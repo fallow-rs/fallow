@@ -750,6 +750,8 @@ pub fn find_dead_code_full(
         });
     }
 
+    let declared_deps = collect_declared_dependency_names(config, pkg.as_ref(), workspaces);
+
     if config.rules.security_client_server_leak != Severity::Off {
         let (security_findings, stats) =
             security::find_security_findings(graph, modules, &suppressions, &line_offsets_by_file);
@@ -767,7 +769,6 @@ pub fn find_dead_code_full(
         // the project's declared dependency set: the same dependency universe the
         // plugin system activates on (root package.json + every workspace
         // package.json). Built once here and passed to the detector.
-        let declared_deps = collect_declared_dependency_names(config, pkg.as_ref(), workspaces);
         let (sink_findings, sink_stats) = security::find_tainted_sinks(
             graph,
             modules,
@@ -813,6 +814,9 @@ pub fn find_dead_code_full(
             .collect();
         security::rank_security_findings(
             graph,
+            modules,
+            &line_offsets_by_file,
+            &declared_deps,
             &boundary_anchor_paths,
             &mut results.security_findings,
         );

@@ -372,6 +372,12 @@ pub fn filter_results_by_changed_files(
             || f.trace
                 .iter()
                 .any(|hop| contains_normalized(&cf, &hop.path))
+            || f.reachability.as_ref().is_some_and(|reachability| {
+                reachability
+                    .untrusted_source_trace
+                    .iter()
+                    .any(|hop| contains_normalized(&cf, &hop.path))
+            })
     });
 
     results
@@ -501,6 +507,7 @@ mod tests {
         BoundaryViolationFinding, CircularDependencyFinding, EmptyCatalogGroupFinding,
         UnusedExportFinding, UnusedFileFinding,
     };
+    use fallow_types::results::SecurityReachability;
 
     #[test]
     fn changed_files_error_describe_variants() {
@@ -766,6 +773,52 @@ mod tests {
 
         let mut changed: FxHashSet<PathBuf> = FxHashSet::default();
         changed.insert("/project/src/server.ts".into());
+
+        filter_results_by_changed_files(&mut results, &changed);
+
+        assert_eq!(results.security_findings.len(), 1);
+    }
+
+    #[test]
+    fn filter_results_keeps_security_finding_when_untrusted_source_trace_file_changed() {
+        let mut results = AnalysisResults::default();
+        results.security_findings.push(SecurityFinding {
+            kind: SecurityFindingKind::TaintedSink,
+            category: Some("command-injection".into()),
+            cwe: Some(78),
+            path: "/project/src/runner.ts".into(),
+            line: 4,
+            col: 2,
+            evidence: "candidate".into(),
+            source_backed: false,
+            trace: Vec::new(),
+            actions: Vec::new(),
+            dead_code: None,
+            reachability: Some(SecurityReachability {
+                reachable_from_entry: false,
+                reachable_from_untrusted_source: true,
+                untrusted_source_hop_count: Some(1),
+                untrusted_source_trace: vec![
+                    TraceHop {
+                        path: "/project/src/route.ts".into(),
+                        line: 1,
+                        col: 0,
+                        role: TraceHopRole::UntrustedSource,
+                    },
+                    TraceHop {
+                        path: "/project/src/runner.ts".into(),
+                        line: 4,
+                        col: 2,
+                        role: TraceHopRole::Sink,
+                    },
+                ],
+                blast_radius: 0,
+                crosses_boundary: false,
+            }),
+        });
+
+        let mut changed: FxHashSet<PathBuf> = FxHashSet::default();
+        changed.insert("/project/src/route.ts".into());
 
         filter_results_by_changed_files(&mut results, &changed);
 

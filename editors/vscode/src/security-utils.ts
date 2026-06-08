@@ -81,6 +81,8 @@ export const hopRoleLabel = (role: TraceHopRole): string => {
   switch (role) {
     case "client-boundary":
       return "client boundary";
+    case "untrusted-source":
+      return "untrusted source module";
     case "intermediate":
       return "intermediate";
     case "secret-source":

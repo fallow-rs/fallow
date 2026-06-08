@@ -247,6 +247,11 @@ fn relativize_finding(mut finding: SecurityFinding, root: &Path) -> SecurityFind
     for hop in &mut finding.trace {
         hop.path = relativize(&hop.path, root);
     }
+    if let Some(reachability) = &mut finding.reachability {
+        for hop in &mut reachability.untrusted_source_trace {
+            hop.path = relativize(&hop.path, root);
+        }
+    }
     finding
 }
 
@@ -338,7 +343,7 @@ pub fn render_human(output: &SecurityOutput) -> String {
             if let Some(hint) = dead_code_hint(finding) {
                 out.push_str(&format!("    dead-code: {hint}\n"));
             }
-            if let Some(reach) = finding.reachability {
+            if let Some(reach) = finding.reachability.as_ref() {
                 let entry = if reach.reachable_from_entry {
                     "reachable from a runtime entry point"
                 } else {
@@ -353,6 +358,25 @@ pub fn render_human(output: &SecurityOutput) -> String {
                     "    reach: {entry} (blast radius {}){boundary}\n",
                     reach.blast_radius,
                 ));
+                if reach.reachable_from_untrusted_source {
+                    let hops = reach.untrusted_source_hop_count.unwrap_or(0);
+                    out.push_str(&format!(
+                        "    untrusted-source path: module reachable from an untrusted-source \
+                         module via {hops} import hop{}\n",
+                        crate::report::plural(hops as usize),
+                    ));
+                    if !reach.untrusted_source_trace.is_empty() {
+                        out.push_str("    untrusted-source trace:\n");
+                        for hop in &reach.untrusted_source_trace {
+                            out.push_str(&format!(
+                                "      {}:{} ({})\n",
+                                hop.path.to_string_lossy().replace('\\', "/"),
+                                hop.line,
+                                hop_role_label(hop.role),
+                            ));
+                        }
+                    }
+                }
             }
             if !finding.trace.is_empty() {
                 out.push_str("    trace:\n");
@@ -453,10 +477,21 @@ fn dead_code_hint(finding: &SecurityFinding) -> Option<String> {
 const fn hop_role_label(role: TraceHopRole) -> &'static str {
     match role {
         TraceHopRole::ClientBoundary => "client boundary",
+        TraceHopRole::UntrustedSource => "untrusted source module",
         TraceHopRole::Intermediate => "intermediate",
         TraceHopRole::SecretSource => "secret source",
         TraceHopRole::Sink => "sink site",
     }
+}
+
+fn source_reachability_hint(finding: &SecurityFinding) -> Option<&'static str> {
+    finding
+        .reachability
+        .as_ref()
+        .filter(|reach| reach.reachable_from_untrusted_source)
+        .map(|_| {
+            "Module-level context: the sink module is reachable from an untrusted-source module; fallow does not prove value flow."
+        })
 }
 
 /// The SARIF ruleId for a finding. `client-server-leak` keeps its bespoke id;
@@ -531,15 +566,27 @@ fn render_sarif(output: &SecurityOutput) -> String {
         .iter()
         .map(|finding| {
             let rule_id = sarif_rule_id(finding);
-            let message = dead_code_hint(finding).map_or_else(
+            let mut message = dead_code_hint(finding).map_or_else(
                 || finding.evidence.clone(),
                 |hint| format!("{} Dead-code cross-link: {hint}.", finding.evidence),
             );
-            let related: Vec<serde_json::Value> = finding
+            if let Some(hint) = source_reachability_hint(finding) {
+                message.push(' ');
+                message.push_str(hint);
+            }
+            let mut related: Vec<serde_json::Value> = finding
                 .trace
                 .iter()
                 .map(|hop| sarif_location(&hop.path, hop.line, hop.col))
                 .collect();
+            if let Some(reach) = finding.reachability.as_ref() {
+                related.extend(
+                    reach
+                        .untrusted_source_trace
+                        .iter()
+                        .map(|hop| sarif_location(&hop.path, hop.line, hop.col)),
+                );
+            }
             // Stable dedup key for GHAS: rule + anchor path + line. Without
             // partialFingerprints, every run re-opens previously triaged alerts.
             let fp = format!(
@@ -613,6 +660,7 @@ mod tests {
         SecurityDeadCodeContext, SecurityDeadCodeKind, SecurityFinding, SecurityFindingKind,
         TraceHop, TraceHopRole,
     };
+    use fallow_types::results::SecurityReachability;
 
     /// Build a finding anchored under `root` with a three-hop client -> secret trace.
     fn sample_finding(root: &Path) -> SecurityFinding {
@@ -660,6 +708,30 @@ mod tests {
         }
     }
 
+    fn add_untrusted_source_reachability(finding: &mut SecurityFinding, root: &Path) {
+        finding.reachability = Some(SecurityReachability {
+            reachable_from_entry: true,
+            reachable_from_untrusted_source: true,
+            untrusted_source_hop_count: Some(1),
+            untrusted_source_trace: vec![
+                TraceHop {
+                    path: root.join("src/routes/api.ts"),
+                    line: 3,
+                    col: 0,
+                    role: TraceHopRole::UntrustedSource,
+                },
+                TraceHop {
+                    path: root.join("src/lib/sink.ts"),
+                    line: 9,
+                    col: 2,
+                    role: TraceHopRole::Sink,
+                },
+            ],
+            blast_radius: 2,
+            crosses_boundary: false,
+        });
+    }
+
     #[test]
     fn relativize_strips_root_prefix() {
         let root = Path::new("/proj/root");
@@ -696,6 +768,21 @@ mod tests {
     }
 
     #[test]
+    fn relativize_finding_relativizes_untrusted_source_trace() {
+        let root = Path::new("/proj/root");
+        let mut finding = sample_finding(root);
+        add_untrusted_source_reachability(&mut finding, root);
+        let finding = relativize_finding(finding, root);
+        let reach = finding.reachability.as_ref().expect("reachability");
+        let hop_paths: Vec<String> = reach
+            .untrusted_source_trace
+            .iter()
+            .map(|h| h.path.to_string_lossy().replace('\\', "/"))
+            .collect();
+        assert_eq!(hop_paths, vec!["src/routes/api.ts", "src/lib/sink.ts"]);
+    }
+
+    #[test]
     fn fnv_hex_is_deterministic_and_16_hex_digits() {
         let a = fnv_hex("security/client-server-leak:src/app.tsx:12");
         let b = fnv_hex("security/client-server-leak:src/app.tsx:12");
@@ -711,6 +798,10 @@ mod tests {
         assert_eq!(
             hop_role_label(TraceHopRole::ClientBoundary),
             "client boundary"
+        );
+        assert_eq!(
+            hop_role_label(TraceHopRole::UntrustedSource),
+            "untrusted source module"
         );
         assert_eq!(hop_role_label(TraceHopRole::Intermediate), "intermediate");
         assert_eq!(hop_role_label(TraceHopRole::SecretSource), "secret source");
@@ -785,6 +876,29 @@ mod tests {
             "got: {out}"
         );
         assert!(out.contains("delete the code if safe"), "got: {out}");
+    }
+
+    #[test]
+    fn human_render_shows_untrusted_source_path_as_module_context() {
+        colored::control::set_override(false);
+        let root = Path::new("/proj/root");
+        let mut finding = sample_finding(root);
+        finding.kind = SecurityFindingKind::TaintedSink;
+        finding.category = Some("command-injection".to_string());
+        add_untrusted_source_reachability(&mut finding, root);
+        let finding = relativize_finding(finding, root);
+
+        let out = render_human(&output_with(vec![finding], 0));
+
+        assert!(
+            out.contains("module reachable from an untrusted-source module via 1 import hop"),
+            "got: {out}"
+        );
+        assert!(out.contains("untrusted-source trace:"), "got: {out}");
+        assert!(
+            out.contains("src/routes/api.ts:3 (untrusted source module)"),
+            "got: {out}"
+        );
     }
 
     #[test]
@@ -872,6 +986,25 @@ mod tests {
     }
 
     #[test]
+    fn sarif_render_includes_untrusted_source_context_and_related_locations() {
+        let root = Path::new("/proj/root");
+        let mut finding = sample_finding(root);
+        finding.kind = SecurityFindingKind::TaintedSink;
+        finding.category = Some("command-injection".to_string());
+        add_untrusted_source_reachability(&mut finding, root);
+        let rendered = render_sarif(&output_with(vec![relativize_finding(finding, root)], 0));
+        let sarif: serde_json::Value = serde_json::from_str(&rendered).expect("valid SARIF JSON");
+        let result = &sarif["runs"][0]["results"][0];
+        let message = result["message"]["text"].as_str().expect("message text");
+        assert!(message.contains("Module-level context"), "got: {message}");
+        assert!(
+            message.contains("does not prove value flow"),
+            "got: {message}"
+        );
+        assert_eq!(result["relatedLocations"].as_array().unwrap().len(), 5);
+    }
+
+    #[test]
     fn sarif_tainted_sink_uses_per_category_rule_id_and_cwe_tag() {
         let root = Path::new("/proj/root");
         let mut finding = sample_finding(root);
@@ -915,6 +1048,11 @@ mod tests {
             .join("../../tests/fixtures/security-client-server-leak")
     }
 
+    fn source_reachability_fixture_root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/security-source-reachability-885")
+    }
+
     fn run_opts(root: &Path, output: OutputFormat, fail_on_issues: bool) -> SecurityOptions<'_> {
         SecurityOptions {
             root,
@@ -932,6 +1070,51 @@ mod tests {
             changed_workspaces: None,
             file: &[],
         }
+    }
+
+    #[test]
+    #[expect(
+        deprecated,
+        reason = "CLI fixture test uses the same workspace path dependency boundary as `run`"
+    )]
+    fn source_reachability_fixture_marks_cross_module_sink() {
+        let root = source_reachability_fixture_root();
+        let mut config = load_config_for_analysis(
+            &root,
+            &NO_CONFIG,
+            OutputFormat::Json,
+            true,
+            1,
+            None,
+            true,
+            ProductionAnalysis::DeadCode,
+        )
+        .expect("fixture config loads");
+        config.rules.security_sink = Severity::Warn;
+
+        let results = fallow_core::analyze(&config).expect("fixture analyzes");
+        let finding = results
+            .security_findings
+            .iter()
+            .find(|finding| finding.path.ends_with("src/runner.ts"))
+            .expect("runner sink finding");
+        let reach = finding.reachability.as_ref().expect("reachability");
+
+        assert!(reach.reachable_from_untrusted_source);
+        assert_eq!(reach.untrusted_source_hop_count, Some(1));
+        assert_eq!(
+            reach
+                .untrusted_source_trace
+                .iter()
+                .map(|hop| hop.role)
+                .collect::<Vec<_>>(),
+            vec![TraceHopRole::UntrustedSource, TraceHopRole::Sink]
+        );
+        assert!(
+            reach.untrusted_source_trace[0]
+                .path
+                .ends_with("src/route.ts")
+        );
     }
 
     #[test]

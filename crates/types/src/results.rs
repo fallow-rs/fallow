@@ -836,6 +836,8 @@ pub enum SecurityFindingKind {
 pub enum TraceHopRole {
     /// The `"use client"` boundary file the finding is anchored on.
     ClientBoundary,
+    /// A module that reads an untrusted input source such as request data.
+    UntrustedSource,
     /// An intermediate module on the transitive import path.
     Intermediate,
     /// The module that reads the secret.
@@ -849,7 +851,7 @@ pub enum TraceHopRole {
 /// One hop in a security finding's structural trace. Stored as an absolute path
 /// internally; JSON serialization strips the project root via
 /// `serde_path::serialize`.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TraceHop {
     /// File on this hop of the import chain.
@@ -872,7 +874,7 @@ pub struct TraceHop {
 ///
 /// This is a relative-ordering signal, NOT a `confidence` or `signal_strength`
 /// score: fallow does not prove the path is exploitable.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityReachability {
     /// Whether the anchor module is reachable from a runtime/application entry
@@ -880,6 +882,20 @@ pub struct SecurityReachability {
     /// closest graph proxy for an external/request input surface. Code reachable
     /// only from test entry points does not count.
     pub reachable_from_entry: bool,
+    /// Whether the anchor module is reachable over value imports from a module
+    /// that reads a known untrusted input source. Module-level only: this does
+    /// not prove a specific source value reaches the sink argument.
+    #[serde(default)]
+    pub reachable_from_untrusted_source: bool,
+    /// Number of value-import hops from the untrusted-source module to the sink
+    /// module when `reachable_from_untrusted_source` is true.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub untrusted_source_hop_count: Option<u32>,
+    /// Module-level import path from the untrusted-source module to the sink
+    /// anchor. Empty when no source module reaches this candidate. The path is a
+    /// ranking explanation, not a value-flow proof.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub untrusted_source_trace: Vec<TraceHop>,
     /// Number of distinct modules that transitively depend on the anchor module
     /// (fan-in via the graph's reverse-dependency index). A higher value means a
     /// wider surface: more call sites could route untrusted input into the sink.

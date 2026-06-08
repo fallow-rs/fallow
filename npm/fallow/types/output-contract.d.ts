@@ -609,7 +609,7 @@ export type SecurityFindingKind = ("client-server-leak" | "tainted-sink")
 /**
  * The role a hop plays in a security finding's structural import trace.
  */
-export type TraceHopRole = ("client-boundary" | "intermediate" | "secret-source" | "sink")
+export type TraceHopRole = ("client-boundary" | "untrusted-source" | "intermediate" | "secret-source" | "sink")
 /**
  * Dead-code issue kind linked to a security candidate.
  */
@@ -4993,6 +4993,23 @@ export interface SecurityReachability {
  * only from test entry points does not count.
  */
 reachable_from_entry: boolean
+/**
+ * Whether the anchor module is reachable over value imports from a module
+ * that reads a known untrusted input source. Module-level only: this does
+ * not prove a specific source value reaches the sink argument.
+ */
+reachable_from_untrusted_source?: boolean
+/**
+ * Number of value-import hops from the untrusted-source module to the sink
+ * module when `reachable_from_untrusted_source` is true.
+ */
+untrusted_source_hop_count?: (number | null)
+/**
+ * Module-level import path from the untrusted-source module to the sink
+ * anchor. Empty when no source module reaches this candidate. The path is a
+ * ranking explanation, not a value-flow proof.
+ */
+untrusted_source_trace?: TraceHop[]
 /**
  * Number of distinct modules that transitively depend on the anchor module
  * (fan-in via the graph's reverse-dependency index). A higher value means a

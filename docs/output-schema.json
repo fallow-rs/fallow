@@ -10009,6 +10009,11 @@
         },
         {
           "type": "string",
+          "const": "untrusted-source",
+          "description": "A module that reads an untrusted input source such as request data."
+        },
+        {
+          "type": "string",
           "const": "intermediate",
           "description": "An intermediate module on the transitive import path."
         },
@@ -10031,6 +10036,24 @@
         "reachable_from_entry": {
           "type": "boolean",
           "description": "Whether the anchor module is reachable from a runtime/application entry\npoint (route handlers, server entry, framework runtime roots), the\nclosest graph proxy for an external/request input surface. Code reachable\nonly from test entry points does not count."
+        },
+        "reachable_from_untrusted_source": {
+          "type": "boolean",
+          "description": "Whether the anchor module is reachable over value imports from a module\nthat reads a known untrusted input source. Module-level only: this does\nnot prove a specific source value reaches the sink argument."
+        },
+        "untrusted_source_hop_count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Number of value-import hops from the untrusted-source module to the sink\nmodule when `reachable_from_untrusted_source` is true."
+        },
+        "untrusted_source_trace": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TraceHop"
+          },
+          "description": "Module-level import path from the untrusted-source module to the sink\nanchor. Empty when no source module reaches this candidate. The path is a\nranking explanation, not a value-flow proof."
         },
         "blast_radius": {
           "type": "integer",

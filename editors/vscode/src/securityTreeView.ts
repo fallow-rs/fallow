@@ -36,12 +36,29 @@ const reachabilityLine = (finding: SecurityFinding): string | null => {
   const entry = reach.reachable_from_entry
     ? "reachable from a runtime entry point"
     : "not reached from any runtime entry point";
+  const source = reach.reachable_from_untrusted_source
+    ? `; module reachable from an untrusted-source module via ${pluralize(reach.untrusted_source_hop_count ?? 0, "import hop", "import hops")}`
+    : "";
   const boundary = reach.crosses_boundary ? "; crosses an architecture boundary" : "";
-  return `reach: ${entry} (blast radius ${reach.blast_radius})${boundary}`;
+  return `reach: ${entry} (blast radius ${reach.blast_radius})${source}${boundary}`;
 };
 
 const pluralize = (count: number, singular: string, plural: string): string =>
   `${count} ${count === 1 ? singular : plural}`;
+
+const untrustedSourceTraceLines = (finding: SecurityFinding): string[] => {
+  const trace = finding.reachability?.untrusted_source_trace ?? [];
+  if (trace.length === 0) {
+    return [];
+  }
+  return [
+    "untrusted-source trace:",
+    ...trace.map((hop) => {
+      const { relative } = resolveFilePath(hop.path);
+      return `${hopRoleLabel(hop.role)} ${middleElidePath(relative)}:${hop.line}`;
+    }),
+  ];
+};
 
 type SecurityItem =
   | SecurityGroupItem
@@ -133,6 +150,7 @@ class SecurityFindingItem extends vscode.TreeItem {
     if (reach) {
       tooltipLines.push(reach);
     }
+    tooltipLines.push(...untrustedSourceTraceLines(finding));
     this.tooltip = tooltipLines.join("\n");
 
     this.command = openCommand(absolute, finding.line, finding.col);

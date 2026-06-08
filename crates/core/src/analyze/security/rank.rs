@@ -21,13 +21,13 @@ use fallow_types::output::{FixAction, FixActionType, IssueAction};
 use fallow_types::output_dead_code::{UnusedExportFinding, UnusedFileFinding};
 use fallow_types::results::{
     SecurityDeadCodeContext, SecurityDeadCodeKind, SecurityFinding, SecurityFindingKind,
-    SecurityReachability,
+    SecurityReachability, TraceHop, TraceHopRole,
 };
 
 use crate::discover::FileId;
 use crate::graph::ModuleGraph;
 
-use super::{LineOffsetsMap, byte_offset_to_line_col};
+use super::{LineOffsetsMap, byte_offset_to_line_col, catalogue::catalogue};
 
 const UNUSED_FILE_GUIDANCE: &str = "This sink sits in a file fallow also reports as unused. Verify the dead-code finding, then delete the file instead of hardening the sink.";
 const UNUSED_EXPORT_GUIDANCE: &str = "This sink sits on an export fallow also reports as unused. Verify the dead-code finding, then remove the export instead of hardening the sink.";
@@ -178,6 +178,9 @@ fn prepend_dead_code_action(finding: &mut SecurityFinding) {
 /// `(path, line, col, category)` tiebreak so output stays stable across runs.
 pub fn rank_security_findings(
     graph: &ModuleGraph,
+    modules: &[ModuleInfo],
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+    declared_deps: &FxHashSet<String>,
     boundary_anchor_paths: &FxHashSet<PathBuf>,
     findings: &mut [SecurityFinding],
 ) {
@@ -191,21 +194,37 @@ pub fn rank_security_findings(
         .iter()
         .map(|node| (node.path.as_path(), node.file_id))
         .collect();
+    let source_index = UntrustedSourceIndex::build(graph, modules, declared_deps);
 
     for finding in findings.iter_mut() {
         let reachability = path_to_id.get(finding.path.as_path()).map(|&file_id| {
-            compute_reachability(graph, file_id, &finding.path, boundary_anchor_paths)
+            compute_reachability(
+                graph,
+                file_id,
+                finding,
+                boundary_anchor_paths,
+                &source_index,
+                line_offsets_by_file,
+            )
         });
         finding.reachability = reachability;
     }
 
     findings.sort_by(|a, b| {
-        let (ra, rb) = (a.reachability, b.reachability);
+        let (ra, rb) = (a.reachability.as_ref(), b.reachability.as_ref());
         // Reachable-from-entry findings sort first.
         let reach_a = ra.is_some_and(|r| r.reachable_from_entry);
         let reach_b = rb.is_some_and(|r| r.reachable_from_entry);
         reach_b
             .cmp(&reach_a)
+            // Then same-module source-backed sinks first.
+            .then_with(|| b.source_backed.cmp(&a.source_backed))
+            // Then module-level source-reachable sinks first.
+            .then_with(|| {
+                let source_a = ra.is_some_and(|r| r.reachable_from_untrusted_source);
+                let source_b = rb.is_some_and(|r| r.reachable_from_untrusted_source);
+                source_b.cmp(&source_a)
+            })
             // Then larger blast radius first.
             .then_with(|| {
                 let ba = ra.map_or(0, |r| r.blast_radius);
@@ -232,19 +251,200 @@ pub fn rank_security_findings(
 fn compute_reachability(
     graph: &ModuleGraph,
     file_id: FileId,
-    anchor_path: &Path,
+    finding: &SecurityFinding,
     boundary_anchor_paths: &FxHashSet<PathBuf>,
+    source_index: &UntrustedSourceIndex,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
 ) -> SecurityReachability {
     let reachable_from_entry = graph
         .modules
         .get(file_id.0 as usize)
         .is_some_and(|node| node.is_runtime_reachable());
+    let source_trace = source_index.trace_for(graph, file_id, finding, line_offsets_by_file);
 
     SecurityReachability {
         reachable_from_entry,
+        reachable_from_untrusted_source: source_trace.is_some(),
+        untrusted_source_hop_count: source_trace.as_ref().map(|source| source.hop_count),
+        untrusted_source_trace: source_trace.map_or_else(Vec::new, |source| source.trace),
         blast_radius: transitive_dependent_count(graph, file_id),
-        crosses_boundary: boundary_anchor_paths.contains(anchor_path),
+        crosses_boundary: boundary_anchor_paths.contains(&finding.path),
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SourceParent {
+    previous: FileId,
+    import_span_start: Option<u32>,
+}
+
+struct UntrustedSourceIndex {
+    source_for: Vec<Option<FileId>>,
+    parent: Vec<Option<SourceParent>>,
+}
+
+struct UntrustedSourceTrace {
+    hop_count: u32,
+    trace: Vec<TraceHop>,
+}
+
+impl UntrustedSourceIndex {
+    fn build(
+        graph: &ModuleGraph,
+        modules: &[ModuleInfo],
+        declared_deps: &FxHashSet<String>,
+    ) -> Self {
+        let modules_by_id: FxHashMap<FileId, &ModuleInfo> = modules
+            .iter()
+            .map(|module| (module.file_id, module))
+            .collect();
+        let mut source_for = vec![None; graph.modules.len()];
+        let mut parent = vec![None; graph.modules.len()];
+        let mut queue: VecDeque<FileId> = VecDeque::new();
+
+        for node in &graph.modules {
+            let Some(module) = modules_by_id.get(&node.file_id) else {
+                continue;
+            };
+            if !module_contains_untrusted_source(module, declared_deps) {
+                continue;
+            }
+            let idx = node.file_id.0 as usize;
+            if idx >= source_for.len() || source_for[idx].is_some() {
+                continue;
+            }
+            source_for[idx] = Some(node.file_id);
+            queue.push_back(node.file_id);
+        }
+
+        while let Some(current) = queue.pop_front() {
+            let Some(source_id) = source_for.get(current.0 as usize).copied().flatten() else {
+                continue;
+            };
+            for (target, all_type_only, span) in graph.outgoing_edge_summaries(current) {
+                if all_type_only {
+                    continue;
+                }
+                let idx = target.0 as usize;
+                if idx >= source_for.len() || source_for[idx].is_some() {
+                    continue;
+                }
+                source_for[idx] = Some(source_id);
+                parent[idx] = Some(SourceParent {
+                    previous: current,
+                    import_span_start: span,
+                });
+                queue.push_back(target);
+            }
+        }
+
+        Self { source_for, parent }
+    }
+
+    fn trace_for(
+        &self,
+        graph: &ModuleGraph,
+        sink_id: FileId,
+        finding: &SecurityFinding,
+        line_offsets_by_file: &LineOffsetsMap<'_>,
+    ) -> Option<UntrustedSourceTrace> {
+        if !is_source_reachability_candidate(finding) {
+            return None;
+        }
+        let source_id = self.source_for.get(sink_id.0 as usize).copied().flatten()?;
+        let mut ids = vec![sink_id];
+        let mut current = sink_id;
+        while current != source_id {
+            let parent = self.parent.get(current.0 as usize).copied().flatten()?;
+            current = parent.previous;
+            ids.push(current);
+        }
+        ids.reverse();
+        let hop_count = u32::try_from(ids.len().saturating_sub(1)).unwrap_or(u32::MAX);
+
+        if source_id == sink_id {
+            return Some(UntrustedSourceTrace {
+                hop_count,
+                trace: vec![
+                    TraceHop {
+                        path: finding.path.clone(),
+                        line: 1,
+                        col: 0,
+                        role: TraceHopRole::UntrustedSource,
+                    },
+                    TraceHop {
+                        path: finding.path.clone(),
+                        line: finding.line,
+                        col: finding.col,
+                        role: TraceHopRole::Sink,
+                    },
+                ],
+            });
+        }
+
+        let mut trace = Vec::with_capacity(ids.len().saturating_add(1));
+        for (idx, &file_id) in ids.iter().enumerate() {
+            let path = graph.modules.get(file_id.0 as usize)?.path.clone();
+            if idx == ids.len() - 1 {
+                trace.push(TraceHop {
+                    path,
+                    line: finding.line,
+                    col: finding.col,
+                    role: TraceHopRole::Sink,
+                });
+                continue;
+            }
+
+            let Some(&next_id) = ids.get(idx + 1) else {
+                continue;
+            };
+            let next_parent = self.parent.get(next_id.0 as usize).copied().flatten();
+            let (line, col) = next_parent
+                .and_then(|p| p.import_span_start)
+                .map_or((1, 0), |span| {
+                    byte_offset_to_line_col(line_offsets_by_file, file_id, span)
+                });
+            trace.push(TraceHop {
+                path,
+                line,
+                col,
+                role: if idx == 0 {
+                    TraceHopRole::UntrustedSource
+                } else {
+                    TraceHopRole::Intermediate
+                },
+            });
+        }
+
+        Some(UntrustedSourceTrace { hop_count, trace })
+    }
+}
+
+fn is_source_reachability_candidate(finding: &SecurityFinding) -> bool {
+    matches!(finding.kind, SecurityFindingKind::TaintedSink)
+        && finding.category.as_deref() != Some(super::hardcoded_secret::CATEGORY_ID)
+}
+
+fn module_contains_untrusted_source(
+    module: &ModuleInfo,
+    declared_deps: &FxHashSet<String>,
+) -> bool {
+    let cat = catalogue();
+    module.tainted_bindings.iter().any(|binding| {
+        cat.matching_source_for_deps(&binding.source_path, declared_deps)
+            .is_some()
+    }) || module.security_sinks.iter().any(|sink| {
+        sink.arg_source_paths
+            .iter()
+            .any(|path| cat.matching_source_for_deps(path, declared_deps).is_some())
+    }) || module.member_accesses.iter().any(|access| {
+        let full_path = format!("{}.{}", access.object, access.member);
+        cat.matching_source_for_deps(&full_path, declared_deps)
+            .is_some()
+            || cat
+                .matching_source_for_deps(&access.object, declared_deps)
+                .is_some()
+    })
 }
 
 /// Count the distinct modules that transitively depend on `target` (fan-in) via
@@ -276,6 +476,7 @@ mod tests {
     use super::*;
 
     use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
+    use fallow_types::extract::{MemberAccess, TaintedBinding};
     use fallow_types::output::{FixActionType, IssueAction};
     use fallow_types::output_dead_code::{UnusedExportFinding, UnusedFileFinding};
     use fallow_types::results::{
@@ -290,6 +491,16 @@ mod tests {
     /// Build a graph from `file_names` and `(from, to)` import edges. `entry`
     /// indices become runtime entry points (so their cones are runtime-reachable).
     fn build_graph(file_names: &[&str], edges: &[(usize, usize)], entry: &[usize]) -> ModuleGraph {
+        let edges: Vec<(usize, usize, bool)> =
+            edges.iter().map(|&(from, to)| (from, to, false)).collect();
+        build_graph_with_type_edges(file_names, &edges, entry)
+    }
+
+    fn build_graph_with_type_edges(
+        file_names: &[&str],
+        edges: &[(usize, usize, bool)],
+        entry: &[usize],
+    ) -> ModuleGraph {
         let files: Vec<DiscoveredFile> = file_names
             .iter()
             .enumerate()
@@ -305,14 +516,14 @@ mod tests {
             .map(|f| {
                 let imports: Vec<ResolvedImport> = edges
                     .iter()
-                    .filter(|(from, _)| *from == f.id.0 as usize)
-                    .map(|&(_, to)| ResolvedImport {
+                    .filter(|(from, _, _)| *from == f.id.0 as usize)
+                    .map(|&(_, to, is_type_only)| ResolvedImport {
                         target: ResolveResult::InternalModule(FileId(to as u32)),
                         info: fallow_types::extract::ImportInfo {
                             source: format!("./{}", file_names[to]),
                             imported_name: fallow_types::extract::ImportedName::Default,
                             local_name: "x".to_string(),
-                            is_type_only: false,
+                            is_type_only,
                             from_style: false,
                             span: oxc_span::Span::new(0, 10),
                             source_span: oxc_span::Span::new(0, 10),
@@ -350,6 +561,99 @@ mod tests {
         ModuleGraph::build(&resolved, &entry_points, &files)
     }
 
+    fn rank(
+        graph: &ModuleGraph,
+        boundary_anchor_paths: &FxHashSet<PathBuf>,
+        findings: &mut [SecurityFinding],
+    ) {
+        let modules = Vec::new();
+        let line_offsets = FxHashMap::default();
+        let declared_deps = FxHashSet::default();
+        rank_security_findings(
+            graph,
+            &modules,
+            &line_offsets,
+            &declared_deps,
+            boundary_anchor_paths,
+            findings,
+        );
+    }
+
+    fn rank_with_modules(
+        graph: &ModuleGraph,
+        modules: &[ModuleInfo],
+        findings: &mut [SecurityFinding],
+    ) {
+        let line_offsets = FxHashMap::default();
+        let declared_deps = FxHashSet::default();
+        let boundary_anchor_paths = FxHashSet::default();
+        rank_security_findings(
+            graph,
+            modules,
+            &line_offsets,
+            &declared_deps,
+            &boundary_anchor_paths,
+            findings,
+        );
+    }
+
+    fn module(file_id: u32) -> ModuleInfo {
+        ModuleInfo {
+            file_id: FileId(file_id),
+            exports: vec![],
+            imports: vec![],
+            re_exports: vec![],
+            dynamic_imports: vec![],
+            dynamic_import_patterns: vec![],
+            require_calls: vec![],
+            package_path_references: vec![],
+            member_accesses: vec![],
+            whole_object_uses: vec![],
+            has_cjs_exports: false,
+            has_angular_component_template_url: false,
+            content_hash: 0,
+            suppressions: vec![],
+            unknown_suppression_kinds: vec![],
+            unused_import_bindings: vec![],
+            type_referenced_import_bindings: vec![],
+            value_referenced_import_bindings: vec![],
+            line_offsets: vec![],
+            complexity: vec![],
+            flag_uses: vec![],
+            class_heritage: vec![],
+            injection_tokens: vec![],
+            local_type_declarations: vec![],
+            public_signature_type_references: vec![],
+            namespace_object_aliases: vec![],
+            iconify_prefixes: vec![],
+            iconify_icon_names: vec![],
+            auto_import_candidates: vec![],
+            directives: vec![],
+            security_sinks: vec![],
+            security_sinks_skipped: 0,
+            tainted_bindings: vec![],
+            sanitized_sink_args: vec![],
+        }
+    }
+
+    fn member_source_module(file_id: u32) -> ModuleInfo {
+        let mut module = module(file_id);
+        module.member_accesses.push(MemberAccess {
+            object: "req".to_string(),
+            member: "body".to_string(),
+        });
+        module
+    }
+
+    fn tainted_binding_source_module(file_id: u32) -> ModuleInfo {
+        let mut module = module(file_id);
+        module.tainted_bindings.push(TaintedBinding {
+            local: "body".to_string(),
+            source_path: "req.body".to_string(),
+        });
+        module
+    }
+
     fn finding(name: &str) -> SecurityFinding {
         let path = PathBuf::from(ROOT).join(name);
         SecurityFinding {
@@ -380,12 +684,13 @@ mod tests {
         let empty = FxHashSet::default();
         // Seed in the "wrong" order to prove the sort moves the reachable one up.
         let mut findings = vec![finding("orphan.ts"), finding("reachable.ts")];
-        rank_security_findings(&graph, &empty, &mut findings);
+        rank(&graph, &empty, &mut findings);
 
         assert!(findings[0].path.ends_with("reachable.ts"));
         assert!(
             findings[0]
                 .reachability
+                .as_ref()
                 .expect("ranked")
                 .reachable_from_entry
         );
@@ -393,6 +698,7 @@ mod tests {
         assert!(
             !findings[1]
                 .reachability
+                .as_ref()
                 .expect("ranked")
                 .reachable_from_entry
         );
@@ -409,11 +715,11 @@ mod tests {
         );
         let empty = FxHashSet::default();
         let mut findings = vec![finding("leaf.ts"), finding("hub.ts")];
-        rank_security_findings(&graph, &empty, &mut findings);
+        rank(&graph, &empty, &mut findings);
 
         assert!(findings[0].path.ends_with("hub.ts"));
-        let hub = findings[0].reachability.expect("ranked");
-        let leaf = findings[1].reachability.expect("ranked");
+        let hub = findings[0].reachability.as_ref().expect("ranked");
+        let leaf = findings[1].reachability.as_ref().expect("ranked");
         assert!(hub.reachable_from_entry && leaf.reachable_from_entry);
         assert!(
             hub.blast_radius > leaf.blast_radius,
@@ -431,11 +737,23 @@ mod tests {
         boundary.insert(PathBuf::from(ROOT).join("b.ts"));
         // Seed a-first; b crosses a boundary so it should sort ahead.
         let mut findings = vec![finding("a.ts"), finding("b.ts")];
-        rank_security_findings(&graph, &boundary, &mut findings);
+        rank(&graph, &boundary, &mut findings);
 
         assert!(findings[0].path.ends_with("b.ts"));
-        assert!(findings[0].reachability.expect("ranked").crosses_boundary);
-        assert!(!findings[1].reachability.expect("ranked").crosses_boundary);
+        assert!(
+            findings[0]
+                .reachability
+                .as_ref()
+                .expect("ranked")
+                .crosses_boundary
+        );
+        assert!(
+            !findings[1]
+                .reachability
+                .as_ref()
+                .expect("ranked")
+                .crosses_boundary
+        );
     }
 
     #[test]
@@ -443,7 +761,7 @@ mod tests {
         let graph = build_graph(&["entry.ts", "a.ts", "b.ts"], &[(0, 1), (0, 2)], &[0]);
         let empty = FxHashSet::default();
         let mut findings = vec![finding("b.ts"), finding("a.ts")];
-        rank_security_findings(&graph, &empty, &mut findings);
+        rank(&graph, &empty, &mut findings);
         assert!(findings[0].path.ends_with("a.ts"));
         assert!(findings[1].path.ends_with("b.ts"));
     }
@@ -549,7 +867,7 @@ mod tests {
         });
         let mut findings = vec![dead, finding("active.ts")];
 
-        rank_security_findings(&graph, &empty, &mut findings);
+        rank(&graph, &empty, &mut findings);
 
         assert!(findings[0].path.ends_with("active.ts"));
         assert!(findings[0].dead_code.is_none());
@@ -562,7 +880,144 @@ mod tests {
         let graph = build_graph(&["entry.ts"], &[], &[0]);
         let empty = FxHashSet::default();
         let mut findings: Vec<SecurityFinding> = vec![];
-        rank_security_findings(&graph, &empty, &mut findings);
+        rank(&graph, &empty, &mut findings);
         assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn untrusted_source_reachability_uses_value_import_path() {
+        let graph = build_graph(&["handler.ts", "helper.ts"], &[(0, 1)], &[]);
+        let modules = vec![member_source_module(0), module(1)];
+        let mut findings = vec![finding("helper.ts")];
+
+        rank_with_modules(&graph, &modules, &mut findings);
+
+        let reach = findings[0].reachability.as_ref().expect("ranked");
+        assert!(reach.reachable_from_untrusted_source);
+        assert_eq!(reach.untrusted_source_hop_count, Some(1));
+        assert_eq!(
+            reach
+                .untrusted_source_trace
+                .iter()
+                .map(|hop| hop.role)
+                .collect::<Vec<_>>(),
+            vec![TraceHopRole::UntrustedSource, TraceHopRole::Sink]
+        );
+    }
+
+    #[test]
+    fn untrusted_source_reachability_skips_type_only_import_path() {
+        let graph = build_graph_with_type_edges(&["handler.ts", "helper.ts"], &[(0, 1, true)], &[]);
+        let modules = vec![member_source_module(0), module(1)];
+        let mut findings = vec![finding("helper.ts")];
+
+        rank_with_modules(&graph, &modules, &mut findings);
+
+        let reach = findings[0].reachability.as_ref().expect("ranked");
+        assert!(!reach.reachable_from_untrusted_source);
+        assert_eq!(reach.untrusted_source_hop_count, None);
+        assert!(reach.untrusted_source_trace.is_empty());
+    }
+
+    #[test]
+    fn same_file_untrusted_source_and_sink_has_zero_hop_trace() {
+        let graph = build_graph(&["handler.ts"], &[], &[]);
+        let modules = vec![tainted_binding_source_module(0)];
+        let mut findings = vec![finding("handler.ts")];
+
+        rank_with_modules(&graph, &modules, &mut findings);
+
+        let reach = findings[0].reachability.as_ref().expect("ranked");
+        assert!(reach.reachable_from_untrusted_source);
+        assert_eq!(reach.untrusted_source_hop_count, Some(0));
+        assert_eq!(
+            reach
+                .untrusted_source_trace
+                .iter()
+                .map(|hop| hop.role)
+                .collect::<Vec<_>>(),
+            vec![TraceHopRole::UntrustedSource, TraceHopRole::Sink]
+        );
+    }
+
+    #[test]
+    fn source_backed_sorts_ahead_of_module_level_source_when_entry_ties() {
+        let graph = build_graph(
+            &["entry.ts", "source.ts", "module.ts", "direct.ts"],
+            &[(0, 1), (0, 2), (0, 3), (1, 2)],
+            &[0],
+        );
+        let modules = vec![
+            module(0),
+            member_source_module(1),
+            module(2),
+            tainted_binding_source_module(3),
+        ];
+        let mut direct = finding("direct.ts");
+        direct.source_backed = true;
+        let mut findings = vec![finding("module.ts"), direct];
+
+        rank_with_modules(&graph, &modules, &mut findings);
+
+        assert!(findings[0].path.ends_with("direct.ts"));
+        assert!(findings[0].source_backed);
+        assert!(findings[1].path.ends_with("module.ts"));
+        assert!(
+            findings[1]
+                .reachability
+                .as_ref()
+                .expect("ranked")
+                .reachable_from_untrusted_source
+        );
+    }
+
+    #[test]
+    fn runtime_entry_reachability_sorts_before_module_source_reachability() {
+        let graph = build_graph(
+            &["entry.ts", "reachable.ts", "source.ts", "module.ts"],
+            &[(0, 1), (2, 3)],
+            &[0],
+        );
+        let modules = vec![module(0), module(1), member_source_module(2), module(3)];
+        let mut findings = vec![finding("module.ts"), finding("reachable.ts")];
+
+        rank_with_modules(&graph, &modules, &mut findings);
+
+        assert!(findings[0].path.ends_with("reachable.ts"));
+        assert!(
+            findings[0]
+                .reachability
+                .as_ref()
+                .expect("ranked")
+                .reachable_from_entry
+        );
+        assert!(findings[1].path.ends_with("module.ts"));
+        assert!(
+            findings[1]
+                .reachability
+                .as_ref()
+                .expect("ranked")
+                .reachable_from_untrusted_source
+        );
+    }
+
+    #[test]
+    fn hardcoded_secret_and_client_server_leak_are_not_source_annotated() {
+        let graph = build_graph(&["source.ts", "candidate.ts"], &[(0, 1)], &[]);
+        let modules = vec![member_source_module(0), module(1)];
+        let mut hardcoded = finding("candidate.ts");
+        hardcoded.category = Some(super::super::hardcoded_secret::CATEGORY_ID.to_string());
+        let mut leak = finding("candidate.ts");
+        leak.kind = SecurityFindingKind::ClientServerLeak;
+        leak.category = None;
+        let mut findings = vec![hardcoded, leak];
+
+        rank_with_modules(&graph, &modules, &mut findings);
+
+        for finding in findings {
+            let reach = finding.reachability.as_ref().expect("ranked");
+            assert!(!reach.reachable_from_untrusted_source);
+            assert!(reach.untrusted_source_trace.is_empty());
+        }
     }
 }
