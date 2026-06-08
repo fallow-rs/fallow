@@ -1004,6 +1004,16 @@ enum Command {
     /// `--diff-stdin`, `--workspace`, `--changed-workspaces`, `--ci`,
     /// `--fail-on-issues`, `--sarif-file`, and `--summary`.
     Security {
+        /// Paid runtime-coverage sidecar input. Accepts a V8 directory, a
+        /// single V8 JSON file, or an Istanbul coverage map JSON. When set,
+        /// `fallow security` annotates tainted-sink candidates with production
+        /// runtime state and uses that state as an additive ranking signal.
+        #[arg(long, value_name = "PATH")]
+        runtime_coverage: Option<PathBuf>,
+        /// Threshold for hot-path classification, forwarded to the sidecar
+        /// when `--runtime-coverage` is set.
+        #[arg(long, default_value_t = 100)]
+        min_invocations_hot: u64,
         /// Only report security candidates in or reachable from the specified files.
         /// The full project graph is still built, but output is scoped to matching
         /// finding anchors or trace hops. Accepts multiple values.
@@ -2963,7 +2973,12 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             },
         ),
         Command::Impact { subcommand } => dispatch_impact(root, quiet, output, subcommand),
-        Command::Security { file, gate } => {
+        Command::Security {
+            runtime_coverage,
+            min_invocations_hot,
+            file,
+            gate,
+        } => {
             let (output, quiet, fail_on_issues) = dispatch.ci_defaults();
             security::run(&security::SecurityOptions {
                 root,
@@ -2981,6 +2996,8 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
                 changed_workspaces: cli.changed_workspaces.as_deref(),
                 file: file.as_slice(),
                 gate,
+                runtime_coverage: runtime_coverage.as_deref(),
+                min_invocations_hot,
             })
         }
         Command::Schema => unreachable!("handled above"),

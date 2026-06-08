@@ -108,6 +108,20 @@ mod gated {
             ]
         }
 
+        fn security_args(&self) -> Vec<String> {
+            let fixture = fixture_path("security-dangerous-html");
+            vec![
+                "security".to_owned(),
+                "--root".to_owned(),
+                fixture.to_string_lossy().into_owned(),
+                "--runtime-coverage".to_owned(),
+                self.coverage_file.to_string_lossy().into_owned(),
+                "--format".to_owned(),
+                "json".to_owned(),
+                "--quiet".to_owned(),
+            ]
+        }
+
         fn multi_capture_dir(&self) -> PathBuf {
             let dir = self.tmp.path().join("multi-capture");
             fs::create_dir_all(&dir).expect("create multi-capture dir");
@@ -241,6 +255,42 @@ mod gated {
             json.pointer("/runtime_coverage/schema_version"),
             Some(&serde_json::Value::String("1".to_owned())),
             "runtime_coverage schema_version must be stable for agent consumers"
+        );
+    }
+
+    #[test]
+    fn security_runtime_coverage_marks_hot_sink_candidate() {
+        let harness = Harness::new();
+        let mut cmd = harness.fallow();
+        cmd.env("FALLOW_LICENSE", sign::mint_runtime_coverage_jwt());
+        cmd.env("FALLOW_STUB_MODE", "security-hot");
+        for arg in harness.security_args() {
+            cmd.arg(arg);
+        }
+        let (stdout, stderr, code) = run_with(cmd);
+        assert_eq!(
+            code,
+            0,
+            "security runtime coverage must exit 0; stderr={stderr}; stdout head={}",
+            &stdout.chars().take(400).collect::<String>()
+        );
+        let json: serde_json::Value =
+            serde_json::from_str(&stdout).expect("security output should be JSON");
+        let first = json
+            .pointer("/security_findings/0")
+            .expect("first security finding");
+
+        assert_eq!(
+            first.pointer("/path"),
+            Some(&serde_json::Value::String("src/sink.ts".to_owned()))
+        );
+        assert_eq!(
+            first.pointer("/runtime/state"),
+            Some(&serde_json::Value::String("runtime-hot".to_owned()))
+        );
+        assert_eq!(
+            first.pointer("/runtime/invocations"),
+            Some(&serde_json::Value::Number(250.into()))
         );
     }
 

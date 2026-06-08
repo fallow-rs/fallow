@@ -2545,6 +2545,7 @@ export function choose(value: number): string {
                 actions: vec![],
                 dead_code: None,
                 reachability: None,
+                runtime: None,
             }],
             security_unresolved_edge_files: 2,
             security_unresolved_callee_sites: 0,
@@ -3357,6 +3358,7 @@ export function choose(value: number): string {
             actions: vec![],
             dead_code: None,
             reachability: None,
+            runtime: None,
         };
         let mut diags_by_file: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
         diags_by_file.insert(

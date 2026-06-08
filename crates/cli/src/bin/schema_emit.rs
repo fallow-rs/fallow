@@ -97,11 +97,11 @@ use fallow_types::results::{
     FlagConfidence, FlagKind, ImportSite, MisconfiguredDependencyOverride, PrivateTypeLeak,
     ReferenceLocation, SecurityCandidate, SecurityCandidateBoundary, SecurityCandidateSink,
     SecurityDeadCodeContext, SecurityDeadCodeKind, SecurityFinding, SecurityFindingKind,
-    SecurityReachability, SecurityTaintFlow, SecurityZoneCrossing, StaleSuppression,
-    SuppressionOrigin, TaintEndpoint, TaintPath, TestOnlyDependency, TraceHop, TraceHopRole,
-    TypeOnlyDependency, UnlistedDependency, UnresolvedCatalogReference, UnresolvedImport,
-    UnusedCatalogEntry, UnusedDependency, UnusedDependencyOverride, UnusedExport, UnusedFile,
-    UnusedMember,
+    SecurityReachability, SecurityRuntimeContext, SecurityRuntimeState, SecurityTaintFlow,
+    SecurityZoneCrossing, StaleSuppression, SuppressionOrigin, TaintEndpoint, TaintPath,
+    TestOnlyDependency, TraceHop, TraceHopRole, TypeOnlyDependency, UnlistedDependency,
+    UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry, UnusedDependency,
+    UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedMember,
 };
 
 /// Workspace-relative path to the committed schema.
@@ -529,6 +529,8 @@ fn derived_definitions() -> Map<String, Value> {
     let _ = generator.subschema_for::<TaintEndpoint>();
     let _ = generator.subschema_for::<TaintPath>();
     let _ = generator.subschema_for::<SecurityTaintFlow>();
+    let _ = generator.subschema_for::<SecurityRuntimeState>();
+    let _ = generator.subschema_for::<SecurityRuntimeContext>();
     let _ = generator.subschema_for::<SecurityFinding>();
     let _ = generator.subschema_for::<SecurityGateMode>();
     let _ = generator.subschema_for::<SecurityGateVerdict>();

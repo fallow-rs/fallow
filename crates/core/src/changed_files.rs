@@ -813,6 +813,7 @@ mod tests {
             actions: Vec::new(),
             dead_code: None,
             reachability: None,
+            runtime: None,
         });
 
         let mut changed: FxHashSet<PathBuf> = FxHashSet::default();
@@ -862,6 +863,7 @@ mod tests {
                 blast_radius: 0,
                 crosses_boundary: false,
             }),
+            runtime: None,
         });
 
         let mut changed: FxHashSet<PathBuf> = FxHashSet::default();

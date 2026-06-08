@@ -460,6 +460,7 @@ pub fn find_tainted_sinks(
                 reachability: None,
                 candidate,
                 taint_flow: None,
+                runtime: None,
             });
         }
     }

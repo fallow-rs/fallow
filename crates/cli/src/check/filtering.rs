@@ -1925,6 +1925,7 @@ mod tests {
             actions: Vec::new(),
             dead_code: None,
             reachability: None,
+            runtime: None,
         });
 
         filter_results_by_diff(&mut results, &diff, root);
@@ -1979,6 +1980,7 @@ mod tests {
                 blast_radius: 0,
                 crosses_boundary: false,
             }),
+            runtime: None,
         });
 
         filter_results_by_diff(&mut results, &diff, root);
@@ -2013,6 +2015,7 @@ mod tests {
             actions: Vec::new(),
             dead_code: None,
             reachability: None,
+            runtime: None,
         });
 
         retain_gate_new(&mut results, &diff, root);
@@ -2065,6 +2068,7 @@ mod tests {
             actions: Vec::new(),
             dead_code: None,
             reachability: None,
+            runtime: None,
         });
 
         // Advisory keeps it; the gate drops it.
@@ -2117,6 +2121,7 @@ mod tests {
                 blast_radius: 0,
                 crosses_boundary: false,
             }),
+            runtime: None,
         });
 
         retain_gate_new(&mut results, &diff, root);
@@ -2159,6 +2164,7 @@ mod tests {
             actions: Vec::new(),
             dead_code: None,
             reachability: None,
+            runtime: None,
         });
 
         retain_gate_new(&mut results, &diff, root);

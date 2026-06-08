@@ -167,6 +167,7 @@ mod tests {
             actions: vec![],
             dead_code: None,
             reachability: None,
+            runtime: None,
         }
     }
 
@@ -187,6 +188,7 @@ mod tests {
             actions: vec![],
             dead_code: None,
             reachability: None,
+            runtime: None,
         }
     }
 

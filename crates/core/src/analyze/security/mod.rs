@@ -350,6 +350,7 @@ fn build_leak_finding(
         reachability: None,
         candidate,
         taint_flow: None,
+        runtime: None,
     }
 }
 
@@ -412,6 +413,7 @@ fn build_direct_finding(
         reachability: None,
         candidate,
         taint_flow: None,
+        runtime: None,
     }
 }
 

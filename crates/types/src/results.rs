@@ -1075,6 +1075,51 @@ pub struct SecurityTaintFlow {
     pub path: TaintPath,
 }
 
+/// Runtime coverage state for the function enclosing a security sink.
+/// This is production-observation evidence, not an exploitability verdict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum SecurityRuntimeState {
+    /// The sink sits inside a runtime hot path.
+    RuntimeHot,
+    /// The sink sits inside a tracked function with zero production invocations.
+    RuntimeCold,
+    /// The sink sits inside a tracked function the runtime layer marked as safe
+    /// to delete because it was never executed.
+    NeverExecuted,
+    /// The sink sits inside a function that executed, but below the low-traffic
+    /// threshold.
+    LowTraffic,
+    /// Runtime coverage could not classify the enclosing function.
+    CoverageUnavailable,
+    /// A static enclosing function was found, but the runtime report carried no
+    /// matching evidence for it.
+    RuntimeUnknown,
+}
+
+/// Runtime coverage context attached to a security candidate when
+/// `fallow security --runtime-coverage` is supplied.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecurityRuntimeContext {
+    /// Runtime state for the enclosing function.
+    pub state: SecurityRuntimeState,
+    /// Enclosing function name from static extraction.
+    pub function: String,
+    /// 1-based line where the enclosing function starts.
+    pub line: u32,
+    /// Observed invocation count when the runtime report provides it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invocations: Option<u64>,
+    /// Runtime coverage stable function id, when available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stable_id: Option<String>,
+    /// Short candidate-framed explanation of the runtime evidence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<String>,
+}
+
 /// A local security CANDIDATE for downstream agent verification, NOT a verified
 /// vulnerability. Emitted only by `fallow security`, never under bare `fallow`
 /// or the `audit` gate. There is deliberately no `confidence` or
@@ -1149,6 +1194,11 @@ pub struct SecurityFinding {
     /// is import-reachable to this sink. Absent (skipped) otherwise.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub taint_flow: Option<SecurityTaintFlow>,
+    /// Production runtime coverage context for the function enclosing this
+    /// security sink. Present only when `fallow security --runtime-coverage`
+    /// runs and the candidate is a `tainted-sink`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<SecurityRuntimeContext>,
 }
 
 /// A pnpm catalog entry declared in pnpm-workspace.yaml that no workspace package

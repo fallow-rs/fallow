@@ -173,6 +173,7 @@ mod tests {
                 blast_radius: 3,
                 crosses_boundary: true,
             }),
+            runtime: None,
         }
     }
 
@@ -193,6 +194,7 @@ mod tests {
             actions: vec![],
             dead_code: None,
             reachability: None,
+            runtime: None,
         }
     }
 

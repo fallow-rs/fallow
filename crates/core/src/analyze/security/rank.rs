@@ -759,6 +759,7 @@ mod tests {
                 boundary: SecurityCandidateBoundary::default(),
             },
             taint_flow: None,
+            runtime: None,
         }
     }
 

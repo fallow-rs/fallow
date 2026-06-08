@@ -626,6 +626,11 @@ export type TraceHopRole = ("client-boundary" | "untrusted-source" | "intermedia
  */
 export type SecurityDeadCodeKind = ("unused-file" | "unused-export")
 /**
+ * Runtime coverage state for the function enclosing a security sink.
+ * This is production-observation evidence, not an exploitability verdict.
+ */
+export type SecurityRuntimeState = ("runtime-hot" | "runtime-cold" | "never-executed" | "low-traffic" | "coverage-unavailable" | "runtime-unknown")
+/**
  * Discriminator value for [`CodeClimateIssue::kind`].
  */
 export type CodeClimateIssueKind = "issue"
@@ -4979,6 +4984,12 @@ candidate: SecurityCandidate
  * is import-reachable to this sink. Absent (skipped) otherwise.
  */
 taint_flow?: (SecurityTaintFlow | null)
+/**
+ * Production runtime coverage context for the function enclosing this
+ * security sink. Present only when `fallow security --runtime-coverage`
+ * runs and the candidate is a `tainted-sink`.
+ */
+runtime?: (SecurityRuntimeContext | null)
 }
 /**
  * One hop in a security finding's structural trace. Stored as an absolute path
@@ -5221,6 +5232,33 @@ intra_module: boolean
  * module. Zero for an intra-module flow.
  */
 cross_module_hops: number
+}
+/**
+ * Runtime coverage context attached to a security candidate when
+ * `fallow security --runtime-coverage` is supplied.
+ */
+export interface SecurityRuntimeContext {
+state: SecurityRuntimeState
+/**
+ * Enclosing function name from static extraction.
+ */
+function: string
+/**
+ * 1-based line where the enclosing function starts.
+ */
+line: number
+/**
+ * Observed invocation count when the runtime report provides it.
+ */
+invocations?: (number | null)
+/**
+ * Runtime coverage stable function id, when available.
+ */
+stable_id?: (string | null)
+/**
+ * Short candidate-framed explanation of the runtime evidence.
+ */
+evidence?: (string | null)
 }
 /**
  * Bare `fallow --format json` envelope.

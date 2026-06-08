@@ -117,6 +117,7 @@ pub fn find_hardcoded_secret_candidates(
                 dead_code: None,
                 candidate,
                 taint_flow: None,
+                runtime: None,
             });
         }
     }

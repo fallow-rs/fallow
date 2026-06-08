@@ -15,11 +15,18 @@ use std::process::ExitCode;
 
 use fallow_config::{OutputFormat, ProductionAnalysis, Severity};
 use fallow_core::results::{
-    SecurityDeadCodeKind, SecurityFinding, SecurityFindingKind, TraceHopRole,
+    AnalysisResults, SecurityDeadCodeKind, SecurityFinding, SecurityFindingKind, TraceHopRole,
 };
+use fallow_types::discover::DiscoveredFile;
+use fallow_types::extract::ModuleInfo;
+use fallow_types::results::{SecurityRuntimeContext, SecurityRuntimeState};
 use serde::Serialize;
 
 use crate::error::emit_error;
+use crate::health::{HealthOptions, SharedParseData, SortBy};
+use crate::health_types::{
+    RuntimeCoverageFinding, RuntimeCoverageHotPath, RuntimeCoverageReport, RuntimeCoverageVerdict,
+};
 use crate::load_config_for_analysis;
 
 /// The `fallow security --format json` schema version. Independently versioned
@@ -132,16 +139,16 @@ pub struct SecurityOptions<'a> {
     /// source (`--changed-since`, `--diff-file`, or `--diff-stdin`); reports only
     /// candidates introduced in the changed lines and exits 8 if any exist.
     pub gate: Option<SecurityGateMode>,
+    /// Paid local runtime-coverage sidecar input.
+    pub runtime_coverage: Option<&'a Path>,
+    /// Threshold for hot-path classification when `--runtime-coverage` is set.
+    pub min_invocations_hot: u64,
 }
 
 /// Run `fallow security`. Always exits 0 unless the user explicitly raised the
 /// `security-client-server-leak` rule to `error` AND findings exist (the rule
 /// defaults to `off` and the command forces it to `warn`, so the common case is
 /// advisory). Unsupported output formats exit 2.
-#[expect(
-    deprecated,
-    reason = "ADR-008 deprecates fallow_core::analyze externally; the CLI uses the workspace path dependency"
-)]
 pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
     if !matches!(
         opts.output,
@@ -180,9 +187,9 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
         config.rules.security_sink = Severity::Warn;
     }
 
-    let mut results = match fallow_core::analyze(&config) {
-        Ok(results) => results,
-        Err(err) => return emit_error(&format!("Analysis error: {err}"), 2, opts.output),
+    let mut analysis = match analyze_security_candidates(opts, &config) {
+        Ok(analysis) => analysis,
+        Err(code) => return code,
     };
 
     // Workspace scope (mutually exclusive flags resolved by the shared helper).
@@ -196,7 +203,7 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
         Err(code) => return code,
     };
     if let Some(ref roots) = ws_roots {
-        crate::check::filtering::filter_to_workspaces(&mut results, roots);
+        crate::check::filtering::filter_to_workspaces(&mut analysis.results, roots);
     }
 
     // Changed-since scope (canonical normalization via the core filter, which
@@ -204,66 +211,50 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
     if let Some(git_ref) = opts.changed_since
         && let Some(changed) = fallow_core::changed_files::get_changed_files(opts.root, git_ref)
     {
-        fallow_core::changed_files::filter_results_by_changed_files(&mut results, &changed);
+        fallow_core::changed_files::filter_results_by_changed_files(
+            &mut analysis.results,
+            &changed,
+        );
     }
     if opts.use_shared_diff_index
         && let Some(diff_index) = crate::report::ci::diff_filter::shared_diff_index()
     {
-        crate::check::filtering::filter_results_by_diff(&mut results, diff_index, opts.root);
+        crate::check::filtering::filter_results_by_diff(
+            &mut analysis.results,
+            diff_index,
+            opts.root,
+        );
     }
-    filter_to_files(&mut results, opts.root, opts.file, opts.quiet);
+    filter_to_files(&mut analysis.results, opts.root, opts.file, opts.quiet);
 
-    // Security gate (issue #886): narrow to the STRICT "new in changed lines"
-    // predicate and drive a dedicated exit code. The gate requires a diff
-    // source; a diff it cannot compute is a LOUD error (exit 2), never a green
-    // gate (a silent miss defeats a security gate).
-    let mut owned_gate_diff: Option<crate::report::ci::diff_filter::DiffIndex> = None;
-    let gate_mode = if let Some(mode) = opts.gate {
-        let gate_diff: &crate::report::ci::diff_filter::DiffIndex = if let Some(shared) =
-            crate::report::ci::diff_filter::shared_diff_index()
-        {
-            shared
-        } else if let Some(git_ref) = opts.changed_since {
-            match fallow_core::changed_files::try_get_changed_diff(opts.root, git_ref) {
-                Ok(text) => owned_gate_diff
-                    .insert(crate::report::ci::diff_filter::DiffIndex::from_unified_diff(&text)),
-                Err(err) => {
-                    return emit_error(
-                        &format!(
-                            "fallow security --gate could not compute the diff for '{git_ref}': {}",
-                            err.describe()
-                        ),
-                        2,
-                        opts.output,
-                    );
-                }
-            }
-        } else {
-            return emit_error(
-                "fallow security --gate requires a diff source: --changed-since <ref>, \
-                     --diff-file <path>, or --diff-stdin.",
-                2,
-                opts.output,
-            );
-        };
-        crate::check::filtering::retain_gate_new(&mut results, gate_diff, opts.root);
-        Some(mode)
-    } else {
-        None
+    let gate_mode = match apply_security_gate(opts, &mut analysis.results) {
+        Ok(mode) => mode,
+        Err(code) => return code,
     };
 
-    let unresolved_edge_files = results.security_unresolved_edge_files;
-    let unresolved_callee_sites = results.security_unresolved_callee_sites;
-    let findings: Vec<SecurityFinding> = std::mem::take(&mut results.security_findings)
-        .into_iter()
-        .map(|f| {
-            // Relativize first, then stamp the correlation id on the
-            // project-relative path so it matches the SARIF fingerprint.
-            let mut f = relativize_finding(f, &config.root);
-            f.finding_id = security_finding_id(&f);
-            f
-        })
-        .collect();
+    let unresolved_edge_files = analysis.results.security_unresolved_edge_files;
+    let unresolved_callee_sites = analysis.results.security_unresolved_callee_sites;
+    let runtime_report = match security_runtime_report(opts, &mut analysis) {
+        Ok(report) => report,
+        Err(code) => return code,
+    };
+    let mut findings: Vec<SecurityFinding> =
+        std::mem::take(&mut analysis.results.security_findings)
+            .into_iter()
+            .map(|f| relativize_finding(f, &config.root))
+            .collect();
+    if let (Some(report), Some(modules), Some(files)) = (
+        runtime_report.as_ref(),
+        analysis.modules.as_ref(),
+        analysis.files.as_ref(),
+    ) {
+        apply_runtime_context(&mut findings, modules, files, &config.root, report);
+    }
+    for finding in &mut findings {
+        // Stamp the correlation id on the project-relative path so it matches
+        // the SARIF fingerprint.
+        finding.finding_id = security_finding_id(finding);
+    }
 
     // In gate mode the displayed set IS the strict "new" set, so its length is
     // the new-candidate count. The gate block is emitted unconditionally when a
@@ -325,6 +316,378 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
     } else {
         ExitCode::SUCCESS
     }
+}
+
+fn apply_security_gate(
+    opts: &SecurityOptions<'_>,
+    results: &mut AnalysisResults,
+) -> Result<Option<SecurityGateMode>, ExitCode> {
+    let Some(mode) = opts.gate else {
+        return Ok(None);
+    };
+
+    // Security gate (issue #886): narrow to the STRICT "new in changed lines"
+    // predicate and drive a dedicated exit code. The gate requires a diff
+    // source; a diff it cannot compute is a LOUD error (exit 2), never a green
+    // gate (a silent miss defeats a security gate).
+    let mut owned_gate_diff: Option<crate::report::ci::diff_filter::DiffIndex> = None;
+    let gate_diff: &crate::report::ci::diff_filter::DiffIndex =
+        if let Some(shared) = crate::report::ci::diff_filter::shared_diff_index() {
+            shared
+        } else if let Some(git_ref) = opts.changed_since {
+            match fallow_core::changed_files::try_get_changed_diff(opts.root, git_ref) {
+                Ok(text) => owned_gate_diff
+                    .insert(crate::report::ci::diff_filter::DiffIndex::from_unified_diff(&text)),
+                Err(err) => {
+                    return Err(emit_error(
+                        &format!(
+                            "fallow security --gate could not compute the diff for '{git_ref}': {}",
+                            err.describe()
+                        ),
+                        2,
+                        opts.output,
+                    ));
+                }
+            }
+        } else {
+            return Err(emit_error(
+                "fallow security --gate requires a diff source: --changed-since <ref>, \
+                     --diff-file <path>, or --diff-stdin.",
+                2,
+                opts.output,
+            ));
+        };
+    crate::check::filtering::retain_gate_new(results, gate_diff, opts.root);
+    Ok(Some(mode))
+}
+
+struct SecurityAnalysisState {
+    results: AnalysisResults,
+    modules: Option<Vec<ModuleInfo>>,
+    files: Option<Vec<DiscoveredFile>>,
+    analysis_output: Option<fallow_core::AnalysisOutput>,
+}
+
+#[expect(
+    deprecated,
+    reason = "ADR-008 deprecates fallow_core::analyze APIs externally; the CLI uses the workspace path dependency"
+)]
+fn analyze_security_candidates(
+    opts: &SecurityOptions<'_>,
+    config: &fallow_config::ResolvedConfig,
+) -> Result<SecurityAnalysisState, ExitCode> {
+    if opts.runtime_coverage.is_none() {
+        return fallow_core::analyze(config)
+            .map(|results| SecurityAnalysisState {
+                results,
+                modules: None,
+                files: None,
+                analysis_output: None,
+            })
+            .map_err(|err| emit_error(&format!("Analysis error: {err}"), 2, opts.output));
+    }
+
+    fallow_core::analyze_retaining_modules(config, true, true)
+        .map(|mut output| {
+            let modules = output.modules.take();
+            let files = output.files.take();
+            let results = output.results.clone();
+            SecurityAnalysisState {
+                results,
+                modules,
+                files,
+                analysis_output: Some(output),
+            }
+        })
+        .map_err(|err| emit_error(&format!("Analysis error: {err}"), 2, opts.output))
+}
+
+fn security_runtime_report(
+    opts: &SecurityOptions<'_>,
+    analysis: &mut SecurityAnalysisState,
+) -> Result<Option<RuntimeCoverageReport>, ExitCode> {
+    let Some(path) = opts.runtime_coverage else {
+        return Ok(None);
+    };
+    let (Some(modules), Some(files), Some(analysis_output)) = (
+        analysis.modules.as_ref(),
+        analysis.files.as_ref(),
+        analysis.analysis_output.take(),
+    ) else {
+        return Ok(None);
+    };
+    analyze_security_runtime(opts, path, modules.clone(), files.clone(), analysis_output)
+}
+
+fn analyze_security_runtime(
+    opts: &SecurityOptions<'_>,
+    path: &Path,
+    modules: Vec<ModuleInfo>,
+    files: Vec<DiscoveredFile>,
+    analysis_output: fallow_core::AnalysisOutput,
+) -> Result<Option<RuntimeCoverageReport>, ExitCode> {
+    let runtime_coverage = crate::health::coverage::prepare_options(
+        path,
+        opts.min_invocations_hot,
+        None,
+        None,
+        opts.output,
+    )?;
+    let result = crate::health::execute_health_with_shared_parse(
+        &HealthOptions {
+            root: opts.root,
+            config_path: opts.config_path,
+            output: opts.output,
+            no_cache: opts.no_cache,
+            threads: opts.threads,
+            quiet: opts.quiet,
+            max_cyclomatic: None,
+            max_cognitive: None,
+            max_crap: None,
+            top: None,
+            sort: SortBy::Cyclomatic,
+            production: true,
+            production_override: Some(true),
+            changed_since: opts.changed_since,
+            diff_index: None,
+            use_shared_diff_index: opts.use_shared_diff_index,
+            workspace: opts.workspace,
+            changed_workspaces: opts.changed_workspaces,
+            baseline: None,
+            save_baseline: None,
+            complexity: false,
+            complexity_breakdown: false,
+            file_scores: false,
+            coverage_gaps: false,
+            config_activates_coverage_gaps: false,
+            hotspots: false,
+            ownership: false,
+            ownership_emails: None,
+            targets: false,
+            force_full: false,
+            score_only_output: false,
+            enforce_coverage_gap_gate: false,
+            effort: None,
+            score: false,
+            min_score: None,
+            since: None,
+            min_commits: None,
+            explain: false,
+            summary: false,
+            save_snapshot: None,
+            trend: false,
+            group_by: None,
+            coverage: None,
+            coverage_root: None,
+            performance: false,
+            min_severity: None,
+            report_only: false,
+            runtime_coverage: Some(runtime_coverage),
+            churn_file: None,
+        },
+        SharedParseData {
+            files,
+            modules,
+            analysis_output: Some(analysis_output),
+        },
+    )?;
+    Ok(result.report.runtime_coverage)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct RuntimeFunctionKey {
+    path: String,
+    function: String,
+    line: u32,
+}
+
+#[derive(Debug, Clone)]
+struct FunctionSpan {
+    key: RuntimeFunctionKey,
+    end_line: u32,
+}
+
+fn apply_runtime_context(
+    findings: &mut Vec<SecurityFinding>,
+    modules: &[ModuleInfo],
+    files: &[fallow_types::discover::DiscoveredFile],
+    root: &Path,
+    report: &RuntimeCoverageReport,
+) {
+    let spans = function_spans(modules, files, root);
+    let runtime = SecurityRuntimeIndex::new(report);
+    let mut indexed = findings.drain(..).enumerate().collect::<Vec<_>>();
+    for (_, finding) in &mut indexed {
+        if !matches!(finding.kind, SecurityFindingKind::TaintedSink) {
+            continue;
+        }
+        finding.runtime = runtime_context_for_finding(finding, &spans, &runtime);
+    }
+    indexed.sort_by(|(left_index, left), (right_index, right)| {
+        runtime_rank(left)
+            .cmp(&runtime_rank(right))
+            .then_with(|| left_index.cmp(right_index))
+    });
+    findings.extend(indexed.into_iter().map(|(_, finding)| finding));
+}
+
+fn function_spans(
+    modules: &[ModuleInfo],
+    files: &[fallow_types::discover::DiscoveredFile],
+    root: &Path,
+) -> Vec<FunctionSpan> {
+    let paths_by_id = files
+        .iter()
+        .map(|file| (file.id, &file.path))
+        .collect::<rustc_hash::FxHashMap<_, _>>();
+    let mut spans = Vec::new();
+    for module in modules {
+        let Some(path) = paths_by_id.get(&module.file_id) else {
+            continue;
+        };
+        let path = relative_key(path, root);
+        for function in &module.complexity {
+            spans.push(FunctionSpan {
+                key: RuntimeFunctionKey {
+                    path: path.clone(),
+                    function: function.name.clone(),
+                    line: function.line,
+                },
+                end_line: function.line.saturating_add(function.line_count),
+            });
+        }
+    }
+    spans
+}
+
+struct SecurityRuntimeIndex {
+    hot_paths: Vec<(RuntimeFunctionKey, u32, SecurityRuntimeContext)>,
+    findings: rustc_hash::FxHashMap<RuntimeFunctionKey, SecurityRuntimeContext>,
+}
+
+impl SecurityRuntimeIndex {
+    fn new(report: &RuntimeCoverageReport) -> Self {
+        let hot_paths = report
+            .hot_paths
+            .iter()
+            .map(|hot| {
+                (
+                    runtime_hot_key(hot),
+                    hot.end_line.max(hot.line),
+                    SecurityRuntimeContext {
+                        state: SecurityRuntimeState::RuntimeHot,
+                        function: hot.function.clone(),
+                        line: hot.line,
+                        invocations: Some(hot.invocations),
+                        stable_id: hot.stable_id.clone(),
+                        evidence: Some(format!(
+                            "production hot path observed with {} invocation{}",
+                            hot.invocations,
+                            crate::report::plural(hot.invocations as usize)
+                        )),
+                    },
+                )
+            })
+            .collect();
+        let findings = report
+            .findings
+            .iter()
+            .map(runtime_finding_context)
+            .collect();
+        Self {
+            hot_paths,
+            findings,
+        }
+    }
+}
+
+fn runtime_context_for_finding(
+    finding: &SecurityFinding,
+    spans: &[FunctionSpan],
+    runtime: &SecurityRuntimeIndex,
+) -> Option<SecurityRuntimeContext> {
+    let path = path_key(&finding.path);
+    let span = spans
+        .iter()
+        .filter(|span| {
+            span.key.path == path && span.key.line <= finding.line && finding.line <= span.end_line
+        })
+        .min_by_key(|span| span.end_line.saturating_sub(span.key.line))?;
+    if let Some((_, _, context)) = runtime.hot_paths.iter().find(|(key, end_line, _)| {
+        key == &span.key && key.line <= finding.line && finding.line <= *end_line
+    }) {
+        return Some(context.clone());
+    }
+    runtime.findings.get(&span.key).cloned().or_else(|| {
+        Some(SecurityRuntimeContext {
+            state: SecurityRuntimeState::RuntimeUnknown,
+            function: span.key.function.clone(),
+            line: span.key.line,
+            invocations: None,
+            stable_id: None,
+            evidence: Some("runtime coverage carried no matching function evidence".to_owned()),
+        })
+    })
+}
+
+fn runtime_rank(finding: &SecurityFinding) -> u8 {
+    match finding.runtime.as_ref().map(|runtime| runtime.state) {
+        Some(SecurityRuntimeState::RuntimeHot) => 0,
+        Some(SecurityRuntimeState::LowTraffic) => 1,
+        None | Some(SecurityRuntimeState::RuntimeUnknown) => 2,
+        Some(SecurityRuntimeState::CoverageUnavailable) => 3,
+        Some(SecurityRuntimeState::RuntimeCold) => 4,
+        Some(SecurityRuntimeState::NeverExecuted) => 5,
+    }
+}
+
+fn runtime_hot_key(hot: &RuntimeCoverageHotPath) -> RuntimeFunctionKey {
+    RuntimeFunctionKey {
+        path: path_key(&hot.path),
+        function: hot.function.clone(),
+        line: hot.line,
+    }
+}
+
+fn runtime_finding_context(
+    finding: &RuntimeCoverageFinding,
+) -> (RuntimeFunctionKey, SecurityRuntimeContext) {
+    let state = match finding.verdict {
+        RuntimeCoverageVerdict::SafeToDelete => SecurityRuntimeState::NeverExecuted,
+        RuntimeCoverageVerdict::ReviewRequired if finding.invocations.unwrap_or(0) == 0 => {
+            SecurityRuntimeState::RuntimeCold
+        }
+        RuntimeCoverageVerdict::LowTraffic => SecurityRuntimeState::LowTraffic,
+        RuntimeCoverageVerdict::CoverageUnavailable | RuntimeCoverageVerdict::Unknown => {
+            SecurityRuntimeState::CoverageUnavailable
+        }
+        RuntimeCoverageVerdict::ReviewRequired | RuntimeCoverageVerdict::Active => {
+            SecurityRuntimeState::RuntimeUnknown
+        }
+    };
+    (
+        RuntimeFunctionKey {
+            path: path_key(&finding.path),
+            function: finding.function.clone(),
+            line: finding.line,
+        },
+        SecurityRuntimeContext {
+            state,
+            function: finding.function.clone(),
+            line: finding.line,
+            invocations: finding.invocations,
+            stable_id: finding.stable_id.clone(),
+            evidence: Some(format!("runtime coverage verdict: {}", finding.verdict)),
+        },
+    )
+}
+
+fn relative_key(path: &Path, root: &Path) -> String {
+    path_key(path.strip_prefix(root).unwrap_or(path))
+}
+
+fn path_key(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
 }
 
 fn filter_to_files(
@@ -500,6 +863,9 @@ pub fn render_human(output: &SecurityOutput) -> String {
             if let Some(hint) = dead_code_hint(finding) {
                 out.push_str(&format!("    dead-code: {hint}\n"));
             }
+            if let Some(runtime) = finding.runtime.as_ref() {
+                out.push_str(&format!("    runtime: {}\n", runtime_hint_text(runtime)));
+            }
             if let Some(reach) = finding.reachability.as_ref() {
                 let entry = if reach.reachable_from_entry {
                     "reachable from a runtime entry point"
@@ -651,6 +1017,41 @@ fn source_reachability_hint(finding: &SecurityFinding) -> Option<&'static str> {
         })
 }
 
+fn runtime_hint_text(runtime: &SecurityRuntimeContext) -> String {
+    use std::fmt::Write as _;
+
+    let mut text = format!(
+        "{} in {}:{}",
+        runtime_state_label(runtime.state),
+        runtime.function,
+        runtime.line
+    );
+    if let Some(invocations) = runtime.invocations {
+        let _ = write!(
+            text,
+            " ({} invocation{})",
+            invocations,
+            crate::report::plural(invocations as usize)
+        );
+    }
+    if let Some(evidence) = runtime.evidence.as_deref() {
+        text.push_str("; ");
+        text.push_str(evidence);
+    }
+    text
+}
+
+const fn runtime_state_label(state: SecurityRuntimeState) -> &'static str {
+    match state {
+        SecurityRuntimeState::RuntimeHot => "runtime-hot",
+        SecurityRuntimeState::RuntimeCold => "runtime-cold",
+        SecurityRuntimeState::NeverExecuted => "never-executed",
+        SecurityRuntimeState::LowTraffic => "low-traffic",
+        SecurityRuntimeState::CoverageUnavailable => "coverage-unavailable",
+        SecurityRuntimeState::RuntimeUnknown => "runtime-unknown",
+    }
+}
+
 /// The SARIF ruleId for a finding. `client-server-leak` keeps its bespoke id;
 /// each `TaintedSink` category gets `security/<category>` so the GitHub Security
 /// tab groups and labels candidates per CWE class instead of collapsing every
@@ -730,6 +1131,11 @@ fn render_sarif(output: &SecurityOutput) -> String {
             if let Some(hint) = source_reachability_hint(finding) {
                 message.push(' ');
                 message.push_str(hint);
+            }
+            if let Some(runtime) = finding.runtime.as_ref() {
+                message.push_str(" Runtime context: ");
+                message.push_str(&runtime_hint_text(runtime));
+                message.push('.');
             }
             let mut related: Vec<serde_json::Value> = finding
                 .trace
@@ -894,6 +1300,7 @@ mod tests {
                 },
             },
             taint_flow: None,
+            runtime: None,
         }
     }
 
@@ -919,6 +1326,84 @@ mod tests {
             unresolved_edge_files: 0,
             unresolved_callee_sites: 0,
         }
+    }
+
+    fn tainted_with_runtime(root: &Path, state: Option<SecurityRuntimeState>) -> SecurityFinding {
+        let mut finding = sample_finding(root);
+        finding.kind = SecurityFindingKind::TaintedSink;
+        finding.category = Some("dangerous-html".to_owned());
+        finding.cwe = Some(79);
+        finding.runtime = state.map(|state| SecurityRuntimeContext {
+            state,
+            function: "render".to_owned(),
+            line: 10,
+            invocations: Some(123),
+            stable_id: Some("fallow:fn:test".to_owned()),
+            evidence: Some("production runtime evidence".to_owned()),
+        });
+        finding
+    }
+
+    #[test]
+    fn runtime_rank_promotes_hot_and_demotes_never_executed() {
+        let root = Path::new("/proj/root");
+        let mut findings = [
+            tainted_with_runtime(root, Some(SecurityRuntimeState::NeverExecuted)),
+            tainted_with_runtime(root, None),
+            tainted_with_runtime(root, Some(SecurityRuntimeState::RuntimeHot)),
+            tainted_with_runtime(root, Some(SecurityRuntimeState::CoverageUnavailable)),
+        ];
+
+        findings.sort_by_key(runtime_rank);
+
+        assert_eq!(
+            findings
+                .iter()
+                .map(|finding| finding.runtime.as_ref().map(|runtime| runtime.state))
+                .collect::<Vec<_>>(),
+            vec![
+                Some(SecurityRuntimeState::RuntimeHot),
+                None,
+                Some(SecurityRuntimeState::CoverageUnavailable),
+                Some(SecurityRuntimeState::NeverExecuted),
+            ]
+        );
+    }
+
+    #[test]
+    fn human_render_includes_runtime_context_line() {
+        let root = Path::new("/proj/root");
+        let finding = relativize_finding(
+            tainted_with_runtime(root, Some(SecurityRuntimeState::RuntimeHot)),
+            root,
+        );
+        let out = render_human(&output_with(vec![finding], 0));
+
+        assert!(
+            out.contains("runtime: runtime-hot in render:10"),
+            "got: {out}"
+        );
+        assert!(out.contains("production runtime evidence"), "got: {out}");
+    }
+
+    #[test]
+    fn sarif_render_includes_runtime_context_in_message() {
+        let root = Path::new("/proj/root");
+        let finding = relativize_finding(
+            tainted_with_runtime(root, Some(SecurityRuntimeState::RuntimeHot)),
+            root,
+        );
+        let rendered = render_sarif(&output_with(vec![finding], 0));
+        let sarif: serde_json::Value = serde_json::from_str(&rendered).expect("valid SARIF JSON");
+        let message = sarif["runs"][0]["results"][0]["message"]["text"]
+            .as_str()
+            .expect("message text");
+
+        assert!(message.contains("Runtime context"), "got: {message}");
+        assert!(
+            message.contains("runtime-hot in render:10"),
+            "got: {message}"
+        );
     }
 
     #[test]
@@ -1400,6 +1885,8 @@ mod tests {
             changed_workspaces: None,
             file: &[],
             gate: None,
+            runtime_coverage: None,
+            min_invocations_hot: 100,
         }
     }
 

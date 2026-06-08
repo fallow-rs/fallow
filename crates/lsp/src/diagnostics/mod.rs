@@ -214,6 +214,7 @@ mod tests {
                 actions: vec![],
                 dead_code: None,
                 reachability: None,
+                runtime: None,
             });
 
         let duplication = empty_duplication();

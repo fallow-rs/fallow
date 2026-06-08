@@ -1528,6 +1528,7 @@ mod tests {
                 blast_radius: 4,
                 crosses_boundary: false,
             }),
+            runtime: None,
         }
     }
 

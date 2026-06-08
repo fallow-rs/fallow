@@ -9974,6 +9974,17 @@
             }
           ],
           "description": "Source-to-sink taint-flow triple, present only when an untrusted source\nis import-reachable to this sink. Absent (skipped) otherwise."
+        },
+        "runtime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SecurityRuntimeContext"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Production runtime coverage context for the function enclosing this\nsecurity sink. Present only when `fallow security --runtime-coverage`\nruns and the candidate is a `tainted-sink`."
         }
       },
       "required": [
@@ -10606,6 +10617,85 @@
         "cross_module_hops"
       ],
       "description": "Compact taint-flow path shape. The ordered per-hop trace is NOT duplicated\nhere: it lives on [`SecurityReachability::untrusted_source_trace`]. This\ncarries only the flow's structural summary (intra-module flow plus the\ncross-module hop count) so consumers do not parse two copies of the hops."
+    },
+    "SecurityRuntimeState": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "runtime-hot",
+          "description": "The sink sits inside a runtime hot path."
+        },
+        {
+          "type": "string",
+          "const": "runtime-cold",
+          "description": "The sink sits inside a tracked function with zero production invocations."
+        },
+        {
+          "type": "string",
+          "const": "never-executed",
+          "description": "The sink sits inside a tracked function the runtime layer marked as safe\nto delete because it was never executed."
+        },
+        {
+          "type": "string",
+          "const": "low-traffic",
+          "description": "The sink sits inside a function that executed, but below the low-traffic\nthreshold."
+        },
+        {
+          "type": "string",
+          "const": "coverage-unavailable",
+          "description": "Runtime coverage could not classify the enclosing function."
+        },
+        {
+          "type": "string",
+          "const": "runtime-unknown",
+          "description": "A static enclosing function was found, but the runtime report carried no\nmatching evidence for it."
+        }
+      ],
+      "description": "Runtime coverage state for the function enclosing a security sink.\nThis is production-observation evidence, not an exploitability verdict."
+    },
+    "SecurityRuntimeContext": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "description": "Runtime state for the enclosing function.",
+          "$ref": "#/definitions/SecurityRuntimeState"
+        },
+        "function": {
+          "type": "string",
+          "description": "Enclosing function name from static extraction."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line where the enclosing function starts."
+        },
+        "invocations": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Observed invocation count when the runtime report provides it."
+        },
+        "stable_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Runtime coverage stable function id, when available."
+        },
+        "evidence": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Short candidate-framed explanation of the runtime evidence."
+        }
+      },
+      "required": [
+        "state",
+        "function",
+        "line"
+      ],
+      "description": "Runtime coverage context attached to a security candidate when\n`fallow security --runtime-coverage` is supplied."
     }
   }
 }
