@@ -1,4 +1,5 @@
 mod quality;
+pub mod security;
 mod structural;
 mod unused;
 
@@ -51,6 +52,7 @@ pub fn build_diagnostics(
     structural::push_re_export_cycle_diagnostics(&mut map, results);
     structural::push_boundary_violation_diagnostics(&mut map, results);
     quality::push_stale_suppression_diagnostics(&mut map, results);
+    security::push_security_diagnostics(&mut map, results);
 
     map
 }
@@ -187,6 +189,38 @@ mod tests {
                 assert_eq!(d.source, Some("fallow".to_string()));
             }
         }
+    }
+
+    #[test]
+    fn build_diagnostics_wires_security_block() {
+        let root = test_root();
+        let path = root.join("src/render.ts");
+        let mut results = AnalysisResults::default();
+        results
+            .security_findings
+            .push(fallow_core::results::SecurityFinding {
+                kind: fallow_core::results::SecurityFindingKind::TaintedSink,
+                category: Some("dangerous-html".to_string()),
+                cwe: Some(79),
+                path: path.clone(),
+                line: 4,
+                col: 2,
+                evidence: "sink".to_string(),
+                source_backed: false,
+                trace: vec![],
+                actions: vec![],
+                dead_code: None,
+                reachability: None,
+            });
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, &root);
+        let uri = Uri::from_file_path(&path).unwrap();
+        let file_diags = diags.get(&uri).expect("security diagnostic present");
+        assert!(file_diags.iter().any(|d| matches!(
+            &d.code,
+            Some(ls_types::NumberOrString::String(c)) if c == "security-sink"
+        )));
     }
 
     #[test]

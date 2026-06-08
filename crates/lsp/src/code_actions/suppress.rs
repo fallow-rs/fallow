@@ -1,0 +1,271 @@
+//! Suppress code actions for security candidates (issue #891).
+//!
+//! Security findings are CANDIDATES, not confirmed bugs, so the actions are
+//! framed as "dismiss a candidate", never "fix" / "ignore" / "silence". Both
+//! actions are ADDITIVE (they insert a `// fallow-ignore-*` comment), unlike the
+//! destructive remove/delete actions in `quick_fix.rs`, so re-validation only
+//! confirms the anchor line still exists rather than re-parsing a declaration.
+//!
+//! The default (first) action is line-level, the conservative scope: it
+//! dismisses exactly the candidate the user looked at. A file-level action
+//! follows, clearly labeled, deduped to one per kind.
+
+#[expect(
+    clippy::disallowed_types,
+    reason = "ls_types WorkspaceEdit.changes is a std HashMap"
+)]
+use std::collections::HashMap;
+use std::path::Path;
+
+#[allow(clippy::wildcard_imports, reason = "many LSP types used")]
+use ls_types::*;
+use rustc_hash::FxHashSet;
+
+use fallow_core::results::AnalysisResults;
+
+use crate::diagnostics::security::{security_diagnostic, security_label, security_token};
+
+/// Build suppress code actions for security candidates under the cursor.
+///
+/// For each candidate on a line within `cursor_range`, offers a line-level
+/// `// fallow-ignore-next-line <token>` dismissal (the default). A file-level
+/// `// fallow-ignore-file <token>` dismissal is offered once per distinct kind.
+pub fn build_suppress_security_actions(
+    results: &AnalysisResults,
+    file_path: &Path,
+    uri: &Uri,
+    cursor_range: &Range,
+    file_lines: &[&str],
+) -> Vec<CodeActionOrCommand> {
+    let mut actions = Vec::new();
+    let mut file_level_tokens: FxHashSet<&'static str> = FxHashSet::default();
+
+    for finding in &results.security_findings {
+        if finding.path != file_path {
+            continue;
+        }
+
+        let finding_line = finding.line.saturating_sub(1);
+        if finding_line < cursor_range.start.line || finding_line > cursor_range.end.line {
+            continue;
+        }
+
+        // Additive insert: only confirm the anchor line still exists in the
+        // live buffer (the destructive-edit re-validation in `quick_fix.rs` is
+        // not needed because we never overwrite user text).
+        let Some(line_content) = file_lines.get(finding_line as usize).copied() else {
+            continue;
+        };
+
+        let token = security_token(finding.kind);
+        let label = security_label(finding);
+        let linked = security_diagnostic(finding);
+
+        // Line-level: match the anchor's indentation so the inserted comment
+        // sits flush with the code it suppresses.
+        let indent: String = line_content
+            .chars()
+            .take_while(|c| c.is_whitespace())
+            .collect();
+        actions.push(suppress_action(
+            format!("Dismiss this security candidate on this line ({label})"),
+            uri,
+            insert_before(
+                finding_line,
+                format!("{indent}// fallow-ignore-next-line {token}\n"),
+            ),
+            linked.clone(),
+        ));
+
+        // File-level: one per distinct kind, inserted at the top of the file.
+        if file_level_tokens.insert(token) {
+            actions.push(suppress_action(
+                format!("Dismiss this security candidate type in this file ({label})"),
+                uri,
+                insert_before(0, format!("// fallow-ignore-file {token}\n")),
+                linked,
+            ));
+        }
+    }
+
+    actions
+}
+
+/// A zero-width insertion `TextEdit` at the start of `line`.
+fn insert_before(line: u32, new_text: String) -> TextEdit {
+    TextEdit {
+        range: Range {
+            start: Position { line, character: 0 },
+            end: Position { line, character: 0 },
+        },
+        new_text,
+    }
+}
+
+/// Wrap a single insertion edit + its linked diagnostic into a quick-fix action.
+#[expect(
+    clippy::disallowed_types,
+    reason = "ls_types WorkspaceEdit.changes is a std HashMap"
+)]
+fn suppress_action(
+    title: String,
+    uri: &Uri,
+    edit: TextEdit,
+    linked: Diagnostic,
+) -> CodeActionOrCommand {
+    let mut changes = HashMap::new();
+    changes.insert(uri.clone(), vec![edit]);
+    CodeActionOrCommand::CodeAction(CodeAction {
+        title,
+        kind: Some(CodeActionKind::QUICKFIX),
+        edit: Some(WorkspaceEdit {
+            changes: Some(changes),
+            ..Default::default()
+        }),
+        diagnostics: Some(vec![linked]),
+        ..Default::default()
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    use fallow_core::results::{SecurityFinding, SecurityFindingKind};
+
+    fn test_root() -> PathBuf {
+        if cfg!(windows) {
+            PathBuf::from("C:\\project")
+        } else {
+            PathBuf::from("/project")
+        }
+    }
+
+    fn sink(path: PathBuf, line: u32) -> SecurityFinding {
+        SecurityFinding {
+            kind: SecurityFindingKind::TaintedSink,
+            category: Some("dangerous-html".to_string()),
+            cwe: Some(79),
+            path,
+            line,
+            col: 2,
+            evidence: "sink".to_string(),
+            source_backed: false,
+            trace: vec![],
+            actions: vec![],
+            dead_code: None,
+            reachability: None,
+        }
+    }
+
+    fn action_titles(actions: &[CodeActionOrCommand]) -> Vec<String> {
+        actions
+            .iter()
+            .map(|a| match a {
+                CodeActionOrCommand::CodeAction(action) => action.title.clone(),
+                CodeActionOrCommand::Command(cmd) => cmd.title.clone(),
+            })
+            .collect()
+    }
+
+    fn first_edit_text(action: &CodeActionOrCommand) -> String {
+        let CodeActionOrCommand::CodeAction(action) = action else {
+            panic!("expected a CodeAction");
+        };
+        let changes = action
+            .edit
+            .as_ref()
+            .and_then(|e| e.changes.as_ref())
+            .expect("edit has changes");
+        changes.values().next().unwrap()[0].new_text.clone()
+    }
+
+    #[test]
+    fn offers_line_and_file_suppress_for_candidate_under_cursor() {
+        let root = test_root();
+        let path = root.join("src/render.ts");
+        let uri = Uri::from_file_path(&path).unwrap();
+        let mut results = AnalysisResults::default();
+        results.security_findings.push(sink(path.clone(), 3));
+        let file_lines = vec!["line1", "line2", "  doRender();", "line4"];
+        let cursor = Range {
+            start: Position {
+                line: 2,
+                character: 0,
+            },
+            end: Position {
+                line: 2,
+                character: 0,
+            },
+        };
+
+        let actions = build_suppress_security_actions(&results, &path, &uri, &cursor, &file_lines);
+        let titles = action_titles(&actions);
+        assert_eq!(titles.len(), 2);
+        assert!(titles[0].contains("Dismiss this security candidate on this line"));
+        assert!(titles[1].contains("Dismiss this security candidate type in this file"));
+        // Indentation is matched on the line-level insert.
+        assert_eq!(
+            first_edit_text(&actions[0]),
+            "  // fallow-ignore-next-line security-sink\n"
+        );
+        assert_eq!(
+            first_edit_text(&actions[1]),
+            "// fallow-ignore-file security-sink\n"
+        );
+    }
+
+    #[test]
+    fn file_level_action_deduped_per_kind() {
+        let root = test_root();
+        let path = root.join("src/render.ts");
+        let uri = Uri::from_file_path(&path).unwrap();
+        let mut results = AnalysisResults::default();
+        results.security_findings.push(sink(path.clone(), 2));
+        results.security_findings.push(sink(path.clone(), 3));
+        let file_lines = vec!["a", "b", "c", "d"];
+        let cursor = Range {
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 10,
+                character: 0,
+            },
+        };
+
+        let actions = build_suppress_security_actions(&results, &path, &uri, &cursor, &file_lines);
+        // Two line-level (one per finding) + ONE file-level (deduped).
+        let file_level = action_titles(&actions)
+            .iter()
+            .filter(|t| t.contains("type in this file"))
+            .count();
+        assert_eq!(file_level, 1);
+        assert_eq!(actions.len(), 3);
+    }
+
+    #[test]
+    fn no_actions_outside_cursor_range() {
+        let root = test_root();
+        let path = root.join("src/render.ts");
+        let uri = Uri::from_file_path(&path).unwrap();
+        let mut results = AnalysisResults::default();
+        results.security_findings.push(sink(path.clone(), 50));
+        let file_lines = vec!["a", "b", "c"];
+        let cursor = Range {
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 1,
+                character: 0,
+            },
+        };
+
+        let actions = build_suppress_security_actions(&results, &path, &uri, &cursor, &file_lines);
+        assert!(actions.is_empty());
+    }
+}

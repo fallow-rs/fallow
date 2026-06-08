@@ -4,8 +4,9 @@ use std::path::Path;
 use ls_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position, Range};
 
 use fallow_core::duplicates::DuplicationReport;
-use fallow_core::results::AnalysisResults;
+use fallow_core::results::{AnalysisResults, SecurityFindingKind};
 
+use crate::diagnostics::security::security_label;
 use crate::markdown::format_inline_code;
 
 /// Build hover information for a position in a file.
@@ -43,8 +44,118 @@ pub fn build_hover(
         return Some(hover);
     }
 
+    if let Some(hover) = check_security(results, file_path, position) {
+        return Some(hover);
+    }
+
     if let Some(hover) = check_duplication(duplication, file_path, position) {
         return Some(hover);
+    }
+
+    None
+}
+
+/// Check if the position is on a security candidate's anchor line.
+///
+/// The hover is a confidence-first TRIAGE surface, not a port of the CLI's
+/// vertical report: it leads with the candidate kind + the honest confidence
+/// signals (`source_backed`, `reachable_from_entry`), then evidence, then a
+/// one-line blast-radius summary, the kind-appropriate next step, and a pointer
+/// to the full trace (`fallow security --file`). The multi-hop traces stay out
+/// of the hover. Every user-controlled string goes through `format_inline_code`
+/// (never backslash-escaped) so a crafted evidence/path string cannot leak
+/// markdown or a `command:` URI.
+fn check_security(
+    results: &AnalysisResults,
+    file_path: &Path,
+    position: Position,
+) -> Option<Hover> {
+    for finding in &results.security_findings {
+        if finding.path != file_path {
+            continue;
+        }
+        let finding_line = finding.line.saturating_sub(1);
+        if finding_line != position.line {
+            continue;
+        }
+        if position.character < finding.col {
+            continue;
+        }
+
+        let label = security_label(finding);
+        let mut value = format!(
+            "**fallow** security candidate: {} (unverified, verify before acting)",
+            format_inline_code(&label),
+        );
+
+        let source_backed = if finding.source_backed { "yes" } else { "no" };
+        let reachable = finding.reachability.as_ref().map_or("unknown", |r| {
+            if r.reachable_from_entry { "yes" } else { "no" }
+        });
+        let _ = write!(
+            value,
+            "\n\nconfidence: source-backed {source_backed}, reachable from a runtime entry point \
+             {reachable}",
+        );
+
+        let _ = write!(value, "\n\n{}", format_inline_code(&finding.evidence));
+
+        if let Some(context) = finding.dead_code.as_ref() {
+            let _ = write!(value, "\n\ndead-code: {}", context.guidance);
+        }
+
+        if let Some(reach) = finding.reachability.as_ref() {
+            let boundary = if reach.crosses_boundary {
+                "; crosses an architecture boundary"
+            } else {
+                ""
+            };
+            let _ = write!(value, "\n\nblast radius {}{boundary}", reach.blast_radius);
+        }
+
+        let next = match finding.kind {
+            SecurityFindingKind::ClientServerLeak => {
+                "Next: check whether the import is type-only, server-only, or behind a build-time \
+                 guard; if the value never ships to the client bundle, this candidate is a false \
+                 positive."
+            }
+            SecurityFindingKind::TaintedSink if finding.dead_code.is_some() => {
+                "Next: verify the dead-code finding and delete the code if safe; otherwise verify \
+                 and harden the sink."
+            }
+            SecurityFindingKind::TaintedSink => {
+                "Next: verify whether untrusted input can reach this sink; harden it or dismiss the \
+                 candidate if it cannot."
+            }
+        };
+        let _ = write!(value, "\n\n{next}");
+
+        let basename = file_path.file_name().map_or_else(
+            || file_path.display().to_string(),
+            |name| name.to_string_lossy().into_owned(),
+        );
+        let _ = write!(
+            value,
+            "\n\nFull trace: run {} or see the security docs.",
+            format_inline_code(&format!("fallow security --file {basename}")),
+        );
+
+        return Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value,
+            }),
+            range: Some(Range {
+                start: Position {
+                    line: finding_line,
+                    character: finding.col,
+                },
+                end: Position {
+                    line: finding_line,
+                    character: u32::MAX,
+                },
+            }),
+        });
     }
 
     None
@@ -1386,5 +1497,103 @@ mod tests {
             character: 0,
         };
         assert!(build_hover(&results, &duplication, &path_b, pos).is_none());
+    }
+
+    fn tainted_sink_finding(path: PathBuf) -> fallow_core::results::SecurityFinding {
+        fallow_core::results::SecurityFinding {
+            kind: fallow_core::results::SecurityFindingKind::TaintedSink,
+            category: Some("dangerous-html".to_string()),
+            cwe: Some(79),
+            path,
+            line: 8,
+            col: 6,
+            evidence: "req.query.html flows into dangerouslySetInnerHTML".to_string(),
+            source_backed: true,
+            trace: vec![],
+            actions: vec![],
+            dead_code: None,
+            reachability: Some(fallow_core::results::SecurityReachability {
+                reachable_from_entry: true,
+                reachable_from_untrusted_source: false,
+                untrusted_source_hop_count: None,
+                untrusted_source_trace: vec![],
+                blast_radius: 4,
+                crosses_boundary: false,
+            }),
+        }
+    }
+
+    #[test]
+    fn hover_on_security_candidate() {
+        let root = test_root();
+        let path = root.join("src/render.ts");
+        let mut results = AnalysisResults::default();
+        results
+            .security_findings
+            .push(tainted_sink_finding(path.clone()));
+        let duplication = DuplicationReport::default();
+        let pos = Position {
+            line: 7, // 1-based 8 -> 0-based 7
+            character: 10,
+        };
+
+        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let value = markup_value(&hover);
+        assert!(value.contains("security candidate"));
+        assert!(value.contains("unverified"));
+        assert!(value.contains("CWE-79"));
+        assert!(value.contains("source-backed yes"));
+        assert!(value.contains("reachable from a runtime entry point yes"));
+        assert!(value.contains("dangerouslySetInnerHTML"));
+        assert!(value.contains("blast radius 4"));
+        assert!(value.contains("Next:"));
+        assert!(value.contains("fallow security --file render.ts"));
+        let range = hover.range.unwrap();
+        assert_eq!(range.start.line, 7);
+        assert_eq!(range.start.character, 6);
+    }
+
+    #[test]
+    fn hover_off_security_candidate_line_returns_none() {
+        let root = test_root();
+        let path = root.join("src/render.ts");
+        let mut results = AnalysisResults::default();
+        results
+            .security_findings
+            .push(tainted_sink_finding(path.clone()));
+        let duplication = DuplicationReport::default();
+
+        // Wrong line.
+        let pos = Position {
+            line: 20,
+            character: 6,
+        };
+        assert!(build_hover(&results, &duplication, &path, pos).is_none());
+
+        // Before the anchor column.
+        let pos = Position {
+            line: 7,
+            character: 2,
+        };
+        assert!(build_hover(&results, &duplication, &path, pos).is_none());
+    }
+
+    #[test]
+    fn hover_on_security_candidate_neutralizes_link_injection() {
+        let root = test_root();
+        let path = root.join("src/render.ts");
+        let mut finding = tainted_sink_finding(path.clone());
+        finding.evidence = "[click](command:vscode.open?evil)".to_string();
+        let mut results = AnalysisResults::default();
+        results.security_findings.push(finding);
+        let duplication = DuplicationReport::default();
+        let pos = Position {
+            line: 7,
+            character: 6,
+        };
+
+        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let value = markup_value(&hover);
+        assert!(value.contains("`[click](command:vscode.open?evil)`"));
     }
 }

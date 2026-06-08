@@ -216,6 +216,16 @@ const DIAGNOSTIC_ISSUE_TYPES: &[DiagnosticIssueType] = &[
         code: "misconfigured-dependency-override",
         label: "Misconfigured Dependency Overrides",
     },
+    DiagnosticIssueType {
+        config_key: Some("security-sink"),
+        code: "security-sink",
+        label: "Security Sink Candidates",
+    },
+    DiagnosticIssueType {
+        config_key: Some("security-client-server-leak"),
+        code: "security-client-server-leak",
+        label: "Security Client-Server Leaks",
+    },
 ];
 
 fn diagnostic_issue_types() -> Vec<IssueTypeInfo> {
@@ -836,6 +846,14 @@ impl LanguageServer for FallowLspServer {
                 &file_lines,
             ));
         }
+
+        actions.extend(code_actions::build_suppress_security_actions(
+            results,
+            &file_path,
+            uri,
+            &params.range,
+            &file_lines,
+        ));
 
         if actions.is_empty() {
             Ok(None)
@@ -2484,6 +2502,14 @@ export function choose(value: number): string {
         }
     }
 
+    /// Whether a `publishDiagnostics` params payload carries a `security-sink`
+    /// coded diagnostic. Extracted to keep the delivery test's loop flat.
+    fn pushed_diagnostics_have_security_sink(params: &serde_json::Value) -> bool {
+        params["diagnostics"]
+            .as_array()
+            .is_some_and(|items| items.iter().any(|d| d["code"] == json!("security-sink")))
+    }
+
     #[test]
     fn attach_changed_since_data_sets_payload_when_active() {
         let mut map: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
@@ -3151,6 +3177,88 @@ export function choose(value: number): string {
             assert!(
                 saw_open_file_push,
                 "open-file diagnostics must still push when the client never pulls",
+            );
+        };
+
+        tokio::join!(publish, client);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn security_diagnostics_push_when_client_never_pulls() {
+        use futures::StreamExt;
+
+        // The opt-in author-time security surface must reach a client that
+        // advertises pull-diagnostics `refreshSupport` but never issues a
+        // `textDocument/diagnostic` (fallow's own VS Code extension does
+        // exactly this). Delivery keys on the OBSERVED pull, so the new
+        // `security-sink` code rides the push path like any other. This locks
+        // the exact path that silently blanked once (issue #891 / rec 4).
+        let (mut service, socket) = LspService::build(FallowLspServer::new).finish();
+        let initialize = Request::build("initialize")
+            .params(json!({
+                "capabilities": {
+                    "workspace": { "diagnostics": { "refreshSupport": true } }
+                }
+            }))
+            .id(1)
+            .finish();
+        service
+            .ready()
+            .await
+            .expect("service ready")
+            .call(initialize)
+            .await
+            .expect("initialize call")
+            .expect("initialize response");
+
+        let backend = service.inner();
+        // `client_pulls` is intentionally NOT set: this client never pulls.
+        let uri = "file:///render.ts".parse::<Uri>().unwrap();
+        install_document(backend, &uri, 1, "doRender();").await;
+        let snapshot: VersionSnapshot = std::iter::once((uri.clone(), 1)).collect();
+
+        let finding = fallow_core::results::SecurityFinding {
+            kind: fallow_core::results::SecurityFindingKind::TaintedSink,
+            category: Some("dangerous-html".to_string()),
+            cwe: Some(79),
+            path: std::path::PathBuf::from("/render.ts"),
+            line: 1,
+            col: 0,
+            evidence: "sink".to_string(),
+            source_backed: false,
+            trace: vec![],
+            actions: vec![],
+            dead_code: None,
+            reachability: None,
+        };
+        let mut diags_by_file: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
+        diags_by_file.insert(
+            uri.clone(),
+            vec![crate::diagnostics::security::security_diagnostic(&finding)],
+        );
+
+        let mut socket = socket;
+        let publish = backend.publish_collected_diagnostics(diags_by_file, &snapshot);
+        let client = async {
+            let mut saw_security_push = false;
+            while let Ok(Some(request)) =
+                tokio::time::timeout(Duration::from_millis(500), socket.next()).await
+            {
+                if request.method() != "textDocument/publishDiagnostics" {
+                    continue;
+                }
+                let params = request
+                    .params()
+                    .expect("publishDiagnostics carries params on every call");
+                if params["uri"] == json!(uri.to_string())
+                    && pushed_diagnostics_have_security_sink(params)
+                {
+                    saw_security_push = true;
+                }
+            }
+            assert!(
+                saw_security_push,
+                "opt-in security diagnostics must push to a never-pulling client",
             );
         };
 
