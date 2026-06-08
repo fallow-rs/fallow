@@ -35,6 +35,12 @@ mod baseline;
     unused_imports,
     reason = "shared CLI library compiles bin-oriented support modules for reuse"
 )]
+mod cache_notice;
+#[allow(
+    dead_code,
+    unused_imports,
+    reason = "shared CLI library compiles bin-oriented support modules for reuse"
+)]
 mod check;
 /// CODEOWNERS file parser and ownership lookup.
 pub mod codeowners;

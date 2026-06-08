@@ -9,7 +9,7 @@ These interfaces are covered by semver — breaking changes only happen in major
 ### Configuration format
 
 - **Config file names**: `.fallowrc.json`, `.fallowrc.jsonc`, `fallow.toml`, `.fallow.toml`
-- **All documented config fields**: `extends`, `ignorePatterns`, `rules`, `overrides`, `entry`, `ignoreDependencies`, `ignoreExports`, `ignoreExportsUsedInFile`, `ignoreDecorators`, `includeEntryExports`, `autoImports`, `duplicates`, `audit`, `fix`, `production` (boolean form `production: true` or per-analysis form `production: { deadCode, health, dupes }`), `framework`, `workspaces`, `plugins`, `boundaries` (including `boundaries.preset`)
+- **All documented config fields**: `extends`, `ignorePatterns`, `rules`, `overrides`, `entry`, `ignoreDependencies`, `ignoreExports`, `ignoreExportsUsedInFile`, `ignoreDecorators`, `includeEntryExports`, `autoImports`, `duplicates`, `audit`, `cache`, `fix`, `production` (boolean form `production: true` or per-analysis form `production: { deadCode, health, dupes }`), `framework`, `workspaces`, `plugins`, `boundaries` (including `boundaries.preset`)
 - **Rule names and severity values**: `unused-files`, `unused-exports`, etc. with `error`/`warn`/`off`
 - **Extends and overrides semantics**: merge behavior, glob matching, override precedence, `npm:` prefix resolution, `https://` URL resolution
 - **Inline suppression comment syntax**: `fallow-ignore-next-line`, `fallow-ignore-file`
@@ -73,7 +73,7 @@ The schema-derive ladder ([#384](https://github.com/fallow-rs/fallow/issues/384)
 - **Audit flags**: `--gate <new-only|all>` (controls whether only introduced findings or all findings affect the verdict), `--max-crap` (forwarded to the health sub-analysis; mirrors `health.maxCrap` in config), `--coverage` (Istanbul coverage data for accurate CRAP scores), `--coverage-root` (absolute coverage-data prefix for CI rebasing)
 - **Init flags**: `--toml`, `--hooks` (scaffold pre-commit git hook), `--branch` (fallback base branch/ref for the hook when no upstream is set)
 - **Hooks command**: `hooks install|uninstall --target <git|agent>` manages Git pre-commit hooks and agent gates. `setup-hooks` remains supported as the legacy agent-hook command.
-- **Environment variables**: `FALLOW_FORMAT`, `FALLOW_QUIET`, `FALLOW_BIN`, `FALLOW_TIMEOUT_SECS`, `FALLOW_EXTENDS_TIMEOUT_SECS`, `FALLOW_COVERAGE`, `FALLOW_API_URL`, `FALLOW_API_KEY`, `FALLOW_CA_BUNDLE`, `FALLOW_PRODUCTION`, `FALLOW_PRODUCTION_DEAD_CODE`, `FALLOW_PRODUCTION_HEALTH`, `FALLOW_PRODUCTION_DUPES`, `FALLOW_REVIEW_GUIDANCE`, `FALLOW_SUMMARY_SCOPE`, `FALLOW_AUDIT_CACHE_MAX_AGE_DAYS`, `FALLOW_UPDATE_CHECK`
+- **Environment variables**: `FALLOW_FORMAT`, `FALLOW_QUIET`, `FALLOW_BIN`, `FALLOW_TIMEOUT_SECS`, `FALLOW_EXTENDS_TIMEOUT_SECS`, `FALLOW_COVERAGE`, `FALLOW_CACHE_DIR`, `FALLOW_API_URL`, `FALLOW_API_KEY`, `FALLOW_CA_BUNDLE`, `FALLOW_PRODUCTION`, `FALLOW_PRODUCTION_DEAD_CODE`, `FALLOW_PRODUCTION_HEALTH`, `FALLOW_PRODUCTION_DUPES`, `FALLOW_REVIEW_GUIDANCE`, `FALLOW_SUMMARY_SCOPE`, `FALLOW_AUDIT_CACHE_MAX_AGE_DAYS`, `FALLOW_UPDATE_CHECK`
 - **Generated hook-script env vars**: `FALLOW_GATE_MIN_VERSION` (consumed by `.claude/hooks/fallow-gate.sh` written by `fallow hooks install --target agent` / `fallow setup-hooks`; controls the minimum fallow version the gate accepts, default `2.46.0`, empty string disables)
 
 ### External plugin format

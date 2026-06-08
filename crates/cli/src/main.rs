@@ -21,6 +21,7 @@ use clap::{CommandFactory, Parser, Subcommand};
 mod api;
 mod audit;
 mod baseline;
+mod cache_notice;
 mod check;
 mod ci;
 mod ci_template;
@@ -2517,17 +2518,36 @@ fn main() -> ExitCode {
     {
         return code;
     }
+    record_run_epilogue(
+        telemetry_workflow,
+        output,
+        quiet,
+        telemetry_start.elapsed(),
+        exit_code,
+        cli.parent_run.as_deref(),
+    )
+}
+
+fn record_run_epilogue(
+    telemetry_workflow: telemetry::Workflow,
+    output: fallow_config::OutputFormat,
+    quiet: bool,
+    elapsed: std::time::Duration,
+    exit_code: ExitCode,
+    parent_run: Option<&str>,
+) -> ExitCode {
+    let cache_notice_printed = cache_notice::maybe_print_created_notice();
     telemetry::record_workflow(&telemetry::WorkflowRecord {
         workflow: telemetry_workflow,
         output,
         quiet,
-        elapsed: telemetry_start.elapsed(),
+        elapsed,
         exit_code,
-        parent_run: cli.parent_run.as_deref(),
+        parent_run,
     });
     if exit_code == ExitCode::SUCCESS {
         let note_printed = telemetry::maybe_print_opt_in_note(output, quiet);
-        update_check::maybe_nudge(output, quiet, note_printed);
+        update_check::maybe_nudge(output, quiet, note_printed || cache_notice_printed);
     }
     exit_code
 }
@@ -3579,6 +3599,7 @@ struct AuditDispatchArgs {
 
 struct ResolvedAuditInputs {
     audit_cfg: fallow_config::AuditConfig,
+    cache_dir: PathBuf,
     production: ProductionModes,
     dead_code_baseline: Option<PathBuf>,
     health_baseline: Option<PathBuf>,
@@ -3613,7 +3634,7 @@ fn resolve_audit_inputs(
     let cli = dispatch.cli;
     let root = dispatch.root;
     let output = dispatch.output;
-    let audit_cfg = load_config(
+    let config = load_config(
         root,
         &cli.config,
         output,
@@ -3621,8 +3642,9 @@ fn resolve_audit_inputs(
         dispatch.threads,
         cli.production,
         dispatch.quiet,
-    )?
-    .audit;
+    )?;
+    let cache_dir = config.cache_dir.clone();
+    let audit_cfg = config.audit;
     let production = resolve_production_modes(
         cli,
         root,
@@ -3653,6 +3675,7 @@ fn resolve_audit_inputs(
 
     Ok(ResolvedAuditInputs {
         audit_cfg,
+        cache_dir,
         production,
         dead_code_baseline: resolved_dead_code_baseline,
         health_baseline: resolved_health_baseline,
@@ -3671,6 +3694,7 @@ fn run_resolved_audit(
         &audit::AuditOptions {
             root: dispatch.root,
             config_path: &cli.config,
+            cache_dir: &inputs.cache_dir,
             output: dispatch.output,
             no_cache: cli.no_cache,
             threads: dispatch.threads,

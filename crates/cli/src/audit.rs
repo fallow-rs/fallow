@@ -78,6 +78,7 @@ pub struct AuditResult {
 pub struct AuditOptions<'a> {
     pub root: &'a std::path::Path,
     pub config_path: &'a Option<std::path::PathBuf>,
+    pub cache_dir: &'a std::path::Path,
     pub output: OutputFormat,
     pub no_cache: bool,
     pub threads: usize,
@@ -423,14 +424,14 @@ fn cached_from_snapshot(
     }
 }
 
-fn audit_base_snapshot_cache_dir(root: &Path) -> PathBuf {
-    root.join(".fallow")
+fn audit_base_snapshot_cache_dir(cache_dir: &Path) -> PathBuf {
+    cache_dir
         .join("cache")
         .join(format!("audit-base-v{AUDIT_BASE_SNAPSHOT_CACHE_VERSION}"))
 }
 
-fn audit_base_snapshot_cache_file(root: &Path, key: &AuditBaseSnapshotCacheKey) -> PathBuf {
-    audit_base_snapshot_cache_dir(root).join(format!("{:016x}.bin", key.hash))
+fn audit_base_snapshot_cache_file(cache_dir: &Path, key: &AuditBaseSnapshotCacheKey) -> PathBuf {
+    audit_base_snapshot_cache_dir(cache_dir).join(format!("{:016x}.bin", key.hash))
 }
 
 fn ensure_audit_base_snapshot_cache_dir(dir: &Path) -> Result<(), std::io::Error> {
@@ -446,7 +447,7 @@ fn load_cached_base_snapshot(
     opts: &AuditOptions<'_>,
     key: &AuditBaseSnapshotCacheKey,
 ) -> Option<AuditKeySnapshot> {
-    let path = audit_base_snapshot_cache_file(opts.root, key);
+    let path = audit_base_snapshot_cache_file(opts.cache_dir, key);
     let data = std::fs::read(path).ok()?;
     if data.len() > MAX_AUDIT_BASE_SNAPSHOT_CACHE_SIZE {
         return None;
@@ -467,7 +468,7 @@ fn save_cached_base_snapshot(
     key: &AuditBaseSnapshotCacheKey,
     snapshot: &AuditKeySnapshot,
 ) {
-    let dir = audit_base_snapshot_cache_dir(opts.root);
+    let dir = audit_base_snapshot_cache_dir(opts.cache_dir);
     if ensure_audit_base_snapshot_cache_dir(&dir).is_err() {
         return;
     }
@@ -478,7 +479,7 @@ fn save_cached_base_snapshot(
     if tmp.write_all(&data).is_err() {
         return;
     }
-    let _ = tmp.persist(audit_base_snapshot_cache_file(opts.root, key));
+    let _ = tmp.persist(audit_base_snapshot_cache_file(opts.cache_dir, key));
 }
 
 fn git_rev_parse(root: &Path, rev: &str) -> Option<String> {
@@ -650,6 +651,7 @@ fn compute_base_snapshot(
         return Err(emit_error(&message, 2, opts.output));
     };
     let base_root = base_analysis_root(opts.root, worktree.path());
+    let base_cache_dir = remap_cache_dir_for_base_worktree(opts.root, &base_root, opts.cache_dir);
     let current_config_path = opts
         .config_path
         .clone()
@@ -657,6 +659,7 @@ fn compute_base_snapshot(
     let base_opts = AuditOptions {
         root: &base_root,
         config_path: &current_config_path,
+        cache_dir: &base_cache_dir,
         output: opts.output,
         no_cache: opts.no_cache,
         threads: opts.threads,
@@ -764,7 +767,7 @@ fn can_reuse_current_as_base(
     let Some(git_root) = git_toplevel(opts.root) else {
         return false;
     };
-    let cache_dir = opts.root.join(".fallow");
+    let cache_dir = opts.cache_dir.to_path_buf();
     let canonical_cache_dir = dunce::canonicalize(&cache_dir).ok();
     changed_files.iter().all(|path| {
         if is_fallow_cache_artifact(path, &cache_dir, canonical_cache_dir.as_deref()) {
@@ -796,6 +799,19 @@ fn is_fallow_cache_artifact(
 ) -> bool {
     path.starts_with(cache_dir)
         || canonical_cache_dir.is_some_and(|canonical| path.starts_with(canonical))
+}
+
+fn remap_cache_dir_for_base_worktree(
+    current_root: &Path,
+    base_worktree_root: &Path,
+    cache_dir: &Path,
+) -> PathBuf {
+    if cache_dir.is_absolute()
+        && let Ok(relative) = cache_dir.strip_prefix(current_root)
+    {
+        return base_worktree_root.join(relative);
+    }
+    cache_dir.to_path_buf()
 }
 
 fn git_toplevel(root: &Path) -> Option<PathBuf> {
@@ -2441,7 +2457,8 @@ mod tests {
     #[test]
     fn audit_base_snapshot_cache_dir_writes_gitignore() {
         let tmp = tempfile::TempDir::new().expect("temp dir should be created");
-        let cache_dir = audit_base_snapshot_cache_dir(tmp.path());
+        let cache_root = tmp.path().join(".custom-fallow-cache");
+        let cache_dir = audit_base_snapshot_cache_dir(&cache_root);
 
         ensure_audit_base_snapshot_cache_dir(&cache_dir).expect("cache dir should be created");
 
@@ -2455,8 +2472,10 @@ mod tests {
     fn audit_base_snapshot_cache_roundtrips_from_disk() {
         let tmp = tempfile::TempDir::new().expect("temp dir should be created");
         let config_path = None;
+        let cache_root = tmp.path().join(".custom-fallow-cache");
         let opts = AuditOptions {
             root: tmp.path(),
+            cache_dir: &cache_root,
             config_path: &config_path,
             output: OutputFormat::Json,
             no_cache: false,
@@ -2495,6 +2514,10 @@ mod tests {
         };
 
         save_cached_base_snapshot(&opts, &key, &snapshot);
+        assert!(
+            audit_base_snapshot_cache_file(&cache_root, &key).exists(),
+            "snapshot should be saved below the configured cache directory"
+        );
         let loaded = load_cached_base_snapshot(&opts, &key).expect("snapshot should load");
 
         assert_eq!(loaded.dead_code, snapshot.dead_code);
@@ -2506,8 +2529,10 @@ mod tests {
     fn audit_base_snapshot_cache_rejects_mismatched_key() {
         let tmp = tempfile::TempDir::new().expect("temp dir should be created");
         let config_path = None;
+        let cache_root = tmp.path().join(".custom-fallow-cache");
         let opts = AuditOptions {
             root: tmp.path(),
+            cache_dir: &cache_root,
             config_path: &config_path,
             output: OutputFormat::Json,
             no_cache: false,
@@ -2548,10 +2573,10 @@ mod tests {
             health: vec![],
             dupes: vec![],
         };
-        let cache_dir = audit_base_snapshot_cache_dir(tmp.path());
+        let cache_dir = audit_base_snapshot_cache_dir(&cache_root);
         ensure_audit_base_snapshot_cache_dir(&cache_dir).expect("cache dir should be created");
         fs::write(
-            audit_base_snapshot_cache_file(tmp.path(), &key),
+            audit_base_snapshot_cache_file(&cache_root, &key),
             bitcode::encode(&cached),
         )
         .expect("cache file should be written");
@@ -2575,8 +2600,10 @@ mod tests {
         .expect("base config should be written");
 
         let config_path = None;
+        let cache_root = root.join(".fallow");
         let opts = AuditOptions {
             root,
+            cache_dir: &cache_root,
             config_path: &config_path,
             output: OutputFormat::Json,
             no_cache: false,
@@ -2645,8 +2672,10 @@ mod tests {
         .expect("changed module should be written");
 
         let config_path = None;
+        let cache_root = root.join(".fallow");
         let opts = AuditOptions {
             root,
+            cache_dir: &cache_root,
             config_path: &config_path,
             output: OutputFormat::Json,
             no_cache: true,
@@ -2720,8 +2749,10 @@ mod tests {
         let before_worktrees = audit_worktree_names(root);
 
         let config_path = None;
+        let cache_root = root.join(".fallow");
         let opts = AuditOptions {
             root,
+            cache_dir: &cache_root,
             config_path: &config_path,
             output: OutputFormat::Json,
             no_cache: true,
@@ -2811,8 +2842,10 @@ mod tests {
         .expect("changed module should be written");
 
         let config_path = None;
+        let cache_root = root.join(".fallow");
         let opts = AuditOptions {
             root,
+            cache_dir: &cache_root,
             config_path: &config_path,
             output: OutputFormat::Json,
             no_cache: true,
@@ -2886,8 +2919,10 @@ mod tests {
         .expect("changed module should be written");
 
         let config_path = None;
+        let cache_root = root.join(".fallow");
         let opts = AuditOptions {
             root,
+            cache_dir: &cache_root,
             config_path: &config_path,
             output: OutputFormat::Json,
             no_cache: true,
@@ -2975,6 +3010,28 @@ mod tests {
     }
 
     #[test]
+    fn remap_cache_dir_moves_project_local_cache_to_base_worktree() {
+        let current_root = PathBuf::from("/repo");
+        let base_root = PathBuf::from("/tmp/fallow-base");
+        let cache_dir = PathBuf::from("/repo/.cache/fallow");
+
+        let remapped = remap_cache_dir_for_base_worktree(&current_root, &base_root, &cache_dir);
+
+        assert_eq!(remapped, PathBuf::from("/tmp/fallow-base/.cache/fallow"));
+    }
+
+    #[test]
+    fn remap_cache_dir_keeps_external_absolute_cache_shared() {
+        let current_root = PathBuf::from("/repo");
+        let base_root = PathBuf::from("/tmp/fallow-base");
+        let cache_dir = PathBuf::from("/tmp/shared/fallow-cache");
+
+        let remapped = remap_cache_dir_for_base_worktree(&current_root, &base_root, &cache_dir);
+
+        assert_eq!(remapped, cache_dir);
+    }
+
+    #[test]
     fn audit_gate_new_only_inherits_pre_existing_duplicates_in_focused_files() {
         let tmp = tempfile::TempDir::new().expect("temp dir should be created");
         let root_buf = tmp
@@ -3016,8 +3073,10 @@ mod tests {
         );
 
         let config_path = None;
+        let cache_root = root.join(".fallow");
         let opts = AuditOptions {
             root,
+            cache_dir: &cache_root,
             config_path: &config_path,
             output: OutputFormat::Json,
             no_cache: true,
@@ -3144,8 +3203,10 @@ export function App() {
         .expect("app should be modified");
 
         let config_path = None;
+        let cache_root = root.join(".fallow");
         let opts = AuditOptions {
             root,
+            cache_dir: &cache_root,
             config_path: &config_path,
             output: OutputFormat::Json,
             no_cache: true,
@@ -3279,8 +3340,10 @@ export function App() {
         .expect("app should be modified");
 
         let config_path = None;
+        let cache_root = root.join(".fallow");
         let opts = AuditOptions {
             root: &root,
+            cache_dir: &cache_root,
             config_path: &config_path,
             output: OutputFormat::Json,
             no_cache: true,
@@ -3359,8 +3422,10 @@ export function App() {
             .expect("index should be modified");
 
         let config_path = Some(explicit_config);
+        let cache_root = root.join(".fallow");
         let opts = AuditOptions {
             root,
+            cache_dir: &cache_root,
             config_path: &config_path,
             output: OutputFormat::Json,
             no_cache: true,
@@ -3433,8 +3498,10 @@ export function App() {
         .expect("package.json should be touched");
 
         let config_path = None;
+        let cache_root = root.join(".fallow");
         let opts = AuditOptions {
             root,
+            cache_dir: &cache_root,
             config_path: &config_path,
             output: OutputFormat::Json,
             no_cache: true,
@@ -3513,8 +3580,10 @@ export function App() {
         .expect("package.json should be touched");
 
         let config_path = None;
+        let cache_root = root.join(".fallow");
         let opts = AuditOptions {
             root,
+            cache_dir: &cache_root,
             config_path: &config_path,
             output: OutputFormat::Json,
             no_cache: false,
@@ -3616,8 +3685,10 @@ export function App() {
         .expect("changed file should be modified");
 
         let config_path = None;
+        let cache_root = root.join(".fallow");
         let opts = AuditOptions {
             root,
+            cache_dir: &cache_root,
             config_path: &config_path,
             output: OutputFormat::Json,
             no_cache: true,

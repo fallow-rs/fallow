@@ -406,7 +406,7 @@ Returns a verdict: **pass** (exit 0), **warn** (exit 0, warn-severity only), or 
 
 `audit` forwards `--coverage` and `--coverage-root` to its health sub-analysis for exact Istanbul-backed CRAP scoring. Relative `--coverage` paths resolve against `--root`; `--coverage-root` must be an absolute prefix from the coverage data. `FALLOW_COVERAGE` is used as the fallback when `--coverage` is omitted. Health JSON includes `coverage_source` on CRAP findings and `summary.coverage_source_consistency` when those findings use a uniform source or mix Istanbul data with estimates.
 
-Audit caches base snapshots under `.fallow/cache/` and may keep a SHA-scoped temporary git worktree for reuse across runs against the same base ref. When the current checkout has `node_modules`, audit links it into the base worktree so tsconfig `extends` chains into installed packages and path aliases resolve like the working tree. Transient worktrees are removed on normal exit. Use `--no-cache` to disable snapshot and reusable-worktree caching; if a process is force-killed, run `git worktree prune` to clean up stale `.git/worktrees/fallow-audit-base-*` entries.
+Audit caches base snapshots under `.fallow/cache/` by default and may keep a SHA-scoped temporary git worktree for reuse across runs against the same base ref. Set `cache.dir` or `FALLOW_CACHE_DIR` to relocate the persistent analysis cache; relative paths resolve from the project root. When the current checkout has `node_modules`, audit links it into the base worktree so tsconfig `extends` chains into installed packages and path aliases resolve like the working tree. Transient worktrees are removed on normal exit. Use `--no-cache` to disable snapshot and reusable-worktree caching; if a process is force-killed, run `git worktree prune` to clean up stale `.git/worktrees/fallow-audit-base-*` entries.
 
 **Per-analysis baselines.** When touching legacy files with pre-existing issues, reuse the baselines saved by the individual subcommands so audit only fails on genuinely new findings:
 
@@ -684,6 +684,9 @@ Works out of the box. When you need to customize, create `.fallowrc.json` or run
     "maxCognitive": 15,
     "maxCrap": 30,
     "crapRefactorBand": 5
+  },
+  "cache": {
+    "dir": ".cache/fallow"
   },
   "fix": {
     "catalog": {

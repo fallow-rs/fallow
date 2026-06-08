@@ -210,6 +210,17 @@ fn compute_cache_config_hash(external_plugins: &[ExternalPluginDef]) -> u64 {
     hasher.digest()
 }
 
+fn resolve_cache_dir(root: &Path, configured: Option<PathBuf>) -> PathBuf {
+    let Some(dir) = configured else {
+        return root.join(".fallow");
+    };
+    if dir.is_absolute() {
+        dir
+    } else {
+        root.join(dir)
+    }
+}
+
 impl FallowConfig {
     /// Resolve into a fully resolved config with compiled globs.
     #[expect(
@@ -255,7 +266,7 @@ impl FallowConfig {
                     .compile_matcher()
             })
             .collect();
-        let cache_dir = root.join(".fallow");
+        let cache_dir = resolve_cache_dir(&root, self.cache.dir.clone());
 
         let mut rules = self.rules;
 
@@ -1190,6 +1201,49 @@ mod tests {
     }
 
     #[test]
+    fn resolve_uses_relative_configured_cache_dir_from_root() {
+        let config = FallowConfig {
+            cache: crate::CacheConfig {
+                dir: Some(PathBuf::from(".cache/fallow")),
+                ..Default::default()
+            },
+            ..make_config(false)
+        };
+        let resolved = config.resolve(
+            PathBuf::from("/my/project"),
+            OutputFormat::Human,
+            1,
+            false,
+            true,
+            None,
+        );
+        assert_eq!(
+            resolved.cache_dir,
+            PathBuf::from("/my/project/.cache/fallow")
+        );
+    }
+
+    #[test]
+    fn resolve_keeps_absolute_configured_cache_dir() {
+        let config = FallowConfig {
+            cache: crate::CacheConfig {
+                dir: Some(PathBuf::from("/tmp/fallow-cache")),
+                ..Default::default()
+            },
+            ..make_config(false)
+        };
+        let resolved = config.resolve(
+            PathBuf::from("/my/project"),
+            OutputFormat::Human,
+            1,
+            false,
+            true,
+            None,
+        );
+        assert_eq!(resolved.cache_dir, PathBuf::from("/tmp/fallow-cache"));
+    }
+
+    #[test]
     fn resolve_passes_through_thread_count() {
         let resolved = make_config(false).resolve(
             PathBuf::from("/project"),
@@ -1396,9 +1450,9 @@ mod tests {
                 );
             }
 
-            /// Cache dir is always root/.fallow.
+            /// Default cache dir is root/.fallow.
             #[test]
-            fn cache_dir_is_root_fallow(dir_suffix in "[a-zA-Z0-9_]{1,20}") {
+            fn cache_dir_defaults_to_root_fallow(dir_suffix in "[a-zA-Z0-9_]{1,20}") {
                 let root = PathBuf::from(format!("/project/{dir_suffix}"));
                 let expected_cache = root.join(".fallow");
                 let resolved = make_config(false).resolve(
@@ -1411,7 +1465,7 @@ mod tests {
                 );
                 prop_assert_eq!(
                     resolved.cache_dir, expected_cache,
-                    "Cache dir should be root/.fallow"
+                    "Default cache dir should be root/.fallow"
                 );
             }
 

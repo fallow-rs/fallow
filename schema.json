@@ -1762,7 +1762,15 @@
     "CacheConfig": {
       "type": "object",
       "properties": {
+        "dir": {
+          "description": "Directory for fallow's persistent analysis cache. Relative paths resolve\nfrom the project root.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "maxSizeMb": {
+          "description": "Maximum size of the persistent extraction cache, in megabytes.",
           "type": [
             "integer",
             "null"

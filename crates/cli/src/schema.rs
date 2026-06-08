@@ -189,6 +189,7 @@ fn environment_variables_schema() -> serde_json::Value {
         "FALLOW_PRODUCTION_HEALTH": "Set to true/false to override production mode for health analysis.",
         "FALLOW_PRODUCTION_DUPES": "Set to true/false to override production mode for duplication analysis.",
         "FALLOW_REVIEW_GUIDANCE": "Set to true to append collapsed guidance blocks to review-github/review-gitlab inline comment bodies.",
+        "FALLOW_CACHE_DIR": "Directory for fallow's persistent analysis cache. Relative paths resolve from the project root and override cache.dir.",
         "FALLOW_BIN": "Path to fallow binary (used by fallow-mcp server)."
     })
 }
@@ -243,6 +244,7 @@ mod tests {
         let env_vars = &schema["environment_variables"];
         assert!(env_vars["FALLOW_FORMAT"].is_string());
         assert!(env_vars["FALLOW_QUIET"].is_string());
+        assert!(env_vars["FALLOW_CACHE_DIR"].is_string());
         assert!(env_vars["FALLOW_BIN"].is_string());
     }
 

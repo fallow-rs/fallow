@@ -33,6 +33,7 @@ pub use used_class_members::{ScopedUsedClassMemberRule, UsedClassMemberRule};
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::ops::Not;
+use std::path::PathBuf;
 
 use crate::external_plugin::ExternalPluginDef;
 use crate::workspace::WorkspaceConfig;
@@ -247,6 +248,11 @@ pub struct SecurityCategories {
 #[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct CacheConfig {
+    /// Directory for fallow's persistent analysis cache. Relative paths resolve
+    /// from the project root.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dir: Option<PathBuf>,
+    /// Maximum size of the persistent extraction cache, in megabytes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_size_mb: Option<u32>,
 }
@@ -254,7 +260,7 @@ pub struct CacheConfig {
 impl CacheConfig {
     #[must_use]
     pub fn is_default(&self) -> bool {
-        self.max_size_mb.is_none()
+        self.dir.is_none() && self.max_size_mb.is_none()
     }
 }
 
