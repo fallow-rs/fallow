@@ -15,13 +15,14 @@ interface FakeBadge {
   readonly tooltip: string;
 }
 
-type SecurityFindingInput = Omit<SecurityFinding, "candidate" | "finding_id"> &
-  Partial<Pick<SecurityFinding, "candidate" | "finding_id">>;
+type SecurityFindingInput = Omit<SecurityFinding, "candidate" | "finding_id" | "severity"> &
+  Partial<Pick<SecurityFinding, "candidate" | "finding_id" | "severity">>;
 
 const makeView = (): { badge: FakeBadge | undefined } => ({ badge: undefined });
 
 const finding = (input: SecurityFindingInput): SecurityFinding => ({
   ...input,
+  severity: input.severity ?? "low",
   finding_id: input.finding_id ?? `security:${input.path}:${input.line}:${input.kind}`,
   candidate: input.candidate ?? {
     sink: {
@@ -44,7 +45,7 @@ const result = (
     Pick<SecurityOutput, "unresolved_edge_files" | "unresolved_callee_sites">
   > = {},
 ): SecurityOutput => ({
-  schema_version: "1",
+  schema_version: "2",
   security_findings: findings.map(finding),
   unresolved_edge_files: overrides.unresolved_edge_files ?? 0,
   unresolved_callee_sites: overrides.unresolved_callee_sites ?? 0,

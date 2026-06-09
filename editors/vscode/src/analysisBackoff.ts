@@ -1,4 +1,4 @@
-export const ANALYSIS_FAILURE_LIMIT = 3;
+const ANALYSIS_FAILURE_LIMIT = 3;
 export const ANALYSIS_DEFAULT_MAX_FILE_SIZE_MB = "5";
 
 interface BackoffEntry {
@@ -59,9 +59,10 @@ export class AnalysisFailureBackoff {
     return paused ? { failures, shouldNotify } : null;
   }
 
-  recordSuccess(key: string): void {
+  // fallow-ignore-next-line unused-class-member
+  readonly recordSuccess = (key: string): void => {
     this.reset(key);
-  }
+  };
 
   reset(key?: string): void {
     if (key === undefined || this.entry?.key === key) {
@@ -70,10 +71,8 @@ export class AnalysisFailureBackoff {
   }
 }
 
-export const buildAnalysisBackoffKey = (
-  root: string,
-  args: ReadonlyArray<string>,
-): string => JSON.stringify([root, ...args]);
+export const buildAnalysisBackoffKey = (root: string, args: ReadonlyArray<string>): string =>
+  JSON.stringify([root, ...args]);
 
 export const buildAnalysisProcessEnv = (
   env: NodeJS.ProcessEnv = process.env,

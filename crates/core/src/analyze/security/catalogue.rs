@@ -38,6 +38,14 @@ struct RawSource {
     #[serde(default)]
     enabler: Option<String>,
     path_patterns: Vec<String>,
+    /// Optional allowlist of receiver names for leading-`*.` wildcard patterns
+    /// (issue #1092). When non-empty, a wildcard pattern fires only if the
+    /// matched member's receiver is one of these (case-insensitive), so
+    /// `*.query` matches `req.query` but not `db.query`. Empty / absent leaves
+    /// the row ungated (every receiver matches). Has no effect on exact
+    /// patterns, whose receiver is fixed in the pattern itself.
+    #[serde(default)]
+    receiver_allowlist: Vec<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -192,6 +200,26 @@ impl CalleePattern {
                     .all(|(pat, seg)| pat == seg)
         }
     }
+
+    /// The receiver segment immediately before this pattern's matched suffix,
+    /// for a leading-`*.` wildcard pattern: `*.query` against `db.query` returns
+    /// `Some("db")`, against `ctx.req.query` returns `Some("req")` (the segment
+    /// right before `query`, which is the receiver of the matched member). Used
+    /// by a source row's receiver allowlist to keep HTTP-input patterns from
+    /// firing on ORM / data-access receivers (issue #1092). Returns `None` for
+    /// an exact (non-wildcard) pattern, whose receiver is fixed in the pattern
+    /// itself, and for any `callee_path` this pattern does not match.
+    #[must_use]
+    pub fn matched_receiver<'p>(&self, callee_path: &'p str) -> Option<&'p str> {
+        if !self.leading_wildcard || !self.matches(callee_path) {
+            return None;
+        }
+        let candidate: Vec<&str> = callee_path.split('.').collect();
+        // `matches` guarantees `candidate.len() > suffix_segments.len()` for a
+        // leading-wildcard hit, so the receiver index is always in range.
+        let recv_idx = candidate.len() - self.suffix_segments.len() - 1;
+        candidate.get(recv_idx).copied()
+    }
 }
 
 /// Parse a raw pattern string into its segmented form. Returns `None` for an
@@ -264,14 +292,37 @@ pub struct SourceMatcher {
     pub title: String,
     pub enabler: Option<String>,
     pub path_patterns: Vec<CalleePattern>,
+    /// Lowercased receiver allowlist for leading-wildcard patterns (issue
+    /// #1092). Empty leaves the row ungated.
+    pub receiver_allowlist: Vec<String>,
 }
 
 impl SourceMatcher {
     /// Whether any of this source's path patterns match the given flattened
-    /// member-access path (a captured tainted-binding `source_path`).
+    /// member-access path (a captured tainted-binding `source_path`), subject to
+    /// the receiver allowlist for leading-wildcard patterns.
     #[must_use]
     pub fn matches(&self, source_path: &str) -> bool {
-        self.path_patterns.iter().any(|p| p.matches(source_path))
+        self.path_patterns
+            .iter()
+            .any(|p| p.matches(source_path) && self.receiver_allowed(p, source_path))
+    }
+
+    /// Whether `pattern`'s match on `source_path` is admitted by the receiver
+    /// allowlist. An empty allowlist admits everything. For a leading-wildcard
+    /// pattern the matched receiver must be in the allowlist (case-insensitive);
+    /// an exact pattern (receiver fixed in the pattern) is always admitted.
+    fn receiver_allowed(&self, pattern: &CalleePattern, source_path: &str) -> bool {
+        if self.receiver_allowlist.is_empty() {
+            return true;
+        }
+        match pattern.matched_receiver(source_path) {
+            Some(receiver) => self
+                .receiver_allowlist
+                .iter()
+                .any(|allowed| allowed.eq_ignore_ascii_case(receiver)),
+            None => true,
+        }
     }
 
     /// Whether this source row's framework enabler is satisfied by the
@@ -720,11 +771,22 @@ fn parse_catalogue(src: &str) -> Result<Catalogue, String> {
             }
             other => other,
         };
+        let mut receiver_allowlist = Vec::with_capacity(entry.receiver_allowlist.len());
+        for receiver in entry.receiver_allowlist {
+            if receiver.trim().is_empty() {
+                return Err(format!(
+                    "source {:?} has an empty / whitespace receiver_allowlist entry; omit the key for an ungated row",
+                    entry.id
+                ));
+            }
+            receiver_allowlist.push(receiver.to_ascii_lowercase());
+        }
         sources.push(SourceMatcher {
             id: entry.id,
             title: entry.title,
             enabler,
             path_patterns,
+            receiver_allowlist,
         });
     }
 
@@ -1298,6 +1360,81 @@ evidence_template = "x"
             .expect("http-request-input source present");
         assert!(http.matches("req.query"));
         assert!(!http.matches("process.argv"));
+    }
+
+    #[test]
+    fn matched_receiver_returns_segment_before_suffix() {
+        // Leading-wildcard `*.query`: the receiver is the segment right before
+        // the matched `query`, regardless of how many object segments precede.
+        let pat = parse_callee_pattern("*.query").expect("pattern parses");
+        assert_eq!(pat.matched_receiver("db.query"), Some("db"));
+        assert_eq!(pat.matched_receiver("req.query"), Some("req"));
+        // Hono `c.req.query` flattens so the receiver of `.query` is `req`.
+        assert_eq!(pat.matched_receiver("ctx.req.query"), Some("req"));
+        // A non-matching path has no receiver.
+        assert_eq!(pat.matched_receiver("req.body"), None);
+        // An exact (non-wildcard) pattern's receiver is fixed in the pattern, so
+        // `matched_receiver` returns None even on a match.
+        let exact = parse_callee_pattern("process.env").expect("pattern parses");
+        assert_eq!(exact.matched_receiver("process.env"), None);
+    }
+
+    #[test]
+    fn receiver_allowlist_rejects_orm_query_builders_keeps_request_objects() {
+        // Issue #1092: the global HTTP-input row is receiver-gated. ORM /
+        // data-access receivers no longer classify their module as a source...
+        let cat = catalogue();
+        assert!(!cat.is_source_path("db.query"), "Drizzle db.query");
+        assert!(!cat.is_source_path("prisma.query"), "Prisma prisma.query");
+        assert!(!cat.is_source_path("drizzle.query"));
+        assert!(!cat.is_source_path("knex.body"));
+        assert!(!cat.is_source_path("client.query"));
+        // ...nor do non-request receivers that merely happen to have a `.query`
+        // member (a sibling-collision check: `dbConn` is not `db`).
+        assert!(!cat.is_source_path("dbConn.query"));
+        assert!(!cat.is_source_path("database.params"));
+        // A genuine request receiver still classifies as a source.
+        assert!(cat.is_source_path("req.query"), "Express req.query");
+        assert!(cat.is_source_path("request.body"));
+        assert!(cat.is_source_path("ctx.params"), "Koa/Elysia ctx.params");
+        assert!(cat.is_source_path("context.body"));
+        assert!(cat.is_source_path("event.query"), "SvelteKit event.query");
+        // Hono `c.req.query`: the matched receiver is `req`, which is allowed.
+        assert!(cat.is_source_path("ctx.req.query"));
+        // The allowlist is case-insensitive.
+        assert!(cat.is_source_path("Req.query"));
+    }
+
+    #[test]
+    fn search_params_source_stays_ungated() {
+        // Issue #1092: `*.searchParams` is intentionally NOT receiver-gated, so a
+        // `new URL(...).searchParams` binding on an arbitrary local still counts.
+        let cat = catalogue();
+        assert!(cat.is_source_path("u.searchParams"));
+        assert!(cat.is_source_path("url.searchParams"));
+        assert!(cat.is_source_path("params.searchParams"));
+    }
+
+    #[test]
+    fn parse_rejects_empty_receiver_allowlist_entry() {
+        let toml = r#"
+[[matcher]]
+id = "x"
+cwe = 79
+title = "x"
+sink_shape = "member-assign"
+callee_patterns = ["*.innerHTML"]
+arg_index = 0
+evidence_template = "x"
+
+[[source]]
+id = "http"
+title = "HTTP"
+path_patterns = ["*.query"]
+receiver_allowlist = ["req", "  "]
+"#;
+        let err = parse_catalogue(toml).unwrap_err();
+        assert!(err.contains("receiver_allowlist"), "got: {err}");
     }
 
     #[test]
