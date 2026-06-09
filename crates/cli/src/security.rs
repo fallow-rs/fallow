@@ -14,6 +14,7 @@ use std::cmp::Ordering;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::time::Instant;
 
 use fallow_config::{OutputFormat, ProductionAnalysis, Severity};
 use fallow_core::analyze::derive_security_severity;
@@ -22,7 +23,7 @@ use fallow_core::results::{
     SecurityFindingKind, TraceHop, TraceHopRole,
 };
 use fallow_types::discover::DiscoveredFile;
-use fallow_types::envelope::Meta;
+use fallow_types::envelope::{ElapsedMs, Meta, ToolVersion};
 use fallow_types::extract::ModuleInfo;
 use fallow_types::results::{
     SecurityRuntimeContext, SecurityRuntimeState, SecuritySeverity, TaintConfidence,
@@ -52,8 +53,15 @@ pub enum SecuritySchemaVersion {
     #[serde(rename = "1")]
     V1,
     /// Adds per-finding `severity` for verification-priority tiering.
+    #[allow(
+        dead_code,
+        reason = "kept so the generated schema documents historical v2"
+    )]
     #[serde(rename = "2")]
     V2,
+    /// Adds version, elapsed time, explain metadata, and safe config metadata.
+    #[serde(rename = "3")]
+    V3,
 }
 
 /// Gate mode for `fallow security --gate <mode>`.
@@ -97,6 +105,42 @@ pub struct SecurityGate {
     pub new_count: usize,
 }
 
+/// Allowlisted config context for `fallow security --format json`.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(
+    feature = "schema",
+    schemars(extend("required" = ["rules", "categories_include", "categories_exclude"]))
+)]
+pub struct SecurityOutputConfig {
+    /// Relevant rule severities before and after this command applies its
+    /// default-on behavior for security-only rules.
+    pub rules: SecurityOutputRulesConfig,
+    /// `security.categories.include` from config. `null` means unset, `[]`
+    /// means explicitly empty.
+    pub categories_include: Option<Vec<String>>,
+    /// `security.categories.exclude` from config. `null` means unset, `[]`
+    /// means explicitly empty.
+    pub categories_exclude: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecurityOutputRulesConfig {
+    pub security_client_server_leak: SecurityRuleSeverityConfig,
+    pub security_sink: SecurityRuleSeverityConfig,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecurityRuleSeverityConfig {
+    /// Severity read from resolved config before the security command applies
+    /// its default-on behavior.
+    pub configured: Severity,
+    /// Severity used for this command run.
+    pub effective: Severity,
+}
+
 /// The `fallow security --format json` envelope. `FallowOutput` discriminates it
 /// by the `kind: "security"` tag; the optional `gate` block is additive and is
 /// not part of that discrimination.
@@ -105,6 +149,15 @@ pub struct SecurityGate {
 pub struct SecurityOutput {
     /// Schema version of this envelope.
     pub schema_version: SecuritySchemaVersion,
+    /// Fallow CLI version that produced this output.
+    pub version: ToolVersion,
+    /// Wall-clock milliseconds spent producing the report.
+    pub elapsed_ms: ElapsedMs,
+    /// Privacy-safe config context relevant to security candidate generation.
+    pub config: SecurityOutputConfig,
+    /// Security-specific rule and field metadata, emitted with `--explain`.
+    #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
+    pub meta: Option<Meta>,
     /// Gate verdict, present only when `--gate <mode>` was set (issue #886).
     /// Emitted on pass too (`verdict: "pass"`, `new_count: 0`) so consumers
     /// distinguish "gate ran and passed" from "gate did not run" (absent).
@@ -112,9 +165,6 @@ pub struct SecurityOutput {
     pub gate: Option<SecurityGate>,
     /// Security candidates. Paths are project-root-relative, forward-slash.
     pub security_findings: Vec<SecurityFinding>,
-    /// Optional metadata for JSON consumers.
-    #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
-    pub meta: Option<Meta>,
     /// Opt-in attack-surface inventory from untrusted entry points to reachable
     /// sinks. Present only when `--surface` was requested.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -172,6 +222,8 @@ pub struct SecurityOptions<'a> {
     pub runtime_coverage: Option<&'a Path>,
     /// Threshold for hot-path classification when `--runtime-coverage` is set.
     pub min_invocations_hot: u64,
+    /// Include security-specific `_meta` in JSON output.
+    pub explain: bool,
 }
 
 /// Run `fallow security`. Always exits 0 unless the user explicitly raised the
@@ -179,6 +231,7 @@ pub struct SecurityOptions<'a> {
 /// defaults to `off` and the command forces it to `warn`, so the common case is
 /// advisory). Unsupported output formats exit 2.
 pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
+    let started = Instant::now();
     if !matches!(
         opts.output,
         OutputFormat::Human | OutputFormat::Json | OutputFormat::Sarif
@@ -204,7 +257,11 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
         Err(code) => return code,
     };
 
-    let (effective_severity, effective_sink_severity) = force_security_rules(&mut config);
+    let configured_severity = config.rules.security_client_server_leak;
+    let configured_sink_severity = config.rules.security_sink;
+    force_security_rules(&mut config);
+    let effective_severity = config.rules.security_client_server_leak;
+    let effective_sink_severity = config.rules.security_sink;
 
     let mut analysis = match analyze_security_candidates(opts, &config) {
         Ok(analysis) => analysis,
@@ -285,10 +342,19 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
         && !findings.is_empty();
 
     let output = SecurityOutput {
-        schema_version: SecuritySchemaVersion::V2,
+        schema_version: SecuritySchemaVersion::V3,
+        version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
+        elapsed_ms: ElapsedMs(started.elapsed().as_millis() as u64),
+        config: security_output_config(
+            &config,
+            configured_severity,
+            effective_severity,
+            configured_sink_severity,
+            effective_sink_severity,
+        ),
+        meta: opts.explain.then(crate::explain::security_meta),
         gate,
         security_findings: findings,
-        meta: None,
         attack_surface,
         unresolved_edge_files,
         unresolved_callee_sites,
@@ -327,18 +393,39 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
     }
 }
 
-fn force_security_rules(config: &mut fallow_config::ResolvedConfig) -> (Severity, Severity) {
+fn force_security_rules(config: &mut fallow_config::ResolvedConfig) {
     // Respect explicit user severities; force the rules on when they are the
     // default off so this dedicated command actually surfaces candidates.
-    let effective_severity = config.rules.security_client_server_leak;
-    if effective_severity == Severity::Off {
+    if config.rules.security_client_server_leak == Severity::Off {
         config.rules.security_client_server_leak = Severity::Warn;
     }
-    let effective_sink_severity = config.rules.security_sink;
-    if effective_sink_severity == Severity::Off {
+    if config.rules.security_sink == Severity::Off {
         config.rules.security_sink = Severity::Warn;
     }
-    (effective_severity, effective_sink_severity)
+}
+
+fn security_output_config(
+    config: &fallow_config::ResolvedConfig,
+    configured_severity: Severity,
+    effective_severity: Severity,
+    configured_sink_severity: Severity,
+    effective_sink_severity: Severity,
+) -> SecurityOutputConfig {
+    let categories = config.security.categories.as_ref();
+    SecurityOutputConfig {
+        rules: SecurityOutputRulesConfig {
+            security_client_server_leak: SecurityRuleSeverityConfig {
+                configured: configured_severity,
+                effective: effective_severity,
+            },
+            security_sink: SecurityRuleSeverityConfig {
+                configured: configured_sink_severity,
+                effective: effective_sink_severity,
+            },
+        },
+        categories_include: categories.and_then(|categories| categories.include.clone()),
+        categories_exclude: categories.and_then(|categories| categories.exclude.clone()),
+    }
 }
 
 fn apply_changed_scope(opts: &SecurityOptions<'_>, results: &mut AnalysisResults) {
@@ -513,6 +600,7 @@ fn compute_base_security_snapshot(
             gate: None,
             runtime_coverage: None,
             min_invocations_hot: opts.min_invocations_hot,
+            explain: false,
         },
         &base_config,
     )?;
@@ -1963,10 +2051,13 @@ mod tests {
 
     fn output_with(findings: Vec<SecurityFinding>, unresolved_edge_files: usize) -> SecurityOutput {
         SecurityOutput {
-            schema_version: SecuritySchemaVersion::V2,
+            schema_version: SecuritySchemaVersion::V3,
+            version: ToolVersion("test".to_string()),
+            elapsed_ms: ElapsedMs(0),
+            config: test_output_config(),
+            meta: None,
             gate: None,
             security_findings: findings,
-            meta: None,
             attack_surface: None,
             unresolved_edge_files,
             unresolved_callee_sites: 0,
@@ -1975,17 +2066,37 @@ mod tests {
 
     fn output_with_gate(verdict: SecurityGateVerdict, new_count: usize) -> SecurityOutput {
         SecurityOutput {
-            schema_version: SecuritySchemaVersion::V2,
+            schema_version: SecuritySchemaVersion::V3,
+            version: ToolVersion("test".to_string()),
+            elapsed_ms: ElapsedMs(0),
+            config: test_output_config(),
+            meta: None,
             gate: Some(SecurityGate {
                 mode: SecurityGateMode::New,
                 verdict,
                 new_count,
             }),
             security_findings: vec![],
-            meta: None,
             attack_surface: None,
             unresolved_edge_files: 0,
             unresolved_callee_sites: 0,
+        }
+    }
+
+    fn test_output_config() -> SecurityOutputConfig {
+        SecurityOutputConfig {
+            rules: SecurityOutputRulesConfig {
+                security_client_server_leak: SecurityRuleSeverityConfig {
+                    configured: Severity::Off,
+                    effective: Severity::Warn,
+                },
+                security_sink: SecurityRuleSeverityConfig {
+                    configured: Severity::Off,
+                    effective: Severity::Warn,
+                },
+            },
+            categories_include: None,
+            categories_exclude: None,
         }
     }
 
@@ -2469,13 +2580,40 @@ mod tests {
         let finding = relativize_finding(sample_finding(root), root);
         let rendered = render_json(&output_with(vec![finding], 1));
         let value: serde_json::Value = serde_json::from_str(&rendered).expect("valid JSON");
-        assert_eq!(value["schema_version"], "2");
+        assert_eq!(value["schema_version"], "3");
+        assert_eq!(value["version"], "test");
+        assert_eq!(value["elapsed_ms"], 0);
+        assert_eq!(
+            value["config"]["rules"]["security_client_server_leak"]["configured"],
+            "off"
+        );
+        assert_eq!(
+            value["config"]["rules"]["security_client_server_leak"]["effective"],
+            "warn"
+        );
+        assert!(value["config"]["categories_include"].is_null());
+        assert!(value["config"]["categories_exclude"].is_null());
         assert_eq!(value["unresolved_edge_files"], 1);
         let findings = value["security_findings"].as_array().expect("array");
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0]["kind"], "client-server-leak");
         assert_eq!(findings[0]["path"], "src/app.tsx");
         assert_eq!(findings[0]["severity"], "high");
+    }
+
+    #[test]
+    fn json_render_carries_security_meta_when_explain_requested() {
+        let mut output = output_with(vec![], 0);
+        output.meta = Some(crate::explain::security_meta());
+
+        let rendered = render_json(&output);
+        let value: serde_json::Value = serde_json::from_str(&rendered).expect("valid JSON");
+
+        assert_eq!(
+            value["_meta"]["field_definitions"]["security_findings[]"],
+            "Unverified security candidates for downstream human or agent verification."
+        );
+        assert!(value["_meta"]["rules"]["security/tainted-sink"].is_object());
     }
 
     #[test]
@@ -2763,6 +2901,7 @@ mod tests {
             gate: None,
             runtime_coverage: None,
             min_invocations_hot: 100,
+            explain: false,
         }
     }
 

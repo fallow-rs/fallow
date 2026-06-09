@@ -4,10 +4,12 @@
 //! and rule means — consumed by the `_meta` object in JSON output and by
 //! SARIF `fullDescription` / `helpUri` fields.
 
+use std::collections::BTreeMap;
 use std::process::ExitCode;
 
 use colored::Colorize;
 use fallow_config::OutputFormat;
+use fallow_types::envelope::{Meta, MetaRule};
 use serde_json::{Value, json};
 
 const DOCS_BASE: &str = "https://docs.fallow.tools";
@@ -26,6 +28,9 @@ pub const COVERAGE_SETUP_DOCS: &str = "https://docs.fallow.tools/cli/coverage#ag
 
 /// Docs URL for `fallow coverage analyze --format json --explain`.
 pub const COVERAGE_ANALYZE_DOCS: &str = "https://docs.fallow.tools/cli/coverage#analyze";
+
+/// Docs URL for the security command.
+pub const SECURITY_DOCS: &str = "https://docs.fallow.tools/cli/security";
 
 /// `_meta` description for the per-finding `actions[]` array shared across
 /// `check`, `health`, and `dupes` JSON output.
@@ -1201,6 +1206,80 @@ pub fn dupes_meta() -> Value {
             }
         }
     })
+}
+
+/// Build the `_meta` object for `fallow security --format json --explain`.
+#[must_use]
+pub fn security_meta() -> Meta {
+    let rules = SECURITY_RULES
+        .iter()
+        .map(|rule| {
+            (
+                rule.id.to_string(),
+                MetaRule {
+                    name: Some(rule.name.to_string()),
+                    description: Some(rule.full.to_string()),
+                    docs: Some(rule_docs_url(rule)),
+                },
+            )
+        })
+        .collect();
+
+    Meta {
+        docs: Some(SECURITY_DOCS.to_string()),
+        telemetry: None,
+        field_definitions: BTreeMap::from([
+            (
+                "version".to_string(),
+                "fallow CLI version that produced this output.".to_string(),
+            ),
+            (
+                "elapsed_ms".to_string(),
+                "Wall-clock milliseconds spent producing the security report.".to_string(),
+            ),
+            (
+                "config".to_string(),
+                "Privacy-safe config context relevant to security candidate generation."
+                    .to_string(),
+            ),
+            (
+                "config.rules.*.configured".to_string(),
+                "Severity from resolved config before the security command forced default-off rules on."
+                    .to_string(),
+            ),
+            (
+                "config.rules.*.effective".to_string(),
+                "Severity used for this security command run.".to_string(),
+            ),
+            (
+                "config.categories_include".to_string(),
+                "Configured security category include list. null means unset, [] means explicitly empty."
+                    .to_string(),
+            ),
+            (
+                "config.categories_exclude".to_string(),
+                "Configured security category exclude list. null means unset, [] means explicitly empty."
+                    .to_string(),
+            ),
+            (
+                "security_findings[]".to_string(),
+                "Unverified security candidates for downstream human or agent verification."
+                    .to_string(),
+            ),
+            (
+                "unresolved_edge_files".to_string(),
+                "Number of client files whose import cone contains dynamic edges the graph could not follow."
+                    .to_string(),
+            ),
+            (
+                "unresolved_callee_sites".to_string(),
+                "Number of sink-shaped nodes whose callee could not be flattened to a static path."
+                    .to_string(),
+            ),
+        ]),
+        metrics: BTreeMap::new(),
+        rules,
+    }
 }
 
 /// Build the `_meta` object for `fallow coverage setup --json --explain`.

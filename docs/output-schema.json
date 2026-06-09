@@ -9911,6 +9911,29 @@
           "description": "Schema version of this envelope.",
           "$ref": "#/definitions/SecuritySchemaVersion"
         },
+        "version": {
+          "description": "Fallow CLI version that produced this output.",
+          "$ref": "#/definitions/ToolVersion"
+        },
+        "elapsed_ms": {
+          "description": "Wall-clock milliseconds spent producing the report.",
+          "$ref": "#/definitions/ElapsedMs"
+        },
+        "config": {
+          "description": "Privacy-safe config context relevant to security candidate generation.",
+          "$ref": "#/definitions/SecurityOutputConfig"
+        },
+        "_meta": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Meta"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Security-specific rule and field metadata, emitted with `--explain`."
+        },
         "gate": {
           "anyOf": [
             {
@@ -9928,17 +9951,6 @@
             "$ref": "#/definitions/SecurityFinding"
           },
           "description": "Security candidates. Paths are project-root-relative, forward-slash."
-        },
-        "_meta": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Meta"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Optional metadata for JSON consumers."
         },
         "attack_surface": {
           "type": [
@@ -9961,6 +9973,9 @@
       },
       "required": [
         "schema_version",
+        "version",
+        "elapsed_ms",
+        "config",
         "security_findings",
         "unresolved_edge_files",
         "unresolved_callee_sites"
@@ -9978,6 +9993,11 @@
           "type": "string",
           "const": "2",
           "description": "Adds per-finding `severity` for verification-priority tiering."
+        },
+        {
+          "type": "string",
+          "const": "3",
+          "description": "Adds version, elapsed time, explain metadata, and safe config metadata."
         }
       ],
       "description": "The `fallow security --format json` schema version. Independently versioned\nfrom the main contract, mirroring `ImpactReportSchemaVersion`."
@@ -11018,6 +11038,93 @@
         }
       },
       "description": "Privacy-safe local run metadata emitted for JSON consumers."
+    },
+    "SecurityOutputConfig": {
+      "type": "object",
+      "properties": {
+        "rules": {
+          "description": "Relevant rule severities before and after this command applies its\ndefault-on behavior for security-only rules.",
+          "$ref": "#/definitions/SecurityOutputRulesConfig"
+        },
+        "categories_include": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "`security.categories.include` from config. `null` means unset, `[]`\nmeans explicitly empty."
+        },
+        "categories_exclude": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "`security.categories.exclude` from config. `null` means unset, `[]`\nmeans explicitly empty."
+        }
+      },
+      "required": [
+        "rules",
+        "categories_include",
+        "categories_exclude"
+      ],
+      "description": "Allowlisted config context for `fallow security --format json`."
+    },
+    "SecurityOutputRulesConfig": {
+      "type": "object",
+      "properties": {
+        "security_client_server_leak": {
+          "$ref": "#/definitions/SecurityRuleSeverityConfig"
+        },
+        "security_sink": {
+          "$ref": "#/definitions/SecurityRuleSeverityConfig"
+        }
+      },
+      "required": [
+        "security_client_server_leak",
+        "security_sink"
+      ]
+    },
+    "SecurityRuleSeverityConfig": {
+      "type": "object",
+      "properties": {
+        "configured": {
+          "description": "Severity read from resolved config before the security command applies\nits default-on behavior.",
+          "$ref": "#/definitions/Severity"
+        },
+        "effective": {
+          "description": "Severity used for this command run.",
+          "$ref": "#/definitions/Severity"
+        }
+      },
+      "required": [
+        "configured",
+        "effective"
+      ]
+    },
+    "Severity": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "error",
+          "description": "Report and fail CI (non-zero exit code)."
+        },
+        {
+          "type": "string",
+          "const": "warn",
+          "description": "Report but don't fail CI."
+        },
+        {
+          "type": "string",
+          "const": "off",
+          "description": "Don't detect or report."
+        }
+      ],
+      "description": "Severity level for rules.\n\nControls whether an issue type causes CI failure (`error`), is reported\nwithout failing (`warn`), or is suppressed entirely (`off`)."
     }
   }
 }

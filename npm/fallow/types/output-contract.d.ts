@@ -612,7 +612,14 @@ export type ImpactTrendDirection = ("improving" | "declining" | "stable")
  * The `fallow security --format json` schema version. Independently versioned
  * from the main contract, mirroring `ImpactReportSchemaVersion`.
  */
-export type SecuritySchemaVersion = ("1" | "2")
+export type SecuritySchemaVersion = ("1" | "2" | "3")
+/**
+ * Severity level for rules.
+ *
+ * Controls whether an issue type causes CI failure (`error`), is reported
+ * without failing (`warn`), or is suppressed entirely (`off`).
+ */
+export type Severity = ("error" | "warn" | "off")
 /**
  * Gate mode for `fallow security --gate <mode>`.
  */
@@ -4905,6 +4912,13 @@ timestamp: string
  */
 export interface SecurityOutput {
 schema_version: SecuritySchemaVersion
+version: ToolVersion
+elapsed_ms: ElapsedMs
+config: SecurityOutputConfig
+/**
+ * Security-specific rule and field metadata, emitted with `--explain`.
+ */
+_meta?: (Meta | null)
 /**
  * Gate verdict, present only when `--gate <mode>` was set (issue #886).
  * Emitted on pass too (`verdict: "pass"`, `new_count: 0`) so consumers
@@ -4915,10 +4929,6 @@ gate?: (SecurityGate | null)
  * Security candidates. Paths are project-root-relative, forward-slash.
  */
 security_findings: SecurityFinding[]
-/**
- * Optional metadata for JSON consumers.
- */
-_meta?: (Meta | null)
 /**
  * Opt-in attack-surface inventory from untrusted entry points to reachable
  * sinks. Present only when `--surface` was requested.
@@ -4938,6 +4948,30 @@ unresolved_edge_files: number
  * here is NOT a clean bill.
  */
 unresolved_callee_sites: number
+}
+/**
+ * Allowlisted config context for `fallow security --format json`.
+ */
+export interface SecurityOutputConfig {
+rules: SecurityOutputRulesConfig
+/**
+ * `security.categories.include` from config. `null` means unset, `[]`
+ * means explicitly empty.
+ */
+categories_include: (string[] | null)
+/**
+ * `security.categories.exclude` from config. `null` means unset, `[]`
+ * means explicitly empty.
+ */
+categories_exclude: (string[] | null)
+}
+export interface SecurityOutputRulesConfig {
+security_client_server_leak: SecurityRuleSeverityConfig
+security_sink: SecurityRuleSeverityConfig
+}
+export interface SecurityRuleSeverityConfig {
+configured: Severity
+effective: Severity
 }
 /**
  * The `gate` block on `SecurityOutput`, present only when `--gate <mode>` ran.

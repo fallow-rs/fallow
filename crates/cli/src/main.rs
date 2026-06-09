@@ -2033,8 +2033,6 @@ fn unsupported_security_global(cli: &Cli) -> Option<&'static str> {
         Some("--group-by")
     } else if cli.performance {
         Some("--performance")
-    } else if cli.explain {
-        Some("--explain")
     } else if cli.explain_skipped {
         Some("--explain-skipped")
     } else if cli.fail_on_regression {
@@ -3247,6 +3245,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
                 gate,
                 runtime_coverage: runtime_coverage.as_deref(),
                 min_invocations_hot,
+                explain: cli.explain,
             })
         }
         Command::Schema => unreachable!("handled above"),
