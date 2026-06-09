@@ -83,7 +83,17 @@ describe("countSecurityFindings", () => {
 
   it("counts the findings array", () => {
     const result: SecurityOutput = {
-      schema_version: "1",
+      schema_version: "3",
+      version: "test",
+      elapsed_ms: 0,
+      config: {
+        rules: {
+          security_client_server_leak: { configured: "off", effective: "warn" },
+          security_sink: { configured: "off", effective: "warn" },
+        },
+        categories_include: null,
+        categories_exclude: null,
+      },
       security_findings: [finding({}), finding({})],
       unresolved_edge_files: 0,
       unresolved_callee_sites: 0,
