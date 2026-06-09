@@ -67,6 +67,28 @@ use list::ListOptions;
 pub use runtime_support::{AnalysisKind, GroupBy};
 pub(crate) use runtime_support::{build_ownership_resolver, load_config, load_config_for_analysis};
 
+const SECURITY_UNSUPPORTED_GLOBAL_LONGS: &[&str] = &[
+    "baseline",
+    "save-baseline",
+    "production",
+    "no-production",
+    "group-by",
+    "performance",
+    "explain-skipped",
+    "fail-on-regression",
+    "regression-baseline",
+    "save-regression-baseline",
+    "dupes-mode",
+    "dupes-threshold",
+    "dupes-min-tokens",
+    "dupes-min-lines",
+    "dupes-min-occurrences",
+    "dupes-skip-local",
+    "dupes-cross-language",
+    "dupes-ignore-imports",
+    "include-entry-exports",
+];
+
 const TOP_LEVEL_HELP_TEMPLATE: &str =
     "{about-with-newline}\n{usage-heading} {usage}{after-help}\n\nOptions:\n{options}";
 
@@ -1012,7 +1034,7 @@ enum Command {
     /// Honors
     /// `--root`, `--format {human,json,sarif}`, `--changed-since`, `--file`, `--diff-file`,
     /// `--diff-stdin`, `--workspace`, `--changed-workspaces`, `--ci`,
-    /// `--fail-on-issues`, `--sarif-file`, `--summary`, and `--surface`.
+    /// `--fail-on-issues`, `--sarif-file`, `--summary`, `--explain`, and `--surface`.
     Security {
         /// Paid runtime-coverage sidecar input. Accepts a V8 directory, a
         /// single V8 JSON file, or an Istanbul coverage map JSON. When set,
@@ -2826,6 +2848,13 @@ fn telemetry_analysis_mode_for_command(command: Option<&Command>) -> telemetry::
 }
 
 fn handle_cli_parse_error(err: &clap::Error) -> ExitCode {
+    if err.kind() == clap::error::ErrorKind::DisplayHelp
+        && args_request_security_help(std::env::args_os().skip(1))
+    {
+        print!("{}", render_security_help());
+        return ExitCode::SUCCESS;
+    }
+
     if is_top_level_coverage_unknown_argument(err, std::env::args_os().skip(1)) {
         eprintln!("{}", top_level_coverage_error_message());
         return ExitCode::from(2);
@@ -2834,6 +2863,51 @@ fn handle_cli_parse_error(err: &clap::Error) -> ExitCode {
     let exit_code = err.exit_code();
     let _ = err.print();
     ExitCode::from(u8::try_from(exit_code).unwrap_or(2))
+}
+
+fn args_request_security_help<I, S>(args: I) -> bool
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let args: Vec<String> = args
+        .into_iter()
+        .map(|arg| arg.as_ref().to_string_lossy().into_owned())
+        .collect();
+
+    if args.first().is_some_and(|arg| arg == "help") {
+        return args.get(1).is_some_and(|arg| arg == "security");
+    }
+
+    let mut saw_security = false;
+    for arg in args {
+        if arg == "security" {
+            saw_security = true;
+            continue;
+        }
+        if saw_security && matches!(arg.as_str(), "--help" | "-h") {
+            return true;
+        }
+    }
+    false
+}
+
+fn render_security_help() -> String {
+    let mut root = Cli::command().mut_args(|arg| {
+        if arg.get_long().is_some_and(security_unsupported_global_long) {
+            arg.hide(true)
+        } else {
+            arg
+        }
+    });
+    match root.try_get_matches_from_mut(["fallow", "security", "--help"]) {
+        Ok(_) => String::new(),
+        Err(err) => err.to_string(),
+    }
+}
+
+fn security_unsupported_global_long(long: &str) -> bool {
+    SECURITY_UNSUPPORTED_GLOBAL_LONGS.contains(&long)
 }
 
 fn is_top_level_coverage_unknown_argument<I, S>(err: &clap::Error, args: I) -> bool
@@ -4339,6 +4413,80 @@ mod tests {
     }
 
     #[test]
+    fn security_help_hides_globals_rejected_by_security_validator() {
+        let help = render_security_help();
+
+        for long in SECURITY_UNSUPPORTED_GLOBAL_LONGS {
+            assert!(
+                !help_contains_long_flag(&help, long),
+                "security help must hide unsupported --{long}:\n{help}"
+            );
+        }
+
+        for long in [
+            "root",
+            "config",
+            "format",
+            "quiet",
+            "no-cache",
+            "threads",
+            "changed-since",
+            "diff-file",
+            "diff-stdin",
+            "workspace",
+            "changed-workspaces",
+            "ci",
+            "fail-on-issues",
+            "sarif-file",
+            "summary",
+            "output-file",
+            "legacy-envelope",
+            "max-file-size",
+            "explain",
+            "surface",
+        ] {
+            assert!(
+                help_contains_long_flag(&help, long),
+                "security help must keep supported --{long}:\n{help}"
+            );
+        }
+    }
+
+    #[test]
+    fn security_help_detection_covers_subcommand_and_help_alias_forms() {
+        assert!(args_request_security_help(["security", "--help"]));
+        assert!(args_request_security_help(["security", "-h"]));
+        assert!(args_request_security_help([
+            "--format", "json", "security", "--help"
+        ]));
+        assert!(args_request_security_help(["help", "security"]));
+        assert!(!args_request_security_help(["health", "--help"]));
+        assert!(!args_request_security_help(["help", "health"]));
+    }
+
+    #[test]
+    fn security_unsupported_global_validator_matches_hidden_help_contract() {
+        for (argv, expected) in [
+            (vec!["fallow", "security", "--performance"], "--performance"),
+            (
+                vec!["fallow", "security", "--baseline", "base.json"],
+                "--baseline",
+            ),
+            (
+                vec!["fallow", "security", "--dupes-mode", "weak"],
+                "--dupes-mode",
+            ),
+        ] {
+            let cli = Cli::try_parse_from(argv).expect("security global parses before validation");
+            assert_eq!(unsupported_security_global(&cli), Some(expected));
+        }
+
+        let explain = Cli::try_parse_from(["fallow", "security", "--explain"])
+            .expect("security --explain parses");
+        assert_eq!(unsupported_security_global(&explain), None);
+    }
+
+    #[test]
     fn programmatic_common_options_track_analysis_affecting_cli_globals() {
         use clap::CommandFactory;
 
@@ -4370,6 +4518,12 @@ mod tests {
                 .collect();
 
         assert_eq!(programmatic_flags, cli_flags);
+    }
+
+    fn help_contains_long_flag(help: &str, long: &str) -> bool {
+        let flag = format!("--{long}");
+        help.split(|c: char| c.is_whitespace() || c == ',' || c == '[' || c == ']')
+            .any(|token| token == flag)
     }
 
     fn visit_help(cmd: &mut clap::Command, path: &str, violations: &mut Vec<(String, String)>) {
