@@ -983,9 +983,10 @@ pub enum FallowOutput {
     /// `command`, `total_issues`, or `report`.
     #[serde(rename = "impact")]
     Impact(crate::impact::ImpactReport),
-    /// `fallow security --format json`. Required `security_findings` plus
-    /// `unresolved_edge_files`; ordered before the broader variants because the
-    /// `security_findings` discriminator is uniquely present here.
+    /// `fallow security --format json`. Required `security_findings`,
+    /// `unresolved_edge_files`, and `unresolved_callee_sites`; ordered before the
+    /// broader variants because the `security_findings` discriminator is uniquely
+    /// present here.
     #[serde(rename = "security")]
     Security(crate::security::SecurityOutput),
     /// `fallow dead-code --format json`.

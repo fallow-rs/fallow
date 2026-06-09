@@ -323,10 +323,7 @@ export interface RunAnalysisOptions {
 
 const analysisBackoff = new AnalysisFailureBackoff();
 
-const showAnalysisPausedMessage = (
-  failures: number,
-  cause: string | null,
-): void => {
+const showAnalysisPausedMessage = (failures: number, cause: string | null): void => {
   const suffix = cause ? ` Last failure: ${cause}` : "";
   void vscode.window
     .showErrorMessage(

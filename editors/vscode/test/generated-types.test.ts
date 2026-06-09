@@ -120,6 +120,7 @@ describe("generated/output-contract.d.ts", () => {
       line: 12,
       col: 0,
       evidence: "imports a server-only secret",
+      severity: "high",
       trace: [{ path: "src/lib/secret.ts", line: 8, col: 0, role: "secret-source" }],
       actions: [],
       candidate: {
