@@ -204,6 +204,8 @@ For full adoption instead of one-off review, see the [Fallow compliance happy pa
 
 See [Agent integration](https://docs.fallow.tools/integrations/mcp) for MCP setup and the full list of structured tools.
 
+For security review loops, see the [Security agent verification recipe](docs/security-agent-verification.md). It shows how to combine `fallow security --format json --surface`, candidate evidence, and MCP `security_candidates` output without adding model calls to fallow core.
+
 Run `fallow impact` to see what fallow has done for you: how many issues it is surfacing, the trend since your last recorded run, and how many commits its pre-commit gate caught before they shipped. It is opt-in (`fallow impact enable`) and entirely local: history lives in a gitignored `.fallow/impact.json` and is never uploaded.
 
 Product telemetry for improving agent, CI, MCP, and editor workflows is off by default. Run `fallow telemetry inspect --example` to see the payload, or `FALLOW_TELEMETRY=inspect fallow audit --format json --quiet` to inspect a real run without sending it. Run `fallow telemetry enable` only when you want to help improve these integrations. See [Telemetry](docs/telemetry.md).
@@ -251,7 +253,7 @@ Combined mode (`fallow`) and `fallow audit` support per-analysis production mode
 
 Use `--production-health`, `--production-dead-code`, or `--production-dupes` for one invocation, or `FALLOW_PRODUCTION_HEALTH=true` and related env vars in CI. The global `--production` flag still enables production mode for every analysis.
 
-`fallow security` remains opt-in and ranks reachable active-code candidates first. It includes source-backed ReDoS regex candidates for risky literal patterns applied to untrusted input, while safe literal patterns and source-free uses stay quiet. When a sink is also reported as dead code, JSON includes `dead_code` context and the command points agents toward deleting the unused file or removing the unused export before hardening that sink.
+`fallow security` remains opt-in and ranks reachable active-code candidates first. It includes source-backed ReDoS regex candidates for risky literal patterns applied to untrusted input, while safe literal patterns and source-free uses stay quiet. When a sink is also reported as dead code, JSON includes `dead_code` context and the command points agents toward deleting the unused file or removing the unused export before hardening that sink. Use the [Security agent verification recipe](docs/security-agent-verification.md) to turn raw candidates into verifier-filtered survivors outside fallow core.
 
 Precedence (highest to lowest): CLI flags, per-analysis env var, global `FALLOW_PRODUCTION`, config. CLI flags only enable; env vars and config can also disable. Worked examples:
 
