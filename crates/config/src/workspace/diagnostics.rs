@@ -87,6 +87,19 @@ impl WorkspaceDiagnosticKind {
             Self::SkippedLargeFile { .. } => "skipped-large-file",
         }
     }
+
+    /// Whether this diagnostic is produced by SOURCE discovery (the file walk in
+    /// `discover_files`) rather than WORKSPACE discovery (config load). Source-
+    /// discovery diagnostics are APPENDED to the registry after config load, so
+    /// [`stash_workspace_diagnostics`] must preserve them when it replaces the
+    /// workspace-discovery set, otherwise the per-analysis config re-loads in
+    /// combined-mode (`fallow` with no subcommand re-loads config for check,
+    /// dupes, and health) wipe them before the JSON envelope is built (issue
+    /// #1086).
+    #[must_use]
+    pub const fn is_source_discovery(&self) -> bool {
+        matches!(self, Self::SkippedLargeFile { .. })
+    }
 }
 
 /// Render a byte count as a megabyte figure with one decimal place for
@@ -482,16 +495,34 @@ pub fn capture_workspace_warnings<F: FnOnce() -> R, R>(body: F) -> (R, Vec<Works
 static WORKSPACE_DIAGNOSTICS: OnceLock<Mutex<FxHashMap<PathBuf, Vec<WorkspaceDiagnostic>>>> =
     OnceLock::new();
 
-/// Replace the workspace-discovery diagnostics for `root` with `diagnostics`.
+/// Replace the workspace-discovery diagnostics for `root` with `diagnostics`,
+/// PRESERVING any source-discovery diagnostics (see
+/// [`WorkspaceDiagnosticKind::is_source_discovery`]) already appended for the
+/// root.
 ///
 /// Called at config-load time after [`super::discover_workspaces_with_diagnostics`]
-/// completes; the analyze pipeline then APPENDS undeclared-workspace
-/// diagnostics via [`append_workspace_diagnostics`].
+/// completes; the analyze pipeline then APPENDS undeclared-workspace and
+/// source-discovery (`skipped-large-file`) diagnostics via
+/// [`append_workspace_diagnostics`]. The workspace-discovery set is authoritative
+/// and replaced wholesale (so a fixed `package.json` clears its stale diagnostic
+/// across watch-mode reruns), but source-discovery diagnostics are appended
+/// AFTER this stash, so combined-mode's per-analysis config re-loads would
+/// otherwise wipe a `skipped-large-file` entry that the first analysis's
+/// discovery already recorded (issue #1086).
 pub fn stash_workspace_diagnostics(root: &Path, diagnostics: Vec<WorkspaceDiagnostic>) {
     let canonical = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     let registry = WORKSPACE_DIAGNOSTICS.get_or_init(|| Mutex::new(FxHashMap::default()));
     if let Ok(mut map) = registry.lock() {
-        map.insert(canonical, diagnostics);
+        let mut combined = diagnostics;
+        if let Some(existing) = map.get(&canonical) {
+            combined.extend(
+                existing
+                    .iter()
+                    .filter(|d| d.kind.is_source_discovery())
+                    .cloned(),
+            );
+        }
+        map.insert(canonical, combined);
     }
 }
 
@@ -630,6 +661,54 @@ mod tests {
         assert_eq!(format_size_mb(0), "0.0 MB");
         assert_eq!(format_size_mb(5 * 1024 * 1024), "5.0 MB");
         assert_eq!(format_size_mb(1024 * 1024 + 512 * 1024), "1.5 MB");
+    }
+
+    #[test]
+    fn stash_preserves_appended_skipped_large_file_across_restash() {
+        // Unique synthetic root so the process-global registry does not collide
+        // with sibling tests.
+        let root = Path::new("/fallow-test-1086-stash-preserve");
+        let undeclared = || {
+            WorkspaceDiagnostic::new(
+                root,
+                root.join("pkg"),
+                WorkspaceDiagnosticKind::UndeclaredWorkspace,
+            )
+        };
+        // First analysis loads config and stashes the workspace-discovery set.
+        stash_workspace_diagnostics(root, vec![undeclared()]);
+        // Its source discovery appends a skipped-large-file diagnostic.
+        append_workspace_diagnostics(
+            root,
+            vec![WorkspaceDiagnostic::new(
+                root,
+                root.join("vendor/big.js"),
+                WorkspaceDiagnosticKind::SkippedLargeFile {
+                    size_bytes: 9_999_999,
+                },
+            )],
+        );
+        // A sibling analysis (combined-mode dupes/health) re-loads config and
+        // re-stashes the same workspace-discovery set.
+        stash_workspace_diagnostics(root, vec![undeclared()]);
+
+        let after = workspace_diagnostics_for(root);
+        assert_eq!(
+            after
+                .iter()
+                .filter(|d| d.kind.is_source_discovery())
+                .count(),
+            1,
+            "skipped-large-file survives the combined-mode re-stash exactly once (#1086): {after:?}"
+        );
+        assert_eq!(
+            after
+                .iter()
+                .filter(|d| matches!(d.kind, WorkspaceDiagnosticKind::UndeclaredWorkspace))
+                .count(),
+            1,
+            "the workspace-discovery diagnostic is replaced, not duplicated"
+        );
     }
 
     #[test]

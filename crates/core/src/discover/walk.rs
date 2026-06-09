@@ -1,12 +1,26 @@
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
 use fallow_config::{ResolvedConfig, WorkspaceDiagnostic, WorkspaceDiagnosticKind};
 use fallow_types::discover::{DiscoveredFile, FileId};
 use ignore::WalkBuilder;
+use rustc_hash::FxHashSet;
 
 use super::ALLOWED_HIDDEN_DIRS;
+
+/// Process-wide dedupe of the size-skip / largest-files stderr notes, keyed by a
+/// content-derived string, so combined-mode (`fallow` runs check + dupes +
+/// health, each of which can trigger a source walk) emits each note at most once
+/// per distinct content. Mirrors the workspace-diagnostics `should_emit`
+/// pattern (issue #1086).
+fn should_emit_note_once(key: String) -> bool {
+    static EMITTED: OnceLock<Mutex<FxHashSet<String>>> = OnceLock::new();
+    EMITTED
+        .get_or_init(|| Mutex::new(FxHashSet::default()))
+        .lock()
+        .map_or(true, |mut set| set.insert(key))
+}
 
 /// A discovered file path paired with its on-disk size in bytes, as collected
 /// by the parallel walker before [`DiscoveredFile`] ids are assigned.
@@ -111,11 +125,17 @@ fn report_skipped_large_files(config: &ResolvedConfig, skipped: &[SizedFile]) {
         .collect();
     fallow_config::append_workspace_diagnostics(&config.root, diagnostics);
 
-    if !config.quiet {
-        let mut sorted: Vec<SizedFile> = skipped.to_vec();
-        sorted.sort_unstable_by_key(|f| std::cmp::Reverse(f.1));
+    let mut sorted: Vec<SizedFile> = skipped.to_vec();
+    sorted.sort_unstable_by_key(|f| std::cmp::Reverse(f.1));
+    let count = skipped.len();
+    if !config.quiet
+        && should_emit_note_once(format!(
+            "skip::{}::{count}::{}",
+            config.root.display(),
+            sorted.first().map_or(0, |f| f.1)
+        ))
+    {
         let examples = summarize_examples(&config.root, &sorted);
-        let count = skipped.len();
         let noun = if count == 1 { "file" } else { "files" };
         tracing::warn!(
             "fallow: skipped {count} {noun} over the max file size limit ({examples}). \
@@ -167,7 +187,9 @@ fn note_largest_files(config: &ResolvedConfig, files: &[DiscoveredFile]) {
     if config.quiet {
         return;
     }
-    if let Some(message) = build_largest_files_note(&config.root, files) {
+    if let Some(message) = build_largest_files_note(&config.root, files)
+        && should_emit_note_once(format!("note::{}::{}", config.root.display(), files.len()))
+    {
         tracing::warn!("{message}");
     }
 }
