@@ -204,6 +204,8 @@ For full adoption instead of one-off review, see the [Fallow compliance happy pa
 
 See [Agent integration](https://docs.fallow.tools/integrations/mcp) for MCP setup and the full list of structured tools.
 
+The MCP server also exposes `code_execute`, a bounded read-only Code Mode tool for composing multiple fallow analysis calls in one JavaScript snippet. It can call analysis helpers such as `fallow.projectInfo`, `fallow.audit`, and `fallow.checkHealth`, but it does not expose mutating fix tools.
+
 For security review loops, see the [Security agent verification recipe](docs/security-agent-verification.md). It shows how to combine `fallow security --format json --surface`, candidate evidence, and MCP `security_candidates` output without adding model calls to fallow core.
 
 Run `fallow impact` to see what fallow has done for you: how many issues it is surfacing, the trend since your last recorded run, and how many commits its pre-commit gate caught before they shipped. It is opt-in (`fallow impact enable`) and entirely local: history lives in a gitignored `.fallow/impact.json` and is never uploaded.
@@ -785,6 +787,7 @@ Fallow is not an AI assistant. It is the deterministic codebase intelligence lay
 - **Editor integrations** -- VS Code extension, Zed extension, and Neovim LSP setup ([editors](https://github.com/fallow-rs/fallow/tree/main/editors))
 - **LSP server** -- real-time diagnostics, hover info, code actions, Code Lens with reference counts
 - **Agent Skill + MCP server** -- version-matched AI agent guidance ships in the npm package, with MCP integration for Claude Code, Codex, Cursor, Windsurf, and other agents ([fallow-skills](https://github.com/fallow-rs/fallow-skills))
+- **MCP Code Mode** -- `code_execute` composes read-only analysis calls in a bounded JavaScript sandbox, without filesystem, network, shell, or fix-apply access
 - **JSON `actions` array** -- every issue in `--format json` output includes fix suggestions with `auto_fixable` flag, so agents can self-correct
 - **Typed output contract** -- `import type { CheckOutput } from "fallow/types"` version-pinned to your installed CLI
 - **Opt-in telemetry controls** -- `fallow telemetry status|inspect|enable|disable`, with agent-source attribution through `FALLOW_AGENT_SOURCE`

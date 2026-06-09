@@ -57,6 +57,7 @@ const MCP_TOOL_ENV: &str = "FALLOW_MCP_TOOL";
 /// the allowlisted payload. Kept in sync with the tools the MCP server exposes
 /// (see `crates/mcp/src/server/mod.rs`).
 const MCP_TOOLS: &[&str] = &[
+    "code_execute",
     "analyze",
     "check_changed",
     "security_candidates",
@@ -2604,6 +2605,7 @@ mod tests {
     #[test]
     fn mcp_tool_value_is_allowlist_validated() {
         // Known tool names round-trip to the static allowlist entry.
+        assert_eq!(mcp_tool_from_value("code_execute"), Some("code_execute"));
         assert_eq!(mcp_tool_from_value("find_dupes"), Some("find_dupes"));
         assert_eq!(mcp_tool_from_value("  audit  "), Some("audit"));
         // Anything off-allowlist is dropped, never echoed into the payload.

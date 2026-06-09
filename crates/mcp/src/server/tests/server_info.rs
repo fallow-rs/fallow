@@ -21,6 +21,7 @@ fn all_tools_registered() {
     let server = FallowMcp::new();
     let tools = server.tool_router.list_all();
     let names: Vec<String> = tools.iter().map(|t| t.name.to_string()).collect();
+    assert!(names.contains(&"code_execute".to_string()));
     assert!(names.contains(&"analyze".to_string()));
     assert!(names.contains(&"check_changed".to_string()));
     assert!(names.contains(&"security_candidates".to_string()));
@@ -43,7 +44,7 @@ fn all_tools_registered() {
     assert!(names.contains(&"get_importance".to_string()));
     assert!(names.contains(&"get_cleanup_candidates".to_string()));
     assert!(names.contains(&"impact".to_string()));
-    assert_eq!(tools.len(), 22);
+    assert_eq!(tools.len(), 23);
 }
 
 #[test]
@@ -51,6 +52,7 @@ fn read_only_tools_have_annotations() {
     let server = FallowMcp::new();
     let tools = server.tool_router.list_all();
     let read_only = [
+        "code_execute",
         "analyze",
         "check_changed",
         "security_candidates",
@@ -124,6 +126,7 @@ fn open_world_hint_on_analysis_tools() {
     let server = FallowMcp::new();
     let tools = server.tool_router.list_all();
     let open_world = [
+        "code_execute",
         "analyze",
         "check_changed",
         "security_candidates",
@@ -192,6 +195,7 @@ fn server_instructions_mention_all_tools() {
     let server = FallowMcp::new();
     let info = ServerHandler::get_info(&server);
     let instructions = info.instructions.as_deref().unwrap();
+    assert!(instructions.contains("code_execute"));
     assert!(instructions.contains("analyze"));
     assert!(instructions.contains("check_changed"));
     assert!(instructions.contains("security_candidates"));
@@ -226,6 +230,22 @@ fn all_tools_have_input_schema() {
             "tool '{name}' should have a non-empty input_schema"
         );
     }
+}
+
+#[test]
+fn code_execute_schema_contains_expected_properties() {
+    let server = FallowMcp::new();
+    let tools = server.tool_router.list_all();
+    let tool = tools.iter().find(|t| t.name == "code_execute").unwrap();
+    let schema = serde_json::to_string(&tool.input_schema).unwrap();
+    for prop in ["code", "root", "timeout_ms", "max_output_bytes"] {
+        assert!(
+            schema.contains(prop),
+            "code_execute schema should contain property '{prop}'"
+        );
+    }
+    let schema: serde_json::Value = serde_json::to_value(&tool.input_schema).unwrap();
+    assert_required_fields(&schema, &["code"]);
 }
 
 #[test]

@@ -4,8 +4,8 @@ use rmcp::model::{CallToolResult, Content, Implementation, ServerCapabilities, S
 use rmcp::{ErrorData as McpError, ServerHandler, tool, tool_router};
 
 use crate::params::{
-    AnalyzeParams, AuditParams, CheckChangedParams, CheckRuntimeCoverageParams, ExplainParams,
-    FeatureFlagsParams, FindDupesParams, FixParams, HealthParams, ImpactParams,
+    AnalyzeParams, AuditParams, CheckChangedParams, CheckRuntimeCoverageParams, CodeExecuteParams,
+    ExplainParams, FeatureFlagsParams, FindDupesParams, FixParams, HealthParams, ImpactParams,
     ListBoundariesParams, ProjectInfoParams, SecurityCandidatesParams, TraceCloneParams,
     TraceDependencyParams, TraceExportParams, TraceFileParams,
 };
@@ -16,8 +16,8 @@ use crate::tools::{
     build_get_blast_radius_args, build_get_cleanup_candidates_args, build_get_hot_paths_args,
     build_get_importance_args, build_health_args, build_impact_args, build_list_boundaries_args,
     build_project_info_args, build_security_candidates_args, build_trace_clone_args,
-    build_trace_dependency_args, build_trace_export_args, build_trace_file_args, run_tool,
-    run_tool_with_top_level_warnings,
+    build_trace_dependency_args, build_trace_export_args, build_trace_file_args, execute_code_mode,
+    run_tool, run_tool_with_top_level_warnings,
 };
 
 #[cfg(test)]
@@ -67,6 +67,25 @@ fn resolve_binary() -> String {
 
 #[tool_router]
 impl FallowMcp {
+    #[tool(
+        description = "Execute a bounded, read-only JavaScript Code Mode snippet against fallow's MCP host API. `code` must be a JavaScript function expression or function body that receives `{ fallow, root }` and returns a JSON-serializable value. The embedded sandbox exposes only a typed `fallow` object with read-only analysis calls: analyze, checkChanged, securityCandidates, findDupes, projectInfo, traceExport, traceFile, traceDependency, traceClone, checkHealth, audit, explain, listBoundaries, featureFlags, impact, checkRuntimeCoverage, getHotPaths, getBlastRadius, getImportance, getCleanupCandidates, plus `fallow.run(tool, params)` for the same allowlist. Mutating fix tools are intentionally not exposed. The sandbox has no filesystem, network, imports, eval, Function, process, require, Deno, Bun, or shell access. `root` is injected into host calls that omit params.root. `timeout_ms` caps the whole snippet and `max_output_bytes` caps total fallow JSON read by host calls.",
+        annotations(read_only_hint = true, open_world_hint = true)
+    )]
+    async fn code_execute(
+        &self,
+        params: Parameters<CodeExecuteParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let binary = self.binary.clone();
+        let params = params.0;
+        tokio::task::spawn_blocking(move || execute_code_mode(binary, params))
+            .await
+            .map_err(|err| McpError::internal_error(format!("code mode task failed: {err}"), None))
+            .map(|result| match result {
+                Ok(output) => CallToolResult::success(vec![Content::text(output)]),
+                Err(output) => CallToolResult::error(vec![Content::text(output)]),
+            })
+    }
+
     #[tool(
         description = "Analyze a TypeScript/JavaScript project for unused code, circular dependencies, and re-export cycles (barrel files that form a structural loop, silently breaking re-exports). Detects unused files, exports, types, dependencies, enum/class members, unresolved imports, unlisted dependencies, duplicate exports, circular dependencies, re-export cycles, boundary violations, stale suppression comments, unused pnpm catalog entries (entries in pnpm-workspace.yaml `catalog:` / `catalogs:` not referenced by any workspace package), empty pnpm catalog groups (named `catalogs.<name>:` groups with no entries), unresolved catalog references (workspace package.json declares `catalog:` but the catalog has no entry), unused pnpm dependency overrides (`pnpm-workspace.yaml#overrides` or `package.json#pnpm.overrides` targets a package no workspace package declares and pnpm-lock.yaml does not resolve), and misconfigured pnpm dependency overrides (unparsable key or empty value; pnpm install will reject). Private type leaks are an opt-in API hygiene check via issue_types: [\"private-type-leaks\"]. Returns structured JSON with all issues found, grouped by issue type. For code duplication use find_dupes, for complexity hotspots use check_health. Supports baseline comparisons (baseline/save_baseline), regression detection (fail_on_regression, tolerance, regression_baseline, save_regression_baseline), and performance tuning (no_cache, threads). Set boundary_violations=true to check only architecture boundary violations (convenience alias for issue_types: [\"boundary-violations\"]). Set group_by to \"owner\" (CODEOWNERS), \"directory\", \"package\" (workspace), or \"section\" to group results. The `section` mode reads GitLab CODEOWNERS `[Section]` headers and emits `owners` metadata per group.",
         annotations(read_only_hint = true, open_world_hint = true)
@@ -346,7 +365,8 @@ impl ServerHandler for FallowMcp {
             )
             .with_instructions(
                 "Fallow MCP server, codebase analysis for TypeScript/JavaScript projects. \
-                 Tools: analyze (full analysis), check_changed (incremental/PR analysis), \
+                 Tools: code_execute (bounded read-only Code Mode composition over fallow analysis tools), \
+                 analyze (full analysis), check_changed (incremental/PR analysis), \
                  security_candidates (unverified local security candidates for agent verification), \
                  find_dupes (code duplication), fix_preview/fix_apply (auto-fix), \
                  project_info (plugins, files, entry points, boundary zones), \

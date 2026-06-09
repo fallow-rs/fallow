@@ -11,7 +11,7 @@ use rmcp::model::RawContent;
 use crate::tools::{
     build_analyze_args, build_health_args, build_project_info_args, build_security_candidates_args,
     build_trace_clone_args, build_trace_dependency_args, build_trace_export_args,
-    build_trace_file_args, run_fallow,
+    build_trace_file_args, execute_code_mode, run_fallow,
 };
 
 /// Resolve the fallow binary from `FALLOW_BIN`, or the workspace target dir.
@@ -97,6 +97,87 @@ async fn e2e_project_info_returns_files() {
     assert!(
         file_count > 0,
         "project_info should report files, got file_count={file_count}"
+    );
+}
+
+#[test]
+fn e2e_code_execute_runs_project_info_on_basic_project() {
+    let bin = fallow_binary();
+    let root = fixture_path("basic-project");
+    let output = execute_code_mode(
+        bin,
+        crate::params::CodeExecuteParams {
+            code: "return { fileCount: fallow.projectInfo({ files: true }).file_count, root };"
+                .to_string(),
+            root: Some(root.to_string_lossy().to_string()),
+            timeout_ms: Some(10_000),
+            max_output_bytes: Some(1_000_000),
+        },
+    )
+    .unwrap_or_else(|err| panic!("code mode should succeed: {err}"));
+
+    let json: serde_json::Value = serde_json::from_str(&output)
+        .unwrap_or_else(|e| panic!("should parse as JSON: {e}\ntext: {output}"));
+    assert_eq!(json["ok"].as_bool(), Some(true));
+    assert!(json["result"]["fileCount"].as_u64().unwrap_or(0) > 0);
+    assert_eq!(json["calls"][0]["tool"].as_str(), Some("project_info"));
+}
+
+#[test]
+fn e2e_code_execute_enforces_host_output_limit() {
+    let bin = fallow_binary();
+    let root = fixture_path("basic-project");
+    let output = execute_code_mode(
+        bin,
+        crate::params::CodeExecuteParams {
+            code: "return fallow.projectInfo({ files: true });".to_string(),
+            root: Some(root.to_string_lossy().to_string()),
+            timeout_ms: Some(10_000),
+            max_output_bytes: Some(1),
+        },
+    )
+    .expect_err("code mode should cap host output");
+
+    let json: serde_json::Value = serde_json::from_str(&output)
+        .unwrap_or_else(|e| panic!("should parse as JSON: {e}\ntext: {output}"));
+    assert_eq!(json["ok"].as_bool(), Some(false));
+    assert!(
+        json["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("host output exceeded 1 bytes")),
+        "output cap rejection should be explicit: {output}"
+    );
+}
+
+#[test]
+fn e2e_code_execute_rejects_fix_apply() {
+    let bin = fallow_binary();
+    let root = fixture_path("basic-project");
+    let output = execute_code_mode(
+        bin,
+        crate::params::CodeExecuteParams {
+            code: "return fallow.run('fix_apply', {});".to_string(),
+            root: Some(root.to_string_lossy().to_string()),
+            timeout_ms: Some(1_000),
+            max_output_bytes: Some(10_000),
+        },
+    )
+    .expect_err("code mode should reject fix_apply");
+
+    let json: serde_json::Value = serde_json::from_str(&output)
+        .unwrap_or_else(|e| panic!("should parse as JSON: {e}\ntext: {output}"));
+    assert_eq!(json["ok"].as_bool(), Some(false));
+    assert!(
+        json["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("does not expose fix tools")),
+        "fix_apply rejection should be explicit: {output}"
+    );
+    assert_eq!(json["calls"].as_array().map(Vec::len), Some(1));
+    assert_eq!(json["calls"][0]["tool"].as_str(), Some("fix_apply"));
+    assert_eq!(
+        json["calls"][0]["error_kind"].as_str(),
+        Some("unsupported_tool")
     );
 }
 

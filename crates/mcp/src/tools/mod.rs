@@ -2,6 +2,7 @@ mod analyze;
 mod audit;
 mod check_changed;
 mod check_runtime_coverage;
+mod code_mode;
 mod dupes;
 mod explain;
 mod fix;
@@ -20,6 +21,7 @@ pub use check_runtime_coverage::{
     build_check_runtime_coverage_args, build_get_blast_radius_args,
     build_get_cleanup_candidates_args, build_get_hot_paths_args, build_get_importance_args,
 };
+pub use code_mode::execute_code_mode;
 pub use dupes::build_find_dupes_args;
 pub use explain::build_explain_args;
 pub use fix::{build_fix_apply_args, build_fix_preview_args};

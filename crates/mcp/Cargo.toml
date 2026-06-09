@@ -18,10 +18,12 @@ path = "src/main.rs"
 
 [dependencies]
 rmcp = { version = "1.7", features = ["transport-io"] }
+rquickjs = "0.12"
 tokio.workspace = true
 serde.workspace = true
 serde_json = { workspace = true, features = ["preserve_order"] }
 schemars.workspace = true
+tempfile.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]

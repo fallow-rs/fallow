@@ -697,6 +697,28 @@ pub struct ImpactParams {
     pub root: Option<String>,
 }
 
+#[derive(Deserialize, JsonSchema)]
+pub struct CodeExecuteParams {
+    /// JavaScript function expression or function body. The function receives
+    /// `{ fallow, root }` and must return a JSON-serializable value.
+    #[schemars(length(min = 1, max = 20000))]
+    pub code: String,
+
+    /// Default project root injected into fallow host calls when their params
+    /// omit `root`.
+    pub root: Option<String>,
+
+    /// Overall sandbox timeout in milliseconds. Defaults to 5000 and is capped
+    /// at 30000.
+    #[schemars(range(min = 1, max = 30000))]
+    pub timeout_ms: Option<u64>,
+
+    /// Maximum total bytes of fallow JSON output that sandbox host calls may
+    /// read. Defaults to 1000000 and is capped at 4000000.
+    #[schemars(range(min = 1024, max = 4_000_000))]
+    pub max_output_bytes: Option<usize>,
+}
+
 #[derive(Default, Deserialize, JsonSchema)]
 pub struct FeatureFlagsParams {
     /// Root directory of the project to analyze. Defaults to current working directory.
