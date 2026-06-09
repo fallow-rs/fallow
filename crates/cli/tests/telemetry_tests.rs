@@ -429,6 +429,59 @@ fn admin_command_emits_no_findings_present_key() {
 }
 
 #[test]
+fn project_inventory_command_routes_to_project_inventory_without_findings_present() {
+    let dir = tempfile::tempdir().expect("temp project");
+    std::fs::write(dir.path().join("package.json"), "{\n  \"name\": \"x\"\n}\n")
+        .expect("write package.json");
+
+    let (event, output) = inspect_event_output(dir.path(), &["list"], &[]);
+
+    assert_eq!(output.code, 0, "list should exit 0: {}", output.stderr);
+    assert_eq!(event["workflow"].as_str(), Some("project_inventory"));
+    assert!(
+        event.get("findings_present").is_none(),
+        "project-inventory commands must omit findings_present"
+    );
+}
+
+#[test]
+fn setup_command_routes_to_setup_without_findings_present() {
+    let dir = tempfile::tempdir().expect("temp project");
+    std::fs::write(dir.path().join("package.json"), "{\n  \"name\": \"x\"\n}\n")
+        .expect("write package.json");
+
+    let (event, output) = inspect_event_output(dir.path(), &["init"], &[]);
+
+    assert_eq!(output.code, 0, "init should exit 0: {}", output.stderr);
+    assert_eq!(event["workflow"].as_str(), Some("setup"));
+    assert!(
+        event.get("findings_present").is_none(),
+        "setup commands must omit findings_present"
+    );
+}
+
+#[test]
+fn license_command_routes_to_license_without_findings_present() {
+    let dir = tempfile::tempdir().expect("temp project");
+    std::fs::write(dir.path().join("package.json"), "{\n  \"name\": \"x\"\n}\n")
+        .expect("write package.json");
+
+    let (event, output) = inspect_event_output(dir.path(), &["license", "status"], &[]);
+
+    assert_eq!(
+        output.code, 3,
+        "license status should exit 3 when no local license exists: {}",
+        output.stderr
+    );
+    assert_eq!(event["workflow"].as_str(), Some("license"));
+    assert_eq!(event["outcome"].as_str(), Some("failed"));
+    assert!(
+        event.get("findings_present").is_none(),
+        "license commands must omit findings_present"
+    );
+}
+
+#[test]
 fn mcp_surface_override_tags_event_with_tool() {
     let dir = tempfile::tempdir().expect("temp project");
     std::fs::write(dir.path().join("package.json"), "{\n  \"name\": \"x\"\n}\n")

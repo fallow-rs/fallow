@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Telemetry now separates admin workflow buckets.** Opt-in CLI telemetry now records coarse `project_inventory`, `setup`, and `license` workflow labels for admin and setup commands that previously collapsed into `unknown`. The payload remains allowlisted and still does not include raw commands, paths, config values, repository identifiers, or license identifiers. (Closes [#1061](https://github.com/fallow-rs/fallow/issues/1061).)
+
 ## [2.90.0] - 2026-06-08
 
 ### Added

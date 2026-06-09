@@ -146,6 +146,9 @@ pub enum Workflow {
     Security,
     Fix,
     Explain,
+    ProjectInventory,
+    Setup,
+    License,
     Unknown,
 }
 

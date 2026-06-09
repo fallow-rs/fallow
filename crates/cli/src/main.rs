@@ -3122,7 +3122,9 @@ fn telemetry_workflow_for_command(
     output: fallow_config::OutputFormat,
 ) -> telemetry::Workflow {
     match command {
-        None | Some(Command::Flags { .. }) => telemetry::Workflow::CodeQualityReview,
+        None | Some(Command::Flags { .. } | Command::Watch { .. }) => {
+            telemetry::Workflow::CodeQualityReview
+        }
         Some(Command::Check { .. }) => telemetry::Workflow::DeadCode,
         Some(Command::Dupes { .. }) => telemetry::Workflow::Dupes,
         Some(Command::Health { .. }) => telemetry::Workflow::Health,
@@ -3138,22 +3140,21 @@ fn telemetry_workflow_for_command(
         Some(Command::Security { .. }) => telemetry::Workflow::Security,
         Some(Command::Fix { .. }) => telemetry::Workflow::Fix,
         Some(Command::Explain { .. }) => telemetry::Workflow::Explain,
+        Some(Command::List { .. } | Command::Workspaces | Command::Schema) => {
+            telemetry::Workflow::ProjectInventory
+        }
+        Some(Command::License { .. }) => telemetry::Workflow::License,
         Some(
-            Command::List { .. }
-            | Command::Workspaces
-            | Command::Watch { .. }
-            | Command::Init { .. }
+            Command::Init { .. }
             | Command::Hooks { .. }
             | Command::ConfigSchema
             | Command::PluginSchema
             | Command::Config { .. }
-            | Command::Schema
             | Command::CiTemplate { .. }
             | Command::Migrate { .. }
-            | Command::License { .. }
             | Command::Telemetry { .. }
             | Command::SetupHooks { .. },
-        ) => telemetry::Workflow::Unknown,
+        ) => telemetry::Workflow::Setup,
     }
 }
 
@@ -3940,9 +3941,9 @@ mod tests {
         Cli::command().debug_assert();
     }
 
-    /// The high-value commands each get their own telemetry workflow instead of
-    /// the `Unknown` catch-all, so "is anyone using `fallow impact`?" is
-    /// answerable. Admin / low-signal commands stay `Unknown`.
+    /// The high-value and coarse admin commands each get a distinct telemetry
+    /// workflow instead of the `Unknown` catch-all, so command families stay
+    /// answerable without uploading raw command lines.
     #[test]
     fn high_value_commands_route_to_distinct_workflows() {
         use clap::Parser;
@@ -3956,6 +3957,44 @@ mod tests {
                 vec!["fallow", "explain", "unused-exports"],
                 telemetry::Workflow::Explain,
             ),
+            (
+                vec!["fallow", "watch"],
+                telemetry::Workflow::CodeQualityReview,
+            ),
+            (
+                vec!["fallow", "list"],
+                telemetry::Workflow::ProjectInventory,
+            ),
+            (
+                vec!["fallow", "workspaces"],
+                telemetry::Workflow::ProjectInventory,
+            ),
+            (
+                vec!["fallow", "schema"],
+                telemetry::Workflow::ProjectInventory,
+            ),
+            (vec!["fallow", "init"], telemetry::Workflow::Setup),
+            (
+                vec!["fallow", "hooks", "install", "--target", "git"],
+                telemetry::Workflow::Setup,
+            ),
+            (vec!["fallow", "config-schema"], telemetry::Workflow::Setup),
+            (vec!["fallow", "plugin-schema"], telemetry::Workflow::Setup),
+            (vec!["fallow", "config"], telemetry::Workflow::Setup),
+            (
+                vec!["fallow", "ci-template", "gitlab"],
+                telemetry::Workflow::Setup,
+            ),
+            (vec!["fallow", "migrate"], telemetry::Workflow::Setup),
+            (
+                vec!["fallow", "telemetry", "status"],
+                telemetry::Workflow::Setup,
+            ),
+            (vec!["fallow", "setup-hooks"], telemetry::Workflow::Setup),
+            (
+                vec!["fallow", "license", "status"],
+                telemetry::Workflow::License,
+            ),
         ];
         for (argv, expected) in distinct {
             let cli = Cli::try_parse_from(&argv).expect("argv parses");
@@ -3963,19 +4002,6 @@ mod tests {
                 telemetry_workflow_for_command(cli.command.as_ref(), OutputFormat::Json),
                 expected,
                 "{argv:?} should map to {expected:?}"
-            );
-        }
-
-        for argv in [
-            vec!["fallow", "list"],
-            vec!["fallow", "config"],
-            vec!["fallow", "schema"],
-        ] {
-            let cli = Cli::try_parse_from(&argv).expect("argv parses");
-            assert_eq!(
-                telemetry_workflow_for_command(cli.command.as_ref(), OutputFormat::Json),
-                telemetry::Workflow::Unknown,
-                "{argv:?} should stay Unknown"
             );
         }
     }
