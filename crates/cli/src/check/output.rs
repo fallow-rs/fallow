@@ -219,6 +219,7 @@ mod tests {
             auto_imports: false,
             cache_max_size_mb: None,
             cache_config_hash: 0,
+            max_file_size_bytes: None,
         }
     }
 

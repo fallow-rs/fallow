@@ -192,6 +192,15 @@ struct Cli {
     #[arg(long = "churn-file", value_name = "PATH", global = true)]
     churn_file: Option<PathBuf>,
 
+    /// Skip source files larger than this many megabytes (default 5) instead of
+    /// parsing them, guarding against the out-of-memory blowup a single
+    /// multi-MB generated/vendored/bundled file causes on large repos. Use `0`
+    /// for no limit. Declaration files (`.d.ts`) are always analyzed. Skipped
+    /// files are reported and excluded from every analysis. Also settable via
+    /// `FALLOW_MAX_FILE_SIZE`.
+    #[arg(long = "max-file-size", value_name = "MB", global = true)]
+    max_file_size: Option<u32>,
+
     /// Compare against a previously saved baseline file
     #[arg(long, global = true)]
     baseline: Option<PathBuf>,
@@ -2439,6 +2448,7 @@ fn main() -> ExitCode {
     };
     warn_legacy_check_alias_if_needed(used_legacy_check_alias, cli.quiet);
     output_envelope::set_legacy_envelope(cli.legacy_envelope);
+    runtime_support::set_max_file_size_override(cli.max_file_size);
 
     if let Some(workspaces) = cli.workspace.as_ref()
         && !workspaces.is_empty()

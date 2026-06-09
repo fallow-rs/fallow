@@ -1,10 +1,12 @@
-//! Workspace discovery diagnostics.
+//! Workspace and source-discovery diagnostics.
 //!
 //! Surfaces malformed `package.json`, unreachable glob matches, missing
-//! tsconfig references, and undeclared workspaces as typed
-//! [`WorkspaceDiagnostic`] values. Each diagnostic also emits a deduplicated
-//! `tracing::warn!` so users running fallow with default tracing filters see
-//! the cause of "fallow doesn't see my package."
+//! tsconfig references, undeclared workspaces, and source files skipped for
+//! exceeding the per-file size limit ([`WorkspaceDiagnosticKind::SkippedLargeFile`],
+//! issue #1086) as typed [`WorkspaceDiagnostic`] values. Each diagnostic also
+//! emits a deduplicated `tracing::warn!` so users running fallow with default
+//! tracing filters see the cause of "fallow doesn't see my package" or "fallow
+//! ate all my memory."
 //!
 //! Repeated `GlobMatchedNoPackageJson` diagnostics are aggregated by glob
 //! pattern at emission time so a wide glob matching hundreds of package-less
@@ -59,6 +61,17 @@ pub enum WorkspaceDiagnosticKind {
     /// `tsconfig.json` lists a `references[].path` that does not point to an
     /// existing directory.
     TsconfigReferenceDirMissing,
+    /// A source file was skipped at discovery because it exceeds the configured
+    /// per-file size limit (`--max-file-size` / `FALLOW_MAX_FILE_SIZE`, default
+    /// 5 MB). The file is never read, parsed, or analyzed, guarding against the
+    /// out-of-memory blowup a single multi-MB generated/vendored/bundled file
+    /// causes (issue #1086). Surfaced by source discovery, not workspace
+    /// discovery, but shares this channel so the skip is visible in
+    /// `workspace_diagnostics[]` on `fallow dead-code / dupes / health` JSON.
+    SkippedLargeFile {
+        /// On-disk size of the skipped file in bytes.
+        size_bytes: u64,
+    },
 }
 
 impl WorkspaceDiagnosticKind {
@@ -71,8 +84,21 @@ impl WorkspaceDiagnosticKind {
             Self::GlobMatchedNoPackageJson { .. } => "glob-matched-no-package-json",
             Self::MalformedTsconfig { .. } => "malformed-tsconfig",
             Self::TsconfigReferenceDirMissing => "tsconfig-reference-dir-missing",
+            Self::SkippedLargeFile { .. } => "skipped-large-file",
         }
     }
+}
+
+/// Render a byte count as a megabyte figure with one decimal place for
+/// human-readable diagnostic messages (e.g. `12.3 MB`).
+#[must_use]
+fn format_size_mb(bytes: u64) -> String {
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "display-only size figure; precision loss past 2^53 bytes is irrelevant"
+    )]
+    let mb = bytes as f64 / (1024.0 * 1024.0);
+    format!("{mb:.1} MB")
 }
 
 /// A diagnostic about a workspace-discovery candidate.
@@ -183,6 +209,13 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
         WorkspaceDiagnosticKind::TsconfigReferenceDirMissing => format!(
             "tsconfig.json references '{display}' but the directory does not exist. \
              Update or remove the reference, or restore the missing directory."
+        ),
+        WorkspaceDiagnosticKind::SkippedLargeFile { size_bytes } => format!(
+            "Skipped '{display}' ({size}): exceeds the max file size limit. \
+             Its imports and exports are not analyzed. Raise the limit with \
+             --max-file-size <MB> (or FALLOW_MAX_FILE_SIZE), or add '{display}' \
+             to ignorePatterns.",
+            size = format_size_mb(*size_bytes)
         ),
     }
 }
@@ -562,6 +595,41 @@ mod tests {
                 pattern: pattern.to_owned(),
             },
         )
+    }
+
+    #[test]
+    fn skipped_large_file_diagnostic_id_and_message() {
+        let root = Path::new("/project");
+        let diag = WorkspaceDiagnostic::new(
+            root,
+            root.join("src/vendor/app.bundle.js"),
+            WorkspaceDiagnosticKind::SkippedLargeFile {
+                size_bytes: 6 * 1024 * 1024,
+            },
+        );
+        assert_eq!(diag.kind.id(), "skipped-large-file");
+        assert!(
+            diag.message.contains("src/vendor/app.bundle.js"),
+            "message names the project-relative path: {}",
+            diag.message
+        );
+        assert!(
+            diag.message.contains("6.0 MB"),
+            "message reports the size: {}",
+            diag.message
+        );
+        assert!(
+            diag.message.contains("--max-file-size"),
+            "message names the override flag: {}",
+            diag.message
+        );
+    }
+
+    #[test]
+    fn format_size_mb_one_decimal() {
+        assert_eq!(format_size_mb(0), "0.0 MB");
+        assert_eq!(format_size_mb(5 * 1024 * 1024), "5.0 MB");
+        assert_eq!(format_size_mb(1024 * 1024 + 512 * 1024), "1.5 MB");
     }
 
     #[test]

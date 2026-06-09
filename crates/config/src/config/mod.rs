@@ -23,8 +23,9 @@ pub use format::OutputFormat;
 pub use health::{EmailMode, HealthConfig, OwnershipConfig};
 pub use resolution::{
     CompiledIgnoreCatalogReferenceRule, CompiledIgnoreDependencyOverrideRule,
-    CompiledIgnoreExportRule, ConfigOverride, IgnoreCatalogReferenceRule,
-    IgnoreDependencyOverrideRule, IgnoreExportRule, ResolvedConfig, ResolvedOverride,
+    CompiledIgnoreExportRule, ConfigOverride, DEFAULT_MAX_FILE_SIZE_BYTES,
+    DEFAULT_MAX_FILE_SIZE_MB, IgnoreCatalogReferenceRule, IgnoreDependencyOverrideRule,
+    IgnoreExportRule, ResolvedConfig, ResolvedOverride, resolve_max_file_size_bytes,
 };
 pub use resolve::ResolveConfig;
 pub use rules::{PartialRulesConfig, RulesConfig, Severity};

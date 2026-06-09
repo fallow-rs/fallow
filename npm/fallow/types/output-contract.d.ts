@@ -322,6 +322,12 @@ error: string
 kind: "malformed-tsconfig"
 } | {
 kind: "tsconfig-reference-dir-missing"
+} | {
+/**
+ * On-disk size of the skipped file in bytes.
+ */
+size_bytes: number
+kind: "skipped-large-file"
 })
 /**
  * Discriminant for [`CloneGroupAction::kind`]. Mirrors the action types

@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::sync::{LazyLock, Mutex};
+use std::sync::{LazyLock, Mutex, OnceLock};
 
 use fallow_config::{
     FallowConfig, OutputFormat, PartialRulesConfig, ProductionAnalysis, ResolvedConfig, RulesConfig,
@@ -9,6 +9,31 @@ use rustc_hash::FxHashSet;
 
 static CONFIG_LOADED_LOGGED: LazyLock<Mutex<FxHashSet<PathBuf>>> =
     LazyLock::new(|| Mutex::new(FxHashSet::default()));
+
+/// The `--max-file-size` global flag value, set once from `main()` after clap
+/// parse. `Some(Some(mb))` means the flag was passed; `Some(None)` / unset
+/// means it was not. Held in a `OnceLock` rather than threaded through the ten
+/// `load_config_for_analysis` callers (the skill-endorsed set-once-read-by-many
+/// pattern; avoids `set_var`, which is unsafe under edition 2024).
+static MAX_FILE_SIZE_OVERRIDE: OnceLock<Option<u32>> = OnceLock::new();
+
+/// Record the `--max-file-size` flag value (megabytes; `Some(0)` = unlimited).
+/// Called once from `main()` before dispatch. Subsequent calls are ignored.
+pub fn set_max_file_size_override(max_file_size_mb: Option<u32>) {
+    let _ = MAX_FILE_SIZE_OVERRIDE.set(max_file_size_mb);
+}
+
+/// Resolve the effective per-file size ceiling override (in megabytes): the
+/// `--max-file-size` flag wins, then `FALLOW_MAX_FILE_SIZE`, else `None` (the
+/// built-in default applies). `Some(0)` from either source means unlimited.
+fn resolve_max_file_size_mb() -> Option<u32> {
+    if let Some(Some(mb)) = MAX_FILE_SIZE_OVERRIDE.get() {
+        return Some(*mb);
+    }
+    std::env::var("FALLOW_MAX_FILE_SIZE")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u32>().ok())
+}
 
 /// Analysis types for --only/--skip selection.
 #[derive(Clone, PartialEq, Eq, clap::ValueEnum)]
@@ -219,6 +244,9 @@ pub fn load_config_for_analysis(
         quiet,
         cache_max_size_mb,
     );
+    if let Some(mb) = resolve_max_file_size_mb() {
+        resolved.max_file_size_bytes = fallow_config::resolve_max_file_size_bytes(Some(mb));
+    }
     apply_cache_dir_env_override(root, &mut resolved, resolve_cache_dir_env());
     crate::cache_notice::record_candidate(
         root,

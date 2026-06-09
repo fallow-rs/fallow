@@ -196,6 +196,36 @@ pub struct ResolvedConfig {
     pub resolve: ResolveConfig,
     pub include_entry_exports: bool,
     pub auto_imports: bool,
+    /// Source files strictly larger than this many bytes are skipped at
+    /// discovery (never read, parsed, or analyzed), guarding against the
+    /// out-of-memory blowup a single multi-MB generated/vendored/bundled file
+    /// causes (issue #1086). `None` means no limit. Declaration files
+    /// (`.d.ts`/`.d.mts`/`.d.cts`) are exempt regardless of size because they
+    /// are reachability roots for global types. Defaults to
+    /// [`DEFAULT_MAX_FILE_SIZE_MB`] MB; the CLI overrides it post-resolve from
+    /// `--max-file-size` / `FALLOW_MAX_FILE_SIZE` (`0` = unlimited).
+    pub max_file_size_bytes: Option<u64>,
+}
+
+/// Default per-file size ceiling (in megabytes) for source discovery. A value
+/// chosen so hand-written source effectively never reaches it while generated
+/// API clients, vendored bundles, and minified blobs do. See issue #1086.
+pub const DEFAULT_MAX_FILE_SIZE_MB: u32 = 5;
+
+/// [`DEFAULT_MAX_FILE_SIZE_MB`] expressed in bytes.
+pub const DEFAULT_MAX_FILE_SIZE_BYTES: u64 = DEFAULT_MAX_FILE_SIZE_MB as u64 * 1024 * 1024;
+
+/// Convert a user-supplied megabyte ceiling into the byte limit stored on
+/// [`ResolvedConfig::max_file_size_bytes`]. `Some(0)` means "no limit"
+/// (`None`); any other `Some(n)` is `n` MB in bytes; `None` (unset) keeps the
+/// built-in [`DEFAULT_MAX_FILE_SIZE_BYTES`].
+#[must_use]
+pub fn resolve_max_file_size_bytes(max_file_size_mb: Option<u32>) -> Option<u64> {
+    match max_file_size_mb {
+        None => Some(DEFAULT_MAX_FILE_SIZE_BYTES),
+        Some(0) => None,
+        Some(mb) => Some(u64::from(mb) * 1024 * 1024),
+    }
 }
 
 /// Compute the cache-invalidation hash over extraction-affecting config fields.
@@ -251,6 +281,8 @@ impl FallowConfig {
             "**/coverage/**",
             "**/*.min.js",
             "**/*.min.mjs",
+            "**/*.min.cjs",
+            "**/*.bundle.js",
         ];
         for pattern in &default_ignores {
             ignore_builder.add(Glob::new(pattern).expect("default ignore pattern is valid"));
@@ -426,6 +458,7 @@ impl FallowConfig {
             resolve: self.resolve,
             include_entry_exports: self.include_entry_exports,
             auto_imports: self.auto_imports,
+            max_file_size_bytes: Some(DEFAULT_MAX_FILE_SIZE_BYTES),
         }
     }
 }
@@ -1026,6 +1059,46 @@ mod tests {
         );
         assert!(resolved.ignore_patterns.is_match("vendor/jquery.min.js"));
         assert!(resolved.ignore_patterns.is_match("lib/utils.min.mjs"));
+        assert!(resolved.ignore_patterns.is_match("lib/legacy.min.cjs"));
+        assert!(resolved.ignore_patterns.is_match("public/app.bundle.js"));
+        assert!(
+            resolved
+                .ignore_patterns
+                .is_match("src/vendor/app.bundle.js")
+        );
+        // Hand-written source with a similar name stays analyzed.
+        assert!(!resolved.ignore_patterns.is_match("src/bundle.ts"));
+        assert!(!resolved.ignore_patterns.is_match("src/app.cjs"));
+    }
+
+    #[test]
+    fn resolve_max_file_size_bytes_default_and_unlimited() {
+        // Unset keeps the built-in default.
+        assert_eq!(
+            resolve_max_file_size_bytes(None),
+            Some(DEFAULT_MAX_FILE_SIZE_BYTES)
+        );
+        // `0` means no limit.
+        assert_eq!(resolve_max_file_size_bytes(Some(0)), None);
+        // Any other value is that many megabytes in bytes.
+        assert_eq!(resolve_max_file_size_bytes(Some(2)), Some(2 * 1024 * 1024));
+        assert_eq!(DEFAULT_MAX_FILE_SIZE_MB, 5);
+    }
+
+    #[test]
+    fn resolve_sets_default_max_file_size() {
+        let resolved = make_config(false).resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+            None,
+        );
+        assert_eq!(
+            resolved.max_file_size_bytes,
+            Some(DEFAULT_MAX_FILE_SIZE_BYTES)
+        );
     }
 
     #[test]
