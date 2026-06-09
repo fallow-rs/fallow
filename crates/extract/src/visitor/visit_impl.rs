@@ -5,7 +5,7 @@ use oxc_ast::ast::*;
 use oxc_ast_visit::Visit;
 use oxc_ast_visit::walk;
 use oxc_semantic::ScopeFlags;
-use oxc_span::Span;
+use oxc_span::{GetSpan, Span};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::PathBuf;
 
@@ -1022,6 +1022,9 @@ impl ModuleInfoExtractor {
             self.tainted_bindings.push(TaintedBinding {
                 local: name.to_string(),
                 source_path,
+                // The initializer member-access read (`req.query.id`); anchors
+                // the taint trace's source node at the real read line.
+                source_span_start: expr.span().start,
             });
         }
     }
@@ -1037,6 +1040,11 @@ impl ModuleInfoExtractor {
         self.tainted_bindings.push(TaintedBinding {
             local: name.to_string(),
             source_path: source_path.to_string(),
+            // Synthetic framework-handler-param source (e.g. `framework.request`);
+            // no concrete member-access read expression, so the analyze layer
+            // anchors at the sink rather than a spurious line. `0` signals "no
+            // captured read span".
+            source_span_start: 0,
         });
     }
 
@@ -1219,6 +1227,10 @@ impl ModuleInfoExtractor {
             self.tainted_bindings.push(TaintedBinding {
                 local: name.to_string(),
                 source_path,
+                // One-hop helper-return source: the real read lives inside the
+                // helper body, not at this binding, so no concrete read span is
+                // available here. `0` makes the analyze layer anchor at the sink.
+                source_span_start: 0,
             });
         }
     }
@@ -1514,6 +1526,10 @@ impl ModuleInfoExtractor {
             self.tainted_bindings.push(TaintedBinding {
                 local,
                 source_path: source_path.clone(),
+                // The destructured initializer read (`req.query` in
+                // `const { id } = req.query`); anchors the source node at the
+                // real read line.
+                source_span_start: expr.span().start,
             });
         }
     }

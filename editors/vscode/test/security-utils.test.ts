@@ -15,6 +15,7 @@ const finding = (overrides: Partial<SecurityFinding>): SecurityFinding => ({
   line: 12,
   col: 4,
   evidence: "reaches process.env.SECRET",
+  severity: overrides.severity ?? "low",
   trace: [],
   actions: [],
   candidate: {
@@ -119,6 +120,8 @@ describe("hopRoleLabel", () => {
   it("maps every TraceHopRole to its human label", () => {
     const cases: ReadonlyArray<readonly [TraceHopRole, string]> = [
       ["client-boundary", "client boundary"],
+      ["untrusted-source", "untrusted source"],
+      ["module-source", "source module"],
       ["intermediate", "intermediate"],
       ["secret-source", "secret source"],
       ["sink", "sink site"],

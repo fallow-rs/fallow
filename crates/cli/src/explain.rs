@@ -247,6 +247,7 @@ pub fn rule_by_id(id: &str) -> Option<&'static RuleDef> {
         .iter()
         .chain(HEALTH_RULES.iter())
         .chain(DUPES_RULES.iter())
+        .chain(SECURITY_RULES.iter())
         .find(|r| r.id == id)
 }
 
@@ -332,6 +333,20 @@ pub fn rule_by_token(token: &str) -> Option<&'static RuleDef> {
         }
         "crap" | "high-crap" | "high-crap-score" => Some("fallow/high-crap-score"),
         "duplication" | "dupes" | "code-duplication" => Some("fallow/code-duplication"),
+        "security"
+        | "security-candidate"
+        | "security-candidates"
+        | "tainted-sink"
+        | "tainted-sinks"
+        | "security-sink"
+        | "security-sinks" => Some("security/tainted-sink"),
+        "client-server-leak"
+        | "client-server-leaks"
+        | "security-client-server-leak"
+        | "security-client-server-leaks" => Some("security/client-server-leak"),
+        "hardcoded-secret" | "hardcoded-secrets" | "hard-coded-secret" | "hard-coded-secrets" => {
+            Some("security/hardcoded-secret")
+        }
         _ => None,
     };
     if let Some(id) = alias
@@ -339,16 +354,27 @@ pub fn rule_by_token(token: &str) -> Option<&'static RuleDef> {
     {
         return Some(rule);
     }
+    let security_token = normalized.strip_prefix("security-").unwrap_or(&normalized);
+    let security_id = format!("security/{security_token}");
+    if let Some(rule) = rule_by_id(&security_id) {
+        return Some(rule);
+    }
     let singular = normalized
         .strip_suffix('s')
         .filter(|_| normalized != "unused-class")
         .unwrap_or(&normalized);
+    let singular_security_token = singular.strip_prefix("security-").unwrap_or(singular);
+    let singular_security_id = format!("security/{singular_security_token}");
+    if let Some(rule) = rule_by_id(&singular_security_id) {
+        return Some(rule);
+    }
     let id = format!("fallow/{singular}");
     rule_by_id(&id).or_else(|| {
         CHECK_RULES
             .iter()
             .chain(HEALTH_RULES.iter())
             .chain(DUPES_RULES.iter())
+            .chain(SECURITY_RULES.iter())
             .find(|rule| {
                 rule.docs_path.ends_with(&normalized)
                     || rule.docs_path.ends_with(singular)
@@ -473,6 +499,22 @@ pub fn rule_guide(rule: &RuleDef) -> RuleGuide {
             example: "Two files contain the same normalized token sequence across a multi-line block.",
             how_to_fix: "Extract the shared logic when the duplicated behavior should evolve together. Leave it duplicated when the similarity is accidental and likely to diverge.",
         },
+        "security/tainted-sink" => RuleGuide {
+            example: "A non-literal request field reaches a catalogue sink such as security/sql-injection or security/dangerous-html. The finding is a candidate, not proof of exploitability.",
+            how_to_fix: "Trace the source, sink, sanitization, and runtime context. Fix confirmed issues with parameterization, escaping, validation, or safer APIs, and suppress only reviewed false positives with context.",
+        },
+        "security/client-server-leak" => RuleGuide {
+            example: "A module marked `use client` imports code that reads a non-public `process.env` or `import.meta.env` value through a static path.",
+            how_to_fix: "Keep non-public env reads on the server side, move the value behind an API boundary, or rename only intentionally public values to the framework's public prefix.",
+        },
+        "security/hardcoded-secret" => RuleGuide {
+            example: "A provider-prefixed token-shaped literal is assigned to a secret-shaped variable, and the hardcoded-secret category is explicitly included.",
+            how_to_fix: "Rotate real credentials, move them to a secret manager or environment variable, and keep test-only literals clearly fake so they do not resemble provider tokens.",
+        },
+        id if id.starts_with("security/") => RuleGuide {
+            example: "A `fallow security` candidate uses this catalogue category as its SARIF rule id, for example security/sql-injection for a matched SQL sink.",
+            how_to_fix: "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
+        },
         _ => RuleGuide {
             example: "Run the relevant command with --format json --quiet --explain to inspect this rule in context.",
             how_to_fix: "Use the issue action hints, source location, and docs URL to decide whether to remove, move, configure, or suppress the finding.",
@@ -484,13 +526,16 @@ pub fn rule_guide(rule: &RuleDef) -> RuleGuide {
 #[must_use]
 pub fn run_explain(issue_type: &str, output: OutputFormat) -> ExitCode {
     let Some(rule) = rule_by_token(issue_type) else {
-        return crate::error::emit_error(
-            &format!(
+        let message = if looks_security_explain_token(issue_type) {
+            format!(
+                "unknown issue type '{issue_type}'. Try values like tainted-sink, client-server-leak, hardcoded-secret, sql-injection, or security/sql-injection"
+            )
+        } else {
+            format!(
                 "unknown issue type '{issue_type}'. Try values like unused files, unused-export, high complexity, or code duplication"
-            ),
-            2,
-            output,
-        );
+            )
+        };
+        return crate::error::emit_error(&message, 2, output);
     };
     let guide = rule_guide(rule);
     match output {
@@ -528,6 +573,16 @@ pub fn run_explain(issue_type: &str, output: OutputFormat) -> ExitCode {
             output,
         ),
     }
+}
+
+fn looks_security_explain_token(issue_type: &str) -> bool {
+    let normalized = issue_type.trim().to_ascii_lowercase().replace('_', "-");
+    normalized.contains("security")
+        || normalized.contains("secret")
+        || normalized.contains("sink")
+        || normalized.contains("cwe")
+        || normalized.contains("client-server")
+        || normalized.contains("injection")
 }
 
 fn print_explain_human(rule: &RuleDef, guide: &RuleGuide) -> ExitCode {
@@ -716,6 +771,153 @@ pub const DUPES_RULES: &[RuleDef] = &[RuleDef {
     full: "A block of code that appears in multiple locations with identical or near-identical token sequences. Clone detection uses normalized token comparison: identifier names and literals are abstracted away in non-strict modes.",
     docs_path: "explanations/duplication#clone-groups",
 }];
+
+macro_rules! security_catalogue_rule {
+    ($id:literal, $name:literal, $cwe:literal) => {
+        RuleDef {
+            id: concat!("security/", $id),
+            category: "Security",
+            name: $name,
+            short: concat!("Catalogue security candidate for CWE-", $cwe),
+            full: concat!(
+                $name,
+                " is a data-driven `fallow security` tainted-sink catalogue category with CWE-",
+                $cwe,
+                " metadata. fallow reports it as an unverified candidate when a captured sink shape matches this category. Use it to understand or filter `security/",
+                $id,
+                "` findings, then inspect the trace, source, sink, sanitization, and application context before treating it as exploitable."
+            ),
+            docs_path: "cli/security",
+        }
+    };
+}
+
+pub const SECURITY_RULES: &[RuleDef] = &[
+    RuleDef {
+        id: "security/tainted-sink",
+        category: "Security",
+        name: "Tainted Sink Candidates",
+        short: "Syntactic security sink candidates require verification",
+        full: "The `tainted-sink` family covers data-driven `fallow security` catalogue categories. These findings are unverified candidates, not confirmed vulnerabilities. fallow can connect known source signals to captured sink shapes and add CWE metadata, but it does not prove attacker control, missing sanitization, exploitability, or business impact.",
+        docs_path: "cli/security",
+    },
+    RuleDef {
+        id: "security/client-server-leak",
+        category: "Security",
+        name: "Client-server Secret Leak Candidates",
+        short: "Client-bound code reaches a non-public env read",
+        full: "`client-server-leak` reports a candidate when a `use client` module can transitively reach a static non-public `process.env` or `import.meta.env` read. Public-by-convention env prefixes are treated as public. The finding is advisory and still needs bundle, framework, and runtime verification before treating it as a real exposure.",
+        docs_path: "cli/security",
+    },
+    RuleDef {
+        id: "security/hardcoded-secret",
+        category: "Security",
+        name: "Hardcoded Secret Candidates",
+        short: "Provider-prefixed or contextual secret literals require verification",
+        full: "`hardcoded-secret` reports opt-in candidates for provider-prefixed or contextual secret-shaped literals. The category is include-required and only runs when listed in `security.categories.include`. It avoids raw entropy alone, but every result still requires review, secret rotation decisions, and context before acting.",
+        docs_path: "cli/security",
+    },
+    security_catalogue_rule!("dangerous-html", "Dangerous HTML sink", "79"),
+    security_catalogue_rule!(
+        "template-escape-bypass",
+        "Template escape bypass sink",
+        "79"
+    ),
+    security_catalogue_rule!("command-injection", "OS command injection sink", "78"),
+    security_catalogue_rule!("code-injection", "Code injection sink", "94"),
+    security_catalogue_rule!("dynamic-regex", "Dynamic regular expression sink", "1333"),
+    security_catalogue_rule!("redos-regex", "ReDoS regex sink", "1333"),
+    security_catalogue_rule!(
+        "resource-amplification",
+        "Resource amplification sink",
+        "400"
+    ),
+    security_catalogue_rule!("dynamic-module-load", "Dynamic module load sink", "95"),
+    security_catalogue_rule!("sql-injection", "SQL injection sink", "89"),
+    security_catalogue_rule!("ssrf", "Server-side request forgery sink", "918"),
+    security_catalogue_rule!(
+        "secret-to-network",
+        "Secret reaches a network request",
+        "201"
+    ),
+    security_catalogue_rule!("path-traversal", "Path traversal sink", "22"),
+    security_catalogue_rule!(
+        "header-injection",
+        "HTTP response header injection sink",
+        "113"
+    ),
+    security_catalogue_rule!("open-redirect", "Open redirect sink", "601"),
+    security_catalogue_rule!(
+        "postmessage-wildcard-origin",
+        "Wildcard postMessage target origin",
+        "346"
+    ),
+    security_catalogue_rule!("tls-validation-disabled", "TLS validation disabled", "295"),
+    security_catalogue_rule!("cleartext-transport", "Cleartext transport URL", "319"),
+    security_catalogue_rule!(
+        "electron-unsafe-webpreferences",
+        "Unsafe Electron BrowserWindow preferences",
+        "1188"
+    ),
+    security_catalogue_rule!(
+        "world-writable-permission",
+        "World-writable chmod mode",
+        "732"
+    ),
+    security_catalogue_rule!(
+        "insecure-temp-file",
+        "Predictable temporary file path",
+        "377"
+    ),
+    security_catalogue_rule!(
+        "mysql-multiple-statements",
+        "MySQL multiple statements enabled",
+        "89"
+    ),
+    security_catalogue_rule!("permissive-cors", "Permissive CORS policy", "942"),
+    security_catalogue_rule!("insecure-cookie", "Insecure cookie options", "614"),
+    security_catalogue_rule!("mass-assignment", "Mass assignment sink", "915"),
+    security_catalogue_rule!("weak-crypto", "Runtime-selectable crypto algorithm", "327"),
+    security_catalogue_rule!("insecure-randomness", "Insecure randomness sink", "338"),
+    security_catalogue_rule!("jwt-alg-none", "JWT alg none", "347"),
+    security_catalogue_rule!(
+        "jwt-verify-missing-algorithms",
+        "JWT verify missing algorithms allowlist",
+        "347"
+    ),
+    security_catalogue_rule!("deprecated-cipher", "Deprecated cipher constructor", "327"),
+    security_catalogue_rule!(
+        "unsafe-buffer-alloc",
+        "Unsafe Buffer allocation sink",
+        "1188"
+    ),
+    security_catalogue_rule!(
+        "unsafe-deserialization",
+        "Unsafe deserialization sink",
+        "502"
+    ),
+    security_catalogue_rule!(
+        "angular-trusted-html",
+        "Angular bypassSecurityTrust sink",
+        "79"
+    ),
+    security_catalogue_rule!("nextjs-open-redirect", "Next.js open redirect sink", "601"),
+    security_catalogue_rule!("dom-document-write", "DOM document.write sink", "79"),
+    security_catalogue_rule!("jquery-html", "jQuery .html() sink", "79"),
+    security_catalogue_rule!(
+        "route-send-file",
+        "Route file-send path traversal sink",
+        "22"
+    ),
+    security_catalogue_rule!("webview-injection", "WebView injected-script sink", "94"),
+    security_catalogue_rule!("prototype-pollution", "Prototype pollution sink", "1321"),
+    security_catalogue_rule!("zip-slip", "Archive path-traversal (zip-slip) sink", "22"),
+    security_catalogue_rule!("nosql-injection", "NoSQL injection sink", "943"),
+    security_catalogue_rule!("ssti", "Server-side template injection sink", "1336"),
+    security_catalogue_rule!("xxe", "XML external entity (XXE) sink", "611"),
+    security_catalogue_rule!("secret-pii-log", "Secret or PII logged", "532"),
+    security_catalogue_rule!("xpath-injection", "XPath injection sink", "643"),
+];
 
 /// Build the `_meta` object for `fallow dead-code --format json --explain`.
 #[must_use]
@@ -1106,6 +1308,12 @@ mod tests {
     }
 
     #[test]
+    fn rule_by_id_finds_security_rule() {
+        let rule = rule_by_id("security/tainted-sink").unwrap();
+        assert_eq!(rule.name, "Tainted Sink Candidates");
+    }
+
+    #[test]
     fn rule_by_id_returns_none_for_unknown() {
         assert!(rule_by_id("fallow/nonexistent").is_none());
         assert!(rule_by_id("").is_none());
@@ -1144,7 +1352,12 @@ mod tests {
     #[test]
     fn check_rules_no_duplicate_ids() {
         let mut seen = rustc_hash::FxHashSet::default();
-        for rule in CHECK_RULES.iter().chain(HEALTH_RULES).chain(DUPES_RULES) {
+        for rule in CHECK_RULES
+            .iter()
+            .chain(HEALTH_RULES)
+            .chain(DUPES_RULES)
+            .chain(SECURITY_RULES)
+        {
             assert!(seen.insert(rule.id), "duplicate rule id: {}", rule.id);
         }
     }
@@ -1400,6 +1613,49 @@ mod tests {
     }
 
     #[test]
+    fn security_rules_all_have_security_prefix() {
+        for rule in SECURITY_RULES {
+            assert!(
+                rule.id.starts_with("security/"),
+                "security rule {} should start with security/",
+                rule.id
+            );
+        }
+    }
+
+    #[test]
+    fn security_rules_all_have_docs_path() {
+        for rule in SECURITY_RULES {
+            assert_eq!(
+                rule.docs_path, "cli/security",
+                "security rule {} should point at security docs",
+                rule.id
+            );
+        }
+    }
+
+    #[test]
+    fn security_rules_all_have_non_empty_fields() {
+        for rule in SECURITY_RULES {
+            assert!(
+                !rule.name.is_empty(),
+                "security rule {} missing name",
+                rule.id
+            );
+            assert!(
+                !rule.short.is_empty(),
+                "security rule {} missing short description",
+                rule.id
+            );
+            assert!(
+                !rule.full.is_empty(),
+                "security rule {} missing full description",
+                rule.id
+            );
+        }
+    }
+
+    #[test]
     fn check_rules_all_have_non_empty_fields() {
         for rule in CHECK_RULES {
             assert!(!rule.name.is_empty(), "check rule {} missing name", rule.id);
@@ -1430,6 +1686,13 @@ mod tests {
         let url = rule_docs_url(rule);
         assert!(url.starts_with("https://docs.fallow.tools/"));
         assert!(url.contains("duplication"));
+    }
+
+    #[test]
+    fn rule_docs_url_security_rule() {
+        let rule = rule_by_id("security/sql-injection").unwrap();
+        let url = rule_docs_url(rule);
+        assert_eq!(url, "https://docs.fallow.tools/cli/security");
     }
 
     #[test]
@@ -1586,6 +1849,17 @@ mod tests {
     }
 
     #[test]
+    fn rule_by_id_finds_all_security_rules() {
+        for rule in SECURITY_RULES {
+            assert!(
+                rule_by_id(rule.id).is_some(),
+                "rule_by_id should find security rule {}",
+                rule.id
+            );
+        }
+    }
+
+    #[test]
     fn check_rules_count() {
         assert_eq!(CHECK_RULES.len(), 23);
     }
@@ -1598,6 +1872,56 @@ mod tests {
     #[test]
     fn dupes_rules_count() {
         assert_eq!(DUPES_RULES.len(), 1);
+    }
+
+    #[test]
+    fn security_rules_count() {
+        assert_eq!(
+            SECURITY_RULES.len(),
+            matcher_entries_from_security_catalogue().len() + 3
+        );
+    }
+
+    #[test]
+    fn security_rules_cover_every_catalogue_matcher() {
+        let mut rule_ids = rustc_hash::FxHashSet::default();
+        for rule in SECURITY_RULES {
+            rule_ids.insert(rule.id);
+        }
+
+        for matcher in matcher_entries_from_security_catalogue() {
+            let rule_id = format!("security/{}", matcher.id);
+            assert!(
+                rule_ids.contains(rule_id.as_str()),
+                "security matcher {} has no explain rule",
+                matcher.id
+            );
+        }
+    }
+
+    #[test]
+    fn security_catalogue_rules_match_catalogue_title_and_cwe() {
+        for matcher in matcher_entries_from_security_catalogue() {
+            let rule_id = format!("security/{}", matcher.id);
+            let rule = rule_by_id(&rule_id)
+                .unwrap_or_else(|| panic!("security matcher {} has no explain rule", matcher.id));
+            let cwe = format!("CWE-{}", matcher.cwe);
+            assert_eq!(
+                rule.name, matcher.title,
+                "security matcher {} has stale explain title",
+                matcher.id
+            );
+            assert!(
+                rule.short.contains(&cwe),
+                "security matcher {} explain summary does not mention {cwe}",
+                matcher.id
+            );
+            assert!(
+                rule.full.contains(&cwe),
+                "security matcher {} explain rationale does not mention {cwe}",
+                matcher.id
+            );
+        }
     }
 
     /// Every registered rule must declare a category. The PR/MR sticky
@@ -1614,8 +1938,14 @@ mod tests {
             "Health",
             "Architecture",
             "Suppressions",
+            "Security",
         ];
-        for rule in CHECK_RULES.iter().chain(HEALTH_RULES).chain(DUPES_RULES) {
+        for rule in CHECK_RULES
+            .iter()
+            .chain(HEALTH_RULES)
+            .chain(DUPES_RULES)
+            .chain(SECURITY_RULES)
+        {
             assert!(
                 !rule.category.is_empty(),
                 "rule {} has empty category",
@@ -1629,5 +1959,65 @@ mod tests {
                 allowed
             );
         }
+    }
+
+    #[derive(Debug)]
+    struct MatcherEntry {
+        id: &'static str,
+        title: &'static str,
+        cwe: &'static str,
+    }
+
+    fn matcher_entries_from_security_catalogue() -> Vec<MatcherEntry> {
+        let toml = include_str!("../../core/data/security_matchers.toml");
+        let mut entries = Vec::new();
+        let mut in_matcher = false;
+        let mut id = None;
+        let mut title = None;
+        let mut cwe = None;
+
+        for line in toml.lines() {
+            let trimmed = line.trim();
+            if trimmed == "[[matcher]]" {
+                if let (Some(id), Some(title), Some(cwe)) = (id.take(), title.take(), cwe.take()) {
+                    entries.push(MatcherEntry { id, title, cwe });
+                }
+                in_matcher = true;
+                continue;
+            }
+            if trimmed.starts_with("[[") {
+                if let (Some(id), Some(title), Some(cwe)) = (id.take(), title.take(), cwe.take()) {
+                    entries.push(MatcherEntry { id, title, cwe });
+                }
+                in_matcher = false;
+                continue;
+            }
+            if !in_matcher {
+                continue;
+            }
+            if let Some(value) = trimmed
+                .strip_prefix("id = \"")
+                .and_then(|value| value.strip_suffix('"'))
+            {
+                id = Some(value);
+            } else if let Some(value) = trimmed
+                .strip_prefix("title = \"")
+                .and_then(|value| value.strip_suffix('"'))
+            {
+                title = Some(value);
+            } else if let Some(value) = trimmed.strip_prefix("cwe = ") {
+                cwe = Some(value);
+            }
+        }
+
+        if let (Some(id), Some(title), Some(cwe)) = (id.take(), title.take(), cwe.take()) {
+            entries.push(MatcherEntry { id, title, cwe });
+        }
+
+        let mut seen = rustc_hash::FxHashSet::default();
+        entries
+            .into_iter()
+            .filter(|entry| seen.insert(entry.id))
+            .collect()
     }
 }

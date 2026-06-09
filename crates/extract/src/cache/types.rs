@@ -294,7 +294,11 @@ use crate::MemberKind;
 /// Bumped to 140 for issue #1094: JS/TS extraction now records declarative
 /// framework validation boundary controls for security surface output. Pre-140
 /// entries can miss route-level validation control sites until re-extracted.
-pub(super) const CACHE_VERSION: u32 = 140;
+///
+/// Bumped to 141 for issue #1093: `TaintedBinding` gains `source_span_start`
+/// (the byte offset of the source read) so the analyze layer can anchor a taint
+/// trace's source node at the real read line; pre-141 entries lack the offset.
+pub(super) const CACHE_VERSION: u32 = 141;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
