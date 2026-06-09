@@ -1,152 +1,42 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("vscode", () => {
-  class FakeTreeItem {
-    public description: string | undefined;
-    public tooltip: string | undefined;
-    public contextValue: string | undefined;
-    public command: unknown;
-    public iconPath: unknown;
-
-    public constructor(
-      public readonly label: string,
-      public readonly collapsibleState: number
-    ) {}
-  }
-
-  class FakeEventEmitter<T> {
-    public readonly event = vi.fn();
-    public fire = vi.fn((_value?: T) => {});
-    public dispose = vi.fn();
-  }
-
-  class FakeRange {
-    public constructor(
-      public readonly startLine: number,
-      public readonly startCharacter: number,
-      public readonly endLine: number,
-      public readonly endCharacter: number
-    ) {}
-  }
-
-  return {
-    EventEmitter: FakeEventEmitter,
-    Range: FakeRange,
-    ThemeIcon: class {
-      public constructor(public readonly id: string) {}
-    },
-    TreeItem: FakeTreeItem,
-    TreeItemCollapsibleState: {
-      None: 0,
-      Collapsed: 1,
-    },
-    Uri: {
-      file: (fsPath: string) => ({ fsPath }),
-    },
-    workspace: {
-      workspaceFolders: [
-        {
-          uri: {
-            fsPath: "/workspace",
-          },
-        },
-      ],
-    },
-  };
+vi.mock("vscode", async () => {
+  const { createTreeViewVscodeMock } = await import("./vscodeTreeMock.js");
+  return createTreeViewVscodeMock("/workspace");
 });
 
+import { emptyCheck } from "./checkFixtures.js";
+import type { TestRange, TestTreeItem } from "./vscodeTreeMock.js";
 import { DeadCodeTreeProvider } from "../src/treeView.js";
-import type { FallowCheckResult } from "../src/types.js";
+import { OPEN_FILE_COMMAND, type OpenFileCommandArgs } from "../src/openFileCommand.js";
 
-interface TestTreeItem {
-  readonly label: string;
-  readonly description?: string;
-  readonly tooltip?: string;
-  readonly command?: {
-    readonly command: string;
-    readonly arguments: ReadonlyArray<unknown>;
-  };
-}
-
-interface TestRange {
-  readonly startLine: number;
-  readonly startCharacter: number;
-  readonly endLine: number;
-  readonly endCharacter: number;
-}
-
-const emptyCheck = (): FallowCheckResult => ({
-  schema_version: 7,
-  version: "0.0.0-test",
-  elapsed_ms: 0,
-  total_issues: 0,
-  unused_files: [],
-  unused_exports: [],
-  unused_types: [],
-  private_type_leaks: [],
-  unused_dependencies: [],
-  unused_dev_dependencies: [],
-  unused_optional_dependencies: [],
-  unused_enum_members: [],
-  unused_class_members: [],
-  unresolved_imports: [],
-  unlisted_dependencies: [],
-  duplicate_exports: [],
-  type_only_dependencies: [],
-  test_only_dependencies: [],
-  circular_dependencies: [],
-  boundary_violations: [],
-  stale_suppressions: [],
-  summary: {
-    total_issues: 0,
-    unused_files: 0,
-    unused_exports: 0,
-    unused_types: 0,
-    private_type_leaks: 0,
-    unused_dependencies: 0,
-    unused_enum_members: 0,
-    unused_class_members: 0,
-    unresolved_imports: 0,
-    unlisted_dependencies: 0,
-    duplicate_exports: 0,
-    type_only_dependencies: 0,
-    test_only_dependencies: 0,
-    circular_dependencies: 0,
-    boundary_violations: 0,
-    stale_suppressions: 0,
-    unused_catalog_entries: 0,
-    empty_catalog_groups: 0,
-    unresolved_catalog_references: 0,
-    unused_dependency_overrides: 0,
-    misconfigured_dependency_overrides: 0,
-  },
-});
-
-const findCategory = (
-  categories: ReadonlyArray<TestTreeItem>,
-  label: string
-): TestTreeItem => {
+const findCategory = (categories: ReadonlyArray<TestTreeItem>, label: string): TestTreeItem => {
   const category = categories.find((item) => item.label === label);
   expect(category).toBeDefined();
   return category as TestTreeItem;
 };
 
-const firstIssue = (
-  provider: DeadCodeTreeProvider,
-  category: TestTreeItem
-): TestTreeItem => {
+const firstIssue = (provider: DeadCodeTreeProvider, category: TestTreeItem): TestTreeItem => {
   const issues = provider.getChildren(category as never) as TestTreeItem[];
   expect(issues).toHaveLength(1);
   return issues[0] as TestTreeItem;
 };
 
+const commandArgsOf = (item: TestTreeItem): OpenFileCommandArgs => {
+  expect(item.command?.command).toBe(OPEN_FILE_COMMAND);
+  const args = item.command?.arguments[0] as OpenFileCommandArgs | undefined;
+  expect(args).toBeDefined();
+  return args as OpenFileCommandArgs;
+};
+
 const selectionOf = (item: TestTreeItem): TestRange => {
-  expect(item.command?.command).toBe("vscode.open");
-  const selection = (
-    item.command?.arguments[1] as { selection: TestRange } | undefined
-  )?.selection;
-  expect(selection).toBeDefined();
-  return selection as TestRange;
+  const args = commandArgsOf(item);
+  return {
+    startLine: Math.max(0, args.line - 1),
+    startCharacter: Math.max(0, args.col),
+    endLine: Math.max(0, (args.endLine ?? args.line) - 1),
+    endCharacter: Math.max(0, args.endCol ?? args.col),
+  };
 };
 
 describe("DeadCodeTreeProvider", () => {
@@ -200,21 +90,18 @@ describe("DeadCodeTreeProvider", () => {
     });
 
     const categories = provider.getChildren() as TestTreeItem[];
-    const privateLeak = firstIssue(
-      provider,
-      findCategory(categories, "Private Type Leaks (1)")
-    );
+    const privateLeak = firstIssue(provider, findCategory(categories, "Private Type Leaks (1)"));
     const testOnlyDep = firstIssue(
       provider,
-      findCategory(categories, "Test-Only Dependencies (1)")
+      findCategory(categories, "Test-Only Dependencies (1)"),
     );
     const boundaryViolation = firstIssue(
       provider,
-      findCategory(categories, "Boundary Violations (1)")
+      findCategory(categories, "Boundary Violations (1)"),
     );
     const staleSuppression = firstIssue(
       provider,
-      findCategory(categories, "Stale Suppressions (1)")
+      findCategory(categories, "Stale Suppressions (1)"),
     );
 
     expect(privateLeak.label).toBe("makeWidget -> WidgetState");
@@ -244,6 +131,28 @@ describe("DeadCodeTreeProvider", () => {
       startLine: 4,
       startCharacter: 2,
     });
+  });
+
+  it("keeps bracketed dynamic route paths decoded in open commands", () => {
+    const provider = new DeadCodeTreeProvider();
+    provider.update({
+      ...emptyCheck(),
+      unused_files: [
+        {
+          path: "src/app/[productId]/page.tsx",
+          actions: [],
+        },
+      ],
+    });
+
+    const categories = provider.getChildren() as TestTreeItem[];
+    const dynamicRoute = firstIssue(provider, findCategory(categories, "Unused Files (1)"));
+    const args = commandArgsOf(dynamicRoute);
+
+    expect(dynamicRoute.description).toBe("src/app/[productId]/page.tsx:1");
+    expect(args.absolutePath).toBe("/workspace/src/app/[productId]/page.tsx");
+    expect(args.absolutePath).not.toContain("%5B");
+    expect(args.absolutePath).not.toContain("%5D");
   });
 
   it("labels stale suppressions by origin variant", () => {

@@ -1,79 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("vscode", () => {
-  class FakeTreeItem {
-    public description: string | undefined;
-    public tooltip: string | undefined;
-    public contextValue: string | undefined;
-    public command: unknown;
-    public iconPath: unknown;
-
-    public constructor(
-      public readonly label: string,
-      public readonly collapsibleState: number
-    ) {}
-  }
-
-  class FakeEventEmitter<T> {
-    public readonly event = vi.fn();
-    public fire = vi.fn((_value?: T) => {});
-    public dispose = vi.fn();
-  }
-
-  class FakeRange {
-    public constructor(
-      public readonly startLine: number,
-      public readonly startCharacter: number,
-      public readonly endLine: number,
-      public readonly endCharacter: number
-    ) {}
-  }
-
-  return {
-    EventEmitter: FakeEventEmitter,
-    Range: FakeRange,
-    ThemeIcon: class {
-      public constructor(public readonly id: string) {}
-    },
-    TreeItem: FakeTreeItem,
-    TreeItemCollapsibleState: {
-      None: 0,
-      Collapsed: 1,
-    },
-    Uri: {
-      file: (fsPath: string) => ({ fsPath }),
-    },
-    workspace: {
-      workspaceFolders: [
-        {
-          uri: {
-            fsPath: "/workspace",
-          },
-        },
-      ],
-    },
-  };
+vi.mock("vscode", async () => {
+  const { createTreeViewVscodeMock } = await import("./vscodeTreeMock.js");
+  return createTreeViewVscodeMock("/workspace");
 });
 
+import type { TestRange, TestTreeItem } from "./vscodeTreeMock.js";
 import { SecurityTreeProvider } from "../src/securityTreeView.js";
+import { OPEN_FILE_COMMAND, type OpenFileCommandArgs } from "../src/openFileCommand.js";
 import type { SecurityFinding, SecurityOutput } from "../src/types.js";
-
-interface TestTreeItem {
-  readonly label: string;
-  readonly description?: string;
-  readonly tooltip?: string;
-  readonly iconPath?: { readonly id: string };
-  readonly collapsibleState: number;
-  readonly command?: {
-    readonly command: string;
-    readonly arguments: ReadonlyArray<unknown>;
-  };
-}
-
-interface TestRange {
-  readonly startLine: number;
-  readonly startCharacter: number;
-}
 
 interface FakeBadge {
   readonly value: number;
@@ -105,7 +40,9 @@ const finding = (input: SecurityFindingInput): SecurityFinding => ({
 
 const result = (
   findings: ReadonlyArray<SecurityFindingInput>,
-  overrides: Partial<Pick<SecurityOutput, "unresolved_edge_files" | "unresolved_callee_sites">> = {},
+  overrides: Partial<
+    Pick<SecurityOutput, "unresolved_edge_files" | "unresolved_callee_sites">
+  > = {},
 ): SecurityOutput => ({
   schema_version: "1",
   security_findings: findings.map(finding),
@@ -114,10 +51,17 @@ const result = (
 });
 
 const selectionOf = (item: TestTreeItem): TestRange => {
-  expect(item.command?.command).toBe("vscode.open");
-  const selection = (item.command?.arguments[1] as { selection: TestRange } | undefined)?.selection;
-  expect(selection).toBeDefined();
-  return selection as TestRange;
+  expect(item.command?.command).toBe(OPEN_FILE_COMMAND);
+  const args = item.command?.arguments[0] as OpenFileCommandArgs | undefined;
+  expect(args).toBeDefined();
+  const line = Math.max(0, (args as OpenFileCommandArgs).line - 1);
+  const character = Math.max(0, (args as OpenFileCommandArgs).col);
+  return {
+    startLine: line,
+    startCharacter: character,
+    endLine: line,
+    endCharacter: character,
+  };
 };
 
 describe("SecurityTreeProvider", () => {
@@ -148,7 +92,7 @@ describe("SecurityTreeProvider", () => {
           trace: [],
           actions: [],
         },
-      ])
+      ]),
     );
 
     const groups = provider.getChildren() as TestTreeItem[];
@@ -192,7 +136,7 @@ describe("SecurityTreeProvider", () => {
           ],
           actions: [],
         },
-      ])
+      ]),
     );
 
     const groups = provider.getChildren() as TestTreeItem[];
@@ -305,7 +249,7 @@ describe("SecurityTreeProvider", () => {
           trace: [],
           actions: [],
         },
-      ])
+      ]),
     );
 
     expect(view.badge).toMatchObject({ value: 2 });

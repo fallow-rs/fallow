@@ -3,6 +3,7 @@
 // VS Code injects this module into the extension host at runtime.
 // fallow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
+import { openFileCommand } from "./openFileCommand.js";
 import { countSecurityFindings, hopRoleLabel, securityFindingLabel } from "./security-utils.js";
 import { middleElidePath, resolveFilePath as resolveFilePathPure } from "./treeView-utils.js";
 import type { SecurityFinding, SecurityOutput, TraceHop } from "./types.js";
@@ -16,17 +17,6 @@ const resolveFilePath = (filePath: string | undefined): { absolute: string; rela
  * candidate pending verification, never a confirmed vulnerability.
  */
 const CANDIDATE_TOOLTIP_PREFIX = "UNVERIFIED CANDIDATE - verify before acting";
-
-const openCommand = (absolute: string, line: number, col: number): vscode.Command => ({
-  command: "vscode.open",
-  title: "Open File",
-  arguments: [
-    vscode.Uri.file(absolute),
-    {
-      selection: new vscode.Range(Math.max(0, line - 1), col, Math.max(0, line - 1), col),
-    },
-  ],
-});
 
 const reachabilityLine = (finding: SecurityFinding): string | null => {
   const reach = finding.reachability;
@@ -96,7 +86,7 @@ class SecurityHopItem extends vscode.TreeItem {
     ].join("\n");
     this.contextValue = "securityHop";
     this.iconPath = new vscode.ThemeIcon("arrow-small-right");
-    this.command = openCommand(absolute, hop.line, hop.col);
+    this.command = openFileCommand(absolute, hop.line, hop.col);
   }
 }
 
@@ -153,7 +143,7 @@ class SecurityFindingItem extends vscode.TreeItem {
     tooltipLines.push(...untrustedSourceTraceLines(finding));
     this.tooltip = tooltipLines.join("\n");
 
-    this.command = openCommand(absolute, finding.line, finding.col);
+    this.command = openFileCommand(absolute, finding.line, finding.col);
   }
 }
 

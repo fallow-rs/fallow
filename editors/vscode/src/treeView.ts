@@ -10,6 +10,7 @@ import {
   resolveFilePath as resolveFilePathPure,
   sortCloneGroupsBySize,
 } from "./treeView-utils.js";
+import { openFileCommand } from "./openFileCommand.js";
 import type {
   CloneGroupFinding,
   FallowCheckResult,
@@ -120,16 +121,7 @@ class IssueItem extends vscode.TreeItem {
     this.tooltip = `${label}\n${absolute}:${line}:${col}`;
     this.contextValue = "issue";
 
-    this.command = {
-      command: "vscode.open",
-      title: "Open File",
-      arguments: [
-        vscode.Uri.file(absolute),
-        {
-          selection: new vscode.Range(Math.max(0, line - 1), col, Math.max(0, line - 1), col),
-        },
-      ],
-    };
+    this.command = openFileCommand(absolute, line, col);
 
     this.iconPath = new vscode.ThemeIcon(ISSUE_ICONS[category] ?? "warning");
   }
@@ -523,16 +515,7 @@ class CloneInstanceItem extends vscode.TreeItem {
     this.tooltip = `${absolute}:${startLine}-${endLine}`;
     this.contextValue = "cloneInstance";
 
-    this.command = {
-      command: "vscode.open",
-      title: "Open File",
-      arguments: [
-        vscode.Uri.file(absolute),
-        {
-          selection: new vscode.Range(Math.max(0, startLine - 1), 0, Math.max(0, endLine - 1), 0),
-        },
-      ],
-    };
+    this.command = openFileCommand(absolute, startLine, 0, endLine, 0);
 
     this.iconPath = new vscode.ThemeIcon("copy");
   }

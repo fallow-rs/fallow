@@ -18,6 +18,7 @@ import {
 import { getHealthTopFindings } from "./config.js";
 import { HEALTH_SECTION_ICONS, HEALTH_SECTION_LABELS } from "./health-labels.js";
 import type { HealthSection } from "./health-labels.js";
+import { openFileCommand } from "./openFileCommand.js";
 import { middleElidePath, resolveFilePath as resolveFilePathPure } from "./treeView-utils.js";
 import type { HealthReport } from "./types.js";
 
@@ -87,16 +88,7 @@ class HealthLeafItem extends vscode.TreeItem {
 
     if (options.open) {
       const { absolute } = resolveFilePath(options.open.path);
-      const line = Math.max(0, options.open.line - 1);
-      const col = Math.max(0, options.open.col);
-      this.command = {
-        command: "vscode.open",
-        title: "Open File",
-        arguments: [
-          vscode.Uri.file(absolute),
-          { selection: new vscode.Range(line, col, line, col) },
-        ],
-      };
+      this.command = openFileCommand(absolute, options.open.line, options.open.col);
     }
   }
 }

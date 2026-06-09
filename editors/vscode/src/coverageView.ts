@@ -9,6 +9,7 @@ import {
   sortHotPaths,
   splitCleanupCandidates,
 } from "./coverage-utils.js";
+import { openFileCommand } from "./openFileCommand.js";
 import { middleElidePath, resolveFilePath as resolveFilePathPure } from "./treeView-utils.js";
 import type {
   RuntimeCoverageFinding,
@@ -18,16 +19,6 @@ import type {
 
 const resolveFilePath = (filePath: string | undefined) =>
   resolveFilePathPure(filePath, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
-
-/** Open-at-line command shared by every leaf, 1-indexed line in, 0-indexed out. */
-const openAtLine = (absolute: string, line: number): vscode.Command => ({
-  command: "vscode.open",
-  title: "Open File",
-  arguments: [
-    vscode.Uri.file(absolute),
-    { selection: new vscode.Range(Math.max(0, line - 1), 0, Math.max(0, line - 1), 0) },
-  ],
-});
 
 class CoverageGroupItem extends vscode.TreeItem {
   constructor(
@@ -51,7 +42,7 @@ class CoverageLeafItem extends vscode.TreeItem {
     this.tooltip = tooltip;
     this.contextValue = "coverageItem";
     this.iconPath = new vscode.ThemeIcon(icon);
-    this.command = openAtLine(absolute, line);
+    this.command = openFileCommand(absolute, line);
   }
 }
 

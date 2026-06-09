@@ -80,6 +80,7 @@ import {
   setAuditIdle,
   updateAuditStatusBar,
 } from "./auditStatusBar.js";
+import { OPEN_FILE_COMMAND, openFileCommandHandler } from "./openFileCommand.js";
 import type { AnalysisCompleteParams } from "./statusBar.js";
 import { DeadCodeTreeProvider, DuplicatesTreeProvider } from "./treeView.js";
 import {
@@ -871,6 +872,10 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
 
   // Fallback command for Code Lens items with 0 references (display-only)
   context.subscriptions.push(vscode.commands.registerCommand("fallow.noop", () => {}));
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(OPEN_FILE_COMMAND, openFileCommandHandler),
+  );
 
   // The "N references" Code Lens routes here instead of calling the built-in
   // `editor.action.showReferences` directly: that built-in validates its args
