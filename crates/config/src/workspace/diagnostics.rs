@@ -1,12 +1,11 @@
 //! Workspace and source-discovery diagnostics.
 //!
 //! Surfaces malformed `package.json`, unreachable glob matches, missing
-//! tsconfig references, undeclared workspaces, and source files skipped for
-//! exceeding the per-file size limit ([`WorkspaceDiagnosticKind::SkippedLargeFile`],
-//! issue #1086) as typed [`WorkspaceDiagnostic`] values. Each diagnostic also
-//! emits a deduplicated `tracing::warn!` so users running fallow with default
-//! tracing filters see the cause of "fallow doesn't see my package" or "fallow
-//! ate all my memory."
+//! tsconfig references, undeclared workspaces, and source files skipped during
+//! source discovery as typed [`WorkspaceDiagnostic`] values. Each diagnostic
+//! also emits a deduplicated `tracing::warn!` so users running fallow with
+//! default tracing filters see the cause of "fallow doesn't see my package" or
+//! "fallow ate all my memory."
 //!
 //! Repeated `GlobMatchedNoPackageJson` diagnostics are aggregated by glob
 //! pattern at emission time so a wide glob matching hundreds of package-less
@@ -72,6 +71,15 @@ pub enum WorkspaceDiagnosticKind {
         /// On-disk size of the skipped file in bytes.
         size_bytes: u64,
     },
+    /// A large JavaScript bundle was skipped at discovery because it appears to
+    /// be minified generated output. The file is never parsed or analyzed,
+    /// guarding against sub-limit bundles that can still create very large ASTs
+    /// and extraction payloads (issue #1086). Use `--max-file-size 0` when the
+    /// bundled file really should be analyzed.
+    SkippedMinifiedFile {
+        /// On-disk size of the skipped file in bytes.
+        size_bytes: u64,
+    },
 }
 
 impl WorkspaceDiagnosticKind {
@@ -85,6 +93,7 @@ impl WorkspaceDiagnosticKind {
             Self::MalformedTsconfig { .. } => "malformed-tsconfig",
             Self::TsconfigReferenceDirMissing => "tsconfig-reference-dir-missing",
             Self::SkippedLargeFile { .. } => "skipped-large-file",
+            Self::SkippedMinifiedFile { .. } => "skipped-minified-file",
         }
     }
 
@@ -98,7 +107,10 @@ impl WorkspaceDiagnosticKind {
     /// #1086).
     #[must_use]
     pub const fn is_source_discovery(&self) -> bool {
-        matches!(self, Self::SkippedLargeFile { .. })
+        matches!(
+            self,
+            Self::SkippedLargeFile { .. } | Self::SkippedMinifiedFile { .. }
+        )
     }
 }
 
@@ -228,6 +240,13 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
              Its imports and exports are not analyzed. Raise the limit with \
              --max-file-size <MB> (or FALLOW_MAX_FILE_SIZE), or add '{display}' \
              to ignorePatterns.",
+            size = format_size_mb(*size_bytes)
+        ),
+        WorkspaceDiagnosticKind::SkippedMinifiedFile { size_bytes } => format!(
+            "Skipped '{display}' ({size}): appears to be minified generated JavaScript. \
+             Its imports and exports are not analyzed. Add '{display}' to ignorePatterns, \
+             rename it with a .min.js suffix, or use --max-file-size 0 if this file \
+             should be analyzed.",
             size = format_size_mb(*size_bytes)
         ),
     }
@@ -676,6 +695,34 @@ mod tests {
         assert!(
             diag.message.contains("--max-file-size"),
             "message names the override flag: {}",
+            diag.message
+        );
+    }
+
+    #[test]
+    fn skipped_minified_file_diagnostic_id_and_message() {
+        let root = Path::new("/project");
+        let diag = WorkspaceDiagnostic::new(
+            root,
+            root.join("src/assets/index-abc123.js"),
+            WorkspaceDiagnosticKind::SkippedMinifiedFile {
+                size_bytes: 2 * 1024 * 1024,
+            },
+        );
+        assert_eq!(diag.kind.id(), "skipped-minified-file");
+        assert!(
+            diag.message.contains("src/assets/index-abc123.js"),
+            "message names the project-relative path: {}",
+            diag.message
+        );
+        assert!(
+            diag.message.contains("2.0 MB"),
+            "message reports the size: {}",
+            diag.message
+        );
+        assert!(
+            diag.message.contains("--max-file-size 0"),
+            "message names the opt-out: {}",
             diag.message
         );
     }

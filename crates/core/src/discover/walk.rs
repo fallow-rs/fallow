@@ -47,6 +47,18 @@ const LARGE_FILE_NOTE_BYTES: u64 = 4 * 1024 * 1024;
 /// named files to plausible memory contributors.
 const NOTE_FILE_FLOOR_BYTES: u64 = 256 * 1024;
 
+/// Minimum size for content-shape based minified-bundle skipping. Smaller
+/// one-line files can be hand-written utilities, while multi-MB one-line JS is
+/// generated output in practice.
+const MINIFIED_FILE_SKIP_BYTES: u64 = 1024 * 1024;
+
+/// Number of bytes inspected when deciding whether a large JS file is minified.
+const MINIFIED_SAMPLE_BYTES: usize = 256 * 1024;
+
+/// A single line this long in a multi-MB JS file is treated as generated
+/// minified output. This avoids parsing assets that can expand to huge ASTs.
+const MINIFIED_LONG_LINE_BYTES: usize = 128 * 1024;
+
 /// Whether a path is a TypeScript declaration file (`.d.ts`/`.d.mts`/`.d.cts`).
 /// Declaration files are exempt from the per-file size skip because they are
 /// reachability roots for global types: skipping a large `auto-imports.d.ts`
@@ -54,6 +66,49 @@ const NOTE_FILE_FLOOR_BYTES: u64 = 256 * 1024;
 fn is_declaration_file(path: &Path) -> bool {
     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
     name.ends_with(".d.ts") || name.ends_with(".d.mts") || name.ends_with(".d.cts")
+}
+
+fn is_plain_js_file(path: &Path) -> bool {
+    matches!(
+        path.extension().and_then(|ext| ext.to_str()),
+        Some("js" | "mjs" | "cjs")
+    )
+}
+
+fn has_minified_line_shape(path: &Path) -> bool {
+    use std::io::Read;
+
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let mut sample = vec![0; MINIFIED_SAMPLE_BYTES];
+    let Ok(len) = file.read(&mut sample) else {
+        return false;
+    };
+    sample.truncate(len);
+    if sample.is_empty() {
+        return false;
+    }
+
+    let mut current_line = 0usize;
+    for byte in sample {
+        if byte == b'\n' || byte == b'\r' {
+            current_line = 0;
+            continue;
+        }
+        current_line += 1;
+        if current_line >= MINIFIED_LONG_LINE_BYTES {
+            return true;
+        }
+    }
+    false
+}
+
+fn is_probably_minified_generated_js(path: &Path, size_bytes: u64) -> bool {
+    size_bytes >= MINIFIED_FILE_SKIP_BYTES
+        && is_plain_js_file(path)
+        && !is_declaration_file(path)
+        && has_minified_line_shape(path)
 }
 
 /// Render a byte count as a megabyte figure with one decimal place.
@@ -103,6 +158,19 @@ fn partition_by_size(
         .partition(|(path, size)| *size <= limit || is_declaration_file(path))
 }
 
+/// Split discovered `(path, size)` pairs into files kept for parsing and files
+/// skipped because they look like generated minified JavaScript.
+fn partition_minified_generated_js(
+    raw: Vec<SizedFile>,
+    max_file_size_bytes: Option<u64>,
+) -> (Vec<SizedFile>, Vec<SizedFile>) {
+    if max_file_size_bytes.is_none() {
+        return (raw, Vec::new());
+    }
+    raw.into_iter()
+        .partition(|(path, size)| !is_probably_minified_generated_js(path, *size))
+}
+
 /// Record the skipped files in the workspace-diagnostics registry (so they
 /// surface in `workspace_diagnostics[]` JSON) and emit one aggregated
 /// `tracing::warn!` so a human running `fallow` sees what was dropped. Mirrors
@@ -140,6 +208,45 @@ fn report_skipped_large_files(config: &ResolvedConfig, skipped: &[SizedFile]) {
         tracing::warn!(
             "fallow: skipped {count} {noun} over the max file size limit ({examples}). \
              Raise the limit with --max-file-size <MB> (or FALLOW_MAX_FILE_SIZE), or add them to ignorePatterns."
+        );
+    }
+}
+
+/// Record generated minified JS files skipped before parsing.
+fn report_skipped_minified_files(config: &ResolvedConfig, skipped: &[SizedFile]) {
+    if skipped.is_empty() {
+        return;
+    }
+    let diagnostics: Vec<WorkspaceDiagnostic> = skipped
+        .iter()
+        .map(|(path, size_bytes)| {
+            WorkspaceDiagnostic::new(
+                &config.root,
+                path.clone(),
+                WorkspaceDiagnosticKind::SkippedMinifiedFile {
+                    size_bytes: *size_bytes,
+                },
+            )
+        })
+        .collect();
+    fallow_config::append_workspace_diagnostics(&config.root, diagnostics);
+
+    let mut sorted: Vec<SizedFile> = skipped.to_vec();
+    sorted.sort_unstable_by_key(|f| std::cmp::Reverse(f.1));
+    let count = skipped.len();
+    if !config.quiet
+        && should_emit_note_once(format!(
+            "minified::{}::{count}::{}",
+            config.root.display(),
+            sorted.first().map_or(0, |f| f.1)
+        ))
+    {
+        let examples = summarize_examples(&config.root, &sorted);
+        let noun = if count == 1 { "file" } else { "files" };
+        let pronoun = if count == 1 { "it" } else { "them" };
+        tracing::warn!(
+            "fallow: skipped {count} minified generated JS {noun} ({examples}). \
+             Add {pronoun} to ignorePatterns, rename {pronoun} with a .min.js suffix, or use --max-file-size 0 to analyze {pronoun}."
         );
     }
 }
@@ -441,6 +548,9 @@ pub fn discover_files_with_additional_hidden_dirs(
     fallow_config::clear_source_discovery_diagnostics(&config.root);
     let (kept, skipped) = partition_by_size(raw, config.max_file_size_bytes);
     report_skipped_large_files(config, &skipped);
+    let (kept, skipped_minified) =
+        partition_minified_generated_js(kept, config.max_file_size_bytes);
+    report_skipped_minified_files(config, &skipped_minified);
 
     let files: Vec<DiscoveredFile> = kept
         .into_iter()
@@ -1302,6 +1412,76 @@ mod tests {
                         if size_bytes == 5_000
                 ),
                 "the recorded diagnostic carries the on-disk byte size"
+            );
+        }
+
+        #[test]
+        fn skips_large_one_line_js_as_minified_generated_output() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            let src = dir.path().join("src");
+            std::fs::create_dir_all(&src).unwrap();
+            let asset = src.join("index-abc123.js");
+            std::fs::write(&asset, "x".repeat(MINIFIED_FILE_SKIP_BYTES as usize + 1)).unwrap();
+
+            let config = make_config(dir.path().to_path_buf(), false);
+            let files = discover_files(&config);
+            let names = file_names(&files, dir.path());
+
+            assert!(
+                !names.contains(&"src/index-abc123.js".to_string()),
+                "large one-line JS assets should be skipped before parsing"
+            );
+
+            let diagnostics = fallow_config::workspace_diagnostics_for(dir.path());
+            assert!(
+                diagnostics.iter().any(|diag| {
+                    diag.path.ends_with("src/index-abc123.js")
+                        && matches!(
+                            diag.kind,
+                            fallow_config::WorkspaceDiagnosticKind::SkippedMinifiedFile { .. }
+                        )
+                }),
+                "the skipped minified asset is recorded for JSON output: {diagnostics:?}"
+            );
+        }
+
+        #[test]
+        fn unlimited_size_keeps_large_one_line_js() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            let src = dir.path().join("src");
+            std::fs::create_dir_all(&src).unwrap();
+            let asset = src.join("index-abc123.js");
+            std::fs::write(&asset, "x".repeat(MINIFIED_FILE_SKIP_BYTES as usize + 1)).unwrap();
+
+            let config = make_config_with_max_file_size(dir.path().to_path_buf(), None);
+            let files = discover_files(&config);
+            let names = file_names(&files, dir.path());
+
+            assert!(
+                names.contains(&"src/index-abc123.js".to_string()),
+                "--max-file-size 0 should opt out of generated JS skipping"
+            );
+        }
+
+        #[test]
+        fn keeps_large_multiline_js() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            let src = dir.path().join("src");
+            std::fs::create_dir_all(&src).unwrap();
+            let asset = src.join("handwritten.js");
+            let mut content = String::new();
+            while content.len() <= MINIFIED_FILE_SKIP_BYTES as usize + 1 {
+                content.push_str("export const value = 1;\n");
+            }
+            std::fs::write(&asset, content).unwrap();
+
+            let config = make_config(dir.path().to_path_buf(), false);
+            let files = discover_files(&config);
+            let names = file_names(&files, dir.path());
+
+            assert!(
+                names.contains(&"src/handwritten.js".to_string()),
+                "large multiline JS should not be treated as a generated minified asset"
             );
         }
     }

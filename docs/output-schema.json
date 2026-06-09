@@ -9199,6 +9199,24 @@
             "size_bytes"
           ],
           "description": "A source file was skipped at discovery because it exceeds the configured\nper-file size limit (`--max-file-size` / `FALLOW_MAX_FILE_SIZE`, default\n5 MB). The file is never read, parsed, or analyzed, guarding against the\nout-of-memory blowup a single multi-MB generated/vendored/bundled file\ncauses (issue #1086). Surfaced by source discovery, not workspace\ndiscovery, but shares this channel so the skip is visible in\n`workspace_diagnostics[]` on `fallow dead-code / dupes / health` JSON."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "size_bytes": {
+              "type": "integer",
+              "description": "On-disk size of the skipped file in bytes."
+            },
+            "kind": {
+              "type": "string",
+              "const": "skipped-minified-file"
+            }
+          },
+          "required": [
+            "kind",
+            "size_bytes"
+          ],
+          "description": "A large JavaScript bundle was skipped at discovery because it appears to\nbe minified generated output. The file is never parsed or analyzed,\nguarding against sub-limit bundles that can still create very large ASTs\nand extraction payloads (issue #1086). Use `--max-file-size 0` when the\nbundled file really should be analyzed."
         }
       ],
       "description": "A diagnostic about a workspace-discovery candidate.\n\nThe `message` field is a human-readable rendering derived from `kind`. It\nalways ends with a concrete next step (\"fix the JSON syntax\", \"remove from\n`workspaces`\", \"add to `ignorePatterns`\") so first-time users have a path\nforward."

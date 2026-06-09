@@ -328,6 +328,12 @@ kind: "tsconfig-reference-dir-missing"
  */
 size_bytes: number
 kind: "skipped-large-file"
+} | {
+/**
+ * On-disk size of the skipped file in bytes.
+ */
+size_bytes: number
+kind: "skipped-minified-file"
 })
 /**
  * Discriminant for [`CloneGroupAction::kind`]. Mirrors the action types
