@@ -949,6 +949,7 @@ mod tests {
         SecurityReachability {
             reachable_from_entry,
             reachable_from_untrusted_source,
+            taint_confidence: None,
             untrusted_source_hop_count: None,
             untrusted_source_trace: vec![],
             blast_radius: 1,

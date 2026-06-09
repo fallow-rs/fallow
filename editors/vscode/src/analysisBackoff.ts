@@ -59,6 +59,11 @@ export class AnalysisFailureBackoff {
     return paused ? { failures, shouldNotify } : null;
   }
 
+  // fallow-ignore-next-line unused-class-member
+  readonly recordSuccess = (key: string): void => {
+    this.reset(key);
+  };
+
   reset(key?: string): void {
     if (key === undefined || this.entry?.key === key) {
       this.entry = null;
