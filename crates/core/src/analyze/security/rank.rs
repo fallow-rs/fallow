@@ -20,8 +20,9 @@ use fallow_types::output_dead_code::{UnusedExportFinding, UnusedFileFinding};
 use fallow_types::results::{
     SecurityAttackSurfaceEntry, SecurityCandidateBoundary, SecurityDeadCodeContext,
     SecurityDeadCodeKind, SecurityDefensiveBoundary, SecurityDefensiveControl, SecurityFinding,
-    SecurityFindingKind, SecurityReachability, SecurityTaintFlow, SecurityZoneCrossing,
-    TaintEndpoint, TaintPath, TraceHop, TraceHopRole,
+    SecurityFindingKind, SecurityReachability, SecurityRuntimeState, SecuritySeverity,
+    SecurityTaintFlow, SecurityZoneCrossing, TaintConfidence, TaintEndpoint, TaintPath, TraceHop,
+    TraceHopRole,
 };
 
 use crate::discover::FileId;
@@ -233,6 +234,7 @@ pub fn rank_security_findings(
         enrich_candidate(finding, boundary_crossings.get(&finding.path));
         finding.attack_surface =
             build_attack_surface(finding, &modules_by_path, line_offsets_by_file);
+        finding.severity = derive_security_severity(finding);
     }
 
     findings.sort_by(|a, b| {
@@ -272,6 +274,45 @@ pub fn rank_security_findings(
     });
 }
 
+/// Derive the verification-priority tier from existing security signals. This is
+/// ranking only, not a vulnerability verdict.
+#[must_use]
+pub fn derive_security_severity(finding: &SecurityFinding) -> SecuritySeverity {
+    if finding
+        .runtime
+        .as_ref()
+        .is_some_and(|runtime| runtime.state == SecurityRuntimeState::RuntimeHot)
+        || finding.candidate.boundary.client_server
+        || finding
+            .candidate
+            .boundary
+            .architecture_zone
+            .as_ref()
+            .is_some()
+        || finding
+            .reachability
+            .as_ref()
+            .is_some_and(|reach| reach.crosses_boundary)
+        || finding
+            .reachability
+            .as_ref()
+            .is_some_and(|reach| reach.reachable_from_entry && finding.source_backed)
+    {
+        return SecuritySeverity::High;
+    }
+
+    if finding.source_backed
+        || finding
+            .reachability
+            .as_ref()
+            .is_some_and(|reach| reach.reachable_from_untrusted_source)
+    {
+        return SecuritySeverity::Medium;
+    }
+
+    SecuritySeverity::Low
+}
+
 /// Compute the reachability signal for a single anchor module.
 fn compute_reachability(
     graph: &ModuleGraph,
@@ -290,6 +331,17 @@ fn compute_reachability(
     SecurityReachability {
         reachable_from_entry,
         reachable_from_untrusted_source: source_trace.is_some(),
+        // Tier the source association (issue #1093): arg-level when the sink
+        // argument traces to a same-module source read (`source_backed`),
+        // module-level when only the import graph connects a source module.
+        // Present exactly when reachable_from_untrusted_source is true.
+        taint_confidence: source_trace.as_ref().map(|_| {
+            if finding.source_backed {
+                TaintConfidence::ArgLevel
+            } else {
+                TaintConfidence::ModuleLevel
+            }
+        }),
         untrusted_source_hop_count: source_trace.as_ref().map(|source| source.hop_count),
         untrusted_source_trace: source_trace.map_or_else(Vec::new, |source| source.trace),
         blast_radius: transitive_dependent_count(graph, file_id),
@@ -517,14 +569,25 @@ impl UntrustedSourceIndex {
         let hop_count = u32::try_from(ids.len().saturating_sub(1)).unwrap_or(u32::MAX);
 
         if source_id == sink_id {
+            // Arg-level (source_backed): anchor the source node at the real
+            // source read and label it `UntrustedSource` (a specific read is
+            // implicated). Module-level (source elsewhere in the same file, no
+            // arg trace): keep line 1 and label `ModuleSource` so the node is
+            // never read as a proven value path (issue #1093). `source_read` is
+            // Some exactly when `source_backed`.
+            let (source_line, source_col, source_role) = finding
+                .source_read
+                .map_or((1, 0, TraceHopRole::ModuleSource), |(line, col)| {
+                    (line, col, TraceHopRole::UntrustedSource)
+                });
             return Some(UntrustedSourceTrace {
                 hop_count,
                 trace: vec![
                     TraceHop {
                         path: finding.path.clone(),
-                        line: 1,
-                        col: 0,
-                        role: TraceHopRole::UntrustedSource,
+                        line: source_line,
+                        col: source_col,
+                        role: source_role,
                     },
                     TraceHop {
                         path: finding.path.clone(),
@@ -562,8 +625,11 @@ impl UntrustedSourceIndex {
                 path,
                 line,
                 col,
+                // Cross-module reachability is module-level by construction (the
+                // specific source value is not shown to reach the sink), so the
+                // origin hop is `ModuleSource`, not `UntrustedSource` (#1093).
                 role: if idx == 0 {
-                    TraceHopRole::UntrustedSource
+                    TraceHopRole::ModuleSource
                 } else {
                     TraceHopRole::Intermediate
                 },
@@ -636,7 +702,8 @@ mod tests {
     use fallow_types::output::{FixActionType, IssueAction};
     use fallow_types::output_dead_code::{UnusedExportFinding, UnusedFileFinding};
     use fallow_types::results::{
-        SecurityDeadCodeKind, SecurityFindingKind, TraceHop, TraceHopRole, UnusedExport, UnusedFile,
+        SecurityDeadCodeKind, SecurityFindingKind, SecurityRuntimeContext, TraceHop, TraceHopRole,
+        UnusedExport, UnusedFile,
     };
 
     use crate::graph::ModuleGraph;
@@ -815,6 +882,7 @@ mod tests {
         module.tainted_bindings.push(TaintedBinding {
             local: "body".to_string(),
             source_path: "req.body".to_string(),
+            source_span_start: 0,
         });
         module
     }
@@ -852,6 +920,8 @@ mod tests {
             dead_code: None,
             reachability: None,
             source_backed: false,
+            source_read: None,
+            severity: SecuritySeverity::Low,
             candidate: SecurityCandidate {
                 source_kind: None,
                 sink: SecurityCandidateSink {
@@ -868,6 +938,87 @@ mod tests {
             taint_flow: None,
             runtime: None,
             attack_surface: None,
+        }
+    }
+
+    fn reachability(
+        reachable_from_entry: bool,
+        reachable_from_untrusted_source: bool,
+        crosses_boundary: bool,
+    ) -> SecurityReachability {
+        SecurityReachability {
+            reachable_from_entry,
+            reachable_from_untrusted_source,
+            taint_confidence: None,
+            untrusted_source_hop_count: None,
+            untrusted_source_trace: vec![],
+            blast_radius: 1,
+            crosses_boundary,
+        }
+    }
+
+    #[test]
+    fn derives_low_severity_for_baseline_candidate() {
+        assert_eq!(
+            derive_security_severity(&finding("sink.ts")),
+            SecuritySeverity::Low
+        );
+    }
+
+    #[test]
+    fn derives_medium_severity_for_source_signals() {
+        let mut source_backed = finding("source-backed.ts");
+        source_backed.source_backed = true;
+
+        let mut source_reachable = finding("source-reachable.ts");
+        source_reachable.reachability = Some(reachability(false, true, false));
+
+        assert_eq!(
+            derive_security_severity(&source_backed),
+            SecuritySeverity::Medium
+        );
+        assert_eq!(
+            derive_security_severity(&source_reachable),
+            SecuritySeverity::Medium
+        );
+    }
+
+    #[test]
+    fn derives_high_severity_for_boundary_entry_and_runtime_signals() {
+        let mut client_boundary = finding("client-boundary.ts");
+        client_boundary.candidate.boundary.client_server = true;
+
+        let mut architecture_boundary = finding("architecture-boundary.ts");
+        architecture_boundary.candidate.boundary.architecture_zone = Some(SecurityZoneCrossing {
+            from: "web".to_string(),
+            to: "server".to_string(),
+        });
+
+        let mut crossed_boundary = finding("crossed-boundary.ts");
+        crossed_boundary.reachability = Some(reachability(false, false, true));
+
+        let mut source_backed_entry = finding("source-backed-entry.ts");
+        source_backed_entry.source_backed = true;
+        source_backed_entry.reachability = Some(reachability(true, false, false));
+
+        let mut runtime_hot = finding("runtime-hot.ts");
+        runtime_hot.runtime = Some(SecurityRuntimeContext {
+            state: SecurityRuntimeState::RuntimeHot,
+            function: "handler".to_string(),
+            line: 1,
+            invocations: Some(500),
+            stable_id: Some("fallow:fn:test".to_string()),
+            evidence: Some("runtime hot path".to_string()),
+        });
+
+        for finding in [
+            client_boundary,
+            architecture_boundary,
+            crossed_boundary,
+            source_backed_entry,
+            runtime_hot,
+        ] {
+            assert_eq!(derive_security_severity(&finding), SecuritySeverity::High);
         }
     }
 
@@ -1134,14 +1285,39 @@ mod tests {
         let reach = findings[0].reachability.as_ref().expect("ranked");
         assert!(reach.reachable_from_untrusted_source);
         assert_eq!(reach.untrusted_source_hop_count, Some(1));
+        // Cross-module reachability is module-level: the source node is labeled
+        // `ModuleSource`, and the tier says `module-level` (issue #1093).
+        assert_eq!(reach.taint_confidence, Some(TaintConfidence::ModuleLevel));
         assert_eq!(
             reach
                 .untrusted_source_trace
                 .iter()
                 .map(|hop| hop.role)
                 .collect::<Vec<_>>(),
-            vec![TraceHopRole::UntrustedSource, TraceHopRole::Sink]
+            vec![TraceHopRole::ModuleSource, TraceHopRole::Sink]
         );
+    }
+
+    #[test]
+    fn arg_level_same_file_finding_anchors_source_node_at_read_line() {
+        // A source-backed finding with a resolved source-read line: the trace
+        // source node points at that read and is labeled `UntrustedSource`, and
+        // the tier is `arg-level` (issue #1093).
+        let graph = build_graph(&["handler.ts"], &[], &[]);
+        let modules = vec![tainted_binding_source_module(0)];
+        let mut arg_level = finding("handler.ts");
+        arg_level.source_backed = true;
+        arg_level.source_read = Some((7, 4));
+        let mut findings = vec![arg_level];
+
+        rank_with_modules(&graph, &modules, &mut findings);
+
+        let reach = findings[0].reachability.as_ref().expect("ranked");
+        assert!(reach.reachable_from_untrusted_source);
+        assert_eq!(reach.taint_confidence, Some(TaintConfidence::ArgLevel));
+        let source_hop = reach.untrusted_source_trace.first().expect("source node");
+        assert_eq!(source_hop.role, TraceHopRole::UntrustedSource);
+        assert_eq!((source_hop.line, source_hop.col), (7, 4));
     }
 
     #[test]
@@ -1169,13 +1345,17 @@ mod tests {
         let reach = findings[0].reachability.as_ref().expect("ranked");
         assert!(reach.reachable_from_untrusted_source);
         assert_eq!(reach.untrusted_source_hop_count, Some(0));
+        // The finding is not source-backed (the module merely contains a source),
+        // so the same-file source node is module-level: `ModuleSource`, never
+        // `UntrustedSource` (issue #1093).
+        assert_eq!(reach.taint_confidence, Some(TaintConfidence::ModuleLevel));
         assert_eq!(
             reach
                 .untrusted_source_trace
                 .iter()
                 .map(|hop| hop.role)
                 .collect::<Vec<_>>(),
-            vec![TraceHopRole::UntrustedSource, TraceHopRole::Sink]
+            vec![TraceHopRole::ModuleSource, TraceHopRole::Sink]
         );
     }
 
