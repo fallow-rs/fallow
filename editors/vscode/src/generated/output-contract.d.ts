@@ -614,10 +614,9 @@ export type ImpactTrendDirection = ("improving" | "declining" | "stable")
  */
 export type SecuritySchemaVersion = ("1" | "2")
 /**
- * Gate mode for `fallow security --gate <mode>` (issue #886). Tier 2 reserves
- * the value `newly-reachable`.
+ * Gate mode for `fallow security --gate <mode>`.
  */
-export type SecurityGateMode = "new"
+export type SecurityGateMode = ("new" | "newly-reachable")
 /**
  * Gate verdict on the wire. `fail` is the CI-state token; human output renders
  * it as "REVIEW REQUIRED" because these stay unverified candidates, never
@@ -1672,7 +1671,7 @@ introduced?: (AuditIntroduced | null)
  */
 export interface TestOnlyDependencyFinding {
 /**
- * Production dependency that is only imported by test files — consider
+ * Production dependency that is only imported by test files , consider
  * moving to devDependencies.
  */
 package_name: string
@@ -2783,7 +2782,7 @@ severity_high_count: number
 severity_moderate_count: number
 }
 /**
- * Project-wide vital signs — a fixed set of metrics for trend tracking.
+ * Project-wide vital signs , a fixed set of metrics for trend tracking.
  *
  * Metrics are `Option` when the data source was not available in the current run
  * (e.g., `duplication_pct` is `None` unless the duplication pipeline was run,
@@ -3324,7 +3323,7 @@ coverage_percent: number
 trace_count: number
 /**
  * Days of observation covered by the supplied dump (Phase 2 local analysis
- * emits 0 — set by the beacon/cloud in Phase 3+).
+ * emits 0 , set by the beacon/cloud in Phase 3+).
  */
 period_days: number
 /**
@@ -4927,7 +4926,7 @@ export interface SecurityGate {
 mode: SecurityGateMode
 verdict: SecurityGateVerdict
 /**
- * Number of candidates introduced in the changed lines.
+ * Number of candidates matching the selected gate mode.
  */
 new_count: number
 }

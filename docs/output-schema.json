@@ -1347,7 +1347,7 @@
         },
         "period_days": {
           "type": "integer",
-          "description": "Days of observation covered by the supplied dump (Phase 2 local analysis\nemits 0 — set by the beacon/cloud in Phase 3+)."
+          "description": "Days of observation covered by the supplied dump (Phase 2 local analysis\nemits 0 , set by the beacon/cloud in Phase 3+)."
         },
         "deployments_seen": {
           "type": "integer",
@@ -3155,7 +3155,7 @@
         "avg_cyclomatic",
         "p90_cyclomatic"
       ],
-      "description": "Project-wide vital signs — a fixed set of metrics for trend tracking.\n\nMetrics are `Option` when the data source was not available in the current run\n(e.g., `duplication_pct` is `None` unless the duplication pipeline was run,\n`hotspot_count` is `None` without git history)."
+      "description": "Project-wide vital signs , a fixed set of metrics for trend tracking.\n\nMetrics are `Option` when the data source was not available in the current run\n(e.g., `duplication_pct` is `None` unless the duplication pipeline was run,\n`hotspot_count` is `None` without git history)."
     },
     "RiskProfile": {
       "type": "object",
@@ -3879,7 +3879,7 @@
       "properties": {
         "package_name": {
           "type": "string",
-          "description": "Production dependency that is only imported by test files — consider\nmoving to devDependencies."
+          "description": "Production dependency that is only imported by test files , consider\nmoving to devDependencies."
         },
         "path": {
           "type": "string",
@@ -4311,7 +4311,7 @@
         "total_duplicated_tokens",
         "suggestions"
       ],
-      "description": "A clone family: a set of clone groups that share the same file set.\n\nWhen multiple clone groups are all duplicated between the same set of files,\nthey form a family — indicating a deeper structural relationship that should\nbe refactored together rather than group-by-group."
+      "description": "A clone family: a set of clone groups that share the same file set.\n\nWhen multiple clone groups are all duplicated between the same set of files,\nthey form a family , indicating a deeper structural relationship that should\nbe refactored together rather than group-by-group."
     },
     "RefactoringSuggestion": {
       "type": "object",
@@ -5872,7 +5872,7 @@
         {
           "type": "string",
           "const": "urgent_churn_complexity",
-          "description": "Actively-changing file with growing complexity — highest urgency."
+          "description": "Actively-changing file with growing complexity , highest urgency."
         },
         {
           "type": "string",
@@ -5882,12 +5882,12 @@
         {
           "type": "string",
           "const": "split_high_impact",
-          "description": "High fan-in + high complexity — changes here ripple widely."
+          "description": "High fan-in + high complexity , changes here ripple widely."
         },
         {
           "type": "string",
           "const": "remove_dead_code",
-          "description": "Majority of exports are unused — reduce surface area."
+          "description": "Majority of exports are unused , reduce surface area."
         },
         {
           "type": "string",
@@ -5912,17 +5912,17 @@
         {
           "type": "string",
           "const": "low",
-          "description": "Small file, few functions, low fan-in — quick to address."
+          "description": "Small file, few functions, low fan-in , quick to address."
         },
         {
           "type": "string",
           "const": "medium",
-          "description": "Moderate size or coupling — needs planning."
+          "description": "Moderate size or coupling , needs planning."
         },
         {
           "type": "string",
           "const": "high",
-          "description": "Large file, many functions, or high fan-in — significant effort."
+          "description": "Large file, many functions, or high fan-in , significant effort."
         }
       ],
       "description": "A ranked refactoring recommendation for a file.\n\n## Priority Formula\n\n```text\npriority = min(density, 1) × 30 + hotspot_boost × 25 + dead_code × 20 + fan_in_norm × 15 + fan_out_norm × 10\n```\n\nFan-in and fan-out normalization uses adaptive percentile-based thresholds\n(p95 of the project distribution, with floors) instead of fixed constants.\n\n## Efficiency (default sort)\n\n```text\nefficiency = priority / effort_numeric   (Low=1, Medium=2, High=3)\n```\n\nSurfaces quick wins: high-priority, low-effort targets rank first.\nEffort estimate for a refactoring target."
@@ -8076,7 +8076,7 @@
       "properties": {
         "package_name": {
           "type": "string",
-          "description": "Production dependency that is only imported by test files — consider\nmoving to devDependencies."
+          "description": "Production dependency that is only imported by test files , consider\nmoving to devDependencies."
         },
         "path": {
           "type": "string",
@@ -10486,7 +10486,7 @@
         },
         "new_count": {
           "type": "integer",
-          "description": "Number of candidates introduced in the changed lines."
+          "description": "Number of candidates matching the selected gate mode."
         }
       },
       "required": [
@@ -10502,9 +10502,14 @@
           "type": "string",
           "const": "new",
           "description": "Fail when the change introduces a NEW security-sink candidate on a changed\nline (not merely a sink in a changed file). There is deliberately no `all`\nmode: gating on the whole candidate backlog is the anti-feature this gate\nexists to avoid."
+        },
+        {
+          "type": "string",
+          "const": "newly-reachable",
+          "description": "Fail when a candidate becomes runtime-reachable from an entry point in\nhead but the matching candidate was not runtime-reachable in base."
         }
       ],
-      "description": "Gate mode for `fallow security --gate <mode>` (issue #886). Tier 2 reserves\nthe value `newly-reachable`."
+      "description": "Gate mode for `fallow security --gate <mode>`."
     },
     "SecurityGateVerdict": {
       "oneOf": [

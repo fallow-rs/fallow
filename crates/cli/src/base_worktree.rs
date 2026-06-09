@@ -3,22 +3,19 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, SystemTime};
 
-use fallow_config::AuditConfig;
 use fallow_core::git_env::clear_ambient_git_env;
 use xxhash_rust::xxh3::xxh3_64;
 
 use crate::report::plural;
 
-use super::{AuditOptions, git_rev_parse, git_toplevel};
-
-pub(super) struct BaseWorktree {
+pub struct BaseWorktree {
     repo_root: PathBuf,
     path: PathBuf,
     persistent: bool,
 }
 
 impl BaseWorktree {
-    pub(super) fn create(repo_root: &Path, base_ref: &str, base_sha: Option<&str>) -> Option<Self> {
+    pub fn create(repo_root: &Path, base_ref: &str, base_sha: Option<&str>) -> Option<Self> {
         sweep_orphan_audit_worktrees(repo_root);
         if let Some(base_sha) = base_sha
             && let Some(worktree) = Self::reuse_or_create(repo_root, base_sha)
@@ -61,7 +58,7 @@ impl BaseWorktree {
         Some(worktree)
     }
 
-    pub(super) fn reuse_or_create(repo_root: &Path, base_sha: &str) -> Option<Self> {
+    pub fn reuse_or_create(repo_root: &Path, base_sha: &str) -> Option<Self> {
         let path = reusable_audit_worktree_path(repo_root, base_sha);
         let _lock = ReusableWorktreeLock::try_acquire(&path)?;
 
@@ -108,7 +105,7 @@ impl BaseWorktree {
         Some(worktree)
     }
 
-    pub(super) fn path(&self) -> &Path {
+    pub fn path(&self) -> &Path {
         &self.path
     }
 }
@@ -124,14 +121,14 @@ impl BaseWorktree {
 /// With `panic = "abort"` on the release profile, this does not provide
 /// panic-recovery cleanup (no unwind runs), but it is still load-bearing for
 /// every early-return path between subprocess success and struct construction.
-pub(super) struct WorktreeCleanupGuard<'a> {
+pub struct WorktreeCleanupGuard<'a> {
     repo_root: PathBuf,
     path: &'a Path,
     armed: bool,
 }
 
 impl<'a> WorktreeCleanupGuard<'a> {
-    pub(super) fn new(repo_root: &Path, path: &'a Path) -> Self {
+    pub fn new(repo_root: &Path, path: &'a Path) -> Self {
         Self {
             repo_root: repo_root.to_path_buf(),
             path,
@@ -139,13 +136,13 @@ impl<'a> WorktreeCleanupGuard<'a> {
         }
     }
 
-    pub(super) fn path(&self) -> &Path {
+    pub fn path(&self) -> &Path {
         self.path
     }
 
     /// Disarm in place. Idempotent; calling twice is harmless. Drop becomes a
     /// no-op after this returns.
-    pub(super) fn defuse(&mut self) {
+    pub fn defuse(&mut self) {
         self.armed = false;
     }
 }
@@ -164,12 +161,12 @@ impl Drop for WorktreeCleanupGuard<'_> {
 /// 1.89), which wraps `flock(2)` on Unix and `LockFileEx` on Windows.
 /// Concurrent acquirers either fall through (`None`) or observe a
 /// freshly-prepared cache after the holder releases.
-pub(super) struct ReusableWorktreeLock {
+pub struct ReusableWorktreeLock {
     _file: std::fs::File,
 }
 
 impl ReusableWorktreeLock {
-    pub(super) fn try_acquire(reusable_path: &Path) -> Option<Self> {
+    pub fn try_acquire(reusable_path: &Path) -> Option<Self> {
         let lock_path = reusable_worktree_lock_path(reusable_path);
         let file = std::fs::OpenOptions::new()
             .create(true)
@@ -198,7 +195,7 @@ impl ReusableWorktreeLock {
     }
 }
 
-pub(super) fn reusable_worktree_lock_path(reusable_path: &Path) -> PathBuf {
+pub fn reusable_worktree_lock_path(reusable_path: &Path) -> PathBuf {
     let mut name = reusable_path
         .file_name()
         .map(std::ffi::OsString::from)
@@ -222,7 +219,7 @@ const REUSABLE_LAST_USED_SUFFIX: &str = ".last-used";
 ///
 /// Lives next to the cache directory (NOT inside it) so the sidecar is
 /// untouched by `git worktree add/remove` on the cache directory itself.
-pub(super) fn reusable_worktree_last_used_path(reusable_path: &Path) -> PathBuf {
+pub fn reusable_worktree_last_used_path(reusable_path: &Path) -> PathBuf {
     let mut name = reusable_path
         .file_name()
         .map(std::ffi::OsString::from)
@@ -240,7 +237,7 @@ pub(super) fn reusable_worktree_last_used_path(reusable_path: &Path) -> PathBuf 
 /// cache directory itself is not mutated. Failures are surfaced at
 /// `warn!` so a persistent ENOSPC / read-only-tmp condition is visible at
 /// default `RUST_LOG=warn`; the caller does not abort the audit.
-pub(super) fn touch_last_used(reusable_path: &Path) {
+pub fn touch_last_used(reusable_path: &Path) {
     let last_used = reusable_worktree_last_used_path(reusable_path);
     let result = std::fs::OpenOptions::new()
         .create(true)
@@ -263,7 +260,7 @@ pub(super) fn touch_last_used(reusable_path: &Path) {
 /// config field > 30-day default. `0` from either source disables the sweep
 /// entirely (returns `None`). Invalid env values (non-integer) silently fall
 /// back to config / default; audits do not fail on a typo in a runner env var.
-pub(super) fn resolve_cache_max_age(opts: &AuditOptions<'_>) -> Option<Duration> {
+pub fn resolve_cache_max_age(root: &Path, config_path: Option<&PathBuf>) -> Option<Duration> {
     if let Ok(raw) = std::env::var(AUDIT_CACHE_MAX_AGE_ENV) {
         if let Ok(days) = raw.trim().parse::<u32>() {
             return days_to_duration(days);
@@ -273,13 +270,13 @@ pub(super) fn resolve_cache_max_age(opts: &AuditOptions<'_>) -> Option<Duration>
             "FALLOW_AUDIT_CACHE_MAX_AGE_DAYS is not a valid u32; falling back to config/default",
         );
     }
-    if let Some(days) = load_audit_config(opts).and_then(|c| c.cache_max_age_days) {
+    if let Some(days) = load_audit_config(root, config_path).and_then(|c| c.cache_max_age_days) {
         return days_to_duration(days);
     }
     days_to_duration(DEFAULT_AUDIT_CACHE_MAX_AGE_DAYS)
 }
 
-pub(super) fn days_to_duration(days: u32) -> Option<Duration> {
+pub fn days_to_duration(days: u32) -> Option<Duration> {
     if days == 0 {
         return None;
     }
@@ -289,13 +286,16 @@ pub(super) fn days_to_duration(days: u32) -> Option<Duration> {
 /// Load `AuditConfig` from `opts.config_path` (or auto-discover from
 /// `opts.root`) for GC-threshold resolution only. Errors silently fall
 /// back to `None`; the caller defaults to a 30-day window.
-fn load_audit_config(opts: &AuditOptions<'_>) -> Option<AuditConfig> {
-    if let Some(path) = opts.config_path {
+fn load_audit_config(
+    root: &Path,
+    config_path: Option<&PathBuf>,
+) -> Option<fallow_config::AuditConfig> {
+    if let Some(path) = config_path {
         return fallow_config::FallowConfig::load(path)
             .ok()
             .map(|config| config.audit);
     }
-    fallow_config::FallowConfig::find_and_load(opts.root)
+    fallow_config::FallowConfig::find_and_load(root)
         .ok()
         .flatten()
         .map(|(config, _path)| config.audit)
@@ -331,7 +331,7 @@ fn load_audit_config(opts: &AuditOptions<'_>) -> Option<AuditConfig> {
 /// `open(O_CREAT)` at the same path would produce two processes each
 /// holding a kernel flock on different inodes. Lock files are tens of
 /// bytes; leaking them is harmless.
-pub(super) fn sweep_old_reusable_caches(repo_root: &Path, max_age: Option<Duration>, quiet: bool) {
+pub fn sweep_old_reusable_caches(repo_root: &Path, max_age: Option<Duration>, quiet: bool) {
     let Some(worktrees) = list_audit_worktrees(repo_root) else {
         return;
     };
@@ -440,6 +440,31 @@ fn reusable_audit_worktree_is_ready(repo_root: &Path, path: &Path, base_sha: &st
     git_rev_parse(path, "HEAD").is_some_and(|head| head == base_sha)
 }
 
+pub fn git_rev_parse(root: &Path, rev: &str) -> Option<String> {
+    let mut command = Command::new("git");
+    command.args(["rev-parse", rev]).current_dir(root);
+    clear_ambient_git_env(&mut command);
+    let output = command.output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+pub fn git_toplevel(root: &Path) -> Option<PathBuf> {
+    let mut command = Command::new("git");
+    command
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(root);
+    clear_ambient_git_env(&mut command);
+    let output = command.output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let path = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+    Some(dunce::canonicalize(&path).unwrap_or(path))
+}
+
 fn audit_worktree_is_registered(repo_root: &Path, path: &Path) -> bool {
     let Some(worktrees) = list_audit_worktrees(repo_root) else {
         return false;
@@ -447,7 +472,7 @@ fn audit_worktree_is_registered(repo_root: &Path, path: &Path) -> bool {
     worktrees.iter().any(|worktree| paths_equal(worktree, path))
 }
 
-pub(super) fn paths_equal(left: &Path, right: &Path) -> bool {
+pub fn paths_equal(left: &Path, right: &Path) -> bool {
     if left == right {
         return true;
     }
@@ -475,7 +500,7 @@ pub(super) fn paths_equal(left: &Path, right: &Path) -> bool {
 /// that framework.
 const MATERIALIZED_CONTEXT_DIRS: &[&str] = &["node_modules", ".nuxt", ".astro"];
 
-pub(super) fn materialize_base_dependency_context(repo_root: &Path, worktree_path: &Path) {
+pub fn materialize_base_dependency_context(repo_root: &Path, worktree_path: &Path) {
     for &name in MATERIALIZED_CONTEXT_DIRS {
         let source = repo_root.join(name);
         if !source.is_dir() {
@@ -507,7 +532,7 @@ fn symlink_dependency_dir(source: &Path, destination: &Path) -> std::io::Result<
     std::os::windows::fs::symlink_dir(source, destination)
 }
 
-pub(super) fn remove_audit_worktree(repo_root: &Path, path: &Path) {
+pub fn remove_audit_worktree(repo_root: &Path, path: &Path) {
     let mut command = Command::new("git");
     command
         .args([
@@ -539,7 +564,7 @@ pub(super) fn remove_audit_worktree(repo_root: &Path, path: &Path) {
     }
 }
 
-pub(super) fn sweep_orphan_audit_worktrees(repo_root: &Path) {
+pub fn sweep_orphan_audit_worktrees(repo_root: &Path) {
     let Some(worktrees) = list_audit_worktrees(repo_root) else {
         return;
     };
@@ -565,7 +590,7 @@ pub(super) fn sweep_orphan_audit_worktrees(repo_root: &Path) {
     }
 }
 
-pub(super) fn list_audit_worktrees(repo_root: &Path) -> Option<Vec<PathBuf>> {
+pub fn list_audit_worktrees(repo_root: &Path) -> Option<Vec<PathBuf>> {
     let mut command = Command::new("git");
     command
         .args(["worktree", "list", "--porcelain"])
@@ -580,7 +605,7 @@ pub(super) fn list_audit_worktrees(repo_root: &Path) -> Option<Vec<PathBuf>> {
     )))
 }
 
-pub(super) fn parse_worktree_list(output: &str) -> Vec<PathBuf> {
+pub fn parse_worktree_list(output: &str) -> Vec<PathBuf> {
     output
         .lines()
         .filter_map(|line| line.strip_prefix("worktree "))
@@ -589,14 +614,14 @@ pub(super) fn parse_worktree_list(output: &str) -> Vec<PathBuf> {
         .collect()
 }
 
-pub(super) fn is_fallow_audit_worktree_path(path: &Path) -> bool {
+pub fn is_fallow_audit_worktree_path(path: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
         return false;
     };
     name.starts_with("fallow-audit-base-") && path_is_inside_temp_dir(path)
 }
 
-pub(super) fn is_reusable_audit_worktree_path(path: &Path) -> bool {
+pub fn is_reusable_audit_worktree_path(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
         .is_some_and(|name| name.starts_with("fallow-audit-base-cache-"))
@@ -630,7 +655,7 @@ fn audit_worktree_process_is_alive(path: &Path) -> bool {
     process_is_alive(pid)
 }
 
-pub(super) fn audit_worktree_pid(name: &str) -> Option<u32> {
+pub fn audit_worktree_pid(name: &str) -> Option<u32> {
     name.strip_prefix("fallow-audit-base-")?
         .split('-')
         .next()?
@@ -639,7 +664,7 @@ pub(super) fn audit_worktree_pid(name: &str) -> Option<u32> {
 }
 
 #[cfg(unix)]
-pub(super) fn process_is_alive(pid: u32) -> bool {
+pub fn process_is_alive(pid: u32) -> bool {
     Command::new("kill")
         .args(["-0", &pid.to_string()])
         .output()
@@ -647,12 +672,12 @@ pub(super) fn process_is_alive(pid: u32) -> bool {
 }
 
 #[cfg(windows)]
-pub(super) fn process_is_alive(pid: u32) -> bool {
+pub fn process_is_alive(pid: u32) -> bool {
     windows_process::is_alive(pid)
 }
 
 #[cfg(not(any(unix, windows)))]
-pub(super) fn process_is_alive(_pid: u32) -> bool {
+pub fn process_is_alive(_pid: u32) -> bool {
     true
 }
 
@@ -693,7 +718,7 @@ mod windows_process {
     /// processes owned by another session). Returns `false` only when the PID
     /// definitively does not exist (`ERROR_INVALID_PARAMETER`) or the wait
     /// reports the process has exited.
-    pub(super) fn is_alive(pid: u32) -> bool {
+    pub fn is_alive(pid: u32) -> bool {
         // SAFETY: `OpenProcess` accepts any `u32` PID; it either returns a
         // non-null handle we own, or null on failure with `GetLastError`
         // describing why. No memory is borrowed across the FFI boundary.

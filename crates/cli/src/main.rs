@@ -20,6 +20,7 @@ use clap::{CommandFactory, Parser, Subcommand};
 
 mod api;
 mod audit;
+mod base_worktree;
 mod baseline;
 mod cache_notice;
 mod check;

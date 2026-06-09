@@ -313,6 +313,7 @@ fn security_candidates_schema_contains_expected_properties() {
         "paths",
         "changed_workspaces",
         "surface",
+        "gate",
         "no_cache",
         "threads",
     ] {
@@ -363,6 +364,8 @@ fn security_candidates_description_frames_candidates_and_scope() {
         "paths",
         "changed_since",
         "changed_workspaces",
+        "gate",
+        "newly-reachable",
         "attack_surface",
         "FALLOW_DIFF_FILE",
         "FALLOW_TIMEOUT_SECS",

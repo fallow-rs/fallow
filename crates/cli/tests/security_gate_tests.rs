@@ -17,19 +17,23 @@ use std::io::Write as _;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-/// Run `fallow security --gate new` against `root`, optionally piping `stdin`
-/// (a unified diff for `--diff-stdin`). Returns `(exit_code, stdout)`.
-fn run_security_gate(root: &Path, extra: &[&str], stdin: Option<&str>) -> (i32, String) {
+/// Run `fallow security --gate <gate>` against `root`, optionally piping
+/// `stdin` (a unified diff for `--diff-stdin`). Returns `(exit_code, stdout)`.
+fn run_security_gate(
+    root: &Path,
+    gate: &str,
+    extra: &[&str],
+    stdin: Option<&str>,
+) -> (i32, String) {
     let mut cmd = Command::new(fallow_bin());
-    cmd.args([
-        "security", "--gate", "new", "--format", "json", "--quiet", "--root",
-    ])
-    .arg(root)
-    .args(extra)
-    .env("RUST_LOG", "")
-    .env("NO_COLOR", "1")
-    .stdout(Stdio::piped())
-    .stderr(Stdio::piped());
+    cmd.args(["security", "--gate", gate, "--format", "json", "--quiet"])
+        .arg("--root")
+        .arg(root)
+        .args(extra)
+        .env("RUST_LOG", "")
+        .env("NO_COLOR", "1")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     if stdin.is_some() {
         cmd.stdin(Stdio::piped());
     }
@@ -47,6 +51,90 @@ fn run_security_gate(root: &Path, extra: &[&str], stdin: Option<&str>) -> (i32, 
         out.status.code().unwrap_or(-1),
         String::from_utf8_lossy(&out.stdout).into_owned(),
     )
+}
+
+fn run_security_gate_new(root: &Path, extra: &[&str], stdin: Option<&str>) -> (i32, String) {
+    run_security_gate(root, "new", extra, stdin)
+}
+
+fn write_reachability_project(root: &Path, imports_component: bool) {
+    std::fs::create_dir_all(root.join("src")).expect("src dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+  "name": "security-newly-reachable-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "dependencies": {
+    "react": "19.0.0"
+  }
+}
+"#,
+    )
+    .expect("package");
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{
+  "compilerOptions": {
+    "jsx": "react-jsx"
+  },
+  "include": ["src"]
+}
+"#,
+    )
+    .expect("tsconfig");
+    std::fs::write(
+        root.join("src/component.tsx"),
+        "export const Markup = (props: { html: string }): JSX.Element => {\n  return <div dangerouslySetInnerHTML={{ __html: props.html }} />;\n};\n",
+    )
+    .expect("component");
+    let index = if imports_component {
+        "import { Markup } from './component';\n\nexport const render = Markup;\n"
+    } else {
+        "export const render = () => 'ok';\n"
+    };
+    std::fs::write(root.join("src/index.ts"), index).expect("index");
+}
+
+fn git(root: &Path, args: &[&str]) {
+    let status = Command::new("git")
+        .args(args)
+        .current_dir(root)
+        .status()
+        .expect("git should run");
+    assert!(status.success(), "git {args:?} should succeed");
+}
+
+fn commit(root: &Path, message: &str) {
+    git(root, &["add", "."]);
+    git(
+        root,
+        &[
+            "-c",
+            "user.name=Fallow Test",
+            "-c",
+            "user.email=fallow-test@example.com",
+            "commit",
+            "-m",
+            message,
+        ],
+    );
+}
+
+fn newly_reachable_repo(imports_in_base: bool, imports_in_head: bool) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("tempdir");
+    git(dir.path(), &["init", "-q"]);
+    write_reachability_project(dir.path(), imports_in_base);
+    commit(dir.path(), "base");
+    write_reachability_project(dir.path(), imports_in_head);
+    std::fs::write(
+        dir.path().join("src/change.ts"),
+        format!("export const marker = '{imports_in_base}-{imports_in_head}';\n"),
+    )
+    .expect("head marker");
+    commit(dir.path(), "head");
+    dir
 }
 
 /// Adds the `dangerouslySetInnerHTML` sink line (the fixture's `src/component.tsx`
@@ -68,7 +156,7 @@ const NON_SINK_DIFF: &str = "diff --git a/src/component.tsx b/src/component.tsx\
 #[test]
 fn gate_exits_8_when_diff_adds_a_new_sink() {
     let root = fixture_path("security-dangerous-html");
-    let (code, stdout) = run_security_gate(&root, &["--diff-stdin"], Some(SINK_DIFF));
+    let (code, stdout) = run_security_gate_new(&root, &["--diff-stdin"], Some(SINK_DIFF));
     assert_eq!(
         code, 8,
         "a new sink in changed lines must exit 8; stdout: {stdout}"
@@ -80,7 +168,7 @@ fn gate_exits_8_when_diff_adds_a_new_sink() {
 #[test]
 fn gate_exits_0_when_diff_touches_file_but_not_sink_line() {
     let root = fixture_path("security-dangerous-html");
-    let (code, stdout) = run_security_gate(&root, &["--diff-stdin"], Some(NON_SINK_DIFF));
+    let (code, stdout) = run_security_gate_new(&root, &["--diff-stdin"], Some(NON_SINK_DIFF));
     assert_eq!(
         code, 0,
         "a pre-existing sink in a touched file (anchor not added) must exit 0; stdout: {stdout}"
@@ -92,7 +180,7 @@ fn gate_exits_0_when_diff_touches_file_but_not_sink_line() {
 #[test]
 fn gate_exits_2_without_a_diff_source() {
     let root = fixture_path("security-dangerous-html");
-    let (code, _) = run_security_gate(&root, &[], None);
+    let (code, _) = run_security_gate_new(&root, &[], None);
     assert_eq!(
         code, 2,
         "a gate with no diff source must hard-error (exit 2), never a green gate"
@@ -105,7 +193,7 @@ fn gate_supersedes_fail_on_issues_when_no_new_sink() {
     // candidates). In gate mode the gate is authoritative: no NEW sink in the
     // changed lines exits 0, NOT 1 (the gate must not re-gate the backlog).
     let root = fixture_path("security-dangerous-html");
-    let (code, stdout) = run_security_gate(
+    let (code, stdout) = run_security_gate_new(
         &root,
         &["--diff-stdin", "--fail-on-issues"],
         Some(NON_SINK_DIFF),
@@ -113,5 +201,72 @@ fn gate_supersedes_fail_on_issues_when_no_new_sink() {
     assert_eq!(
         code, 0,
         "gate must supersede --fail-on-issues when no new sink; stdout: {stdout}"
+    );
+}
+
+#[test]
+fn newly_reachable_gate_exits_8_when_existing_sink_becomes_entry_reachable() {
+    let repo = newly_reachable_repo(false, true);
+    let (code, stdout) = run_security_gate(
+        repo.path(),
+        "newly-reachable",
+        &["--changed-since", "HEAD~1", "--no-cache"],
+        None,
+    );
+    assert_eq!(
+        code, 8,
+        "existing sink becoming entry-reachable must exit 8; stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"mode\": \"newly-reachable\""),
+        "stdout: {stdout}"
+    );
+    assert!(stdout.contains("\"new_count\": 1"), "stdout: {stdout}");
+}
+
+#[test]
+fn newly_reachable_gate_exits_0_when_sink_was_already_reachable_in_base() {
+    let repo = newly_reachable_repo(true, true);
+    let (code, stdout) = run_security_gate(
+        repo.path(),
+        "newly-reachable",
+        &["--changed-since", "HEAD~1", "--no-cache"],
+        None,
+    );
+    assert_eq!(
+        code, 0,
+        "already-reachable sink must not trip newly-reachable gate; stdout: {stdout}"
+    );
+    assert!(stdout.contains("\"verdict\": \"pass\""), "stdout: {stdout}");
+}
+
+#[test]
+fn newly_reachable_gate_exits_0_when_sink_remains_unreachable_in_head() {
+    let repo = newly_reachable_repo(false, false);
+    let (code, stdout) = run_security_gate(
+        repo.path(),
+        "newly-reachable",
+        &["--changed-since", "HEAD~1", "--no-cache"],
+        None,
+    );
+    assert_eq!(
+        code, 0,
+        "unreachable sink must not trip newly-reachable gate; stdout: {stdout}"
+    );
+    assert!(stdout.contains("\"new_count\": 0"), "stdout: {stdout}");
+}
+
+#[test]
+fn newly_reachable_gate_exits_2_with_diff_only_input() {
+    let root = fixture_path("security-dangerous-html");
+    let (code, _) = run_security_gate(
+        &root,
+        "newly-reachable",
+        &["--diff-stdin"],
+        Some(NON_SINK_DIFF),
+    );
+    assert_eq!(
+        code, 2,
+        "newly-reachable gate requires a base ref, not only a diff"
     );
 }

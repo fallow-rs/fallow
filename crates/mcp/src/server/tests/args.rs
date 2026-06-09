@@ -350,6 +350,7 @@ fn security_candidates_args_with_scope_and_performance_options() {
         paths: None,
         changed_workspaces: None,
         surface: None,
+        gate: None,
         no_cache: Some(true),
         threads: Some(4),
     };
@@ -436,6 +437,42 @@ fn security_candidates_args_support_changed_workspaces() {
         args.windows(2)
             .any(|w| w == ["--changed-workspaces", "origin/main"])
     );
+}
+
+#[test]
+fn security_candidates_args_support_newly_reachable_gate() {
+    let params = SecurityCandidatesParams {
+        changed_since: Some("origin/main".to_string()),
+        gate: Some("newly-reachable".to_string()),
+        ..Default::default()
+    };
+    let args = build_security_candidates_args(&params).unwrap();
+    assert!(
+        args.windows(2).any(|w| w == ["--gate", "newly-reachable"]),
+        "expected --gate newly-reachable, got {args:?}"
+    );
+}
+
+#[test]
+fn security_candidates_args_reject_invalid_gate() {
+    let params = SecurityCandidatesParams {
+        gate: Some("all".to_string()),
+        ..Default::default()
+    };
+    let err = build_security_candidates_args(&params).unwrap_err();
+    let msg = parse_validation_message(&err);
+    assert!(msg.contains("Invalid gate 'all'"));
+}
+
+#[test]
+fn security_candidates_args_reject_newly_reachable_without_changed_since() {
+    let params = SecurityCandidatesParams {
+        gate: Some("newly-reachable".to_string()),
+        ..Default::default()
+    };
+    let err = build_security_candidates_args(&params).unwrap_err();
+    let msg = parse_validation_message(&err);
+    assert!(msg.contains("requires changed_since"));
 }
 
 #[test]

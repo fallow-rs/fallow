@@ -125,6 +125,10 @@ pub struct SecurityCandidatesParams {
     /// prompts in the JSON response.
     pub surface: Option<bool>,
 
+    /// Optional security regression gate. Valid values: "new" or
+    /// "newly-reachable". The "newly-reachable" gate requires `changed_since`.
+    pub gate: Option<String>,
+
     pub no_cache: Option<bool>,
 
     pub threads: Option<usize>,

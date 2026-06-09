@@ -2,6 +2,8 @@ use crate::params::SecurityCandidatesParams;
 
 use super::{push_global, push_str_flag, validation_error_body};
 
+const VALID_SECURITY_GATES: &[&str] = &["new", "newly-reachable"];
+
 fn has_value(value: Option<&str>) -> bool {
     value.is_some_and(|s| !s.is_empty())
 }
@@ -13,6 +15,20 @@ pub fn build_security_candidates_args(
     if has_value(params.workspace.as_deref()) && has_value(params.changed_workspaces.as_deref()) {
         return Err(validation_error_body(
             "workspace and changed_workspaces are mutually exclusive for security_candidates",
+        ));
+    }
+    if let Some(ref gate) = params.gate
+        && !VALID_SECURITY_GATES.contains(&gate.as_str())
+    {
+        return Err(validation_error_body(format!(
+            "Invalid gate '{gate}'. Valid values: new, newly-reachable"
+        )));
+    }
+    if params.gate.as_deref() == Some("newly-reachable")
+        && !has_value(params.changed_since.as_deref())
+    {
+        return Err(validation_error_body(
+            "gate=newly-reachable requires changed_since for security_candidates",
         ));
     }
 
@@ -52,6 +68,7 @@ pub fn build_security_candidates_args(
     if params.surface == Some(true) {
         args.push("--surface".to_string());
     }
+    push_str_flag(&mut args, "--gate", params.gate.as_deref());
 
     Ok(args)
 }

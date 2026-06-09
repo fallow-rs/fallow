@@ -160,11 +160,33 @@ fn main() -> ExitCode {
 
 fn run() -> Result<(), String> {
     let derived = derived_definitions();
-    let merged = merge_with_committed(&derived)?;
+    let mut merged = merge_with_committed(&derived)?;
+    normalize_output_punctuation(&mut merged);
     let pretty = serde_json::to_string_pretty(&merged)
         .map_err(|err| format!("failed to serialize merged schema: {err}"))?;
     println!("{pretty}");
     Ok(())
+}
+
+fn normalize_output_punctuation(value: &mut Value) {
+    match value {
+        Value::String(text) => {
+            if text.contains('\u{2014}') {
+                *text = text.replace('\u{2014}', ",");
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                normalize_output_punctuation(item);
+            }
+        }
+        Value::Object(map) => {
+            for child in map.values_mut() {
+                normalize_output_punctuation(child);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Definitions owned by this binary; everything else is copied from the committed schema.

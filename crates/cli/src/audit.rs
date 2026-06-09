@@ -8,6 +8,9 @@ use fallow_core::git_env::clear_ambient_git_env;
 use rustc_hash::FxHashSet;
 use xxhash_rust::xxh3::xxh3_64;
 
+use crate::base_worktree::{
+    BaseWorktree, git_rev_parse, git_toplevel, resolve_cache_max_age, sweep_old_reusable_caches,
+};
 use crate::check::{CheckOptions, CheckResult, IssueFilters, TraceOptions};
 use crate::dupes::{DupesMode, DupesOptions, DupesResult};
 use crate::error::emit_error;
@@ -482,17 +485,6 @@ fn save_cached_base_snapshot(
     let _ = tmp.persist(audit_base_snapshot_cache_file(opts.cache_dir, key));
 }
 
-fn git_rev_parse(root: &Path, rev: &str) -> Option<String> {
-    let mut command = Command::new("git");
-    command.args(["rev-parse", rev]).current_dir(root);
-    clear_ambient_git_env(&mut command);
-    let output = command.output().ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
-}
-
 /// If fallow's process inherited any ambient git repo-state env vars (typical
 /// when invoked from a `pre-commit` / `pre-push` hook or a tool wrapping git),
 /// surface the most likely culprit so a user hitting an unexpected worktree
@@ -814,20 +806,6 @@ fn remap_cache_dir_for_base_worktree(
     cache_dir.to_path_buf()
 }
 
-fn git_toplevel(root: &Path) -> Option<PathBuf> {
-    let mut command = Command::new("git");
-    command
-        .args(["rev-parse", "--show-toplevel"])
-        .current_dir(root);
-    clear_ambient_git_env(&mut command);
-    let output = command.output().ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let path = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
-    Some(dunce::canonicalize(&path).unwrap_or(path))
-}
-
 fn git_show_file(root: &Path, base_ref: &str, relative: &Path) -> Option<String> {
     let spec = format!(
         "{}:{}",
@@ -910,16 +888,11 @@ fn remap_focus_files(
     Some(remapped)
 }
 
-#[path = "audit_base_worktree.rs"]
-mod base_worktree;
-
-use base_worktree::{BaseWorktree, resolve_cache_max_age, sweep_old_reusable_caches};
-
 #[cfg(test)]
 use std::time::SystemTime;
 
 #[cfg(test)]
-use base_worktree::{
+use crate::base_worktree::{
     ReusableWorktreeLock, WorktreeCleanupGuard, audit_worktree_pid, days_to_duration,
     is_fallow_audit_worktree_path, is_reusable_audit_worktree_path, list_audit_worktrees,
     materialize_base_dependency_context, parse_worktree_list, paths_equal, process_is_alive,
@@ -990,7 +963,11 @@ pub fn execute_audit(opts: &AuditOptions<'_>) -> Result<AuditResult, ExitCode> {
     // Always sweep: prunable orphans (cache dir externally reaped, git admin
     // entry left behind) are reclaimed regardless of the age threshold, so the
     // sweep runs even when age-based GC is disabled (`max_age` is `None`).
-    sweep_old_reusable_caches(opts.root, resolve_cache_max_age(opts), opts.quiet);
+    sweep_old_reusable_caches(
+        opts.root,
+        resolve_cache_max_age(opts.root, opts.config_path.as_ref()),
+        opts.quiet,
+    );
 
     let Some(changed_files) = crate::check::get_changed_files(opts.root, &base_ref) else {
         return Err(emit_error(

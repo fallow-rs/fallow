@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`fallow security --gate newly-reachable` now catches existing sinks newly exposed from entry points.** The gate compares head security candidates against a base-tree reachability snapshot from `--changed-since <ref>`, then exits 8 only when a matching candidate was not runtime-reachable in base but is runtime-reachable in head. Diff-only inputs still exit 2 because this mode needs a materialized base tree. JSON and SARIF reuse the existing additive `gate` block with `mode: "newly-reachable"`, and MCP `security_candidates` accepts the same gate value. (Closes [#1056](https://github.com/fallow-rs/fallow/issues/1056).)
 - **`fallow security` can extend HTTP request receiver detection from config.** `security.requestReceivers` now adds project-local request object names to the built-in `req` / `request` / `ctx` / `context` / `event` allowlist for `*.query`, `*.params`, and `*.body` source reads. Values are trimmed, case-normalized, and additive only, while ORM receivers remain excluded and `*.searchParams` stays ungated. (Closes [#1125](https://github.com/fallow-rs/fallow/issues/1125).)
 
 ## [2.91.0] - 2026-06-09
@@ -1344,7 +1345,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Istanbul `--coverage` now matches functions produced by standard Istanbul tooling (Jest, nyc, c8, babel-plugin-istanbul).** Standard Istanbul producers omit the non-standard `FnEntry.line` field that `oxc-coverage-instrument` writes, so fallow's `load_istanbul_coverage` silently defaulted the line to `0` and every lookup failed — `istanbul_matched: 0` out of N, all CRAP scores fell back to binary estimation, and `--max-crap` ran against estimates instead of real coverage. The loader now falls back to `FnEntry.decl.start.line` when `FnEntry.line` is missing, restoring the anonymous-by-line and fuzzy lookup paths for Jest/nyc/c8-produced coverage while preserving the fast path for `oxc-coverage-instrument` output. Closes [#166](https://github.com/fallow-rs/fallow/issues/166).
+- **Istanbul `--coverage` now matches functions produced by standard Istanbul tooling (Jest, nyc, c8, babel-plugin-istanbul).** Standard Istanbul producers omit the non-standard `FnEntry.line` field that `oxc-coverage-instrument` writes, so fallow's `load_istanbul_coverage` silently defaulted the line to `0` and every lookup failed , `istanbul_matched: 0` out of N, all CRAP scores fell back to binary estimation, and `--max-crap` ran against estimates instead of real coverage. The loader now falls back to `FnEntry.decl.start.line` when `FnEntry.line` is missing, restoring the anonymous-by-line and fuzzy lookup paths for Jest/nyc/c8-produced coverage while preserving the fast path for `oxc-coverage-instrument` output. Closes [#166](https://github.com/fallow-rs/fallow/issues/166).
 - **Repeated "entry point outside project root" warnings collapse into a single diagnostic.** Monorepos with shared entry points (e.g. workspace `package.json` pointing at a sibling build output) used to emit the same warning once per analysis target, spamming `stderr` with dozens of identical lines. The warnings are now deduplicated with a counted summary so the signal stays visible without drowning out other diagnostics.
 - **`fallow dupes` tuning flags (`--min-lines`, `--min-tokens`, `--mode`, `--cross-language`) are forwarded correctly in combined GitLab CI mode.** The wrapper's combined-mode `ARGS=()` block built the `dupes` invocation without reading the `FALLOW_DUPES_*` env vars, so user overrides set in `.gitlab-ci.yml` silently became defaults. Fix pairs with the same GitHub Action fix from v2.44.x so both CI integrations honor the same tuning surface.
 - **Entry point discovery and VS Code extension downloads are hardened.** The entry-point walker now tolerates package manifests with missing / non-object `bin` or `exports` fields instead of aborting discovery, and the VS Code extension's binary-download path validates content-length + checksum against the expected artifact before unpacking (no more silent half-downloads that fail the first `fallow` invocation with an opaque error).
@@ -1459,7 +1460,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Production Coverage Intelligence (Phase 2)** -- `fallow health --production-coverage <path>` merges V8 or Istanbul runtime coverage into the existing health report. Spawns the closed-source `fallow-cov` sidecar (distributed separately; binary distribution deferred to Phase 2.5) and surfaces a typed report with stable content-hash IDs, per-finding verdicts, a supporting evidence block, hot-path percentiles, and a `license-expired-grace` watermark track. Paid feature — gated on a valid Ed25519-signed license JWT with the `production_coverage` feature.
+- **Production Coverage Intelligence (Phase 2)** -- `fallow health --production-coverage <path>` merges V8 or Istanbul runtime coverage into the existing health report. Spawns the closed-source `fallow-cov` sidecar (distributed separately; binary distribution deferred to Phase 2.5) and surfaces a typed report with stable content-hash IDs, per-finding verdicts, a supporting evidence block, hot-path percentiles, and a `license-expired-grace` watermark track. Paid feature , gated on a valid Ed25519-signed license JWT with the `production_coverage` feature.
 - **`fallow license` subcommand** -- `activate` (with `--trial --email <addr>` for zero-credit-card onboarding or `--from-file <path>` / stdin for existing licenses), `status`, `refresh`, `deactivate`. JWT verification is fully offline against a compiled-in Ed25519 public key; only `activate --trial` and `refresh` make network calls (5s connect timeout, 10s total). License is stored at `~/.fallow/license.jwt` (or `$FALLOW_LICENSE_PATH`) with owner-only permissions on Unix; the Windows fallback honours `%USERPROFILE%`. Grace ladder matches Docker Desktop / JetBrains: 0–7 day warning, 7–30 day watermark, 30+ day hard-fail.
 - **`fallow coverage setup`** -- single-entry-point resumable first-run flow that walks a user through: license check, `fallow-cov` sidecar discovery/install, framework-specific coverage recipe (Next.js / Nest / SvelteKit / Remix / Astro / plain Node), and automatic handoff into `fallow health --production-coverage`. Sidecar discovery resolves `$FALLOW_COV_BIN` → `./node_modules/.bin/fallow-cov` → package-manager bin → `~/.fallow/bin/fallow-cov` → `$PATH`.
 - **`--min-observation-volume <N>`** on `fallow health` -- minimum total trace volume before the sidecar is allowed to emit high-confidence `safe_to_delete` / `review_required` verdicts. Below this threshold the sidecar caps confidence at `medium`. Defaults to the spec value (5000) when omitted.
@@ -1489,9 +1490,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Ownership risk analysis on hotspots** -- `fallow health --hotspots --ownership` surfaces per-file ownership signals derived from git author history and CODEOWNERS. For each hotspot: Avelino truck factor (`bus_factor`), contributor count, top contributor with stale-days and commits, up to three additional recent contributors, `suggested_reviewers` (recent contributors with `stale_days < 90` — first-class field for AI agent routing), declared CODEOWNERS owner, tristate `unowned` flag (`true`=no rule matches / `false`=rule matches / `null`=no CODEOWNERS file), drift detection with human-readable reason. Human output prepends a project-level summary line (`9/10 hotspots depend on a single recent contributor · top authors: @alice (6), @bob (4)`) so tech leads see the organizational pattern before scanning per-file rows. JSON gains three new action types: `low-bus-factor` (with file-specific candidate reviewers from `suggested_reviewers`), `unowned-hotspot` (with synthesized CODEOWNERS pattern + `heuristic: "directory-deepest"` discriminator for future evolution), and `ownership-drift`. Test-path hotspots tagged `[test]` in human output and `is_test_path: true` in JSON. Only the free tool combining dead code + complexity + ownership risk. Research-backed (Avelino et al., Thongtanunam et al. ICSE 2016). ([#116](https://github.com/fallow-rs/fallow/discussions/116))
+- **Ownership risk analysis on hotspots** -- `fallow health --hotspots --ownership` surfaces per-file ownership signals derived from git author history and CODEOWNERS. For each hotspot: Avelino truck factor (`bus_factor`), contributor count, top contributor with stale-days and commits, up to three additional recent contributors, `suggested_reviewers` (recent contributors with `stale_days < 90` , first-class field for AI agent routing), declared CODEOWNERS owner, tristate `unowned` flag (`true`=no rule matches / `false`=rule matches / `null`=no CODEOWNERS file), drift detection with human-readable reason. Human output prepends a project-level summary line (`9/10 hotspots depend on a single recent contributor · top authors: @alice (6), @bob (4)`) so tech leads see the organizational pattern before scanning per-file rows. JSON gains three new action types: `low-bus-factor` (with file-specific candidate reviewers from `suggested_reviewers`), `unowned-hotspot` (with synthesized CODEOWNERS pattern + `heuristic: "directory-deepest"` discriminator for future evolution), and `ownership-drift`. Test-path hotspots tagged `[test]` in human output and `is_test_path: true` in JSON. Only the free tool combining dead code + complexity + ownership risk. Research-backed (Avelino et al., Thongtanunam et al. ICSE 2016). ([#116](https://github.com/fallow-rs/fallow/discussions/116))
 - **`--ownership-emails={raw|handle|hash}` privacy control** -- chooses how author emails are rendered in output. `handle` (default) shows the local-part only, unwrapping GitHub-style noreply prefixes (`12345+alice@users.noreply.github.com` → `alice`); `hash` emits stable non-cryptographic `xxh3:<16hex>` pseudonyms for regulated environments where author identities are sensitive in CI artifacts (SARIF, code-scanning uploads); `raw` shows full email addresses for public OSS repos. `ContributorEntry` gains a `format` discriminator so typed JSON consumers can branch without re-parsing the identifier. Configure the repo-wide default via `health.ownership.emailMode` in config.
-- **`health.ownership` config section** -- `botPatterns` (glob patterns matched against raw author emails; defaults cover `*\[bot\]*`, `dependabot*`, `renovate*`, `github-actions*`, `svc-*`, `*-service-account*` — `*noreply*` is deliberately NOT a default because it would filter real human contributors using GitHub's privacy-default email format), `emailMode` (raw/handle/hash).
+- **`health.ownership` config section** -- `botPatterns` (glob patterns matched against raw author emails; defaults cover `*\[bot\]*`, `dependabot*`, `renovate*`, `github-actions*`, `svc-*`, `*-service-account*` , `*noreply*` is deliberately NOT a default because it would filter real human contributors using GitHub's privacy-default email format), `emailMode` (raw/handle/hash).
 - **Ownership signals in MCP `check_health` tool** -- new `ownership: bool` and `ownership_email_mode: "raw"|"handle"|"hash"` params (typed enum so JSON Schema constrains input at the agent layer). Tool description updated.
 
 ### Changed
@@ -1624,7 +1625,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **`` html`...` `` tagged template literal asset references** -- `<script src="...">` and `<link rel="stylesheet|modulepreload" href="...">` inside the `html` tagged template literal (used by [Hono](https://hono.dev) via `hono/html`, [lit-html](https://lit.dev), and [htm](https://github.com/developit/htm)) now emit `SideEffect` imports via a new `visit_tagged_template_expression` override, mirroring the JSX `<script src>` / `<link href>` fix shipped in 2.28.1. The bare identifier tag `html` is matched only — `css`, `sql`, `gql`, `styled.div`, and member or call expressions are deliberately ignored so unrelated tagged templates in the same file are never misread as HTML. Each template quasi is scanned independently with the same regex pipeline used by the HTML file parser (extracted into a shared `collect_asset_refs` helper), so an asset reference split across an interpolation boundary (`` html`<script src="${base}/app.js">` ``) is skipped rather than producing a garbled, unresolvable specifier. Addresses till's follow-up comment on [#105](https://github.com/fallow-rs/fallow/issues/105) where `.ts` Hono layouts using the `html` tagged template (rather than JSX) still flagged sibling `static/*.js` files as unused.
+- **`` html`...` `` tagged template literal asset references** -- `<script src="...">` and `<link rel="stylesheet|modulepreload" href="...">` inside the `html` tagged template literal (used by [Hono](https://hono.dev) via `hono/html`, [lit-html](https://lit.dev), and [htm](https://github.com/developit/htm)) now emit `SideEffect` imports via a new `visit_tagged_template_expression` override, mirroring the JSX `<script src>` / `<link href>` fix shipped in 2.28.1. The bare identifier tag `html` is matched only , `css`, `sql`, `gql`, `styled.div`, and member or call expressions are deliberately ignored so unrelated tagged templates in the same file are never misread as HTML. Each template quasi is scanned independently with the same regex pipeline used by the HTML file parser (extracted into a shared `collect_asset_refs` helper), so an asset reference split across an interpolation boundary (`` html`<script src="${base}/app.js">` ``) is skipped rather than producing a garbled, unresolvable specifier. Addresses till's follow-up comment on [#105](https://github.com/fallow-rs/fallow/issues/105) where `.ts` Hono layouts using the `html` tagged template (rather than JSX) still flagged sibling `static/*.js` files as unused.
 
 ## [2.28.1] - 2026-04-11
 
@@ -2361,148 +2362,148 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Comprehensive test coverage** — 1,200+ new tests across all crates bringing total to 4,700+ unit/integration tests, 101 snapshot tests, 30 property-based tests, 14 doc tests, and 7 conformance fixtures, achieving 91% line coverage
-- **CJS `module.exports.foo` detection** — individual property assignments like `module.exports.foo = fn` are now extracted as named exports, closing ~60 missed findings on CJS-heavy projects
-- **Conformance test harness** — `tests/conformance/verify-fixtures.sh` and `verify-expected.py` provide automated expected-output verification for 7 analysis scenarios (barrel resolution, circular deps, suppression, type-only imports, and more)
+- **Comprehensive test coverage** , 1,200+ new tests across all crates bringing total to 4,700+ unit/integration tests, 101 snapshot tests, 30 property-based tests, 14 doc tests, and 7 conformance fixtures, achieving 91% line coverage
+- **CJS `module.exports.foo` detection** , individual property assignments like `module.exports.foo = fn` are now extracted as named exports, closing ~60 missed findings on CJS-heavy projects
+- **Conformance test harness** , `tests/conformance/verify-fixtures.sh` and `verify-expected.py` provide automated expected-output verification for 7 analysis scenarios (barrel resolution, circular deps, suppression, type-only imports, and more)
 
 ### Fixed
 
-- **Unreachable module export blindspot** — modules not reachable from entry points but containing a mix of used/unused exports were previously skipped entirely; now each export is evaluated individually
-- **Dead test file removed** — `unused_exports_tests.rs` (924 lines) was never compiled due to a missing module directive and contained a type mismatch; inline tests already covered all cases
+- **Unreachable module export blindspot** , modules not reachable from entry points but containing a mix of used/unused exports were previously skipped entirely; now each export is evaluated individually
+- **Dead test file removed** , `unused_exports_tests.rs` (924 lines) was never compiled due to a missing module directive and contained a type mismatch; inline tests already covered all cases
 
 ## [2.3.0] - 2026-03-27
 
 ### Added
 
-- **GitLab CI rich MR comments** — new `FALLOW_COMMENT` and `FALLOW_REVIEW` variables enable rich MR summary comments with collapsible sections and inline review discussions with suggestion blocks, matching the GitHub Action's review quality
-- **GitLab inline review discussions** — posts findings as positioned `DiffNote` discussions on MR diffs with "Why this matters" sections, actionable fix steps, docs links, and one-click suppress instructions
-- **GitLab suggestion blocks** — unused export findings include `suggestion:-0+0` blocks for one-click `export` keyword removal directly in the MR diff
-- **Comment merging pipeline** — groups unused exports per file into single comments, deduplicates clone group findings, drops redundant refactoring targets, and merges same-line findings with numbered headers
-- **Auto `--changed-since` in GitLab MR context** — automatically scopes analysis to changed files using `CI_MERGE_REQUEST_DIFF_BASE_SHA` when running in merge request pipelines
-- **Package manager detection** — review comments and annotations now show correct install/uninstall commands (`npm uninstall`, `pnpm remove`, or `yarn remove`) based on lock file detection
-- **GitLab comment cleanup** — automatically removes previous fallow comments and discussions on re-runs to prevent comment spam
+- **GitLab CI rich MR comments** , new `FALLOW_COMMENT` and `FALLOW_REVIEW` variables enable rich MR summary comments with collapsible sections and inline review discussions with suggestion blocks, matching the GitHub Action's review quality
+- **GitLab inline review discussions** , posts findings as positioned `DiffNote` discussions on MR diffs with "Why this matters" sections, actionable fix steps, docs links, and one-click suppress instructions
+- **GitLab suggestion blocks** , unused export findings include `suggestion:-0+0` blocks for one-click `export` keyword removal directly in the MR diff
+- **Comment merging pipeline** , groups unused exports per file into single comments, deduplicates clone group findings, drops redundant refactoring targets, and merges same-line findings with numbered headers
+- **Auto `--changed-since` in GitLab MR context** , automatically scopes analysis to changed files using `CI_MERGE_REQUEST_DIFF_BASE_SHA` when running in merge request pipelines
+- **Package manager detection** , review comments and annotations now show correct install/uninstall commands (`npm uninstall`, `pnpm remove`, or `yarn remove`) based on lock file detection
+- **GitLab comment cleanup** , automatically removes previous fallow comments and discussions on re-runs to prevent comment spam
 
 ### Changed
 
-- **GitLab CI template modularized** — inline jq scripts extracted to separate files in `ci/jq/` and `ci/scripts/`, downloaded at runtime for maintainability
-- **`diff_refs` from MR API** — GitLab inline discussions now fetch `base_sha`, `start_sha`, `head_sha` from the MR API instead of CI environment variables, matching the ictu-mcp pattern and improving positioning accuracy after rebases
-- **Suggestion block ANSI-C quoting** — GitHub Action suggestion blocks fixed to use `$'...'` quoting for correct newline rendering
+- **GitLab CI template modularized** , inline jq scripts extracted to separate files in `ci/jq/` and `ci/scripts/`, downloaded at runtime for maintainability
+- **`diff_refs` from MR API** , GitLab inline discussions now fetch `base_sha`, `start_sha`, `head_sha` from the MR API instead of CI environment variables, matching the ictu-mcp pattern and improving positioning accuracy after rebases
+- **Suggestion block ANSI-C quoting** , GitHub Action suggestion blocks fixed to use `$'...'` quoting for correct newline rendering
 
 ### Fixed
 
-- **Subshell variable loss** — review comment counters (`POSTED`/`SKIPPED`) now use process substitution instead of pipe subshell to correctly track posting results
-- **Comment body assignment** — `comment.sh` separates jq execution from string concatenation to correctly detect jq failures
-- **Combined mode null arrays** — `jq -s 'add'` replaced with explicit `jq -n --argjson` to prevent null output when all comment arrays are empty
+- **Subshell variable loss** , review comment counters (`POSTED`/`SKIPPED`) now use process substitution instead of pipe subshell to correctly track posting results
+- **Comment body assignment** , `comment.sh` separates jq execution from string concatenation to correctly detect jq failures
+- **Combined mode null arrays** , `jq -s 'add'` replaced with explicit `jq -n --argjson` to prevent null output when all comment arrays are empty
 
 ## [2.2.3] - 2026-03-27
 
 ### Added
 
-- **Auto-changed-since for PRs** — GitHub Action automatically scopes analysis to changed files in pull requests using `--changed-since` with the merge base, eliminating the need for manual configuration
-- **Enriched PR annotations** — inline annotations now include actionable context (export names, dependency names, file paths) with improved formatting for duplication annotations
-- **VS Code status bar and tree views** — expanded extension UX with project health status bar, issue tree view, and pnpm workspace support
-- **`analyze_with_parse_result` API** — new public function in `fallow-core` that accepts pre-parsed modules, enabling callers to skip the parsing stage when modules are already available
+- **Auto-changed-since for PRs** , GitHub Action automatically scopes analysis to changed files in pull requests using `--changed-since` with the merge base, eliminating the need for manual configuration
+- **Enriched PR annotations** , inline annotations now include actionable context (export names, dependency names, file paths) with improved formatting for duplication annotations
+- **VS Code status bar and tree views** , expanded extension UX with project health status bar, issue tree view, and pnpm workspace support
+- **`analyze_with_parse_result` API** , new public function in `fallow-core` that accepts pre-parsed modules, enabling callers to skip the parsing stage when modules are already available
 
 ### Changed
 
-- **Health pipeline optimization** — `fallow health --file-scores` no longer runs the analysis pipeline twice; pre-parsed modules are reused via the new `analyze_with_parse_result` API
-- **O(1) tooling dependency lookups** — `GENERAL_TOOLING_EXACT` (76 entries) converted from linear slice scan to `OnceLock<FxHashSet>` for constant-time lookups
-- **O(1) unused import binding lookups** — `ResolvedModule.unused_import_bindings` converted from `Vec<String>` to `FxHashSet<String>` in hot-path reference population
-- **Optimized member export referencing** — `mark_member_exports_referenced` now uses `FxHashSet<&str>` and avoids per-export `to_string()` allocation
-- **Report dispatcher unified** — new `ReportContext` struct replaces individual parameters across all 3 report dispatch functions for consistent signatures
-- **`define_plugin!` macro extended** — supports `resolve_config: imports_only` variant; Cypress, Commitlint, Remark plugins migrated
-- **Comprehensive code deduplication** — `emit_json()`, `plural()`, `build_json_envelope()`, shared `sample_results` test helper, fix module helpers, config parser shared traversal
+- **Health pipeline optimization** , `fallow health --file-scores` no longer runs the analysis pipeline twice; pre-parsed modules are reused via the new `analyze_with_parse_result` API
+- **O(1) tooling dependency lookups** , `GENERAL_TOOLING_EXACT` (76 entries) converted from linear slice scan to `OnceLock<FxHashSet>` for constant-time lookups
+- **O(1) unused import binding lookups** , `ResolvedModule.unused_import_bindings` converted from `Vec<String>` to `FxHashSet<String>` in hot-path reference population
+- **Optimized member export referencing** , `mark_member_exports_referenced` now uses `FxHashSet<&str>` and avoids per-export `to_string()` allocation
+- **Report dispatcher unified** , new `ReportContext` struct replaces individual parameters across all 3 report dispatch functions for consistent signatures
+- **`define_plugin!` macro extended** , supports `resolve_config: imports_only` variant; Cypress, Commitlint, Remark plugins migrated
+- **Comprehensive code deduplication** , `emit_json()`, `plural()`, `build_json_envelope()`, shared `sample_results` test helper, fix module helpers, config parser shared traversal
 
 ### Fixed
 
-- **Watch mode reload stability** — hardened debounce behavior and related cleanup
-- **Windows CI path normalization** — discovery tests now normalize path separators for cross-platform compatibility
-- **GitHub Action `pull_request_target` handling** — correctly detects and handles `pull_request_target` events in auto-changed-since logic
+- **Watch mode reload stability** , hardened debounce behavior and related cleanup
+- **Windows CI path normalization** , discovery tests now normalize path separators for cross-platform compatibility
+- **GitHub Action `pull_request_target` handling** , correctly detects and handles `pull_request_target` events in auto-changed-since logic
 
 ### Removed
 
-- **1,986 lines of dead code** — removed orphaned `crates/graph/src/graph/build/` directory that was never compiled (abandoned refactoring artifact)
+- **1,986 lines of dead code** , removed orphaned `crates/graph/src/graph/build/` directory that was never compiled (abandoned refactoring artifact)
 
 ## [2.2.2] - 2026-03-27
 
 ### Added
 
-- **CodeClimate output format** — `--format codeclimate` for GitLab Code Quality integration, with deterministic FNV-1a fingerprints and proper severity mapping
-- **GitHub Actions inline annotations** — `--format annotations` emits `::warning` / `::error` workflow commands for inline PR annotations without any Action dependency
-- **Real-world conformance benchmarks** — CI now validates against 8 real-world projects (zod, preact, vite, next.js, angular, nuxt, svelte, vue-core)
-- **~283 new tests** — comprehensive coverage for complexity metrics, JSDoc @public tags, config extends/merge, re-export chain propagation, dynamic import patterns, declaration extraction, visitor helpers, analysis predicates, cycle detection, and file discovery
+- **CodeClimate output format** , `--format codeclimate` for GitLab Code Quality integration, with deterministic FNV-1a fingerprints and proper severity mapping
+- **GitHub Actions inline annotations** , `--format annotations` emits `::warning` / `::error` workflow commands for inline PR annotations without any Action dependency
+- **Real-world conformance benchmarks** , CI now validates against 8 real-world projects (zod, preact, vite, next.js, angular, nuxt, svelte, vue-core)
+- **~283 new tests** , comprehensive coverage for complexity metrics, JSDoc @public tags, config extends/merge, re-export chain propagation, dynamic import patterns, declaration extraction, visitor helpers, analysis predicates, cycle detection, and file discovery
 
 ### Fixed
 
-- **CodeClimate fingerprint stability** — use FNV-1a instead of `DefaultHasher` for deterministic cross-run fingerprints; include group index in duplication fingerprints
-- **Circular dependency annotations** — sanitize chain strings and guard against empty files in annotation output
-- **npm/pnpm install stdout leak** — suppress package manager install stdout that leaked into JSON report output
-- **Duplicate exports comparison** — handle dict locations correctly in `duplicate_exports` comparison
+- **CodeClimate fingerprint stability** , use FNV-1a instead of `DefaultHasher` for deterministic cross-run fingerprints; include group index in duplication fingerprints
+- **Circular dependency annotations** , sanitize chain strings and guard against empty files in annotation output
+- **npm/pnpm install stdout leak** , suppress package manager install stdout that leaked into JSON report output
+- **Duplicate exports comparison** , handle dict locations correctly in `duplicate_exports` comparison
 
 ## [2.2.1] - 2026-03-26
 
 ### Changed
 
-- **Parallel workspace processing** — workspace entry point discovery and plugin runs now execute in parallel using rayon, with sequential merge for deterministic results. Up to 21% faster on monorepos (vite: 507ms → 399ms, next.js: 1532ms → 1371ms)
-- **Lazy canonicalize** — skips upfront bulk `canonicalize()` of all source files when the project root is already canonical (common case). A `OnceLock`-based fallback handles the rare intra-project symlink edge case on demand. Saves up to 148ms on 20k-file projects
-- **O(1) plugin dedup** — workspace plugin name and virtual module prefix deduplication uses `FxHashSet` instead of `Vec::contains` (O(n²) → O(n))
+- **Parallel workspace processing** , workspace entry point discovery and plugin runs now execute in parallel using rayon, with sequential merge for deterministic results. Up to 21% faster on monorepos (vite: 507ms → 399ms, next.js: 1532ms → 1371ms)
+- **Lazy canonicalize** , skips upfront bulk `canonicalize()` of all source files when the project root is already canonical (common case). A `OnceLock`-based fallback handles the rare intra-project symlink edge case on demand. Saves up to 148ms on 20k-file projects
+- **O(1) plugin dedup** , workspace plugin name and virtual module prefix deduplication uses `FxHashSet` instead of `Vec::contains` (O(n²) → O(n))
 
 ### Fixed
 
-- **Benchmark accuracy** — benchmark script now correctly excludes knip runs that crash (exit code 2) instead of counting crash timings as valid results. Also guards against null status from timeouts
-- **Updated benchmark numbers** — rebenchmarked all projects with honest error handling. Speed claims updated: 5-41x vs knip v5 (was 3-36x), 2-18x vs knip v6 (was 2-14x), 8-26x vs jscpd (was 20-33x)
+- **Benchmark accuracy** , benchmark script now correctly excludes knip runs that crash (exit code 2) instead of counting crash timings as valid results. Also guards against null status from timeouts
+- **Updated benchmark numbers** , rebenchmarked all projects with honest error handling. Speed claims updated: 5-41x vs knip v5 (was 3-36x), 2-18x vs knip v6 (was 2-14x), 8-26x vs jscpd (was 20-33x)
 
 ## [2.2.0] - 2026-03-26
 
 ### Added
 
-- **Efficiency score** — refactoring targets now include an `efficiency` field (`priority / effort`) and are sorted by efficiency descending, surfacing quick wins first
-- **Confidence levels** — each target includes a `confidence` field (`high`/`medium`/`low`) based on data source reliability: `high` for graph/AST analysis, `medium` for heuristic thresholds, `low` for git-dependent recommendations
-- **Adaptive thresholds** — fan-in/fan-out normalization uses percentile-based thresholds (p95/p90/p75/p25) from the project's distribution instead of hardcoded constants, with floors to prevent degenerate values in small projects
-- **Target thresholds in JSON** — `target_thresholds` object in health JSON output exposes the computed adaptive thresholds for programmatic consumers
-- **Effort summary** — human output shows effort breakdown after the targets header (e.g., `16 low effort · 34 medium · 43 high`)
-- **Machine-parseable compact categories** — compact output uses underscore-delimited category labels (`circular_dep`, `dead_code`) instead of space-separated labels
+- **Efficiency score** , refactoring targets now include an `efficiency` field (`priority / effort`) and are sorted by efficiency descending, surfacing quick wins first
+- **Confidence levels** , each target includes a `confidence` field (`high`/`medium`/`low`) based on data source reliability: `high` for graph/AST analysis, `medium` for heuristic thresholds, `low` for git-dependent recommendations
+- **Adaptive thresholds** , fan-in/fan-out normalization uses percentile-based thresholds (p95/p90/p75/p25) from the project's distribution instead of hardcoded constants, with floors to prevent degenerate values in small projects
+- **Target thresholds in JSON** , `target_thresholds` object in health JSON output exposes the computed adaptive thresholds for programmatic consumers
+- **Effort summary** , human output shows effort breakdown after the targets header (e.g., `16 low effort · 34 medium · 43 high`)
+- **Machine-parseable compact categories** , compact output uses underscore-delimited category labels (`circular_dep`, `dead_code`) instead of space-separated labels
 
 ### Changed
 
-- **Human output: efficiency as primary score** — the hero number is now efficiency (sort key), with priority shown as a dimmed secondary value
-- **Human output: labeled metadata** — effort and confidence on line 2 are now prefixed (`effort:low · confidence:high`) for self-documenting output
-- **Markdown table: 5 columns** — reduced from 7 to 5 columns by merging effort/confidence and dropping the separate priority column
-- **SARIF messages** — now include priority, efficiency, and confidence values
+- **Human output: efficiency as primary score** , the hero number is now efficiency (sort key), with priority shown as a dimmed secondary value
+- **Human output: labeled metadata** , effort and confidence on line 2 are now prefixed (`effort:low · confidence:high`) for self-documenting output
+- **Markdown table: 5 columns** , reduced from 7 to 5 columns by merging effort/confidence and dropping the separate priority column
+- **SARIF messages** , now include priority, efficiency, and confidence values
 
 ### Fixed
 
-- **Cycle path deduplication** — `evidence.cycle_path` no longer contains duplicate entries when a file participates in multiple cycles
-- **GitLab CI template** — uses Alpine image and detects package manager correctly
-- **Benchmark alert threshold** — corrected for `customBiggerIsBetter` benchmarks
+- **Cycle path deduplication** , `evidence.cycle_path` no longer contains duplicate entries when a file participates in multiple cycles
+- **GitLab CI template** , uses Alpine image and detects package manager correctly
+- **Benchmark alert threshold** , corrected for `customBiggerIsBetter` benchmarks
 - **SARIF version redaction** in test fixtures
-- **MCP analyze tool description** — corrected to match `dead-code` command
+- **MCP analyze tool description** , corrected to match `dead-code` command
 
 ## [2.1.0] - 2026-03-25
 
 ### Added
 
-- **GitLab CI template** (`ci/gitlab-ci.yml`) — includable template with full feature parity to the GitHub Action: Code Quality reports (CodeClimate format) for inline MR annotations, MR comment summaries, incremental caching, and all fallow commands/options via `FALLOW_*` variables
-- **GitHub Action: test workflow** — CI validation for SARIF, JSON, dupes, fix, zero-issues, and PR comment scenarios
+- **GitLab CI template** (`ci/gitlab-ci.yml`) , includable template with full feature parity to the GitHub Action: Code Quality reports (CodeClimate format) for inline MR annotations, MR comment summaries, incremental caching, and all fallow commands/options via `FALLOW_*` variables
+- **GitHub Action: test workflow** , CI validation for SARIF, JSON, dupes, fix, zero-issues, and PR comment scenarios
 
 ### Fixed
 
-- **`list --no-cache`** — the `--no-cache` flag now works correctly with the `list` command
-- **GitHub Action: `check` → `dead-code` rename** — completed the rename across all case statements, SARIF fallback, and job summary dispatch
+- **`list --no-cache`** , the `--no-cache` flag now works correctly with the `list` command
+- **GitHub Action: `check` → `dead-code` rename** , completed the rename across all case statements, SARIF fallback, and job summary dispatch
 - **`dead-code` subcommand** in backwards-compatibility stable interface list
 
 ## [2.0.1] - 2026-03-25
 
 ### Added
 
-- **MCP server: all global CLI flags exposed** — `--baseline`, `--save-baseline`, `--no-cache`, `--threads` now available on all MCP tools; `--config` gap-filled on `find_dupes`/`check_health`; `--workspace` gap-filled on `find_dupes`/`fix_preview`/`fix_apply`
-- **GitHub Action: 13 new inputs** — `no-cache`, `threads`, `only`, `skip`, `cross-language`, `file-scores`, `hotspots`, `targets`, `complexity`, `since`, `min-commits`, `save-snapshot`, `issue-types`
-- **GitHub Action: `dead-code` alias support** — all case statements now handle both `dead-code` and legacy `check` command names
-- **GitHub Action: bare invocation support** — combined issue count extraction, job summary, and PR comments work when no command is specified
+- **MCP server: all global CLI flags exposed** , `--baseline`, `--save-baseline`, `--no-cache`, `--threads` now available on all MCP tools; `--config` gap-filled on `find_dupes`/`check_health`; `--workspace` gap-filled on `find_dupes`/`fix_preview`/`fix_apply`
+- **GitHub Action: 13 new inputs** , `no-cache`, `threads`, `only`, `skip`, `cross-language`, `file-scores`, `hotspots`, `targets`, `complexity`, `since`, `min-commits`, `save-snapshot`, `issue-types`
+- **GitHub Action: `dead-code` alias support** , all case statements now handle both `dead-code` and legacy `check` command names
+- **GitHub Action: bare invocation support** , combined issue count extraction, job summary, and PR comments work when no command is specified
 
 ### Fixed
 
-- **GitHub Action: `fix` without `--dry-run` now adds `--yes`** — previously would hang in CI waiting for TTY input
+- **GitHub Action: `fix` without `--dry-run` now adds `--yes`** , previously would hang in CI waiting for TTY input
 
 ## [2.0.0] - 2026-03-25
 
@@ -2522,7 +2523,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`dead-code` command alias**: `fallow dead-code` as the canonical name for dead code analysis (replaces `check`)
 - **`--ci` on all commands**: `fallow dupes --ci` and `fallow health --ci` now work (SARIF + quiet + fail-on-issues)
 - **Vital signs snapshots** (`fallow health --save-snapshot`): save codebase health metrics for trend tracking
-- **Execute/run split**: internal refactor enabling combined mode — `execute_check`, `execute_dupes`, `execute_health` return results without printing
+- **Execute/run split**: internal refactor enabling combined mode , `execute_check`, `execute_dupes`, `execute_health` return results without printing
 
 ### Changed
 
@@ -2535,8 +2536,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Seven recommendation rules evaluated in priority order: urgent churn+complexity, break circular dependency, split high-impact file, remove dead code, extract complex functions, reduce coupling
   - Priority formula: `min(density,1)×30 + hotspot×25 + dead_code×20 + fan_in_norm×15 + fan_out_norm×10`
   - Contributing factors with raw `value` and `threshold` for programmatic use
-  - **Effort estimation** (`low`/`medium`/`high`) based on file size, function count, and fan-in — shown in all output formats
-  - **Evidence linking**: structured data for AI agents — unused export names, complex function names with line numbers, cycle member paths
+  - **Effort estimation** (`low`/`medium`/`high`) based on file size, function count, and fan-in , shown in all output formats
+  - **Evidence linking**: structured data for AI agents , unused export names, complex function names with line numbers, cycle member paths
   - **Baseline support**: `--save-baseline` / `--baseline` now includes refactoring targets for tracking progress over time
   - All five output formats: human (category · effort labels), JSON (with evidence), compact, markdown (Effort column), SARIF (warning-level findings)
   - MCP server: `targets` parameter on `check_health` tool
@@ -2801,7 +2802,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.3.0] - 2026-03-18
 
 ### Added
-- Production mode (`--production`) — excludes test/dev files, limits to production scripts, reports type-only imports
+- Production mode (`--production`) , excludes test/dev files, limits to production scripts, reports type-only imports
 - Clone families with refactoring suggestions (extract function/module)
 - Config schema generation (`fallow config-schema`) with `$schema` support for IDE autocomplete
 - Duplication baselines (`--save-baseline` / `--baseline`) for incremental CI adoption

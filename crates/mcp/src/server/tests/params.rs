@@ -69,6 +69,7 @@ fn security_candidates_params_minimal() {
     assert!(params.paths.is_none());
     assert!(params.changed_workspaces.is_none());
     assert!(params.surface.is_none());
+    assert!(params.gate.is_none());
     assert!(params.no_cache.is_none());
     assert!(params.threads.is_none());
 }
@@ -83,6 +84,7 @@ fn security_candidates_params_all_fields_deserialize() {
         "paths": ["src/app.tsx", "src/lib/secret.ts"],
         "changed_workspaces": "origin/main",
         "surface": true,
+        "gate": "newly-reachable",
         "no_cache": true,
         "threads": 4
     }"#;
@@ -97,6 +99,7 @@ fn security_candidates_params_all_fields_deserialize() {
     );
     assert_eq!(params.changed_workspaces.as_deref(), Some("origin/main"));
     assert_eq!(params.surface, Some(true));
+    assert_eq!(params.gate.as_deref(), Some("newly-reachable"));
     assert_eq!(params.no_cache, Some(true));
     assert_eq!(params.threads, Some(4));
 }

@@ -10,6 +10,7 @@
 //! only honest signals.
 
 use crate::report::sink::outln;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -22,8 +23,11 @@ use fallow_core::results::{
 use fallow_types::discover::DiscoveredFile;
 use fallow_types::extract::ModuleInfo;
 use fallow_types::results::{SecurityRuntimeContext, SecurityRuntimeState, SecuritySeverity};
+use rustc_hash::FxHashSet;
 use serde::Serialize;
+use xxhash_rust::xxh3::xxh3_64;
 
+use crate::base_worktree::{BaseWorktree, git_rev_parse};
 use crate::error::emit_error;
 use crate::health::{HealthOptions, SharedParseData, SortBy};
 use crate::health_types::{
@@ -48,8 +52,7 @@ pub enum SecuritySchemaVersion {
     V2,
 }
 
-/// Gate mode for `fallow security --gate <mode>` (issue #886). Tier 2 reserves
-/// the value `newly-reachable`.
+/// Gate mode for `fallow security --gate <mode>`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, clap::ValueEnum)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
@@ -59,6 +62,9 @@ pub enum SecurityGateMode {
     /// mode: gating on the whole candidate backlog is the anti-feature this gate
     /// exists to avoid.
     New,
+    /// Fail when a candidate becomes runtime-reachable from an entry point in
+    /// head but the matching candidate was not runtime-reachable in base.
+    NewlyReachable,
 }
 
 /// Gate verdict on the wire. `fail` is the CI-state token; human output renders
@@ -83,7 +89,7 @@ pub struct SecurityGate {
     pub mode: SecurityGateMode,
     /// `pass` or `fail`.
     pub verdict: SecurityGateVerdict,
-    /// Number of candidates introduced in the changed lines.
+    /// Number of candidates matching the selected gate mode.
     pub new_count: usize,
 }
 
@@ -150,9 +156,10 @@ pub struct SecurityOptions<'a> {
     pub file: &'a [PathBuf],
     /// `--surface`: include the top-level attack-surface inventory in JSON.
     pub surface: bool,
-    /// `--gate <mode>`: opt-in regression gate (issue #886). Requires a diff
-    /// source (`--changed-since`, `--diff-file`, or `--diff-stdin`); reports only
-    /// candidates introduced in the changed lines and exits 8 if any exist.
+    /// `--gate <mode>`: opt-in regression gate. `new` requires a diff source and
+    /// reports candidates introduced in changed lines. `newly-reachable`
+    /// requires `--changed-since <ref>` and reports candidates newly reachable
+    /// from runtime entry points.
     pub gate: Option<SecurityGateMode>,
     /// Paid local runtime-coverage sidecar input.
     pub runtime_coverage: Option<&'a Path>,
@@ -190,17 +197,7 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
         Err(code) => return code,
     };
 
-    // Respect an explicit user severity; force the rule on (warn) when it is the
-    // default off, so the detector runs for this dedicated command. Both the
-    // client-server-leak and the catalogue-driven tainted-sink rules are flipped.
-    let effective_severity = config.rules.security_client_server_leak;
-    if effective_severity == Severity::Off {
-        config.rules.security_client_server_leak = Severity::Warn;
-    }
-    let effective_sink_severity = config.rules.security_sink;
-    if effective_sink_severity == Severity::Off {
-        config.rules.security_sink = Severity::Warn;
-    }
+    let (effective_severity, effective_sink_severity) = force_security_rules(&mut config);
 
     let mut analysis = match analyze_security_candidates(opts, &config) {
         Ok(analysis) => analysis,
@@ -221,28 +218,12 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
         crate::check::filtering::filter_to_workspaces(&mut analysis.results, roots);
     }
 
-    // Changed-since scope (canonical normalization via the core filter, which
-    // now retains security_findings too).
-    if let Some(git_ref) = opts.changed_since
-        && let Some(changed) = fallow_core::changed_files::get_changed_files(opts.root, git_ref)
-    {
-        fallow_core::changed_files::filter_results_by_changed_files(
-            &mut analysis.results,
-            &changed,
-        );
-    }
-    if opts.use_shared_diff_index
-        && let Some(diff_index) = crate::report::ci::diff_filter::shared_diff_index()
-    {
-        crate::check::filtering::filter_results_by_diff(
-            &mut analysis.results,
-            diff_index,
-            opts.root,
-        );
+    if !matches!(opts.gate, Some(SecurityGateMode::NewlyReachable)) {
+        apply_changed_scope(opts, &mut analysis.results);
     }
     filter_to_files(&mut analysis.results, opts.root, opts.file, opts.quiet);
 
-    let gate_mode = match apply_security_gate(opts, &mut analysis.results) {
+    let gate_mode = match apply_security_gate(opts, &config, &mut analysis.results) {
         Ok(mode) => mode,
         Err(code) => return code,
     };
@@ -338,13 +319,46 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
     }
 }
 
+fn force_security_rules(config: &mut fallow_config::ResolvedConfig) -> (Severity, Severity) {
+    // Respect explicit user severities; force the rules on when they are the
+    // default off so this dedicated command actually surfaces candidates.
+    let effective_severity = config.rules.security_client_server_leak;
+    if effective_severity == Severity::Off {
+        config.rules.security_client_server_leak = Severity::Warn;
+    }
+    let effective_sink_severity = config.rules.security_sink;
+    if effective_sink_severity == Severity::Off {
+        config.rules.security_sink = Severity::Warn;
+    }
+    (effective_severity, effective_sink_severity)
+}
+
+fn apply_changed_scope(opts: &SecurityOptions<'_>, results: &mut AnalysisResults) {
+    if let Some(git_ref) = opts.changed_since
+        && let Some(changed) = fallow_core::changed_files::get_changed_files(opts.root, git_ref)
+    {
+        fallow_core::changed_files::filter_results_by_changed_files(results, &changed);
+    }
+    if opts.use_shared_diff_index
+        && let Some(diff_index) = crate::report::ci::diff_filter::shared_diff_index()
+    {
+        crate::check::filtering::filter_results_by_diff(results, diff_index, opts.root);
+    }
+}
+
 fn apply_security_gate(
     opts: &SecurityOptions<'_>,
+    config: &fallow_config::ResolvedConfig,
     results: &mut AnalysisResults,
 ) -> Result<Option<SecurityGateMode>, ExitCode> {
     let Some(mode) = opts.gate else {
         return Ok(None);
     };
+
+    if matches!(mode, SecurityGateMode::NewlyReachable) {
+        retain_gate_newly_reachable(opts, config, results)?;
+        return Ok(Some(mode));
+    }
 
     // Security gate (issue #886): narrow to the STRICT "new in changed lines"
     // predicate and drive a dedicated exit code. The gate requires a diff
@@ -379,6 +393,291 @@ fn apply_security_gate(
         };
     crate::check::filtering::retain_gate_new(results, gate_diff, opts.root);
     Ok(Some(mode))
+}
+
+const SECURITY_BASE_SNAPSHOT_CACHE_VERSION: u8 = 1;
+const MAX_SECURITY_BASE_SNAPSHOT_CACHE_SIZE: usize = 8 * 1024 * 1024;
+
+#[derive(Debug, Clone)]
+struct SecurityKeySnapshot {
+    reachable: FxHashSet<String>,
+}
+
+struct SecurityBaseSnapshotCacheKey {
+    hash: u64,
+    base_sha: String,
+}
+
+#[derive(bitcode::Encode, bitcode::Decode)]
+struct CachedSecurityKeySnapshot {
+    version: u8,
+    cli_version: String,
+    key_hash: u64,
+    base_sha: String,
+    reachable: Vec<String>,
+}
+
+fn retain_gate_newly_reachable(
+    opts: &SecurityOptions<'_>,
+    config: &fallow_config::ResolvedConfig,
+    results: &mut AnalysisResults,
+) -> Result<(), ExitCode> {
+    let Some(base_ref) = opts.changed_since else {
+        return Err(emit_error(
+            "fallow security --gate newly-reachable requires --changed-since <ref>; \
+             --diff-file and --diff-stdin do not identify a base tree.",
+            2,
+            opts.output,
+        ));
+    };
+    let Some(base_sha) = git_rev_parse(opts.root, base_ref) else {
+        return Err(emit_error(
+            &format!(
+                "fallow security --gate newly-reachable could not resolve base ref '{base_ref}'."
+            ),
+            2,
+            opts.output,
+        ));
+    };
+    let cache_key = security_base_snapshot_cache_key(opts, config, &base_sha)?;
+    let base = if let Some(snapshot) = load_cached_security_base_snapshot(config, &cache_key) {
+        snapshot
+    } else {
+        let snapshot = compute_base_security_snapshot(opts, config, base_ref, &base_sha)?;
+        save_cached_security_base_snapshot(config, &cache_key, &snapshot);
+        snapshot
+    };
+    results.security_findings.retain(|finding| {
+        security_reachability_key(finding, opts.root)
+            .is_some_and(|key| !base.reachable.contains(&key))
+    });
+    Ok(())
+}
+
+fn compute_base_security_snapshot(
+    opts: &SecurityOptions<'_>,
+    config: &fallow_config::ResolvedConfig,
+    base_ref: &str,
+    base_sha: &str,
+) -> Result<SecurityKeySnapshot, ExitCode> {
+    let Some(worktree) = BaseWorktree::create(opts.root, base_ref, Some(base_sha)) else {
+        return Err(emit_error(
+            &format!("could not create a temporary worktree for base ref '{base_ref}'"),
+            2,
+            opts.output,
+        ));
+    };
+    let base_root = base_analysis_root(opts.root, worktree.path());
+    let current_config_path = opts
+        .config_path
+        .clone()
+        .or_else(|| fallow_config::FallowConfig::find_config_path(opts.root));
+    let mut base_config = load_config_for_analysis(
+        &base_root,
+        &current_config_path,
+        opts.output,
+        opts.no_cache,
+        opts.threads,
+        None,
+        true,
+        ProductionAnalysis::DeadCode,
+    )?;
+    base_config.cache_dir =
+        remap_cache_dir_for_base_worktree(opts.root, &base_root, &config.cache_dir);
+    force_security_rules(&mut base_config);
+    let mut base_analysis = analyze_security_candidates(
+        &SecurityOptions {
+            root: &base_root,
+            config_path: &current_config_path,
+            output: opts.output,
+            no_cache: opts.no_cache,
+            threads: opts.threads,
+            quiet: true,
+            fail_on_issues: false,
+            sarif_file: None,
+            summary: false,
+            changed_since: None,
+            use_shared_diff_index: false,
+            workspace: opts.workspace,
+            changed_workspaces: None,
+            file: &[],
+            surface: false,
+            gate: None,
+            runtime_coverage: None,
+            min_invocations_hot: opts.min_invocations_hot,
+        },
+        &base_config,
+    )?;
+    if let Some(ref roots) = crate::check::filtering::resolve_workspace_scope(
+        &base_root,
+        opts.workspace,
+        None,
+        opts.output,
+    )? {
+        crate::check::filtering::filter_to_workspaces(&mut base_analysis.results, roots);
+    }
+    Ok(SecurityKeySnapshot {
+        reachable: security_reachable_keys(&base_analysis.results.security_findings, &base_root),
+    })
+}
+
+fn security_reachable_keys(findings: &[SecurityFinding], root: &Path) -> FxHashSet<String> {
+    findings
+        .iter()
+        .filter_map(|finding| security_reachability_key(finding, root))
+        .collect()
+}
+
+fn security_reachability_key(finding: &SecurityFinding, root: &Path) -> Option<String> {
+    if !finding
+        .reachability
+        .as_ref()
+        .is_some_and(|reachability| reachability.reachable_from_entry)
+    {
+        return None;
+    }
+    let category = finding.category.as_deref().unwrap_or("none");
+    Some(format!(
+        "security-reach:{}:{}:{}",
+        relative_key(&finding.path, root),
+        security_kind_key(finding.kind),
+        category,
+    ))
+}
+
+fn security_kind_key(kind: SecurityFindingKind) -> &'static str {
+    match kind {
+        SecurityFindingKind::ClientServerLeak => "client-server-leak",
+        SecurityFindingKind::TaintedSink => "tainted-sink",
+    }
+}
+
+fn security_base_snapshot_cache_key(
+    opts: &SecurityOptions<'_>,
+    config: &fallow_config::ResolvedConfig,
+    base_sha: &str,
+) -> Result<SecurityBaseSnapshotCacheKey, ExitCode> {
+    let payload = serde_json::json!({
+        "cache_version": SECURITY_BASE_SNAPSHOT_CACHE_VERSION,
+        "cli_version": env!("CARGO_PKG_VERSION"),
+        "base_sha": base_sha,
+        "config_hash": format!("{:016x}", config.cache_config_hash),
+        "security_client_server_leak": format!("{:?}", config.rules.security_client_server_leak),
+        "security_sink": format!("{:?}", config.rules.security_sink),
+        "workspace": opts.workspace,
+        "changed_workspaces": opts.changed_workspaces,
+    });
+    let bytes = serde_json::to_vec(&payload).map_err(|err| {
+        emit_error(
+            &format!("failed to build security gate cache key: {err}"),
+            2,
+            opts.output,
+        )
+    })?;
+    Ok(SecurityBaseSnapshotCacheKey {
+        hash: xxh3_64(&bytes),
+        base_sha: base_sha.to_owned(),
+    })
+}
+
+fn security_base_snapshot_cache_dir(config: &fallow_config::ResolvedConfig) -> PathBuf {
+    config.cache_dir.join("cache").join(format!(
+        "security-base-v{SECURITY_BASE_SNAPSHOT_CACHE_VERSION}"
+    ))
+}
+
+fn security_base_snapshot_cache_file(
+    config: &fallow_config::ResolvedConfig,
+    key: &SecurityBaseSnapshotCacheKey,
+) -> PathBuf {
+    security_base_snapshot_cache_dir(config).join(format!("{:016x}.bin", key.hash))
+}
+
+fn ensure_security_base_snapshot_cache_dir(dir: &Path) -> Result<(), std::io::Error> {
+    std::fs::create_dir_all(dir)?;
+    let gitignore = dir.join(".gitignore");
+    if std::fs::read_to_string(&gitignore).ok().as_deref() != Some("*\n") {
+        std::fs::write(gitignore, "*\n")?;
+    }
+    Ok(())
+}
+
+fn load_cached_security_base_snapshot(
+    config: &fallow_config::ResolvedConfig,
+    key: &SecurityBaseSnapshotCacheKey,
+) -> Option<SecurityKeySnapshot> {
+    if config.no_cache {
+        return None;
+    }
+    let path = security_base_snapshot_cache_file(config, key);
+    let data = std::fs::read(path).ok()?;
+    if data.len() > MAX_SECURITY_BASE_SNAPSHOT_CACHE_SIZE {
+        return None;
+    }
+    let cached: CachedSecurityKeySnapshot = bitcode::decode(&data).ok()?;
+    if cached.version != SECURITY_BASE_SNAPSHOT_CACHE_VERSION
+        || cached.cli_version != env!("CARGO_PKG_VERSION")
+        || cached.key_hash != key.hash
+        || cached.base_sha != key.base_sha
+    {
+        return None;
+    }
+    Some(SecurityKeySnapshot {
+        reachable: cached.reachable.into_iter().collect(),
+    })
+}
+
+fn save_cached_security_base_snapshot(
+    config: &fallow_config::ResolvedConfig,
+    key: &SecurityBaseSnapshotCacheKey,
+    snapshot: &SecurityKeySnapshot,
+) {
+    if config.no_cache {
+        return;
+    }
+    let dir = security_base_snapshot_cache_dir(config);
+    if ensure_security_base_snapshot_cache_dir(&dir).is_err() {
+        return;
+    }
+    let mut reachable = snapshot.reachable.iter().cloned().collect::<Vec<_>>();
+    reachable.sort_unstable();
+    let data = bitcode::encode(&CachedSecurityKeySnapshot {
+        version: SECURITY_BASE_SNAPSHOT_CACHE_VERSION,
+        cli_version: env!("CARGO_PKG_VERSION").to_owned(),
+        key_hash: key.hash,
+        base_sha: key.base_sha.clone(),
+        reachable,
+    });
+    let Ok(mut tmp) = tempfile::NamedTempFile::new_in(&dir) else {
+        return;
+    };
+    if tmp.write_all(&data).is_err() {
+        return;
+    }
+    let _ = tmp.persist(security_base_snapshot_cache_file(config, key));
+}
+
+fn base_analysis_root(current_root: &Path, base_worktree_root: &Path) -> PathBuf {
+    if current_root.is_absolute()
+        && let Some(git_root) = crate::base_worktree::git_toplevel(current_root)
+        && let Ok(relative) = current_root.strip_prefix(git_root)
+    {
+        return base_worktree_root.join(relative);
+    }
+    base_worktree_root.to_path_buf()
+}
+
+fn remap_cache_dir_for_base_worktree(
+    current_root: &Path,
+    base_worktree_root: &Path,
+    cache_dir: &Path,
+) -> PathBuf {
+    if cache_dir.is_absolute()
+        && let Ok(relative) = cache_dir.strip_prefix(current_root)
+    {
+        return base_worktree_root.join(relative);
+    }
+    cache_dir.to_path_buf()
 }
 
 struct SecurityAnalysisState {
@@ -868,14 +1167,18 @@ fn write_sarif_file(output: &SecurityOutput, path: &Path) -> Result<(), String> 
 /// `fail`; only this human prose says "REVIEW REQUIRED".
 fn gate_human_header(gate: &SecurityGate) -> String {
     use crate::report::plural;
+    let checked = match gate.mode {
+        SecurityGateMode::New => "in changed lines",
+        SecurityGateMode::NewlyReachable => "newly reachable from entry points",
+    };
     match gate.verdict {
         SecurityGateVerdict::Fail => format!(
-            "Gate: REVIEW REQUIRED, {} new security item{} in changed lines. fallow has not confirmed a vulnerability.",
+            "Gate: REVIEW REQUIRED, {} new security item{} {checked}. fallow has not confirmed a vulnerability.",
             gate.new_count,
             plural(gate.new_count),
         ),
         SecurityGateVerdict::Pass => {
-            "Gate: PASS, no new security items in changed lines.".to_owned()
+            format!("Gate: PASS, no new security items {checked}.")
         }
     }
 }
@@ -1778,6 +2081,41 @@ mod tests {
         assert!(json.contains("\"mode\": \"new\""));
         assert!(json.contains("\"verdict\": \"pass\""));
         assert!(json.contains("\"new_count\": 0"));
+    }
+
+    #[test]
+    fn reachability_key_includes_path_kind_and_category() {
+        let root = Path::new("/proj/root");
+        let mut leak = sample_finding(root);
+        leak.reachability = Some(SecurityReachability {
+            reachable_from_entry: true,
+            reachable_from_untrusted_source: false,
+            taint_confidence: None,
+            untrusted_source_hop_count: None,
+            untrusted_source_trace: vec![],
+            blast_radius: 0,
+            crosses_boundary: false,
+        });
+        let mut sink = leak.clone();
+        sink.kind = SecurityFindingKind::TaintedSink;
+        sink.category = Some("dangerous-html".to_owned());
+
+        assert_eq!(
+            security_reachability_key(&leak, root).as_deref(),
+            Some("security-reach:src/app.tsx:client-server-leak:none")
+        );
+        assert_eq!(
+            security_reachability_key(&sink, root).as_deref(),
+            Some("security-reach:src/app.tsx:tainted-sink:dangerous-html")
+        );
+    }
+
+    #[test]
+    fn reachability_key_ignores_unreachable_findings() {
+        let root = Path::new("/proj/root");
+        let finding = sample_finding(root);
+
+        assert!(security_reachability_key(&finding, root).is_none());
     }
 
     #[test]
