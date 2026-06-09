@@ -2225,9 +2225,9 @@ dependencies = [
 
 [[package]]
 name = "oxc_coverage_instrument"
-version = "0.7.6"
+version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4bb65d227afca44320dcff101b568751cdad251b7e2b8374e0001ef2f6802526"
+checksum = "0096558ea02824396d6057082f3bdb11355c440d354ddb7160d3d5cc37199754"
 dependencies = [
  "oxc_allocator",
  "oxc_ast",
@@ -2250,9 +2250,9 @@ dependencies = [
 
 [[package]]
 name = "oxc_coverage_source_maps"
-version = "0.3.1"
+version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23274ed8594c1cd6c82675e86833a15ecb498714ffa05b35f38466af4f34ef8f"
+checksum = "d21449c3cbef6ae2c3cf3acb2ca1e97df390e8afc9ad85227e0a785d7667b677"
 dependencies = [
  "oxc_coverage_types",
  "serde_json",
@@ -2261,9 +2261,9 @@ dependencies = [
 
 [[package]]
 name = "oxc_coverage_types"
-version = "0.2.0"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1665a1ece2c4449dea2c5477f38d97f6b6c6d5587b092eb888fbfc97ca5317b1"
+checksum = "1d019e4323a9578c884ba9a117eb496e9ebf12221804bd5e779554310b71dc01"
 dependencies = [
  "serde",
  "serde_json",
