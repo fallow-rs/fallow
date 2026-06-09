@@ -16,7 +16,7 @@ use std::process::ExitCode;
 use fallow_config::{OutputFormat, ProductionAnalysis, Severity};
 use fallow_core::results::{
     AnalysisResults, SecurityAttackSurfaceEntry, SecurityDeadCodeKind, SecurityFinding,
-    SecurityFindingKind, TraceHopRole,
+    SecurityFindingKind, TraceHop, TraceHopRole,
 };
 use fallow_types::discover::DiscoveredFile;
 use fallow_types::extract::ModuleInfo;
@@ -1116,21 +1116,104 @@ fn sarif_rule_id(finding: &SecurityFinding) -> String {
     }
 }
 
+fn security_help_text(title: &str) -> String {
+    format!(
+        "Verify this unverified {title} candidate before acting. Review the source, sink, \
+         SARIF code flow, and any runtime or dead-code context. fallow does not prove \
+         exploitability, attacker control, or missing sanitization."
+    )
+}
+
+fn security_help_markdown(title: &str) -> String {
+    format!(
+        "Verify this unverified **{title}** candidate before acting.\n\n\
+         1. Review the source and sink in the SARIF code flow.\n\
+         2. Confirm whether attacker-controlled data can reach the sink unsanitized.\n\
+         3. Use runtime and dead-code context only as triage signals."
+    )
+}
+
+fn cwe_taxon_id(cwe: u32) -> String {
+    format!("CWE-{cwe}")
+}
+
+fn cwe_taxon(cwe: u32) -> serde_json::Value {
+    let id = cwe_taxon_id(cwe);
+    serde_json::json!({
+        "id": id,
+        "name": id,
+        "shortDescription": { "text": format!("Common Weakness Enumeration {id}") },
+        "fullDescription": { "text": format!("MITRE Common Weakness Enumeration {id}") },
+        "helpUri": format!("https://cwe.mitre.org/data/definitions/{cwe}.html")
+    })
+}
+
+fn cwe_relationship(cwe: u32, taxon_index: usize) -> serde_json::Value {
+    serde_json::json!({
+        "target": {
+            "id": cwe_taxon_id(cwe),
+            "index": taxon_index,
+            "toolComponent": {
+                "name": "CWE",
+                "index": 0
+            }
+        },
+        "kinds": ["superset"]
+    })
+}
+
+fn collect_cwes(findings: &[SecurityFinding]) -> Vec<u32> {
+    let mut cwes: Vec<u32> = findings.iter().filter_map(|finding| finding.cwe).collect();
+    cwes.sort_unstable();
+    cwes.dedup();
+    cwes
+}
+
+fn cwe_index(cwes: &[u32], cwe: u32) -> Option<usize> {
+    cwes.iter().position(|existing| *existing == cwe)
+}
+
+fn cwe_taxonomy(cwes: &[u32]) -> Option<serde_json::Value> {
+    if cwes.is_empty() {
+        return None;
+    }
+    let taxa = cwes.iter().map(|cwe| cwe_taxon(*cwe)).collect::<Vec<_>>();
+    Some(serde_json::json!({
+        "name": "CWE",
+        "fullName": "Common Weakness Enumeration",
+        "organization": "MITRE",
+        "informationUri": "https://cwe.mitre.org/",
+        "taxa": taxa
+    }))
+}
+
 /// Build the SARIF rule definition for a ruleId, deriving per-category metadata
-/// (catalogue title + CWE tag) for `TaintedSink` findings so the CWE survives
-/// into GHAS via the `external/cwe/cwe-NNN` tag convention.
-fn sarif_rule_def(rule_id: &str, finding: &SecurityFinding) -> serde_json::Value {
+/// (catalogue title + CWE tag and relationship) for `TaintedSink` findings so
+/// CWE grouping survives in SARIF-aware consumers.
+fn sarif_rule_def(
+    rule_id: &str,
+    finding: &SecurityFinding,
+    cwe_taxon_index: Option<usize>,
+) -> serde_json::Value {
     match finding.kind {
-        SecurityFindingKind::ClientServerLeak => serde_json::json!({
-            "id": rule_id,
-            "shortDescription": { "text": "Client-server secret leak candidate (unverified)" },
-            "fullDescription": { "text":
-                "Unverified candidate, requires verification: a \"use client\" file \
-                 transitively imports a module that reads a non-public process.env \
-                 secret. fallow does not prove the secret reaches client-bundled code." },
-            "helpUri": "https://github.com/fallow-rs/fallow",
-            "defaultConfiguration": { "level": "note" }
-        }),
+        SecurityFindingKind::ClientServerLeak => {
+            let title = "Client-server secret leak";
+            serde_json::json!({
+                "id": rule_id,
+                "name": title,
+                "shortDescription": { "text": "Client-server secret leak candidate (unverified)" },
+                "fullDescription": { "text":
+                    "Unverified candidate, requires verification: a \"use client\" file \
+                     transitively imports a module that reads a non-public process.env \
+                     secret. fallow does not prove the secret reaches client-bundled code." },
+                "help": {
+                    "text": security_help_text(title),
+                    "markdown": security_help_markdown(title)
+                },
+                "helpUri": "https://github.com/fallow-rs/fallow",
+                "defaultConfiguration": { "level": "note" }
+            })
+        }
         SecurityFindingKind::TaintedSink => {
             let title = finding
                 .category
@@ -1140,12 +1223,17 @@ fn sarif_rule_def(rule_id: &str, finding: &SecurityFinding) -> serde_json::Value
                 .unwrap_or("tainted-sink");
             let mut rule = serde_json::json!({
                 "id": rule_id,
+                "name": title,
                 "shortDescription": { "text": format!("{title} candidate (unverified)") },
                 "fullDescription": { "text": format!(
                     "Unverified candidate, requires verification: {title}. fallow flags a \
                      syntactic sink reached by a non-literal argument; it does not prove the \
                      value is attacker-controlled or reaches the sink unsanitized."
                 ) },
+                "help": {
+                    "text": security_help_text(title),
+                    "markdown": security_help_markdown(title)
+                },
                 "helpUri": "https://github.com/fallow-rs/fallow",
                 "defaultConfiguration": { "level": "note" }
             });
@@ -1153,10 +1241,79 @@ fn sarif_rule_def(rule_id: &str, finding: &SecurityFinding) -> serde_json::Value
                 rule["properties"] = serde_json::json!({
                     "tags": [format!("external/cwe/cwe-{cwe}")]
                 });
+                if let Some(taxon_index) = cwe_taxon_index {
+                    rule["relationships"] = serde_json::json!([cwe_relationship(cwe, taxon_index)]);
+                }
             }
             rule
         }
     }
+}
+
+fn hop_role_token(role: TraceHopRole) -> &'static str {
+    match role {
+        TraceHopRole::ClientBoundary => "client-boundary",
+        TraceHopRole::UntrustedSource => "untrusted-source",
+        TraceHopRole::Intermediate => "intermediate",
+        TraceHopRole::SecretSource => "secret-source",
+        TraceHopRole::Sink => "sink",
+    }
+}
+
+fn sarif_thread_flow_location(hop: &TraceHop) -> serde_json::Value {
+    let role = hop_role_token(hop.role);
+    serde_json::json!({
+        "location": sarif_location(&hop.path, hop.line, hop.col),
+        "kinds": [role],
+        "properties": { "fallowTraceRole": role }
+    })
+}
+
+fn primary_code_flow_hops(finding: &SecurityFinding) -> &[TraceHop] {
+    if let Some(reachability) = finding.reachability.as_ref()
+        && !reachability.untrusted_source_trace.is_empty()
+    {
+        return &reachability.untrusted_source_trace;
+    }
+    &finding.trace
+}
+
+fn sarif_code_flows(finding: &SecurityFinding) -> Option<serde_json::Value> {
+    let hops = primary_code_flow_hops(finding);
+    if hops.is_empty() {
+        return None;
+    }
+    let locations = hops
+        .iter()
+        .map(sarif_thread_flow_location)
+        .collect::<Vec<_>>();
+    Some(serde_json::json!([
+        {
+            "threadFlows": [
+                { "locations": locations }
+            ]
+        }
+    ]))
+}
+
+fn push_related_location(related: &mut Vec<serde_json::Value>, hop: &TraceHop) {
+    let location = sarif_location(&hop.path, hop.line, hop.col);
+    if !related.iter().any(|existing| existing == &location) {
+        related.push(location);
+    }
+}
+
+fn sarif_related_locations(finding: &SecurityFinding) -> Vec<serde_json::Value> {
+    let mut related = Vec::new();
+    for hop in &finding.trace {
+        push_related_location(&mut related, hop);
+    }
+    if let Some(reachability) = finding.reachability.as_ref() {
+        for hop in &reachability.untrusted_source_trace {
+            push_related_location(&mut related, hop);
+        }
+    }
+    related
 }
 
 /// SARIF output. Emits `level: "note"` (never error/warning) so the candidate
@@ -1167,6 +1324,7 @@ fn sarif_rule_def(rule_id: &str, finding: &SecurityFinding) -> serde_json::Value
 /// hops and source-reachability hops become `relatedLocations` of the result.
 #[must_use]
 fn render_sarif(output: &SecurityOutput) -> String {
+    let cwes = collect_cwes(&output.security_findings);
     let results: Vec<serde_json::Value> = output
         .security_findings
         .iter()
@@ -1185,31 +1343,23 @@ fn render_sarif(output: &SecurityOutput) -> String {
                 message.push_str(&runtime_hint_text(runtime));
                 message.push('.');
             }
-            let mut related: Vec<serde_json::Value> = finding
-                .trace
-                .iter()
-                .map(|hop| sarif_location(&hop.path, hop.line, hop.col))
-                .collect();
-            if let Some(reach) = finding.reachability.as_ref() {
-                related.extend(
-                    reach
-                        .untrusted_source_trace
-                        .iter()
-                        .map(|hop| sarif_location(&hop.path, hop.line, hop.col)),
-                );
-            }
+            let related = sarif_related_locations(finding);
             // Stable dedup key for GHAS: rule + anchor path + line. Without
             // partialFingerprints, every run re-opens previously triaged alerts.
             // Same helper as the JSON `finding_id` field so the two never drift
             // (issue #900).
-            serde_json::json!({
+            let mut result = serde_json::json!({
                 "ruleId": rule_id,
                 "level": "note",
                 "message": { "text": message },
                 "locations": [sarif_location(&finding.path, finding.line, finding.col)],
                 "relatedLocations": related,
                 "partialFingerprints": { "fallowSecurity/v1": security_finding_id(finding) },
-            })
+            });
+            if let Some(code_flows) = sarif_code_flows(finding) {
+                result["codeFlows"] = code_flows;
+            }
+            result
         })
         .collect();
 
@@ -1222,7 +1372,8 @@ fn render_sarif(output: &SecurityOutput) -> String {
             continue;
         }
         seen.push(rule_id.clone());
-        rules.push(sarif_rule_def(&rule_id, finding));
+        let cwe_taxon_index = finding.cwe.and_then(|cwe| cwe_index(&cwes, cwe));
+        rules.push(sarif_rule_def(&rule_id, finding, cwe_taxon_index));
     }
 
     let mut run = serde_json::json!({
@@ -1234,6 +1385,12 @@ fn render_sarif(output: &SecurityOutput) -> String {
         }},
         "results": results,
     });
+    if let Some(taxonomy) = cwe_taxonomy(&cwes) {
+        run["taxonomies"] = serde_json::json!([taxonomy]);
+        run["tool"]["driver"]["supportedTaxonomies"] = serde_json::json!([
+            { "name": "CWE", "index": 0 }
+        ]);
+    }
     // Gate verdict rides as a RUN-level property, never on result severity:
     // every result stays `level: note` so the candidate framing survives into
     // GHAS (an `error`-level result reads as a confirmed problem).
@@ -1294,7 +1451,9 @@ mod tests {
         SecurityDeadCodeContext, SecurityDeadCodeKind, SecurityFinding, SecurityFindingKind,
         TraceHop, TraceHopRole,
     };
-    use fallow_types::results::SecurityReachability;
+    use fallow_types::results::{
+        SecurityReachability, SecurityTaintFlow, TaintEndpoint, TaintPath,
+    };
 
     /// Build a finding anchored under `root` with a three-hop client -> secret trace.
     fn sample_finding(root: &Path) -> SecurityFinding {
@@ -1540,6 +1699,25 @@ mod tests {
             ],
             blast_radius: 2,
             crosses_boundary: false,
+        });
+    }
+
+    fn add_taint_flow(finding: &mut SecurityFinding, root: &Path) {
+        finding.taint_flow = Some(SecurityTaintFlow {
+            source: TaintEndpoint {
+                path: root.join("src/routes/api.ts"),
+                line: 3,
+                col: 0,
+            },
+            sink: TaintEndpoint {
+                path: root.join("src/lib/sink.ts"),
+                line: 9,
+                col: 2,
+            },
+            path: TaintPath {
+                intra_module: false,
+                cross_module_hops: 1,
+            },
         });
     }
 
@@ -1823,10 +2001,32 @@ mod tests {
         assert_eq!(result["level"], "note");
         assert_eq!(result["ruleId"], "security/client-server-leak");
         assert_eq!(result["message"]["text"], "reaches process.env.SECRET_KEY");
-        // Trace hops surface as relatedLocations (3 hops).
+        // Trace hops surface as relatedLocations and codeFlows.
         assert_eq!(result["relatedLocations"].as_array().unwrap().len(), 3);
+        let flow_locations = result["codeFlows"][0]["threadFlows"][0]["locations"]
+            .as_array()
+            .expect("thread flow locations");
+        assert_eq!(flow_locations.len(), 3);
+        assert_eq!(
+            flow_locations[0]["location"]["physicalLocation"]["artifactLocation"]["uri"],
+            "src/app.tsx"
+        );
+        assert_eq!(
+            flow_locations[2]["location"]["physicalLocation"]["artifactLocation"]["uri"],
+            "src/lib/secret.ts"
+        );
+        assert_eq!(
+            flow_locations[2]["kinds"][0],
+            serde_json::json!("secret-source")
+        );
         // Stable dedup fingerprint present for GHAS.
         assert!(result["partialFingerprints"]["fallowSecurity/v1"].is_string());
+
+        let rules = run["tool"]["driver"]["rules"].as_array().unwrap();
+        assert_eq!(rules[0]["name"], "Client-server secret leak");
+        assert!(rules[0]["help"]["text"].is_string());
+        assert!(rules[0].get("relationships").is_none());
+        assert!(run.get("taxonomies").is_none());
     }
 
     #[test]
@@ -1859,6 +2059,13 @@ mod tests {
         finding.kind = SecurityFindingKind::TaintedSink;
         finding.category = Some("command-injection".to_string());
         add_untrusted_source_reachability(&mut finding, root);
+        add_taint_flow(&mut finding, root);
+        finding.trace.push(TraceHop {
+            path: root.join("src/lib/sink.ts"),
+            line: 9,
+            col: 2,
+            role: TraceHopRole::Sink,
+        });
         let rendered = render_sarif(&output_with(vec![relativize_finding(finding, root)], 0));
         let sarif: serde_json::Value = serde_json::from_str(&rendered).expect("valid SARIF JSON");
         let result = &sarif["runs"][0]["results"][0];
@@ -1868,11 +2075,24 @@ mod tests {
             message.contains("does not prove value flow"),
             "got: {message}"
         );
+        // The sink appears in both trace families, but SARIF relatedLocations requires unique items.
         assert_eq!(result["relatedLocations"].as_array().unwrap().len(), 5);
+        let flow_locations = result["codeFlows"][0]["threadFlows"][0]["locations"]
+            .as_array()
+            .expect("thread flow locations");
+        assert_eq!(flow_locations.len(), 2);
+        assert_eq!(
+            flow_locations[0]["location"]["physicalLocation"]["artifactLocation"]["uri"],
+            "src/routes/api.ts"
+        );
+        assert_eq!(
+            flow_locations[1]["location"]["physicalLocation"]["artifactLocation"]["uri"],
+            "src/lib/sink.ts"
+        );
     }
 
     #[test]
-    fn sarif_tainted_sink_uses_per_category_rule_id_and_cwe_tag() {
+    fn sarif_tainted_sink_uses_per_category_rule_id_and_cwe_metadata() {
         let root = Path::new("/proj/root");
         let mut finding = sample_finding(root);
         finding.kind = SecurityFindingKind::TaintedSink;
@@ -1886,12 +2106,38 @@ mod tests {
         let result = &run["results"][0];
         assert_eq!(result["level"], "note");
         assert_eq!(result["ruleId"], "security/dangerous-html");
-        // Exactly one rule definition, carrying the CWE as a GHAS tag.
+        // Exactly one rule definition, carrying compatible tags plus SARIF-native CWE taxonomy.
         let rules = run["tool"]["driver"]["rules"].as_array().unwrap();
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0]["id"], "security/dangerous-html");
+        assert_eq!(rules[0]["name"], "Dangerous HTML sink");
+        assert!(
+            rules[0]["help"]["text"]
+                .as_str()
+                .expect("help text")
+                .contains("Verify this unverified")
+        );
+        assert!(
+            rules[0]["help"]["markdown"]
+                .as_str()
+                .expect("help markdown")
+                .contains("**Dangerous HTML sink**")
+        );
         let tags = rules[0]["properties"]["tags"].as_array().unwrap();
         assert!(tags.iter().any(|t| t == "external/cwe/cwe-79"));
+        let relationship = &rules[0]["relationships"][0];
+        assert_eq!(relationship["target"]["id"], "CWE-79");
+        assert_eq!(relationship["target"]["index"], 0);
+        assert_eq!(relationship["target"]["toolComponent"]["name"], "CWE");
+        assert_eq!(relationship["kinds"][0], "superset");
+
+        let taxonomy = &run["taxonomies"][0];
+        assert_eq!(taxonomy["name"], "CWE");
+        assert_eq!(taxonomy["taxa"][0]["id"], "CWE-79");
+        assert_eq!(
+            run["tool"]["driver"]["supportedTaxonomies"][0]["name"],
+            "CWE"
+        );
     }
 
     #[test]
