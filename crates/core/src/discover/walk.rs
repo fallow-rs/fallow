@@ -23,9 +23,15 @@ const NOTE_EXAMPLE_CAP: usize = 5;
 const LARGE_SET_THRESHOLD: usize = 20_000;
 
 /// Single-file byte threshold above which the pre-parse largest-files note
-/// fires even on a small project, since one multi-MB file dominates parse
-/// memory.
-const LARGE_FILE_NOTE_BYTES: u64 = 2 * 1024 * 1024;
+/// fires even on a small project. Set just under the default 5 MB skip so the
+/// note fires for kept files that are approaching the skip limit (the genuine
+/// out-of-memory suspects), not for ordinary large-but-benign files.
+const LARGE_FILE_NOTE_BYTES: u64 = 4 * 1024 * 1024;
+
+/// Minimum size for a file to appear in the largest-files note. Filters out the
+/// `0.0 MB` entries that would otherwise pad the list once it fires, keeping the
+/// named files to plausible memory contributors.
+const NOTE_FILE_FLOOR_BYTES: u64 = 256 * 1024;
 
 /// Whether a path is a TypeScript declaration file (`.d.ts`/`.d.mts`/`.d.cts`).
 /// Declaration files are exempt from the per-file size skip because they are
@@ -118,29 +124,52 @@ fn report_skipped_large_files(config: &ResolvedConfig, skipped: &[SizedFile]) {
     }
 }
 
+/// Build the pre-parse largest-files note, or `None` when the discovered set is
+/// neither unusually large nor contains an unusually large file. Pure so the
+/// pluralization, floor filtering, and count-only fallback are unit-testable
+/// without a tracing subscriber. See issue #1086.
+fn build_largest_files_note(root: &Path, files: &[DiscoveredFile]) -> Option<String> {
+    if files.is_empty() {
+        return None;
+    }
+    let largest = files.iter().map(|f| f.size_bytes).max().unwrap_or(0);
+    if files.len() <= LARGE_SET_THRESHOLD && largest < LARGE_FILE_NOTE_BYTES {
+        return None;
+    }
+    let count = files.len();
+    let noun = if count == 1 { "file" } else { "files" };
+    let mut by_size: Vec<SizedFile> = files
+        .iter()
+        .filter(|f| f.size_bytes >= NOTE_FILE_FLOOR_BYTES)
+        .map(|f| (f.path.clone(), f.size_bytes))
+        .collect();
+    by_size.sort_unstable_by_key(|f| std::cmp::Reverse(f.1));
+    if by_size.is_empty() {
+        // Large file SET with no individually large file: report the count only,
+        // omitting a "largest:" list that would otherwise be all sub-floor noise.
+        return Some(format!(
+            "fallow: discovered {count} {noun}. If analysis stalls or runs out of memory, \
+             exclude large generated files via ignorePatterns or --max-file-size."
+        ));
+    }
+    let examples = summarize_examples(root, &by_size);
+    Some(format!(
+        "fallow: discovered {count} {noun}; largest: {examples}. If analysis stalls or runs out of memory, \
+         exclude large generated files via ignorePatterns or --max-file-size."
+    ))
+}
+
 /// Emit a pre-parse note listing the largest kept files when the discovered set
 /// is unusually large or contains an unusually large file, so an out-of-memory
 /// hang at the parse stage is diagnosable (issue #1086). Visible before the
 /// expensive parse begins, so it survives a subsequent crash.
 fn note_largest_files(config: &ResolvedConfig, files: &[DiscoveredFile]) {
-    if config.quiet || files.is_empty() {
+    if config.quiet {
         return;
     }
-    let largest = files.iter().map(|f| f.size_bytes).max().unwrap_or(0);
-    if files.len() <= LARGE_SET_THRESHOLD && largest < LARGE_FILE_NOTE_BYTES {
-        return;
+    if let Some(message) = build_largest_files_note(&config.root, files) {
+        tracing::warn!("{message}");
     }
-    let mut by_size: Vec<SizedFile> = files
-        .iter()
-        .map(|f| (f.path.clone(), f.size_bytes))
-        .collect();
-    by_size.sort_unstable_by_key(|f| std::cmp::Reverse(f.1));
-    let examples = summarize_examples(&config.root, &by_size);
-    tracing::warn!(
-        "fallow: discovered {} files; largest: {examples}. If analysis stalls or runs out of memory, \
-         exclude large generated files via ignorePatterns or --max-file-size.",
-        files.len()
-    );
 }
 
 /// Package-scoped hidden directories that source discovery should traverse.
@@ -608,6 +637,57 @@ mod tests {
         );
         assert_eq!(skipped.len(), 1);
         assert_eq!(skipped[0].0, PathBuf::from("huge.ts"));
+    }
+
+    fn disco(path: &str, size_bytes: u64) -> DiscoveredFile {
+        DiscoveredFile {
+            id: FileId(0),
+            path: PathBuf::from(path),
+            size_bytes,
+        }
+    }
+
+    #[test]
+    fn largest_files_note_below_threshold_is_none() {
+        let files = [disco("a.ts", 100), disco("b.ts", 200)];
+        assert!(build_largest_files_note(Path::new("/p"), &files).is_none());
+    }
+
+    #[test]
+    fn largest_files_note_single_file_uses_singular() {
+        let files = [disco("big.ts", 5 * 1024 * 1024)];
+        let note = build_largest_files_note(Path::new("/p"), &files).expect("note fires");
+        assert!(
+            note.contains("discovered 1 file;"),
+            "singular noun on the single-big-file path (issue #1086 regression): {note}"
+        );
+        assert!(!note.contains("discovered 1 files"));
+        assert!(note.contains("big.ts (5.0 MB)"));
+    }
+
+    #[test]
+    fn largest_files_note_filters_sub_floor_files() {
+        let files = [disco("big.ts", 5 * 1024 * 1024), disco("tiny.ts", 10)];
+        let note = build_largest_files_note(Path::new("/p"), &files).expect("note fires");
+        assert!(note.contains("discovered 2 files;"));
+        assert!(note.contains("big.ts (5.0 MB)"));
+        assert!(
+            !note.contains("tiny.ts"),
+            "sub-floor files are not listed as `0.0 MB` chaff: {note}"
+        );
+    }
+
+    #[test]
+    fn largest_files_note_large_set_no_big_file_omits_list() {
+        let files: Vec<DiscoveredFile> = (0..=LARGE_SET_THRESHOLD)
+            .map(|i| disco(&format!("f{i}.ts"), 100))
+            .collect();
+        let note = build_largest_files_note(Path::new("/p"), &files).expect("large set fires");
+        assert!(note.contains(&format!("discovered {} files", LARGE_SET_THRESHOLD + 1)));
+        assert!(
+            !note.contains("largest:"),
+            "no sub-floor `largest:` list when no file clears the floor: {note}"
+        );
     }
 
     mod discover_files_integration {
