@@ -171,9 +171,7 @@ fn run() -> Result<(), String> {
 fn normalize_output_punctuation(value: &mut Value) {
     match value {
         Value::String(text) => {
-            if text.contains('\u{2014}') {
-                *text = text.replace('\u{2014}', ",");
-            }
+            *text = text.replace('\u{2014}', ",");
         }
         Value::Array(items) => {
             for item in items {
