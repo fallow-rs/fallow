@@ -107,6 +107,9 @@ pub fn find_hardcoded_secret_candidates(
                 col,
                 evidence,
                 source_backed: false,
+                // The hardcoded value IS the secret; there is no upstream
+                // source-read to anchor, so no arg-level trace node.
+                source_read: None,
                 trace: vec![TraceHop {
                     path,
                     line,

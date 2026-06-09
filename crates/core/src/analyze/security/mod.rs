@@ -326,6 +326,8 @@ fn build_leak_finding(
         // The client-server-leak rule is graph-structural, not source-to-sink;
         // source-backing is a tainted-sink concept (issue #859).
         source_backed: false,
+        // client-server-leak is module-level by construction (no arg-level read).
+        source_read: None,
         trace,
         actions: build_actions(),
         dead_code: None,
@@ -386,6 +388,8 @@ fn build_direct_finding(
         col: 0,
         evidence,
         source_backed: false,
+        // client-server-leak is module-level by construction (no arg-level read).
+        source_read: None,
         trace: vec![TraceHop {
             path,
             line: 1,

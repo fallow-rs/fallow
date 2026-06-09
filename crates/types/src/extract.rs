@@ -223,6 +223,14 @@ pub struct TaintedBinding {
     pub local: String,
     /// The flattened object member-access path the binding was sourced from.
     pub source_path: String,
+    /// Byte offset of the source read (the member-access expression the binding
+    /// was sourced from), so the analyze layer can anchor a taint trace's source
+    /// node at the real read line instead of the module import line. Stored as a
+    /// `u32` (not `Span`) to stay bitcode-encodable for the cache. `0` when no
+    /// concrete read expression is available (synthetic framework-param /
+    /// helper-return bindings), in which case the analyze layer falls back to the
+    /// sink site rather than claiming a spurious line.
+    pub source_span_start: u32,
 }
 
 /// The syntactic shape of a captured security sink site. Category-blind: the

@@ -359,6 +359,11 @@ pub fn filter_results_by_diff(
                         && touches_file(&hop.path))
             })
             || f.reachability.as_ref().is_some_and(|reachability| {
+                // Source-trace matching here is deliberately ROLE-AGNOSTIC (any
+                // hop on a changed line keeps the finding for advisory display).
+                // Do NOT add a role gate: unlike the strict `retain_gate_new`
+                // gate, the advisory display must surface a finding whose
+                // module-level `ModuleSource` source node sits on a changed line.
                 reachability
                     .untrusted_source_trace
                     .iter()
@@ -415,9 +420,12 @@ pub fn filter_results_by_diff(
 ///   unrelated line in a transit module is not new exposure).
 ///
 /// It KEEPS the sink anchor on an added line (a genuinely new sink) AND an
-/// `UntrustedSource` / `Sink` trace hop on an added line (a change that wires a
-/// new untrusted source INTO an existing sink is real new exposure that
-/// anchor-line-only would miss). Unfilterable paths (outside `root`) are RETAINED
+/// `UntrustedSource` / `ModuleSource` / `Sink` trace hop on an added line (a
+/// change that wires a new untrusted source INTO an existing sink is real new
+/// exposure that anchor-line-only would miss; `ModuleSource` covers the
+/// module-level cross-module source node, the role the arg-vs-module split
+/// (#1093) renamed it to, so wiring a source-module import on an added line
+/// still trips the gate). Unfilterable paths (outside `root`) are RETAINED
 /// (`line_in_diff` returns `true` for them): a candidate the gate cannot prove is
 /// old fails conservatively, the safe direction for a security gate.
 pub fn retain_gate_new(
@@ -437,8 +445,10 @@ pub fn retain_gate_new(
         }
     };
     let taint_hop_added = |path: &Path, line: u32, role: TraceHopRole| -> bool {
-        matches!(role, TraceHopRole::UntrustedSource | TraceHopRole::Sink)
-            && line_in_diff(path, line)
+        matches!(
+            role,
+            TraceHopRole::UntrustedSource | TraceHopRole::ModuleSource | TraceHopRole::Sink
+        ) && line_in_diff(path, line)
     };
 
     results.security_findings.retain(|f| {
@@ -1909,6 +1919,7 @@ mod tests {
             col: 0,
             evidence: "candidate".into(),
             source_backed: false,
+            source_read: None,
             trace: vec![
                 TraceHop {
                     path: PathBuf::from("/project/src/client.tsx"),
@@ -1958,12 +1969,14 @@ mod tests {
             col: 0,
             evidence: "candidate".into(),
             source_backed: false,
+            source_read: None,
             trace: vec![],
             actions: Vec::new(),
             dead_code: None,
             reachability: Some(SecurityReachability {
                 reachable_from_entry: false,
                 reachable_from_untrusted_source: true,
+                taint_confidence: None,
                 untrusted_source_hop_count: Some(1),
                 untrusted_source_trace: vec![
                     TraceHop {
@@ -2014,6 +2027,7 @@ mod tests {
             col: 0,
             evidence: "candidate".into(),
             source_backed: false,
+            source_read: None,
             trace: vec![],
             actions: Vec::new(),
             dead_code: None,
@@ -2055,6 +2069,7 @@ mod tests {
             col: 0,
             evidence: "candidate".into(),
             source_backed: false,
+            source_read: None,
             trace: vec![
                 TraceHop {
                     path: PathBuf::from("/project/src/client.tsx"),
@@ -2110,12 +2125,14 @@ mod tests {
             col: 0,
             evidence: "candidate".into(),
             source_backed: false,
+            source_read: None,
             trace: vec![],
             actions: Vec::new(),
             dead_code: None,
             reachability: Some(SecurityReachability {
                 reachable_from_entry: false,
                 reachable_from_untrusted_source: true,
+                taint_confidence: None,
                 untrusted_source_hop_count: Some(1),
                 untrusted_source_trace: vec![TraceHop {
                     path: PathBuf::from("/project/src/route.ts"),
@@ -2161,6 +2178,7 @@ mod tests {
             col: 0,
             evidence: "candidate".into(),
             source_backed: false,
+            source_read: None,
             trace: vec![TraceHop {
                 path: PathBuf::from("/project/src/transit.ts"),
                 line: 4,

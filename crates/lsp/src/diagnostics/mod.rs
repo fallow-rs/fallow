@@ -211,6 +211,7 @@ mod tests {
                 col: 2,
                 evidence: "sink".to_string(),
                 source_backed: false,
+                source_read: None,
                 trace: vec![],
                 actions: vec![],
                 dead_code: None,

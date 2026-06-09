@@ -201,16 +201,20 @@ pub(super) fn is_low_value_anchor(path: &std::path::Path) -> bool {
 fn source_tainted_locals<'b>(
     bindings: &'b [TaintedBinding],
     declared_deps: &rustc_hash::FxHashSet<String>,
-) -> FxHashMap<&'b str, (&'static str, &'static str)> {
+) -> FxHashMap<&'b str, (&'static str, &'static str, u32)> {
     let cat = catalogue();
-    let mut out: FxHashMap<&'b str, (&'static str, &'static str)> = FxHashMap::default();
+    let mut out: FxHashMap<&'b str, (&'static str, &'static str, u32)> = FxHashMap::default();
     for b in bindings {
         // `matching_source_for_deps` borrows from the `'static` catalogue, so
         // the (id, title) pair outlives the per-module computation. The id is
         // the stable machine source kind (`http-request-input`); the title is
-        // the human phrase woven into the evidence string.
-        if let Some(found) = cat.matching_source_for_deps(&b.source_path, declared_deps) {
-            out.entry(b.local.as_str()).or_insert(found);
+        // the human phrase woven into the evidence string. The third element is
+        // the binding's source-read byte offset (`0` for synthetic
+        // framework-param / helper-return bindings with no concrete read), used
+        // to anchor an arg-level taint trace's source node (issue #1093).
+        if let Some((id, title)) = cat.matching_source_for_deps(&b.source_path, declared_deps) {
+            out.entry(b.local.as_str())
+                .or_insert((id, title, b.source_span_start));
         }
     }
     out
@@ -257,25 +261,29 @@ fn sink_has_html_sanitizer(module: &ModuleInfo, sink: &SinkSite) -> bool {
 /// back-trace from issue #859.
 fn sink_source<'t>(
     sink: &SinkSite,
-    tainted: &FxHashMap<&str, (&'t str, &'t str)>,
+    tainted: &FxHashMap<&str, (&'t str, &'t str, u32)>,
     declared_deps: &rustc_hash::FxHashSet<String>,
-) -> Option<(&'t str, &'t str)> {
+) -> Option<(&'t str, &'t str, Option<u32>)> {
     let cat = catalogue();
-    if let Some(found) = sink
+    // Direct path: the source read is inside the sink argument (same statement),
+    // so there is no separate binding span; the detector anchors at the sink.
+    if let Some((id, title)) = sink
         .arg_source_paths
         .iter()
         .find_map(|path| cat.matching_source_for_deps(path, declared_deps))
     {
-        return Some(found);
+        return Some((id, title, None));
     }
 
+    // Binding path: the argument references a source-tainted local; carry that
+    // binding's source-read byte offset so the trace can anchor at the read.
     if !tainted.is_empty()
-        && let Some(found) = sink
+        && let Some((id, title, span)) = sink
             .arg_idents
             .iter()
             .find_map(|name| tainted.get(name.as_str()).copied())
     {
-        return Some(found);
+        return Some((id, title, Some(span)));
     }
 
     None
@@ -394,8 +402,11 @@ pub fn find_tainted_sinks(
 
         for sink in &module.security_sinks {
             let source = sink_source(sink, &tainted_locals, declared_deps);
+            // The matcher gate only needs (id, title); the optional source-read
+            // span (third element) anchors the trace and is handled below.
+            let source_id = source.map(|(id, title, _)| (id, title));
             let Some(matcher) = active.iter().copied().find(|m| {
-                matcher_admits_sink(m, sink, source)
+                matcher_admits_sink(m, sink, source_id)
                     && provenance_satisfied(m, module, &sink.callee_path)
             }) else {
                 continue;
@@ -444,12 +455,27 @@ pub fn find_tainted_sinks(
             // visible in every output format (the boolean drives ordering; the
             // prefix names the matched untrusted-input class as the rationale).
             let evidence = match source {
-                Some((_, title)) => format!(
+                Some((_, title, _)) => format!(
                     "Untrusted source reaches this sink (an argument traces to {}). {base_evidence}",
                     title.to_ascii_lowercase()
                 ),
                 None => base_evidence,
             };
+
+            // Arg-level source-read anchor (issue #1093): for a source-backed
+            // finding, point the trace's source node at the real read. The
+            // binding path carries the read's byte offset (`Some(span)`); a `0`
+            // span (synthetic framework-param / helper-return source) and the
+            // direct path (`None`, the read sits inside the sink statement) both
+            // fall back to the sink line/col rather than a spurious line. `None`
+            // for module-level findings keeps the trace honest (role
+            // `ModuleSource`, set by the ranking pass).
+            let source_read = source.map(|(_, _, span)| match span {
+                Some(offset) if offset != 0 => {
+                    byte_offset_to_line_col(line_offsets_by_file, file_id, offset)
+                }
+                _ => (line, col),
+            });
 
             // The destination-host signal for the secret-to-network category
             // (#890): the arg-0 URL literal, or `None` (dynamic) when not a
@@ -464,7 +490,7 @@ pub fn find_tainted_sinks(
             // boundary slot is filled by the post-detection ranking pass once
             // reachability is known. See issue #900.
             let candidate = SecurityCandidate {
-                source_kind: source.map(|(id, _)| id.to_string()),
+                source_kind: source.map(|(id, _, _)| id.to_string()),
                 sink: SecurityCandidateSink {
                     path: node.path.clone(),
                     line,
@@ -488,6 +514,7 @@ pub fn find_tainted_sinks(
                 col,
                 evidence,
                 source_backed,
+                source_read,
                 trace: vec![TraceHop {
                     path,
                     line,
@@ -563,6 +590,7 @@ mod tests {
         TaintedBinding {
             local: local.to_string(),
             source_path: source_path.to_string(),
+            source_span_start: 0,
         }
     }
 
@@ -602,7 +630,9 @@ mod tests {
         // catalogue source kind plus the human title.
         assert_eq!(
             tainted.get("id").copied(),
-            Some(("http-request-input", "HTTP request input"))
+            // Third element is the binding's source-read byte offset; the test
+            // `binding` helper sets it to 0 (no concrete read span).
+            Some(("http-request-input", "HTTP request input", 0))
         );
     }
 
@@ -614,7 +644,9 @@ mod tests {
         // both the catalogue source id (slot 1) and the human title.
         assert_eq!(
             sink_source(&sink_with_idents(&["id"]), &tainted, &FxHashSet::default()),
-            Some(("http-request-input", "HTTP request input"))
+            // Binding path: carries the binding's source-read span (`Some(0)`
+            // here, since the test `binding` helper sets the offset to 0).
+            Some(("http-request-input", "HTTP request input", Some(0)))
         );
         // `eval(other)` does not.
         assert_eq!(
@@ -645,7 +677,7 @@ mod tests {
                 &tainted,
                 &FxHashSet::default(),
             )
-            .map(|(_, title)| title),
+            .map(|(_, title, _)| title),
             Some("Environment secret")
         );
     }
@@ -663,7 +695,7 @@ mod tests {
                 &tainted,
                 &deps,
             )
-            .map(|(_, title)| title),
+            .map(|(_, title, _)| title),
             Some("HTTP request input")
         );
     }

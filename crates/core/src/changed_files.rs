@@ -797,6 +797,7 @@ mod tests {
             col: 0,
             evidence: "candidate".into(),
             source_backed: false,
+            source_read: None,
             trace: vec![
                 TraceHop {
                     path: "/project/src/client.tsx".into(),
@@ -841,12 +842,14 @@ mod tests {
             col: 2,
             evidence: "candidate".into(),
             source_backed: false,
+            source_read: None,
             trace: Vec::new(),
             actions: Vec::new(),
             dead_code: None,
             reachability: Some(SecurityReachability {
                 reachable_from_entry: false,
                 reachable_from_untrusted_source: true,
+                taint_confidence: Some(fallow_types::results::TaintConfidence::ModuleLevel),
                 untrusted_source_hop_count: Some(1),
                 untrusted_source_trace: vec![
                     TraceHop {

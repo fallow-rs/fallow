@@ -1048,7 +1048,8 @@ fn dead_code_hint(finding: &SecurityFinding) -> Option<String> {
 const fn hop_role_label(role: TraceHopRole) -> &'static str {
     match role {
         TraceHopRole::ClientBoundary => "client boundary",
-        TraceHopRole::UntrustedSource => "untrusted source module",
+        TraceHopRole::UntrustedSource => "untrusted source",
+        TraceHopRole::ModuleSource => "source module",
         TraceHopRole::Intermediate => "intermediate",
         TraceHopRole::SecretSource => "secret source",
         TraceHopRole::Sink => "sink site",
@@ -1464,6 +1465,7 @@ mod tests {
             col: 3,
             evidence: "reaches process.env.SECRET_KEY".to_owned(),
             source_backed: false,
+            source_read: None,
             trace: vec![
                 TraceHop {
                     path: root.join("src/app.tsx"),
@@ -1682,13 +1684,15 @@ mod tests {
         finding.reachability = Some(SecurityReachability {
             reachable_from_entry: true,
             reachable_from_untrusted_source: true,
+            // Cross-module reachability is module-level (issue #1093).
+            taint_confidence: Some(fallow_core::results::TaintConfidence::ModuleLevel),
             untrusted_source_hop_count: Some(1),
             untrusted_source_trace: vec![
                 TraceHop {
                     path: root.join("src/routes/api.ts"),
                     line: 3,
                     col: 0,
-                    role: TraceHopRole::UntrustedSource,
+                    role: TraceHopRole::ModuleSource,
                 },
                 TraceHop {
                     path: root.join("src/lib/sink.ts"),
@@ -1790,8 +1794,9 @@ mod tests {
         );
         assert_eq!(
             hop_role_label(TraceHopRole::UntrustedSource),
-            "untrusted source module"
+            "untrusted source"
         );
+        assert_eq!(hop_role_label(TraceHopRole::ModuleSource), "source module");
         assert_eq!(hop_role_label(TraceHopRole::Intermediate), "intermediate");
         assert_eq!(hop_role_label(TraceHopRole::SecretSource), "secret source");
         assert_eq!(hop_role_label(TraceHopRole::Sink), "sink site");
@@ -1885,7 +1890,7 @@ mod tests {
         );
         assert!(out.contains("untrusted-source trace:"), "got: {out}");
         assert!(
-            out.contains("src/routes/api.ts:3 (untrusted source module)"),
+            out.contains("src/routes/api.ts:3 (source module)"),
             "got: {out}"
         );
     }
@@ -2219,13 +2224,20 @@ mod tests {
 
         assert!(reach.reachable_from_untrusted_source);
         assert_eq!(reach.untrusted_source_hop_count, Some(1));
+        // Cross-module reachability is module-level: the structured discriminator
+        // says so, and the source node is honestly labeled `ModuleSource`, never
+        // `UntrustedSource` (which is reserved for an arg-level same-module read).
+        assert_eq!(
+            reach.taint_confidence,
+            Some(fallow_core::results::TaintConfidence::ModuleLevel)
+        );
         assert_eq!(
             reach
                 .untrusted_source_trace
                 .iter()
                 .map(|hop| hop.role)
                 .collect::<Vec<_>>(),
-            vec![TraceHopRole::UntrustedSource, TraceHopRole::Sink]
+            vec![TraceHopRole::ModuleSource, TraceHopRole::Sink]
         );
         assert!(
             reach.untrusted_source_trace[0]

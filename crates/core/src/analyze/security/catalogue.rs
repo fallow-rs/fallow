@@ -38,6 +38,14 @@ struct RawSource {
     #[serde(default)]
     enabler: Option<String>,
     path_patterns: Vec<String>,
+    /// Optional allowlist of receiver names for leading-`*.` wildcard patterns
+    /// (issue #1092). When non-empty, a wildcard pattern fires only if the
+    /// matched member's receiver is one of these (case-insensitive), so
+    /// `*.query` matches `req.query` but not `db.query`. Empty / absent leaves
+    /// the row ungated (every receiver matches). Has no effect on exact
+    /// patterns, whose receiver is fixed in the pattern itself.
+    #[serde(default)]
+    receiver_allowlist: Vec<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -192,6 +200,26 @@ impl CalleePattern {
                     .all(|(pat, seg)| pat == seg)
         }
     }
+
+    /// The receiver segment immediately before this pattern's matched suffix,
+    /// for a leading-`*.` wildcard pattern: `*.query` against `db.query` returns
+    /// `Some("db")`, against `ctx.req.query` returns `Some("req")` (the segment
+    /// right before `query`, which is the receiver of the matched member). Used
+    /// by a source row's receiver allowlist to keep HTTP-input patterns from
+    /// firing on ORM / data-access receivers (issue #1092). Returns `None` for
+    /// an exact (non-wildcard) pattern, whose receiver is fixed in the pattern
+    /// itself, and for any `callee_path` this pattern does not match.
+    #[must_use]
+    pub fn matched_receiver<'p>(&self, callee_path: &'p str) -> Option<&'p str> {
+        if !self.leading_wildcard || !self.matches(callee_path) {
+            return None;
+        }
+        let candidate: Vec<&str> = callee_path.split('.').collect();
+        // `matches` guarantees `candidate.len() > suffix_segments.len()` for a
+        // leading-wildcard hit, so the receiver index is always in range.
+        let recv_idx = candidate.len() - self.suffix_segments.len() - 1;
+        candidate.get(recv_idx).copied()
+    }
 }
 
 /// Parse a raw pattern string into its segmented form. Returns `None` for an
@@ -264,14 +292,37 @@ pub struct SourceMatcher {
     pub title: String,
     pub enabler: Option<String>,
     pub path_patterns: Vec<CalleePattern>,
+    /// Lowercased receiver allowlist for leading-wildcard patterns (issue
+    /// #1092). Empty leaves the row ungated.
+    pub receiver_allowlist: Vec<String>,
 }
 
 impl SourceMatcher {
     /// Whether any of this source's path patterns match the given flattened
-    /// member-access path (a captured tainted-binding `source_path`).
+    /// member-access path (a captured tainted-binding `source_path`), subject to
+    /// the receiver allowlist for leading-wildcard patterns.
     #[must_use]
     pub fn matches(&self, source_path: &str) -> bool {
-        self.path_patterns.iter().any(|p| p.matches(source_path))
+        self.path_patterns
+            .iter()
+            .any(|p| p.matches(source_path) && self.receiver_allowed(p, source_path))
+    }
+
+    /// Whether `pattern`'s match on `source_path` is admitted by the receiver
+    /// allowlist. An empty allowlist admits everything. For a leading-wildcard
+    /// pattern the matched receiver must be in the allowlist (case-insensitive);
+    /// an exact pattern (receiver fixed in the pattern) is always admitted.
+    fn receiver_allowed(&self, pattern: &CalleePattern, source_path: &str) -> bool {
+        if self.receiver_allowlist.is_empty() {
+            return true;
+        }
+        match pattern.matched_receiver(source_path) {
+            Some(receiver) => self
+                .receiver_allowlist
+                .iter()
+                .any(|allowed| allowed.eq_ignore_ascii_case(receiver)),
+            None => true,
+        }
     }
 
     /// Whether this source row's framework enabler is satisfied by the
@@ -720,11 +771,22 @@ fn parse_catalogue(src: &str) -> Result<Catalogue, String> {
             }
             other => other,
         };
+        let mut receiver_allowlist = Vec::with_capacity(entry.receiver_allowlist.len());
+        for receiver in entry.receiver_allowlist {
+            if receiver.trim().is_empty() {
+                return Err(format!(
+                    "source {:?} has an empty / whitespace receiver_allowlist entry; omit the key for an ungated row",
+                    entry.id
+                ));
+            }
+            receiver_allowlist.push(receiver.to_ascii_lowercase());
+        }
         sources.push(SourceMatcher {
             id: entry.id,
             title: entry.title,
             enabler,
             path_patterns,
+            receiver_allowlist,
         });
     }
 

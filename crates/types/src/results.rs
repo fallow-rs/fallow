@@ -836,8 +836,17 @@ pub enum SecurityFindingKind {
 pub enum TraceHopRole {
     /// The `"use client"` boundary file the finding is anchored on.
     ClientBoundary,
-    /// A module that reads an untrusted input source such as request data.
+    /// A module that reads an untrusted input source such as request data,
+    /// where the candidate's sink argument actually traces back to that read in
+    /// the same statement (arg-level, the strong intra-module association).
     UntrustedSource,
+    /// A module that merely CONTAINS an untrusted-input source somewhere and is
+    /// import-reachable to the sink module (module-level, issue #885). This is a
+    /// reachability signal, NOT a proven value path: the specific source value
+    /// is not shown to reach the sink argument. Labeled distinctly from
+    /// `UntrustedSource` so a consumer never reads a module-level hop as a
+    /// value-flow proof.
+    ModuleSource,
     /// An intermediate module on the transitive import path.
     Intermediate,
     /// The module that reads the secret.
@@ -867,6 +876,26 @@ pub struct TraceHop {
     pub role: TraceHopRole,
 }
 
+/// How strongly the untrusted-source signal is associated with the sink, a
+/// structured discriminator so a consumer can tier candidates without parsing
+/// the human `evidence` prose. Present only when
+/// [`SecurityReachability::reachable_from_untrusted_source`] is true. Neither
+/// value proves exploitability; both are ranking signals (issue #885 doctrine:
+/// rank, never gate).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum TaintConfidence {
+    /// The sink's argument traces back to a known untrusted-source read in the
+    /// SAME statement / module (the intra-module back-trace, issue #859). The
+    /// strong, high-value candidate: a specific source expression is implicated.
+    ArgLevel,
+    /// The sink merely lives in a module that is import-reachable from a module
+    /// containing an untrusted source (issue #885). The weak candidate: only the
+    /// module is implicated, not a specific value path to the sink argument.
+    ModuleLevel,
+}
+
 /// Graph-derived reachability ranking signal for a security candidate. Computed
 /// from the existing module graph after detection, never proven exploitable.
 /// Used to surface candidates that sit on a request/runtime-reachable surface,
@@ -888,6 +917,14 @@ pub struct SecurityReachability {
     /// not prove a specific source value reaches the sink argument.
     #[serde(default)]
     pub reachable_from_untrusted_source: bool,
+    /// Structured tier of the untrusted-source association: `arg-level` when the
+    /// sink argument traces to a same-module source read (strong), `module-level`
+    /// when only the module is import-reachable from a source (weak). Present
+    /// exactly when `reachable_from_untrusted_source` is true, so a consumer can
+    /// separate strong from weak candidates from this field alone without parsing
+    /// the `evidence` string. Not an exploitability proof.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub taint_confidence: Option<TaintConfidence>,
     /// Number of value-import hops from the untrusted-source module to the sink
     /// module when `reachable_from_untrusted_source` is true.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1228,6 +1265,16 @@ pub struct SecurityFinding {
     /// `ClientServerLeak`. Skipped from JSON when `false` for output stability.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub source_backed: bool,
+    /// Internal cross-pass carrier (NEVER serialized): the (1-based line, 0-based
+    /// col) of the arg-level source read, resolved by the detector when
+    /// `source_backed` is true and a concrete read span was captured. The ranking
+    /// pass uses it to anchor the taint trace's source node at the real read
+    /// instead of the module import line. `None` for module-level findings and
+    /// for arg-level findings with no concrete read span (synthetic
+    /// framework-param / helper-return sources), where the trace falls back to
+    /// the sink site.
+    #[serde(skip)]
+    pub source_read: Option<(u32, u32)>,
     /// Structural import-hop trace from the client boundary to the secret source.
     /// The hop count is the uncalibrated signal; fallow does not prove the path
     /// is exploitable.
