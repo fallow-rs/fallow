@@ -146,7 +146,8 @@ pub struct AnalysisOutput {
     pub timings: Option<PipelineTimings>,
     pub graph: Option<graph::ModuleGraph>,
     /// Parsed modules from the pipeline, available when `retain_modules` is true.
-    /// Used by the combined command to share a single parse across dead-code and health.
+    /// Used by combined and LSP flows to share downstream module data.
+    /// Graph-only extraction payloads are released after graph construction.
     pub modules: Option<Vec<extract::ModuleInfo>>,
     /// Discovered files from the pipeline, available when `retain_modules` is true.
     pub files: Option<Vec<discover::DiscoveredFile>>,
@@ -411,7 +412,8 @@ pub fn analyze_retaining_modules(
 /// This avoids re-parsing files when the caller already has a `ParseResult` (e.g., from
 /// `fallow_core::extract::parse_all_files`). Discovery, plugins, scripts, entry points,
 /// import resolution, graph construction, and dead code detection still run normally.
-/// The graph is always retained (needed for file scores).
+/// The graph is always retained (needed for file scores). Caller-owned modules
+/// are borrowed and are not compacted by this API.
 ///
 /// # Errors
 ///
@@ -733,7 +735,7 @@ fn analyze_full(
     };
 
     let parse_result = extract::parse_all_files(files, cache_store.as_ref(), need_complexity);
-    let modules = parse_result.modules;
+    let mut modules = parse_result.modules;
     let cache_hits = parse_result.cache_hits;
     let cache_misses = parse_result.cache_misses;
     let parse_cpu_ms = parse_result.parse_cpu_ms;
@@ -797,6 +799,9 @@ fn analyze_full(
     );
     credit_package_path_references(&mut graph, &modules);
     credit_workspace_package_usage(&mut graph, &resolved, workspaces);
+    for module in &mut modules {
+        module.release_resolution_payload();
+    }
     let graph_ms = t.elapsed().as_secs_f64() * 1000.0;
 
     let ep_summary = summarize_entry_points(&entry_points.all);

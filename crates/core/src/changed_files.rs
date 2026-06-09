@@ -548,7 +548,7 @@ mod tests {
         BoundaryViolationFinding, CircularDependencyFinding, EmptyCatalogGroupFinding,
         UnusedExportFinding, UnusedFileFinding,
     };
-    use fallow_types::results::SecurityReachability;
+    use fallow_types::results::{SecurityReachability, SecuritySeverity};
 
     #[test]
     fn changed_files_error_describe_variants() {
@@ -797,6 +797,8 @@ mod tests {
             col: 0,
             evidence: "candidate".into(),
             source_backed: false,
+            source_read: None,
+            severity: SecuritySeverity::Low,
             trace: vec![
                 TraceHop {
                     path: "/project/src/client.tsx".into(),
@@ -841,12 +843,15 @@ mod tests {
             col: 2,
             evidence: "candidate".into(),
             source_backed: false,
+            source_read: None,
+            severity: SecuritySeverity::Low,
             trace: Vec::new(),
             actions: Vec::new(),
             dead_code: None,
             reachability: Some(SecurityReachability {
                 reachable_from_entry: false,
                 reachable_from_untrusted_source: true,
+                taint_confidence: Some(fallow_types::results::TaintConfidence::ModuleLevel),
                 untrusted_source_hop_count: Some(1),
                 untrusted_source_trace: vec![
                     TraceHop {
