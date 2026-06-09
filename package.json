@@ -9,9 +9,9 @@
     "fmt:js:check": "oxfmt --check --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src commitlint.config.mjs"
   },
   "devDependencies": {
-    "@commitlint/cli": "21.0.1",
+    "@commitlint/cli": "21.0.2",
     "@commitlint/config-conventional": "21.0.2",
     "oxfmt": "0.52.0",
-    "oxlint": "1.67.0"
+    "oxlint": "1.68.0"
   }
 }
