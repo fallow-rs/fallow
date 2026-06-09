@@ -626,11 +626,20 @@ export type SecurityFindingKind = ("client-server-leak" | "tainted-sink")
 /**
  * The role a hop plays in a security finding's structural import trace.
  */
-export type TraceHopRole = ("client-boundary" | "untrusted-source" | "intermediate" | "secret-source" | "sink")
+export type TraceHopRole = ("client-boundary" | "untrusted-source" | "module-source" | "intermediate" | "secret-source" | "sink")
 /**
  * Dead-code issue kind linked to a security candidate.
  */
 export type SecurityDeadCodeKind = ("unused-file" | "unused-export")
+/**
+ * How strongly the untrusted-source signal is associated with the sink, a
+ * structured discriminator so a consumer can tier candidates without parsing
+ * the human `evidence` prose. Present only when
+ * [`SecurityReachability::reachable_from_untrusted_source`] is true. Neither
+ * value proves exploitability; both are ranking signals (issue #885 doctrine:
+ * rank, never gate).
+ */
+export type TaintConfidence = ("arg-level" | "module-level")
 /**
  * Runtime coverage state for the function enclosing a security sink.
  * This is production-observation evidence, not an exploitability verdict.
@@ -5077,6 +5086,15 @@ reachable_from_entry: boolean
  * not prove a specific source value reaches the sink argument.
  */
 reachable_from_untrusted_source?: boolean
+/**
+ * Structured tier of the untrusted-source association: `arg-level` when the
+ * sink argument traces to a same-module source read (strong), `module-level`
+ * when only the module is import-reachable from a source (weak). Present
+ * exactly when `reachable_from_untrusted_source` is true, so a consumer can
+ * separate strong from weak candidates from this field alone without parsing
+ * the `evidence` string. Not an exploitability proof.
+ */
+taint_confidence?: (TaintConfidence | null)
 /**
  * Number of value-import hops from the untrusted-source module to the sink
  * module when `reachable_from_untrusted_source` is true.
