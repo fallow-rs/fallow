@@ -14,13 +14,14 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use fallow_config::{OutputFormat, ProductionAnalysis, Severity};
+use fallow_core::analyze::derive_security_severity;
 use fallow_core::results::{
     AnalysisResults, SecurityAttackSurfaceEntry, SecurityDeadCodeKind, SecurityFinding,
     SecurityFindingKind, TraceHop, TraceHopRole,
 };
 use fallow_types::discover::DiscoveredFile;
 use fallow_types::extract::ModuleInfo;
-use fallow_types::results::{SecurityRuntimeContext, SecurityRuntimeState};
+use fallow_types::results::{SecurityRuntimeContext, SecurityRuntimeState, SecuritySeverity};
 use serde::Serialize;
 
 use crate::error::emit_error;
@@ -36,8 +37,15 @@ use crate::load_config_for_analysis;
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum SecuritySchemaVersion {
     /// First release of the `fallow security --format json` shape.
+    #[allow(
+        dead_code,
+        reason = "kept so the generated schema documents historical v1"
+    )]
     #[serde(rename = "1")]
     V1,
+    /// Adds per-finding `severity` for verification-priority tiering.
+    #[serde(rename = "2")]
+    V2,
 }
 
 /// Gate mode for `fallow security --gate <mode>` (issue #886). Tier 2 reserves
@@ -257,6 +265,8 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
     ) {
         apply_runtime_context(&mut findings, modules, files, &config.root, report);
     }
+    apply_security_severity(&mut findings);
+    sort_by_security_severity(&mut findings);
     for finding in &mut findings {
         // Stamp the correlation id on the project-relative path so it matches
         // the SARIF fingerprint.
@@ -287,7 +297,7 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
         && !findings.is_empty();
 
     let output = SecurityOutput {
-        schema_version: SecuritySchemaVersion::V1,
+        schema_version: SecuritySchemaVersion::V2,
         gate,
         security_findings: findings,
         attack_surface,
@@ -651,6 +661,31 @@ fn runtime_rank(finding: &SecurityFinding) -> u8 {
     }
 }
 
+fn apply_security_severity(findings: &mut [SecurityFinding]) {
+    for finding in findings {
+        finding.severity = derive_security_severity(finding);
+    }
+}
+
+fn sort_by_security_severity(findings: &mut [SecurityFinding]) {
+    findings.sort_by(|left, right| {
+        security_severity_rank(left.severity)
+            .cmp(&security_severity_rank(right.severity))
+            .then_with(|| left.path.cmp(&right.path))
+            .then_with(|| left.line.cmp(&right.line))
+            .then_with(|| left.col.cmp(&right.col))
+            .then_with(|| left.category.cmp(&right.category))
+    });
+}
+
+const fn security_severity_rank(severity: SecuritySeverity) -> u8 {
+    match severity {
+        SecuritySeverity::High => 0,
+        SecuritySeverity::Medium => 1,
+        SecuritySeverity::Low => 2,
+    }
+}
+
 fn runtime_hot_key(hot: &RuntimeCoverageHotPath) -> RuntimeFunctionKey {
     RuntimeFunctionKey {
         path: path_key(&hot.path),
@@ -899,11 +934,10 @@ pub fn render_human(output: &SecurityOutput) -> String {
     } else {
         for finding in &output.security_findings {
             let kind = security_finding_label(finding);
-            // [I] (info/advisory) is the design-system prefix for off-by-default
-            // findings surfaced for review; it deliberately is NOT a severity glyph.
+            let (glyph, label) = human_severity_marker(finding.severity);
             out.push_str(&format!(
-                "{} {kind}  {}:{}\n",
-                "[I]".blue().bold(),
+                "{} {label} {kind}  {}:{}\n",
+                glyph,
                 finding.path.to_string_lossy().replace('\\', "/").bold(),
                 finding.line,
             ));
@@ -1025,6 +1059,15 @@ fn security_finding_label(finding: &SecurityFinding) -> String {
                 None => title.to_string(),
             }
         }
+    }
+}
+
+fn human_severity_marker(severity: SecuritySeverity) -> (colored::ColoredString, &'static str) {
+    use colored::Colorize;
+    match severity {
+        SecuritySeverity::High => ("[H]".red().bold(), "high"),
+        SecuritySeverity::Medium => ("[M]".yellow().bold(), "medium"),
+        SecuritySeverity::Low => ("[L]".blue().bold(), "low"),
     }
 }
 
@@ -1318,8 +1361,15 @@ fn sarif_related_locations(finding: &SecurityFinding) -> Vec<serde_json::Value> 
     related
 }
 
-/// SARIF output. Emits `level: "note"` (never error/warning) so the candidate
-/// framing survives into the GitHub Security tab. Each finding's ruleId is
+const fn sarif_level(severity: SecuritySeverity) -> &'static str {
+    match severity {
+        SecuritySeverity::High | SecuritySeverity::Medium => "warning",
+        SecuritySeverity::Low => "note",
+    }
+}
+
+/// SARIF output. Maps the candidate's verification-priority tier to SARIF
+/// `level` while keeping the message text candidate-framed. Each finding's ruleId is
 /// per-category (`security/<category>` for tainted-sink, `security/client-server-leak`
 /// for the graph rule); the `rules` array carries one definition per distinct
 /// ruleId present, with the CWE tag for tainted-sink categories. Detector trace
@@ -1352,7 +1402,7 @@ fn render_sarif(output: &SecurityOutput) -> String {
             // (issue #900).
             let mut result = serde_json::json!({
                 "ruleId": rule_id,
-                "level": "note",
+                "level": sarif_level(finding.severity),
                 "message": { "text": message },
                 "locations": [sarif_location(&finding.path, finding.line, finding.col)],
                 "relatedLocations": related,
@@ -1467,6 +1517,7 @@ mod tests {
             evidence: "reaches process.env.SECRET_KEY".to_owned(),
             source_backed: false,
             source_read: None,
+            severity: SecuritySeverity::High,
             trace: vec![
                 TraceHop {
                     path: root.join("src/app.tsx"),
@@ -1518,7 +1569,7 @@ mod tests {
 
     fn output_with(findings: Vec<SecurityFinding>, unresolved_edge_files: usize) -> SecurityOutput {
         SecurityOutput {
-            schema_version: SecuritySchemaVersion::V1,
+            schema_version: SecuritySchemaVersion::V2,
             gate: None,
             security_findings: findings,
             attack_surface: None,
@@ -1529,7 +1580,7 @@ mod tests {
 
     fn output_with_gate(verdict: SecurityGateVerdict, new_count: usize) -> SecurityOutput {
         SecurityOutput {
-            schema_version: SecuritySchemaVersion::V1,
+            schema_version: SecuritySchemaVersion::V2,
             gate: Some(SecurityGate {
                 mode: SecurityGateMode::New,
                 verdict,
@@ -1580,6 +1631,39 @@ mod tests {
                 None,
                 Some(SecurityRuntimeState::CoverageUnavailable),
                 Some(SecurityRuntimeState::NeverExecuted),
+            ]
+        );
+    }
+
+    #[test]
+    fn severity_sort_orders_tiers_then_location() {
+        let root = Path::new("/proj/root");
+        let mut high = sample_finding(root);
+        high.path = root.join("z.ts");
+        high.severity = SecuritySeverity::High;
+        let mut low = sample_finding(root);
+        low.path = root.join("a.ts");
+        low.severity = SecuritySeverity::Low;
+        let mut medium_a = sample_finding(root);
+        medium_a.path = root.join("a.ts");
+        medium_a.severity = SecuritySeverity::Medium;
+        let mut medium_b = sample_finding(root);
+        medium_b.path = root.join("b.ts");
+        medium_b.severity = SecuritySeverity::Medium;
+        let mut findings = vec![low, medium_b, high, medium_a];
+
+        sort_by_security_severity(&mut findings);
+
+        assert_eq!(
+            findings
+                .iter()
+                .map(|finding| (finding.severity, finding.path.file_name().unwrap()))
+                .collect::<Vec<_>>(),
+            vec![
+                (SecuritySeverity::High, std::ffi::OsStr::new("z.ts")),
+                (SecuritySeverity::Medium, std::ffi::OsStr::new("a.ts")),
+                (SecuritySeverity::Medium, std::ffi::OsStr::new("b.ts")),
+                (SecuritySeverity::Low, std::ffi::OsStr::new("a.ts")),
             ]
         );
     }
@@ -1676,7 +1760,7 @@ mod tests {
     fn gate_sarif_is_a_run_property_not_result_severity() {
         let sarif = render_sarif(&output_with_gate(SecurityGateVerdict::Fail, 1));
         assert!(sarif.contains("fallowGate"));
-        // The gate verdict never bumps a result above `note`.
+        // The gate verdict is a run property and creates no result severity.
         assert!(!sarif.contains("\"level\": \"error\""));
         assert!(!sarif.contains("\"level\": \"warning\""));
     }
@@ -1843,6 +1927,7 @@ mod tests {
         let root = Path::new("/proj/root");
         let finding = relativize_finding(sample_finding(root), root);
         let out = render_human(&output_with(vec![finding], 0));
+        assert!(out.contains("[H] high client-server-leak"));
         assert!(out.contains("client-server-leak"));
         assert!(out.contains("src/app.tsx:12"));
         assert!(out.contains("reaches process.env.SECRET_KEY"));
@@ -1910,12 +1995,13 @@ mod tests {
         let finding = relativize_finding(sample_finding(root), root);
         let rendered = render_json(&output_with(vec![finding], 1));
         let value: serde_json::Value = serde_json::from_str(&rendered).expect("valid JSON");
-        assert_eq!(value["schema_version"], "1");
+        assert_eq!(value["schema_version"], "2");
         assert_eq!(value["unresolved_edge_files"], 1);
         let findings = value["security_findings"].as_array().expect("array");
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0]["kind"], "client-server-leak");
         assert_eq!(findings[0]["path"], "src/app.tsx");
+        assert_eq!(findings[0]["severity"], "high");
     }
 
     #[test]
@@ -1994,7 +2080,7 @@ mod tests {
     }
 
     #[test]
-    fn sarif_render_emits_note_level_with_fingerprint_and_related_locations() {
+    fn sarif_render_emits_warning_level_with_fingerprint_and_related_locations() {
         let root = Path::new("/proj/root");
         let finding = relativize_finding(sample_finding(root), root);
         let rendered = render_sarif(&output_with(vec![finding], 0));
@@ -2003,8 +2089,8 @@ mod tests {
         let run = &sarif["runs"][0];
         assert_eq!(run["tool"]["driver"]["name"], "fallow");
         let result = &run["results"][0];
-        // Candidate framing: never error/warning, and no CWE tag.
-        assert_eq!(result["level"], "note");
+        // Candidate framing: a high-priority finding is warning, never error.
+        assert_eq!(result["level"], "warning");
         assert_eq!(result["ruleId"], "security/client-server-leak");
         assert_eq!(result["message"]["text"], "reaches process.env.SECRET_KEY");
         // Trace hops surface as relatedLocations and codeFlows.
@@ -2033,6 +2119,17 @@ mod tests {
         assert!(rules[0]["help"]["text"].is_string());
         assert!(rules[0].get("relationships").is_none());
         assert!(run.get("taxonomies").is_none());
+    }
+
+    #[test]
+    fn sarif_render_keeps_low_severity_as_note() {
+        let root = Path::new("/proj/root");
+        let mut finding = sample_finding(root);
+        finding.severity = SecuritySeverity::Low;
+        let rendered = render_sarif(&output_with(vec![relativize_finding(finding, root)], 0));
+        let sarif: serde_json::Value = serde_json::from_str(&rendered).expect("valid SARIF JSON");
+
+        assert_eq!(sarif["runs"][0]["results"][0]["level"], "note");
     }
 
     #[test]
@@ -2108,9 +2205,9 @@ mod tests {
         let sarif: serde_json::Value = serde_json::from_str(&rendered).expect("valid SARIF JSON");
         let run = &sarif["runs"][0];
         // The finding is grouped under its own per-category rule, not collapsed
-        // into client-server-leak, and stays at candidate (note) level.
+        // into client-server-leak, and stays candidate-framed.
         let result = &run["results"][0];
-        assert_eq!(result["level"], "note");
+        assert_eq!(result["level"], "warning");
         assert_eq!(result["ruleId"], "security/dangerous-html");
         // Exactly one rule definition, carrying compatible tags plus SARIF-native CWE taxonomy.
         let rules = run["tool"]["driver"]["rules"].as_array().unwrap();

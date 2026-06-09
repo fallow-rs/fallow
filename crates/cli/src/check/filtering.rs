@@ -557,7 +557,7 @@ mod tests {
     use super::*;
     use fallow_core::extract::MemberKind;
     use fallow_core::results::*;
-    use fallow_types::results::SecurityReachability;
+    use fallow_types::results::{SecurityReachability, SecuritySeverity};
     use std::path::PathBuf;
 
     /// Test shim: single-workspace variant on top of `filter_to_workspaces`.
@@ -1920,6 +1920,7 @@ mod tests {
             evidence: "candidate".into(),
             source_backed: false,
             source_read: None,
+            severity: SecuritySeverity::Low,
             trace: vec![
                 TraceHop {
                     path: PathBuf::from("/project/src/client.tsx"),
@@ -1970,6 +1971,7 @@ mod tests {
             evidence: "candidate".into(),
             source_backed: false,
             source_read: None,
+            severity: SecuritySeverity::Low,
             trace: vec![],
             actions: Vec::new(),
             dead_code: None,
@@ -2028,6 +2030,7 @@ mod tests {
             evidence: "candidate".into(),
             source_backed: false,
             source_read: None,
+            severity: SecuritySeverity::Low,
             trace: vec![],
             actions: Vec::new(),
             dead_code: None,
@@ -2070,6 +2073,7 @@ mod tests {
             evidence: "candidate".into(),
             source_backed: false,
             source_read: None,
+            severity: SecuritySeverity::Low,
             trace: vec![
                 TraceHop {
                     path: PathBuf::from("/project/src/client.tsx"),
@@ -2126,6 +2130,7 @@ mod tests {
             evidence: "candidate".into(),
             source_backed: false,
             source_read: None,
+            severity: SecuritySeverity::Low,
             trace: vec![],
             actions: Vec::new(),
             dead_code: None,
@@ -2179,6 +2184,7 @@ mod tests {
             evidence: "candidate".into(),
             source_backed: false,
             source_read: None,
+            severity: SecuritySeverity::Low,
             trace: vec![TraceHop {
                 path: PathBuf::from("/project/src/transit.ts"),
                 line: 4,

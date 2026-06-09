@@ -20,7 +20,7 @@ use fallow_types::extract::{
 use fallow_types::output::{IssueAction, SuppressFileAction, SuppressFileKind};
 use fallow_types::results::{
     SecurityCandidate, SecurityCandidateBoundary, SecurityCandidateSink, SecurityFinding,
-    SecurityFindingKind, SecurityNetworkContext, TraceHop, TraceHopRole,
+    SecurityFindingKind, SecurityNetworkContext, SecuritySeverity, TraceHop, TraceHopRole,
 };
 use fallow_types::suppress::IssueKind;
 
@@ -515,6 +515,7 @@ pub fn find_tainted_sinks(
                 evidence,
                 source_backed,
                 source_read,
+                severity: SecuritySeverity::Low,
                 trace: vec![TraceHop {
                     path,
                     line,

@@ -606,7 +606,7 @@ export type ImpactTrendDirection = ("improving" | "declining" | "stable")
  * The `fallow security --format json` schema version. Independently versioned
  * from the main contract, mirroring `ImpactReportSchemaVersion`.
  */
-export type SecuritySchemaVersion = "1"
+export type SecuritySchemaVersion = ("1" | "2")
 /**
  * Gate mode for `fallow security --gate <mode>` (issue #886). Tier 2 reserves
  * the value `newly-reachable`.
@@ -623,6 +623,11 @@ export type SecurityGateVerdict = ("pass" | "fail")
  * verification, NOT verified vulnerabilities.
  */
 export type SecurityFindingKind = ("client-server-leak" | "tainted-sink")
+/**
+ * Verification-priority tier for a security candidate. This is ranking, not an
+ * exploitability verdict.
+ */
+export type SecuritySeverity = ("high" | "medium" | "low")
 /**
  * The role a hop plays in a security finding's structural import trace.
  */
@@ -4975,6 +4980,7 @@ evidence: string
  * `ClientServerLeak`. Skipped from JSON when `false` for output stability.
  */
 source_backed?: boolean
+severity: SecuritySeverity
 /**
  * Structural import-hop trace from the client boundary to the secret source.
  * The hop count is the uncalibrated signal; fallow does not prove the path

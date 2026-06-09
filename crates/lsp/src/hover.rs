@@ -546,9 +546,9 @@ mod tests {
     use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
     use fallow_core::extract::MemberKind;
     use fallow_core::results::{
-        ExportUsage, ReferenceLocation, UnresolvedImport, UnresolvedImportFinding,
-        UnusedClassMemberFinding, UnusedEnumMemberFinding, UnusedExport, UnusedExportFinding,
-        UnusedFile, UnusedFileFinding, UnusedMember, UnusedTypeFinding,
+        ExportUsage, ReferenceLocation, SecuritySeverity, UnresolvedImport,
+        UnresolvedImportFinding, UnusedClassMemberFinding, UnusedEnumMemberFinding, UnusedExport,
+        UnusedExportFinding, UnusedFile, UnusedFileFinding, UnusedMember, UnusedTypeFinding,
     };
 
     /// Extract the markdown text from a Hover's contents.
@@ -1519,6 +1519,7 @@ mod tests {
             evidence: "req.query.html flows into dangerouslySetInnerHTML".to_string(),
             source_backed: true,
             source_read: None,
+            severity: SecuritySeverity::Low,
             trace: vec![],
             actions: vec![],
             dead_code: None,

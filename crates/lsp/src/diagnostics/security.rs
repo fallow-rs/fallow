@@ -139,7 +139,9 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    use fallow_core::results::{SecurityFinding, SecurityFindingKind, SecurityReachability};
+    use fallow_core::results::{
+        SecurityFinding, SecurityFindingKind, SecurityReachability, SecuritySeverity,
+    };
 
     fn test_root() -> PathBuf {
         if cfg!(windows) {
@@ -164,6 +166,7 @@ mod tests {
             evidence: "user input flows into dangerouslySetInnerHTML".to_string(),
             source_backed: true,
             source_read: None,
+            severity: SecuritySeverity::Low,
             trace: vec![],
             actions: vec![],
             dead_code: None,
@@ -195,6 +198,7 @@ mod tests {
             evidence: "client boundary reaches process.env.SECRET_KEY".to_string(),
             source_backed: false,
             source_read: None,
+            severity: SecuritySeverity::Low,
             trace: vec![],
             actions: vec![],
             dead_code: None,

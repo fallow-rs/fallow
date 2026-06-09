@@ -15,6 +15,7 @@ const finding = (overrides: Partial<SecurityFinding>): SecurityFinding => ({
   line: 12,
   col: 4,
   evidence: "reaches process.env.SECRET",
+  severity: overrides.severity ?? "low",
   trace: [],
   actions: [],
   candidate: {

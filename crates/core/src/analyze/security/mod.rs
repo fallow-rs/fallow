@@ -17,7 +17,7 @@ use fallow_types::extract::ModuleInfo;
 use fallow_types::output::{IssueAction, SuppressFileAction, SuppressFileKind};
 use fallow_types::results::{
     SecurityCandidate, SecurityCandidateBoundary, SecurityCandidateSink, SecurityFinding,
-    SecurityFindingKind, TraceHop, TraceHopRole,
+    SecurityFindingKind, SecuritySeverity, TraceHop, TraceHopRole,
 };
 use fallow_types::suppress::IssueKind;
 
@@ -32,7 +32,7 @@ mod rank;
 mod tainted_sink;
 
 pub use hardcoded_secret::find_hardcoded_secret_candidates;
-pub use rank::{annotate_dead_code_cross_links, rank_security_findings};
+pub use rank::{annotate_dead_code_cross_links, derive_security_severity, rank_security_findings};
 pub use tainted_sink::{CategoryFilter, find_tainted_sinks};
 
 #[must_use]
@@ -328,6 +328,7 @@ fn build_leak_finding(
         source_backed: false,
         // client-server-leak is module-level by construction (no arg-level read).
         source_read: None,
+        severity: SecuritySeverity::Low,
         trace,
         actions: build_actions(),
         dead_code: None,
@@ -390,6 +391,7 @@ fn build_direct_finding(
         source_backed: false,
         // client-server-leak is module-level by construction (no arg-level read).
         source_read: None,
+        severity: SecuritySeverity::Low,
         trace: vec![TraceHop {
             path,
             line: 1,

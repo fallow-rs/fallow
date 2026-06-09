@@ -64,7 +64,7 @@ mod tests {
 
     use fallow_core::duplicates::{DuplicationReport, DuplicationStats};
     use fallow_core::results::{
-        AnalysisResults, UnresolvedImport, UnresolvedImportFinding, UnusedExport,
+        AnalysisResults, SecuritySeverity, UnresolvedImport, UnresolvedImportFinding, UnusedExport,
         UnusedExportFinding, UnusedFile, UnusedFileFinding,
     };
 
@@ -212,6 +212,7 @@ mod tests {
                 evidence: "sink".to_string(),
                 source_backed: false,
                 source_read: None,
+                severity: SecuritySeverity::Low,
                 trace: vec![],
                 actions: vec![],
                 dead_code: None,

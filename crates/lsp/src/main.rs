@@ -1507,11 +1507,12 @@ mod tests {
     use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
     use fallow_core::results::{
         BoundaryViolation, BoundaryViolationFinding, CircularDependency, CircularDependencyFinding,
-        ExportUsage, TestOnlyDependency, TestOnlyDependencyFinding, TypeOnlyDependency,
-        UnlistedDependency, UnlistedDependencyFinding, UnusedClassMemberFinding, UnusedDependency,
-        UnusedDependencyFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExport,
-        UnusedExportFinding, UnusedFile, UnusedFileFinding, UnusedMember,
-        UnusedOptionalDependencyFinding, UnusedTypeFinding,
+        ExportUsage, SecuritySeverity, TestOnlyDependency, TestOnlyDependencyFinding,
+        TypeOnlyDependency, UnlistedDependency, UnlistedDependencyFinding,
+        UnusedClassMemberFinding, UnusedDependency, UnusedDependencyFinding,
+        UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExport, UnusedExportFinding,
+        UnusedFile, UnusedFileFinding, UnusedMember, UnusedOptionalDependencyFinding,
+        UnusedTypeFinding,
     };
     use serde_json::json;
     use tower::{Service, ServiceExt};
@@ -2543,6 +2544,7 @@ export function choose(value: number): string {
                 evidence: "transitively reaches DATABASE_URL".to_string(),
                 source_backed: false,
                 source_read: None,
+                severity: SecuritySeverity::Low,
                 trace: vec![],
                 actions: vec![],
                 dead_code: None,
@@ -3358,6 +3360,7 @@ export function choose(value: number): string {
             evidence: "sink".to_string(),
             source_backed: false,
             source_read: None,
+            severity: SecuritySeverity::Low,
             trace: vec![],
             actions: vec![],
             dead_code: None,

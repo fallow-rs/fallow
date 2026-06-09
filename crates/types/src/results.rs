@@ -1178,6 +1178,20 @@ pub struct SecurityRuntimeContext {
     pub evidence: Option<String>,
 }
 
+/// Verification-priority tier for a security candidate. This is ranking, not an
+/// exploitability verdict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "lowercase")]
+pub enum SecuritySeverity {
+    /// Highest-priority candidate based on reachability, boundary, or runtime-hot signals.
+    High,
+    /// Candidate has source-reachability evidence but no high-priority signal.
+    Medium,
+    /// Candidate has no source-reachability or boundary signal.
+    Low,
+}
+
 /// Defensive control found on an attack-surface path.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -1275,6 +1289,10 @@ pub struct SecurityFinding {
     /// the sink site.
     #[serde(skip)]
     pub source_read: Option<(u32, u32)>,
+    /// Verification-priority tier derived from existing reachability, boundary,
+    /// source-backed, and runtime signals. Candidate-only: this does not prove
+    /// exploitability and does not change gates.
+    pub severity: SecuritySeverity,
     /// Structural import-hop trace from the client boundary to the secret source.
     /// The hop count is the uncalibrated signal; fallow does not prove the path
     /// is exploitable.

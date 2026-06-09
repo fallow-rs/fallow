@@ -9903,6 +9903,11 @@
           "type": "string",
           "const": "1",
           "description": "First release of the `fallow security --format json` shape."
+        },
+        {
+          "type": "string",
+          "const": "2",
+          "description": "Adds per-finding `severity` for verification-priority tiering."
         }
       ],
       "description": "The `fallow security --format json` schema version. Independently versioned\nfrom the main contract, mirroring `ImpactReportSchemaVersion`."
@@ -9951,6 +9956,10 @@
         "source_backed": {
           "type": "boolean",
           "description": "Whether the sink argument was associated with a known untrusted source by\nthe intra-module source-to-sink back-trace (issue #859): a local binding\nreferenced in the argument was sourced from a catalogue source path\n(`req.query`, `process.argv`, message-event `data`, etc.). `true` ranks\nthe candidate higher and annotates the evidence; `false` does NOT\nsuppress the finding (the association is conservative, never a proof, and\nfallow prefers false-negatives over false-positives). Always `false` for\n`ClientServerLeak`. Skipped from JSON when `false` for output stability."
+        },
+        "severity": {
+          "description": "Verification-priority tier derived from existing reachability, boundary,\nsource-backed, and runtime signals. Candidate-only: this does not prove\nexploitability and does not change gates.",
+          "$ref": "#/definitions/SecuritySeverity"
         },
         "trace": {
           "type": "array",
@@ -10033,6 +10042,7 @@
         "line",
         "col",
         "evidence",
+        "severity",
         "trace",
         "actions",
         "candidate"
@@ -10900,6 +10910,26 @@
         }
       ],
       "description": "How strongly the untrusted-source signal is associated with the sink, a\nstructured discriminator so a consumer can tier candidates without parsing\nthe human `evidence` prose. Present only when\n[`SecurityReachability::reachable_from_untrusted_source`] is true. Neither\nvalue proves exploitability; both are ranking signals (issue #885 doctrine:\nrank, never gate)."
+    },
+    "SecuritySeverity": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "high",
+          "description": "Highest-priority candidate based on reachability, boundary, or runtime-hot signals."
+        },
+        {
+          "type": "string",
+          "const": "medium",
+          "description": "Candidate has source-reachability evidence but no high-priority signal."
+        },
+        {
+          "type": "string",
+          "const": "low",
+          "description": "Candidate has no source-reachability or boundary signal."
+        }
+      ],
+      "description": "Verification-priority tier for a security candidate. This is ranking, not an\nexploitability verdict."
     }
   }
 }

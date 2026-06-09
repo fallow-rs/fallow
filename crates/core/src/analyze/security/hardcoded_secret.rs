@@ -9,7 +9,7 @@ use rustc_hash::FxHashMap;
 use fallow_types::extract::{ModuleInfo, SinkLiteralValue, SinkShape};
 use fallow_types::results::{
     SecurityCandidate, SecurityCandidateBoundary, SecurityCandidateSink, SecurityFinding,
-    SecurityFindingKind, TraceHop, TraceHopRole,
+    SecurityFindingKind, SecuritySeverity, TraceHop, TraceHopRole,
 };
 use fallow_types::suppress::IssueKind;
 
@@ -110,6 +110,7 @@ pub fn find_hardcoded_secret_candidates(
                 // The hardcoded value IS the secret; there is no upstream
                 // source-read to anchor, so no arg-level trace node.
                 source_read: None,
+                severity: SecuritySeverity::Low,
                 trace: vec![TraceHop {
                     path,
                     line,
