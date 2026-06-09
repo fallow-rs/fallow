@@ -799,7 +799,7 @@
     "json-schema-to-typescript": "15.0.4",
     "mocha": "11.7.6",
     "rolldown": "1.0.3",
-    "ovsx": "0.10.12",
+    "ovsx": "1.0.0",
     "typescript": "6.0.3",
     "vitest": "4.1.7"
   }
