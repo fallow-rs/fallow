@@ -1363,6 +1363,81 @@ evidence_template = "x"
     }
 
     #[test]
+    fn matched_receiver_returns_segment_before_suffix() {
+        // Leading-wildcard `*.query`: the receiver is the segment right before
+        // the matched `query`, regardless of how many object segments precede.
+        let pat = parse_callee_pattern("*.query").expect("pattern parses");
+        assert_eq!(pat.matched_receiver("db.query"), Some("db"));
+        assert_eq!(pat.matched_receiver("req.query"), Some("req"));
+        // Hono `c.req.query` flattens so the receiver of `.query` is `req`.
+        assert_eq!(pat.matched_receiver("ctx.req.query"), Some("req"));
+        // A non-matching path has no receiver.
+        assert_eq!(pat.matched_receiver("req.body"), None);
+        // An exact (non-wildcard) pattern's receiver is fixed in the pattern, so
+        // `matched_receiver` returns None even on a match.
+        let exact = parse_callee_pattern("process.env").expect("pattern parses");
+        assert_eq!(exact.matched_receiver("process.env"), None);
+    }
+
+    #[test]
+    fn receiver_allowlist_rejects_orm_query_builders_keeps_request_objects() {
+        // Issue #1092: the global HTTP-input row is receiver-gated. ORM /
+        // data-access receivers no longer classify their module as a source...
+        let cat = catalogue();
+        assert!(!cat.is_source_path("db.query"), "Drizzle db.query");
+        assert!(!cat.is_source_path("prisma.query"), "Prisma prisma.query");
+        assert!(!cat.is_source_path("drizzle.query"));
+        assert!(!cat.is_source_path("knex.body"));
+        assert!(!cat.is_source_path("client.query"));
+        // ...nor do non-request receivers that merely happen to have a `.query`
+        // member (a sibling-collision check: `dbConn` is not `db`).
+        assert!(!cat.is_source_path("dbConn.query"));
+        assert!(!cat.is_source_path("database.params"));
+        // A genuine request receiver still classifies as a source.
+        assert!(cat.is_source_path("req.query"), "Express req.query");
+        assert!(cat.is_source_path("request.body"));
+        assert!(cat.is_source_path("ctx.params"), "Koa/Elysia ctx.params");
+        assert!(cat.is_source_path("context.body"));
+        assert!(cat.is_source_path("event.query"), "SvelteKit event.query");
+        // Hono `c.req.query`: the matched receiver is `req`, which is allowed.
+        assert!(cat.is_source_path("ctx.req.query"));
+        // The allowlist is case-insensitive.
+        assert!(cat.is_source_path("Req.query"));
+    }
+
+    #[test]
+    fn search_params_source_stays_ungated() {
+        // Issue #1092: `*.searchParams` is intentionally NOT receiver-gated, so a
+        // `new URL(...).searchParams` binding on an arbitrary local still counts.
+        let cat = catalogue();
+        assert!(cat.is_source_path("u.searchParams"));
+        assert!(cat.is_source_path("url.searchParams"));
+        assert!(cat.is_source_path("params.searchParams"));
+    }
+
+    #[test]
+    fn parse_rejects_empty_receiver_allowlist_entry() {
+        let toml = r#"
+[[matcher]]
+id = "x"
+cwe = 79
+title = "x"
+sink_shape = "member-assign"
+callee_patterns = ["*.innerHTML"]
+arg_index = 0
+evidence_template = "x"
+
+[[source]]
+id = "http"
+title = "HTTP"
+path_patterns = ["*.query"]
+receiver_allowlist = ["req", "  "]
+"#;
+        let err = parse_catalogue(toml).unwrap_err();
+        assert!(err.contains("receiver_allowlist"), "got: {err}");
+    }
+
+    #[test]
     fn source_enabler_gates_framework_param_sources() {
         let cat = catalogue();
         let source = cat

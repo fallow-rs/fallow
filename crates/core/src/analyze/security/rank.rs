@@ -1161,14 +1161,39 @@ mod tests {
         let reach = findings[0].reachability.as_ref().expect("ranked");
         assert!(reach.reachable_from_untrusted_source);
         assert_eq!(reach.untrusted_source_hop_count, Some(1));
+        // Cross-module reachability is module-level: the source node is labeled
+        // `ModuleSource`, and the tier says `module-level` (issue #1093).
+        assert_eq!(reach.taint_confidence, Some(TaintConfidence::ModuleLevel));
         assert_eq!(
             reach
                 .untrusted_source_trace
                 .iter()
                 .map(|hop| hop.role)
                 .collect::<Vec<_>>(),
-            vec![TraceHopRole::UntrustedSource, TraceHopRole::Sink]
+            vec![TraceHopRole::ModuleSource, TraceHopRole::Sink]
         );
+    }
+
+    #[test]
+    fn arg_level_same_file_finding_anchors_source_node_at_read_line() {
+        // A source-backed finding with a resolved source-read line: the trace
+        // source node points at that read and is labeled `UntrustedSource`, and
+        // the tier is `arg-level` (issue #1093).
+        let graph = build_graph(&["handler.ts"], &[], &[]);
+        let modules = vec![tainted_binding_source_module(0)];
+        let mut arg_level = finding("handler.ts");
+        arg_level.source_backed = true;
+        arg_level.source_read = Some((7, 4));
+        let mut findings = vec![arg_level];
+
+        rank_with_modules(&graph, &modules, &mut findings);
+
+        let reach = findings[0].reachability.as_ref().expect("ranked");
+        assert!(reach.reachable_from_untrusted_source);
+        assert_eq!(reach.taint_confidence, Some(TaintConfidence::ArgLevel));
+        let source_hop = reach.untrusted_source_trace.first().expect("source node");
+        assert_eq!(source_hop.role, TraceHopRole::UntrustedSource);
+        assert_eq!((source_hop.line, source_hop.col), (7, 4));
     }
 
     #[test]
@@ -1196,13 +1221,17 @@ mod tests {
         let reach = findings[0].reachability.as_ref().expect("ranked");
         assert!(reach.reachable_from_untrusted_source);
         assert_eq!(reach.untrusted_source_hop_count, Some(0));
+        // The finding is not source-backed (the module merely contains a source),
+        // so the same-file source node is module-level: `ModuleSource`, never
+        // `UntrustedSource` (issue #1093).
+        assert_eq!(reach.taint_confidence, Some(TaintConfidence::ModuleLevel));
         assert_eq!(
             reach
                 .untrusted_source_trace
                 .iter()
                 .map(|hop| hop.role)
                 .collect::<Vec<_>>(),
-            vec![TraceHopRole::UntrustedSource, TraceHopRole::Sink]
+            vec![TraceHopRole::ModuleSource, TraceHopRole::Sink]
         );
     }
 
