@@ -70,10 +70,8 @@ export class AnalysisFailureBackoff {
   }
 }
 
-export const buildAnalysisBackoffKey = (
-  root: string,
-  args: ReadonlyArray<string>,
-): string => JSON.stringify([root, ...args]);
+export const buildAnalysisBackoffKey = (root: string, args: ReadonlyArray<string>): string =>
+  JSON.stringify([root, ...args]);
 
 export const buildAnalysisProcessEnv = (
   env: NodeJS.ProcessEnv = process.env,
