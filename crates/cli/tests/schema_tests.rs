@@ -118,6 +118,115 @@ fn explain_rejects_unknown_issue_type() {
 }
 
 #[test]
+fn explain_outputs_tainted_sink_guidance_as_json() {
+    let output = run_fallow_raw(&["explain", "tainted-sink", "--format", "json", "--quiet"]);
+    assert_eq!(output.code, 0, "explain should exit 0: {}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["id"].as_str(), Some("security/tainted-sink"));
+    assert!(
+        json["rationale"]
+            .as_str()
+            .is_some_and(|s| s.contains("unverified candidates"))
+    );
+    assert!(
+        json["example"]
+            .as_str()
+            .is_some_and(|s| s.contains("security/sql-injection"))
+    );
+}
+
+#[test]
+fn explain_outputs_client_server_leak_guidance_as_json() {
+    let output = run_fallow_raw(&[
+        "explain",
+        "client-server-leak",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(output.code, 0, "explain should exit 0: {}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["id"].as_str(), Some("security/client-server-leak"));
+    assert!(
+        json["rationale"]
+            .as_str()
+            .is_some_and(|s| s.contains("process.env"))
+    );
+    assert!(
+        json["example"]
+            .as_str()
+            .is_some_and(|s| s.contains("use client"))
+    );
+}
+
+#[test]
+fn explain_outputs_hardcoded_secret_guidance_as_json() {
+    let output = run_fallow_raw(&["explain", "hardcoded-secret", "--format", "json", "--quiet"]);
+    assert_eq!(output.code, 0, "explain should exit 0: {}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["id"].as_str(), Some("security/hardcoded-secret"));
+    assert!(
+        json["rationale"]
+            .as_str()
+            .is_some_and(|s| s.contains("include-required"))
+    );
+    assert!(
+        json["how_to_fix"]
+            .as_str()
+            .is_some_and(|s| s.contains("Rotate real credentials"))
+    );
+}
+
+#[test]
+fn explain_accepts_security_catalogue_ids() {
+    let output = run_fallow_raw(&["explain", "sql-injection", "--format", "json", "--quiet"]);
+    assert_eq!(output.code, 0, "explain should exit 0: {}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["id"].as_str(), Some("security/sql-injection"));
+    assert_eq!(json["name"].as_str(), Some("SQL injection sink"));
+    assert!(
+        json["rationale"]
+            .as_str()
+            .is_some_and(|s| s.contains("CWE-89"))
+    );
+
+    let output = run_fallow_raw(&["explain", "security/ssrf", "--format", "json", "--quiet"]);
+    assert_eq!(output.code, 0, "explain should exit 0: {}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["id"].as_str(), Some("security/ssrf"));
+    assert_eq!(
+        json["name"].as_str(),
+        Some("Server-side request forgery sink")
+    );
+}
+
+#[test]
+fn explain_security_unknown_suggests_security_examples() {
+    let output = run_fallow_raw(&[
+        "explain",
+        "security-not-a-real-rule",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(output.code, 2, "unknown explain id should exit 2");
+    let json = parse_json(&output);
+    let message = json["message"]
+        .as_str()
+        .or_else(|| json["error_message"].as_str())
+        .unwrap_or("");
+    assert!(message.contains("tainted-sink"), "message was: {message}");
+    assert!(
+        message.contains("client-server-leak"),
+        "message was: {message}"
+    );
+    assert!(
+        message.contains("hardcoded-secret"),
+        "message was: {message}"
+    );
+}
+
+#[test]
 fn schema_has_issue_types() {
     let output = run_fallow_raw(&["schema"]);
     let json = parse_json(&output);

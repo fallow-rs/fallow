@@ -122,6 +122,8 @@ mod security_framework_sinks;
 mod security_hardcoded_secret;
 #[path = "integration_test/security_secret_to_network.rs"]
 mod security_secret_to_network;
+#[path = "integration_test/security_taint_confidence.rs"]
+mod security_taint_confidence;
 #[path = "integration_test/security_template_xss_sinks.rs"]
 mod security_template_xss_sinks;
 #[path = "integration_test/stale_suppressions.rs"]

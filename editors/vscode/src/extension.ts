@@ -274,9 +274,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     readonly force?: boolean;
   }
 
-  const triggerCliAnalysis = async (
-    options: CliAnalysisTriggerOptions = {},
-  ): Promise<boolean> => {
+  const triggerCliAnalysis = async (options: CliAnalysisTriggerOptions = {}): Promise<boolean> => {
     setStatusBarAnalyzing();
     return await vscode.window.withProgress(
       {

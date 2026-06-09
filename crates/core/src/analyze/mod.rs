@@ -19,6 +19,7 @@ pub(crate) use unused_deps::matches_virtual_prefix;
 /// renderer. Re-exported so the `fallow security` command can label a
 /// `TaintedSink` finding without reaching into the private `security` module.
 pub use security::catalogue_title as security_catalogue_title;
+pub use security::derive_security_severity;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 

@@ -90,6 +90,70 @@ fn incremental_no_cache_all_misses() {
 }
 
 #[test]
+fn retaining_modules_releases_graph_payload_after_analysis() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).expect("create src dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"payload-release-fixture","version":"1.0.0"}"#,
+    )
+    .expect("write package.json");
+    std::fs::write(root.join("src/lazy.ts"), "export const lazy = 1;\n")
+        .expect("write lazy module");
+    std::fs::write(root.join("src/required.ts"), "exports.value = 2;\n")
+        .expect("write required module");
+    std::fs::write(
+        root.join("src/index.ts"),
+        r#"
+export async function load(flag: boolean) {
+  const required = require("./required");
+  if (flag) {
+    return import("./lazy");
+  }
+  return required.value;
+}
+"#,
+    )
+    .expect("write index module");
+
+    let config = create_config(root.to_path_buf());
+    let files = fallow_core::discover::discover_files(&config);
+    let parsed = fallow_core::extract::parse_all_files(&files, None, true);
+    let parsed_index = parsed
+        .modules
+        .iter()
+        .find(|module| {
+            files
+                .get(module.file_id.0 as usize)
+                .is_some_and(|file| file.path.ends_with("src/index.ts"))
+        })
+        .expect("parsed index module should exist");
+    assert!(!parsed_index.dynamic_imports.is_empty());
+    assert!(!parsed_index.require_calls.is_empty());
+
+    let output =
+        fallow_core::analyze_retaining_modules(&config, true, false).expect("analysis succeeds");
+    let retained_modules = output.modules.expect("retained modules");
+    let retained_files = output.files.expect("retained files");
+    let retained_index = retained_modules
+        .iter()
+        .find(|module| {
+            retained_files
+                .get(module.file_id.0 as usize)
+                .is_some_and(|file| file.path.ends_with("src/index.ts"))
+        })
+        .expect("retained index module should exist");
+
+    assert!(retained_index.dynamic_imports.is_empty());
+    assert_eq!(retained_index.dynamic_imports.capacity(), 0);
+    assert!(retained_index.require_calls.is_empty());
+    assert_eq!(retained_index.require_calls.capacity(), 0);
+    assert!(!retained_index.line_offsets.is_empty());
+    assert!(!retained_index.complexity.is_empty());
+}
+
+#[test]
 fn incremental_with_cache_all_hits() {
     let root = fixture_path("basic-project");
     let config = create_config(root);
