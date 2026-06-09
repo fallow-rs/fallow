@@ -870,12 +870,12 @@ fn gate_human_header(gate: &SecurityGate) -> String {
     use crate::report::plural;
     match gate.verdict {
         SecurityGateVerdict::Fail => format!(
-            "Gate: REVIEW REQUIRED, {} new security candidate{} in changed lines (unverified; not confirmed vulnerabilities).",
+            "Gate: REVIEW REQUIRED, {} new security item{} in changed lines. fallow has not confirmed a vulnerability.",
             gate.new_count,
             plural(gate.new_count),
         ),
         SecurityGateVerdict::Pass => {
-            "Gate: PASS, no new security candidates in changed lines.".to_owned()
+            "Gate: PASS, no new security items in changed lines.".to_owned()
         }
     }
 }
@@ -891,22 +891,35 @@ fn render_human_summary(output: &SecurityOutput) -> String {
         out.push('\n');
     }
     let count = output.security_findings.len();
-    let _ = writeln!(
-        out,
-        "Security candidates: {count} candidate{} found. These are NOT verified vulnerabilities; verify each before acting.",
-        plural(count),
-    );
-    if output.unresolved_edge_files > 0 {
-        let n = output.unresolved_edge_files;
+    if count == 0 {
+        out.push_str("Security review: no items to check in the scanned code.\n");
+    } else {
         let _ = writeln!(
             out,
-            "Unresolved dynamic import cones: {n} client file{}.",
+            "Security review: {count} item{} to check. These are unverified security candidates, not confirmed vulnerabilities.",
+            plural(count),
+        );
+        out.push_str(
+            "Next: check whether the listed code can run with unsafe input, secrets, or settings, and whether anything blocks the risk.\n",
+        );
+    }
+    if output.unresolved_edge_files > 0 {
+        let n = output.unresolved_edge_files;
+        let verb = if n == 1 { "uses" } else { "use" };
+        let _ = writeln!(
+            out,
+            "Blind spot: {n} client file{} {verb} dynamic imports that fallow could not follow.",
             plural(n)
         );
     }
     if output.unresolved_callee_sites > 0 {
         let n = output.unresolved_callee_sites;
-        let _ = writeln!(out, "Unresolved sink callees: {n} site{}.", plural(n));
+        let verb = if n == 1 { "uses" } else { "use" };
+        let _ = writeln!(
+            out,
+            "Blind spot: {n} call site{} {verb} code patterns that fallow could not resolve.",
+            plural(n)
+        );
     }
     out
 }
@@ -927,10 +940,20 @@ pub fn render_human(output: &SecurityOutput) -> String {
         out.push_str(&gate_human_header(gate));
         out.push_str("\n\n");
     }
-    out.push_str("Security candidates (unverified; for agent or human verification)\n\n");
+    let count = output.security_findings.len();
+    out.push_str(&format!("Security review: {count} item{}", plural(count)));
+    if count == 0 {
+        out.push_str(" to check in the scanned code.\n");
+    } else {
+        out.push_str(" to check.\n");
+        out.push_str(
+            "These are unverified security candidates, not confirmed vulnerabilities. Check whether the listed code can run with unsafe input, secrets, or settings, and whether anything blocks the risk.\n",
+        );
+    }
+    out.push('\n');
 
     if output.security_findings.is_empty() {
-        out.push_str("No security candidates found.\n");
+        out.push_str("No security details to show.\n");
     } else {
         for finding in &output.security_findings {
             let kind = security_finding_label(finding);
@@ -941,7 +964,7 @@ pub fn render_human(output: &SecurityOutput) -> String {
                 finding.path.to_string_lossy().replace('\\', "/").bold(),
                 finding.line,
             ));
-            out.push_str(&format!("    {}\n", finding.evidence));
+            out.push_str(&format!("    evidence: {}\n", finding.evidence));
             if let Some(hint) = dead_code_hint(finding) {
                 out.push_str(&format!("    dead-code: {hint}\n"));
             }
@@ -960,18 +983,18 @@ pub fn render_human(output: &SecurityOutput) -> String {
                     ""
                 };
                 out.push_str(&format!(
-                    "    reach: {entry} (blast radius {}){boundary}\n",
+                    "    code path: {entry} (blast radius {}){boundary}\n",
                     reach.blast_radius,
                 ));
                 if reach.reachable_from_untrusted_source {
                     let hops = reach.untrusted_source_hop_count.unwrap_or(0);
                     out.push_str(&format!(
-                        "    untrusted-source path: module reachable from an untrusted-source \
-                         module via {hops} import hop{}\n",
+                        "    input path: this module is reachable from a module that receives \
+                         untrusted input via {hops} import hop{}\n",
                         crate::report::plural(hops as usize),
                     ));
                     if !reach.untrusted_source_trace.is_empty() {
-                        out.push_str("    untrusted-source trace:\n");
+                        out.push_str("    input import trace:\n");
                         for hop in &reach.untrusted_source_trace {
                             out.push_str(&format!(
                                 "      {}:{} ({})\n",
@@ -984,7 +1007,7 @@ pub fn render_human(output: &SecurityOutput) -> String {
                 }
             }
             if !finding.trace.is_empty() {
-                out.push_str("    trace:\n");
+                out.push_str("    import trace:\n");
                 for hop in &finding.trace {
                     out.push_str(&format!(
                         "      {}:{} ({})\n",
@@ -996,14 +1019,19 @@ pub fn render_human(output: &SecurityOutput) -> String {
             }
             if matches!(finding.kind, SecurityFindingKind::ClientServerLeak) {
                 out.push_str(
-                    "    Next: check whether the import is type-only, server-only, or behind a \
-                     build-time guard; if the value never ships to the client bundle, this \
-                     candidate is a false positive.\n",
+                    "    Next: check whether this import can ship a secret to the browser. If \
+                     it is type-only, server-only, or removed at build time, mark it as a false \
+                     positive.\n",
                 );
             } else if finding.dead_code.is_some() {
                 out.push_str(
-                    "    Next: verify the dead-code finding and delete the code if safe; \
-                     otherwise verify and harden the sink.\n",
+                    "    Next: first verify the dead-code finding. If the code is safe to \
+                     remove, delete it. Otherwise check and harden the risky call.\n",
+                );
+            } else {
+                out.push_str(
+                    "    Next: check whether unsafe input, secrets, or settings can reach this \
+                     risky call without a safe guard. If not, mark it as a false positive.\n",
                 );
             }
             out.push('\n');
@@ -1012,10 +1040,10 @@ pub fn render_human(output: &SecurityOutput) -> String {
 
     if output.unresolved_edge_files > 0 {
         let n = output.unresolved_edge_files;
+        let verb = if n == 1 { "uses" } else { "use" };
         out.push_str(&format!(
-            "{} {n} client file{} reached a dynamic import the reachability scan could not \
-             follow; a leak behind those edges would not be reported, so an empty result is \
-             not a clean bill.\n",
+            "{} Blind spot: {n} client file{} {verb} dynamic imports that fallow could not \
+             follow. Code behind those imports may be missing from this report.\n",
             "[I]".blue().bold(),
             plural(n),
         ));
@@ -1023,21 +1051,23 @@ pub fn render_human(output: &SecurityOutput) -> String {
 
     if output.unresolved_callee_sites > 0 {
         let n = output.unresolved_callee_sites;
+        let verb = if n == 1 { "uses" } else { "use" };
         out.push_str(&format!(
-            "{} {n} sink site{} had a callee the catalogue scan could not resolve to a static \
-             path (dynamic dispatch, computed members, aliased bindings); an empty result is \
-             not a clean bill.\n",
+            "{} Blind spot: {n} call site{} {verb} code patterns that fallow could not resolve, \
+             such as dynamic dispatch, computed members, or aliased bindings.\n",
             "[I]".blue().bold(),
             plural(n),
         ));
     }
 
-    let count = output.security_findings.len();
     out.push_str(&format!(
-        "\nFound {count} security candidate{}. These are NOT verified vulnerabilities; verify \
-         each before acting.\n",
+        "\nResult: {count} security item{} to check.",
         plural(count),
     ));
+    if count > 0 {
+        out.push_str(" Review the listed evidence and trace before changing code.");
+    }
+    out.push('\n');
     out
 }
 
@@ -1713,8 +1743,8 @@ mod tests {
         };
         let header = gate_human_header(&gate);
         assert!(header.contains("REVIEW REQUIRED"));
-        assert!(header.contains("2 new security candidate"));
-        assert!(header.contains("not confirmed vulnerabilities"));
+        assert!(header.contains("2 new security items"));
+        assert!(header.contains("not confirmed a vulnerability"));
         assert!(!header.to_uppercase().contains("GATE: FAIL"));
     }
 
@@ -1727,7 +1757,7 @@ mod tests {
             new_count: 1,
         };
         let header = gate_human_header(&gate);
-        assert!(header.contains("1 new security candidate in changed lines"));
+        assert!(header.contains("1 new security item in changed lines"));
         assert!(!header.contains("1 new security candidates"));
     }
 
@@ -1901,24 +1931,33 @@ mod tests {
     #[test]
     fn human_summary_reports_zero_without_edge_line() {
         let out = render_human_summary(&output_with(vec![], 0));
-        assert!(out.contains("0 candidates found"), "got: {out}");
-        assert!(!out.contains("Unresolved dynamic import cones"));
+        assert!(
+            out.contains("Security review: no items to check in the scanned code."),
+            "got: {out}"
+        );
+        assert!(!out.contains("Blind spot"));
     }
 
     #[test]
     fn human_summary_pluralizes_and_surfaces_unresolved_edges() {
         let root = Path::new("/proj/root");
         let out = render_human_summary(&output_with(vec![sample_finding(root)], 2));
-        assert!(out.contains("1 candidate found"), "got: {out}");
-        assert!(out.contains("Unresolved dynamic import cones: 2 client files."));
+        assert!(
+            out.contains("Security review: 1 item to check."),
+            "got: {out}"
+        );
+        assert!(out.contains("not confirmed vulnerabilities"));
+        assert!(out.contains("unsafe input, secrets, or settings"));
+        assert!(out.contains("Blind spot: 2 client files use dynamic imports"));
     }
 
     #[test]
     fn human_render_empty_states_no_candidates() {
         colored::control::set_override(false);
         let out = render_human(&output_with(vec![], 0));
-        assert!(out.contains("No security candidates found."));
-        assert!(out.contains("Found 0 security candidates"));
+        assert!(out.contains("Security review: 0 items to check"));
+        assert!(out.contains("No security details to show."));
+        assert!(out.contains("Result: 0 security items to check."));
     }
 
     #[test]
@@ -1930,12 +1969,12 @@ mod tests {
         assert!(out.contains("[H] high client-server-leak"));
         assert!(out.contains("client-server-leak"));
         assert!(out.contains("src/app.tsx:12"));
-        assert!(out.contains("reaches process.env.SECRET_KEY"));
-        assert!(out.contains("trace:"));
+        assert!(out.contains("evidence: reaches process.env.SECRET_KEY"));
+        assert!(out.contains("import trace:"));
         assert!(out.contains("src/lib/secret.ts:8 (secret source)"));
         assert!(out.contains("src/app.tsx:12 (client boundary)"));
-        assert!(out.contains("Next:"));
-        assert!(out.contains("Found 1 security candidate."));
+        assert!(out.contains("Next: check whether this import can ship a secret to the browser"));
+        assert!(out.contains("Result: 1 security item to check."));
     }
 
     #[test]
@@ -1955,7 +1994,10 @@ mod tests {
             out.contains("dead-code: also reported as unused-file"),
             "got: {out}"
         );
-        assert!(out.contains("delete the code if safe"), "got: {out}");
+        assert!(
+            out.contains("If the code is safe to remove, delete it"),
+            "got: {out}"
+        );
     }
 
     #[test]
@@ -1971,10 +2013,10 @@ mod tests {
         let out = render_human(&output_with(vec![finding], 0));
 
         assert!(
-            out.contains("module reachable from an untrusted-source module via 1 import hop"),
+            out.contains("reachable from a module that receives untrusted input via 1 import hop"),
             "got: {out}"
         );
-        assert!(out.contains("untrusted-source trace:"), "got: {out}");
+        assert!(out.contains("input import trace:"), "got: {out}");
         assert!(
             out.contains("src/routes/api.ts:3 (source module)"),
             "got: {out}"
@@ -1985,8 +2027,20 @@ mod tests {
     fn human_render_surfaces_unresolved_edge_blind_spot() {
         colored::control::set_override(false);
         let out = render_human(&output_with(vec![], 3));
-        assert!(out.contains("3 client files reached a dynamic import"));
-        assert!(out.contains("not a clean bill"));
+        assert!(out.contains("Blind spot: 3 client files use dynamic imports"));
+        assert!(out.contains("Code behind those imports may be missing from this report."));
+    }
+
+    #[test]
+    fn human_render_blind_spots_use_singular_verbs() {
+        colored::control::set_override(false);
+        let mut output = output_with(vec![], 1);
+        output.unresolved_callee_sites = 1;
+
+        let out = render_human(&output);
+
+        assert!(out.contains("Blind spot: 1 client file uses dynamic imports"));
+        assert!(out.contains("Blind spot: 1 call site uses code patterns"));
     }
 
     #[test]
