@@ -285,7 +285,12 @@ use crate::MemberKind;
 /// arm, and public-by-convention env vars (`NEXT_PUBLIC_`, `VITE_`, ...) are no
 /// longer recorded as secret sources. Pre-138 entries omit the URL signal and may
 /// retain stale public-env source bindings until the file is re-extracted.
-pub(super) const CACHE_VERSION: u32 = 138;
+///
+/// Bumped to 139 for issue #1095: JS/TS extraction now records source-backed
+/// local bindings when template literals, string concatenation, or object
+/// literals embed an untrusted source. Pre-139 entries miss those ranking
+/// signals until the file is re-extracted.
+pub(super) const CACHE_VERSION: u32 = 139;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

@@ -265,6 +265,42 @@ fn dynamic_regex_one_hop_function_expression_source_backed_candidate_is_marked()
 }
 
 #[test]
+fn dynamic_regex_template_binding_source_backed_candidate_is_marked() {
+    let results = analyze_with_security_sink("security-dynamic-regex");
+    let finding = finding_on(&results, "src/source-template-binding.ts");
+
+    assert_eq!(finding.category.as_deref(), Some("dynamic-regex"));
+    assert!(
+        finding.source_backed,
+        "template literal binding should carry the ranking signal"
+    );
+}
+
+#[test]
+fn dynamic_regex_concat_binding_source_backed_candidate_is_marked() {
+    let results = analyze_with_security_sink("security-dynamic-regex");
+    let finding = finding_on(&results, "src/source-concat-binding.ts");
+
+    assert_eq!(finding.category.as_deref(), Some("dynamic-regex"));
+    assert!(
+        finding.source_backed,
+        "concat binding should carry the ranking signal"
+    );
+}
+
+#[test]
+fn dynamic_regex_object_binding_source_backed_candidate_is_marked() {
+    let results = analyze_with_security_sink("security-dynamic-regex");
+    let finding = finding_on(&results, "src/source-object-binding.ts");
+
+    assert_eq!(finding.category.as_deref(), Some("dynamic-regex"));
+    assert!(
+        finding.source_backed,
+        "object literal binding should carry the ranking signal"
+    );
+}
+
+#[test]
 fn dynamic_regex_shadowed_helper_name_keeps_candidate_unbacked() {
     let results = analyze_with_security_sink("security-dynamic-regex");
     let finding = finding_on(&results, "src/source-helper-shadowed.ts");

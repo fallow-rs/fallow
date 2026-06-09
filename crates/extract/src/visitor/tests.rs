@@ -193,6 +193,49 @@ fn import_meta_env_secret_binds_as_a_source() {
     );
 }
 
+fn has_tainted_binding(source: &str, local: &str, source_path: &str) -> bool {
+    let info = parse(source);
+    info.tainted_bindings
+        .iter()
+        .any(|binding| binding.local == local && binding.source_path == source_path)
+}
+
+#[test]
+fn template_literal_source_substitution_binds_as_source() {
+    assert!(has_tainted_binding(
+        "const command = `run ${req.query.id}`;",
+        "command",
+        "req.query"
+    ));
+}
+
+#[test]
+fn concat_source_operand_binds_as_source() {
+    assert!(has_tainted_binding(
+        r#"const command = "run " + req.query.id;"#,
+        "command",
+        "req.query"
+    ));
+}
+
+#[test]
+fn object_literal_source_property_binds_as_source() {
+    assert!(has_tainted_binding(
+        "const payload = { id: req.query.id };",
+        "payload",
+        "req.query"
+    ));
+}
+
+#[test]
+fn non_concat_binary_expression_does_not_bind_as_source() {
+    assert!(!has_tainted_binding(
+        "const amount = req.query.count * 2;",
+        "amount",
+        "req.query"
+    ));
+}
+
 fn redos_regex_sink(source: &str) -> fallow_types::extract::SinkSite {
     let info = parse(source);
     info.security_sinks

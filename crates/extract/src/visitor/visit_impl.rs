@@ -1002,15 +1002,16 @@ impl ModuleInfoExtractor {
         }
     }
 
-    /// Record tainted-source bindings for `const <name> = <object>.<prop>`,
-    /// where the initializer is a member-access chain. The recorded candidates
-    /// include the exact member path and the flattened object path, so
-    /// `const id = req.query.id` still records `req.query` while leaf sources
-    /// such as `const ref = document.referrer` can match exact source rows.
+    /// Record tainted-source bindings for `const <name> = <object>.<prop>` and
+    /// for one-hop local expressions that embed a source member access. The
+    /// recorded candidates include the exact member path and the flattened
+    /// object path, so `const id = req.query.id` still records `req.query`
+    /// while leaf sources such as `const ref = document.referrer` can match
+    /// exact source rows.
     /// Captured at any scope (no `is_module_scope` gate): a sink inside a route
     /// handler reading a function-local source is exactly the target case.
     fn record_tainted_source_binding(&mut self, name: &str, expr: &Expression<'_>) {
-        for source_path in source_path_candidates(expr) {
+        for source_path in binding_source_path_candidates(expr) {
             if self
                 .tainted_bindings
                 .iter()
@@ -3743,6 +3744,56 @@ fn source_path_candidates(expr: &Expression<'_>) -> Vec<String> {
         push_unique_string(&mut out, path);
     }
     out
+}
+
+fn binding_source_path_candidates(expr: &Expression<'_>) -> Vec<String> {
+    let mut out = Vec::new();
+    collect_binding_source_path_candidates(expr, &mut out);
+    out
+}
+
+fn collect_binding_source_path_candidates(expr: &Expression<'_>, out: &mut Vec<String>) {
+    for path in source_path_candidates(expr) {
+        push_unique_string(out, path);
+    }
+
+    match expr {
+        Expression::ParenthesizedExpression(paren) => {
+            collect_binding_source_path_candidates(&paren.expression, out);
+        }
+        Expression::TSAsExpression(ts_as) => {
+            collect_binding_source_path_candidates(&ts_as.expression, out);
+        }
+        Expression::TSSatisfiesExpression(ts_sat) => {
+            collect_binding_source_path_candidates(&ts_sat.expression, out);
+        }
+        Expression::TSNonNullExpression(ts_non_null) => {
+            collect_binding_source_path_candidates(&ts_non_null.expression, out);
+        }
+        Expression::AwaitExpression(await_expr) => {
+            collect_binding_source_path_candidates(&await_expr.argument, out);
+        }
+        Expression::TemplateLiteral(template) => {
+            for expression in &template.expressions {
+                collect_binding_source_path_candidates(expression, out);
+            }
+        }
+        Expression::BinaryExpression(binary)
+            if binary.operator == oxc_ast::ast::BinaryOperator::Addition =>
+        {
+            collect_binding_source_path_candidates(&binary.left, out);
+            collect_binding_source_path_candidates(&binary.right, out);
+        }
+        Expression::ObjectExpression(object) => {
+            for property in &object.properties {
+                let ObjectPropertyKind::ObjectProperty(property) = property else {
+                    continue;
+                };
+                collect_binding_source_path_candidates(&property.value, out);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn source_returning_helper(
