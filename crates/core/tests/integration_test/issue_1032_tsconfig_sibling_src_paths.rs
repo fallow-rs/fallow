@@ -15,6 +15,20 @@ fn write(path: &Path, contents: &str) {
     std::fs::write(path, contents).expect("write file");
 }
 
+fn write_workspace_tsconfig(root: &Path, module_name: &str) {
+    write(
+        &root.join(format!("modules/{module_name}/tsconfig.json")),
+        r#"{
+            "compilerOptions": {
+                "baseUrl": ".",
+                "paths": {
+                    "@darkaura/firlefanz/*": ["../Firlefanz/src/*"]
+                }
+            }
+        }"#,
+    );
+}
+
 fn create_issue_1032_project(root: &Path, shape: TsconfigShape) {
     write(
         &root.join("package.json"),
@@ -36,6 +50,24 @@ fn create_issue_1032_project(root: &Path, shape: TsconfigShape) {
         }"#,
     );
     write(
+        &root.join("modules/Backend/package.json"),
+        r#"{
+            "name": "backend",
+            "private": true,
+            "type": "module",
+            "main": "src/index.ts"
+        }"#,
+    );
+    write(
+        &root.join("modules/Event/package.json"),
+        r#"{
+            "name": "event",
+            "private": true,
+            "type": "module",
+            "main": "src/index.ts"
+        }"#,
+    );
+    write(
         &root.join("modules/Firlefanz/package.json"),
         r#"{
             "name": "@darkaura/firlefanz",
@@ -49,6 +81,18 @@ fn create_issue_1032_project(root: &Path, shape: TsconfigShape) {
            import { componentPatternTypes } from "@darkaura/firlefanz/lib/ecs/componentPatternTypes";
 
            console.log(checkboxRoot, componentPatternTypes);"#,
+    );
+    write(
+        &root.join("modules/Backend/src/index.ts"),
+        r#"import { componentPatternTypes } from "@darkaura/firlefanz/lib/ecs/componentPatternTypes";
+
+           export const backendComponents = componentPatternTypes;"#,
+    );
+    write(
+        &root.join("modules/Event/src/index.ts"),
+        r#"import { componentPatternTypes } from "@darkaura/firlefanz/lib/ecs/componentPatternTypes";
+
+           export const eventComponents = componentPatternTypes;"#,
     );
     write(
         &root.join("modules/Firlefanz/src/lib/ecs/componentPatternTypes.ts"),
@@ -71,17 +115,11 @@ fn create_issue_1032_project(root: &Path, shape: TsconfigShape) {
                 }
             }"#,
         ),
-        TsconfigShape::Workspace => write(
-            &root.join("modules/App/tsconfig.json"),
-            r#"{
-                "compilerOptions": {
-                    "baseUrl": ".",
-                    "paths": {
-                        "@darkaura/firlefanz/*": ["../Firlefanz/src/*"]
-                    }
-                }
-            }"#,
-        ),
+        TsconfigShape::Workspace => {
+            write_workspace_tsconfig(root, "App");
+            write_workspace_tsconfig(root, "Backend");
+            write_workspace_tsconfig(root, "Event");
+        }
     }
 }
 
@@ -95,12 +133,19 @@ fn assert_issue_1032_project_resolves(root: &Path) {
         .map(|finding| finding.file.path.to_string_lossy().replace('\\', "/"))
         .collect();
 
-    assert!(
-        !unused_files
-            .iter()
-            .any(|path| path.ends_with("modules/Firlefanz/src/lib/ecs/componentPatternTypes.ts")),
-        "sibling source file imported through tsconfig paths should be reachable, got {unused_files:?}"
-    );
+    for reachable_path in [
+        "modules/App/src/index.ts",
+        "modules/Backend/src/index.ts",
+        "modules/Event/src/index.ts",
+        "modules/Firlefanz/src/lib/ecs/componentPatternTypes.ts",
+    ] {
+        assert!(
+            !unused_files
+                .iter()
+                .any(|path| path.ends_with(reachable_path)),
+            "{reachable_path} should be reachable, got {unused_files:?}"
+        );
+    }
     assert!(
         unused_files
             .iter()
