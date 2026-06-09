@@ -8,7 +8,7 @@ use std::ffi::OsString;
 use std::io::{IsTerminal, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU16, Ordering};
 use std::time::Duration;
 
 use fallow_config::OutputFormat;
@@ -98,6 +98,9 @@ const MCP_TOOLS: &[&str] = &[
 /// would see the bit stick at the max across all of them.
 static FINDINGS_PRESENT: AtomicU8 = AtomicU8::new(FINDINGS_UNSET);
 static FAILURE_REASON: AtomicU8 = AtomicU8::new(FAILURE_REASON_UNSET);
+static RESULT_COUNT_CAPPED: AtomicU16 = AtomicU16::new(RESULT_COUNT_UNSET);
+static REPORT_TRUNCATED: AtomicU8 = AtomicU8::new(REPORT_TRUNCATION_UNSET);
+static TRUNCATION_REASON: AtomicU8 = AtomicU8::new(TRUNCATION_REASON_UNSET);
 
 const FINDINGS_UNSET: u8 = 0;
 const FINDINGS_CLEAN: u8 = 1;
@@ -113,6 +116,17 @@ const FAILURE_REASON_NETWORK: u8 = 7;
 const FAILURE_REASON_AUTH: u8 = 8;
 const FAILURE_REASON_GATE: u8 = 9;
 const FAILURE_REASON_SIGNAL: u8 = 10;
+const RESULT_COUNT_MAX: usize = 100;
+const RESULT_COUNT_UNSET: u16 = u16::MAX;
+const RESULT_COUNT_UNKNOWN: u16 = u16::MAX - 1;
+const REPORT_TRUNCATION_UNSET: u8 = 0;
+const REPORT_TRUNCATION_FALSE: u8 = 1;
+const REPORT_TRUNCATION_TRUE: u8 = 2;
+const TRUNCATION_REASON_UNSET: u8 = 0;
+const TRUNCATION_REASON_UNKNOWN: u8 = 1;
+const TRUNCATION_REASON_MAX_ITEMS: u8 = 2;
+const TRUNCATION_REASON_COMMENT_LIMIT: u8 = 3;
+const TRUNCATION_REASON_SIZE_LIMIT: u8 = 4;
 
 /// Record whether the analysis that just completed surfaced any findings.
 ///
@@ -127,6 +141,68 @@ pub fn note_findings_present(present: bool) {
         FINDINGS_CLEAN
     };
     FINDINGS_PRESENT.fetch_max(value, Ordering::Relaxed);
+    if present {
+        mark_result_count_unknown();
+    } else {
+        note_result_count(0);
+    }
+}
+
+/// Record the number of findings in the analysis batch that just completed.
+///
+/// The exact count is used only in-process to combine sub-analyses from a
+/// single CLI invocation. The event serializes only the coarse bucket.
+pub fn note_result_count(count: usize) {
+    let value = if count > 0 {
+        FINDINGS_FOUND
+    } else {
+        FINDINGS_CLEAN
+    };
+    FINDINGS_PRESENT.fetch_max(value, Ordering::Relaxed);
+
+    let capped = count.min(RESULT_COUNT_MAX) as u16;
+    let _ = RESULT_COUNT_CAPPED.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+        let next = match current {
+            RESULT_COUNT_UNSET => capped,
+            RESULT_COUNT_UNKNOWN => RESULT_COUNT_UNKNOWN,
+            value => value.saturating_add(capped).min(RESULT_COUNT_MAX as u16),
+        };
+        Some(next)
+    });
+}
+
+/// Record a final command-level count after nested analysis helpers ran.
+pub fn note_final_result_count(count: usize) {
+    let value = if count > 0 {
+        FINDINGS_FOUND
+    } else {
+        FINDINGS_CLEAN
+    };
+    FINDINGS_PRESENT.fetch_max(value, Ordering::Relaxed);
+    RESULT_COUNT_CAPPED.store(count.min(RESULT_COUNT_MAX) as u16, Ordering::Relaxed);
+}
+
+fn mark_result_count_unknown() {
+    RESULT_COUNT_CAPPED.store(RESULT_COUNT_UNKNOWN, Ordering::Relaxed);
+}
+
+/// Record whether a report/comment style output path was truncated.
+pub fn note_report_truncation(truncated: bool, reason: TruncationReason) {
+    if truncated {
+        REPORT_TRUNCATED.store(REPORT_TRUNCATION_TRUE, Ordering::Relaxed);
+        let reason_state = truncation_reason_to_state(reason);
+        let _ = TRUNCATION_REASON.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            Some(current.max(reason_state))
+        });
+    } else {
+        let _ = REPORT_TRUNCATED.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            if current == REPORT_TRUNCATION_UNSET {
+                Some(REPORT_TRUNCATION_FALSE)
+            } else {
+                Some(current)
+            }
+        });
+    }
 }
 
 /// Map the accumulator state to the optional payload field. Pure so it can be
@@ -222,6 +298,82 @@ fn failure_reason() -> Option<FailureReason> {
     failure_reason_from_state(FAILURE_REASON.load(Ordering::Relaxed))
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub enum ResultCountBucket {
+    #[serde(rename = "0")]
+    Zero,
+    #[serde(rename = "1-9")]
+    OneToNine,
+    #[serde(rename = "10-99")]
+    TenToNinetyNine,
+    #[serde(rename = "100+")]
+    OneHundredPlus,
+    #[serde(rename = "unknown")]
+    Unknown,
+}
+
+fn result_count_bucket_from_state(state: u16) -> Option<ResultCountBucket> {
+    match state {
+        RESULT_COUNT_UNSET => None,
+        RESULT_COUNT_UNKNOWN => Some(ResultCountBucket::Unknown),
+        0 => Some(ResultCountBucket::Zero),
+        1..=9 => Some(ResultCountBucket::OneToNine),
+        10..=99 => Some(ResultCountBucket::TenToNinetyNine),
+        _ => Some(ResultCountBucket::OneHundredPlus),
+    }
+}
+
+fn result_count_bucket() -> Option<ResultCountBucket> {
+    result_count_bucket_from_state(RESULT_COUNT_CAPPED.load(Ordering::Relaxed))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TruncationReason {
+    CommentLimit,
+    MaxItems,
+    SizeLimit,
+    Unknown,
+}
+
+fn truncation_reason_to_state(reason: TruncationReason) -> u8 {
+    match reason {
+        TruncationReason::Unknown => TRUNCATION_REASON_UNKNOWN,
+        TruncationReason::MaxItems => TRUNCATION_REASON_MAX_ITEMS,
+        TruncationReason::CommentLimit => TRUNCATION_REASON_COMMENT_LIMIT,
+        TruncationReason::SizeLimit => TRUNCATION_REASON_SIZE_LIMIT,
+    }
+}
+
+fn truncation_reason_from_state(state: u8) -> Option<TruncationReason> {
+    match state {
+        TRUNCATION_REASON_UNKNOWN => Some(TruncationReason::Unknown),
+        TRUNCATION_REASON_MAX_ITEMS => Some(TruncationReason::MaxItems),
+        TRUNCATION_REASON_COMMENT_LIMIT => Some(TruncationReason::CommentLimit),
+        TRUNCATION_REASON_SIZE_LIMIT => Some(TruncationReason::SizeLimit),
+        _ => None,
+    }
+}
+
+fn report_truncated_from_state(state: u8) -> Option<bool> {
+    match state {
+        REPORT_TRUNCATION_FALSE => Some(false),
+        REPORT_TRUNCATION_TRUE => Some(true),
+        _ => None,
+    }
+}
+
+fn report_truncated() -> Option<bool> {
+    report_truncated_from_state(REPORT_TRUNCATED.load(Ordering::Relaxed))
+}
+
+fn truncation_reason() -> Option<TruncationReason> {
+    if report_truncated() != Some(true) {
+        return None;
+    }
+    truncation_reason_from_state(TRUNCATION_REASON.load(Ordering::Relaxed))
+        .or(Some(TruncationReason::Unknown))
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TelemetryCommand {
     Status,
@@ -379,6 +531,18 @@ struct TelemetryEvent {
     /// workflows.
     #[serde(skip_serializing_if = "Option::is_none")]
     findings_present: Option<bool>,
+    /// Coarse bucket of the rendered analysis result count. Never serializes
+    /// exact counts, paths, finding names, rule ids, or snippets.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    result_count_bucket: Option<ResultCountBucket>,
+    /// Whether a report/comment style output path was truncated. Absent on
+    /// output formats that have no truncation-aware reporting path.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    report_truncated: Option<bool>,
+    /// Why a report/comment style output path was truncated. Only present when
+    /// `report_truncated` is true.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    truncation_reason: Option<TruncationReason>,
     /// The MCP tool that triggered this run, when invoked through the MCP
     /// server. Allowlisted to the fixed set of tool names; absent otherwise.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -618,6 +782,9 @@ fn build_workflow_event(record: &WorkflowRecord<'_>) -> TelemetryEvent {
         exit_code_bucket: exit_code_bucket(record.exit_code),
         failure_reason: failure_reason_for(record),
         findings_present: findings_present(),
+        result_count_bucket: result_count_bucket(),
+        report_truncated: report_truncated(),
+        truncation_reason: truncation_reason(),
         mcp_tool: mcp_tool(),
         parent_run: record.parent_run.and_then(sanitize_parent_run),
     }
@@ -663,6 +830,9 @@ fn status_changed_event(enabled: bool) -> TelemetryEvent {
         exit_code_bucket: "0",
         failure_reason: None,
         findings_present: None,
+        result_count_bucket: None,
+        report_truncated: None,
+        truncation_reason: None,
         mcp_tool: None,
         parent_run: None,
     }
@@ -688,6 +858,9 @@ fn example_event() -> TelemetryEvent {
         exit_code_bucket: "1",
         failure_reason: None,
         findings_present: Some(true),
+        result_count_bucket: Some(ResultCountBucket::OneToNine),
+        report_truncated: Some(true),
+        truncation_reason: Some(TruncationReason::CommentLimit),
         mcp_tool: Some("find_dupes"),
         parent_run: Some("tmp_8x7p4k".to_owned()),
     }
@@ -730,6 +903,18 @@ fn field_purposes() -> Vec<(&'static str, &'static str)> {
         (
             "findings_present",
             "Whether the analysis surfaced any findings, decoupled from the exit-code gate. On combined and audit workflows it is an OR across sub-analyses; per-analysis find-rate is answerable only on standalone dead_code, dupes, and health.",
+        ),
+        (
+            "result_count_bucket",
+            "Coarse analysis result volume: 0, 1-9, 10-99, 100+, or unknown. Exact counts, paths, finding names, rule ids, and snippets are never sent.",
+        ),
+        (
+            "report_truncated",
+            "Whether a report/comment output path was truncated before delivery.",
+        ),
+        (
+            "truncation_reason",
+            "Why report/comment output was truncated: comment_limit, max_items, size_limit, or unknown.",
         ),
         (
             "mcp_tool",
@@ -1667,6 +1852,56 @@ mod tests {
         assert_eq!(findings_present_from_state(FINDINGS_FOUND), Some(true));
         // Any unexpected value is treated as unset, never a misleading false.
         assert_eq!(findings_present_from_state(99), None);
+    }
+
+    #[test]
+    fn result_count_state_maps_to_buckets() {
+        assert_eq!(result_count_bucket_from_state(RESULT_COUNT_UNSET), None);
+        assert_eq!(
+            result_count_bucket_from_state(RESULT_COUNT_UNKNOWN),
+            Some(ResultCountBucket::Unknown)
+        );
+        assert_eq!(
+            result_count_bucket_from_state(0),
+            Some(ResultCountBucket::Zero)
+        );
+        assert_eq!(
+            result_count_bucket_from_state(9),
+            Some(ResultCountBucket::OneToNine)
+        );
+        assert_eq!(
+            result_count_bucket_from_state(10),
+            Some(ResultCountBucket::TenToNinetyNine)
+        );
+        assert_eq!(
+            result_count_bucket_from_state(99),
+            Some(ResultCountBucket::TenToNinetyNine)
+        );
+        assert_eq!(
+            result_count_bucket_from_state(100),
+            Some(ResultCountBucket::OneHundredPlus)
+        );
+    }
+
+    #[test]
+    fn report_truncation_state_maps_to_payload_fields() {
+        assert_eq!(report_truncated_from_state(REPORT_TRUNCATION_UNSET), None);
+        assert_eq!(
+            report_truncated_from_state(REPORT_TRUNCATION_FALSE),
+            Some(false)
+        );
+        assert_eq!(
+            report_truncated_from_state(REPORT_TRUNCATION_TRUE),
+            Some(true)
+        );
+        assert_eq!(
+            truncation_reason_from_state(TRUNCATION_REASON_COMMENT_LIMIT),
+            Some(TruncationReason::CommentLimit)
+        );
+        assert_eq!(
+            truncation_reason_from_state(TRUNCATION_REASON_SIZE_LIMIT),
+            Some(TruncationReason::SizeLimit)
+        );
     }
 
     #[test]

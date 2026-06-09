@@ -413,10 +413,10 @@ fn execute_dupes_inner(
 
     let elapsed = start.elapsed();
 
-    // Report findings presence to telemetry from the real result, independent of
-    // the duplication threshold gate (which exits 0 by default even at 100%
-    // duplication). See `telemetry::note_findings_present`.
-    crate::telemetry::note_findings_present(!report.clone_groups.is_empty());
+    // Report result volume to telemetry from the real result, independent of
+    // the duplication threshold gate. Exact counts are bucketed before
+    // serialization.
+    crate::telemetry::note_result_count(report.clone_groups.len());
 
     Ok(DupesResult {
         report,

@@ -237,6 +237,24 @@ fn write_clean_project(dir: &Path) {
     fs::write(src.join("index.ts"), "export const value = 41 + 1;\n").expect("write source");
 }
 
+fn write_many_unused_project(dir: &Path) {
+    let src = dir.join("src");
+    fs::create_dir_all(&src).expect("create src");
+    fs::write(
+        dir.join("package.json"),
+        "{\n  \"name\": \"many-unused\",\n  \"main\": \"src/index.ts\"\n}\n",
+    )
+    .expect("write package.json");
+    fs::write(src.join("index.ts"), "console.log('entry');\n").expect("write index");
+    for index in 0..12 {
+        fs::write(
+            src.join(format!("unused-{index}.ts")),
+            format!("export const unused{index} = {index};\n"),
+        )
+        .expect("write unused source");
+    }
+}
+
 fn write_audit_base_project(dir: &Path) {
     let src = dir.join("src");
     fs::create_dir_all(&src).expect("create src");
@@ -293,6 +311,7 @@ fn dupes_with_duplication_sets_findings_present_despite_success_outcome() {
         Some(true),
         "dupes with real duplication must report findings_present=true"
     );
+    assert_eq!(event["result_count_bucket"].as_str(), Some("1-9"));
 }
 
 #[test]
@@ -310,6 +329,7 @@ fn dupes_on_clean_project_sets_findings_present_false() {
         Some(false),
         "a genuinely clean dupes run must report findings_present=false"
     );
+    assert_eq!(event["result_count_bucket"].as_str(), Some("0"));
 }
 
 #[test]
@@ -404,6 +424,7 @@ fn audit_with_findings_sets_findings_present_true() {
     assert_eq!(event["workflow"].as_str(), Some("audit"));
     assert_eq!(event["outcome"].as_str(), Some("issues_found"));
     assert_eq!(event["findings_present"].as_bool(), Some(true));
+    assert_eq!(event["result_count_bucket"].as_str(), Some("1-9"));
 }
 
 #[test]
@@ -427,6 +448,7 @@ fn audit_on_clean_changed_files_sets_findings_present_false() {
     assert_eq!(event["workflow"].as_str(), Some("audit"));
     assert_eq!(event["outcome"].as_str(), Some("success"));
     assert_eq!(event["findings_present"].as_bool(), Some(false));
+    assert_eq!(event["result_count_bucket"].as_str(), Some("0"));
 }
 
 #[test]
@@ -448,6 +470,7 @@ fn audit_with_no_changed_files_sets_findings_present_false() {
     assert_eq!(event["workflow"].as_str(), Some("audit"));
     assert_eq!(event["outcome"].as_str(), Some("success"));
     assert_eq!(event["findings_present"].as_bool(), Some(false));
+    assert_eq!(event["result_count_bucket"].as_str(), Some("0"));
 }
 
 #[test]
@@ -465,6 +488,7 @@ fn security_with_findings_sets_findings_present_true() {
     assert_eq!(event["workflow"].as_str(), Some("security"));
     assert_eq!(event["outcome"].as_str(), Some("success"));
     assert_eq!(event["findings_present"].as_bool(), Some(true));
+    assert_eq!(event["result_count_bucket"].as_str(), Some("1-9"));
 }
 
 #[test]
@@ -482,6 +506,31 @@ fn security_on_clean_project_sets_findings_present_false() {
     assert_eq!(event["workflow"].as_str(), Some("security"));
     assert_eq!(event["outcome"].as_str(), Some("success"));
     assert_eq!(event["findings_present"].as_bool(), Some(false));
+    assert_eq!(event["result_count_bucket"].as_str(), Some("0"));
+}
+
+#[test]
+fn review_output_reports_comment_limit_truncation() {
+    let dir = tempfile::tempdir().expect("temp project");
+    write_many_unused_project(dir.path());
+
+    let (event, output) = inspect_event_output(
+        dir.path(),
+        &["dead-code", "--format", "review-github", "--quiet"],
+        &[("FALLOW_MAX_COMMENTS", "1")],
+    );
+
+    assert_eq!(
+        output.code, 1,
+        "dead-code with findings should exit 1: {}",
+        output.stderr
+    );
+    assert_eq!(event["workflow"].as_str(), Some("dead_code"));
+    assert_eq!(event["output_format"].as_str(), Some("review_github"));
+    assert_eq!(event["findings_present"].as_bool(), Some(true));
+    assert_eq!(event["result_count_bucket"].as_str(), Some("10-99"));
+    assert_eq!(event["report_truncated"].as_bool(), Some(true));
+    assert_eq!(event["truncation_reason"].as_str(), Some("comment_limit"));
 }
 
 #[test]
@@ -496,6 +545,10 @@ fn admin_command_emits_no_findings_present_key() {
     assert!(
         event.get("findings_present").is_none(),
         "commands that run no analysis must omit findings_present"
+    );
+    assert!(
+        event.get("result_count_bucket").is_none(),
+        "commands that run no analysis must omit result_count_bucket"
     );
 }
 

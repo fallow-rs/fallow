@@ -87,12 +87,15 @@ V1 events are workflow-level and coarse:
   "outcome": "issues_found",
   "exit_code_bucket": "1",
   "findings_present": true,
+  "result_count_bucket": "1-9",
+  "report_truncated": true,
+  "truncation_reason": "comment_limit",
   "mcp_tool": "find_dupes",
   "parent_run": "tmp_8x7p4k"
 }
 ```
 
-`agent_source`, `failure_reason`, `findings_present`, `mcp_tool`, and `parent_run` are optional. `agent_source` appears only on agent-driven runs. `failure_reason` appears only on failed workflow events and uses one of `validation`, `unsupported_format`, `config`, `analysis`, `diff`, `network`, `auth`, `gate`, `signal`, or `unknown`. `findings_present` is omitted by commands that run no analysis (and by older binaries). `mcp_tool` appears only when a run came through the MCP server. `parent_run` appears only when a run is explicitly correlated to a previous one. All are omitted otherwise.
+`agent_source`, `failure_reason`, `findings_present`, `result_count_bucket`, `report_truncated`, `truncation_reason`, `mcp_tool`, and `parent_run` are optional. `agent_source` appears only on agent-driven runs. `failure_reason` appears only on failed workflow events and uses one of `validation`, `unsupported_format`, `config`, `analysis`, `diff`, `network`, `auth`, `gate`, `signal`, or `unknown`. `findings_present` and `result_count_bucket` are omitted by commands that run no analysis (and by older binaries). `report_truncated` appears only on report/comment output paths that can truncate output, and `truncation_reason` appears only when truncation happened. `mcp_tool` appears only when a run came through the MCP server. `parent_run` appears only when a run is explicitly correlated to a previous one. All are omitted otherwise.
 
 Field purposes:
 
@@ -107,6 +110,8 @@ Field purposes:
 | `outcome` / `exit_code_bucket` | Measure clean runs, findings, and failures without uploading raw error text. |
 | `failure_reason` | Group failed workflows by a fixed privacy-safe allowlist; unknown stays `unknown` instead of parsing raw error text. |
 | `findings_present` | Whether the analysis surfaced any findings, decoupled from the exit-code gate (so informational analyses like default-config `dupes`, which never exit non-zero, are still measurable). On the combined and audit workflows it is an OR across the sub-analyses; per-analysis find-rate is answerable on the standalone `dead_code`, `dupes`, `health`, and `security` workflows. |
+| `result_count_bucket` | Coarse result volume, one of `0`, `1-9`, `10-99`, `100+`, or `unknown`. Exact counts, paths, finding names, rule ids, and snippets are never uploaded. |
+| `report_truncated` / `truncation_reason` | Whether a report/comment output path was truncated and why. Reasons are `comment_limit`, `max_items`, `size_limit`, or `unknown`. |
 | `mcp_tool` | Attribute MCP usage to a specific tool, from a fixed allowlist of tool names. |
 | `parent_run` | Link explicit agent follow-up runs using a short allowlisted token, never a path or free-form string. |
 
@@ -153,6 +158,7 @@ Fallow telemetry must not include:
 - file paths, import specifiers, source snippets, or stack traces
 - package, dependency, workspace, or framework package names
 - raw command-line arguments
+- exact result counts or per-rule result counts
 - config contents or config values
 - environment variable names or values
 - raw errors, logs, or serialized exceptions

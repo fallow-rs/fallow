@@ -1090,10 +1090,8 @@ pub fn execute_audit(opts: &AuditOptions<'_>) -> Result<AuditResult, ExitCode> {
         dupes_result.as_ref(),
         health_result.as_ref(),
     );
-    crate::telemetry::note_findings_present(
-        summary.dead_code_issues > 0
-            || summary.complexity_findings > 0
-            || summary.duplication_clone_groups > 0,
+    crate::telemetry::note_final_result_count(
+        summary.dead_code_issues + summary.complexity_findings + summary.duplication_clone_groups,
     );
 
     Ok(AuditResult {
@@ -1139,7 +1137,7 @@ fn resolve_base_ref(opts: &AuditOptions<'_>) -> Result<String, ExitCode> {
 
 /// Build an empty pass result when no files have changed.
 fn empty_audit_result(base_ref: String, opts: &AuditOptions<'_>, elapsed: Duration) -> AuditResult {
-    crate::telemetry::note_findings_present(false);
+    crate::telemetry::note_final_result_count(0);
 
     AuditResult {
         verdict: AuditVerdict::Pass,

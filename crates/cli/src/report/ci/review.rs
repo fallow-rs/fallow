@@ -83,9 +83,10 @@ pub fn render_review_envelope_with_diff(
         .flatten();
     let include_guidance = review_guidance_enabled();
 
-    let merged_groups = group_by_path_line(issues, max);
+    let grouped = group_by_path_line(issues, max);
 
-    let comments: Vec<ReviewComment> = merged_groups
+    let comments: Vec<ReviewComment> = grouped
+        .groups
         .iter()
         .map(|group| {
             render_merged_comment(
@@ -97,6 +98,23 @@ pub fn render_review_envelope_with_diff(
             )
         })
         .collect();
+    let body_truncated = comments.iter().any(review_comment_truncated);
+    if body_truncated {
+        crate::telemetry::note_report_truncation(
+            true,
+            crate::telemetry::TruncationReason::SizeLimit,
+        );
+    } else if grouped.truncated {
+        crate::telemetry::note_report_truncation(
+            true,
+            crate::telemetry::TruncationReason::CommentLimit,
+        );
+    } else {
+        crate::telemetry::note_report_truncation(
+            false,
+            crate::telemetry::TruncationReason::Unknown,
+        );
+    }
 
     let summary_text = format!(
         "### Fallow {}\n\n{} inline finding{} selected for {} review.\n\n<!-- fallow-review -->",
@@ -221,11 +239,20 @@ fn env_truthy(value: &str) -> bool {
     )
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct GroupedReviewIssues<'a> {
+    groups: Vec<Vec<&'a CiIssue>>,
+    truncated: bool,
+}
+
 /// Group consecutive same-(path, line) issues. Input is already sorted by
 /// `(path, line, fingerprint)` so a single linear pass collects runs.
-fn group_by_path_line(issues: &[CiIssue], max_groups: usize) -> Vec<Vec<&CiIssue>> {
+fn group_by_path_line(issues: &[CiIssue], max_groups: usize) -> GroupedReviewIssues<'_> {
     if max_groups == 0 {
-        return Vec::new();
+        return GroupedReviewIssues {
+            groups: Vec::new(),
+            truncated: !issues.is_empty(),
+        };
     }
     let mut groups: Vec<Vec<&CiIssue>> = Vec::with_capacity(max_groups.min(issues.len()));
     let mut current: Vec<&CiIssue> = Vec::new();
@@ -236,7 +263,10 @@ fn group_by_path_line(issues: &[CiIssue], max_groups: usize) -> Vec<Vec<&CiIssue
             if !current.is_empty() {
                 groups.push(std::mem::take(&mut current));
                 if groups.len() == max_groups {
-                    return groups;
+                    return GroupedReviewIssues {
+                        groups,
+                        truncated: true,
+                    };
                 }
             }
             current_key = Some(key);
@@ -246,7 +276,17 @@ fn group_by_path_line(issues: &[CiIssue], max_groups: usize) -> Vec<Vec<&CiIssue
     if !current.is_empty() && groups.len() < max_groups {
         groups.push(current);
     }
-    groups
+    GroupedReviewIssues {
+        groups,
+        truncated: false,
+    }
+}
+
+fn review_comment_truncated(comment: &ReviewComment) -> bool {
+    match comment {
+        ReviewComment::GitHub(comment) => comment.truncated,
+        ReviewComment::GitLab(comment) => comment.truncated,
+    }
 }
 
 /// Render one comment from a group of 1+ issues that share the same
@@ -649,20 +689,24 @@ mod tests {
         let c = issue("fallow/unused-type", "minor", "src/z.ts", 7, "fp_c");
         let issues = vec![a, b, c];
 
-        assert!(group_by_path_line(&issues, 0).is_empty());
+        let max_zero = group_by_path_line(&issues, 0);
+        assert!(max_zero.groups.is_empty());
+        assert!(max_zero.truncated);
 
         let max_one = group_by_path_line(&issues, 1);
-        assert_eq!(max_one.len(), 1);
-        assert_eq!(max_one[0].len(), 2);
-        assert_eq!(max_one[0][0].path, "src/foo.ts");
-        assert_eq!(max_one[0][0].line, 42);
+        assert_eq!(max_one.groups.len(), 1);
+        assert!(max_one.truncated);
+        assert_eq!(max_one.groups[0].len(), 2);
+        assert_eq!(max_one.groups[0][0].path, "src/foo.ts");
+        assert_eq!(max_one.groups[0][0].line, 42);
 
         let max_two = group_by_path_line(&issues, 2);
-        assert_eq!(max_two.len(), 2);
-        assert_eq!(max_two[0].len(), 2);
-        assert_eq!(max_two[1].len(), 1);
+        assert_eq!(max_two.groups.len(), 2);
+        assert!(!max_two.truncated);
+        assert_eq!(max_two.groups[0].len(), 2);
+        assert_eq!(max_two.groups[1].len(), 1);
         assert_eq!(
-            max_two[0]
+            max_two.groups[0]
                 .iter()
                 .map(|issue| issue.fingerprint.as_str())
                 .collect::<Vec<_>>(),

@@ -452,9 +452,9 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
 
     let config_fixable = crate::fix::is_config_fixable(opts.root, opts.config_path.as_ref());
 
-    // Report findings presence to telemetry from the real result, independent of
-    // the exit-code gate. See `telemetry::note_findings_present`.
-    crate::telemetry::note_findings_present(results.total_issues() > 0);
+    // Report result volume to telemetry from the real result, independent of
+    // the exit-code gate. Exact counts are bucketed before serialization.
+    crate::telemetry::note_result_count(results.total_issues());
 
     Ok(CheckResult {
         results,

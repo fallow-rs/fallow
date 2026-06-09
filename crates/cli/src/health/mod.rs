@@ -667,12 +667,15 @@ fn execute_health_inner(
         None
     };
 
-    // Report findings presence to telemetry from the real result (complexity
-    // findings or coverage gaps), independent of the exit-code gate. See
-    // `telemetry::note_findings_present`.
-    crate::telemetry::note_findings_present(
-        !report.findings.is_empty() || coverage_gaps_has_findings,
-    );
+    // Report result volume to telemetry from the real result, independent of
+    // the exit-code gate. Coverage gaps are a section-level signal today, so
+    // they mark an unknown non-empty bucket until that report carries a stable
+    // finding count.
+    if coverage_gaps_has_findings && report.findings.is_empty() {
+        crate::telemetry::note_findings_present(true);
+    } else {
+        crate::telemetry::note_result_count(report.findings.len());
+    }
 
     Ok(HealthResult {
         report,
