@@ -16,11 +16,11 @@ pub use fallow_types::results::{
     ReferenceLocation, SecurityAttackSurfaceEntry, SecurityCandidate, SecurityCandidateBoundary,
     SecurityCandidateSink, SecurityDeadCodeContext, SecurityDeadCodeKind,
     SecurityDefensiveBoundary, SecurityDefensiveControl, SecurityFinding, SecurityFindingKind,
-    SecurityNetworkContext, SecurityReachability, SecurityTaintFlow, SecurityZoneCrossing,
-    StaleSuppression, SuppressionOrigin, TaintEndpoint, TaintPath, TestOnlyDependency, TraceHop,
-    TraceHopRole, TypeOnlyDependency, UnlistedDependency, UnresolvedCatalogReference,
-    UnresolvedImport, UnusedCatalogEntry, UnusedDependency, UnusedDependencyOverride, UnusedExport,
-    UnusedFile, UnusedMember,
+    SecurityNetworkContext, SecurityReachability, SecuritySeverity, SecurityTaintFlow,
+    SecurityZoneCrossing, StaleSuppression, SuppressionOrigin, TaintConfidence, TaintEndpoint,
+    TaintPath, TestOnlyDependency, TraceHop, TraceHopRole, TypeOnlyDependency, UnlistedDependency,
+    UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry, UnusedDependency,
+    UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedMember,
 };
 
 #[cfg(test)]

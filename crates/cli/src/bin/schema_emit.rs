@@ -99,10 +99,10 @@ use fallow_types::results::{
     SecurityCandidateSink, SecurityDeadCodeContext, SecurityDeadCodeKind,
     SecurityDefensiveBoundary, SecurityDefensiveControl, SecurityFinding, SecurityFindingKind,
     SecurityNetworkContext, SecurityReachability, SecurityRuntimeContext, SecurityRuntimeState,
-    SecurityTaintFlow, SecurityZoneCrossing, StaleSuppression, SuppressionOrigin, TaintEndpoint,
-    TaintPath, TestOnlyDependency, TraceHop, TraceHopRole, TypeOnlyDependency, UnlistedDependency,
-    UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry, UnusedDependency,
-    UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedMember,
+    SecuritySeverity, SecurityTaintFlow, SecurityZoneCrossing, StaleSuppression, SuppressionOrigin,
+    TaintEndpoint, TaintPath, TestOnlyDependency, TraceHop, TraceHopRole, TypeOnlyDependency,
+    UnlistedDependency, UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry,
+    UnusedDependency, UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedMember,
 };
 
 /// Workspace-relative path to the committed schema.
@@ -322,6 +322,7 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
         "SecurityGateVerdict",
         "SecurityFinding",
         "SecurityFindingKind",
+        "SecuritySeverity",
         "SecurityDeadCodeContext",
         "SecurityDeadCodeKind",
         "SecurityReachability",
@@ -523,6 +524,7 @@ fn derived_definitions() -> Map<String, Value> {
     let _ = generator.subschema_for::<ImpactReport>();
 
     let _ = generator.subschema_for::<SecurityFindingKind>();
+    let _ = generator.subschema_for::<SecuritySeverity>();
     let _ = generator.subschema_for::<SecurityDeadCodeKind>();
     let _ = generator.subschema_for::<SecurityDeadCodeContext>();
     let _ = generator.subschema_for::<TraceHopRole>();
@@ -740,7 +742,7 @@ fn rewrite_fallow_output_definition(definitions: &mut Map<String, Value>) -> Res
         (
             "security",
             "SecurityOutput",
-            "`fallow security --format json`. Required `security_findings` plus\n`unresolved_edge_files`; findings are unverified security candidates.",
+            "`fallow security --format json`. Required `security_findings`,\n`unresolved_edge_files`, and `unresolved_callee_sites`; findings are\nunverified security candidates.",
         ),
         (
             "dead-code",

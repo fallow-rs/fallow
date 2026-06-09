@@ -2,9 +2,9 @@
 //!
 //! Surfaces `AnalysisResults.security_findings` as opt-in editor squiggles. The
 //! findings are CANDIDATES for downstream verification, never proven
-//! vulnerabilities, so the diagnostic severity is fixed at `INFORMATION` (the
-//! LSP translation of the CLI's deliberate `[I]` advisory glyph in
-//! `crates/cli/src/security.rs`), not mapped from the configured rule severity.
+//! vulnerabilities, so the LSP diagnostic severity is fixed at `INFORMATION`.
+//! The candidate review-priority tier is carried in `Diagnostic.data.security`,
+//! not mapped onto LSP severity.
 //!
 //! Opt-in is automatic: both `security-sink` and `security-client-server-leak`
 //! rules default to `off`, the LSP reuses the project config, so
@@ -79,8 +79,10 @@ fn security_data(finding: &SecurityFinding) -> serde_json::Value {
             "kind": kind,
             "category": finding.category,
             "cwe": finding.cwe,
+            "severity": finding.severity,
             "sourceBacked": finding.source_backed,
             "reachableFromEntry": reach.map(|r| r.reachable_from_entry),
+            "taintConfidence": reach.and_then(|r| r.taint_confidence),
             "blastRadius": reach.map(|r| r.blast_radius),
             "crossesBoundary": reach.map(|r| r.crosses_boundary),
         }
@@ -139,7 +141,10 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    use fallow_core::results::{SecurityFinding, SecurityFindingKind, SecurityReachability};
+    use fallow_core::results::{
+        SecurityFinding, SecurityFindingKind, SecurityReachability, SecuritySeverity,
+        TaintConfidence,
+    };
 
     fn test_root() -> PathBuf {
         if cfg!(windows) {
@@ -163,12 +168,15 @@ mod tests {
             col: 4,
             evidence: "user input flows into dangerouslySetInnerHTML".to_string(),
             source_backed: true,
+            source_read: None,
+            severity: SecuritySeverity::High,
             trace: vec![],
             actions: vec![],
             dead_code: None,
             reachability: Some(SecurityReachability {
                 reachable_from_entry: true,
                 reachable_from_untrusted_source: false,
+                taint_confidence: Some(TaintConfidence::ArgLevel),
                 untrusted_source_hop_count: None,
                 untrusted_source_trace: vec![],
                 blast_radius: 3,
@@ -192,6 +200,8 @@ mod tests {
             col: 0,
             evidence: "client boundary reaches process.env.SECRET_KEY".to_string(),
             source_backed: false,
+            source_read: None,
+            severity: SecuritySeverity::Low,
             trace: vec![],
             actions: vec![],
             dead_code: None,
@@ -268,8 +278,10 @@ mod tests {
         assert_eq!(sec["kind"], serde_json::json!("tainted-sink"));
         assert_eq!(sec["category"], serde_json::json!("dangerous-html"));
         assert_eq!(sec["cwe"], serde_json::json!(79));
+        assert_eq!(sec["severity"], serde_json::json!("high"));
         assert_eq!(sec["sourceBacked"], serde_json::json!(true));
         assert_eq!(sec["reachableFromEntry"], serde_json::json!(true));
+        assert_eq!(sec["taintConfidence"], serde_json::json!("arg-level"));
         assert_eq!(sec["blastRadius"], serde_json::json!(3));
         assert_eq!(sec["crossesBoundary"], serde_json::json!(true));
     }
@@ -281,6 +293,7 @@ mod tests {
         let d = security_diagnostic(&finding);
         let sec = &d.data.expect("data present")["security"];
         assert_eq!(sec["reachableFromEntry"], serde_json::Value::Null);
+        assert_eq!(sec["taintConfidence"], serde_json::Value::Null);
         assert_eq!(sec["blastRadius"], serde_json::Value::Null);
         assert_eq!(sec["sourceBacked"], serde_json::json!(false));
     }

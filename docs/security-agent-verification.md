@@ -5,7 +5,7 @@
 The workflow uses three fallow surfaces:
 
 - `fallow security --format json --surface` for the candidate list and attack-surface inventory.
-- The candidate contract from issue #900: fallow fills `source_kind`, `sink`, and `boundary`; the verifier owns `impact`.
+- The candidate contract: fallow fills `source_kind`, `sink`, `boundary`, `severity`, and reachability context; the verifier owns `impact`.
 - The MCP `security_candidates` tool for agent edit loops that need the same JSON shape without shelling out directly.
 
 ## CLI Flow
@@ -29,11 +29,13 @@ For each `security_findings[]` item, build a verifier packet from these fields:
 
 - `finding_id`, the stable correlation id
 - `kind`, `category`, `cwe`, `path`, `line`, `col`, and `evidence`
+- `severity`, the review-priority tier, not a verified vulnerability verdict
 - `candidate.source_kind`, the deterministic untrusted-input kind or `null`
 - `candidate.sink`, the sink location and catalogue metadata
 - `candidate.boundary`, the crossed boundary fallow can derive
 - `trace`, the structural import-hop trace
 - `taint_flow`, if present
+- `reachability.taint_confidence`, if present, to distinguish `arg-level` from `module-level` source association
 - `reachability.untrusted_source_trace`, if present
 - the matching `attack_surface[]` entry, if one has the same sink path and location
 - caller-provided source windows for the sink, trace hops, and source endpoint
@@ -64,6 +66,7 @@ Normalize each candidate into one packet before prompting a verifier:
 {
   "schema_version": "fallow-security-verifier-input/v1",
   "finding_id": "security:...",
+  "severity": "high",
   "candidate": {
     "source_kind": "http-request-input",
     "sink": {},
@@ -71,6 +74,7 @@ Normalize each candidate into one packet before prompting a verifier:
   },
   "trace": [],
   "taint_flow": null,
+  "taint_confidence": "arg-level",
   "reachability_trace": [],
   "attack_surface": null,
   "source_windows": [
@@ -177,9 +181,9 @@ Do not rewrite fallow's original JSON with verdict fields. Store verifier output
 
 ## Quality Caveats
 
-Candidate quality depends on the source and trace fidelity in the current fallow version. Two known follow-ups affect verifier confidence:
+Candidate quality depends on the source and trace fidelity in the current fallow version:
 
-- Issue #1092 tracks false source matches where broad HTTP-input patterns such as `*.query` can collide with ORM query builders.
-- Issue #1093 tracks the structured distinction between argument-level taint and module-level reachability, plus source-expression trace anchoring.
+- HTTP-input source patterns are receiver-gated to avoid broad `*.query` collisions with unrelated APIs, but framework-specific request aliases can still need verifier judgment.
+- `reachability.taint_confidence` distinguishes `arg-level` from `module-level` source association, and arg-level traces anchor the source read when available. Module-level traces remain ranking evidence, not proof of value flow.
 
-These caveats do not change the recipe. They mean the verifier should treat `reachable_from_untrusted_source` and module-level traces as ranking evidence until source and trace precision improve.
+These caveats do not change the recipe. They mean the verifier should use `severity` and `taint_confidence` for triage order, then verify source control, value flow, sink behavior, and defensive controls from source windows before reporting a survivor.

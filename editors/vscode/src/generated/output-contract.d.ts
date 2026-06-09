@@ -606,7 +606,7 @@ export type ImpactTrendDirection = ("improving" | "declining" | "stable")
  * The `fallow security --format json` schema version. Independently versioned
  * from the main contract, mirroring `ImpactReportSchemaVersion`.
  */
-export type SecuritySchemaVersion = "1"
+export type SecuritySchemaVersion = ("1" | "2")
 /**
  * Gate mode for `fallow security --gate <mode>` (issue #886). Tier 2 reserves
  * the value `newly-reachable`.
@@ -624,13 +624,27 @@ export type SecurityGateVerdict = ("pass" | "fail")
  */
 export type SecurityFindingKind = ("client-server-leak" | "tainted-sink")
 /**
+ * Verification-priority tier for a security candidate. This is ranking, not an
+ * exploitability verdict.
+ */
+export type SecuritySeverity = ("high" | "medium" | "low")
+/**
  * The role a hop plays in a security finding's structural import trace.
  */
-export type TraceHopRole = ("client-boundary" | "untrusted-source" | "intermediate" | "secret-source" | "sink")
+export type TraceHopRole = ("client-boundary" | "untrusted-source" | "module-source" | "intermediate" | "secret-source" | "sink")
 /**
  * Dead-code issue kind linked to a security candidate.
  */
 export type SecurityDeadCodeKind = ("unused-file" | "unused-export")
+/**
+ * How strongly the untrusted-source signal is associated with the sink, a
+ * structured discriminator so a consumer can tier candidates without parsing
+ * the human `evidence` prose. Present only when
+ * [`SecurityReachability::reachable_from_untrusted_source`] is true. Neither
+ * value proves exploitability; both are ranking signals (issue #885 doctrine:
+ * rank, never gate).
+ */
+export type TaintConfidence = ("arg-level" | "module-level")
 /**
  * Runtime coverage state for the function enclosing a security sink.
  * This is production-observation evidence, not an exploitability verdict.
@@ -4966,6 +4980,7 @@ evidence: string
  * `ClientServerLeak`. Skipped from JSON when `false` for output stability.
  */
 source_backed?: boolean
+severity: SecuritySeverity
 /**
  * Structural import-hop trace from the client boundary to the secret source.
  * The hop count is the uncalibrated signal; fallow does not prove the path
@@ -5078,6 +5093,15 @@ reachable_from_entry: boolean
  */
 reachable_from_untrusted_source?: boolean
 /**
+ * Structured tier of the untrusted-source association: `arg-level` when the
+ * sink argument traces to a same-module source read (strong), `module-level`
+ * when only the module is import-reachable from a source (weak). Present
+ * exactly when `reachable_from_untrusted_source` is true, so a consumer can
+ * separate strong from weak candidates from this field alone without parsing
+ * the `evidence` string. Not an exploitability proof.
+ */
+taint_confidence?: (TaintConfidence | null)
+/**
  * Number of value-import hops from the untrusted-source module to the sink
  * module when `reachable_from_untrusted_source` is true.
  */
@@ -5105,10 +5129,11 @@ crosses_boundary: boolean
 /**
  * An agent-actionable candidate record on a [`SecurityFinding`]. fallow fills
  * `source_kind`, `sink`, and `boundary`. The exploitability IMPACT is
- * deliberately NOT a field: deciding severity / exploitability is the consuming
- * agent's job, not fallow's, and a perpetually-null `impact` key would only
- * train consumers to ignore it. The agent reads this record, then writes its
- * own impact verdict downstream.
+ * deliberately NOT a field: `severity` on the parent finding is only a
+ * review-priority tier, while deciding exploitability remains the consuming
+ * agent's job. A perpetually-null `impact` key would only train consumers to
+ * ignore it. The agent reads this record, then writes its own impact verdict
+ * downstream.
  */
 export interface SecurityCandidate {
 /**
