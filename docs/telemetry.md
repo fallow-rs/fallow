@@ -66,11 +66,11 @@ Accepted values are `codex`, `claude_code`, `cursor`, `copilot`, `opencode`, `ai
 
 ## What Is Collected
 
-V1 events are workflow-level and coarse:
+V2 events are workflow-level and coarse:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "event": "workflow_completed",
   "fallow_version": "2.85.0",
   "workflow": "audit",
@@ -91,11 +91,13 @@ V1 events are workflow-level and coarse:
   "report_truncated": true,
   "truncation_reason": "comment_limit",
   "mcp_tool": "find_dupes",
-  "parent_run": "tmp_8x7p4k"
+  "has_parent_run": true,
+  "run_role": "followup",
+  "followup_kind": "audit"
 }
 ```
 
-`agent_source`, `failure_reason`, `findings_present`, `result_count_bucket`, `report_truncated`, `truncation_reason`, `mcp_tool`, and `parent_run` are optional. `agent_source` appears only on agent-driven runs. `failure_reason` appears only on failed workflow events and uses one of `validation`, `unsupported_format`, `config`, `analysis`, `diff`, `network`, `auth`, `gate`, `signal`, or `unknown`. `findings_present` and `result_count_bucket` are omitted by commands that run no analysis (and by older binaries). `report_truncated` appears only on report/comment output paths that can truncate output, and `truncation_reason` appears only when truncation happened. `mcp_tool` appears only when a run came through the MCP server. `parent_run` appears only when a run is explicitly correlated to a previous one. All are omitted otherwise.
+`agent_source`, `failure_reason`, `findings_present`, `result_count_bucket`, `report_truncated`, `truncation_reason`, and `mcp_tool` are optional. `agent_source` appears only on agent-driven runs. `failure_reason` appears only on failed workflow events and uses one of `validation`, `unsupported_format`, `config`, `analysis`, `diff`, `network`, `auth`, `gate`, `signal`, or `unknown`. `findings_present` and `result_count_bucket` are omitted by commands that run no analysis (and by older binaries). `report_truncated` appears only on report/comment output paths that can truncate output, and `truncation_reason` appears only when truncation happened. `mcp_tool` appears only when a run came through the MCP server. `has_parent_run`, `run_role`, and `followup_kind` are always safe, allowlisted values and never include the raw parent-run token.
 
 Field purposes:
 
@@ -113,7 +115,9 @@ Field purposes:
 | `result_count_bucket` | Coarse result volume, one of `0`, `1-9`, `10-99`, `100+`, or `unknown`. Exact counts, paths, finding names, rule ids, and snippets are never uploaded. |
 | `report_truncated` / `truncation_reason` | Whether a report/comment output path was truncated and why. Reasons are `comment_limit`, `max_items`, `size_limit`, or `unknown`. |
 | `mcp_tool` | Attribute MCP usage to a specific tool, from a fixed allowlist of tool names. |
-| `parent_run` | Link explicit agent follow-up runs using a short allowlisted token, never a path or free-form string. |
+| `has_parent_run` | Segment explicit follow-up runs without exposing the parent-run token. |
+| `run_role` | Separate root runs, follow-up runs, and unknown parent-run state using the allowlist `root`, `followup`, `unknown`. |
+| `followup_kind` | Classify follow-up runs with the allowlist `audit`, `security`, `health`, `check`, `dupes`, `fix`, `explain`, `unknown`. |
 
 ## Integration surfaces
 
@@ -159,6 +163,7 @@ Fallow telemetry must not include:
 - package, dependency, workspace, or framework package names
 - raw command-line arguments
 - exact result counts or per-rule result counts
+- raw parent-run tokens, run IDs, or correlation IDs as event properties
 - config contents or config values
 - environment variable names or values
 - raw errors, logs, or serialized exceptions
@@ -168,7 +173,7 @@ Hashing these values is not used as a workaround.
 
 ## Agent Follow-up
 
-The `--parent-run` flag and the `parent_run` field ship today (the flag is hidden from `--help` until the rest of this mechanism lands). `--parent-run` accepts only short ASCII tokens with letters, numbers, `_`, and `-`; paths and free-form values are dropped before upload. The piece that is still future is the server-issued `_meta.telemetry.analysis_run_id` that an agent would pass back via `--parent-run` so Fallow can measure whether a follow-up run improved aggregate findings.
+The `--parent-run` flag is hidden from `--help` until the rest of this mechanism lands. `--parent-run` accepts only short ASCII tokens with letters, numbers, `_`, and `-`; paths and free-form values are dropped before upload. Inspect mode and JSON event properties never include the raw token. Instead, events expose `has_parent_run`, `run_role`, and `followup_kind` so aggregate dashboards can distinguish root runs from follow-up work. When telemetry is uploaded, a sanitized parent-run token may be sent as a private transport correlation header for server-side `distinct_id` grouping, not as an event property. The piece that is still future is the server-issued `_meta.telemetry.analysis_run_id` that an agent would pass back via `--parent-run` so Fallow can measure whether a follow-up run improved aggregate findings.
 
 Agents must not enable telemetry automatically. `fallow telemetry enable` requires explicit user action in a human-controlled shell or explicit CI environment configuration.
 

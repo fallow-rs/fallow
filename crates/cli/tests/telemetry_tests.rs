@@ -127,6 +127,43 @@ fn telemetry_inspect_preserves_command_stdout_json() {
     assert_eq!(event["invocation_context"].as_str(), Some("agent"));
     assert_eq!(event["agent_source"].as_str(), Some("claude_code"));
     assert_eq!(event.get("parent_run"), None);
+    assert_eq!(event["has_parent_run"].as_bool(), Some(false));
+    assert_eq!(event["run_role"].as_str(), Some("unknown"));
+    assert_eq!(event["followup_kind"].as_str(), Some("unknown"));
+}
+
+#[test]
+fn telemetry_inspect_reports_safe_followup_fields() {
+    let mut cmd = Command::new(fallow_bin());
+    let home = tempfile::tempdir().expect("temp home");
+    cmd.env("FALLOW_TELEMETRY", "inspect")
+        .env("FALLOW_AGENT_SOURCE", "codex")
+        .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", home.path().join(".config"))
+        .env("APPDATA", home.path().join("AppData"))
+        .env("RUST_LOG", "")
+        .env("NO_COLOR", "1")
+        .arg("--parent-run")
+        .arg("tmp_8x7p4k")
+        .args(["--format", "json", "--quiet", "explain", "unused-exports"]);
+    let raw = cmd.output().expect("failed to run fallow binary");
+    let output = common::CommandOutput {
+        stdout: String::from_utf8_lossy(&raw.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&raw.stderr).to_string(),
+        code: raw.status.code().unwrap_or(-1),
+    };
+
+    assert_eq!(output.code, 0, "explain should exit 0: {}", output.stderr);
+    let event_start = output
+        .stderr
+        .find('{')
+        .expect("inspect stderr should contain telemetry JSON");
+    let event: serde_json::Value = serde_json::from_str(&output.stderr[event_start..])
+        .expect("inspect stderr should contain valid telemetry JSON");
+    assert_eq!(event.get("parent_run"), None);
+    assert_eq!(event["has_parent_run"].as_bool(), Some(true));
+    assert_eq!(event["run_role"].as_str(), Some("followup"));
+    assert_eq!(event["followup_kind"].as_str(), Some("explain"));
 }
 
 #[test]

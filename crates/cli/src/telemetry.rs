@@ -17,10 +17,11 @@ use serde::{Deserialize, Serialize};
 use crate::api::{api_url, try_api_agent_with_timeout};
 
 const CONFIG_SCHEMA_VERSION: u8 = 1;
-const TELEMETRY_SCHEMA_VERSION: u8 = 1;
+const TELEMETRY_SCHEMA_VERSION: u8 = 2;
 const CONNECT_TIMEOUT_SECS: u64 = 1;
 const TOTAL_TIMEOUT_SECS: u64 = 1;
 const TELEMETRY_PATH: &str = "/v1/telemetry/events";
+const PARENT_RUN_HEADER: &str = "X-Fallow-Parent-Run";
 
 /// Maximum number of events retained in the spool. The spool grows one line per
 /// telemetry-enabled run and is drained on the next run. Two paths keep it to the
@@ -460,6 +461,27 @@ pub enum AgentSource {
     Unknown,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum RunRole {
+    Root,
+    Followup,
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum FollowupKind {
+    Audit,
+    Security,
+    Health,
+    Check,
+    Dupes,
+    Fix,
+    Explain,
+    Unknown,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum EffectiveMode {
     Off,
@@ -547,8 +569,17 @@ struct TelemetryEvent {
     /// server. Allowlisted to the fixed set of tool names; absent otherwise.
     #[serde(skip_serializing_if = "Option::is_none")]
     mcp_tool: Option<&'static str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    parent_run: Option<String>,
+    has_parent_run: bool,
+    run_role: RunRole,
+    followup_kind: FollowupKind,
+}
+
+#[derive(Clone, Debug)]
+struct ParentRunContext {
+    token: Option<String>,
+    has_parent_run: bool,
+    run_role: RunRole,
+    followup_kind: FollowupKind,
 }
 
 pub struct WorkflowRecord<'a> {
@@ -571,10 +602,12 @@ pub fn run(command: TelemetryCommand, output: OutputFormat) -> ExitCode {
 }
 
 pub fn record_workflow(record: &WorkflowRecord<'_>) {
+    let parent_run = parent_run_context(record.parent_run, record.workflow);
+    let event = build_workflow_event(record, &parent_run);
     match effective_config().mode {
         EffectiveMode::Off | EffectiveMode::DisabledByAdmin => {}
-        EffectiveMode::Inspect => print_event_to_stderr(&build_workflow_event(record)),
-        EffectiveMode::On => spool_event(&build_workflow_event(record)),
+        EffectiveMode::Inspect => print_event_to_stderr(&event),
+        EffectiveMode::On => spool_event(&event, parent_run.token.as_deref()),
     }
 }
 
@@ -676,7 +709,7 @@ fn set_enabled(enabled: bool, output: OutputFormat) -> ExitCode {
     if enabled {
         match effective_config().mode {
             EffectiveMode::Inspect => print_event_to_stderr(&event),
-            EffectiveMode::On => spool_event(&event),
+            EffectiveMode::On => spool_event(&event, None),
             EffectiveMode::Off | EffectiveMode::DisabledByAdmin => {}
         }
     }
@@ -752,7 +785,10 @@ fn inspect(example: bool, output: OutputFormat) -> ExitCode {
     }
 }
 
-fn build_workflow_event(record: &WorkflowRecord<'_>) -> TelemetryEvent {
+fn build_workflow_event(
+    record: &WorkflowRecord<'_>,
+    parent_run: &ParentRunContext,
+) -> TelemetryEvent {
     let invocation_context = classify_invocation_context();
     let agent_source = if invocation_context == InvocationContext::Agent {
         Some(classify_agent_source())
@@ -786,7 +822,9 @@ fn build_workflow_event(record: &WorkflowRecord<'_>) -> TelemetryEvent {
         report_truncated: report_truncated(),
         truncation_reason: truncation_reason(),
         mcp_tool: mcp_tool(),
-        parent_run: record.parent_run.and_then(sanitize_parent_run),
+        has_parent_run: parent_run.has_parent_run,
+        run_role: parent_run.run_role,
+        followup_kind: parent_run.followup_kind,
     }
 }
 
@@ -834,7 +872,9 @@ fn status_changed_event(enabled: bool) -> TelemetryEvent {
         report_truncated: None,
         truncation_reason: None,
         mcp_tool: None,
-        parent_run: None,
+        has_parent_run: false,
+        run_role: RunRole::Root,
+        followup_kind: FollowupKind::Unknown,
     }
 }
 
@@ -862,7 +902,9 @@ fn example_event() -> TelemetryEvent {
         report_truncated: Some(true),
         truncation_reason: Some(TruncationReason::CommentLimit),
         mcp_tool: Some("find_dupes"),
-        parent_run: Some("tmp_8x7p4k".to_owned()),
+        has_parent_run: true,
+        run_role: RunRole::Followup,
+        followup_kind: FollowupKind::Audit,
     }
 }
 
@@ -883,10 +925,6 @@ fn field_purposes() -> Vec<(&'static str, &'static str)> {
         (
             "agent_source",
             "Identifies which agent integrations need compatibility work using a fixed allowlist.",
-        ),
-        (
-            "parent_run",
-            "Links explicit agent follow-up runs using a short allowlisted token, never a path or free-form string.",
         ),
         (
             "duration_bucket_ms",
@@ -919,6 +957,18 @@ fn field_purposes() -> Vec<(&'static str, &'static str)> {
         (
             "mcp_tool",
             "Which MCP tool an agent called, from a fixed allowlist, so MCP usage is attributable per tool.",
+        ),
+        (
+            "has_parent_run",
+            "Shows whether a run has a sanitized parent-run correlation token without exposing the token.",
+        ),
+        (
+            "run_role",
+            "Separates root runs from follow-up runs using an allowlisted enum.",
+        ),
+        (
+            "followup_kind",
+            "Classifies follow-up runs by workflow using an allowlisted enum.",
         ),
     ]
 }
@@ -1066,11 +1116,22 @@ fn append_spool_line(path: &Path, line: &str) -> std::io::Result<()> {
 /// adds no perceptible latency. Delivery stays best-effort and lossy by design
 /// (errors are discarded and the spool is bounded), but a fast run now defers
 /// its event rather than dropping it.
-fn spool_event(event: &TelemetryEvent) {
+fn spool_event(event: &TelemetryEvent, parent_run: Option<&str>) {
     let Some(path) = spool_file(SPOOL_FILE_NAME) else {
         return;
     };
-    let Ok(line) = serde_json::to_string(event) else {
+    let value = if let Some(parent_run) = parent_run {
+        serde_json::json!({
+            "payload": event,
+            "parent_run_header": parent_run,
+        })
+    } else {
+        let Ok(value) = serde_json::to_value(event) else {
+            return;
+        };
+        value
+    };
+    let Ok(line) = serde_json::to_string(&value) else {
         return;
     };
     if append_spool_line(&path, &line).is_ok() {
@@ -1177,7 +1238,7 @@ pub fn flush_spool_in_background() {
 /// rather than by this function completing.
 fn drain_spool_file<P>(spool: &Path, mut post: P)
 where
-    P: FnMut(&serde_json::Value) -> Result<(), String>,
+    P: FnMut(&serde_json::Value, Option<&str>) -> Result<(), String>,
 {
     let lock_path = spool.with_file_name(SPOOL_LOCK_NAME);
     let Some(_lock) = SpoolLock::try_acquire(&lock_path) else {
@@ -1198,11 +1259,11 @@ where
 
     let mut removed = 0usize;
     for line in &lines {
-        match serde_json::from_str::<serde_json::Value>(line) {
+        match parse_spool_line(line) {
             // A corrupt (non-JSON) line cannot be delivered, so it is dropped.
             Err(_) => removed += 1,
-            Ok(value) => {
-                if post(&value).is_ok() {
+            Ok((payload, parent_run)) => {
+                if post(&payload, parent_run.as_deref()).is_ok() {
                     removed += 1;
                 } else {
                     // The endpoint is likely unreachable; stop and keep the rest.
@@ -1220,15 +1281,33 @@ where
     rewrite_spool(spool, &remaining[keep_from..]);
 }
 
+fn parse_spool_line(line: &str) -> serde_json::Result<(serde_json::Value, Option<String>)> {
+    let value = serde_json::from_str::<serde_json::Value>(line)?;
+    let Some(payload) = value.get("payload") else {
+        return Ok((value, None));
+    };
+    let parent_run = value
+        .get("parent_run_header")
+        .and_then(serde_json::Value::as_str)
+        .and_then(sanitize_parent_run);
+    Ok((payload.clone(), parent_run))
+}
+
 /// POST one already-serialized telemetry payload to the events endpoint.
-fn post_telemetry_payload(payload: &serde_json::Value) -> Result<(), String> {
+fn post_telemetry_payload(
+    payload: &serde_json::Value,
+    parent_run: Option<&str>,
+) -> Result<(), String> {
     let agent = try_api_agent_with_timeout(CONNECT_TIMEOUT_SECS, TOTAL_TIMEOUT_SECS)
         .map_err(|err| err.to_string())?;
     let url = api_url(TELEMETRY_PATH);
-    let response = agent
-        .post(&url)
-        .send_json(payload)
-        .map_err(|err| err.to_string())?;
+    let request = agent.post(&url);
+    let request = if let Some(parent_run) = parent_run {
+        request.header(PARENT_RUN_HEADER, parent_run)
+    } else {
+        request
+    };
+    let response = request.send_json(payload).map_err(|err| err.to_string())?;
     if response.status().is_success() {
         Ok(())
     } else {
@@ -1478,6 +1557,58 @@ fn outcome(code: ExitCode) -> &'static str {
     }
 }
 
+fn parent_run_context(parent_run: Option<&str>, workflow: Workflow) -> ParentRunContext {
+    match parent_run {
+        Some(value) => {
+            if let Some(token) = sanitize_parent_run(value) {
+                ParentRunContext {
+                    token: Some(token),
+                    has_parent_run: true,
+                    run_role: RunRole::Followup,
+                    followup_kind: followup_kind(workflow),
+                }
+            } else {
+                ParentRunContext {
+                    token: None,
+                    has_parent_run: false,
+                    run_role: RunRole::Unknown,
+                    followup_kind: FollowupKind::Unknown,
+                }
+            }
+        }
+        None => ParentRunContext {
+            token: None,
+            has_parent_run: false,
+            run_role: RunRole::Root,
+            followup_kind: FollowupKind::Unknown,
+        },
+    }
+}
+
+fn followup_kind(workflow: Workflow) -> FollowupKind {
+    match workflow {
+        Workflow::Audit => FollowupKind::Audit,
+        Workflow::Security => FollowupKind::Security,
+        Workflow::Health => FollowupKind::Health,
+        Workflow::DeadCode => FollowupKind::Check,
+        Workflow::Dupes => FollowupKind::Dupes,
+        Workflow::Fix => FollowupKind::Fix,
+        Workflow::Explain => FollowupKind::Explain,
+        Workflow::DependencyCleanup
+        | Workflow::CodeQualityReview
+        | Workflow::GithubAction
+        | Workflow::GitlabCi
+        | Workflow::EditorDiagnostic
+        | Workflow::ProgrammaticAnalysis
+        | Workflow::RuntimeCoverageSetup
+        | Workflow::Impact
+        | Workflow::ProjectInventory
+        | Workflow::Setup
+        | Workflow::License
+        | Workflow::Unknown => FollowupKind::Unknown,
+    }
+}
+
 fn sanitize_parent_run(value: &str) -> Option<String> {
     let trimmed = value.trim();
     if !(6..=64).contains(&trimmed.len()) {
@@ -1615,13 +1746,17 @@ mod tests {
             failure_reason: None,
             parent_run: Some("tmp_123"),
         };
-        let event = build_workflow_event(&record);
+        let parent_run = parent_run_context(record.parent_run, record.workflow);
+        let event = build_workflow_event(&record, &parent_run);
         assert_eq!(event.event, "workflow_completed");
         assert_eq!(event.duration_bucket_ms, "500-2000");
         assert_eq!(event.outcome, "issues_found");
         assert_eq!(event.exit_code_bucket, "1");
         assert_eq!(event.failure_reason, None);
-        assert_eq!(event.parent_run.as_deref(), Some("tmp_123"));
+        assert_eq!(parent_run.token.as_deref(), Some("tmp_123"));
+        assert!(event.has_parent_run);
+        assert_eq!(event.run_role, RunRole::Followup);
+        assert_eq!(event.followup_kind, FollowupKind::Audit);
     }
 
     #[test]
@@ -1712,6 +1847,38 @@ mod tests {
         assert_eq!(sanitize_parent_run("../repo/main"), None);
         assert_eq!(sanitize_parent_run("customer project"), None);
         assert_eq!(sanitize_parent_run("x"), None);
+    }
+
+    #[test]
+    fn parent_run_context_never_serializes_raw_token() {
+        let record = WorkflowRecord {
+            workflow: Workflow::Explain,
+            output: OutputFormat::Json,
+            quiet: true,
+            elapsed: Duration::from_millis(10),
+            exit_code: ExitCode::SUCCESS,
+            failure_reason: None,
+            parent_run: Some("tmp_abc-123"),
+        };
+        let parent_run = parent_run_context(record.parent_run, record.workflow);
+        let event = build_workflow_event(&record, &parent_run);
+        let value = serde_json::to_value(&event).expect("event serializes");
+
+        assert_eq!(parent_run.token.as_deref(), Some("tmp_abc-123"));
+        assert_eq!(value.get("parent_run"), None);
+        assert_eq!(value["has_parent_run"].as_bool(), Some(true));
+        assert_eq!(value["run_role"].as_str(), Some("followup"));
+        assert_eq!(value["followup_kind"].as_str(), Some("explain"));
+    }
+
+    #[test]
+    fn invalid_parent_run_marks_unknown_without_token() {
+        let parent_run = parent_run_context(Some("../repo/main"), Workflow::Fix);
+
+        assert_eq!(parent_run.token, None);
+        assert!(!parent_run.has_parent_run);
+        assert_eq!(parent_run.run_role, RunRole::Unknown);
+        assert_eq!(parent_run.followup_kind, FollowupKind::Unknown);
     }
 
     #[test]
@@ -1953,7 +2120,7 @@ mod tests {
         append_spool_line(&spool, "{\"n\":2}").expect("append");
 
         let mut seen = Vec::new();
-        drain_spool_file(&spool, |value| {
+        drain_spool_file(&spool, |value, _parent_run| {
             seen.push(
                 value
                     .get("n")
@@ -1976,7 +2143,7 @@ mod tests {
         }
 
         let mut calls = 0;
-        drain_spool_file(&spool, |_value| {
+        drain_spool_file(&spool, |_value, _parent_run| {
             calls += 1;
             Err("offline".to_owned())
         });
@@ -2001,7 +2168,7 @@ mod tests {
         append_spool_line(&spool, "{\"n\":7}").expect("append");
 
         let mut seen = Vec::new();
-        drain_spool_file(&spool, |value| {
+        drain_spool_file(&spool, |value, _parent_run| {
             seen.push(value.clone());
             Ok(())
         });
@@ -2025,7 +2192,7 @@ mod tests {
 
         // Deliver the first event, then the endpoint goes down for the rest.
         let mut calls = 0;
-        drain_spool_file(&spool, |_value| {
+        drain_spool_file(&spool, |_value, _parent_run| {
             calls += 1;
             if calls == 1 {
                 Ok(())
@@ -2143,11 +2310,14 @@ mod tests {
             failure_reason: None,
             parent_run: None,
         };
-        let line = serde_json::to_string(&build_workflow_event(&record)).expect("serialize");
+        let parent_run = parent_run_context(record.parent_run, record.workflow);
+        let line =
+            serde_json::to_string(&build_workflow_event(&record, &parent_run)).expect("serialize");
         append_spool_line(&spool, &line).expect("append");
 
         let mut seen = Vec::new();
-        drain_spool_file(&spool, |value| {
+        drain_spool_file(&spool, |value, parent_run| {
+            assert_eq!(parent_run, None);
             seen.push(value.clone());
             Ok(())
         });
@@ -2157,6 +2327,43 @@ mod tests {
             seen[0].get("event").and_then(serde_json::Value::as_str),
             Some("workflow_completed"),
         );
+        assert!(!spool.exists());
+    }
+
+    #[test]
+    fn spooled_parent_run_uses_private_header_without_payload_field() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let spool = dir.path().join(SPOOL_FILE_NAME);
+        let record = WorkflowRecord {
+            workflow: Workflow::Explain,
+            output: OutputFormat::Json,
+            quiet: true,
+            elapsed: Duration::from_millis(10),
+            exit_code: ExitCode::SUCCESS,
+            failure_reason: None,
+            parent_run: Some("tmp_abc-123"),
+        };
+        let parent_run = parent_run_context(record.parent_run, record.workflow);
+        let event = build_workflow_event(&record, &parent_run);
+        let line = serde_json::to_string(&serde_json::json!({
+            "payload": event,
+            "parent_run_header": parent_run.token,
+        }))
+        .expect("serialize");
+        append_spool_line(&spool, &line).expect("append");
+
+        let mut seen = Vec::new();
+        drain_spool_file(&spool, |value, parent_run| {
+            seen.push((value.clone(), parent_run.map(str::to_owned)));
+            Ok(())
+        });
+
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].0.get("parent_run"), None);
+        assert_eq!(seen[0].0["has_parent_run"].as_bool(), Some(true));
+        assert_eq!(seen[0].0["run_role"].as_str(), Some("followup"));
+        assert_eq!(seen[0].0["followup_kind"].as_str(), Some("explain"));
+        assert_eq!(seen[0].1.as_deref(), Some("tmp_abc-123"));
         assert!(!spool.exists());
     }
 }
