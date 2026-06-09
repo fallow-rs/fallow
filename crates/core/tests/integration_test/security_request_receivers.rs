@@ -2,7 +2,7 @@
 //! (issue #1125).
 
 use fallow_config::Severity;
-use fallow_core::results::{AnalysisResults, SecurityFinding};
+use fallow_core::results::{AnalysisResults, SecurityFinding, TaintConfidence};
 
 use super::common::{create_config_with_rules, fixture_path};
 
@@ -50,6 +50,18 @@ fn configured_receiver_makes_binding_source_backed() {
         finding.candidate.source_kind.as_deref(),
         Some("http-request-input")
     );
+    let reachability = finding
+        .reachability
+        .as_ref()
+        .expect("source-backed finding should have reachability metadata");
+    assert!(
+        reachability.reachable_from_untrusted_source,
+        "configured receiver should seed untrusted-source reachability"
+    );
+    assert_eq!(
+        reachability.taint_confidence,
+        Some(TaintConfidence::ArgLevel)
+    );
 }
 
 #[test]
@@ -64,6 +76,18 @@ fn configured_receiver_applies_to_direct_sink_argument_paths() {
     assert_eq!(
         finding.candidate.source_kind.as_deref(),
         Some("http-request-input")
+    );
+    let reachability = finding
+        .reachability
+        .as_ref()
+        .expect("source-backed finding should have reachability metadata");
+    assert!(
+        reachability.reachable_from_untrusted_source,
+        "direct configured source should seed untrusted-source reachability"
+    );
+    assert_eq!(
+        reachability.taint_confidence,
+        Some(TaintConfidence::ArgLevel)
     );
 }
 

@@ -752,6 +752,12 @@ pub fn find_dead_code_full(
     }
 
     let declared_deps = collect_declared_dependency_names(config, pkg.as_ref(), workspaces);
+    let request_receivers = config
+        .security
+        .request_receivers
+        .iter()
+        .cloned()
+        .collect::<FxHashSet<_>>();
 
     if config.rules.security_client_server_leak != Severity::Off {
         let (security_findings, stats) =
@@ -766,12 +772,6 @@ pub fn find_dead_code_full(
             categories.and_then(|c| c.include.clone()),
             categories.and_then(|c| c.exclude.clone()),
         );
-        let request_receivers = config
-            .security
-            .request_receivers
-            .iter()
-            .cloned()
-            .collect::<FxHashSet<_>>();
         // Framework-scoped catalogue rows (#861) gate on the active framework via
         // the project's declared dependency set: the same dependency universe the
         // plugin system activates on (root package.json + every workspace
@@ -850,6 +850,7 @@ pub fn find_dead_code_full(
             modules,
             &line_offsets_by_file,
             &declared_deps,
+            &request_receivers,
             &boundary_crossings,
             &mut results.security_findings,
         );

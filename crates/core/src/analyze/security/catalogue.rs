@@ -548,6 +548,7 @@ impl Catalogue {
 
     /// The id + human title of the first untrusted-source matcher whose pattern
     /// and optional framework enabler match the given source path.
+    #[cfg(test)]
     #[must_use]
     pub fn matching_source_for_deps(
         &self,

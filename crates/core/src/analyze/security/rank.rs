@@ -188,6 +188,7 @@ pub fn rank_security_findings(
     modules: &[ModuleInfo],
     line_offsets_by_file: &LineOffsetsMap<'_>,
     declared_deps: &FxHashSet<String>,
+    request_receivers: &FxHashSet<String>,
     boundary_crossings: &FxHashMap<PathBuf, (String, String)>,
     findings: &mut [SecurityFinding],
 ) {
@@ -201,7 +202,8 @@ pub fn rank_security_findings(
         .iter()
         .map(|node| (node.path.as_path(), node.file_id))
         .collect();
-    let source_index = UntrustedSourceIndex::build(graph, modules, declared_deps);
+    let source_index =
+        UntrustedSourceIndex::build(graph, modules, declared_deps, request_receivers);
     let modules_by_id: FxHashMap<FileId, &ModuleInfo> = modules
         .iter()
         .map(|module| (module.file_id, module))
@@ -499,6 +501,7 @@ impl UntrustedSourceIndex {
         graph: &ModuleGraph,
         modules: &[ModuleInfo],
         declared_deps: &FxHashSet<String>,
+        request_receivers: &FxHashSet<String>,
     ) -> Self {
         let modules_by_id: FxHashMap<FileId, &ModuleInfo> = modules
             .iter()
@@ -512,7 +515,7 @@ impl UntrustedSourceIndex {
             let Some(module) = modules_by_id.get(&node.file_id) else {
                 continue;
             };
-            if !module_contains_untrusted_source(module, declared_deps) {
+            if !module_contains_untrusted_source(module, declared_deps, request_receivers) {
                 continue;
             }
             let idx = node.file_id.0 as usize;
@@ -648,21 +651,31 @@ fn is_source_reachability_candidate(finding: &SecurityFinding) -> bool {
 fn module_contains_untrusted_source(
     module: &ModuleInfo,
     declared_deps: &FxHashSet<String>,
+    request_receivers: &FxHashSet<String>,
 ) -> bool {
     let cat = catalogue();
     module.tainted_bindings.iter().any(|binding| {
-        cat.matching_source_for_deps(&binding.source_path, declared_deps)
-            .is_some()
+        cat.matching_source_for_deps_with_receivers(
+            &binding.source_path,
+            declared_deps,
+            request_receivers,
+        )
+        .is_some()
     }) || module.security_sinks.iter().any(|sink| {
-        sink.arg_source_paths
-            .iter()
-            .any(|path| cat.matching_source_for_deps(path, declared_deps).is_some())
+        sink.arg_source_paths.iter().any(|path| {
+            cat.matching_source_for_deps_with_receivers(path, declared_deps, request_receivers)
+                .is_some()
+        })
     }) || module.member_accesses.iter().any(|access| {
         let full_path = format!("{}.{}", access.object, access.member);
-        cat.matching_source_for_deps(&full_path, declared_deps)
+        cat.matching_source_for_deps_with_receivers(&full_path, declared_deps, request_receivers)
             .is_some()
             || cat
-                .matching_source_for_deps(&access.object, declared_deps)
+                .matching_source_for_deps_with_receivers(
+                    &access.object,
+                    declared_deps,
+                    request_receivers,
+                )
                 .is_some()
     })
 }
@@ -796,6 +809,7 @@ mod tests {
         let modules = Vec::new();
         let line_offsets = FxHashMap::default();
         let declared_deps = FxHashSet::default();
+        let request_receivers = FxHashSet::default();
         let boundary_crossings: FxHashMap<PathBuf, (String, String)> = boundary_anchor_paths
             .iter()
             .map(|path| (path.clone(), ("from".to_string(), "to".to_string())))
@@ -805,6 +819,7 @@ mod tests {
             &modules,
             &line_offsets,
             &declared_deps,
+            &request_receivers,
             &boundary_crossings,
             findings,
         );
@@ -817,12 +832,14 @@ mod tests {
     ) {
         let line_offsets = FxHashMap::default();
         let declared_deps = FxHashSet::default();
+        let request_receivers = FxHashSet::default();
         let boundary_crossings = FxHashMap::default();
         rank_security_findings(
             graph,
             modules,
             &line_offsets,
             &declared_deps,
+            &request_receivers,
             &boundary_crossings,
             findings,
         );
