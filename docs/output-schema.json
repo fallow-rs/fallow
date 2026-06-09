@@ -7280,7 +7280,7 @@
           ]
         },
         {
-          "description": "`fallow security --format json`. Required `security_findings` plus\n`unresolved_edge_files`; findings are unverified security candidates.",
+          "description": "`fallow security --format json`. Required `security_findings`,\n`unresolved_edge_files`, and `unresolved_callee_sites`; findings are\nunverified security candidates.",
           "allOf": [
             {
               "$ref": "#/definitions/SecurityOutput"
@@ -9903,6 +9903,11 @@
           "type": "string",
           "const": "1",
           "description": "First release of the `fallow security --format json` shape."
+        },
+        {
+          "type": "string",
+          "const": "2",
+          "description": "Adds per-finding `severity` for verification-priority tiering."
         }
       ],
       "description": "The `fallow security --format json` schema version. Independently versioned\nfrom the main contract, mirroring `ImpactReportSchemaVersion`."
@@ -9951,6 +9956,10 @@
         "source_backed": {
           "type": "boolean",
           "description": "Whether the sink argument was associated with a known untrusted source by\nthe intra-module source-to-sink back-trace (issue #859): a local binding\nreferenced in the argument was sourced from a catalogue source path\n(`req.query`, `process.argv`, message-event `data`, etc.). `true` ranks\nthe candidate higher and annotates the evidence; `false` does NOT\nsuppress the finding (the association is conservative, never a proof, and\nfallow prefers false-negatives over false-positives). Always `false` for\n`ClientServerLeak`. Skipped from JSON when `false` for output stability."
+        },
+        "severity": {
+          "description": "Verification-priority tier derived from existing reachability, boundary,\nsource-backed, and runtime signals. Candidate-only: this does not prove\nexploitability and does not change gates.",
+          "$ref": "#/definitions/SecuritySeverity"
         },
         "trace": {
           "type": "array",
@@ -10033,6 +10042,7 @@
         "line",
         "col",
         "evidence",
+        "severity",
         "trace",
         "actions",
         "candidate"
@@ -10092,7 +10102,12 @@
         {
           "type": "string",
           "const": "untrusted-source",
-          "description": "A module that reads an untrusted input source such as request data."
+          "description": "A module that reads an untrusted input source such as request data,\nwhere the candidate's sink argument actually traces back to that read in\nthe same statement (arg-level, the strong intra-module association)."
+        },
+        {
+          "type": "string",
+          "const": "module-source",
+          "description": "A module that merely CONTAINS an untrusted-input source somewhere and is\nimport-reachable to the sink module (module-level, issue #885). This is a\nreachability signal, NOT a proven value path: the specific source value\nis not shown to reach the sink argument. Labeled distinctly from\n`UntrustedSource` so a consumer never reads a module-level hop as a\nvalue-flow proof."
         },
         {
           "type": "string",
@@ -10122,6 +10137,17 @@
         "reachable_from_untrusted_source": {
           "type": "boolean",
           "description": "Whether the anchor module is reachable over value imports from a module\nthat reads a known untrusted input source. Module-level only: this does\nnot prove a specific source value reaches the sink argument."
+        },
+        "taint_confidence": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TaintConfidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Structured tier of the untrusted-source association: `arg-level` when the\nsink argument traces to a same-module source read (strong), `module-level`\nwhen only the module is import-reachable from a source (weak). Present\nexactly when `reachable_from_untrusted_source` is true, so a consumer can\nseparate strong from weak candidates from this field alone without parsing\nthe `evidence` string. Not an exploitability proof."
         },
         "untrusted_source_hop_count": {
           "type": [
@@ -10511,7 +10537,7 @@
         "sink",
         "boundary"
       ],
-      "description": "An agent-actionable candidate record on a [`SecurityFinding`]. fallow fills\n`source_kind`, `sink`, and `boundary`. The exploitability IMPACT is\ndeliberately NOT a field: deciding severity / exploitability is the consuming\nagent's job, not fallow's, and a perpetually-null `impact` key would only\ntrain consumers to ignore it. The agent reads this record, then writes its\nown impact verdict downstream."
+      "description": "An agent-actionable candidate record on a [`SecurityFinding`]. fallow fills\n`source_kind`, `sink`, and `boundary`. The exploitability IMPACT is\ndeliberately NOT a field: `severity` on the parent finding is only a\nreview-priority tier, while deciding exploitability remains the consuming\nagent's job. A perpetually-null `impact` key would only train consumers to\nignore it. The agent reads this record, then writes its own impact verdict\ndownstream."
     },
     "SecurityCandidateSink": {
       "type": "object",
@@ -10869,6 +10895,41 @@
         }
       },
       "description": "Network-destination context for a `secret-to-network` candidate (#890): where\nthe secret-bearing network call sends its data. Present only on\nnetwork-category candidates. A consuming agent uses it to triage exfil\n(dynamic / untrusted destination) from intended auth (a literal provider\nhost) without re-reading source."
+    },
+    "TaintConfidence": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "arg-level",
+          "description": "The sink's argument traces back to a known untrusted-source read in the\nSAME statement / module (the intra-module back-trace, issue #859). The\nstrong, high-value candidate: a specific source expression is implicated."
+        },
+        {
+          "type": "string",
+          "const": "module-level",
+          "description": "The sink merely lives in a module that is import-reachable from a module\ncontaining an untrusted source (issue #885). The weak candidate: only the\nmodule is implicated, not a specific value path to the sink argument."
+        }
+      ],
+      "description": "How strongly the untrusted-source signal is associated with the sink, a\nstructured discriminator so a consumer can tier candidates without parsing\nthe human `evidence` prose. Present only when\n[`SecurityReachability::reachable_from_untrusted_source`] is true. Neither\nvalue proves exploitability; both are ranking signals (issue #885 doctrine:\nrank, never gate)."
+    },
+    "SecuritySeverity": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "high",
+          "description": "Highest-priority candidate based on reachability, boundary, or runtime-hot signals."
+        },
+        {
+          "type": "string",
+          "const": "medium",
+          "description": "Candidate has source-reachability evidence but no high-priority signal."
+        },
+        {
+          "type": "string",
+          "const": "low",
+          "description": "Candidate has no source-reachability or boundary signal."
+        }
+      ],
+      "description": "Verification-priority tier for a security candidate. This is ranking, not an\nexploitability verdict."
     }
   }
 }
