@@ -789,30 +789,37 @@ Fallow is not an AI assistant. It is the deterministic codebase intelligence lay
 
 ## Performance
 
-Benchmarked on real open-source projects (median of 5 runs with 2 warmups, Apple M5).
+Benchmarked on real open-source projects, cold runs (no cache) so both tools work from scratch, median of 5 runs with 2 warmups. fallow 2.90.0, knip 5.87.0 and 6.6.1, Apple M5, Node 22. Fastest tool per row in bold.
 
 ### Dead code: fallow vs knip
 
-| Project | Files | fallow | knip v5 | knip v6 | vs v5 | vs v6 |
-|:--------|------:|-------:|--------:|--------:|------:|------:|
-| [zod](https://github.com/colinhacks/zod) | 174 | **25ms** | 650ms | 330ms | 26x | 13x |
-| [fastify](https://github.com/fastify/fastify) | 286 | **27ms** | 933ms | 222ms | 34x | 8x |
-| [preact](https://github.com/preactjs/preact) | 244 | **200ms** | 911ms | 2.15s | 5x | 11x |
-| [vue/core](https://github.com/vuejs/core) | 522 | **68ms** | ---* | ---* | --- | --- |
-| [TanStack/query](https://github.com/TanStack/query) | 901 | **330ms** | 2.66s | 1.08s | 8x | 3.3x |
-| [vite](https://github.com/vitejs/vite) | 1,420 | **378ms** | ---* | ---* | --- | --- |
-| [svelte](https://github.com/sveltejs/svelte) | 3,337 | **363ms** | 1.95s | 714ms | 5x | 2x |
-| [next.js](https://github.com/vercel/next.js) | 20,416 | **1.72s** | ---* | ---* | --- | --- |
+| Project | Files | fallow | knip v5 | knip v6 |
+|:--------|------:|-------:|--------:|--------:|
+| [zod](https://github.com/colinhacks/zod) | 174 | **35ms** | 655ms | 328ms |
+| [preact](https://github.com/preactjs/preact) | 244 | **49ms** | 822ms | 2.05s |
+| [fastify](https://github.com/fastify/fastify) | 286 | **50ms** | 890ms | 225ms |
+| [vue/core](https://github.com/vuejs/core) | 522 | **142ms** | incomplete¹ | incomplete¹ |
+| [TanStack/query](https://github.com/TanStack/query) | 901 | **447ms** | 2.87s | 1.19s |
+| [vite](https://github.com/vitejs/vite) | 1,420 | **897ms** | incomplete¹ | incomplete¹ |
+| [astro](https://github.com/withastro/astro) | 2,859 | 2.19s | 3.74s | **1.29s** |
+| [svelte](https://github.com/sveltejs/svelte) | 3,337 | **779ms** | 2.80s | 978ms |
+| [TypeScript](https://github.com/microsoft/TypeScript) | 38,146 | 2.19s | 3.03s | **804ms** |
+| [next.js](https://github.com/vercel/next.js) | 20,552 | **3.35s** | incomplete¹ | incomplete¹ |
 
-On the current benchmark fixtures, knip does not produce valid JSON results for vite, vue/core, and next.js. fallow completes on all three. See the [full comparison page](https://docs.fallow.tools/migration/comparison) for the complete matrix and current caveats. * knip exits without valid results on those fixtures.
+fallow is fastest on small-to-medium projects (roughly 5-18x faster than knip v5 and 2.7-9x than knip v6; preact is an outlier where knip v6 happens to be slow). On large projects, knip v6's Oxc-based parser is competitive or faster (astro, TypeScript), there, fallow's edge is doing more in one tool, not raw dead-code speed. fallow's persistent cache makes repeat (warm) runs faster again; the table uses the conservative cold numbers.
+
+¹ knip loads and executes a project's config and JSON files to read plugin settings, which is its design and works well on apps. A few framework monorepos trip that up where fallow (purely syntactic, no config execution) completes with no setup: **vite**, a workspace `package.json` carries a UTF-8 BOM that knip's `JSON.parse` rejects (a robustness gap, reportable upstream); **vue/core**, a private `sfc-playground/vite.config.ts` fails to load; **next.js**, the framework's own monorepo needs a build for its jest config and per-workspace entry config for its `dist`-published packages (this is the framework source, not a Next.js app, which is what knip's Next.js plugin targets). All are fixable with knip config; the point is fallow needs none.
 
 ### Duplication: fallow vs jscpd
 
 | Project | Files | fallow | jscpd | Speedup |
 |:--------|------:|-------:|------:|--------:|
-| [fastify](https://github.com/fastify/fastify) | 286 | **76ms** | 1.96s | 26x |
-| [vue/core](https://github.com/vuejs/core) | 522 | **124ms** | 3.11s | 25x |
-| [next.js](https://github.com/vercel/next.js) | 20,416 | **2.89s** | 24.37s | 8x |
+| [preact](https://github.com/preactjs/preact) | 244 | **90ms** | 1.83s | 20x |
+| [fastify](https://github.com/fastify/fastify) | 286 | **100ms** | 1.57s | 16x |
+| [vue/core](https://github.com/vuejs/core) | 522 | **204ms** | 3.22s | 16x |
+| [TanStack/query](https://github.com/TanStack/query) | 901 | **173ms** | 1.28s | 7x |
+| [svelte](https://github.com/sveltejs/svelte) | 3,337 | **366ms** | 3.52s | 10x |
+| [next.js](https://github.com/vercel/next.js) | 20,552 | **3.87s** | 25.50s | 7x |
 
 No TypeScript compiler, no Node.js runtime needed to analyze your code. [Fallow vs linters](https://docs.fallow.tools/explanations/fallow-vs-linters) | [Reproduce benchmarks](https://github.com/fallow-rs/fallow/tree/main/benchmarks)
 
