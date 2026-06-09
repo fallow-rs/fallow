@@ -82,9 +82,10 @@ fn arg_level_finding_is_tiered_and_anchored_at_the_source_read() {
 
 #[test]
 fn module_level_finding_is_tiered_and_labeled_source_module() {
-    // `viaTemplate`: the sink argument does NOT trace to a source (the read sits
-    // inside a template binding), but the module contains `req.query.id`, so the
-    // sink is module-level reachable. It must be labeled honestly.
+    // `unrelated`: the sink argument is a plain parameter that does NOT trace to
+    // any source, but the module contains `req.query.id` (in `direct`), so the
+    // sink is module-level reachable. It must be labeled honestly. (Kept distinct
+    // from a template/concat binding, which #1095 now treats as arg-level.)
     let results = analyze_fixture("security-taint-confidence-1093");
     let module_level = tainted_sinks(&results)
         .into_iter()

@@ -1255,6 +1255,7 @@ fn hop_role_token(role: TraceHopRole) -> &'static str {
     match role {
         TraceHopRole::ClientBoundary => "client-boundary",
         TraceHopRole::UntrustedSource => "untrusted-source",
+        TraceHopRole::ModuleSource => "module-source",
         TraceHopRole::Intermediate => "intermediate",
         TraceHopRole::SecretSource => "secret-source",
         TraceHopRole::Sink => "sink",
