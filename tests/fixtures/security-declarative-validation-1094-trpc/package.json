@@ -1,0 +1,9 @@
+{
+  "name": "security-declarative-validation-1094-trpc",
+  "dependencies": {
+    "@trpc/server": "latest"
+  },
+  "devDependencies": {
+    "typescript": "latest"
+  }
+}

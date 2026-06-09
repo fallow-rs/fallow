@@ -2990,8 +2990,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
         self.try_record_fluent_chain_access(expr);
 
-        self.capture_redos_regex_sink(expr);
-        self.capture_call_sink(expr);
+        self.capture_security_call_sites(expr);
 
         walk::walk_call_expression(self, expr);
     }
@@ -3032,6 +3031,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             });
         }
 
+        self.capture_declarative_validation_new_expression(expr);
         self.capture_new_expression_sink(expr);
 
         walk::walk_new_expression(self, expr);
@@ -5275,6 +5275,139 @@ impl ModuleInfoExtractor {
         });
     }
 
+    fn record_validation_control_site(&mut self, callee_path: &str, span: Span) {
+        self.security_control_sites.push(SecurityControlSite {
+            kind: SecurityControlKind::Validation,
+            callee_path: callee_path.to_string(),
+            span_start: span.start,
+            span_end: span.end,
+        });
+    }
+
+    fn has_package_evidence(&self, package: &str) -> bool {
+        self.imports.iter().any(|import| {
+            !import.is_type_only && import_source_matches_package(&import.source, package)
+        }) || self
+            .require_calls
+            .iter()
+            .any(|require| import_source_matches_package(&require.source, package))
+    }
+
+    fn capture_declarative_validation_control(&mut self, expr: &CallExpression<'_>) {
+        let Some(callee_path) =
+            flatten_callee_path(&expr.callee).or_else(|| callee_leaf_name(&expr.callee))
+        else {
+            return;
+        };
+
+        if self.is_elysia_validation_route(&callee_path, expr) {
+            self.record_validation_control_site("elysia.route.validation", expr.span);
+            return;
+        }
+
+        if self.is_fastify_validation_route(&callee_path, expr) {
+            self.record_validation_control_site("fastify.route.schema", expr.span);
+            return;
+        }
+
+        if self.is_trpc_input_control(&callee_path, expr) {
+            self.record_validation_control_site("trpc.procedure.input", expr.span);
+            return;
+        }
+
+        if self.is_hono_validation_middleware(&callee_path, expr) {
+            self.record_validation_control_site("hono.validator", expr.span);
+            return;
+        }
+
+        if self.is_nest_validation_pipe_call(&callee_path) {
+            self.record_validation_control_site("nestjs.validation-pipe", expr.span);
+            return;
+        }
+
+        if self.is_express_validator_control(&callee_path, expr) {
+            self.record_validation_control_site("express-validator.middleware", expr.span);
+        }
+    }
+
+    fn capture_declarative_validation_new_expression(
+        &mut self,
+        expr: &oxc_ast::ast::NewExpression<'_>,
+    ) {
+        let Some(callee_path) = flatten_callee_path(&expr.callee) else {
+            return;
+        };
+        if self.has_package_evidence("@nestjs/common")
+            && callee_path.rsplit('.').next() == Some("ValidationPipe")
+        {
+            self.record_validation_control_site("nestjs.validation-pipe", expr.span);
+        }
+    }
+
+    fn is_elysia_validation_route(&self, callee_path: &str, expr: &CallExpression<'_>) -> bool {
+        self.has_package_evidence("elysia")
+            && route_method_leaf(callee_path).is_some()
+            && expr
+                .arguments
+                .iter()
+                .skip(1)
+                .filter_map(Argument::as_expression)
+                .any(expression_has_boundary_validation_keys)
+    }
+
+    fn is_fastify_validation_route(&self, callee_path: &str, expr: &CallExpression<'_>) -> bool {
+        self.has_package_evidence("fastify")
+            && route_method_leaf(callee_path).is_some()
+            && expr
+                .arguments
+                .iter()
+                .filter_map(Argument::as_expression)
+                .any(expression_has_fastify_schema)
+    }
+
+    fn is_trpc_input_control(&self, callee_path: &str, expr: &CallExpression<'_>) -> bool {
+        let lower = callee_path.to_ascii_lowercase();
+        self.has_package_evidence("@trpc/server")
+            && callee_path
+                .rsplit('.')
+                .next()
+                .is_some_and(|leaf| leaf.eq_ignore_ascii_case("input"))
+            && lower.contains("procedure")
+            && !expr.arguments.is_empty()
+    }
+
+    fn is_hono_validation_middleware(&self, callee_path: &str, expr: &CallExpression<'_>) -> bool {
+        (self.has_package_evidence("hono") || self.has_package_evidence("@hono/zod-validator"))
+            && matches!(
+                callee_path.rsplit('.').next(),
+                Some("validator" | "zValidator")
+            )
+            && !expr.arguments.is_empty()
+    }
+
+    fn is_nest_validation_pipe_call(&self, callee_path: &str) -> bool {
+        self.has_package_evidence("@nestjs/common")
+            && matches!(
+                callee_path.rsplit('.').next(),
+                Some("UsePipes" | "ValidationPipe")
+            )
+    }
+
+    fn is_express_validator_control(&self, callee_path: &str, expr: &CallExpression<'_>) -> bool {
+        self.has_package_evidence("express-validator")
+            && matches!(
+                callee_path.rsplit('.').next(),
+                Some("body" | "param" | "query" | "check")
+            )
+            && !expr.arguments.is_empty()
+    }
+
+    fn capture_security_call_sites(&mut self, expr: &CallExpression<'_>) {
+        self.capture_redos_regex_sink(expr);
+        self.capture_declarative_validation_control(expr);
+        self.capture_call_sink(expr);
+    }
+
     /// Capture a call/member-call sink site (category-blind). Pushes one
     /// `SinkSite` per admitted positional argument; a callee that cannot be
     /// flattened to a static path increments the blind-spot counter instead.
@@ -5721,4 +5854,90 @@ fn control_object(callee_path: &str) -> Option<&str> {
     callee_path
         .rsplit_once('.')
         .map(|(object, _)| object.rsplit('.').next().unwrap_or(object))
+}
+
+fn import_source_matches_package(source: &str, package: &str) -> bool {
+    source == package
+        || source
+            .strip_prefix(package)
+            .is_some_and(|rest| rest.starts_with('/'))
+}
+
+fn route_method_leaf(callee_path: &str) -> Option<&str> {
+    let leaf = callee_path.rsplit('.').next()?;
+    matches!(
+        leaf,
+        "route" | "get" | "post" | "put" | "patch" | "delete" | "all" | "head" | "options"
+    )
+    .then_some(leaf)
+}
+
+fn callee_leaf_name(callee: &Expression<'_>) -> Option<String> {
+    match callee {
+        Expression::Identifier(ident) => Some(ident.name.to_string()),
+        Expression::StaticMemberExpression(member) => Some(member.property.name.to_string()),
+        Expression::ChainExpression(chain) => match &chain.expression {
+            ChainElement::CallExpression(call) => callee_leaf_name(&call.callee),
+            ChainElement::StaticMemberExpression(member) => Some(member.property.name.to_string()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn expression_has_boundary_validation_keys(expr: &Expression<'_>) -> bool {
+    match expr {
+        Expression::ObjectExpression(obj) => object_has_any_key(obj, &["body", "query", "params"]),
+        Expression::ParenthesizedExpression(paren) => {
+            expression_has_boundary_validation_keys(&paren.expression)
+        }
+        Expression::TSAsExpression(ts_as) => {
+            expression_has_boundary_validation_keys(&ts_as.expression)
+        }
+        Expression::TSSatisfiesExpression(ts_sat) => {
+            expression_has_boundary_validation_keys(&ts_sat.expression)
+        }
+        _ => false,
+    }
+}
+
+fn expression_has_fastify_schema(expr: &Expression<'_>) -> bool {
+    match expr {
+        Expression::ObjectExpression(obj) => object_property_value(obj, "schema")
+            .is_some_and(|schema| expression_has_boundary_validation_keys(schema)),
+        Expression::ParenthesizedExpression(paren) => {
+            expression_has_fastify_schema(&paren.expression)
+        }
+        Expression::TSAsExpression(ts_as) => expression_has_fastify_schema(&ts_as.expression),
+        Expression::TSSatisfiesExpression(ts_sat) => {
+            expression_has_fastify_schema(&ts_sat.expression)
+        }
+        _ => false,
+    }
+}
+
+fn object_has_any_key(obj: &ObjectExpression<'_>, keys: &[&str]) -> bool {
+    obj.properties.iter().any(|prop| {
+        let ObjectPropertyKind::ObjectProperty(prop) = prop else {
+            return false;
+        };
+        prop.key
+            .static_name()
+            .is_some_and(|name| keys.iter().any(|key| name == *key))
+    })
+}
+
+fn object_property_value<'a>(
+    obj: &'a ObjectExpression<'a>,
+    key: &str,
+) -> Option<&'a Expression<'a>> {
+    obj.properties.iter().find_map(|prop| {
+        let ObjectPropertyKind::ObjectProperty(prop) = prop else {
+            return None;
+        };
+        prop.key
+            .static_name()
+            .is_some_and(|name| name == key)
+            .then_some(&prop.value)
+    })
 }

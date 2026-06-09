@@ -290,7 +290,11 @@ use crate::MemberKind;
 /// local bindings when template literals, string concatenation, or object
 /// literals embed an untrusted source. Pre-139 entries miss those ranking
 /// signals until the file is re-extracted.
-pub(super) const CACHE_VERSION: u32 = 139;
+///
+/// Bumped to 140 for issue #1094: JS/TS extraction now records declarative
+/// framework validation boundary controls for security surface output. Pre-140
+/// entries can miss route-level validation control sites until re-extracted.
+pub(super) const CACHE_VERSION: u32 = 140;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

@@ -288,6 +288,108 @@ fn security_control_capture_records_validation_and_auth_calls() {
     }));
 }
 
+fn has_validation_control(source: &str, callee: &str) -> bool {
+    parse(source).security_control_sites.iter().any(|control| {
+        control.kind == SecurityControlKind::Validation && control.callee_path == callee
+    })
+}
+
+#[test]
+fn security_control_capture_records_elysia_route_validation() {
+    assert!(has_validation_control(
+        r#"
+        import { Elysia, t } from "elysia";
+        const app = new Elysia().post("/users", ({ body }) => save(body.name), {
+            body: t.Object({ name: t.String() }),
+        });
+        "#,
+        "elysia.route.validation",
+    ));
+}
+
+#[test]
+fn security_control_capture_records_fastify_route_schema() {
+    assert!(has_validation_control(
+        r#"
+        import fastify from "fastify";
+        const app = fastify();
+        app.post("/users", {
+            schema: { body: { type: "object" } },
+            handler: async (request) => save(request.body.name),
+        });
+        "#,
+        "fastify.route.schema",
+    ));
+}
+
+#[test]
+fn security_control_capture_records_trpc_input_validation() {
+    assert!(has_validation_control(
+        r#"
+        import { initTRPC } from "@trpc/server";
+        const t = initTRPC.create();
+        const publicProcedure = t.procedure;
+        export const route = publicProcedure.input(schema).mutation(({ input }) => save(input));
+        "#,
+        "trpc.procedure.input",
+    ));
+}
+
+#[test]
+fn security_control_capture_records_hono_validator_middleware() {
+    assert!(has_validation_control(
+        r#"
+        import { zValidator } from "@hono/zod-validator";
+        app.post("/users", zValidator("json", schema), (c) => save(c.req.valid("json")));
+        "#,
+        "hono.validator",
+    ));
+}
+
+#[test]
+fn security_control_capture_records_nest_validation_pipe() {
+    assert!(has_validation_control(
+        r#"
+        import { UsePipes, ValidationPipe } from "@nestjs/common";
+        @UsePipes(new ValidationPipe())
+        class UsersController {}
+        "#,
+        "nestjs.validation-pipe",
+    ));
+}
+
+#[test]
+fn security_control_capture_records_express_validator_middleware() {
+    assert!(has_validation_control(
+        r#"
+        import { body } from "express-validator";
+        app.post("/users", body("email").isEmail(), (req, res) => save(req.body.email));
+        "#,
+        "express-validator.middleware",
+    ));
+}
+
+#[test]
+fn security_control_capture_skips_generic_declarative_shapes_without_framework_evidence() {
+    let info = parse(
+        r#"
+        const route = app.post("/users", handler, { body: schema });
+        const field = builder.input(schema);
+        body("email").isEmail();
+        "#,
+    );
+
+    assert!(!info.security_control_sites.iter().any(|control| {
+        matches!(
+            control.callee_path.as_str(),
+            "elysia.route.validation"
+                | "fastify.route.schema"
+                | "trpc.procedure.input"
+                | "express-validator.middleware"
+        )
+    }));
+}
+
 #[test]
 fn security_redos_regex_capture_records_string_method_application() {
     let sink = redos_regex_sink("req.params.slug.match(/^(a|aa)+$/);");
