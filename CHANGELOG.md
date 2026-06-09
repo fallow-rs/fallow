@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`fallow security` can extend HTTP request receiver detection from config.** `security.requestReceivers` now adds project-local request object names to the built-in `req` / `request` / `ctx` / `context` / `event` allowlist for `*.query`, `*.params`, and `*.body` source reads. Values are trimmed, case-normalized, and additive only, while ORM receivers remain excluded and `*.searchParams` stays ungated. (Closes [#1125](https://github.com/fallow-rs/fallow/issues/1125).)
+
 ## [2.91.0] - 2026-06-09
 
 ### Added

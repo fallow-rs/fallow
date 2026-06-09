@@ -12,7 +12,7 @@
 
 use std::sync::OnceLock;
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_types::extract::{
     ModuleInfo, SanitizedSinkArg, SanitizerScope, SinkSite, TaintedBinding,
@@ -200,7 +200,8 @@ pub(super) fn is_low_value_anchor(path: &std::path::Path) -> bool {
 /// "source-backed", and the matched source title names the input class.
 fn source_tainted_locals<'b>(
     bindings: &'b [TaintedBinding],
-    declared_deps: &rustc_hash::FxHashSet<String>,
+    declared_deps: &FxHashSet<String>,
+    request_receivers: &FxHashSet<String>,
 ) -> FxHashMap<&'b str, (&'static str, &'static str, u32)> {
     let cat = catalogue();
     let mut out: FxHashMap<&'b str, (&'static str, &'static str, u32)> = FxHashMap::default();
@@ -212,7 +213,11 @@ fn source_tainted_locals<'b>(
         // the binding's source-read byte offset (`0` for synthetic
         // framework-param / helper-return bindings with no concrete read), used
         // to anchor an arg-level taint trace's source node (issue #1093).
-        if let Some((id, title)) = cat.matching_source_for_deps(&b.source_path, declared_deps) {
+        if let Some((id, title)) = cat.matching_source_for_deps_with_receivers(
+            &b.source_path,
+            declared_deps,
+            request_receivers,
+        ) {
             out.entry(b.local.as_str())
                 .or_insert((id, title, b.source_span_start));
         }
@@ -262,16 +267,15 @@ fn sink_has_html_sanitizer(module: &ModuleInfo, sink: &SinkSite) -> bool {
 fn sink_source<'t>(
     sink: &SinkSite,
     tainted: &FxHashMap<&str, (&'t str, &'t str, u32)>,
-    declared_deps: &rustc_hash::FxHashSet<String>,
+    declared_deps: &FxHashSet<String>,
+    request_receivers: &FxHashSet<String>,
 ) -> Option<(&'t str, &'t str, Option<u32>)> {
     let cat = catalogue();
     // Direct path: the source read is inside the sink argument (same statement),
     // so there is no separate binding span; the detector anchors at the sink.
-    if let Some((id, title)) = sink
-        .arg_source_paths
-        .iter()
-        .find_map(|path| cat.matching_source_for_deps(path, declared_deps))
-    {
+    if let Some((id, title)) = sink.arg_source_paths.iter().find_map(|path| {
+        cat.matching_source_for_deps_with_receivers(path, declared_deps, request_receivers)
+    }) {
         return Some((id, title, None));
     }
 
@@ -320,32 +324,23 @@ pub(super) const NETWORK_EXFIL_CATEGORY: &str = "secret-to-network";
 /// include list never admits it.
 pub(super) const INCLUDE_REQUIRED_CATEGORIES: &[&str] = &[NETWORK_EXFIL_CATEGORY];
 
+/// Shared options for the catalogue-driven tainted-sink detector.
+pub struct TaintedSinkContext<'a> {
+    pub category_filter: &'a CategoryFilter,
+    pub request_receivers: &'a FxHashSet<String>,
+    pub root: &'a std::path::Path,
+}
+
 /// Whether a catalogue category is include-required (opt-in only).
 fn is_include_required_category(id: &str) -> bool {
     INCLUDE_REQUIRED_CATEGORIES.contains(&id)
 }
 
-/// Run the catalogue-driven tainted-sink detector. Returns the findings plus the
-/// in-band blind-spot stats. Callers gate this on the `security_sink` rule
-/// severity; it never runs under bare `fallow` or the `audit` gate.
-#[must_use]
-pub fn find_tainted_sinks(
-    graph: &ModuleGraph,
-    modules: &[ModuleInfo],
-    suppressions: &SuppressionContext<'_>,
-    line_offsets_by_file: &LineOffsetsMap<'_>,
+fn active_matchers(
     category_filter: &CategoryFilter,
-    declared_deps: &rustc_hash::FxHashSet<String>,
-    root: &std::path::Path,
-) -> (Vec<SecurityFinding>, TaintedSinkStats) {
-    let mut stats = TaintedSinkStats::default();
-
-    // Pre-filter the catalogue by the category scope AND the framework enabler
-    // gate (#861). `enabler_satisfied` depends only on the project's declared
-    // dependency set, not the per-module state, so it is hoisted here: a
-    // framework-scoped row whose enabler package is absent never participates.
-    // Empty -> nothing to do.
-    let active: Vec<&Matcher> = catalogue()
+    declared_deps: &FxHashSet<String>,
+) -> Vec<&'static Matcher> {
+    catalogue()
         .matchers()
         .iter()
         .filter(|m| {
@@ -359,7 +354,29 @@ pub fn find_tainted_sinks(
             };
             admitted && m.enabler_satisfied(declared_deps)
         })
-        .collect();
+        .collect()
+}
+
+/// Run the catalogue-driven tainted-sink detector. Returns the findings plus the
+/// in-band blind-spot stats. Callers gate this on the `security_sink` rule
+/// severity; it never runs under bare `fallow` or the `audit` gate.
+#[must_use]
+pub fn find_tainted_sinks(
+    graph: &ModuleGraph,
+    modules: &[ModuleInfo],
+    suppressions: &SuppressionContext<'_>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+    declared_deps: &FxHashSet<String>,
+    context: &TaintedSinkContext<'_>,
+) -> (Vec<SecurityFinding>, TaintedSinkStats) {
+    let mut stats = TaintedSinkStats::default();
+
+    // Pre-filter the catalogue by the category scope AND the framework enabler
+    // gate (#861). `enabler_satisfied` depends only on the project's declared
+    // dependency set, not the per-module state, so it is hoisted here: a
+    // framework-scoped row whose enabler package is absent never participates.
+    // Empty -> nothing to do.
+    let active = active_matchers(context.category_filter, declared_deps);
     if active.is_empty() {
         return (Vec::new(), stats);
     }
@@ -384,7 +401,7 @@ pub fn find_tainted_sinks(
         // mirrors the production-mode dead-code exclusion. Matching runs on the
         // PROJECT-RELATIVE path so the `**/tests/**` glob does not catch every
         // file when the project itself lives under a `tests/` directory.
-        let rel_path = node.path.strip_prefix(root).unwrap_or(&node.path);
+        let rel_path = node.path.strip_prefix(context.root).unwrap_or(&node.path);
         if is_low_value_anchor(rel_path) {
             continue;
         }
@@ -398,10 +415,19 @@ pub fn find_tainted_sinks(
 
         // Source-tainted local names for this module (issue #859). Computed once
         // per module; empty for modules with no source-shaped bindings.
-        let tainted_locals = source_tainted_locals(&module.tainted_bindings, declared_deps);
+        let tainted_locals = source_tainted_locals(
+            &module.tainted_bindings,
+            declared_deps,
+            context.request_receivers,
+        );
 
         for sink in &module.security_sinks {
-            let source = sink_source(sink, &tainted_locals, declared_deps);
+            let source = sink_source(
+                sink,
+                &tainted_locals,
+                declared_deps,
+                context.request_receivers,
+            );
             // The matcher gate only needs (id, title); the optional source-read
             // span (third element) anchors the trace and is handled below.
             let source_id = source.map(|(id, title, _)| (id, title));
@@ -619,12 +645,16 @@ mod tests {
         sink_with_idents_and_sources(idents, &[])
     }
 
+    fn empty_receivers() -> FxHashSet<String> {
+        FxHashSet::default()
+    }
+
     #[test]
     fn source_tainted_locals_match_catalogue_sources() {
         // `const id = req.query.id` is source-tainted; `const cfg = config.value`
         // is not (config.value is not an untrusted-source path).
         let bindings = vec![binding("id", "req.query"), binding("cfg", "config.value")];
-        let tainted = source_tainted_locals(&bindings, &FxHashSet::default());
+        let tainted = source_tainted_locals(&bindings, &FxHashSet::default(), &empty_receivers());
         assert!(tainted.contains_key("id"));
         assert!(!tainted.contains_key("cfg"));
         // The matched local carries the source's (id, title) pair: the stable
@@ -640,11 +670,16 @@ mod tests {
     #[test]
     fn sink_is_source_backed_when_arg_traces_to_source() {
         let bindings = vec![binding("id", "req.query")];
-        let tainted = source_tainted_locals(&bindings, &FxHashSet::default());
+        let tainted = source_tainted_locals(&bindings, &FxHashSet::default(), &empty_receivers());
         // `eval(id)` traces to the source-tainted `id`; the returned pair carries
         // both the catalogue source id (slot 1) and the human title.
         assert_eq!(
-            sink_source(&sink_with_idents(&["id"]), &tainted, &FxHashSet::default()),
+            sink_source(
+                &sink_with_idents(&["id"]),
+                &tainted,
+                &FxHashSet::default(),
+                &empty_receivers()
+            ),
             // Binding path: carries the binding's source-read span (`Some(0)`
             // here, since the test `binding` helper sets the offset to 0).
             Some(("http-request-input", "HTTP request input", Some(0)))
@@ -655,6 +690,7 @@ mod tests {
                 &sink_with_idents(&["other"]),
                 &tainted,
                 &FxHashSet::default(),
+                &empty_receivers(),
             ),
             None
         );
@@ -662,21 +698,27 @@ mod tests {
 
     #[test]
     fn sink_not_source_backed_with_no_tainted_locals() {
-        let tainted = source_tainted_locals(&[], &FxHashSet::default());
+        let tainted = source_tainted_locals(&[], &FxHashSet::default(), &empty_receivers());
         assert_eq!(
-            sink_source(&sink_with_idents(&["id"]), &tainted, &FxHashSet::default()),
+            sink_source(
+                &sink_with_idents(&["id"]),
+                &tainted,
+                &FxHashSet::default(),
+                &empty_receivers()
+            ),
             None
         );
     }
 
     #[test]
     fn sink_is_source_backed_when_arg_source_path_matches_catalogue() {
-        let tainted = source_tainted_locals(&[], &FxHashSet::default());
+        let tainted = source_tainted_locals(&[], &FxHashSet::default(), &empty_receivers());
         assert_eq!(
             sink_source(
                 &sink_with_idents_and_sources(&["process"], &["process.env.SECRET", "process.env"]),
                 &tainted,
                 &FxHashSet::default(),
+                &empty_receivers(),
             )
             .map(|(_, title, _)| title),
             Some("Environment secret")
@@ -688,13 +730,14 @@ mod tests {
         let bindings = vec![binding("req", "framework.request")];
         let mut deps = FxHashSet::default();
         deps.insert("express".to_string());
-        let tainted = source_tainted_locals(&bindings, &deps);
+        let tainted = source_tainted_locals(&bindings, &deps, &empty_receivers());
 
         assert_eq!(
             sink_source(
                 &sink_with_idents_and_sources(&["req"], &["req.body"]),
                 &tainted,
                 &deps,
+                &empty_receivers(),
             )
             .map(|(_, title, _)| title),
             Some("HTTP request input")

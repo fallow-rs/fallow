@@ -30,6 +30,7 @@ fn analyze_included() -> AnalysisResults {
             include: Some(vec!["secret-to-network".to_string()]),
             exclude: None,
         }),
+        request_receivers: Vec::new(),
     };
     fallow_core::analyze(&config).expect("analysis should succeed")
 }

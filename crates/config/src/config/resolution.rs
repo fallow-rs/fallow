@@ -420,6 +420,11 @@ impl FallowConfig {
             compute_cache_config_hash(&external_plugins)
         };
 
+        let security = SecurityConfig {
+            request_receivers: self.security.normalized_request_receivers(),
+            ..self.security
+        };
+
         ResolvedConfig {
             root,
             entry_patterns: self.entry,
@@ -453,7 +458,7 @@ impl FallowConfig {
             codeowners: self.codeowners,
             public_packages: self.public_packages,
             flags: self.flags,
-            security: self.security,
+            security,
             fix: self.fix,
             resolve: self.resolve,
             include_entry_exports: self.include_entry_exports,

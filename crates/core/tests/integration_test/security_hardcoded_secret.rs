@@ -18,6 +18,7 @@ fn analyze_with_category(include: bool, exclude: bool) -> AnalysisResults {
             include: include.then(|| vec![CATEGORY.to_string()]),
             exclude: exclude.then(|| vec![CATEGORY.to_string()]),
         }),
+        request_receivers: Vec::new(),
     };
     fallow_core::analyze(&config).expect("analysis should succeed")
 }

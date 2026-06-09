@@ -766,6 +766,12 @@ pub fn find_dead_code_full(
             categories.and_then(|c| c.include.clone()),
             categories.and_then(|c| c.exclude.clone()),
         );
+        let request_receivers = config
+            .security
+            .request_receivers
+            .iter()
+            .cloned()
+            .collect::<FxHashSet<_>>();
         // Framework-scoped catalogue rows (#861) gate on the active framework via
         // the project's declared dependency set: the same dependency universe the
         // plugin system activates on (root package.json + every workspace
@@ -775,9 +781,12 @@ pub fn find_dead_code_full(
             modules,
             &suppressions,
             &line_offsets_by_file,
-            &filter,
             &declared_deps,
-            &config.root,
+            &security::TaintedSinkContext {
+                category_filter: &filter,
+                request_receivers: &request_receivers,
+                root: &config.root,
+            },
         );
         results.security_findings.extend(sink_findings);
         results.security_unresolved_callee_sites = sink_stats.sinks_skipped_dynamic_callee;

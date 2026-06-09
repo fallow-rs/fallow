@@ -842,6 +842,11 @@ impl FallowConfig {
                 .join("\n  - ");
             miette::miette!("invalid config:\n  - {}", joined)
         })?;
+        if !config.security.request_receivers_are_valid() {
+            return Err(miette::miette!(
+                "invalid config:\n  - security.requestReceivers entries must be non-empty strings"
+            ));
+        }
 
         Ok(config)
     }
@@ -2903,6 +2908,48 @@ minTokens = 100
 
         let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
         assert_eq!(config.rules.unused_files, Severity::Off);
+    }
+
+    #[test]
+    fn load_rejects_empty_security_request_receivers() {
+        let dir = test_dir("empty-security-request-receivers");
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            r#"{"security": {"requestReceivers": ["req", "  "]}}"#,
+        )
+        .unwrap();
+
+        let result = FallowConfig::load(&dir.path().join(".fallowrc.json"));
+        let err = result.expect_err("empty receiver should be rejected");
+        assert!(
+            err.to_string().contains("security.requestReceivers"),
+            "error should name security.requestReceivers: {err}"
+        );
+    }
+
+    #[test]
+    fn resolve_normalizes_security_request_receivers() {
+        let dir = test_dir("normalize-security-request-receivers");
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            r#"{"security": {"requestReceivers": [" HttpReq ", "httpreq", "R"]}}"#,
+        )
+        .unwrap();
+
+        let config = FallowConfig::load(&dir.path().join(".fallowrc.json"))
+            .unwrap()
+            .resolve(
+                dir.path().to_path_buf(),
+                OutputFormat::Human,
+                1,
+                true,
+                true,
+                None,
+            );
+        assert_eq!(
+            config.security.request_receivers,
+            vec!["httpreq".to_string(), "r".to_string()]
+        );
     }
 
     #[test]

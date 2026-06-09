@@ -1188,7 +1188,7 @@
       ]
     },
     "SecurityConfig": {
-      "description": "Scopes the security categories used by `fallow security`. An absent block\nadmits every catalogue category. `hardcoded-secret` is include-required and\nonly runs when explicitly listed in `security.categories.include`.",
+      "description": "Scopes `fallow security` catalogue behavior. An absent category block admits\nevery catalogue category. `hardcoded-secret` is include-required and only\nruns when explicitly listed in `security.categories.include`.",
       "type": "object",
       "properties": {
         "categories": {
@@ -1201,6 +1201,13 @@
               "type": "null"
             }
           ]
+        },
+        "requestReceivers": {
+          "description": "Additional project-local names for HTTP request objects. These names\nextend the built-in receiver allowlist for `*.query`, `*.params`, and\n`*.body` source patterns. They do not replace the built-ins and do not\ngate `*.searchParams`, which intentionally stays ungated.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "additionalProperties": false

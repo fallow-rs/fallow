@@ -13,6 +13,7 @@
 //! captured literal or context predicates when the literal itself is the signal.
 
 use fallow_types::extract::{SinkArgKind, SinkLiteralValue, SinkObjectProperty, SinkShape};
+use rustc_hash::FxHashSet;
 
 /// Embedded catalogue source. Because it is `include_str!`-embedded at compile
 /// time, a green `security_catalogue_parses` test guarantees the released
@@ -299,28 +300,45 @@ pub struct SourceMatcher {
 
 impl SourceMatcher {
     /// Whether any of this source's path patterns match the given flattened
-    /// member-access path (a captured tainted-binding `source_path`), subject to
-    /// the receiver allowlist for leading-wildcard patterns.
+    /// member-access path, subject to the built-in receiver allowlist.
+    #[cfg(test)]
     #[must_use]
     pub fn matches(&self, source_path: &str) -> bool {
-        self.path_patterns
-            .iter()
-            .any(|p| p.matches(source_path) && self.receiver_allowed(p, source_path))
+        let extra_receivers = FxHashSet::default();
+        self.matches_with_extra_receivers(source_path, &extra_receivers)
+    }
+
+    #[must_use]
+    pub fn matches_with_extra_receivers(
+        &self,
+        source_path: &str,
+        extra_receivers: &FxHashSet<String>,
+    ) -> bool {
+        self.path_patterns.iter().any(|p| {
+            p.matches(source_path) && self.receiver_allowed(p, source_path, extra_receivers)
+        })
     }
 
     /// Whether `pattern`'s match on `source_path` is admitted by the receiver
     /// allowlist. An empty allowlist admits everything. For a leading-wildcard
     /// pattern the matched receiver must be in the allowlist (case-insensitive);
     /// an exact pattern (receiver fixed in the pattern) is always admitted.
-    fn receiver_allowed(&self, pattern: &CalleePattern, source_path: &str) -> bool {
+    fn receiver_allowed(
+        &self,
+        pattern: &CalleePattern,
+        source_path: &str,
+        extra_receivers: &FxHashSet<String>,
+    ) -> bool {
         if self.receiver_allowlist.is_empty() {
             return true;
         }
         match pattern.matched_receiver(source_path) {
-            Some(receiver) => self
-                .receiver_allowlist
-                .iter()
-                .any(|allowed| allowed.eq_ignore_ascii_case(receiver)),
+            Some(receiver) => {
+                self.receiver_allowlist
+                    .iter()
+                    .any(|allowed| allowed.eq_ignore_ascii_case(receiver))
+                    || extra_receivers.contains(&receiver.to_ascii_lowercase())
+            }
             None => true,
         }
     }
@@ -521,9 +539,10 @@ impl Catalogue {
     #[cfg(test)]
     #[must_use]
     pub fn matching_source(&self, source_path: &str) -> Option<(&str, &str)> {
+        let request_receivers = FxHashSet::default();
         self.sources
             .iter()
-            .find(|s| s.matches(source_path))
+            .find(|s| s.matches_with_extra_receivers(source_path, &request_receivers))
             .map(|s| (s.id.as_str(), s.title.as_str()))
     }
 
@@ -533,11 +552,34 @@ impl Catalogue {
     pub fn matching_source_for_deps(
         &self,
         source_path: &str,
-        declared_deps: &rustc_hash::FxHashSet<String>,
+        declared_deps: &FxHashSet<String>,
     ) -> Option<(&str, &str)> {
+        let request_receivers = FxHashSet::default();
+        self.matching_source_for_deps_with_receivers(source_path, declared_deps, &request_receivers)
+    }
+
+    /// The id + human title of the first untrusted-source matcher whose pattern,
+    /// optional framework enabler, and configured request-receiver extension
+    /// match the given source path.
+    #[must_use]
+    pub fn matching_source_for_deps_with_receivers(
+        &self,
+        source_path: &str,
+        declared_deps: &FxHashSet<String>,
+        request_receivers: &FxHashSet<String>,
+    ) -> Option<(&str, &str)> {
+        let empty_receivers = FxHashSet::default();
         self.sources
             .iter()
-            .find(|s| s.enabler_satisfied(declared_deps) && s.matches(source_path))
+            .find(|s| {
+                let extra_receivers = if s.id == "http-request-input" {
+                    request_receivers
+                } else {
+                    &empty_receivers
+                };
+                s.enabler_satisfied(declared_deps)
+                    && s.matches_with_extra_receivers(source_path, extra_receivers)
+            })
             .map(|s| (s.id.as_str(), s.title.as_str()))
     }
 
@@ -1403,6 +1445,30 @@ evidence_template = "x"
         assert!(cat.is_source_path("ctx.req.query"));
         // The allowlist is case-insensitive.
         assert!(cat.is_source_path("Req.query"));
+    }
+
+    #[test]
+    fn configured_request_receivers_extend_http_request_source_allowlist() {
+        let cat = catalogue();
+        let deps = FxHashSet::default();
+        let receivers = FxHashSet::from_iter(["h".to_string(), "httpreq".to_string()]);
+
+        assert!(
+            cat.matching_source_for_deps_with_receivers("h.query", &deps, &receivers)
+                .is_some()
+        );
+        assert!(
+            cat.matching_source_for_deps_with_receivers("HttpReq.body", &deps, &receivers)
+                .is_some()
+        );
+        assert!(
+            cat.matching_source_for_deps_with_receivers("req.params", &deps, &receivers)
+                .is_some()
+        );
+        assert!(
+            cat.matching_source_for_deps_with_receivers("db.query", &deps, &receivers)
+                .is_none()
+        );
     }
 
     #[test]

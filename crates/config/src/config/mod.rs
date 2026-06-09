@@ -220,15 +220,42 @@ pub struct FallowConfig {
     pub cache: CacheConfig,
 }
 
-/// Scopes the security categories used by `fallow security`. An absent block
-/// admits every catalogue category. `hardcoded-secret` is include-required and
-/// only runs when explicitly listed in `security.categories.include`.
+/// Scopes `fallow security` catalogue behavior. An absent category block admits
+/// every catalogue category. `hardcoded-secret` is include-required and only
+/// runs when explicitly listed in `security.categories.include`.
 #[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct SecurityConfig {
     /// Include/exclude filter over category ids (e.g. `dangerous-html`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub categories: Option<SecurityCategories>,
+    /// Additional project-local names for HTTP request objects. These names
+    /// extend the built-in receiver allowlist for `*.query`, `*.params`, and
+    /// `*.body` source patterns. They do not replace the built-ins and do not
+    /// gate `*.searchParams`, which intentionally stays ungated.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub request_receivers: Vec<String>,
+}
+
+impl SecurityConfig {
+    #[must_use]
+    pub fn normalized_request_receivers(&self) -> Vec<String> {
+        let mut receivers = Vec::new();
+        for receiver in &self.request_receivers {
+            let normalized = receiver.trim().to_ascii_lowercase();
+            if !normalized.is_empty() && !receivers.contains(&normalized) {
+                receivers.push(normalized);
+            }
+        }
+        receivers
+    }
+
+    #[must_use]
+    pub fn request_receivers_are_valid(&self) -> bool {
+        self.request_receivers
+            .iter()
+            .all(|receiver| !receiver.trim().is_empty())
+    }
 }
 
 /// Include/exclude lists scoping the active security categories. When `include`
