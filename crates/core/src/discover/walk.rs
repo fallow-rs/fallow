@@ -435,6 +435,10 @@ pub fn discover_files_with_additional_hidden_dirs(
         .expect("walk collector lock poisoned");
     raw.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
+    // Drop any source-discovery diagnostics from a previous pass (watch-mode
+    // rerun, combined-mode re-walk) BEFORE re-recording this walk's skips, so a
+    // file that is no longer skipped does not leave a stale entry (issue #1086).
+    fallow_config::clear_source_discovery_diagnostics(&config.root);
     let (kept, skipped) = partition_by_size(raw, config.max_file_size_bytes);
     report_skipped_large_files(config, &skipped);
 

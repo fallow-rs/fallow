@@ -569,6 +569,30 @@ pub fn append_workspace_diagnostics(root: &Path, additions: Vec<WorkspaceDiagnos
     }
 }
 
+/// Remove all source-discovery diagnostics (see
+/// [`WorkspaceDiagnosticKind::is_source_discovery`]) for `root` from the
+/// registry, keeping the workspace-discovery set intact.
+///
+/// Called at the START of each source walk (`discover_files`) so a stale
+/// `skipped-large-file` entry from a previous analysis pass (e.g. a watch-mode
+/// rerun after the user raised `--max-file-size` or added the file to
+/// `ignorePatterns`) is dropped before the current walk re-appends only the
+/// files it actually skips. Pairs with the preserve in
+/// [`stash_workspace_diagnostics`]: clear keeps the set CURRENT across reruns,
+/// preserve keeps it ALIVE across combined-mode's per-analysis config re-loads
+/// (issue #1086).
+pub fn clear_source_discovery_diagnostics(root: &Path) {
+    let canonical = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let Some(registry) = WORKSPACE_DIAGNOSTICS.get() else {
+        return;
+    };
+    if let Ok(mut map) = registry.lock()
+        && let Some(existing) = map.get_mut(&canonical)
+    {
+        existing.retain(|d| !d.kind.is_source_discovery());
+    }
+}
+
 /// Read the workspace-discovery diagnostics produced by the most recent
 /// `stash_workspace_diagnostics` + any subsequent
 /// `append_workspace_diagnostics` calls for `root`. Returns an empty vector
@@ -708,6 +732,43 @@ mod tests {
                 .count(),
             1,
             "the workspace-discovery diagnostic is replaced, not duplicated"
+        );
+    }
+
+    #[test]
+    fn clear_source_discovery_drops_stale_skip_keeps_workspace_diag() {
+        let root = Path::new("/fallow-test-1086-clear-stale");
+        stash_workspace_diagnostics(
+            root,
+            vec![WorkspaceDiagnostic::new(
+                root,
+                root.join("pkg"),
+                WorkspaceDiagnosticKind::UndeclaredWorkspace,
+            )],
+        );
+        append_workspace_diagnostics(
+            root,
+            vec![WorkspaceDiagnostic::new(
+                root,
+                root.join("vendor/big.js"),
+                WorkspaceDiagnosticKind::SkippedLargeFile {
+                    size_bytes: 9_999_999,
+                },
+            )],
+        );
+        // A later walk (the file is no longer skipped) clears the stale entry.
+        clear_source_discovery_diagnostics(root);
+
+        let after = workspace_diagnostics_for(root);
+        assert!(
+            !after.iter().any(|d| d.kind.is_source_discovery()),
+            "stale skipped-large-file is dropped on the next walk (#1086 watch-mode): {after:?}"
+        );
+        assert!(
+            after
+                .iter()
+                .any(|d| matches!(d.kind, WorkspaceDiagnosticKind::UndeclaredWorkspace)),
+            "the workspace-discovery diagnostic survives the source-discovery clear"
         );
     }
 
