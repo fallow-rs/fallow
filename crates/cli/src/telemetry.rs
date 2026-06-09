@@ -6,7 +6,7 @@
 
 use std::ffi::OsString;
 use std::io::{IsTerminal, Write as _};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Duration;
@@ -20,12 +20,27 @@ const CONFIG_SCHEMA_VERSION: u8 = 1;
 const TELEMETRY_SCHEMA_VERSION: u8 = 1;
 const CONNECT_TIMEOUT_SECS: u64 = 1;
 const TOTAL_TIMEOUT_SECS: u64 = 1;
-/// Maximum time the main thread waits for a telemetry upload to finish before
-/// continuing. The upload runs on a detached thread; if it has not completed
-/// within this grace window the process continues and the thread is abandoned
-/// at exit. Telemetry must never add meaningful latency to a sub-second run.
-const UPLOAD_GRACE_MS: u64 = 200;
 const TELEMETRY_PATH: &str = "/v1/telemetry/events";
+
+/// Maximum number of events retained in the spool. The spool grows one line per
+/// telemetry-enabled run and is drained on the next run. Two paths keep it to the
+/// newest `SPOOL_MAX_EVENTS` lines: the drain caps the undelivered tail once it
+/// has delivered part of a backlog, and the over-cap write-path trim
+/// ([`SPOOL_MAX_BYTES`]) bounds it even on a machine where delivery never
+/// succeeds, so the oldest events are dropped rather than letting the file grow.
+const SPOOL_MAX_EVENTS: usize = 64;
+/// Hot-path size ceiling for the spool, checked with a single `fstat` on each
+/// append. When the live spool grows past it (a machine that stays offline, so
+/// the background drain never delivers and never trims), the append rewrites the
+/// file down to the newest `SPOOL_MAX_EVENTS` lines. This bounds the spool
+/// unconditionally, independent of whether any drain ever completes, so a fast
+/// command whose drain is always abandoned mid-upload still cannot grow it. Set
+/// well above `SPOOL_MAX_EVENTS` coarse events so a normal append never trims.
+const SPOOL_MAX_BYTES: u64 = 64 * 1024;
+/// Live append-only spool of events awaiting upload, next to `telemetry.json`.
+const SPOOL_FILE_NAME: &str = "telemetry-spool.jsonl";
+/// Advisory `flock` sidecar serialising drains/trims across concurrent processes.
+const SPOOL_LOCK_NAME: &str = "telemetry-spool.lock";
 
 const DO_NOT_TRACK: &str = "DO_NOT_TRACK";
 const DISABLED_ENV: &str = "FALLOW_TELEMETRY_DISABLED";
@@ -395,7 +410,7 @@ pub fn record_workflow(record: &WorkflowRecord<'_>) {
     match effective_config().mode {
         EffectiveMode::Off | EffectiveMode::DisabledByAdmin => {}
         EffectiveMode::Inspect => print_event_to_stderr(&build_workflow_event(record)),
-        EffectiveMode::On => upload_event_best_effort(build_workflow_event(record)),
+        EffectiveMode::On => spool_event(&build_workflow_event(record)),
     }
 }
 
@@ -497,7 +512,7 @@ fn set_enabled(enabled: bool, output: OutputFormat) -> ExitCode {
     if enabled {
         match effective_config().mode {
             EffectiveMode::Inspect => print_event_to_stderr(&event),
-            EffectiveMode::On => upload_event_best_effort(event),
+            EffectiveMode::On => spool_event(&event),
             EffectiveMode::Off | EffectiveMode::DisabledByAdmin => {}
         }
     }
@@ -830,33 +845,241 @@ fn write_config_to(path: &std::path::Path, config: &TelemetryConfig) -> Result<(
     std::fs::write(path, raw).map_err(|err| err.to_string())
 }
 
-/// Send a telemetry event without blocking the caller for meaningful time.
-///
-/// The bounded HTTP POST runs on a detached thread. The main thread waits only
-/// up to [`UPLOAD_GRACE_MS`] for it to finish on a healthy network; if the grace
-/// window elapses, the caller returns and the thread is abandoned (terminated at
-/// process exit). Delivery is best-effort and lossy by design: errors are
-/// already discarded, so blocking process exit on the upload would buy nothing.
-fn upload_event_best_effort(event: TelemetryEvent) {
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let _ = tx.send(upload_event(&event));
-    });
-    let _ = rx.recv_timeout(Duration::from_millis(UPLOAD_GRACE_MS));
+/// Path to a spool-related file in the same directory as `telemetry.json`.
+fn spool_file(name: &str) -> Option<PathBuf> {
+    Some(config_path()?.with_file_name(name))
 }
 
-fn upload_event(event: &TelemetryEvent) -> Result<(), String> {
+/// Append one serialized event line to the spool.
+///
+/// The line and its newline are written in a single `write_all`, so under
+/// `O_APPEND` two processes that exit at the same instant cannot interleave a
+/// half-line (each write lands atomically at the end). The append never takes
+/// the drain lock, so the hot path (process exit) pays only one small write.
+fn append_spool_line(path: &Path, line: &str) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    let mut record = String::with_capacity(line.len() + 1);
+    record.push_str(line);
+    record.push('\n');
+    file.write_all(record.as_bytes())
+}
+
+/// Persist a telemetry event for delivery on a later run instead of uploading it
+/// now.
+///
+/// Telemetry is recorded last, at process exit, once `elapsed` and `exit_code`
+/// are known, so a synchronous upload here would block the command by the full
+/// network round-trip. Spooling is sub-millisecond and network-free; the event
+/// is drained and POSTed by [`flush_spool_in_background`] at the start of the
+/// next telemetry-enabled run, where the upload overlaps the analysis work and
+/// adds no perceptible latency. Delivery stays best-effort and lossy by design
+/// (errors are discarded and the spool is bounded), but a fast run now defers
+/// its event rather than dropping it.
+fn spool_event(event: &TelemetryEvent) {
+    let Some(path) = spool_file(SPOOL_FILE_NAME) else {
+        return;
+    };
+    let Ok(line) = serde_json::to_string(event) else {
+        return;
+    };
+    if append_spool_line(&path, &line).is_ok() {
+        trim_spool_if_oversized(&path);
+    }
+}
+
+/// Keep the spool from growing without bound when no drain ever delivers.
+///
+/// The size check is a single `fstat`, so a normal append pays nothing. A trim
+/// only runs once the file grows past [`SPOOL_MAX_BYTES`], which happens only on
+/// a machine whose drains never complete (offline, or every run shorter than one
+/// upload). It takes the same flock as the drain so the two never rewrite the
+/// spool at once; on contention it skips and the next append retries. This is the
+/// load-bearing bound: the drain's own cap only applies once it has delivered
+/// something, so on a fast command whose drain is always abandoned mid-upload,
+/// this is what keeps the file bounded.
+fn trim_spool_if_oversized(path: &Path) {
+    let oversized = std::fs::metadata(path).is_ok_and(|meta| meta.len() > SPOOL_MAX_BYTES);
+    if !oversized {
+        return;
+    }
+    let lock_path = path.with_file_name(SPOOL_LOCK_NAME);
+    let Some(_lock) = SpoolLock::try_acquire(&lock_path) else {
+        return;
+    };
+    let Ok(contents) = std::fs::read_to_string(path) else {
+        return;
+    };
+    let lines: Vec<&str> = contents
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    if lines.len() <= SPOOL_MAX_EVENTS {
+        return;
+    }
+    let keep_from = lines.len() - SPOOL_MAX_EVENTS;
+    rewrite_spool(path, &lines[keep_from..]);
+}
+
+/// Atomically replace the spool with `lines`, or remove it when `lines` is empty.
+///
+/// The temp file is named per-process so a trim and a drain in different
+/// processes cannot clobber each other's staging file; the final `rename` is
+/// atomic, so a reader (or a process killed mid-write) sees either the old spool
+/// or the new one, never a torn file.
+fn rewrite_spool(path: &Path, lines: &[&str]) {
+    if lines.is_empty() {
+        let _ = std::fs::remove_file(path);
+        return;
+    }
+    let Some(parent) = path.parent() else {
+        return;
+    };
+    let mut body = String::with_capacity(lines.iter().map(|line| line.len() + 1).sum());
+    for line in lines {
+        body.push_str(line);
+        body.push('\n');
+    }
+    let tmp = parent.join(format!("telemetry-spool.{}.tmp", std::process::id()));
+    if std::fs::write(&tmp, body).is_ok() {
+        if std::fs::rename(&tmp, path).is_err() {
+            let _ = std::fs::remove_file(&tmp);
+        }
+    } else {
+        let _ = std::fs::remove_file(&tmp);
+    }
+}
+
+/// Drain any spooled telemetry events on a detached background thread.
+///
+/// Only runs when telemetry is `On`; the opt-out majority and the env kill
+/// switches short-circuit in [`effective_config`] before any spool I/O, and no
+/// thread is spawned when there is nothing to drain. The upload overlaps the
+/// analysis work that follows in `main`, so spooled events are delivered with no
+/// perceptible latency on any run longer than the POST, and a trivial run that
+/// exits first simply leaves them spooled for the run after.
+pub fn flush_spool_in_background() {
+    if !matches!(effective_config().mode, EffectiveMode::On) {
+        return;
+    }
+    let Some(spool) = spool_file(SPOOL_FILE_NAME) else {
+        return;
+    };
+    if !spool.exists() {
+        return;
+    }
+    std::thread::spawn(move || {
+        drain_spool_file(&spool, post_telemetry_payload);
+    });
+}
+
+/// POST spooled events oldest-first and drop the delivered ones in place.
+///
+/// Generic over the uploader so tests can inject a fake without touching the
+/// network. The flock is held for the whole drain so a concurrent drain or trim
+/// cannot rewrite the spool underneath it. Events are delivered oldest-first and
+/// the drain stops at the first POST failure (a likely-unreachable endpoint), so
+/// the removed set is always a prefix; the file is rewritten to the undelivered
+/// tail (capped, in case it grew while the endpoint was down). Crucially, if the
+/// thread is abandoned at process exit mid-upload, no rewrite runs and the spool
+/// is simply retried next run, bounded meanwhile by [`trim_spool_if_oversized`]
+/// rather than by this function completing.
+fn drain_spool_file<P>(spool: &Path, mut post: P)
+where
+    P: FnMut(&serde_json::Value) -> Result<(), String>,
+{
+    let lock_path = spool.with_file_name(SPOOL_LOCK_NAME);
+    let Some(_lock) = SpoolLock::try_acquire(&lock_path) else {
+        return;
+    };
+    let Ok(contents) = std::fs::read_to_string(spool) else {
+        return;
+    };
+    let lines: Vec<&str> = contents
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    if lines.is_empty() {
+        let _ = std::fs::remove_file(spool);
+        return;
+    }
+
+    let mut removed = 0usize;
+    for line in &lines {
+        match serde_json::from_str::<serde_json::Value>(line) {
+            // A corrupt (non-JSON) line cannot be delivered, so it is dropped.
+            Err(_) => removed += 1,
+            Ok(value) => {
+                if post(&value).is_ok() {
+                    removed += 1;
+                } else {
+                    // The endpoint is likely unreachable; stop and keep the rest.
+                    break;
+                }
+            }
+        }
+    }
+
+    if removed == 0 {
+        return;
+    }
+    let remaining = &lines[removed..];
+    let keep_from = remaining.len().saturating_sub(SPOOL_MAX_EVENTS);
+    rewrite_spool(spool, &remaining[keep_from..]);
+}
+
+/// POST one already-serialized telemetry payload to the events endpoint.
+fn post_telemetry_payload(payload: &serde_json::Value) -> Result<(), String> {
     let agent = try_api_agent_with_timeout(CONNECT_TIMEOUT_SECS, TOTAL_TIMEOUT_SECS)
         .map_err(|err| err.to_string())?;
     let url = api_url(TELEMETRY_PATH);
     let response = agent
         .post(&url)
-        .send_json(event)
+        .send_json(payload)
         .map_err(|err| err.to_string())?;
     if response.status().is_success() {
         Ok(())
     } else {
         Err(format!("telemetry endpoint returned {}", response.status()))
+    }
+}
+
+/// Advisory lock serialising spool rewrites across concurrent `fallow` processes.
+///
+/// A normal append never takes this lock (the hot path stays lock-free); only a
+/// drain or an over-cap trim does, so at most one process rewrites the spool at a
+/// time. The `.lock` sidecar is intentionally never deleted: an
+/// unlinked-but-flocked inode plus a racer's `open(O_CREAT)` would split the lock
+/// across two inodes. The kernel releases the lock when the file handle drops,
+/// including at process exit, so an abandoned drain never wedges the next run.
+struct SpoolLock {
+    _file: std::fs::File,
+}
+
+impl SpoolLock {
+    fn try_acquire(lock_path: &Path) -> Option<Self> {
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(lock_path)
+            .ok()?;
+        match file.try_lock() {
+            Ok(()) => Some(Self { _file: file }),
+            // Another process holds the lock; skip and let the next run retry.
+            Err(std::fs::TryLockError::WouldBlock) => None,
+            Err(std::fs::TryLockError::Error(err)) => {
+                tracing::debug!(error = %err, "could not acquire telemetry spool lock");
+                None
+            }
+        }
     }
 }
 
@@ -1475,5 +1698,230 @@ mod tests {
         assert_eq!(parse_integration_surface_override("cli_json"), None);
         assert_eq!(parse_integration_surface_override("github_action"), None);
         assert_eq!(parse_integration_surface_override(""), None);
+    }
+
+    #[test]
+    fn append_spool_line_accumulates_newline_terminated_lines() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join(SPOOL_FILE_NAME);
+        append_spool_line(&path, "{\"a\":1}").expect("append");
+        append_spool_line(&path, "{\"b\":2}").expect("append");
+        let contents = std::fs::read_to_string(&path).expect("read");
+        assert_eq!(contents, "{\"a\":1}\n{\"b\":2}\n");
+    }
+
+    #[test]
+    fn drain_delivers_all_events_and_removes_spool() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let spool = dir.path().join(SPOOL_FILE_NAME);
+        append_spool_line(&spool, "{\"n\":1}").expect("append");
+        append_spool_line(&spool, "{\"n\":2}").expect("append");
+
+        let mut seen = Vec::new();
+        drain_spool_file(&spool, |value| {
+            seen.push(
+                value
+                    .get("n")
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(0),
+            );
+            Ok(())
+        });
+
+        assert_eq!(seen, vec![1, 2]);
+        assert!(!spool.exists(), "fully delivered spool should be removed");
+    }
+
+    #[test]
+    fn drain_keeps_undelivered_and_stops_after_first_failure() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let spool = dir.path().join(SPOOL_FILE_NAME);
+        for n in 0..3 {
+            append_spool_line(&spool, &format!("{{\"n\":{n}}}")).expect("append");
+        }
+
+        let mut calls = 0;
+        drain_spool_file(&spool, |_value| {
+            calls += 1;
+            Err("offline".to_owned())
+        });
+
+        assert_eq!(
+            calls, 1,
+            "network-down short-circuit should stop after the first failure",
+        );
+        let contents = std::fs::read_to_string(&spool).expect("spool retained");
+        assert_eq!(
+            contents.lines().count(),
+            3,
+            "nothing delivered, so the spool is left untouched for the next run",
+        );
+    }
+
+    #[test]
+    fn drain_drops_corrupt_lines_and_delivers_valid_ones() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let spool = dir.path().join(SPOOL_FILE_NAME);
+        append_spool_line(&spool, "not json").expect("append");
+        append_spool_line(&spool, "{\"n\":7}").expect("append");
+
+        let mut seen = Vec::new();
+        drain_spool_file(&spool, |value| {
+            seen.push(value.clone());
+            Ok(())
+        });
+
+        assert_eq!(seen.len(), 1, "corrupt line dropped, valid line delivered");
+        assert_eq!(
+            seen[0].get("n").and_then(serde_json::Value::as_i64),
+            Some(7)
+        );
+        assert!(!spool.exists());
+    }
+
+    #[test]
+    fn drain_caps_undelivered_tail_after_partial_delivery() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let spool = dir.path().join(SPOOL_FILE_NAME);
+        let total = SPOOL_MAX_EVENTS + 6;
+        for n in 0..total {
+            append_spool_line(&spool, &format!("{{\"n\":{n}}}")).expect("append");
+        }
+
+        // Deliver the first event, then the endpoint goes down for the rest.
+        let mut calls = 0;
+        drain_spool_file(&spool, |_value| {
+            calls += 1;
+            if calls == 1 {
+                Ok(())
+            } else {
+                Err("offline".to_owned())
+            }
+        });
+        assert_eq!(calls, 2, "deliver one, fail on the second, then stop");
+
+        let contents = std::fs::read_to_string(&spool).expect("spool retained");
+        let kept: Vec<i64> = contents
+            .lines()
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+            .filter_map(|value| value.get("n").and_then(serde_json::Value::as_i64))
+            .collect();
+
+        // First event delivered (dropped), the 69-event tail capped to the newest 64.
+        assert_eq!(
+            kept.len(),
+            SPOOL_MAX_EVENTS,
+            "undelivered tail bounded to the cap"
+        );
+        assert_eq!(kept.first().copied(), Some(6), "oldest of the tail dropped");
+        assert_eq!(
+            kept.last().copied(),
+            Some((total - 1) as i64),
+            "newest kept"
+        );
+    }
+
+    #[test]
+    fn trim_caps_oversized_spool_to_newest_events() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let spool = dir.path().join(SPOOL_FILE_NAME);
+        // Pad each event so a modest line count blows past `SPOOL_MAX_BYTES`.
+        let pad = "x".repeat(650);
+        let total = 100;
+        for n in 0..total {
+            append_spool_line(&spool, &format!("{{\"n\":{n},\"pad\":\"{pad}\"}}")).expect("append");
+        }
+        assert!(
+            std::fs::metadata(&spool).expect("metadata").len() > SPOOL_MAX_BYTES,
+            "fixture must exceed the byte ceiling so the trim fires",
+        );
+
+        trim_spool_if_oversized(&spool);
+
+        let contents = std::fs::read_to_string(&spool).expect("spool retained");
+        let kept: Vec<i64> = contents
+            .lines()
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+            .filter_map(|value| value.get("n").and_then(serde_json::Value::as_i64))
+            .collect();
+
+        assert_eq!(
+            kept.len(),
+            SPOOL_MAX_EVENTS,
+            "write-path trim bounds the spool"
+        );
+        assert_eq!(
+            kept.first().copied(),
+            Some((total - SPOOL_MAX_EVENTS) as i64)
+        );
+        assert_eq!(
+            kept.last().copied(),
+            Some((total - 1) as i64),
+            "newest kept"
+        );
+    }
+
+    #[test]
+    fn trim_leaves_small_spool_untouched() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let spool = dir.path().join(SPOOL_FILE_NAME);
+        for n in 0..3 {
+            append_spool_line(&spool, &format!("{{\"n\":{n}}}")).expect("append");
+        }
+        let before = std::fs::read_to_string(&spool).expect("read");
+
+        trim_spool_if_oversized(&spool);
+
+        let after = std::fs::read_to_string(&spool).expect("read");
+        assert_eq!(
+            before, after,
+            "a spool under the byte ceiling is never rewritten"
+        );
+    }
+
+    #[test]
+    fn spool_lock_excludes_concurrent_acquire() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let lock_path = dir.path().join(SPOOL_LOCK_NAME);
+        let first = SpoolLock::try_acquire(&lock_path).expect("first acquire");
+        assert!(
+            SpoolLock::try_acquire(&lock_path).is_none(),
+            "second acquire should contend while the first is held",
+        );
+        drop(first);
+        assert!(
+            SpoolLock::try_acquire(&lock_path).is_some(),
+            "lock should be free after the holder drops",
+        );
+    }
+
+    #[test]
+    fn spooled_event_round_trips_through_drain() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let spool = dir.path().join(SPOOL_FILE_NAME);
+        let record = WorkflowRecord {
+            workflow: Workflow::DeadCode,
+            output: OutputFormat::Json,
+            quiet: true,
+            elapsed: Duration::from_millis(10),
+            exit_code: ExitCode::from(0),
+            failure_reason: None,
+            parent_run: None,
+        };
+        let line = serde_json::to_string(&build_workflow_event(&record)).expect("serialize");
+        append_spool_line(&spool, &line).expect("append");
+
+        let mut seen = Vec::new();
+        drain_spool_file(&spool, |value| {
+            seen.push(value.clone());
+            Ok(())
+        });
+
+        assert_eq!(seen.len(), 1);
+        assert_eq!(
+            seen[0].get("event").and_then(serde_json::Value::as_str),
+            Some("workflow_completed"),
+        );
+        assert!(!spool.exists());
     }
 }

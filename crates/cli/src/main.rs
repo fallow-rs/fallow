@@ -2464,6 +2464,11 @@ fn main() -> ExitCode {
     let telemetry_workflow = telemetry_workflow_for_command(cli.command.as_ref(), fmt.output);
     let telemetry_start = std::time::Instant::now();
 
+    // Deliver any telemetry events the previous run spooled at exit. Detached and
+    // gated on telemetry being enabled, so it overlaps the analysis work below and
+    // never blocks the command (the opt-out path does no spool I/O at all).
+    telemetry::flush_spool_in_background();
+
     let (root, threads) = match validate_inputs(&cli, fmt.output) {
         Ok(v) => v,
         Err(code) => {

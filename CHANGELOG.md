@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Telemetry now separates admin workflow buckets.** Opt-in CLI telemetry now records coarse `project_inventory`, `setup`, and `license` workflow labels for admin and setup commands that previously collapsed into `unknown`. The payload remains allowlisted and still does not include raw commands, paths, config values, repository identifiers, or license identifiers. (Closes [#1061](https://github.com/fallow-rs/fallow/issues/1061).)
 
+### Fixed
+
+- **Telemetry no longer adds latency to your command.** With telemetry enabled, every run previously waited at exit (up to 200ms, around 50ms on a healthy network and longer on a slow one) for the usage event to upload, which could more than double the wall time of a fast command and contradicted telemetry's own "never add meaningful latency" promise. Fallow now appends the event to a small local spool file (`telemetry-spool.jsonl`, in your config directory next to `telemetry.json`) at exit, which is sub-millisecond and never touches the network, and a later telemetry-enabled run uploads the spooled events on a background thread while it works, so the upload is never on your command's critical path. Telemetry stays opt-in and best-effort: a fast run now defers its event instead of dropping it, the spool is bounded so a machine that stays offline cannot grow it without limit, and disabled and inspect modes write and upload nothing.
+
 ## [2.90.0] - 2026-06-08
 
 ### Added
