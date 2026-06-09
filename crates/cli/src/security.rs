@@ -10,6 +10,7 @@
 //! only honest signals.
 
 use crate::report::sink::outln;
+use std::cmp::Ordering;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -23,7 +24,9 @@ use fallow_core::results::{
 use fallow_types::discover::DiscoveredFile;
 use fallow_types::envelope::Meta;
 use fallow_types::extract::ModuleInfo;
-use fallow_types::results::{SecurityRuntimeContext, SecurityRuntimeState, SecuritySeverity};
+use fallow_types::results::{
+    SecurityRuntimeContext, SecurityRuntimeState, SecuritySeverity, TaintConfidence,
+};
 use rustc_hash::FxHashSet;
 use serde::Serialize;
 use xxhash_rust::xxh3::xxh3_64;
@@ -972,14 +975,67 @@ fn apply_security_severity(findings: &mut [SecurityFinding]) {
 }
 
 fn sort_by_security_severity(findings: &mut [SecurityFinding]) {
-    findings.sort_by(|left, right| {
-        security_severity_rank(left.severity)
-            .cmp(&security_severity_rank(right.severity))
-            .then_with(|| left.path.cmp(&right.path))
-            .then_with(|| left.line.cmp(&right.line))
-            .then_with(|| left.col.cmp(&right.col))
-            .then_with(|| left.category.cmp(&right.category))
-    });
+    findings.sort_by(compare_security_priority);
+}
+
+fn compare_security_priority(left: &SecurityFinding, right: &SecurityFinding) -> Ordering {
+    security_severity_rank(left.severity)
+        .cmp(&security_severity_rank(right.severity))
+        .then_with(|| runtime_rank(left).cmp(&runtime_rank(right)))
+        .then_with(|| {
+            right
+                .reachability
+                .as_ref()
+                .is_some_and(|reach| reach.reachable_from_entry)
+                .cmp(
+                    &left
+                        .reachability
+                        .as_ref()
+                        .is_some_and(|reach| reach.reachable_from_entry),
+                )
+        })
+        .then_with(|| taint_rank(left).cmp(&taint_rank(right)))
+        .then_with(|| security_blast_radius(right).cmp(&security_blast_radius(left)))
+        .then_with(|| security_crosses_boundary(right).cmp(&security_crosses_boundary(left)))
+        .then_with(|| left.dead_code.is_some().cmp(&right.dead_code.is_some()))
+        .then_with(|| left.path.cmp(&right.path))
+        .then_with(|| left.line.cmp(&right.line))
+        .then_with(|| left.col.cmp(&right.col))
+        .then_with(|| left.category.cmp(&right.category))
+}
+
+fn taint_rank(finding: &SecurityFinding) -> u8 {
+    match finding
+        .reachability
+        .as_ref()
+        .and_then(|reach| reach.taint_confidence)
+    {
+        Some(TaintConfidence::ArgLevel) => 0,
+        Some(TaintConfidence::ModuleLevel) => 1,
+        None if finding.source_backed => 0,
+        None if finding
+            .reachability
+            .as_ref()
+            .is_some_and(|reach| reach.reachable_from_untrusted_source) =>
+        {
+            1
+        }
+        None => 2,
+    }
+}
+
+fn security_blast_radius(finding: &SecurityFinding) -> u32 {
+    finding
+        .reachability
+        .as_ref()
+        .map_or(0, |reach| reach.blast_radius)
+}
+
+fn security_crosses_boundary(finding: &SecurityFinding) -> bool {
+    finding
+        .reachability
+        .as_ref()
+        .is_some_and(|reach| reach.crosses_boundary)
 }
 
 const fn security_severity_rank(severity: SecuritySeverity) -> u8 {
@@ -1987,9 +2043,28 @@ mod tests {
         let mut medium_a = sample_finding(root);
         medium_a.path = root.join("a.ts");
         medium_a.severity = SecuritySeverity::Medium;
+        medium_a.reachability = Some(fallow_types::results::SecurityReachability {
+            reachable_from_entry: false,
+            reachable_from_untrusted_source: true,
+            taint_confidence: Some(TaintConfidence::ModuleLevel),
+            untrusted_source_hop_count: Some(1),
+            untrusted_source_trace: vec![],
+            blast_radius: 10,
+            crosses_boundary: false,
+        });
         let mut medium_b = sample_finding(root);
         medium_b.path = root.join("b.ts");
         medium_b.severity = SecuritySeverity::Medium;
+        medium_b.source_backed = true;
+        medium_b.reachability = Some(fallow_types::results::SecurityReachability {
+            reachable_from_entry: false,
+            reachable_from_untrusted_source: true,
+            taint_confidence: Some(TaintConfidence::ArgLevel),
+            untrusted_source_hop_count: Some(0),
+            untrusted_source_trace: vec![],
+            blast_radius: 1,
+            crosses_boundary: false,
+        });
         let mut findings = vec![low, medium_b, high, medium_a];
 
         sort_by_security_severity(&mut findings);
@@ -2001,8 +2076,8 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 (SecuritySeverity::High, std::ffi::OsStr::new("z.ts")),
-                (SecuritySeverity::Medium, std::ffi::OsStr::new("a.ts")),
                 (SecuritySeverity::Medium, std::ffi::OsStr::new("b.ts")),
+                (SecuritySeverity::Medium, std::ffi::OsStr::new("a.ts")),
                 (SecuritySeverity::Low, std::ffi::OsStr::new("a.ts")),
             ]
         );

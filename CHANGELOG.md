@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`fallow security --gate newly-reachable` now catches existing sinks newly exposed from entry points.** The gate compares head security candidates against a base-tree reachability snapshot from `--changed-since <ref>`, then exits 8 only when a matching candidate was not runtime-reachable in base but is runtime-reachable in head. Diff-only inputs still exit 2 because this mode needs a materialized base tree. JSON and SARIF reuse the existing additive `gate` block with `mode: "newly-reachable"`, and MCP `security_candidates` accepts the same gate value. (Closes [#1056](https://github.com/fallow-rs/fallow/issues/1056).)
 - **`fallow security` can extend HTTP request receiver detection from config.** `security.requestReceivers` now adds project-local request object names to the built-in `req` / `request` / `ctx` / `context` / `event` allowlist for `*.query`, `*.params`, and `*.body` source reads. Values are trimmed, case-normalized, and additive only, while ORM receivers remain excluded and `*.searchParams` stays ungated. (Closes [#1125](https://github.com/fallow-rs/fallow/issues/1125).)
 
+### Fixed
+
+- **`fallow security` now preserves source-backed ranking inside each severity tier.** The final CLI ordering still groups candidates by high, medium, then low severity, but same-tier ties now keep the existing runtime, arg-level/source-backed, module-level source reachability, blast-radius, boundary, and dead-code ranking signals before falling back to path order. This keeps stronger candidates ahead of weaker same-severity candidates without changing schema shape or treating any candidate as a proven vulnerability. (Closes [#1133](https://github.com/fallow-rs/fallow/issues/1133).)
+
 ## [2.91.0] - 2026-06-09
 
 ### Added
