@@ -61,6 +61,7 @@ use fallow_cli::report::dupes_grouping::{
 };
 use fallow_cli::security::{
     SecurityGate, SecurityGateMode, SecurityGateVerdict, SecurityOutput, SecuritySchemaVersion,
+    SecuritySeverityCounts, SecuritySummary, SecuritySummaryOutput,
 };
 use fallow_config::{AuthoredRule, LogicalGroup, LogicalGroupStatus};
 use fallow_core::duplicates::{
@@ -336,6 +337,9 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
         "ResolutionEvent",
         "TrendSummary",
         "SecurityOutput",
+        "SecuritySummaryOutput",
+        "SecuritySummary",
+        "SecuritySeverityCounts",
         "SecuritySchemaVersion",
         "SecurityGate",
         "SecurityGateMode",
@@ -571,6 +575,9 @@ fn derived_definitions() -> Map<String, Value> {
     let _ = generator.subschema_for::<SecurityGate>();
     let _ = generator.subschema_for::<SecuritySchemaVersion>();
     let _ = generator.subschema_for::<SecurityOutput>();
+    let _ = generator.subschema_for::<SecuritySummaryOutput>();
+    let _ = generator.subschema_for::<SecuritySummary>();
+    let _ = generator.subschema_for::<SecuritySeverityCounts>();
 
     let _ = generator.subschema_for::<FallowOutput>();
 
@@ -763,7 +770,7 @@ fn rewrite_fallow_output_definition(definitions: &mut Map<String, Value>) -> Res
         (
             "security",
             "SecurityOutput",
-            "`fallow security --format json`. Required `security_findings`,\n`unresolved_edge_files`, and `unresolved_callee_sites`; findings are\nunverified security candidates.",
+            "`fallow security --format json`. Full mode requires `security_findings`,\n`unresolved_edge_files`, and `unresolved_callee_sites`; summary mode requires\n`summary` and omits per-finding arrays.",
         ),
         (
             "dead-code",
@@ -1080,6 +1087,7 @@ mod drift_tests {
             ("CheckGrouped", "CheckGroupedOutput"),
             ("Impact", "ImpactReport"),
             ("Security", "SecurityOutput"),
+            ("SecuritySummary", "SecuritySummaryOutput"),
             ("Check", "CheckOutput"),
             ("Combined", "CombinedOutput"),
         ];
@@ -1102,6 +1110,7 @@ mod drift_tests {
                 FallowOutput::Dupes(_) => "Dupes",
                 FallowOutput::CheckGrouped(_) => "CheckGrouped",
                 FallowOutput::Impact(_) => "Impact",
+                FallowOutput::SecuritySummary(_) => "SecuritySummary",
                 FallowOutput::Security(_) => "Security",
                 FallowOutput::Check(_) => "Check",
                 FallowOutput::Combined(_) => "Combined",

@@ -11,6 +11,7 @@
 
 use crate::report::sink::outln;
 use std::cmp::Ordering;
+use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -179,6 +180,49 @@ pub struct SecurityOutput {
     /// members, aliased bindings). A zero finding count with a non-zero value
     /// here is NOT a clean bill.
     pub unresolved_callee_sites: usize,
+}
+
+/// Compact `fallow security --summary --format json` payload. Uses the same
+/// `kind: "security"` discriminator as the full payload, but omits candidate
+/// arrays and exposes only aggregate counts.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecuritySummaryOutput {
+    /// Schema version of this envelope.
+    pub schema_version: SecuritySchemaVersion,
+    /// Gate verdict, present only when `--gate <mode>` was set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate: Option<SecurityGate>,
+    /// Aggregate security counts after all filters, gates, and scopes.
+    pub summary: SecuritySummary,
+}
+
+/// Aggregate counts for `fallow security --summary --format json`.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecuritySummary {
+    /// Number of security candidates after all filters, gates, and scopes.
+    pub security_findings: usize,
+    /// Fixed severity counts for the closed security severity enum.
+    pub by_severity: SecuritySeverityCounts,
+    /// Finding counts by catalogue category, or by kind for findings without a
+    /// catalogue category.
+    pub by_category: BTreeMap<String, usize>,
+    /// Number of client files whose dynamic imports could not be followed.
+    pub unresolved_edge_files: usize,
+    /// Number of sink-shaped callees that could not be statically flattened.
+    pub unresolved_callee_sites: usize,
+    /// Number of attack-surface entries included in the prepared full output.
+    pub attack_surface_entries: usize,
+}
+
+/// Fixed severity counters for summary JSON.
+#[derive(Debug, Clone, Copy, Default, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecuritySeverityCounts {
+    pub high: usize,
+    pub medium: usize,
+    pub low: usize,
 }
 
 /// Options for `fallow security`, mirroring the global CLI flags it honors.
@@ -368,6 +412,7 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
     }
 
     let rendered = match opts.output {
+        OutputFormat::Json if opts.summary => render_json_summary(&output),
         OutputFormat::Json => render_json(&output),
         OutputFormat::Sarif => render_sarif(&output),
         _ if opts.summary => render_human_summary(&output),
@@ -1293,6 +1338,51 @@ pub fn render_json(output: &SecurityOutput) -> String {
     };
     serde_json::to_string_pretty(&value)
         .unwrap_or_else(|_| "{\"error\":\"failed to serialize security output\"}".to_owned())
+}
+
+/// JSON summary: compact aggregate payload without per-finding arrays.
+#[must_use]
+pub fn render_json_summary(output: &SecurityOutput) -> String {
+    let summary = SecuritySummaryOutput {
+        schema_version: output.schema_version,
+        gate: output.gate,
+        summary: security_summary(output),
+    };
+    let Ok(value) = crate::output_envelope::serialize_root_output_without_telemetry(
+        crate::output_envelope::FallowOutput::SecuritySummary(summary),
+    ) else {
+        return "{\"error\":\"failed to serialize security summary output\"}".to_owned();
+    };
+    serde_json::to_string_pretty(&value).unwrap_or_else(|_| {
+        "{\"error\":\"failed to serialize security summary output\"}".to_owned()
+    })
+}
+
+fn security_summary(output: &SecurityOutput) -> SecuritySummary {
+    let mut by_severity = SecuritySeverityCounts::default();
+    let mut by_category = BTreeMap::new();
+
+    for finding in &output.security_findings {
+        match finding.severity {
+            SecuritySeverity::High => by_severity.high += 1,
+            SecuritySeverity::Medium => by_severity.medium += 1,
+            SecuritySeverity::Low => by_severity.low += 1,
+        }
+        let category = finding
+            .category
+            .clone()
+            .unwrap_or_else(|| security_kind_key(finding.kind).to_owned());
+        *by_category.entry(category).or_insert(0) += 1;
+    }
+
+    SecuritySummary {
+        security_findings: output.security_findings.len(),
+        by_severity,
+        by_category,
+        unresolved_edge_files: output.unresolved_edge_files,
+        unresolved_callee_sites: output.unresolved_callee_sites,
+        attack_surface_entries: output.attack_surface.as_ref().map_or(0, Vec::len),
+    }
 }
 
 fn write_sarif_file(output: &SecurityOutput, path: &Path) -> Result<(), String> {
@@ -2599,6 +2689,52 @@ mod tests {
         assert_eq!(findings[0]["kind"], "client-server-leak");
         assert_eq!(findings[0]["path"], "src/app.tsx");
         assert_eq!(findings[0]["severity"], "high");
+    }
+
+    #[test]
+    fn json_summary_omits_finding_arrays_and_counts_security_findings() {
+        let root = Path::new("/proj/root");
+        let mut leak = relativize_finding(sample_finding(root), root);
+        leak.severity = SecuritySeverity::High;
+
+        let mut sink = relativize_finding(sample_finding(root), root);
+        sink.kind = SecurityFindingKind::TaintedSink;
+        sink.category = Some("dangerous-html".to_string());
+        sink.severity = SecuritySeverity::Medium;
+
+        let mut output = output_with(vec![leak, sink], 2);
+        output.unresolved_callee_sites = 3;
+
+        let rendered = render_json_summary(&output);
+        let value: serde_json::Value = serde_json::from_str(&rendered).expect("valid JSON");
+
+        assert_eq!(value["kind"], "security");
+        assert_eq!(value["schema_version"], "3");
+        assert!(value.get("security_findings").is_none());
+        assert!(value.get("attack_surface").is_none());
+        assert!(value.get("_meta").is_none());
+        assert_eq!(value["summary"]["security_findings"], 2);
+        assert_eq!(value["summary"]["by_severity"]["high"], 1);
+        assert_eq!(value["summary"]["by_severity"]["medium"], 1);
+        assert_eq!(value["summary"]["by_severity"]["low"], 0);
+        assert_eq!(value["summary"]["by_category"]["client-server-leak"], 1);
+        assert_eq!(value["summary"]["by_category"]["dangerous-html"], 1);
+        assert_eq!(value["summary"]["unresolved_edge_files"], 2);
+        assert_eq!(value["summary"]["unresolved_callee_sites"], 3);
+        assert_eq!(value["summary"]["attack_surface_entries"], 0);
+    }
+
+    #[test]
+    fn json_summary_preserves_gate_block() {
+        let output = output_with_gate(SecurityGateVerdict::Fail, 1);
+        let rendered = render_json_summary(&output);
+        let value: serde_json::Value = serde_json::from_str(&rendered).expect("valid JSON");
+
+        assert_eq!(value["kind"], "security");
+        assert_eq!(value["gate"]["mode"], "new");
+        assert_eq!(value["gate"]["verdict"], "fail");
+        assert_eq!(value["gate"]["new_count"], 1);
+        assert_eq!(value["summary"]["security_findings"], 0);
     }
 
     #[test]

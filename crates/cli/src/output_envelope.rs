@@ -59,6 +59,16 @@ pub fn serialize_root_output(output: FallowOutput) -> Result<serde_json::Value, 
     serialize_root_output_with_mode(output, EnvelopeMode::current())
 }
 
+pub fn serialize_root_output_without_telemetry(
+    output: FallowOutput,
+) -> Result<serde_json::Value, serde_json::Error> {
+    let mut value = serde_json::to_value(output)?;
+    if EnvelopeMode::current() == EnvelopeMode::Legacy {
+        remove_root_kind(&mut value);
+    }
+    Ok(value)
+}
+
 pub fn serialize_root_output_with_mode(
     output: FallowOutput,
     mode: EnvelopeMode,
@@ -1024,6 +1034,10 @@ pub enum FallowOutput {
     /// `command`, `total_issues`, or `report`.
     #[serde(rename = "impact")]
     Impact(crate::impact::ImpactReport),
+    /// `fallow security --summary --format json`. Required `summary`; no
+    /// per-finding arrays.
+    #[serde(rename = "security")]
+    SecuritySummary(crate::security::SecuritySummaryOutput),
     /// `fallow security --format json`. Required `security_findings`,
     /// `unresolved_edge_files`, and `unresolved_callee_sites`; ordered before the
     /// broader variants because the `security_findings` discriminator is uniquely

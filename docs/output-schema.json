@@ -7301,7 +7301,7 @@
           ]
         },
         {
-          "description": "`fallow security --format json`. Required `security_findings`,\n`unresolved_edge_files`, and `unresolved_callee_sites`; findings are\nunverified security candidates.",
+          "description": "`fallow security --format json`. Full mode requires `security_findings`,\n`unresolved_edge_files`, and `unresolved_callee_sites`; summary mode requires\n`summary` and omits per-finding arrays.",
           "allOf": [
             {
               "$ref": "#/definitions/SecurityOutput"
@@ -11125,6 +11125,96 @@
         }
       ],
       "description": "Severity level for rules.\n\nControls whether an issue type causes CI failure (`error`), is reported\nwithout failing (`warn`), or is suppressed entirely (`off`)."
+    },
+    "SecuritySummaryOutput": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "description": "Schema version of this envelope.",
+          "$ref": "#/definitions/SecuritySchemaVersion"
+        },
+        "gate": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SecurityGate"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Gate verdict, present only when `--gate <mode>` was set."
+        },
+        "summary": {
+          "description": "Aggregate security counts after all filters, gates, and scopes.",
+          "$ref": "#/definitions/SecuritySummary"
+        }
+      },
+      "required": [
+        "schema_version",
+        "summary"
+      ],
+      "description": "Compact `fallow security --summary --format json` payload. Uses the same\n`kind: \"security\"` discriminator as the full payload, but omits candidate\narrays and exposes only aggregate counts."
+    },
+    "SecuritySummary": {
+      "type": "object",
+      "properties": {
+        "security_findings": {
+          "type": "integer",
+          "description": "Number of security candidates after all filters, gates, and scopes."
+        },
+        "by_severity": {
+          "description": "Fixed severity counts for the closed security severity enum.",
+          "$ref": "#/definitions/SecuritySeverityCounts"
+        },
+        "by_category": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "description": "Finding counts by catalogue category, or by kind for findings without a\ncatalogue category."
+        },
+        "unresolved_edge_files": {
+          "type": "integer",
+          "description": "Number of client files whose dynamic imports could not be followed."
+        },
+        "unresolved_callee_sites": {
+          "type": "integer",
+          "description": "Number of sink-shaped callees that could not be statically flattened."
+        },
+        "attack_surface_entries": {
+          "type": "integer",
+          "description": "Number of attack-surface entries included in the prepared full output."
+        }
+      },
+      "required": [
+        "security_findings",
+        "by_severity",
+        "by_category",
+        "unresolved_edge_files",
+        "unresolved_callee_sites",
+        "attack_surface_entries"
+      ],
+      "description": "Aggregate counts for `fallow security --summary --format json`."
+    },
+    "SecuritySeverityCounts": {
+      "type": "object",
+      "properties": {
+        "high": {
+          "type": "integer"
+        },
+        "medium": {
+          "type": "integer"
+        },
+        "low": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "high",
+        "medium",
+        "low"
+      ],
+      "description": "Fixed severity counters for summary JSON."
     }
   }
 }
