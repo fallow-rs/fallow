@@ -31,6 +31,12 @@ import {
   countCheckIssues,
   planDegradation,
 } from "./analysis-utils.js";
+import {
+  AnalysisBackoffBlockedError,
+  AnalysisFailureBackoff,
+  buildAnalysisBackoffKey,
+  buildAnalysisProcessEnv,
+} from "./analysisBackoff.js";
 import { buildAuditArgs, parseAuditOutput } from "./audit-utils.js";
 import { showBinarySkewToastOnce } from "./binary-skew.js";
 import { findBinaryInPath, findLocalBinary, getExecutableExtension } from "./binary-utils.js";
@@ -123,10 +129,15 @@ export class FallowExecError extends Error {
   }
 }
 
+interface ExecFallowOptions {
+  readonly env?: Readonly<Record<string, string>>;
+}
+
 export const execFallow = (
   binary: string | null,
   args: ReadonlyArray<string>,
   cwd: string,
+  options: ExecFallowOptions = {},
 ): Promise<string> =>
   new Promise((resolve, reject) => {
     if (!binary) {
@@ -140,6 +151,7 @@ export const execFallow = (
 
     const child = child_process.spawn(binary, [...args], {
       cwd,
+      env: options.env ? { ...process.env, ...options.env } : process.env,
       stdio: ["ignore", "pipe", "pipe"],
     });
 
@@ -162,7 +174,11 @@ export const execFallow = (
 
     child.on("close", (code, signal) => {
       if (signal) {
-        reject(new Error(`fallow exited via signal ${signal}`));
+        const sizeLimit = options.env?.FALLOW_MAX_FILE_SIZE;
+        const hint = sizeLimit
+          ? ` The analysis process used FALLOW_MAX_FILE_SIZE=${sizeLimit}; lower it or add large generated files to ignorePatterns if memory pressure persists.`
+          : "";
+        reject(new Error(`fallow exited via signal ${signal}.${hint}`));
         return;
       }
 
@@ -276,12 +292,13 @@ const execAnalysisTolerant = async (
   cwd: string,
   binaryPath: string | null,
   outputChannel?: vscode.OutputChannel,
+  options: ExecFallowOptions = {},
 ): Promise<string> => {
   let args: string[] = [...initialArgs];
 
   for (;;) {
     try {
-      return await execFallow(binaryPath, args, cwd);
+      return await execFallow(binaryPath, args, cwd, options);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       const plan = planDegradation(message, args);
@@ -297,6 +314,31 @@ const execAnalysisTolerant = async (
       args = plan.args;
     }
   }
+};
+
+export interface RunAnalysisOptions {
+  readonly force?: boolean;
+  readonly backoff?: AnalysisFailureBackoff;
+}
+
+const analysisBackoff = new AnalysisFailureBackoff();
+
+const showAnalysisPausedMessage = (
+  failures: number,
+  cause: string | null,
+): void => {
+  const suffix = cause ? ` Last failure: ${cause}` : "";
+  void vscode.window
+    .showErrorMessage(
+      `Fallow analysis paused after ${failures} failed attempts for this workspace input. Automatic retries are stopped until you run analysis manually.${suffix}`,
+      "Retry now",
+    )
+    .then((choice) => {
+      if (choice === "Retry now") {
+        void vscode.commands.executeCommand("fallow.analyze");
+      }
+      return undefined;
+    });
 };
 
 /** Filter check results based on the user's issueTypes configuration. */
@@ -459,6 +501,7 @@ const showDryRunPreview = async (root: string, result: FallowFixResult): Promise
 export const runAnalysis = async (
   context: vscode.ExtensionContext,
   outputChannel?: vscode.OutputChannel,
+  options: RunAnalysisOptions = {},
 ): Promise<{
   check: FallowCheckResult | null;
   dupes: FallowDupesResult | null;
@@ -471,6 +514,8 @@ export const runAnalysis = async (
 
   let check: FallowCheckResult | null = null;
   let dupes: FallowDupesResult | null = null;
+  let backoffKey: string | null = null;
+  const backoff = options.backoff ?? analysisBackoff;
 
   try {
     // Resolve the CLI to run, self-healing to the managed binary when the one
@@ -499,6 +544,14 @@ export const runAnalysis = async (
       dupesIgnoreImports: getDuplicationIgnoreImportsOverride(),
       cliVersion,
     });
+    backoffKey = buildAnalysisBackoffKey(root, analysisArgs);
+    const blocked = backoff.blockedNotice(backoffKey, options.force === true);
+    if (blocked) {
+      if (blocked.shouldNotify) {
+        showAnalysisPausedMessage(blocked.failures, null);
+      }
+      throw new AnalysisBackoffBlockedError(blocked.failures);
+    }
 
     for (const skip of skipped) {
       noteBinarySkew(
@@ -508,21 +561,36 @@ export const runAnalysis = async (
       );
     }
 
-    const output = await execAnalysisTolerant(analysisArgs, root, cliBinary, outputChannel);
+    const output = await execAnalysisTolerant(analysisArgs, root, cliBinary, outputChannel, {
+      env: buildAnalysisProcessEnv(),
+    });
 
     if (output.trim().length === 0) {
       // execFallow already rejects on non-zero exit codes (other than 0/1);
       // an empty stdout on a successful exit means there was nothing to
       // report. Leave check/dupes null and return without raising.
+      backoff.recordSuccess(backoffKey);
       return { check, dupes };
     }
 
     const result = JSON.parse(output) as FallowCombinedResult;
     check = result.check ? filterCheckResult(result.check) : null;
     dupes = result.dupes ?? null;
+    backoff.recordSuccess(backoffKey);
   } catch (err) {
+    if (err instanceof AnalysisBackoffBlockedError) {
+      throw err;
+    }
     const message = err instanceof Error ? err.message : String(err);
-    void vscode.window.showErrorMessage(`Fallow analysis failed: ${message}`);
+    const paused =
+      backoffKey !== null && options.force !== true ? backoff.recordFailure(backoffKey) : null;
+    if (paused) {
+      if (paused.shouldNotify) {
+        showAnalysisPausedMessage(paused.failures, message);
+      }
+    } else {
+      void vscode.window.showErrorMessage(`Fallow analysis failed: ${message}`);
+    }
     throw err;
   }
 

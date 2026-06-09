@@ -270,7 +270,13 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     })();
   };
 
-  const triggerCliAnalysis = async (): Promise<boolean> => {
+  interface CliAnalysisTriggerOptions {
+    readonly force?: boolean;
+  }
+
+  const triggerCliAnalysis = async (
+    options: CliAnalysisTriggerOptions = {},
+  ): Promise<boolean> => {
     setStatusBarAnalyzing();
     return await vscode.window.withProgress(
       {
@@ -280,7 +286,9 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
       },
       async () => {
         try {
-          const { check, dupes } = await runAnalysis(context, outputChannel);
+          const { check, dupes } = await runAnalysis(context, outputChannel, {
+            force: options.force === true,
+          });
           lastCheckResult = check;
           lastDupesResult = dupes;
           updateViews();
@@ -564,7 +572,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   };
 
   const runCliAnalysisCommand = async (): Promise<void> => {
-    cliAnalysisRan = await triggerCliAnalysis();
+    cliAnalysisRan = await triggerCliAnalysis({ force: true });
   };
 
   const runHealthAnalysisCommand = async (): Promise<void> => {
@@ -810,7 +818,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
       // bypassing VS Code's editor, so did_save never fires for those files
       await restartClient(context, outputChannel, diagnosticFilter);
       // Re-run CLI analysis for tree views
-      cliAnalysisRan = await triggerCliAnalysis();
+      cliAnalysisRan = await triggerCliAnalysis({ force: true });
     }),
   );
 
