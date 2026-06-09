@@ -112,6 +112,29 @@ pub struct ModuleInfo {
     pub security_control_sites: Vec<SecurityControlSite>,
 }
 
+impl ModuleInfo {
+    /// Release extraction payload that resolution has already copied into the graph.
+    ///
+    /// This keeps fields needed by analysis, health, security, LSP, coverage,
+    /// and hash drift checks, while dropping vectors that otherwise duplicate
+    /// data owned by `ResolvedModule` or already credited into the module graph.
+    pub fn release_resolution_payload(&mut self) {
+        Self::release_vec(&mut self.dynamic_imports);
+        Self::release_vec(&mut self.require_calls);
+        Self::release_vec(&mut self.package_path_references);
+        Self::release_vec(&mut self.whole_object_uses);
+        Self::release_vec(&mut self.unused_import_bindings);
+        Self::release_vec(&mut self.type_referenced_import_bindings);
+        Self::release_vec(&mut self.value_referenced_import_bindings);
+        Self::release_vec(&mut self.namespace_object_aliases);
+        Self::release_vec(&mut self.auto_import_candidates);
+    }
+
+    fn release_vec<T>(values: &mut Vec<T>) {
+        *values = Vec::new();
+    }
+}
+
 /// Defensive control family detected on a source to sink path.
 #[derive(
     Debug,
@@ -952,9 +975,167 @@ pub struct ParseResult {
 mod tests {
     use super::*;
 
+    fn span() -> Span {
+        Span::new(0, 1)
+    }
+
+    macro_rules! assert_released {
+        ($values:expr) => {{
+            assert!($values.is_empty());
+            assert_eq!($values.capacity(), 0);
+        }};
+    }
+
     #[test]
     fn line_offsets_empty_string() {
         assert_eq!(compute_line_offsets(""), vec![0]);
+    }
+
+    #[test]
+    fn release_resolution_payload_drops_copied_vectors_only() {
+        let mut module = ModuleInfo {
+            file_id: FileId(7),
+            exports: vec![ExportInfo {
+                name: ExportName::Named("kept".to_string()),
+                local_name: None,
+                is_type_only: false,
+                is_side_effect_used: false,
+                visibility: VisibilityTag::None,
+                span: span(),
+                members: Vec::new(),
+                super_class: None,
+            }],
+            imports: vec![ImportInfo {
+                source: "node:child_process".to_string(),
+                imported_name: ImportedName::Default,
+                local_name: "childProcess".to_string(),
+                is_type_only: false,
+                from_style: false,
+                span: span(),
+                source_span: span(),
+            }],
+            re_exports: vec![ReExportInfo {
+                source: "./kept".to_string(),
+                imported_name: "kept".to_string(),
+                exported_name: "kept".to_string(),
+                is_type_only: false,
+                span: span(),
+            }],
+            dynamic_imports: vec![DynamicImportInfo {
+                source: "./dynamic".to_string(),
+                span: span(),
+                destructured_names: vec!["value".to_string()],
+                local_name: None,
+                is_speculative: false,
+            }],
+            dynamic_import_patterns: vec![DynamicImportPattern {
+                prefix: "./pages/".to_string(),
+                suffix: Some(".tsx".to_string()),
+                span: span(),
+            }],
+            require_calls: vec![RequireCallInfo {
+                source: "./required".to_string(),
+                span: span(),
+                source_span: span(),
+                destructured_names: Vec::new(),
+                local_name: Some("required".to_string()),
+            }],
+            package_path_references: vec!["react".to_string()],
+            member_accesses: vec![MemberAccess {
+                object: "Status".to_string(),
+                member: "Active".to_string(),
+            }],
+            whole_object_uses: vec!["Status".to_string()],
+            has_cjs_exports: true,
+            has_angular_component_template_url: true,
+            content_hash: 42,
+            suppressions: Vec::new(),
+            unknown_suppression_kinds: Vec::new(),
+            unused_import_bindings: vec!["unused".to_string()],
+            type_referenced_import_bindings: vec!["TypeOnly".to_string()],
+            value_referenced_import_bindings: vec!["Value".to_string()],
+            line_offsets: vec![0, 8],
+            complexity: vec![FunctionComplexity {
+                name: "work".to_string(),
+                line: 1,
+                col: 0,
+                cyclomatic: 2,
+                cognitive: 3,
+                line_count: 4,
+                param_count: 1,
+                source_hash: Some("hash".to_string()),
+                contributions: Vec::new(),
+            }],
+            flag_uses: vec![FlagUse {
+                flag_name: "FEATURE_X".to_string(),
+                kind: FlagUseKind::EnvVar,
+                line: 1,
+                col: 0,
+                guard_span_start: None,
+                guard_span_end: None,
+                sdk_name: None,
+            }],
+            class_heritage: vec![ClassHeritageInfo {
+                export_name: "Child".to_string(),
+                super_class: Some("Parent".to_string()),
+                implements: vec!["Contract".to_string()],
+                instance_bindings: Vec::new(),
+            }],
+            injection_tokens: vec![("TOKEN".to_string(), "Contract".to_string())],
+            local_type_declarations: vec![LocalTypeDeclaration {
+                name: "Contract".to_string(),
+                span: span(),
+            }],
+            public_signature_type_references: vec![PublicSignatureTypeReference {
+                export_name: "kept".to_string(),
+                type_name: "Contract".to_string(),
+                span: span(),
+            }],
+            namespace_object_aliases: vec![NamespaceObjectAlias {
+                via_export_name: "api".to_string(),
+                suffix: "read".to_string(),
+                namespace_local: "ns".to_string(),
+            }],
+            iconify_prefixes: vec!["hero".to_string()],
+            iconify_icon_names: vec!["hero-home".to_string()],
+            auto_import_candidates: vec!["useState".to_string()],
+            directives: vec!["use client".to_string()],
+            security_sinks: Vec::new(),
+            security_sinks_skipped: 1,
+            tainted_bindings: Vec::new(),
+            sanitized_sink_args: Vec::new(),
+            security_control_sites: Vec::new(),
+        };
+
+        module.release_resolution_payload();
+
+        assert_eq!(module.file_id, FileId(7));
+        assert_eq!(module.content_hash, 42);
+        assert_eq!(module.line_offsets, vec![0, 8]);
+        assert_eq!(module.imports.len(), 1);
+        assert_eq!(module.exports.len(), 1);
+        assert_eq!(module.re_exports.len(), 1);
+        assert_eq!(module.dynamic_import_patterns.len(), 1);
+        assert_eq!(module.member_accesses.len(), 1);
+        assert_eq!(module.complexity.len(), 1);
+        assert_eq!(module.flag_uses.len(), 1);
+        assert_eq!(module.class_heritage.len(), 1);
+        assert_eq!(module.injection_tokens.len(), 1);
+        assert_eq!(module.local_type_declarations.len(), 1);
+        assert_eq!(module.public_signature_type_references.len(), 1);
+        assert_eq!(module.iconify_prefixes.len(), 1);
+        assert_eq!(module.iconify_icon_names.len(), 1);
+        assert_eq!(module.directives.len(), 1);
+        assert_eq!(module.security_sinks_skipped, 1);
+        assert_released!(module.dynamic_imports);
+        assert_released!(module.require_calls);
+        assert_released!(module.package_path_references);
+        assert_released!(module.whole_object_uses);
+        assert_released!(module.unused_import_bindings);
+        assert_released!(module.type_referenced_import_bindings);
+        assert_released!(module.value_referenced_import_bindings);
+        assert_released!(module.namespace_object_aliases);
+        assert_released!(module.auto_import_candidates);
     }
 
     #[test]
