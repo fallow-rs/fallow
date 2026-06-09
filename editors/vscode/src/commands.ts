@@ -566,14 +566,14 @@ export const runAnalysis = async (
       // execFallow already rejects on non-zero exit codes (other than 0/1);
       // an empty stdout on a successful exit means there was nothing to
       // report. Leave check/dupes null and return without raising.
-      backoff.recordSuccess(backoffKey);
+      backoff.reset(backoffKey);
       return { check, dupes };
     }
 
     const result = JSON.parse(output) as FallowCombinedResult;
     check = result.check ? filterCheckResult(result.check) : null;
     dupes = result.dupes ?? null;
-    backoff.recordSuccess(backoffKey);
+    backoff.reset(backoffKey);
   } catch (err) {
     if (err instanceof AnalysisBackoffBlockedError) {
       throw err;

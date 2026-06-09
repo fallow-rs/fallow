@@ -1,4 +1,4 @@
-export const ANALYSIS_FAILURE_LIMIT = 3;
+const ANALYSIS_FAILURE_LIMIT = 3;
 export const ANALYSIS_DEFAULT_MAX_FILE_SIZE_MB = "5";
 
 interface BackoffEntry {
@@ -57,10 +57,6 @@ export class AnalysisFailureBackoff {
       notified: current.notified || shouldNotify,
     };
     return paused ? { failures, shouldNotify } : null;
-  }
-
-  recordSuccess(key: string): void {
-    this.reset(key);
   }
 
   reset(key?: string): void {
