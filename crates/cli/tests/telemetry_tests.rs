@@ -381,12 +381,65 @@ fn dupes_on_clean_project_sets_findings_present_false() {
         event.get("failure_reason").is_none(),
         "successful workflows must omit failure_reason"
     );
+    assert_eq!(event["run_scope"].as_str(), Some("full_project"));
+    assert_eq!(event["config_shape"].as_str(), Some("default"));
+    assert_eq!(event["output_destination"].as_str(), Some("stdout"));
+    assert_eq!(event["analysis_mode"].as_str(), Some("static"));
     assert_eq!(
         event["findings_present"].as_bool(),
         Some(false),
         "a genuinely clean dupes run must report findings_present=false"
     );
     assert_eq!(event["result_count_bucket"].as_str(), Some("0"));
+}
+
+#[test]
+fn file_scoped_custom_rules_file_output_are_coarse_context_dimensions() {
+    let dir = tempfile::tempdir().expect("temp project");
+    write_clean_project(dir.path());
+    let config_path = dir.path().join(".fallowrc.json");
+    let output_path = dir.path().join("report.json");
+    fs::write(
+        &config_path,
+        "{\n  \"rules\": {\n    \"unused-files\": \"warn\"\n  }\n}\n",
+    )
+    .expect("write config");
+    let config_arg = config_path.to_string_lossy().to_string();
+    let output_arg = output_path.to_string_lossy().to_string();
+
+    let (event, output) = inspect_event_output(
+        dir.path(),
+        &[
+            "--config",
+            &config_arg,
+            "--output-file",
+            &output_arg,
+            "dead-code",
+            "--file",
+            "src/index.ts",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+        &[],
+    );
+
+    assert_eq!(
+        output.code, 0,
+        "file scoped run should pass: {}",
+        output.stderr
+    );
+    assert_eq!(event["workflow"].as_str(), Some("dead_code"));
+    assert_eq!(event["run_scope"].as_str(), Some("file_scoped"));
+    assert_eq!(event["config_shape"].as_str(), Some("custom_rules"));
+    assert_eq!(event["output_destination"].as_str(), Some("file"));
+    assert_eq!(event["analysis_mode"].as_str(), Some("static"));
+    assert!(
+        !event
+            .to_string()
+            .contains(&dir.path().to_string_lossy().to_string()),
+        "telemetry event must not include raw project paths"
+    );
 }
 
 #[test]
@@ -534,6 +587,9 @@ fn audit_with_findings_sets_findings_present_true() {
     );
     assert_eq!(event["workflow"].as_str(), Some("audit"));
     assert_eq!(event["outcome"].as_str(), Some("issues_found"));
+    assert_eq!(event["run_scope"].as_str(), Some("changed_only"));
+    assert_eq!(event["output_destination"].as_str(), Some("stdout"));
+    assert_eq!(event["analysis_mode"].as_str(), Some("static"));
     assert_eq!(event["findings_present"].as_bool(), Some(true));
     assert_eq!(event["result_count_bucket"].as_str(), Some("1-9"));
 }
@@ -598,8 +654,56 @@ fn security_with_findings_sets_findings_present_true() {
     assert_eq!(output.code, 0, "security should exit 0: {}", output.stderr);
     assert_eq!(event["workflow"].as_str(), Some("security"));
     assert_eq!(event["outcome"].as_str(), Some("success"));
+    assert_eq!(event["analysis_mode"].as_str(), Some("security"));
     assert_eq!(event["findings_present"].as_bool(), Some(true));
     assert_eq!(event["result_count_bucket"].as_str(), Some("1-9"));
+}
+
+#[test]
+fn fix_dry_run_reports_fix_analysis_mode() {
+    let dir = tempfile::tempdir().expect("temp project");
+    write_clean_project(dir.path());
+
+    let (event, output) = inspect_event_output(
+        dir.path(),
+        &["fix", "--dry-run", "--format", "json", "--quiet"],
+        &[],
+    );
+
+    assert_eq!(output.code, 0, "fix dry-run should pass: {}", output.stderr);
+    assert_eq!(event["workflow"].as_str(), Some("fix"));
+    assert_eq!(event["analysis_mode"].as_str(), Some("fix"));
+}
+
+#[test]
+fn health_coverage_flag_reports_runtime_coverage_mode_without_path() {
+    let dir = tempfile::tempdir().expect("temp project");
+    write_clean_project(dir.path());
+
+    let (event, output) = inspect_event_output(
+        dir.path(),
+        &[
+            "health",
+            "--coverage",
+            "missing-coverage.json",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+        &[],
+    );
+
+    assert_eq!(
+        output.code, 2,
+        "missing coverage should fail: {}",
+        output.stderr
+    );
+    assert_eq!(event["workflow"].as_str(), Some("health"));
+    assert_eq!(event["analysis_mode"].as_str(), Some("runtime_coverage"));
+    assert!(
+        !event.to_string().contains("missing-coverage.json"),
+        "telemetry event must not include raw coverage paths"
+    );
 }
 
 #[test]

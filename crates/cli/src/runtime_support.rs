@@ -2,7 +2,9 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::{LazyLock, Mutex};
 
-use fallow_config::{FallowConfig, OutputFormat, ProductionAnalysis, ResolvedConfig};
+use fallow_config::{
+    FallowConfig, OutputFormat, PartialRulesConfig, ProductionAnalysis, ResolvedConfig, RulesConfig,
+};
 use rustc_hash::FxHashSet;
 
 static CONFIG_LOADED_LOGGED: LazyLock<Mutex<FxHashSet<PathBuf>>> =
@@ -171,6 +173,7 @@ pub fn load_config_for_analysis(
         }
     };
 
+    let loaded_user_config = user_config.is_some();
     let final_config = match user_config {
         Some(mut config) => {
             let production =
@@ -183,6 +186,7 @@ pub fn load_config_for_analysis(
             ..FallowConfig::default()
         },
     };
+    crate::telemetry::note_config_shape(config_shape_for(&final_config, loaded_user_config));
 
     if let Err(errors) =
         fallow_config::discover_and_validate_external_plugins(root, &final_config.plugins)
@@ -242,6 +246,34 @@ pub fn load_config_for_analysis(
     }
 
     Ok(resolved)
+}
+
+fn config_shape_for(
+    config: &FallowConfig,
+    loaded_user_config: bool,
+) -> crate::telemetry::ConfigShape {
+    if !config.plugins.is_empty() || !config.framework.is_empty() {
+        return crate::telemetry::ConfigShape::PluginsEnabled;
+    }
+    if config.rules != RulesConfig::default()
+        || config
+            .overrides
+            .iter()
+            .any(|entry| partial_rules_config_has_values(&entry.rules))
+    {
+        return crate::telemetry::ConfigShape::CustomRules;
+    }
+    if loaded_user_config {
+        return crate::telemetry::ConfigShape::CustomConfig;
+    }
+    crate::telemetry::ConfigShape::Default
+}
+
+fn partial_rules_config_has_values(rules: &PartialRulesConfig) -> bool {
+    serde_json::to_value(rules)
+        .ok()
+        .and_then(|value| value.as_object().map(|object| !object.is_empty()))
+        .unwrap_or(false)
 }
 
 /// Read the workspace-discovery diagnostics produced by the most recent

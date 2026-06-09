@@ -2461,8 +2461,13 @@ fn main() -> ExitCode {
         return code;
     }
     setup_tracing();
-    let telemetry_workflow = telemetry_workflow_for_command(cli.command.as_ref(), fmt.output);
-    let telemetry_start = std::time::Instant::now();
+    let telemetry_run = TelemetryRun {
+        workflow: telemetry_workflow_for_command(cli.command.as_ref(), fmt.output),
+        output: fmt.output,
+        quiet: fmt.quiet,
+        start: std::time::Instant::now(),
+        context: telemetry_context_for_command(&cli, cli.command.as_ref(), fmt.output),
+    };
 
     // Deliver any telemetry events the previous run spooled at exit. Detached and
     // gated on telemetry being enabled, so it overlaps the analysis work below and
@@ -2472,15 +2477,7 @@ fn main() -> ExitCode {
     let (root, threads) = match validate_inputs(&cli, fmt.output) {
         Ok(v) => v,
         Err(code) => {
-            return record_run_epilogue(
-                telemetry_workflow,
-                fmt.output,
-                fmt.quiet,
-                telemetry_start.elapsed(),
-                code,
-                None,
-                cli.parent_run.as_deref(),
-            );
+            return record_run_epilogue(telemetry_run, code, None, cli.parent_run.as_deref());
         }
     };
 
@@ -2499,10 +2496,7 @@ fn main() -> ExitCode {
         Err(msg) => {
             let code = emit_known_failure(&msg, 2, output, telemetry::FailureReason::Diff);
             return record_run_epilogue(
-                telemetry_workflow,
-                output,
-                quiet,
-                telemetry_start.elapsed(),
+                telemetry_run,
                 code,
                 Some(telemetry::FailureReason::Diff),
                 cli.parent_run.as_deref(),
@@ -2552,10 +2546,7 @@ fn main() -> ExitCode {
             telemetry::FailureReason::Validation,
         );
         return record_run_epilogue(
-            telemetry_workflow,
-            output,
-            quiet,
-            telemetry_start.elapsed(),
+            telemetry_run,
             code,
             Some(telemetry::FailureReason::Validation),
             cli.parent_run.as_deref(),
@@ -2570,10 +2561,7 @@ fn main() -> ExitCode {
             telemetry::FailureReason::Validation,
         );
         return record_run_epilogue(
-            telemetry_workflow,
-            output,
-            quiet,
-            telemetry_start.elapsed(),
+            telemetry_run,
             code,
             Some(telemetry::FailureReason::Validation),
             cli.parent_run.as_deref(),
@@ -2589,10 +2577,7 @@ fn main() -> ExitCode {
             telemetry::FailureReason::Validation,
         );
         return record_run_epilogue(
-            telemetry_workflow,
-            output,
-            quiet,
-            telemetry_start.elapsed(),
+            telemetry_run,
             code,
             Some(telemetry::FailureReason::Validation),
             cli.parent_run.as_deref(),
@@ -2606,10 +2591,7 @@ fn main() -> ExitCode {
             telemetry::FailureReason::Validation,
         );
         return record_run_epilogue(
-            telemetry_workflow,
-            output,
-            quiet,
-            telemetry_start.elapsed(),
+            telemetry_run,
             code,
             Some(telemetry::FailureReason::Validation),
             cli.parent_run.as_deref(),
@@ -2626,10 +2608,7 @@ fn main() -> ExitCode {
                 telemetry::FailureReason::Validation,
             );
             return record_run_epilogue(
-                telemetry_workflow,
-                output,
-                quiet,
-                telemetry_start.elapsed(),
+                telemetry_run,
                 code,
                 Some(telemetry::FailureReason::Validation),
                 cli.parent_run.as_deref(),
@@ -2675,41 +2654,162 @@ fn main() -> ExitCode {
     {
         return code;
     }
-    record_run_epilogue(
-        telemetry_workflow,
-        output,
-        quiet,
-        telemetry_start.elapsed(),
-        exit_code,
-        None,
-        cli.parent_run.as_deref(),
-    )
+    record_run_epilogue(telemetry_run, exit_code, None, cli.parent_run.as_deref())
+}
+
+#[derive(Clone, Copy)]
+struct TelemetryRun {
+    workflow: telemetry::Workflow,
+    output: fallow_config::OutputFormat,
+    quiet: bool,
+    start: std::time::Instant,
+    context: telemetry::WorkflowContext,
 }
 
 fn record_run_epilogue(
-    telemetry_workflow: telemetry::Workflow,
-    output: fallow_config::OutputFormat,
-    quiet: bool,
-    elapsed: std::time::Duration,
+    run: TelemetryRun,
     exit_code: ExitCode,
     failure_reason: Option<telemetry::FailureReason>,
     parent_run: Option<&str>,
 ) -> ExitCode {
     let cache_notice_printed = cache_notice::maybe_print_created_notice();
     telemetry::record_workflow(&telemetry::WorkflowRecord {
-        workflow: telemetry_workflow,
-        output,
-        quiet,
-        elapsed,
+        workflow: run.workflow,
+        output: run.output,
+        quiet: run.quiet,
+        elapsed: run.start.elapsed(),
         exit_code,
         failure_reason,
         parent_run,
+        context: run.context,
     });
     if exit_code == ExitCode::SUCCESS {
-        let note_printed = telemetry::maybe_print_opt_in_note(output, quiet);
-        update_check::maybe_nudge(output, quiet, note_printed || cache_notice_printed);
+        let note_printed = telemetry::maybe_print_opt_in_note(run.output, run.quiet);
+        update_check::maybe_nudge(run.output, run.quiet, note_printed || cache_notice_printed);
     }
     exit_code
+}
+
+fn telemetry_context_for_command(
+    cli: &Cli,
+    command: Option<&Command>,
+    output: fallow_config::OutputFormat,
+) -> telemetry::WorkflowContext {
+    telemetry::WorkflowContext {
+        run_scope: telemetry_run_scope_for_command(cli, command),
+        config_shape: telemetry_config_shape_for_cli(cli),
+        output_destination: telemetry_output_destination_for_command(cli, command, output),
+        analysis_mode: telemetry_analysis_mode_for_command(command),
+    }
+}
+
+fn telemetry_run_scope_for_command(cli: &Cli, command: Option<&Command>) -> telemetry::RunScope {
+    if command_is_file_scoped(command) {
+        return telemetry::RunScope::FileScoped;
+    }
+    if cli
+        .workspace
+        .as_ref()
+        .is_some_and(|workspaces| !workspaces.is_empty())
+        || cli.changed_workspaces.is_some()
+    {
+        return telemetry::RunScope::WorkspaceScoped;
+    }
+    if cli.changed_since.is_some()
+        || cli.diff_file.is_some()
+        || cli.diff_stdin
+        || matches!(command, Some(Command::Audit { .. }))
+    {
+        return telemetry::RunScope::ChangedOnly;
+    }
+    if command_runs_full_project_analysis(command) {
+        return telemetry::RunScope::FullProject;
+    }
+    telemetry::RunScope::Unknown
+}
+
+fn command_is_file_scoped(command: Option<&Command>) -> bool {
+    matches!(
+        command,
+        Some(Command::Check { file, .. } | Command::Security { file, .. }) if !file.is_empty()
+    )
+}
+
+fn command_runs_full_project_analysis(command: Option<&Command>) -> bool {
+    matches!(
+        command,
+        None | Some(
+            Command::Check { .. }
+                | Command::Dupes { .. }
+                | Command::Health { .. }
+                | Command::Flags { .. }
+                | Command::Security { .. }
+                | Command::Fix { .. }
+                | Command::Watch { .. },
+        )
+    )
+}
+
+fn telemetry_config_shape_for_cli(cli: &Cli) -> telemetry::ConfigShape {
+    if cli.config.is_some() {
+        telemetry::ConfigShape::CustomConfig
+    } else {
+        telemetry::ConfigShape::Unknown
+    }
+}
+
+fn telemetry_output_destination_for_command(
+    cli: &Cli,
+    command: Option<&Command>,
+    output: fallow_config::OutputFormat,
+) -> telemetry::OutputDestination {
+    if matches!(command, Some(Command::Ci { .. }))
+        || matches!(
+            output,
+            fallow_config::OutputFormat::PrCommentGithub
+                | fallow_config::OutputFormat::PrCommentGitlab
+                | fallow_config::OutputFormat::ReviewGithub
+                | fallow_config::OutputFormat::CodeClimate
+        )
+    {
+        return telemetry::OutputDestination::CiComment;
+    }
+    if cli.output_file.is_some() || cli.sarif_file.is_some() {
+        return telemetry::OutputDestination::File;
+    }
+    telemetry::OutputDestination::Stdout
+}
+
+fn telemetry_analysis_mode_for_command(command: Option<&Command>) -> telemetry::AnalysisMode {
+    match command {
+        Some(Command::Security { .. }) => telemetry::AnalysisMode::Security,
+        Some(Command::Fix { .. }) => telemetry::AnalysisMode::Fix,
+        Some(Command::Health {
+            runtime_coverage: Some(_),
+            ..
+        })
+        | Some(Command::Audit {
+            runtime_coverage: Some(_),
+            ..
+        })
+        | Some(Command::Coverage { .. }) => telemetry::AnalysisMode::ProductionCoverage,
+        Some(Command::Health {
+            coverage: Some(_), ..
+        })
+        | Some(Command::Audit {
+            coverage: Some(_), ..
+        }) => telemetry::AnalysisMode::RuntimeCoverage,
+        None
+        | Some(
+            Command::Check { .. }
+            | Command::Dupes { .. }
+            | Command::Health { .. }
+            | Command::Audit { .. }
+            | Command::Flags { .. }
+            | Command::Watch { .. },
+        ) => telemetry::AnalysisMode::Static,
+        _ => telemetry::AnalysisMode::Unknown,
+    }
 }
 
 fn handle_cli_parse_error(err: &clap::Error) -> ExitCode {

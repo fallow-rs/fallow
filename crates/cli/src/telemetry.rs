@@ -103,6 +103,7 @@ static RESULT_COUNT_CAPPED: AtomicU16 = AtomicU16::new(RESULT_COUNT_UNSET);
 static REPORT_TRUNCATED: AtomicU8 = AtomicU8::new(REPORT_TRUNCATION_UNSET);
 static TRUNCATION_REASON: AtomicU8 = AtomicU8::new(TRUNCATION_REASON_UNSET);
 static CACHE_STATE: AtomicU8 = AtomicU8::new(CACHE_STATE_UNSET);
+static CONFIG_SHAPE: AtomicU8 = AtomicU8::new(CONFIG_SHAPE_UNSET);
 
 const FINDINGS_UNSET: u8 = 0;
 const FINDINGS_CLEAN: u8 = 1;
@@ -134,6 +135,12 @@ const CACHE_STATE_COLD: u8 = 1;
 const CACHE_STATE_WARM: u8 = 2;
 const CACHE_STATE_PARTIAL: u8 = 3;
 const CACHE_STATE_UNKNOWN: u8 = 4;
+const CONFIG_SHAPE_UNSET: u8 = 0;
+const CONFIG_SHAPE_UNKNOWN: u8 = 1;
+const CONFIG_SHAPE_DEFAULT: u8 = 2;
+const CONFIG_SHAPE_CUSTOM_CONFIG: u8 = 3;
+const CONFIG_SHAPE_CUSTOM_RULES: u8 = 4;
+const CONFIG_SHAPE_PLUGINS_ENABLED: u8 = 5;
 
 /// Record whether the analysis that just completed surfaced any findings.
 ///
@@ -224,6 +231,43 @@ fn findings_present_from_state(state: u8) -> Option<bool> {
 
 fn findings_present() -> Option<bool> {
     findings_present_from_state(FINDINGS_PRESENT.load(Ordering::Relaxed))
+}
+
+/// Record the coarse loaded configuration shape after config resolution.
+///
+/// The most specific shape wins. This stores only fixed enum buckets and never
+/// records config paths, rule names, plugin names, or config values.
+pub fn note_config_shape(shape: ConfigShape) {
+    CONFIG_SHAPE.fetch_max(config_shape_rank(shape), Ordering::Relaxed);
+}
+
+fn config_shape_rank(shape: ConfigShape) -> u8 {
+    match shape {
+        ConfigShape::Unknown => CONFIG_SHAPE_UNKNOWN,
+        ConfigShape::Default => CONFIG_SHAPE_DEFAULT,
+        ConfigShape::CustomConfig => CONFIG_SHAPE_CUSTOM_CONFIG,
+        ConfigShape::CustomRules => CONFIG_SHAPE_CUSTOM_RULES,
+        ConfigShape::PluginsEnabled => CONFIG_SHAPE_PLUGINS_ENABLED,
+    }
+}
+
+fn config_shape_from_state(state: u8) -> Option<ConfigShape> {
+    match state {
+        CONFIG_SHAPE_UNKNOWN => Some(ConfigShape::Unknown),
+        CONFIG_SHAPE_DEFAULT => Some(ConfigShape::Default),
+        CONFIG_SHAPE_CUSTOM_CONFIG => Some(ConfigShape::CustomConfig),
+        CONFIG_SHAPE_CUSTOM_RULES => Some(ConfigShape::CustomRules),
+        CONFIG_SHAPE_PLUGINS_ENABLED => Some(ConfigShape::PluginsEnabled),
+        _ => None,
+    }
+}
+
+fn noted_config_shape() -> Option<ConfigShape> {
+    config_shape_from_state(CONFIG_SHAPE.load(Ordering::Relaxed))
+}
+
+fn config_shape_for_record(record: &WorkflowRecord<'_>) -> ConfigShape {
+    noted_config_shape().unwrap_or(record.context.config_shape)
 }
 
 /// Coarse allowlisted reason for a failed workflow telemetry event.
@@ -489,6 +533,58 @@ pub enum InvocationContext {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
+pub enum RunScope {
+    FullProject,
+    ChangedOnly,
+    WorkspaceScoped,
+    FileScoped,
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfigShape {
+    Default,
+    CustomConfig,
+    CustomRules,
+    PluginsEnabled,
+    Unknown,
+}
+
+#[expect(
+    dead_code,
+    reason = "telemetry schema reserves v1 destination values before every sink is wired"
+)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OutputDestination {
+    Stdout,
+    File,
+    CiComment,
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnalysisMode {
+    Static,
+    RuntimeCoverage,
+    ProductionCoverage,
+    Security,
+    Fix,
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WorkflowContext {
+    pub run_scope: RunScope,
+    pub config_shape: ConfigShape,
+    pub output_destination: OutputDestination,
+    pub analysis_mode: AnalysisMode,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum AgentSource {
     None,
     Codex,
@@ -592,6 +688,22 @@ struct TelemetryEvent {
     /// events and never derived from raw error text.
     #[serde(skip_serializing_if = "Option::is_none")]
     failure_reason: Option<FailureReason>,
+    /// Coarse scope of the analyzed files. Never includes file, workspace,
+    /// branch, or ref names.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    run_scope: Option<RunScope>,
+    /// Coarse shape of the loaded configuration. Never includes paths, rule
+    /// names, plugin names, or config values.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    config_shape: Option<ConfigShape>,
+    /// Coarse report destination bucket. Never includes destination paths,
+    /// URLs, or integration identifiers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    output_destination: Option<OutputDestination>,
+    /// Coarse analysis family. Never includes raw command lines or paths to
+    /// coverage artifacts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    analysis_mode: Option<AnalysisMode>,
     /// Whether the analysis surfaced any findings, independent of the exit-code
     /// `outcome` gate. Absent on commands that run no analysis (admin commands)
     /// and on older binaries. On the combined `code_quality_review` and `audit`
@@ -641,6 +753,7 @@ pub struct WorkflowRecord<'a> {
     pub exit_code: ExitCode,
     pub failure_reason: Option<FailureReason>,
     pub parent_run: Option<&'a str>,
+    pub context: WorkflowContext,
 }
 
 pub fn run(command: TelemetryCommand, output: OutputFormat) -> ExitCode {
@@ -868,6 +981,10 @@ fn build_workflow_event(
         outcome: outcome(record.exit_code),
         exit_code_bucket: exit_code_bucket(record.exit_code),
         failure_reason: failure_reason_for(record),
+        run_scope: Some(record.context.run_scope),
+        config_shape: Some(config_shape_for_record(record)),
+        output_destination: Some(record.context.output_destination),
+        analysis_mode: Some(record.context.analysis_mode),
         findings_present: findings_present(),
         result_count_bucket: result_count_bucket(),
         report_truncated: report_truncated(),
@@ -919,6 +1036,10 @@ fn status_changed_event(enabled: bool) -> TelemetryEvent {
         outcome: if enabled { "enabled" } else { "disabled" },
         exit_code_bucket: "0",
         failure_reason: None,
+        run_scope: None,
+        config_shape: None,
+        output_destination: None,
+        analysis_mode: None,
         findings_present: None,
         result_count_bucket: None,
         report_truncated: None,
@@ -950,6 +1071,10 @@ fn example_event() -> TelemetryEvent {
         outcome: "issues_found",
         exit_code_bucket: "1",
         failure_reason: None,
+        run_scope: Some(RunScope::ChangedOnly),
+        config_shape: Some(ConfigShape::CustomRules),
+        output_destination: Some(OutputDestination::Stdout),
+        analysis_mode: Some(AnalysisMode::Static),
         findings_present: Some(true),
         result_count_bucket: Some(ResultCountBucket::OneToNine),
         report_truncated: Some(true),
@@ -991,6 +1116,22 @@ fn field_purposes() -> Vec<(&'static str, &'static str)> {
         (
             "failure_reason",
             "Groups failed workflows into a fixed privacy-safe allowlist; unknown stays unknown instead of parsing raw error text.",
+        ),
+        (
+            "run_scope",
+            "Classifies the run as full-project, changed-only, workspace-scoped, or file-scoped without storing names or refs.",
+        ),
+        (
+            "config_shape",
+            "Classifies config as default, custom config, custom rules, or plugins enabled without storing paths, rules, plugin names, or values.",
+        ),
+        (
+            "output_destination",
+            "Classifies the report sink as stdout, file, or CI comment without storing paths or URLs.",
+        ),
+        (
+            "analysis_mode",
+            "Classifies static, runtime-coverage, production-coverage, security, and fix workflows without storing raw command lines.",
         ),
         (
             "findings_present",
@@ -1803,6 +1944,12 @@ mod tests {
             exit_code: ExitCode::from(1),
             failure_reason: None,
             parent_run: Some("tmp_123"),
+            context: WorkflowContext {
+                run_scope: RunScope::ChangedOnly,
+                config_shape: ConfigShape::CustomRules,
+                output_destination: OutputDestination::Stdout,
+                analysis_mode: AnalysisMode::Static,
+            },
         };
         let parent_run = parent_run_context(record.parent_run, record.workflow);
         let event = build_workflow_event(&record, &parent_run);
@@ -1811,6 +1958,10 @@ mod tests {
         assert_eq!(event.outcome, "issues_found");
         assert_eq!(event.exit_code_bucket, "1");
         assert_eq!(event.failure_reason, None);
+        assert_eq!(event.run_scope, Some(RunScope::ChangedOnly));
+        assert_eq!(event.config_shape, Some(ConfigShape::CustomRules));
+        assert_eq!(event.output_destination, Some(OutputDestination::Stdout));
+        assert_eq!(event.analysis_mode, Some(AnalysisMode::Static));
         assert_eq!(parent_run.token.as_deref(), Some("tmp_123"));
         assert!(event.has_parent_run);
         assert_eq!(event.run_role, RunRole::Followup);
@@ -1827,6 +1978,12 @@ mod tests {
             exit_code: ExitCode::from(2),
             failure_reason: None,
             parent_run: None,
+            context: WorkflowContext {
+                run_scope: RunScope::ChangedOnly,
+                config_shape: ConfigShape::Default,
+                output_destination: OutputDestination::Stdout,
+                analysis_mode: AnalysisMode::Static,
+            },
         };
         assert_eq!(
             failure_reason_for_value(&record, None),
@@ -1844,6 +2001,12 @@ mod tests {
             exit_code: ExitCode::from(2),
             failure_reason: Some(FailureReason::Diff),
             parent_run: None,
+            context: WorkflowContext {
+                run_scope: RunScope::ChangedOnly,
+                config_shape: ConfigShape::Default,
+                output_destination: OutputDestination::Stdout,
+                analysis_mode: AnalysisMode::Static,
+            },
         };
         assert_eq!(
             failure_reason_for_value(&record, Some(FailureReason::Validation)),
@@ -1917,6 +2080,12 @@ mod tests {
             exit_code: ExitCode::SUCCESS,
             failure_reason: None,
             parent_run: Some("tmp_abc-123"),
+            context: WorkflowContext {
+                run_scope: RunScope::FullProject,
+                config_shape: ConfigShape::Default,
+                output_destination: OutputDestination::Stdout,
+                analysis_mode: AnalysisMode::Static,
+            },
         };
         let parent_run = parent_run_context(record.parent_run, record.workflow);
         let event = build_workflow_event(&record, &parent_run);
@@ -2389,6 +2558,12 @@ mod tests {
             exit_code: ExitCode::from(0),
             failure_reason: None,
             parent_run: None,
+            context: WorkflowContext {
+                run_scope: RunScope::FullProject,
+                config_shape: ConfigShape::Default,
+                output_destination: OutputDestination::Stdout,
+                analysis_mode: AnalysisMode::Static,
+            },
         };
         let parent_run = parent_run_context(record.parent_run, record.workflow);
         let line =
@@ -2422,6 +2597,12 @@ mod tests {
             exit_code: ExitCode::SUCCESS,
             failure_reason: None,
             parent_run: Some("tmp_abc-123"),
+            context: WorkflowContext {
+                run_scope: RunScope::FullProject,
+                config_shape: ConfigShape::Default,
+                output_destination: OutputDestination::Stdout,
+                analysis_mode: AnalysisMode::Static,
+            },
         };
         let parent_run = parent_run_context(record.parent_run, record.workflow);
         let event = build_workflow_event(&record, &parent_run);

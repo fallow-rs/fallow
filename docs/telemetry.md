@@ -86,6 +86,10 @@ V2 events are workflow-level and coarse:
   "duration_bucket_ms": "500-2000",
   "outcome": "issues_found",
   "exit_code_bucket": "1",
+  "run_scope": "changed_only",
+  "config_shape": "custom_rules",
+  "output_destination": "stdout",
+  "analysis_mode": "static",
   "findings_present": true,
   "result_count_bucket": "1-9",
   "report_truncated": true,
@@ -98,7 +102,7 @@ V2 events are workflow-level and coarse:
 }
 ```
 
-`agent_source`, `failure_reason`, `findings_present`, `result_count_bucket`, `report_truncated`, `truncation_reason`, `cache_state`, and `mcp_tool` are optional. `agent_source` appears only on agent-driven runs. `failure_reason` appears only on failed workflow events and uses one of `validation`, `unsupported_format`, `config`, `analysis`, `diff`, `network`, `auth`, `gate`, `signal`, or `unknown`. `findings_present` and `result_count_bucket` are omitted by commands that run no analysis (and by older binaries). `report_truncated` appears only on report/comment output paths that can truncate output, and `truncation_reason` appears only when truncation happened. `cache_state` appears on combined `code_quality_review` runs and is one of `cold`, `warm`, `partial`, or `unknown`; `unknown` covers disabled cache or missing cache signal. `mcp_tool` appears only when a run came through the MCP server. `has_parent_run`, `run_role`, and `followup_kind` are always safe, allowlisted values and never include the raw parent-run token.
+`agent_source`, `failure_reason`, `findings_present`, `result_count_bucket`, `report_truncated`, `truncation_reason`, `cache_state`, `mcp_tool`, `run_scope`, `config_shape`, `output_destination`, and `analysis_mode` are optional. `agent_source` appears only on agent-driven runs. `failure_reason` appears only on failed workflow events and uses one of `validation`, `unsupported_format`, `config`, `analysis`, `diff`, `network`, `auth`, `gate`, `signal`, or `unknown`. `findings_present` and `result_count_bucket` are omitted by commands that run no analysis (and by older binaries). `report_truncated` appears only on report/comment output paths that can truncate output, and `truncation_reason` appears only when truncation happened. `cache_state` appears on combined `code_quality_review` runs and is one of `cold`, `warm`, `partial`, or `unknown`; `unknown` covers disabled cache or missing cache signal. `mcp_tool` appears only when a run came through the MCP server. `run_scope`, `config_shape`, `output_destination`, and `analysis_mode` appear on workflow events and use fixed coarse buckets only. `has_parent_run`, `run_role`, and `followup_kind` are always safe, allowlisted values and never include the raw parent-run token. All are omitted otherwise.
 
 Field purposes:
 
@@ -112,6 +116,10 @@ Field purposes:
 | `duration_bucket_ms` | Find slow workflow classes without collecting exact timings. |
 | `outcome` / `exit_code_bucket` | Measure clean runs, findings, and failures without uploading raw error text. |
 | `failure_reason` | Group failed workflows by a fixed privacy-safe allowlist; unknown stays `unknown` instead of parsing raw error text. |
+| `run_scope` | Classify the run as `full_project`, `changed_only`, `workspace_scoped`, `file_scoped`, or `unknown` without uploading file, workspace, branch, or ref names. |
+| `config_shape` | Classify configuration as `default`, `custom_config`, `custom_rules`, `plugins_enabled`, or `unknown` without uploading config paths, rule names, plugin names, or values. |
+| `output_destination` | Classify the report sink as `stdout`, `file`, `ci_comment`, or `unknown` without uploading destination paths, URLs, or integration identifiers. |
+| `analysis_mode` | Classify analysis as `static`, `runtime_coverage`, `production_coverage`, `security`, `fix`, or `unknown` without uploading raw command lines or coverage artifact paths. |
 | `findings_present` | Whether the analysis surfaced any findings, decoupled from the exit-code gate (so informational analyses like default-config `dupes`, which never exit non-zero, are still measurable). On the combined and audit workflows it is an OR across the sub-analyses; per-analysis find-rate is answerable on the standalone `dead_code`, `dupes`, `health`, and `security` workflows. |
 | `result_count_bucket` | Coarse result volume, one of `0`, `1-9`, `10-99`, `100+`, or `unknown`. Exact counts, paths, finding names, rule ids, and snippets are never uploaded. |
 | `report_truncated` / `truncation_reason` | Whether a report/comment output path was truncated and why. Reasons are `comment_limit`, `max_items`, `size_limit`, or `unknown`. |

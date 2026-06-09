@@ -60,7 +60,7 @@ impl std::str::FromStr for Severity {
 /// or are suppressed entirely. Most fields default to `Severity::Error`.
 ///
 /// Rule names use kebab-case in config files (e.g., `"unused-files": "error"`).
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct RulesConfig {
     #[serde(default, alias = "unused-file")]
