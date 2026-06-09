@@ -375,6 +375,12 @@ fn execute_health_inner(
         pre_computed_analysis,
         needs_analysis_output,
     )?;
+    if let Some(graph) = shared_analysis_output
+        .as_ref()
+        .and_then(|output| output.graph.as_ref())
+    {
+        crate::telemetry::note_graph_structure(graph);
+    }
 
     let mut runtime_coverage = analyze_runtime_coverage(
         opts,
@@ -676,6 +682,10 @@ fn execute_health_inner(
     } else {
         crate::telemetry::note_result_count(report.findings.len());
     }
+    crate::telemetry::note_analysis_scale(
+        Some(report.summary.files_analyzed),
+        Some(report.summary.functions_analyzed),
+    );
 
     Ok(HealthResult {
         report,

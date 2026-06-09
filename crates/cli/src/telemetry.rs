@@ -104,6 +104,9 @@ static REPORT_TRUNCATED: AtomicU8 = AtomicU8::new(REPORT_TRUNCATION_UNSET);
 static TRUNCATION_REASON: AtomicU8 = AtomicU8::new(TRUNCATION_REASON_UNSET);
 static CACHE_STATE: AtomicU8 = AtomicU8::new(CACHE_STATE_UNSET);
 static CONFIG_SHAPE: AtomicU8 = AtomicU8::new(CONFIG_SHAPE_UNSET);
+static FILE_COUNT_BUCKET: AtomicU8 = AtomicU8::new(SCALE_BUCKET_UNSET);
+static FUNCTION_COUNT_BUCKET: AtomicU8 = AtomicU8::new(SCALE_BUCKET_UNSET);
+static AVG_FAN_OUT_BUCKET: AtomicU8 = AtomicU8::new(SCALE_BUCKET_UNSET);
 
 const FINDINGS_UNSET: u8 = 0;
 const FINDINGS_CLEAN: u8 = 1;
@@ -141,6 +144,12 @@ const CONFIG_SHAPE_DEFAULT: u8 = 2;
 const CONFIG_SHAPE_CUSTOM_CONFIG: u8 = 3;
 const CONFIG_SHAPE_CUSTOM_RULES: u8 = 4;
 const CONFIG_SHAPE_PLUGINS_ENABLED: u8 = 5;
+const SCALE_BUCKET_UNSET: u8 = 0;
+const SCALE_BUCKET_SMALL: u8 = 1;
+const SCALE_BUCKET_MEDIUM: u8 = 2;
+const SCALE_BUCKET_LARGE: u8 = 3;
+const SCALE_BUCKET_XLARGE: u8 = 4;
+const SCALE_BUCKET_UNKNOWN: u8 = 5;
 
 /// Record whether the analysis that just completed surfaced any findings.
 ///
@@ -183,6 +192,32 @@ pub fn note_result_count(count: usize) {
         };
         Some(next)
     });
+}
+
+/// Record coarse analysis scale from counts already computed by an analysis.
+///
+/// Exact counts are bucketed immediately and never serialized. Repeated calls are
+/// safe: combined workflows keep the largest bucket reported by their
+/// sub-analyses.
+pub fn note_analysis_scale(file_count: Option<usize>, function_count: Option<usize>) {
+    if let Some(count) = file_count {
+        FILE_COUNT_BUCKET.fetch_max(file_count_bucket_state(count), Ordering::Relaxed);
+    }
+    if let Some(count) = function_count {
+        FUNCTION_COUNT_BUCKET.fetch_max(function_count_bucket_state(count), Ordering::Relaxed);
+    }
+}
+
+/// Record a coarse fan-out bucket from a graph already retained by the workflow.
+///
+/// This uses only the graph's existing module and edge counts. It never walks
+/// adjacency, resolves dependencies, or computes diameter/depth metrics for
+/// telemetry.
+pub fn note_graph_structure(graph: &fallow_core::graph::ModuleGraph) {
+    AVG_FAN_OUT_BUCKET.fetch_max(
+        avg_fan_out_bucket_state(graph.module_count(), graph.edge_count()),
+        Ordering::Relaxed,
+    );
 }
 
 /// Record a final command-level count after nested analysis helpers ran.
@@ -466,6 +501,121 @@ enum CacheState {
     Unknown,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+enum FileCountBucket {
+    #[serde(rename = "0-99")]
+    Small,
+    #[serde(rename = "100-499")]
+    Medium,
+    #[serde(rename = "500-1999")]
+    Large,
+    #[serde(rename = "2000+")]
+    XLarge,
+    #[serde(rename = "unknown")]
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+enum FunctionCountBucket {
+    #[serde(rename = "0-999")]
+    Small,
+    #[serde(rename = "1000-9999")]
+    Medium,
+    #[serde(rename = "10000+")]
+    Large,
+    #[serde(rename = "unknown")]
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+enum AvgFanOutBucket {
+    #[serde(rename = "0")]
+    Zero,
+    #[serde(rename = "<1")]
+    LessThanOne,
+    #[serde(rename = "1-2")]
+    OneToTwo,
+    #[serde(rename = "3+")]
+    ThreePlus,
+    #[serde(rename = "unknown")]
+    Unknown,
+}
+
+const fn file_count_bucket_state(count: usize) -> u8 {
+    match count {
+        0..=99 => SCALE_BUCKET_SMALL,
+        100..=499 => SCALE_BUCKET_MEDIUM,
+        500..=1999 => SCALE_BUCKET_LARGE,
+        _ => SCALE_BUCKET_XLARGE,
+    }
+}
+
+const fn function_count_bucket_state(count: usize) -> u8 {
+    match count {
+        0..=999 => SCALE_BUCKET_SMALL,
+        1000..=9999 => SCALE_BUCKET_MEDIUM,
+        _ => SCALE_BUCKET_LARGE,
+    }
+}
+
+const fn avg_fan_out_bucket_state(module_count: usize, edge_count: usize) -> u8 {
+    if module_count == 0 {
+        SCALE_BUCKET_UNKNOWN
+    } else if edge_count == 0 {
+        SCALE_BUCKET_SMALL
+    } else if edge_count < module_count {
+        SCALE_BUCKET_MEDIUM
+    } else if edge_count < module_count.saturating_mul(3) {
+        SCALE_BUCKET_LARGE
+    } else {
+        SCALE_BUCKET_XLARGE
+    }
+}
+
+const fn file_count_bucket_from_state(state: u8) -> Option<FileCountBucket> {
+    match state {
+        SCALE_BUCKET_SMALL => Some(FileCountBucket::Small),
+        SCALE_BUCKET_MEDIUM => Some(FileCountBucket::Medium),
+        SCALE_BUCKET_LARGE => Some(FileCountBucket::Large),
+        SCALE_BUCKET_XLARGE => Some(FileCountBucket::XLarge),
+        SCALE_BUCKET_UNKNOWN => Some(FileCountBucket::Unknown),
+        _ => None,
+    }
+}
+
+const fn function_count_bucket_from_state(state: u8) -> Option<FunctionCountBucket> {
+    match state {
+        SCALE_BUCKET_SMALL => Some(FunctionCountBucket::Small),
+        SCALE_BUCKET_MEDIUM => Some(FunctionCountBucket::Medium),
+        SCALE_BUCKET_LARGE => Some(FunctionCountBucket::Large),
+        SCALE_BUCKET_UNKNOWN => Some(FunctionCountBucket::Unknown),
+        _ => None,
+    }
+}
+
+const fn avg_fan_out_bucket_from_state(state: u8) -> Option<AvgFanOutBucket> {
+    match state {
+        SCALE_BUCKET_SMALL => Some(AvgFanOutBucket::Zero),
+        SCALE_BUCKET_MEDIUM => Some(AvgFanOutBucket::LessThanOne),
+        SCALE_BUCKET_LARGE => Some(AvgFanOutBucket::OneToTwo),
+        SCALE_BUCKET_XLARGE => Some(AvgFanOutBucket::ThreePlus),
+        SCALE_BUCKET_UNKNOWN => Some(AvgFanOutBucket::Unknown),
+        _ => None,
+    }
+}
+
+fn file_count_bucket() -> Option<FileCountBucket> {
+    file_count_bucket_from_state(FILE_COUNT_BUCKET.load(Ordering::Relaxed))
+}
+
+fn function_count_bucket() -> Option<FunctionCountBucket> {
+    function_count_bucket_from_state(FUNCTION_COUNT_BUCKET.load(Ordering::Relaxed))
+}
+
+fn avg_fan_out_bucket() -> Option<AvgFanOutBucket> {
+    avg_fan_out_bucket_from_state(AVG_FAN_OUT_BUCKET.load(Ordering::Relaxed))
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TelemetryCommand {
     Status,
@@ -704,6 +854,21 @@ struct TelemetryEvent {
     /// coverage artifacts.
     #[serde(skip_serializing_if = "Option::is_none")]
     analysis_mode: Option<AnalysisMode>,
+    /// Coarse analyzed-file scale from counts already computed by the workflow.
+    /// Exact counts never leave the analysis path. Combined workflows keep the
+    /// largest bucket reported by sub-analyses.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    file_count_bucket: Option<FileCountBucket>,
+    /// Coarse analyzed-function scale from counts already computed by the
+    /// workflow. Exact counts never leave the analysis path. Absent when the
+    /// workflow has no cheap function count.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    function_count_bucket: Option<FunctionCountBucket>,
+    /// Coarse average fan-out bucket derived only when a workflow already
+    /// retained a module graph. Uses existing graph counts, not dependency
+    /// traversal or graph-walk metrics.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    avg_fan_out_bucket: Option<AvgFanOutBucket>,
     /// Whether the analysis surfaced any findings, independent of the exit-code
     /// `outcome` gate. Absent on commands that run no analysis (admin commands)
     /// and on older binaries. On the combined `code_quality_review` and `audit`
@@ -985,6 +1150,9 @@ fn build_workflow_event(
         config_shape: Some(config_shape_for_record(record)),
         output_destination: Some(record.context.output_destination),
         analysis_mode: Some(record.context.analysis_mode),
+        file_count_bucket: file_count_bucket(),
+        function_count_bucket: function_count_bucket(),
+        avg_fan_out_bucket: avg_fan_out_bucket(),
         findings_present: findings_present(),
         result_count_bucket: result_count_bucket(),
         report_truncated: report_truncated(),
@@ -1040,6 +1208,9 @@ fn status_changed_event(enabled: bool) -> TelemetryEvent {
         config_shape: None,
         output_destination: None,
         analysis_mode: None,
+        file_count_bucket: None,
+        function_count_bucket: None,
+        avg_fan_out_bucket: None,
         findings_present: None,
         result_count_bucket: None,
         report_truncated: None,
@@ -1075,6 +1246,9 @@ fn example_event() -> TelemetryEvent {
         config_shape: Some(ConfigShape::CustomRules),
         output_destination: Some(OutputDestination::Stdout),
         analysis_mode: Some(AnalysisMode::Static),
+        file_count_bucket: Some(FileCountBucket::Large),
+        function_count_bucket: Some(FunctionCountBucket::Medium),
+        avg_fan_out_bucket: Some(AvgFanOutBucket::OneToTwo),
         findings_present: Some(true),
         result_count_bucket: Some(ResultCountBucket::OneToNine),
         report_truncated: Some(true),
@@ -1132,6 +1306,18 @@ fn field_purposes() -> Vec<(&'static str, &'static str)> {
         (
             "analysis_mode",
             "Classifies static, runtime-coverage, production-coverage, security, and fix workflows without storing raw command lines.",
+        ),
+        (
+            "file_count_bucket",
+            "Coarse analyzed-file scale from counts already computed by the workflow; exact counts are never uploaded. On combined and audit workflows it keeps the largest bucket reported by sub-analyses.",
+        ),
+        (
+            "function_count_bucket",
+            "Coarse analyzed-function scale from counts already computed by the workflow; exact counts are never uploaded. Absent when a workflow has no cheap function count.",
+        ),
+        (
+            "avg_fan_out_bucket",
+            "Coarse average fan-out from an already-retained module graph, derived from existing module and edge counts only. Absent when the workflow has no retained graph.",
         ),
         (
             "findings_present",
@@ -2057,6 +2243,101 @@ mod tests {
             Some(FailureReason::Unknown)
         );
         assert_eq!(failure_reason_from_state(99), None);
+    }
+
+    #[test]
+    fn file_count_bucket_boundaries_are_coarse() {
+        assert_eq!(
+            file_count_bucket_from_state(file_count_bucket_state(0)),
+            Some(FileCountBucket::Small)
+        );
+        assert_eq!(
+            file_count_bucket_from_state(file_count_bucket_state(99)),
+            Some(FileCountBucket::Small)
+        );
+        assert_eq!(
+            file_count_bucket_from_state(file_count_bucket_state(100)),
+            Some(FileCountBucket::Medium)
+        );
+        assert_eq!(
+            file_count_bucket_from_state(file_count_bucket_state(499)),
+            Some(FileCountBucket::Medium)
+        );
+        assert_eq!(
+            file_count_bucket_from_state(file_count_bucket_state(500)),
+            Some(FileCountBucket::Large)
+        );
+        assert_eq!(
+            file_count_bucket_from_state(file_count_bucket_state(1999)),
+            Some(FileCountBucket::Large)
+        );
+        assert_eq!(
+            file_count_bucket_from_state(file_count_bucket_state(2000)),
+            Some(FileCountBucket::XLarge)
+        );
+        assert_eq!(file_count_bucket_from_state(SCALE_BUCKET_UNSET), None);
+        assert_eq!(
+            file_count_bucket_from_state(SCALE_BUCKET_UNKNOWN),
+            Some(FileCountBucket::Unknown)
+        );
+    }
+
+    #[test]
+    fn function_count_bucket_boundaries_are_coarse() {
+        assert_eq!(
+            function_count_bucket_from_state(function_count_bucket_state(0)),
+            Some(FunctionCountBucket::Small)
+        );
+        assert_eq!(
+            function_count_bucket_from_state(function_count_bucket_state(999)),
+            Some(FunctionCountBucket::Small)
+        );
+        assert_eq!(
+            function_count_bucket_from_state(function_count_bucket_state(1000)),
+            Some(FunctionCountBucket::Medium)
+        );
+        assert_eq!(
+            function_count_bucket_from_state(function_count_bucket_state(9999)),
+            Some(FunctionCountBucket::Medium)
+        );
+        assert_eq!(
+            function_count_bucket_from_state(function_count_bucket_state(10000)),
+            Some(FunctionCountBucket::Large)
+        );
+        assert_eq!(function_count_bucket_from_state(SCALE_BUCKET_UNSET), None);
+        assert_eq!(
+            function_count_bucket_from_state(SCALE_BUCKET_UNKNOWN),
+            Some(FunctionCountBucket::Unknown)
+        );
+    }
+
+    #[test]
+    fn avg_fan_out_bucket_boundaries_are_coarse() {
+        assert_eq!(
+            avg_fan_out_bucket_from_state(avg_fan_out_bucket_state(0, 0)),
+            Some(AvgFanOutBucket::Unknown)
+        );
+        assert_eq!(
+            avg_fan_out_bucket_from_state(avg_fan_out_bucket_state(4, 0)),
+            Some(AvgFanOutBucket::Zero)
+        );
+        assert_eq!(
+            avg_fan_out_bucket_from_state(avg_fan_out_bucket_state(4, 3)),
+            Some(AvgFanOutBucket::LessThanOne)
+        );
+        assert_eq!(
+            avg_fan_out_bucket_from_state(avg_fan_out_bucket_state(4, 4)),
+            Some(AvgFanOutBucket::OneToTwo)
+        );
+        assert_eq!(
+            avg_fan_out_bucket_from_state(avg_fan_out_bucket_state(4, 11)),
+            Some(AvgFanOutBucket::OneToTwo)
+        );
+        assert_eq!(
+            avg_fan_out_bucket_from_state(avg_fan_out_bucket_state(4, 12)),
+            Some(AvgFanOutBucket::ThreePlus)
+        );
+        assert_eq!(avg_fan_out_bucket_from_state(SCALE_BUCKET_UNSET), None);
     }
 
     #[test]

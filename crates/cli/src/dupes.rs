@@ -417,6 +417,7 @@ fn execute_dupes_inner(
     // the duplication threshold gate. Exact counts are bucketed before
     // serialization.
     crate::telemetry::note_result_count(report.clone_groups.len());
+    crate::telemetry::note_analysis_scale(Some(report.stats.total_files), None);
 
     Ok(DupesResult {
         report,

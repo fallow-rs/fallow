@@ -308,6 +308,10 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         report::print_performance(timings, config.output);
     }
 
+    if let Some(ref graph) = trace_graph {
+        crate::telemetry::note_graph_structure(graph);
+    }
+
     if let Some(ref graph) = trace_graph
         && let Some(code) = output::handle_trace_output(
             graph,

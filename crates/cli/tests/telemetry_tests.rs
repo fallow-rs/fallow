@@ -385,6 +385,15 @@ fn dupes_on_clean_project_sets_findings_present_false() {
     assert_eq!(event["config_shape"].as_str(), Some("default"));
     assert_eq!(event["output_destination"].as_str(), Some("stdout"));
     assert_eq!(event["analysis_mode"].as_str(), Some("static"));
+    assert_eq!(event["file_count_bucket"].as_str(), Some("0-99"));
+    assert!(
+        event.get("function_count_bucket").is_none(),
+        "dupes has no cheap function count and must omit function_count_bucket"
+    );
+    assert!(
+        event.get("avg_fan_out_bucket").is_none(),
+        "dupes has no retained graph and must omit avg_fan_out_bucket"
+    );
     assert_eq!(
         event["findings_present"].as_bool(),
         Some(false),
@@ -440,6 +449,27 @@ fn file_scoped_custom_rules_file_output_are_coarse_context_dimensions() {
             .contains(&dir.path().to_string_lossy().to_string()),
         "telemetry event must not include raw project paths"
     );
+}
+
+#[test]
+fn health_reports_file_and_function_scale_buckets() {
+    let dir = tempfile::tempdir().expect("temp project");
+    write_clean_project(dir.path());
+    let event = inspect_event(dir.path(), &["health", "--format", "json", "--quiet"], &[]);
+    assert_eq!(event["workflow"].as_str(), Some("health"));
+    assert_eq!(event["file_count_bucket"].as_str(), Some("0-99"));
+    assert_eq!(event["function_count_bucket"].as_str(), Some("0-999"));
+}
+
+#[test]
+fn combined_review_reports_avg_fan_out_bucket_from_retained_graph() {
+    let dir = tempfile::tempdir().expect("temp project");
+    write_audit_base_project(dir.path());
+    let event = inspect_event(dir.path(), &["--format", "json", "--quiet"], &[]);
+    assert_eq!(event["workflow"].as_str(), Some("code_quality_review"));
+    assert_eq!(event["file_count_bucket"].as_str(), Some("0-99"));
+    assert_eq!(event["function_count_bucket"].as_str(), Some("0-999"));
+    assert_eq!(event["avg_fan_out_bucket"].as_str(), Some("<1"));
 }
 
 #[test]
@@ -800,6 +830,18 @@ fn setup_command_routes_to_setup_without_findings_present() {
     assert!(
         event.get("findings_present").is_none(),
         "setup commands must omit findings_present"
+    );
+    assert!(
+        event.get("file_count_bucket").is_none(),
+        "commands that run no analysis must omit file_count_bucket"
+    );
+    assert!(
+        event.get("function_count_bucket").is_none(),
+        "commands that run no analysis must omit function_count_bucket"
+    );
+    assert!(
+        event.get("avg_fan_out_bucket").is_none(),
+        "commands that run no analysis must omit avg_fan_out_bucket"
     );
 }
 
