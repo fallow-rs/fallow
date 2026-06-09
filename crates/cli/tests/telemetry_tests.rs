@@ -301,11 +301,82 @@ fn dupes_on_clean_project_sets_findings_present_false() {
     write_clean_project(dir.path());
     let event = inspect_event(dir.path(), &["dupes", "--format", "json", "--quiet"], &[]);
     assert_eq!(event["workflow"].as_str(), Some("dupes"));
+    assert!(
+        event.get("failure_reason").is_none(),
+        "successful workflows must omit failure_reason"
+    );
     assert_eq!(
         event["findings_present"].as_bool(),
         Some(false),
         "a genuinely clean dupes run must report findings_present=false"
     );
+}
+
+#[test]
+fn validation_failure_sets_failure_reason() {
+    let dir = tempfile::tempdir().expect("temp project");
+    write_clean_project(dir.path());
+
+    let (event, output) = inspect_event_output(
+        dir.path(),
+        &[
+            "--only",
+            "dead-code",
+            "--skip",
+            "dupes",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+        &[],
+    );
+
+    assert_eq!(output.code, 2, "validation should fail: {}", output.stderr);
+    assert_eq!(event["event"].as_str(), Some("workflow_failed"));
+    assert_eq!(event["workflow"].as_str(), Some("code_quality_review"));
+    assert_eq!(event["failure_reason"].as_str(), Some("validation"));
+}
+
+#[test]
+fn diff_setup_failure_sets_failure_reason() {
+    let dir = tempfile::tempdir().expect("temp project");
+    write_clean_project(dir.path());
+
+    let (event, output) = inspect_event_output(
+        dir.path(),
+        &[
+            "--diff-file",
+            "changes.diff",
+            "--diff-stdin",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+        &[],
+    );
+
+    assert_eq!(output.code, 2, "diff setup should fail: {}", output.stderr);
+    assert_eq!(event["event"].as_str(), Some("workflow_failed"));
+    assert_eq!(event["workflow"].as_str(), Some("code_quality_review"));
+    assert_eq!(event["failure_reason"].as_str(), Some("diff"));
+}
+
+#[test]
+fn unsupported_format_failure_sets_failure_reason() {
+    let dir = tempfile::tempdir().expect("temp project");
+    write_clean_project(dir.path());
+
+    let (event, output) =
+        inspect_event_output(dir.path(), &["--format", "sarif", "--quiet", "impact"], &[]);
+
+    assert_eq!(
+        output.code, 2,
+        "unsupported format should fail: {}",
+        output.stderr
+    );
+    assert_eq!(event["event"].as_str(), Some("workflow_failed"));
+    assert_eq!(event["workflow"].as_str(), Some("impact"));
+    assert_eq!(event["failure_reason"].as_str(), Some("unsupported_format"));
 }
 
 #[test]

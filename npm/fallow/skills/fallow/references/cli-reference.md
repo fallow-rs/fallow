@@ -1253,6 +1253,7 @@ The inspected payload prints to stderr; stdout (including `--format json`) is un
 - **CI is off** unless `FALLOW_TELEMETRY` is explicitly set in that CI environment; a local `enable` never turns on org CI telemetry.
 - **Transport:** when enabled, one small JSON event is POSTed to `https://api.fallow.cloud/v1/telemetry/events` (override with `FALLOW_API_URL`), no auth token, no cookies, on a background thread so it does not delay your command. Delivery is best-effort; errors never change output or exit code.
 - **Agent source:** wrappers may set `FALLOW_AGENT_SOURCE=<allowlisted-value>` so an enabled run is attributed correctly. Allowlist: `codex`, `claude_code`, `cursor`, `copilot`, `opencode`, `aider`, `roo`, `windsurf`, `gemini` (aliases `gemini_cli`/`antigravity`), `cline`, `continue`, `zed`, `goose`, `other_known`, `unknown`, `none`. Setting it never enables telemetry and uploads no codebase content.
+- **Failure reason:** failed workflow events may include coarse `failure_reason`: `validation`, `unsupported_format`, `config`, `analysis`, `diff`, `network`, `auth`, `gate`, `signal`, or `unknown`. Successful workflow events omit it, and unknown failures stay `unknown` instead of deriving a value from raw error text.
 
 ---
 

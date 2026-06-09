@@ -82,10 +82,22 @@ const MCP_TOOLS: &[&str] = &[
 /// (the CLI one-shot model); an in-process embedder running several batches
 /// would see the bit stick at the max across all of them.
 static FINDINGS_PRESENT: AtomicU8 = AtomicU8::new(FINDINGS_UNSET);
+static FAILURE_REASON: AtomicU8 = AtomicU8::new(FAILURE_REASON_UNSET);
 
 const FINDINGS_UNSET: u8 = 0;
 const FINDINGS_CLEAN: u8 = 1;
 const FINDINGS_FOUND: u8 = 2;
+const FAILURE_REASON_UNSET: u8 = 0;
+const FAILURE_REASON_UNKNOWN: u8 = 1;
+const FAILURE_REASON_VALIDATION: u8 = 2;
+const FAILURE_REASON_UNSUPPORTED_FORMAT: u8 = 3;
+const FAILURE_REASON_CONFIG: u8 = 4;
+const FAILURE_REASON_ANALYSIS: u8 = 5;
+const FAILURE_REASON_DIFF: u8 = 6;
+const FAILURE_REASON_NETWORK: u8 = 7;
+const FAILURE_REASON_AUTH: u8 = 8;
+const FAILURE_REASON_GATE: u8 = 9;
+const FAILURE_REASON_SIGNAL: u8 = 10;
 
 /// Record whether the analysis that just completed surfaced any findings.
 ///
@@ -114,6 +126,85 @@ fn findings_present_from_state(state: u8) -> Option<bool> {
 
 fn findings_present() -> Option<bool> {
     findings_present_from_state(FINDINGS_PRESENT.load(Ordering::Relaxed))
+}
+
+/// Coarse allowlisted reason for a failed workflow telemetry event.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FailureReason {
+    Validation,
+    UnsupportedFormat,
+    Config,
+    Analysis,
+    Diff,
+    Network,
+    Auth,
+    Gate,
+    Signal,
+    Unknown,
+}
+
+impl FailureReason {
+    const fn state(self) -> u8 {
+        match self {
+            Self::Validation => FAILURE_REASON_VALIDATION,
+            Self::UnsupportedFormat => FAILURE_REASON_UNSUPPORTED_FORMAT,
+            Self::Config => FAILURE_REASON_CONFIG,
+            Self::Analysis => FAILURE_REASON_ANALYSIS,
+            Self::Diff => FAILURE_REASON_DIFF,
+            Self::Network => FAILURE_REASON_NETWORK,
+            Self::Auth => FAILURE_REASON_AUTH,
+            Self::Gate => FAILURE_REASON_GATE,
+            Self::Signal => FAILURE_REASON_SIGNAL,
+            Self::Unknown => FAILURE_REASON_UNKNOWN,
+        }
+    }
+}
+
+/// Record a coarse failure reason without storing raw error text.
+///
+/// The first known reason wins. A later known reason may replace `unknown`, but
+/// otherwise earlier domain knowledge is kept so downstream code cannot
+/// accidentally overwrite a specific bucket with a generic one.
+pub fn note_failure_reason(reason: FailureReason) {
+    let next = reason.state();
+    let mut current = FAILURE_REASON.load(Ordering::Relaxed);
+    loop {
+        let should_update = current == FAILURE_REASON_UNSET
+            || (current == FAILURE_REASON_UNKNOWN && next != FAILURE_REASON_UNKNOWN);
+        if !should_update {
+            return;
+        }
+        match FAILURE_REASON.compare_exchange_weak(
+            current,
+            next,
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => return,
+            Err(actual) => current = actual,
+        }
+    }
+}
+
+fn failure_reason_from_state(state: u8) -> Option<FailureReason> {
+    match state {
+        FAILURE_REASON_UNKNOWN => Some(FailureReason::Unknown),
+        FAILURE_REASON_VALIDATION => Some(FailureReason::Validation),
+        FAILURE_REASON_UNSUPPORTED_FORMAT => Some(FailureReason::UnsupportedFormat),
+        FAILURE_REASON_CONFIG => Some(FailureReason::Config),
+        FAILURE_REASON_ANALYSIS => Some(FailureReason::Analysis),
+        FAILURE_REASON_DIFF => Some(FailureReason::Diff),
+        FAILURE_REASON_NETWORK => Some(FailureReason::Network),
+        FAILURE_REASON_AUTH => Some(FailureReason::Auth),
+        FAILURE_REASON_GATE => Some(FailureReason::Gate),
+        FAILURE_REASON_SIGNAL => Some(FailureReason::Signal),
+        _ => None,
+    }
+}
+
+fn failure_reason() -> Option<FailureReason> {
+    failure_reason_from_state(FAILURE_REASON.load(Ordering::Relaxed))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -261,6 +352,10 @@ struct TelemetryEvent {
     duration_bucket_ms: &'static str,
     outcome: &'static str,
     exit_code_bucket: &'static str,
+    /// Coarse allowlisted failure class. Present only on `workflow_failed`
+    /// events and never derived from raw error text.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    failure_reason: Option<FailureReason>,
     /// Whether the analysis surfaced any findings, independent of the exit-code
     /// `outcome` gate. Absent on commands that run no analysis (admin commands)
     /// and on older binaries. On the combined `code_quality_review` and `audit`
@@ -283,6 +378,7 @@ pub struct WorkflowRecord<'a> {
     pub quiet: bool,
     pub elapsed: Duration,
     pub exit_code: ExitCode,
+    pub failure_reason: Option<FailureReason>,
     pub parent_run: Option<&'a str>,
 }
 
@@ -505,9 +601,30 @@ fn build_workflow_event(record: &WorkflowRecord<'_>) -> TelemetryEvent {
         duration_bucket_ms: duration_bucket(record.elapsed),
         outcome: outcome(record.exit_code),
         exit_code_bucket: exit_code_bucket(record.exit_code),
+        failure_reason: failure_reason_for(record),
         findings_present: findings_present(),
         mcp_tool: mcp_tool(),
         parent_run: record.parent_run.and_then(sanitize_parent_run),
+    }
+}
+
+fn failure_reason_for(record: &WorkflowRecord<'_>) -> Option<FailureReason> {
+    failure_reason_for_value(record, failure_reason())
+}
+
+fn failure_reason_for_value(
+    record: &WorkflowRecord<'_>,
+    recorded: Option<FailureReason>,
+) -> Option<FailureReason> {
+    if is_failed(record.exit_code) {
+        Some(
+            record
+                .failure_reason
+                .or(recorded)
+                .unwrap_or(FailureReason::Unknown),
+        )
+    } else {
+        None
     }
 }
 
@@ -529,6 +646,7 @@ fn status_changed_event(enabled: bool) -> TelemetryEvent {
         duration_bucket_ms: "<100",
         outcome: if enabled { "enabled" } else { "disabled" },
         exit_code_bucket: "0",
+        failure_reason: None,
         findings_present: None,
         mcp_tool: None,
         parent_run: None,
@@ -553,6 +671,7 @@ fn example_event() -> TelemetryEvent {
         duration_bucket_ms: "500-2000",
         outcome: "issues_found",
         exit_code_bucket: "1",
+        failure_reason: None,
         findings_present: Some(true),
         mcp_tool: Some("find_dupes"),
         parent_run: Some("tmp_8x7p4k".to_owned()),
@@ -588,6 +707,10 @@ fn field_purposes() -> Vec<(&'static str, &'static str)> {
         (
             "exit_code_bucket",
             "Measures success, findings, and failure classes without raw errors.",
+        ),
+        (
+            "failure_reason",
+            "Groups failed workflows into a fixed privacy-safe allowlist; unknown stays unknown instead of parsing raw error text.",
         ),
         (
             "findings_present",
@@ -1081,6 +1204,7 @@ mod tests {
             quiet: true,
             elapsed: Duration::from_millis(750),
             exit_code: ExitCode::from(1),
+            failure_reason: None,
             parent_run: Some("tmp_123"),
         };
         let event = build_workflow_event(&record);
@@ -1088,7 +1212,87 @@ mod tests {
         assert_eq!(event.duration_bucket_ms, "500-2000");
         assert_eq!(event.outcome, "issues_found");
         assert_eq!(event.exit_code_bucket, "1");
+        assert_eq!(event.failure_reason, None);
         assert_eq!(event.parent_run.as_deref(), Some("tmp_123"));
+    }
+
+    #[test]
+    fn failed_workflow_defaults_to_unknown_failure_reason() {
+        let record = WorkflowRecord {
+            workflow: Workflow::Audit,
+            output: OutputFormat::Json,
+            quiet: true,
+            elapsed: Duration::from_millis(750),
+            exit_code: ExitCode::from(2),
+            failure_reason: None,
+            parent_run: None,
+        };
+        assert_eq!(
+            failure_reason_for_value(&record, None),
+            Some(FailureReason::Unknown)
+        );
+    }
+
+    #[test]
+    fn explicit_failure_reason_wins_for_failed_workflow() {
+        let record = WorkflowRecord {
+            workflow: Workflow::Audit,
+            output: OutputFormat::Json,
+            quiet: true,
+            elapsed: Duration::from_millis(750),
+            exit_code: ExitCode::from(2),
+            failure_reason: Some(FailureReason::Diff),
+            parent_run: None,
+        };
+        assert_eq!(
+            failure_reason_for_value(&record, Some(FailureReason::Validation)),
+            Some(FailureReason::Diff)
+        );
+    }
+
+    #[test]
+    fn failure_reason_state_accepts_only_allowlist() {
+        assert_eq!(
+            failure_reason_from_state(FAILURE_REASON_VALIDATION),
+            Some(FailureReason::Validation)
+        );
+        assert_eq!(
+            failure_reason_from_state(FAILURE_REASON_UNSUPPORTED_FORMAT),
+            Some(FailureReason::UnsupportedFormat)
+        );
+        assert_eq!(
+            failure_reason_from_state(FAILURE_REASON_CONFIG),
+            Some(FailureReason::Config)
+        );
+        assert_eq!(
+            failure_reason_from_state(FAILURE_REASON_ANALYSIS),
+            Some(FailureReason::Analysis)
+        );
+        assert_eq!(
+            failure_reason_from_state(FAILURE_REASON_DIFF),
+            Some(FailureReason::Diff)
+        );
+        assert_eq!(
+            failure_reason_from_state(FAILURE_REASON_NETWORK),
+            Some(FailureReason::Network)
+        );
+        assert_eq!(
+            failure_reason_from_state(FAILURE_REASON_AUTH),
+            Some(FailureReason::Auth)
+        );
+        assert_eq!(
+            failure_reason_from_state(FAILURE_REASON_GATE),
+            Some(FailureReason::Gate)
+        );
+        assert_eq!(
+            failure_reason_from_state(FAILURE_REASON_SIGNAL),
+            Some(FailureReason::Signal)
+        );
+        assert_eq!(
+            failure_reason_from_state(FAILURE_REASON_UNKNOWN),
+            Some(FailureReason::Unknown)
+        );
+        assert_eq!(failure_reason_from_state(99), None);
     }
 
     #[test]

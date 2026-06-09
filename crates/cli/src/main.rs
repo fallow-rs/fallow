@@ -1882,10 +1882,11 @@ fn validate_inputs(
     if matches!(&cli.command, Some(Command::Security { .. }))
         && let Some(flag) = unsupported_security_global(cli)
     {
-        return Err(emit_error(
+        return Err(emit_known_failure(
             &format!("{flag} is not valid with `fallow security`."),
             2,
             output,
+            telemetry::FailureReason::Validation,
         ));
     }
 
@@ -1893,33 +1894,54 @@ fn validate_inputs(
         && let Some(s) = config_path.to_str()
         && let Err(e) = validate::validate_no_control_chars(s, "--config")
     {
-        return Err(emit_error(&e, 2, output));
+        return Err(emit_known_failure(
+            &e,
+            2,
+            output,
+            telemetry::FailureReason::Validation,
+        ));
     }
     if let Some(ref ws_patterns) = cli.workspace {
         for ws in ws_patterns {
             if let Err(e) = validate::validate_no_control_chars(ws, "--workspace") {
-                return Err(emit_error(&e, 2, output));
+                return Err(emit_known_failure(
+                    &e,
+                    2,
+                    output,
+                    telemetry::FailureReason::Validation,
+                ));
             }
         }
     }
     if let Some(ref git_ref) = cli.changed_since
         && let Err(e) = validate::validate_no_control_chars(git_ref, "--changed-since")
     {
-        return Err(emit_error(&e, 2, output));
+        return Err(emit_known_failure(
+            &e,
+            2,
+            output,
+            telemetry::FailureReason::Validation,
+        ));
     }
     if let Some(ref git_ref) = cli.changed_workspaces
         && let Err(e) = validate::validate_no_control_chars(git_ref, "--changed-workspaces")
     {
-        return Err(emit_error(&e, 2, output));
+        return Err(emit_known_failure(
+            &e,
+            2,
+            output,
+            telemetry::FailureReason::Validation,
+        ));
     }
 
     if cli.workspace.is_some() && cli.changed_workspaces.is_some() {
-        return Err(emit_error(
+        return Err(emit_known_failure(
             "--workspace and --changed-workspaces are mutually exclusive. \
              Pick one: --workspace for explicit package names/globs, \
              --changed-workspaces for git-derived monorepo CI scoping.",
             2,
             output,
+            telemetry::FailureReason::Validation,
         ));
     }
 
@@ -1927,37 +1949,45 @@ fn validate_inputs(
         root
     } else {
         std::env::current_dir().map_err(|err| {
-            emit_error(
+            emit_known_failure(
                 &format!("Failed to get current directory: {err}"),
                 2,
                 output,
+                telemetry::FailureReason::Config,
             )
         })?
     };
     let root = match validate::validate_root(&raw_root) {
         Ok(r) => r,
         Err(e) => {
-            return Err(emit_error(&e, 2, output));
+            return Err(emit_known_failure(
+                &e,
+                2,
+                output,
+                telemetry::FailureReason::Config,
+            ));
         }
     };
 
     if let Some(ref git_ref) = cli.changed_since
         && let Err(e) = validate::validate_git_ref(git_ref)
     {
-        return Err(emit_error(
+        return Err(emit_known_failure(
             &format!("invalid --changed-since: {e}"),
             2,
             output,
+            telemetry::FailureReason::Validation,
         ));
     }
 
     if let Some(ref git_ref) = cli.changed_workspaces
         && let Err(e) = validate::validate_git_ref(git_ref)
     {
-        return Err(emit_error(
+        return Err(emit_known_failure(
             &format!("invalid --changed-workspaces: {e}"),
             2,
             output,
+            telemetry::FailureReason::Validation,
         ));
     }
 
@@ -1968,6 +1998,16 @@ fn validate_inputs(
     rayon_pool::configure_global_pool(threads);
 
     Ok((root, threads))
+}
+
+fn emit_known_failure(
+    message: &str,
+    exit_code: u8,
+    output: fallow_config::OutputFormat,
+    reason: telemetry::FailureReason,
+) -> ExitCode {
+    telemetry::note_failure_reason(reason);
+    emit_error(message, exit_code, output)
 }
 
 fn unsupported_security_global(cli: &Cli) -> Option<&'static str> {
@@ -2421,10 +2461,22 @@ fn main() -> ExitCode {
         return code;
     }
     setup_tracing();
+    let telemetry_workflow = telemetry_workflow_for_command(cli.command.as_ref(), fmt.output);
+    let telemetry_start = std::time::Instant::now();
 
     let (root, threads) = match validate_inputs(&cli, fmt.output) {
         Ok(v) => v,
-        Err(code) => return code,
+        Err(code) => {
+            return record_run_epilogue(
+                telemetry_workflow,
+                fmt.output,
+                fmt.quiet,
+                telemetry_start.elapsed(),
+                code,
+                None,
+                cli.parent_run.as_deref(),
+            );
+        }
     };
 
     let FormatConfig {
@@ -2439,7 +2491,18 @@ fn main() -> ExitCode {
         &root,
     ) {
         Ok(src) => src,
-        Err(msg) => return emit_error(&msg, 2, output),
+        Err(msg) => {
+            let code = emit_known_failure(&msg, 2, output, telemetry::FailureReason::Diff);
+            return record_run_epilogue(
+                telemetry_workflow,
+                output,
+                quiet,
+                telemetry_start.elapsed(),
+                code,
+                Some(telemetry::FailureReason::Diff),
+                cli.parent_run.as_deref(),
+            );
+        }
     };
     if diff_source.is_some() && cli.changed_since.is_some() && !quiet {
         eprintln!(
@@ -2477,36 +2540,96 @@ fn main() -> ExitCode {
             )
         )
     {
-        return emit_error(
+        let code = emit_known_failure(
             "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, dupes, health, security, or bare invocation",
             2,
             output,
+            telemetry::FailureReason::Validation,
+        );
+        return record_run_epilogue(
+            telemetry_workflow,
+            output,
+            quiet,
+            telemetry_start.elapsed(),
+            code,
+            Some(telemetry::FailureReason::Validation),
+            cli.parent_run.as_deref(),
         );
     }
 
     if (!cli.only.is_empty() || !cli.skip.is_empty()) && cli.command.is_some() {
-        return emit_error(
+        let code = emit_known_failure(
             "--only and --skip can only be used without a subcommand",
             2,
             output,
+            telemetry::FailureReason::Validation,
+        );
+        return record_run_epilogue(
+            telemetry_workflow,
+            output,
+            quiet,
+            telemetry_start.elapsed(),
+            code,
+            Some(telemetry::FailureReason::Validation),
+            cli.parent_run.as_deref(),
         );
     }
     if (cli.production_dead_code || cli.production_health || cli.production_dupes)
         && cli.command.is_some()
     {
-        return emit_error(
+        let code = emit_known_failure(
             "--production-dead-code, --production-health, and --production-dupes can only be used without a subcommand. For audit, pass them after `audit`",
             2,
             output,
+            telemetry::FailureReason::Validation,
+        );
+        return record_run_epilogue(
+            telemetry_workflow,
+            output,
+            quiet,
+            telemetry_start.elapsed(),
+            code,
+            Some(telemetry::FailureReason::Validation),
+            cli.parent_run.as_deref(),
         );
     }
     if !cli.only.is_empty() && !cli.skip.is_empty() {
-        return emit_error("--only and --skip are mutually exclusive", 2, output);
+        let code = emit_known_failure(
+            "--only and --skip are mutually exclusive",
+            2,
+            output,
+            telemetry::FailureReason::Validation,
+        );
+        return record_run_epilogue(
+            telemetry_workflow,
+            output,
+            quiet,
+            telemetry_start.elapsed(),
+            code,
+            Some(telemetry::FailureReason::Validation),
+            cli.parent_run.as_deref(),
+        );
     }
 
     let tolerance = match regression::Tolerance::parse(&cli.tolerance) {
         Ok(t) => t,
-        Err(e) => return emit_error(&format!("invalid --tolerance: {e}"), 2, output),
+        Err(e) => {
+            let code = emit_known_failure(
+                &format!("invalid --tolerance: {e}"),
+                2,
+                output,
+                telemetry::FailureReason::Validation,
+            );
+            return record_run_epilogue(
+                telemetry_workflow,
+                output,
+                quiet,
+                telemetry_start.elapsed(),
+                code,
+                Some(telemetry::FailureReason::Validation),
+                cli.parent_run.as_deref(),
+            );
+        }
     };
 
     let save_regression_file: Option<std::path::PathBuf> =
@@ -2527,8 +2650,6 @@ fn main() -> ExitCode {
     }
 
     let command = cli.command.take();
-    let telemetry_workflow = telemetry_workflow_for_command(command.as_ref(), output);
-    let telemetry_start = std::time::Instant::now();
     let dispatch = DispatchContext {
         cli: &cli,
         root: &root,
@@ -2555,6 +2676,7 @@ fn main() -> ExitCode {
         quiet,
         telemetry_start.elapsed(),
         exit_code,
+        None,
         cli.parent_run.as_deref(),
     )
 }
@@ -2565,6 +2687,7 @@ fn record_run_epilogue(
     quiet: bool,
     elapsed: std::time::Duration,
     exit_code: ExitCode,
+    failure_reason: Option<telemetry::FailureReason>,
     parent_run: Option<&str>,
 ) -> ExitCode {
     let cache_notice_printed = cache_notice::maybe_print_created_notice();
@@ -2574,6 +2697,7 @@ fn record_run_epilogue(
         quiet,
         elapsed,
         exit_code,
+        failure_reason,
         parent_run,
     });
     if exit_code == ExitCode::SUCCESS {
@@ -3106,10 +3230,11 @@ fn render_impact_status(root: &std::path::Path, output: fallow_config::OutputFor
         | fallow_config::OutputFormat::ReviewGithub
         | fallow_config::OutputFormat::ReviewGitlab
         | fallow_config::OutputFormat::Badge => {
-            return crate::error::emit_error(
+            return emit_known_failure(
                 "impact supports human, json, and markdown output",
                 2,
                 output,
+                telemetry::FailureReason::UnsupportedFormat,
             );
         }
     };
