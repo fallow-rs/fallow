@@ -274,6 +274,26 @@ fn write_clean_project(dir: &Path) {
     fs::write(src.join("index.ts"), "export const value = 41 + 1;\n").expect("write source");
 }
 
+fn write_cache_project(dir: &Path) {
+    let src = dir.join("src");
+    fs::create_dir_all(&src).expect("create src");
+    fs::write(
+        dir.join("package.json"),
+        "{\n  \"name\": \"cache-fixture\",\n  \"main\": \"src/index.ts\"\n}\n",
+    )
+    .expect("write package.json");
+    fs::write(
+        src.join("index.ts"),
+        "import { used } from './used';\nconsole.log(used());\n",
+    )
+    .expect("write index");
+    fs::write(
+        src.join("used.ts"),
+        "export const used = (): number => 42;\n",
+    )
+    .expect("write used");
+}
+
 fn write_many_unused_project(dir: &Path) {
     let src = dir.join("src");
     fs::create_dir_all(&src).expect("create src");
@@ -437,6 +457,60 @@ fn unsupported_format_failure_sets_failure_reason() {
 }
 
 #[test]
+fn code_quality_review_reports_cold_then_partial_cache_state() {
+    let dir = tempfile::tempdir().expect("temp project");
+    write_cache_project(dir.path());
+
+    let (first_event, first_output) =
+        inspect_event_output(dir.path(), &["--format", "json", "--quiet"], &[]);
+
+    assert_eq!(
+        first_output.code, 0,
+        "first combined run should exit 0: {}",
+        first_output.stderr
+    );
+    assert_eq!(
+        first_event["workflow"].as_str(),
+        Some("code_quality_review")
+    );
+    assert_eq!(first_event["cache_state"].as_str(), Some("cold"));
+
+    let (second_event, second_output) =
+        inspect_event_output(dir.path(), &["--format", "json", "--quiet"], &[]);
+
+    assert_eq!(
+        second_output.code, 0,
+        "second combined run should exit 0: {}",
+        second_output.stderr
+    );
+    assert_eq!(
+        second_event["workflow"].as_str(),
+        Some("code_quality_review")
+    );
+    assert_eq!(second_event["cache_state"].as_str(), Some("partial"));
+}
+
+#[test]
+fn code_quality_review_with_no_cache_reports_unknown_cache_state() {
+    let dir = tempfile::tempdir().expect("temp project");
+    write_cache_project(dir.path());
+
+    let (event, output) = inspect_event_output(
+        dir.path(),
+        &["--no-cache", "--format", "json", "--quiet"],
+        &[],
+    );
+
+    assert_eq!(
+        output.code, 0,
+        "combined run should exit 0: {}",
+        output.stderr
+    );
+    assert_eq!(event["workflow"].as_str(), Some("code_quality_review"));
+    assert_eq!(event["cache_state"].as_str(), Some("unknown"));
+}
+
+#[test]
 fn audit_with_findings_sets_findings_present_true() {
     let dir = tempfile::tempdir().expect("temp project");
     init_audit_repo(dir.path());
@@ -586,6 +660,10 @@ fn admin_command_emits_no_findings_present_key() {
     assert!(
         event.get("result_count_bucket").is_none(),
         "commands that run no analysis must omit result_count_bucket"
+    );
+    assert!(
+        event.get("cache_state").is_none(),
+        "commands that run no analysis must omit cache_state"
     );
 }
 

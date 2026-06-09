@@ -102,6 +102,7 @@ static FAILURE_REASON: AtomicU8 = AtomicU8::new(FAILURE_REASON_UNSET);
 static RESULT_COUNT_CAPPED: AtomicU16 = AtomicU16::new(RESULT_COUNT_UNSET);
 static REPORT_TRUNCATED: AtomicU8 = AtomicU8::new(REPORT_TRUNCATION_UNSET);
 static TRUNCATION_REASON: AtomicU8 = AtomicU8::new(TRUNCATION_REASON_UNSET);
+static CACHE_STATE: AtomicU8 = AtomicU8::new(CACHE_STATE_UNSET);
 
 const FINDINGS_UNSET: u8 = 0;
 const FINDINGS_CLEAN: u8 = 1;
@@ -128,6 +129,11 @@ const TRUNCATION_REASON_UNKNOWN: u8 = 1;
 const TRUNCATION_REASON_MAX_ITEMS: u8 = 2;
 const TRUNCATION_REASON_COMMENT_LIMIT: u8 = 3;
 const TRUNCATION_REASON_SIZE_LIMIT: u8 = 4;
+const CACHE_STATE_UNSET: u8 = 0;
+const CACHE_STATE_COLD: u8 = 1;
+const CACHE_STATE_WARM: u8 = 2;
+const CACHE_STATE_PARTIAL: u8 = 3;
+const CACHE_STATE_UNKNOWN: u8 = 4;
 
 /// Record whether the analysis that just completed surfaced any findings.
 ///
@@ -375,6 +381,47 @@ fn truncation_reason() -> Option<TruncationReason> {
     truncation_reason_from_state(TRUNCATION_REASON.load(Ordering::Relaxed))
         .or(Some(TruncationReason::Unknown))
 }
+
+/// Record a coarse cache state from aggregate cache counts.
+///
+/// Only the derived enum is serialized. Raw hit and miss counts remain local.
+pub fn note_cache_state(cache_hits: usize, cache_misses: usize) {
+    let value = match (cache_hits, cache_misses) {
+        (0, 0) => CACHE_STATE_UNKNOWN,
+        (0, _) => CACHE_STATE_COLD,
+        (_, 0) => CACHE_STATE_WARM,
+        (_, _) => CACHE_STATE_PARTIAL,
+    };
+    CACHE_STATE.store(value, Ordering::Relaxed);
+}
+
+pub fn note_cache_state_unknown() {
+    CACHE_STATE.store(CACHE_STATE_UNKNOWN, Ordering::Relaxed);
+}
+
+fn cache_state_from_state(state: u8) -> Option<CacheState> {
+    match state {
+        CACHE_STATE_COLD => Some(CacheState::Cold),
+        CACHE_STATE_WARM => Some(CacheState::Warm),
+        CACHE_STATE_PARTIAL => Some(CacheState::Partial),
+        CACHE_STATE_UNKNOWN => Some(CacheState::Unknown),
+        _ => None,
+    }
+}
+
+fn cache_state() -> Option<CacheState> {
+    cache_state_from_state(CACHE_STATE.load(Ordering::Relaxed))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum CacheState {
+    Cold,
+    Warm,
+    Partial,
+    Unknown,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TelemetryCommand {
     Status,
@@ -565,6 +612,10 @@ struct TelemetryEvent {
     /// `report_truncated` is true.
     #[serde(skip_serializing_if = "Option::is_none")]
     truncation_reason: Option<TruncationReason>,
+    /// Coarse cache state for combined `code_quality_review` runs.
+    /// Derived from aggregate cache hits and misses, never raw counts or paths.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache_state: Option<CacheState>,
     /// The MCP tool that triggered this run, when invoked through the MCP
     /// server. Allowlisted to the fixed set of tool names; absent otherwise.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -821,6 +872,7 @@ fn build_workflow_event(
         result_count_bucket: result_count_bucket(),
         report_truncated: report_truncated(),
         truncation_reason: truncation_reason(),
+        cache_state: cache_state(),
         mcp_tool: mcp_tool(),
         has_parent_run: parent_run.has_parent_run,
         run_role: parent_run.run_role,
@@ -871,6 +923,7 @@ fn status_changed_event(enabled: bool) -> TelemetryEvent {
         result_count_bucket: None,
         report_truncated: None,
         truncation_reason: None,
+        cache_state: None,
         mcp_tool: None,
         has_parent_run: false,
         run_role: RunRole::Root,
@@ -901,6 +954,7 @@ fn example_event() -> TelemetryEvent {
         result_count_bucket: Some(ResultCountBucket::OneToNine),
         report_truncated: Some(true),
         truncation_reason: Some(TruncationReason::CommentLimit),
+        cache_state: Some(CacheState::Warm),
         mcp_tool: Some("find_dupes"),
         has_parent_run: true,
         run_role: RunRole::Followup,
@@ -953,6 +1007,10 @@ fn field_purposes() -> Vec<(&'static str, &'static str)> {
         (
             "truncation_reason",
             "Why report/comment output was truncated: comment_limit, max_items, size_limit, or unknown.",
+        ),
+        (
+            "cache_state",
+            "Segments combined code-quality review durations into cold, warm, partial, or unknown cache states without uploading cache paths or raw counts.",
         ),
         (
             "mcp_tool",
@@ -2048,6 +2106,28 @@ mod tests {
             result_count_bucket_from_state(100),
             Some(ResultCountBucket::OneHundredPlus)
         );
+    }
+
+    #[test]
+    fn cache_state_maps_to_allowlisted_enum() {
+        assert_eq!(cache_state_from_state(CACHE_STATE_UNSET), None);
+        assert_eq!(
+            cache_state_from_state(CACHE_STATE_COLD),
+            Some(CacheState::Cold)
+        );
+        assert_eq!(
+            cache_state_from_state(CACHE_STATE_WARM),
+            Some(CacheState::Warm)
+        );
+        assert_eq!(
+            cache_state_from_state(CACHE_STATE_PARTIAL),
+            Some(CacheState::Partial)
+        );
+        assert_eq!(
+            cache_state_from_state(CACHE_STATE_UNKNOWN),
+            Some(CacheState::Unknown)
+        );
+        assert_eq!(cache_state_from_state(99), None);
     }
 
     #[test]

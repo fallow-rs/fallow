@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Telemetry now separates admin workflow buckets.** Opt-in CLI telemetry now records coarse `project_inventory`, `setup`, and `license` workflow labels for admin and setup commands that previously collapsed into `unknown`. The payload remains allowlisted and still does not include raw commands, paths, config values, repository identifiers, or license identifiers. (Closes [#1061](https://github.com/fallow-rs/fallow/issues/1061).)
 - **Telemetry now describes parent-run follow-ups with safe dimensions.** Inspect-mode and uploaded workflow events use `has_parent_run`, `run_role`, and `followup_kind` instead of exposing raw parent-run tokens as event properties. Valid `--parent-run` values can still be used as private upload correlation metadata, while paths and free-form values are dropped. (Closes [#1078](https://github.com/fallow-rs/fallow/issues/1078).)
+- **Telemetry now segments code quality review duration by cache state.** Opt-in CLI telemetry for combined `code_quality_review` runs can now include an allowlisted `cache_state` value of `cold`, `warm`, `partial`, or `unknown`, so slow duration buckets can be interpreted without exact timings, raw cache counts, paths, repository identifiers, or cache directories. (Closes [#1062](https://github.com/fallow-rs/fallow/issues/1062).)
 
 ### Fixed
 

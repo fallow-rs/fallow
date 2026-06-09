@@ -90,6 +90,7 @@ V2 events are workflow-level and coarse:
   "result_count_bucket": "1-9",
   "report_truncated": true,
   "truncation_reason": "comment_limit",
+  "cache_state": "warm",
   "mcp_tool": "find_dupes",
   "has_parent_run": true,
   "run_role": "followup",
@@ -97,7 +98,7 @@ V2 events are workflow-level and coarse:
 }
 ```
 
-`agent_source`, `failure_reason`, `findings_present`, `result_count_bucket`, `report_truncated`, `truncation_reason`, and `mcp_tool` are optional. `agent_source` appears only on agent-driven runs. `failure_reason` appears only on failed workflow events and uses one of `validation`, `unsupported_format`, `config`, `analysis`, `diff`, `network`, `auth`, `gate`, `signal`, or `unknown`. `findings_present` and `result_count_bucket` are omitted by commands that run no analysis (and by older binaries). `report_truncated` appears only on report/comment output paths that can truncate output, and `truncation_reason` appears only when truncation happened. `mcp_tool` appears only when a run came through the MCP server. `has_parent_run`, `run_role`, and `followup_kind` are always safe, allowlisted values and never include the raw parent-run token.
+`agent_source`, `failure_reason`, `findings_present`, `result_count_bucket`, `report_truncated`, `truncation_reason`, `cache_state`, and `mcp_tool` are optional. `agent_source` appears only on agent-driven runs. `failure_reason` appears only on failed workflow events and uses one of `validation`, `unsupported_format`, `config`, `analysis`, `diff`, `network`, `auth`, `gate`, `signal`, or `unknown`. `findings_present` and `result_count_bucket` are omitted by commands that run no analysis (and by older binaries). `report_truncated` appears only on report/comment output paths that can truncate output, and `truncation_reason` appears only when truncation happened. `cache_state` appears on combined `code_quality_review` runs and is one of `cold`, `warm`, `partial`, or `unknown`; `unknown` covers disabled cache or missing cache signal. `mcp_tool` appears only when a run came through the MCP server. `has_parent_run`, `run_role`, and `followup_kind` are always safe, allowlisted values and never include the raw parent-run token.
 
 Field purposes:
 
@@ -114,6 +115,7 @@ Field purposes:
 | `findings_present` | Whether the analysis surfaced any findings, decoupled from the exit-code gate (so informational analyses like default-config `dupes`, which never exit non-zero, are still measurable). On the combined and audit workflows it is an OR across the sub-analyses; per-analysis find-rate is answerable on the standalone `dead_code`, `dupes`, `health`, and `security` workflows. |
 | `result_count_bucket` | Coarse result volume, one of `0`, `1-9`, `10-99`, `100+`, or `unknown`. Exact counts, paths, finding names, rule ids, and snippets are never uploaded. |
 | `report_truncated` / `truncation_reason` | Whether a report/comment output path was truncated and why. Reasons are `comment_limit`, `max_items`, `size_limit`, or `unknown`. |
+| `cache_state` | Segment combined code-quality review durations into cold, warm, partial, or unknown cache states without uploading cache paths, cache directories, raw counts, or exact timings. |
 | `mcp_tool` | Attribute MCP usage to a specific tool, from a fixed allowlist of tool names. |
 | `has_parent_run` | Segment explicit follow-up runs without exposing the parent-run token. |
 | `run_role` | Separate root runs, follow-up runs, and unknown parent-run state using the allowlist `root`, `followup`, `unknown`. |

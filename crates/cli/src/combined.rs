@@ -155,6 +155,8 @@ pub fn run_combined(opts: &CombinedOptions<'_>) -> ExitCode {
         }
     }
 
+    record_combined_cache_state(opts, check_result.as_ref());
+
     if opts.performance
         && let Some(ref mut check) = check_result
         && let Some(ref mut timings) = check.timings
@@ -217,6 +219,20 @@ pub fn run_combined(opts: &CombinedOptions<'_>) -> ExitCode {
     );
 
     ExitCode::from(max_exit)
+}
+
+fn record_combined_cache_state(opts: &CombinedOptions<'_>, check_result: Option<&CheckResult>) {
+    if opts.no_cache {
+        crate::telemetry::note_cache_state_unknown();
+        return;
+    }
+
+    let Some(timings) = check_result.and_then(|check| check.timings.as_ref()) else {
+        crate::telemetry::note_cache_state_unknown();
+        return;
+    };
+
+    crate::telemetry::note_cache_state(timings.cache_hits, timings.cache_misses);
 }
 
 /// Whether this combined invocation is a true WHOLE-PROJECT run, the only shape
