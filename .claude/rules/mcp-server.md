@@ -64,6 +64,7 @@ All params structs derive `Default` for ergonomic test construction except those
 Built with `rmcp` (official Rust MCP SDK). Thin subprocess wrapper — all analysis logic stays in the CLI.
 - `FALLOW_BIN` — binary path (defaults to sibling binary or `fallow` in PATH)
 - `FALLOW_TIMEOUT_SECS` — subprocess timeout in seconds (default: 120)
+- `FALLOW_MAX_FILE_SIZE` sets the per-file size ceiling in megabytes (issue #1086). The default-on 5 MB skip already protects every MCP-driven run from the large-file OOM; set this in the MCP server's `env` block (it is inherited by the spawned CLI, `run_fallow` does not strip it) to override the limit (`0` = unlimited). There is no per-tool `max_file_size_mb` param yet (deferred); the env var is the override path for MCP.
 
 ## Telemetry surface tagging
 
