@@ -1094,10 +1094,26 @@ evidence_template = "Non-literal script bound to {callee} (runs in the embedded 
 [[source]]
 id = "http-request-input"
 title = "HTTP request input"
-# Express / Connect / Koa / Fastify / Hono request accessors. `*.query`,
-# `*.params`, `*.body` cover `req.query`, `ctx.req.query`, `request.body`, etc.
-# `*.searchParams` covers `new URL(...).searchParams`-style bindings.
-path_patterns = ["*.query", "*.params", "*.body", "*.searchParams"]
+# Express / Connect / Koa / Fastify / Hono / Elysia / SvelteKit request
+# accessors. `*.query`, `*.params`, `*.body` cover `req.query`, `ctx.req.query`
+# (the matched receiver is `req`), `request.body`, `ctx.params`, etc.
+# Receiver-gated (issue #1092): the leading-`*.` receiver must be a known
+# request object, so ORM / data-access receivers (`db.query`, `prisma.query`,
+# `knex.query`) no longer classify their module as an untrusted source. A
+# missed source on a non-standard request var name is the cheap error here; a
+# false DB-client source is the expensive one (#885 doctrine).
+path_patterns = ["*.query", "*.params", "*.body"]
+receiver_allowlist = ["req", "request", "ctx", "context", "event"]
+
+[[source]]
+id = "http-request-input"
+title = "HTTP request input"
+# `*.searchParams` covers `new URL(...).searchParams`-style bindings, whose
+# receiver is an arbitrary URL local (`u`, `url`, `params`), not a request
+# object. It is left UNGATED: a request-receiver allowlist would turn this into
+# a guaranteed false negative, and a `.searchParams` member almost never
+# collides with a data-access receiver.
+path_patterns = ["*.searchParams"]
 
 [[source]]
 id = "framework-handler-input"

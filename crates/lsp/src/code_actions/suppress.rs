@@ -140,7 +140,7 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    use fallow_core::results::{SecurityFinding, SecurityFindingKind};
+    use fallow_core::results::{SecurityFinding, SecurityFindingKind, SecuritySeverity};
 
     fn test_root() -> PathBuf {
         if cfg!(windows) {
@@ -164,6 +164,8 @@ mod tests {
             col: 2,
             evidence: "sink".to_string(),
             source_backed: false,
+            source_read: None,
+            severity: SecuritySeverity::Low,
             trace: vec![],
             actions: vec![],
             dead_code: None,
@@ -186,6 +188,8 @@ mod tests {
             col: 0,
             evidence: "leak".to_string(),
             source_backed: false,
+            source_read: None,
+            severity: SecuritySeverity::Low,
             trace: vec![],
             actions: vec![],
             dead_code: None,
