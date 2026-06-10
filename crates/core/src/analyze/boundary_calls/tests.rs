@@ -455,3 +455,71 @@ fn multiple_patterns_per_rule_all_apply() {
         find_boundary_call_violations(&graph, &modules, &config, &suppressions, &line_offsets);
     assert_eq!(violations.len(), 2);
 }
+
+#[test]
+fn rebound_callee_is_a_documented_false_negative() {
+    // `import * as cp from "child_process"; const run = cp.exec; run()` only
+    // captures the written callee `run`. The local binding is not an import,
+    // so canonicalization finds no provenance and the call stays quiet. This
+    // pins the documented direct-callee-only posture: laundered, injected,
+    // and re-bound callees are out of scope by design.
+    let root = PathBuf::from("/tmp/boundary-calls-test");
+    let config = make_config(root.clone(), vec![forbid("domain", "child_process.*")]);
+    let graph = build_graph(&root, &["src/domain/rules.ts"]);
+    let modules = vec![module(
+        0,
+        vec![callee("run", 0)],
+        vec![import(
+            "child_process",
+            ImportedName::Namespace,
+            "cp",
+            false,
+        )],
+    )];
+    let suppressions = SuppressionContext::empty();
+    let line_offsets = FxHashMap::default();
+
+    let violations =
+        find_boundary_call_violations(&graph, &modules, &config, &suppressions, &line_offsets);
+    assert!(
+        violations.is_empty(),
+        "a re-bound callee has no import provenance and must not match: {violations:?}"
+    );
+}
+
+#[test]
+fn distinct_written_paths_for_same_canonical_callee_both_report() {
+    // Extraction dedupes on the WRITTEN path, before canonicalization. Two
+    // different written forms of the same canonical callee (`cp.exec` via the
+    // namespace import and `execSync` via the named import) are distinct
+    // callee uses and must each produce a finding.
+    let root = PathBuf::from("/tmp/boundary-calls-test");
+    let config = make_config(root.clone(), vec![forbid("domain", "child_process.*")]);
+    let graph = build_graph(&root, &["src/domain/rules.ts"]);
+    let modules = vec![module(
+        0,
+        vec![callee("cp.exec", 0), callee("execSync", 5)],
+        vec![
+            import("child_process", ImportedName::Namespace, "cp", false),
+            import(
+                "node:child_process",
+                ImportedName::Named("execSync".to_string()),
+                "execSync",
+                false,
+            ),
+        ],
+    )];
+    let suppressions = SuppressionContext::empty();
+    let line_offsets = FxHashMap::default();
+
+    let violations =
+        find_boundary_call_violations(&graph, &modules, &config, &suppressions, &line_offsets);
+    assert_eq!(
+        violations.len(),
+        2,
+        "dedup is per written path, not per canonical path: {violations:?}"
+    );
+    let callees: Vec<&str> = violations.iter().map(|v| v.callee.as_str()).collect();
+    assert!(callees.contains(&"cp.exec"));
+    assert!(callees.contains(&"execSync"));
+}

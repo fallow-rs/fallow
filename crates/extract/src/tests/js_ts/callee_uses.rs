@@ -94,6 +94,18 @@ fn coexists_with_security_sink_capture() {
 }
 
 #[test]
+fn captures_optional_chaining_callee() {
+    // oxc keeps StaticMemberExpression nodes inside chain expressions, so
+    // `cp?.exec(...)` flattens to the same dotted path as `cp.exec(...)`.
+    let info = parse_source("import * as cp from 'child_process';\ncp?.exec('ls');");
+    assert!(
+        info.callee_uses.iter().any(|u| u.callee_path == "cp.exec"),
+        "optional-chaining callee should flatten like its non-optional form, got {:?}",
+        info.callee_uses
+    );
+}
+
+#[test]
 fn zero_arg_and_fully_literal_calls_are_captured() {
     // The security sink channel skips fully-literal and zero-arg calls; the
     // banned-call policy is about WHO calls WHAT, so both must be captured.
