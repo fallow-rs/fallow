@@ -290,6 +290,23 @@ fn reports_forbidden_calls_from_zoned_files() {
             .all(|(path, _, _, _)| !path.ends_with("src/domain/suppressed.ts")),
         "file-level boundary-violation suppression must be consumed: {entries:?}"
     );
+    assert!(
+        entries
+            .iter()
+            .all(|(path, _, _, _)| !path.ends_with("src/domain/alias-suppressed.ts")),
+        "the rule-id-shaped `boundary-call-violation` token must suppress as a \
+         boundary-family alias, not silently no-op: {entries:?}"
+    );
+    assert!(
+        results.stale_suppressions.iter().all(|s| !s
+            .path
+            .to_string_lossy()
+            .replace('\\', "/")
+            .ends_with("src/domain/alias-suppressed.ts")),
+        "the alias token is a recognized, consumed suppression, so it must not \
+         surface as stale or unknown: {:?}",
+        results.stale_suppressions
+    );
 }
 
 #[test]

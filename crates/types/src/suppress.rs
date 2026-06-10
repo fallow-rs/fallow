@@ -108,7 +108,9 @@ impl IssueKind {
             }
             "type-only-dependency" => Some(Self::TypeOnlyDependency),
             "test-only-dependency" => Some(Self::TestOnlyDependency),
-            "boundary-violation" => Some(Self::BoundaryViolation),
+            "boundary-violation" | "boundary-call-violation" | "boundary-call-violations" => {
+                Some(Self::BoundaryViolation)
+            }
             "coverage-gaps" => Some(Self::CoverageGaps),
             "feature-flag" => Some(Self::FeatureFlag),
             "complexity" => Some(Self::Complexity),
@@ -281,6 +283,8 @@ pub const KNOWN_ISSUE_KIND_NAMES: &[&str] = &[
     "type-only-dependency",
     "test-only-dependency",
     "boundary-violation",
+    "boundary-call-violation",
+    "boundary-call-violations",
     "coverage-gaps",
     "feature-flag",
     "complexity",
@@ -424,6 +428,17 @@ mod tests {
         );
         assert_eq!(
             IssueKind::parse("boundary-violation"),
+            Some(IssueKind::BoundaryViolation)
+        );
+        // The boundary family token also accepts the rule-id-shaped alias so
+        // users who derive the token from the `boundary-call-violation` rule
+        // id by analogy get a working suppression instead of a silent no-op.
+        assert_eq!(
+            IssueKind::parse("boundary-call-violation"),
+            Some(IssueKind::BoundaryViolation)
+        );
+        assert_eq!(
+            IssueKind::parse("boundary-call-violations"),
             Some(IssueKind::BoundaryViolation)
         );
         assert_eq!(
