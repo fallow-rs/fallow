@@ -138,6 +138,7 @@ else
       (if ((.check.re_export_cycles // []) | length) > 0 then "| [Re-export cycles](\(docs("re-export-cycles"))) | \(.check.re_export_cycles | length) |" else null end),
       (if (.check.boundary_violations | length) > 0 then "| [Boundary violations](\(docs("boundary-violations"))) | \(.check.boundary_violations | length) |" else null end),
       (if (.check.boundary_coverage_violations | length) > 0 then "| [Boundary coverage](\(docs("boundary-violations"))) | \(.check.boundary_coverage_violations | length) |" else null end),
+      (if ((.check.boundary_call_violations // []) | length) > 0 then "| [Boundary calls](\(docs("boundary-violations"))) | \(.check.boundary_call_violations | length) |" else null end),
       (if (.check.type_only_dependencies | length) > 0 then "| [Type-only dependencies](\(docs("type-only-dependencies"))) | \(.check.type_only_dependencies | length) |" else null end),
       (if (.check.test_only_dependencies | length) > 0 then "| [Test-only dependencies](\(docs("test-only-dependencies"))) | \(.check.test_only_dependencies | length) |" else null end),
       (if (.check.stale_suppressions | length) > 0 then "| [Stale suppressions](\(docs("stale-suppressions"))) | \(.check.stale_suppressions | length) |" else null end),
