@@ -788,6 +788,24 @@ To catch files that are reachable but assigned to no zone, enable boundary cover
 
 `requireAllFiles` reports unzoned source files as `boundary_coverage_violations`. Use `allowUnmatched` for generated files or other intentionally unzoned paths.
 
+To ban specific calls from a zone (for example, keeping a domain layer free of process execution and logging), add a forbidden-call policy:
+
+```jsonc
+{
+  "boundaries": {
+    "zones": [{ "name": "domain", "patterns": ["src/domain/**"] }],
+    "calls": {
+      "forbidden": [
+        { "from": "domain", "callee": "child_process.*" },
+        { "from": "domain", "callee": ["console.*", "process.exit"] }
+      ]
+    }
+  }
+}
+```
+
+Each matching call reports as a `boundary_call_violations` finding naming the written callee, the matched pattern, and the zone. Matching is segment-aware, not substring or glob: `fetch` matches only `fetch` (never `myfetch`), a trailing `object.*` matches any member (`child_process.*` matches `child_process.exec`), and a leading `*.member` matches any object (`*.innerHTML` matches `el.innerHTML`). Patterns also match through import provenance, so `child_process.*` covers `import { execSync } from "node:child_process"`, the bare `child_process` specifier, and namespace imports alike. Two scope rules to know: forbidden-call rules apply only to files classified into a zone (unzoned files are unrestricted; combine with `coverage.requireAllFiles` to force zoning first), and the check is syntactic, so it does not follow aliased or re-bound callees (`const run = cp.exec; run()`), computed members, or optional-chaining call sites. Findings share the `boundary-violation` rule severity and suppression token.
+
 Run `fallow list --boundaries` to inspect the expanded rules. TOML also supported (`fallow init --toml`). The init command auto-detects your project structure (monorepo layout, frameworks, existing config) and generates a tailored config. It also adds `.fallow/` to your `.gitignore` (cache and local data). Use `fallow init --agents` to scaffold a starter `AGENTS.md` with project-specific guidance for coding agents. Scaffold a pre-commit `fallow audit` hook with `fallow hooks install --target git`; the hook uses the current branch upstream as its base and falls back to `--branch` (or the detected default branch) when no upstream is set. For agent gates, use `fallow hooks install --target agent`. Migrating from knip or jscpd? Run `fallow migrate`.
 
 Use `ignoreUnresolvedImports` for generated or runtime-provided import specifiers that fallow cannot resolve. Patterns match the raw import string, not a filesystem path: list both `@example/icons` and `@example/icons/**` when you need the bare package and its subpaths. Parent-relative generated specifiers such as `../generated/**` are allowed. Keep patterns narrow, since broad values like `**` can hide real missing modules. This setting affects only `unresolved-import` findings; it does not change dependency usage or resolver behavior.
