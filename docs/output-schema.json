@@ -7318,7 +7318,14 @@
           "description": "`fallow security --format json`. Full mode requires `security_findings`,\n`unresolved_edge_files`, and `unresolved_callee_sites`; summary mode requires\n`summary` and omits per-finding arrays.",
           "allOf": [
             {
-              "$ref": "#/definitions/SecurityOutput"
+              "oneOf": [
+                {
+                  "$ref": "#/definitions/SecurityOutput"
+                },
+                {
+                  "$ref": "#/definitions/SecuritySummaryOutput"
+                }
+              ]
             },
             {
               "type": "object",

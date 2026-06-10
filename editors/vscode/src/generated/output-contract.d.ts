@@ -71,7 +71,7 @@ kind: "dupes"
 kind: "dead-code-grouped"
 }) | (ImpactReport & {
 kind: "impact"
-}) | (SecurityOutput & {
+}) | ((SecurityOutput | SecuritySummaryOutput) & {
 kind: "security"
 }) | (CheckOutput & {
 kind: "dead-code"
@@ -5575,6 +5575,88 @@ reason: SkippedSecurityCalleeReason
  * Number of unresolved callees with this reason.
  */
 count: number
+}
+/**
+ * Compact `fallow security --summary --format json` payload. Uses the same
+ * `kind: "security"` discriminator as the full payload, but omits candidate
+ * arrays and exposes only aggregate counts.
+ */
+export interface SecuritySummaryOutput {
+schema_version: SecuritySchemaVersion
+version: ToolVersion
+elapsed_ms: ElapsedMs
+config: SecurityOutputConfig
+/**
+ * Security-specific rule and field metadata, emitted with `--explain`.
+ */
+_meta?: (Meta | null)
+/**
+ * Gate verdict, present only when `--gate <mode>` was set.
+ */
+gate?: (SecurityGate | null)
+summary: SecuritySummary
+}
+/**
+ * Aggregate counts for `fallow security --summary --format json`.
+ */
+export interface SecuritySummary {
+/**
+ * Number of security candidates after all filters, gates, and scopes.
+ */
+security_findings: number
+by_severity: SecuritySeverityCounts
+/**
+ * Finding counts by catalogue category, or by kind for findings without a
+ * catalogue category.
+ */
+by_category: {
+[k: string]: number
+}
+by_reachability: SecurityReachabilityCounts
+by_runtime_state: SecurityRuntimeStateCounts
+/**
+ * Number of client files whose dynamic imports could not be followed.
+ */
+unresolved_edge_files: number
+/**
+ * Number of sink-shaped callees that could not be statically flattened.
+ */
+unresolved_callee_sites: number
+/**
+ * Number of attack-surface entries included in the prepared full output.
+ */
+attack_surface_entries: number
+}
+/**
+ * Fixed severity counters for summary JSON.
+ */
+export interface SecuritySeverityCounts {
+high: number
+medium: number
+low: number
+}
+/**
+ * Fixed reachability counters for summary JSON.
+ */
+export interface SecurityReachabilityCounts {
+entry_reachable: number
+untrusted_source_reachable: number
+arg_level: number
+module_level: number
+crosses_boundary: number
+source_backed: number
+}
+/**
+ * Fixed runtime coverage counters for summary JSON.
+ */
+export interface SecurityRuntimeStateCounts {
+runtime_hot: number
+runtime_cold: number
+never_executed: number
+low_traffic: number
+coverage_unavailable: number
+runtime_unknown: number
+not_collected: number
 }
 /**
  * Bare `fallow --format json` envelope.

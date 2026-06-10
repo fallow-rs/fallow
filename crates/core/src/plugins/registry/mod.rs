@@ -96,7 +96,9 @@ pub fn format_plugin_regex_errors(errors: &[PluginRegexValidationError]) -> Stri
         .map(ToString::to_string)
         .collect::<Vec<_>>()
         .join("\n  - ");
-    format!("invalid plugin regex configuration:\n  - {joined}")
+    format!(
+        "invalid plugin regex configuration:\n  - {joined}\n\nRewrite the plugin config with Rust-compatible regex syntax, or remove unsupported constructs such as JavaScript lookahead and lookbehind."
+    )
 }
 
 /// Aggregated results from all active plugins for a project.
@@ -327,10 +329,11 @@ impl PluginRegistry {
         dirs
     }
 
-    /// Run all plugins against a project, returning aggregated results.
+    /// Test convenience wrapper for running all plugins against a project.
     ///
     /// This discovers which plugins are active, collects their static patterns,
     /// then parses any config files to extract dynamic information.
+    #[cfg(test)]
     pub fn run(
         &self,
         pkg: &PackageJson,
@@ -349,35 +352,6 @@ impl PluginRegistry {
         discovered_files: &[PathBuf],
     ) -> Result<AggregatedPluginResult, Vec<PluginRegexValidationError>> {
         self.try_run_with_search_roots(pkg, root, discovered_files, &[root], false)
-    }
-
-    /// Run all plugins against a project with explicit config-file search roots.
-    ///
-    /// `config_search_roots` should stay narrowly focused to directories that are
-    /// already known to matter for this project. Broad recursive scans are
-    /// intentionally avoided because they become prohibitively expensive on
-    /// large monorepos with populated `node_modules` trees.
-    ///
-    /// `production_mode` controls the FS fallback for source-extension config
-    /// patterns. In production mode the source walker excludes `*.config.*` so
-    /// the FS walk is required; otherwise Phase 3a's in-memory matcher covers
-    /// them and the walk is skipped.
-    pub fn run_with_search_roots(
-        &self,
-        pkg: &PackageJson,
-        root: &Path,
-        discovered_files: &[PathBuf],
-        config_search_roots: &[&Path],
-        production_mode: bool,
-    ) -> AggregatedPluginResult {
-        self.try_run_with_search_roots(
-            pkg,
-            root,
-            discovered_files,
-            config_search_roots,
-            production_mode,
-        )
-        .unwrap_or_else(|errors| panic!("{}", format_plugin_regex_errors(&errors)))
     }
 
     /// Run all plugins against a project with explicit config-file search roots,
@@ -562,7 +536,7 @@ impl PluginRegistry {
         }
     }
 
-    /// Fast variant of `run()` for workspace packages.
+    /// Test convenience wrapper for the fast workspace plugin path.
     ///
     /// Reuses pre-compiled config matchers and pre-computed relative files from the root
     /// project run, avoiding repeated glob compilation and path computation per workspace.
@@ -572,7 +546,8 @@ impl PluginRegistry {
         reason = "Each parameter is a distinct, small value with no natural grouping; \
                   bundling them into a struct hurts call-site readability."
     )]
-    pub fn run_workspace_fast(
+    #[cfg(test)]
+    fn run_workspace_fast(
         &self,
         pkg: &PackageJson,
         root: &Path,

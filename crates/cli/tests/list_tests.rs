@@ -764,6 +764,10 @@ fn combined_json_errors_on_invalid_plugin_regex() {
         message.contains("entry_patterns[].exclude_segment_regexes"),
         "message: {message}"
     );
+    assert!(
+        message.contains("Rewrite the plugin config with Rust-compatible regex syntax"),
+        "message: {message}"
+    );
     assert!(message.contains("vite.config.ts"), "message: {message}");
     assert!(
         !message.contains("future release"),
@@ -795,6 +799,10 @@ fn list_plugins_json_errors_on_invalid_plugin_regex() {
     assert!(message.contains("tanstack-router"), "message: {message}");
     assert!(
         message.contains("entry_patterns[].exclude_segment_regexes"),
+        "message: {message}"
+    );
+    assert!(
+        message.contains("Rewrite the plugin config with Rust-compatible regex syntax"),
         "message: {message}"
     );
 }

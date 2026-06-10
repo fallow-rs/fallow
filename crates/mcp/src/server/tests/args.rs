@@ -10,7 +10,7 @@ use crate::tools::{
 };
 
 /// Parse a validation error body into its `message` field. Arg builders emit
-/// structured JSON (`{"error": true, "message": "...", "exit_code": 0}`) so the
+/// structured JSON (`{"error": true, "message": "...", "exit_code": 2}`) so the
 /// handler can forward it verbatim to MCP clients; tests decode it here.
 fn parse_validation_message(err: &str) -> String {
     let v: serde_json::Value = serde_json::from_str(err)
@@ -22,8 +22,8 @@ fn parse_validation_message(err: &str) -> String {
     );
     assert_eq!(
         v["exit_code"].as_i64(),
-        Some(0),
-        "expected exit_code=0 in {err}"
+        Some(2),
+        "expected exit_code=2 in {err}"
     );
     v["message"]
         .as_str()
@@ -1264,8 +1264,8 @@ fn validation_errors_use_structured_json_body() {
         );
         assert_eq!(
             v["exit_code"],
-            serde_json::Value::from(0),
-            "exit_code=0 in {body}"
+            serde_json::Value::from(2),
+            "exit_code=2 in {body}"
         );
         assert!(v["message"].is_string(), "message is a string in {body}");
         assert!(

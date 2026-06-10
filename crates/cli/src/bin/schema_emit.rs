@@ -736,72 +736,76 @@ const HAND_MAINTAINED_ROOT_ENVELOPES: &[&str] = &[];
 /// by many validators and code generators. Rewrite the root union into explicit
 /// intersections so the `kind` discriminator is part of the public contract.
 fn rewrite_fallow_output_definition(definitions: &mut Map<String, Value>) -> Result<(), String> {
-    const VARIANTS: &[(&str, &str, &str)] = &[
+    const VARIANTS: &[(&str, &[&str], &str)] = &[
         (
             "audit",
-            "AuditOutput",
+            &["AuditOutput"],
             "`fallow audit --format json`. Required `command: \"audit\"` singleton\nplus `verdict` and `summary`.",
         ),
         (
             "explain",
-            "ExplainOutput",
+            &["ExplainOutput"],
             "`fallow explain <issue-type> --format json`. Required `id`, `name`,\n`rationale`, `example`, `how_to_fix`, `docs`; no `schema_version`.",
         ),
         (
             "review-envelope",
-            "ReviewEnvelopeOutput",
+            &["ReviewEnvelopeOutput"],
             "`fallow --format review-github` / `--format review-gitlab`. Required\n`body`, `comments`, `meta`; no `schema_version`.",
         ),
         (
             "review-reconcile",
-            "ReviewReconcileOutput",
+            &["ReviewReconcileOutput"],
             "`fallow ci reconcile-review --format json`. Required `schema`\nsingleton plus `provider`, `comments`, and the various\n`*_fingerprints` arrays.",
         ),
         (
             "coverage-setup",
-            "CoverageSetupOutput",
+            &["CoverageSetupOutput"],
             "`fallow coverage setup --json`. Required `schema_version` singleton\nplus `framework_detected`, `members`, `commands`, `snippets`.",
         ),
         (
             "coverage-analyze",
-            "CoverageAnalyzeOutput",
+            &["CoverageAnalyzeOutput"],
             "`fallow coverage analyze --format json`. Required\n`schema_version: \"1\"` singleton plus `version`, `elapsed_ms`,\n`runtime_coverage`.",
         ),
         (
             "list-boundaries",
-            "ListBoundariesOutput",
+            &["ListBoundariesOutput"],
             "`fallow list --boundaries --format json`. Required `boundaries`\nsub-object; no `schema_version`.",
         ),
         (
             "list-workspaces",
-            "WorkspacesOutput",
+            &["WorkspacesOutput"],
             "`fallow workspaces --format json`. Required `workspace_count`,\n`workspaces`, and `workspace_diagnostics`; no `schema_version`.",
         ),
-        ("health", "HealthOutput", "`fallow health --format json`."),
-        ("dupes", "DupesOutput", "`fallow dupes --format json`."),
+        (
+            "health",
+            &["HealthOutput"],
+            "`fallow health --format json`.",
+        ),
+        ("dupes", &["DupesOutput"], "`fallow dupes --format json`."),
         (
             "dead-code-grouped",
-            "CheckGroupedOutput",
+            &["CheckGroupedOutput"],
             "`fallow dead-code --format json --group-by <mode>`. Required `grouped_by`\nplus a `groups` array.",
         ),
         (
             "impact",
-            "ImpactReport",
+            &["ImpactReport"],
             "`fallow impact --format json`. Required `enabled`, `record_count`,\n`containment_count`, `recent_containment`; no global `schema_version`,\n`command`, `total_issues`, or `report`.",
         ),
         (
             "security",
-            "SecurityOutput",
+            &["SecurityOutput", "SecuritySummaryOutput"],
             "`fallow security --format json`. Full mode requires `security_findings`,\n`unresolved_edge_files`, and `unresolved_callee_sites`; summary mode requires\n`summary` and omits per-finding arrays.",
         ),
         (
             "dead-code",
-            "CheckOutput",
+            &["CheckOutput"],
             "`fallow dead-code --format json`.\nRequired `total_issues` plus `summary: CheckSummary`.",
         ),
         (
             "combined",
-            "CombinedOutput",
+            &["CombinedOutput"],
             "Bare `fallow --format json` (combined dead-code + dupes + health).\nRequired `schema_version`, `version`, and `elapsed_ms`, with optional\n`check`, `dupes`, and `health` subreports.",
         ),
     ];
@@ -813,11 +817,23 @@ fn rewrite_fallow_output_definition(definitions: &mut Map<String, Value>) -> Res
 
     let one_of = VARIANTS
         .iter()
-        .map(|(kind, definition, description)| {
+        .map(|(kind, definitions, description)| {
+            let payload_schema = if definitions.len() == 1 {
+                serde_json::json!({ "$ref": format!("#/definitions/{}", definitions[0]) })
+            } else {
+                serde_json::json!({
+                    "oneOf": definitions
+                        .iter()
+                        .map(|definition| {
+                            serde_json::json!({ "$ref": format!("#/definitions/{definition}") })
+                        })
+                        .collect::<Vec<_>>()
+                })
+            };
             serde_json::json!({
                 "description": description,
                 "allOf": [
-                    { "$ref": format!("#/definitions/{definition}") },
+                    payload_schema,
                     {
                         "type": "object",
                         "properties": {
@@ -1610,9 +1626,18 @@ mod drift_tests {
                 2,
                 "FallowOutput variant allOf should contain exactly payload ref + kind discriminator"
             );
+            let payload_branch = &all_of[0];
+            let has_payload_ref = payload_branch.get("$ref").is_some()
+                || payload_branch
+                    .get("oneOf")
+                    .and_then(Value::as_array)
+                    .is_some_and(|branches| {
+                        !branches.is_empty()
+                            && branches.iter().all(|branch| branch.get("$ref").is_some())
+                    });
             assert!(
-                all_of[0].get("$ref").is_some(),
-                "first allOf branch should be the payload ref: {variant}"
+                has_payload_ref,
+                "first allOf branch should be a payload ref or a oneOf of payload refs: {variant}"
             );
             assert!(
                 all_of[1]
@@ -1622,5 +1647,45 @@ mod drift_tests {
                 "second allOf branch should require a literal kind discriminator: {variant}"
             );
         }
+    }
+
+    #[test]
+    fn security_kind_accepts_full_and_summary_payloads() {
+        let document: Value = serde_json::from_str(COMMITTED_SCHEMA)
+            .expect("committed docs/output-schema.json must parse");
+        let variants = document
+            .pointer("/definitions/FallowOutput/oneOf")
+            .and_then(Value::as_array)
+            .expect("FallowOutput must expose oneOf variants");
+        let security_variant = variants
+            .iter()
+            .find(|variant| {
+                variant
+                    .pointer("/allOf/1/properties/kind/const")
+                    .and_then(Value::as_str)
+                    == Some("security")
+            })
+            .expect("FallowOutput must include the security kind variant");
+        let payload_refs: Vec<&str> = security_variant
+            .pointer("/allOf/0/oneOf")
+            .and_then(Value::as_array)
+            .expect("security kind payload must be a oneOf")
+            .iter()
+            .map(|branch| {
+                branch
+                    .get("$ref")
+                    .and_then(Value::as_str)
+                    .expect("security payload branch must be a ref")
+            })
+            .collect();
+
+        assert!(
+            payload_refs.contains(&"#/definitions/SecurityOutput"),
+            "security kind must accept full security output"
+        );
+        assert!(
+            payload_refs.contains(&"#/definitions/SecuritySummaryOutput"),
+            "security kind must accept summary security output"
+        );
     }
 }

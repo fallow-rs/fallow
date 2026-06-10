@@ -150,7 +150,7 @@ pub fn validation_error_body(message: impl Into<String>) -> String {
     serde_json::json!({
         "error": true,
         "message": message.into(),
-        "exit_code": 0,
+        "exit_code": 2,
     })
     .to_string()
 }

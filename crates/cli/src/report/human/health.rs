@@ -3037,11 +3037,18 @@ mod tests {
                 evidence: Some(crate::health_types::TargetEvidence {
                     direct_callers: vec![crate::health_types::DirectCallerEvidence {
                         path: root.join("src/consumer.ts"),
-                        symbols: vec![crate::health_types::DirectCallerSymbolEvidence {
-                            imported: "loadLegacy".into(),
-                            local: "load".into(),
-                            type_only: false,
-                        }],
+                        symbols: vec![
+                            crate::health_types::DirectCallerSymbolEvidence {
+                                imported: "loadLegacy".into(),
+                                local: "load".into(),
+                                type_only: false,
+                            },
+                            crate::health_types::DirectCallerSymbolEvidence {
+                                imported: "side-effect".into(),
+                                local: String::new(),
+                                type_only: false,
+                            },
+                        ],
                     }],
                     clone_siblings: vec![crate::health_types::CloneSiblingEvidence {
                         path: root.join("src/peer.ts"),
@@ -3056,7 +3063,8 @@ mod tests {
         ];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
-        assert!(text.contains("callers: src/consumer.ts (loadLegacy as load)"));
+        assert!(text.contains("importers: src/consumer.ts (loadLegacy as load, side effect)"));
+        assert!(!text.contains("side-effect"));
         assert!(text.contains("clones: src/peer.ts:12-20 dup:12345678"));
     }
 

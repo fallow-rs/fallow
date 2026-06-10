@@ -6,6 +6,20 @@ use super::{MAX_FLAT_ITEMS, relative_path, split_dir_filename};
 
 const DOCS_HEALTH: &str = "https://docs.fallow.tools/explanations/health";
 
+fn render_direct_import_symbol(symbol: &crate::health_types::DirectCallerSymbolEvidence) -> String {
+    let imported = if symbol.imported == "side-effect" {
+        "side effect"
+    } else {
+        symbol.imported.as_str()
+    };
+
+    if symbol.local.is_empty() || symbol.imported == symbol.local {
+        imported.to_string()
+    } else {
+        format!("{imported} as {}", symbol.local)
+    }
+}
+
 pub(super) fn render_refactoring_targets(
     lines: &mut Vec<String>,
     report: &crate::health_types::HealthReport,
@@ -151,13 +165,7 @@ fn render_target_evidence(
                     let symbols = caller
                         .symbols
                         .iter()
-                        .map(|symbol| {
-                            if symbol.local.is_empty() || symbol.imported == symbol.local {
-                                symbol.imported.clone()
-                            } else {
-                                format!("{} as {}", symbol.imported, symbol.local)
-                            }
-                        })
+                        .map(render_direct_import_symbol)
                         .collect::<Vec<_>>()
                         .join(", ");
                     format!("{path} ({symbols})")
@@ -167,7 +175,7 @@ fn render_target_evidence(
             .join("; ");
         lines.push(format!(
             "         {}",
-            format!("callers: {callers}").dimmed()
+            format!("importers: {callers}").dimmed()
         ));
     }
 

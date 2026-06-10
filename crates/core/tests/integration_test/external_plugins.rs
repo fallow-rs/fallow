@@ -90,7 +90,9 @@ fn plugin_entry_points_carry_correct_plugin_name() {
     let registry = fallow_core::plugins::PluginRegistry::new(
         fallow_config::discover_external_plugins(&root, &[]),
     );
-    let plugin_result = registry.run(&pkg, &root, &file_paths);
+    let plugin_result = registry
+        .try_run(&pkg, &root, &file_paths)
+        .expect("external plugin registry should run");
 
     let entries =
         fallow_core::discover::discover_plugin_entry_points(&plugin_result, &config, &files);
@@ -179,7 +181,9 @@ fn external_plugin_active_in_list() {
     let pkg = fallow_config::PackageJson::load(&pkg_path).unwrap();
 
     let registry = fallow_core::plugins::PluginRegistry::new(config.external_plugins);
-    let result = registry.run(&pkg, &root, &file_paths);
+    let result = registry
+        .try_run(&pkg, &root, &file_paths)
+        .expect("external plugin registry should run");
 
     assert!(
         result.active_plugins.contains(&"my-framework".to_string()),

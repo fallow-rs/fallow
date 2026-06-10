@@ -797,7 +797,7 @@ fn external_plugin_detection_overrides_enablers() {
     let result = registry.run(&pkg, Path::new("/project"), &[]);
     assert!(
         !result.active_plugins.contains(&"priority-test".to_string()),
-        "detection should take priority over enablers — pkg-x not present"
+        "detection should take priority over enablers, pkg-x not present"
     );
 }
 
@@ -3163,6 +3163,7 @@ fn process_config_result_rejects_all_invalid_regex_patterns() {
     assert!(rendered.contains("src/**/*.ts"));
     assert!(rendered.contains("[unclosed"));
     assert!(rendered.contains("(also_invalid"));
+    assert!(rendered.contains("Rewrite the plugin config with Rust-compatible regex syntax"));
     assert_eq!(
         rendered.matches("plugin 'test-plugin'").count(),
         2,
@@ -3226,6 +3227,7 @@ fn tanstack_route_file_ignore_pattern_unsupported_patterns_are_hard_errors() {
             !rendered.contains("future release"),
             "promoted invalid-regex errors should not carry a future-release tail"
         );
+        assert!(rendered.contains("unsupported constructs such as JavaScript lookahead"));
     }
 }
 
