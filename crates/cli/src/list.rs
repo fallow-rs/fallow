@@ -42,16 +42,31 @@ pub fn run_list(opts: &ListOptions<'_>) -> ExitCode {
         let registry = fallow_core::plugins::PluginRegistry::new(config.external_plugins.clone());
 
         let pkg_path = opts.root.join("package.json");
-        let mut result = fallow_config::PackageJson::load(&pkg_path).map_or_else(
-            |_| fallow_core::plugins::AggregatedPluginResult::default(),
-            |pkg| registry.run(&pkg, opts.root, &file_paths),
-        );
+        let mut result = if let Ok(pkg) = fallow_config::PackageJson::load(&pkg_path) {
+            match registry.try_run(&pkg, opts.root, &file_paths) {
+                Ok(result) => result,
+                Err(errors) => {
+                    let message =
+                        fallow_core::plugins::registry::format_plugin_regex_errors(&errors);
+                    return crate::error::emit_error(&message, 2, opts.output);
+                }
+            }
+        } else {
+            fallow_core::plugins::AggregatedPluginResult::default()
+        };
 
         let workspaces = fallow_config::discover_workspaces(opts.root);
         for ws in &workspaces {
             let ws_pkg_path = ws.root.join("package.json");
             if let Ok(ws_pkg) = fallow_config::PackageJson::load(&ws_pkg_path) {
-                let ws_result = registry.run(&ws_pkg, &ws.root, &file_paths);
+                let ws_result = match registry.try_run(&ws_pkg, &ws.root, &file_paths) {
+                    Ok(result) => result,
+                    Err(errors) => {
+                        let message =
+                            fallow_core::plugins::registry::format_plugin_regex_errors(&errors);
+                        return crate::error::emit_error(&message, 2, opts.output);
+                    }
+                };
                 for plugin_name in &ws_result.active_plugins {
                     if !result.active_plugins.contains(plugin_name) {
                         result.active_plugins.push(plugin_name.clone());

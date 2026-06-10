@@ -13,7 +13,7 @@ use fallow_config::{ExternalPluginDef, PluginDetection, UsedClassMemberRule};
 use crate::discover::SOURCE_EXTENSIONS;
 
 use super::super::{PathRule, Plugin, PluginResult, PluginUsedExportRule, UsedExportRule};
-use super::AggregatedPluginResult;
+use super::{AggregatedPluginResult, PluginRegexValidationError};
 
 /// True when a config pattern names a source-extension config file living
 /// directly in some directory (no path separator, no leading dot, all expanded
@@ -317,117 +317,79 @@ fn expand_brace_pattern(pattern: &str) -> Vec<String> {
     expanded
 }
 
-/// Eagerly validate the user-supplied exclude regexes attached to a
-/// `PathRule`, dropping any that fail to compile and emitting one enriched
-/// `tracing::warn!` per invalid pattern.
+/// Validate the user-supplied exclude regexes attached to a `PathRule`.
 ///
-/// The originating plugin and the source config file are surfaced in the
-/// warning so the user can locate the typo. Matches the #467 / #510 precedent:
-/// load continues with the invalid pattern stripped, no exit non-zero.
-fn validate_path_rule_regexes(
-    rule: &mut crate::plugins::PathRule,
+/// The originating plugin and source config file are surfaced so users can
+/// locate every typo in one config-load error.
+fn collect_path_rule_regex_errors(
+    rule: &crate::plugins::PathRule,
     plugin_name: &str,
     config_path: Option<&Path>,
+    rule_kind: &'static str,
+    errors: &mut Vec<PluginRegexValidationError>,
 ) {
-    rule.exclude_regexes
-        .retain(|pattern| match regex::Regex::new(pattern) {
-            Ok(_) => true,
-            Err(err) => {
-                tracing::warn!(
-                    "{}",
-                    invalid_excluded_regex_warning(
-                        plugin_name,
-                        config_path,
-                        pattern,
-                        &rule.pattern,
-                        &err,
-                    )
-                );
-                false
-            }
-        });
-    rule.exclude_segment_regexes
-        .retain(|pattern| match regex::Regex::new(pattern) {
-            Ok(_) => true,
-            Err(err) => {
-                tracing::warn!(
-                    "{}",
-                    invalid_excluded_segment_regex_warning(
-                        plugin_name,
-                        config_path,
-                        pattern,
-                        &rule.pattern,
-                        &err,
-                    )
-                );
-                false
-            }
-        });
-}
-
-fn config_location(config_path: Option<&Path>) -> String {
-    config_path
-        .map(|p| format!(" in {}", p.display()))
-        .unwrap_or_default()
-}
-
-fn invalid_excluded_regex_warning(
-    plugin_name: &str,
-    config_path: Option<&Path>,
-    pattern: &str,
-    rule_pattern: &str,
-    err: &regex::Error,
-) -> String {
-    let loc = config_location(config_path);
-    format!(
-        "plugin '{plugin_name}'{loc}: invalid excluded regex '{pattern}' for entry pattern \
-         '{rule_pattern}': {err}; the pattern will be ignored. A future release may reject \
-         invalid regex patterns at config load."
-    )
-}
-
-pub(super) fn invalid_excluded_segment_regex_warning(
-    plugin_name: &str,
-    config_path: Option<&Path>,
-    pattern: &str,
-    rule_pattern: &str,
-    err: &regex::Error,
-) -> String {
-    let loc = config_location(config_path);
-    if plugin_name == "tanstack-router" {
-        return format!(
-            "plugin '{plugin_name}'{loc}: routeFileIgnorePattern '{pattern}' for entry pattern \
-             '{rule_pattern}' uses JavaScript regex syntax unsupported by fallow's Rust regex \
-             engine: {err}; fallow will ignore this routeFileIgnorePattern during analysis."
-        );
+    for pattern in &rule.exclude_regexes {
+        if let Err(source) = regex::Regex::new(pattern) {
+            errors.push(PluginRegexValidationError::new(
+                plugin_name,
+                config_path,
+                rule_kind,
+                "exclude_regexes",
+                &rule.pattern,
+                pattern,
+                &source,
+            ));
+        }
     }
-
-    format!(
-        "plugin '{plugin_name}'{loc}: invalid excluded segment regex '{pattern}' for entry pattern \
-         '{rule_pattern}': {err}; the pattern will be ignored. A future release may reject \
-         invalid regex patterns at config load."
-    )
+    for pattern in &rule.exclude_segment_regexes {
+        if let Err(source) = regex::Regex::new(pattern) {
+            errors.push(PluginRegexValidationError::new(
+                plugin_name,
+                config_path,
+                rule_kind,
+                "exclude_segment_regexes",
+                &rule.pattern,
+                pattern,
+                &source,
+            ));
+        }
+    }
 }
 
 /// Merge a `PluginResult` from config parsing into the aggregated result.
 ///
 /// `config_path` is the source config file the plugin parsed (when known).
-/// It is only used to enrich `tracing::warn!` messages emitted by
-/// [`validate_path_rule_regexes`] so users can find their typo. Tests and
-/// inline package.json fallbacks may pass `None`.
+/// It is only used to enrich config-load errors so users can find their typo.
+/// Tests and inline package.json fallbacks may pass `None`.
 pub fn process_config_result(
     plugin_name: &str,
-    mut plugin_result: PluginResult,
+    plugin_result: PluginResult,
     result: &mut AggregatedPluginResult,
     config_path: Option<&Path>,
-) {
+) -> Result<(), Vec<PluginRegexValidationError>> {
     let pname = plugin_name.to_string();
+    let mut regex_errors = Vec::new();
 
-    for rule in &mut plugin_result.entry_patterns {
-        validate_path_rule_regexes(rule, plugin_name, config_path);
+    for rule in &plugin_result.entry_patterns {
+        collect_path_rule_regex_errors(
+            rule,
+            plugin_name,
+            config_path,
+            "entry_patterns[]",
+            &mut regex_errors,
+        );
     }
-    for rule in &mut plugin_result.used_exports {
-        validate_path_rule_regexes(&mut rule.path, plugin_name, config_path);
+    for rule in &plugin_result.used_exports {
+        collect_path_rule_regex_errors(
+            &rule.path,
+            plugin_name,
+            config_path,
+            "used_exports[].path",
+            &mut regex_errors,
+        );
+    }
+    if !regex_errors.is_empty() {
+        return Err(regex_errors);
     }
     if plugin_result.replace_entry_patterns && !plugin_result.entry_patterns.is_empty() {
         result.entry_patterns.retain(|(_, name)| name != &pname);
@@ -486,6 +448,7 @@ pub fn process_config_result(
     result
         .provided_dependencies
         .extend(plugin_result.provided_dependencies);
+    Ok(())
 }
 
 /// Check if a plugin already has a config file matched against discovered files.

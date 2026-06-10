@@ -4,10 +4,7 @@ use fallow_config::{
     ExternalPluginDef, ExternalUsedExport, PluginDetection, ScopedUsedClassMemberRule,
     UsedClassMemberRule,
 };
-use helpers::{
-    check_plugin_detection, discover_config_files, invalid_excluded_segment_regex_warning,
-    process_config_result,
-};
+use helpers::{check_plugin_detection, discover_config_files, process_config_result};
 use rustc_hash::FxHashSet;
 
 fn make_external(name: &str, enablers: &[&str], config_patterns: &[&str]) -> ExternalPluginDef {
@@ -1110,7 +1107,7 @@ fn process_config_result_merges_all_fields() {
         static_dir_mappings: vec![],
         provided_dependencies: vec![],
     };
-    process_config_result("test-plugin", config_result, &mut aggregated, None);
+    process_config_result("test-plugin", config_result, &mut aggregated, None).unwrap();
 
     assert_eq!(aggregated.entry_patterns.len(), 1);
     assert_eq!(aggregated.entry_patterns[0].0, "src/routes/**/*.ts");
@@ -1168,7 +1165,7 @@ fn process_config_result_preserves_scoped_used_class_member_rules() {
         ..PluginResult::default()
     };
 
-    process_config_result("test-plugin", config_result, &mut aggregated, None);
+    process_config_result("test-plugin", config_result, &mut aggregated, None).unwrap();
 
     assert_eq!(
         aggregated.used_class_members,
@@ -1215,8 +1212,8 @@ fn process_config_result_accumulates_across_multiple_calls() {
         provided_dependencies: vec![],
     };
 
-    process_config_result("plugin-a", result1, &mut aggregated, None);
-    process_config_result("plugin-b", result2, &mut aggregated, None);
+    process_config_result("plugin-a", result1, &mut aggregated, None).unwrap();
+    process_config_result("plugin-b", result2, &mut aggregated, None).unwrap();
 
     assert_eq!(aggregated.entry_patterns.len(), 2);
     assert_eq!(aggregated.entry_patterns[0].0, "a.ts");
@@ -1273,7 +1270,7 @@ fn process_config_result_path_aliases_override_existing_prefixes() {
         ..Default::default()
     };
 
-    process_config_result("nuxt", config_result, &mut aggregated, None);
+    process_config_result("nuxt", config_result, &mut aggregated, None).unwrap();
 
     let tilde_aliases: Vec<_> = aggregated
         .path_aliases
@@ -1318,7 +1315,7 @@ fn process_config_result_replace_entry_patterns_removes_static_defaults() {
         ..Default::default()
     };
 
-    process_config_result("vitest", config_result, &mut aggregated, None);
+    process_config_result("vitest", config_result, &mut aggregated, None).unwrap();
 
     let vitest_patterns: Vec<_> = aggregated
         .entry_patterns
@@ -1366,7 +1363,7 @@ fn process_config_result_replace_used_export_rules_removes_static_defaults() {
         ..Default::default()
     };
 
-    process_config_result("tanstack-router", config_result, &mut aggregated, None);
+    process_config_result("tanstack-router", config_result, &mut aggregated, None).unwrap();
 
     let tanstack_rules: Vec<_> = aggregated
         .used_exports
@@ -1394,7 +1391,7 @@ fn process_config_result_replace_entry_patterns_noop_when_empty() {
         ..Default::default()
     };
 
-    process_config_result("vitest", config_result, &mut aggregated, None);
+    process_config_result("vitest", config_result, &mut aggregated, None).unwrap();
 
     assert_eq!(
         aggregated.entry_patterns.len(),
@@ -1419,7 +1416,7 @@ fn process_config_result_replace_used_export_rules_noop_when_empty() {
         ..Default::default()
     };
 
-    process_config_result("tanstack-router", config_result, &mut aggregated, None);
+    process_config_result("tanstack-router", config_result, &mut aggregated, None).unwrap();
 
     assert_eq!(aggregated.used_exports.len(), 1);
     assert_eq!(
@@ -2372,7 +2369,7 @@ fn process_static_patterns_accumulates_across_plugins() {
 fn process_config_result_empty_result_is_noop() {
     let mut aggregated = AggregatedPluginResult::default();
     let empty = PluginResult::default();
-    process_config_result("empty-plugin", empty, &mut aggregated, None);
+    process_config_result("empty-plugin", empty, &mut aggregated, None).unwrap();
 
     assert!(aggregated.entry_patterns.is_empty());
     assert!(aggregated.referenced_dependencies.is_empty());
@@ -3138,7 +3135,7 @@ fn enabler_prefix_match_skips_check() {
 }
 
 #[test]
-fn process_config_result_strips_invalid_regex_patterns() {
+fn process_config_result_rejects_all_invalid_regex_patterns() {
     let mut aggregated = AggregatedPluginResult::default();
     let rule = PathRule::new("src/**/*.ts")
         .with_excluded_regexes(["valid\\.ts$", "[unclosed"]) // second is invalid
@@ -3148,29 +3145,33 @@ fn process_config_result_strips_invalid_regex_patterns() {
         entry_patterns: vec![rule],
         ..Default::default()
     };
-    process_config_result(
+    let errors = process_config_result(
         "test-plugin",
         config_result,
         &mut aggregated,
         Some(Path::new("/proj/test.config.js")),
-    );
+    )
+    .unwrap_err();
 
-    assert_eq!(aggregated.entry_patterns.len(), 1);
-    let (kept, _name) = &aggregated.entry_patterns[0];
+    assert!(aggregated.entry_patterns.is_empty());
+    assert_eq!(errors.len(), 2);
+    let rendered = format_plugin_regex_errors(&errors);
+    assert!(rendered.contains("invalid plugin regex configuration"));
+    assert!(rendered.contains("plugin 'test-plugin' in /proj/test.config.js"));
+    assert!(rendered.contains("entry_patterns[].exclude_regexes"));
+    assert!(rendered.contains("entry_patterns[].exclude_segment_regexes"));
+    assert!(rendered.contains("src/**/*.ts"));
+    assert!(rendered.contains("[unclosed"));
+    assert!(rendered.contains("(also_invalid"));
     assert_eq!(
-        kept.exclude_regexes,
-        vec!["valid\\.ts$".to_string()],
-        "invalid path regex should be stripped"
-    );
-    assert_eq!(
-        kept.exclude_segment_regexes,
-        vec!["valid_seg".to_string()],
-        "invalid segment regex should be stripped"
+        rendered.matches("plugin 'test-plugin'").count(),
+        2,
+        "every invalid regex should be listed"
     );
 }
 
 #[test]
-fn process_config_result_strips_invalid_regex_in_used_exports() {
+fn process_config_result_rejects_invalid_regex_in_used_exports() {
     let mut aggregated = AggregatedPluginResult::default();
     let rule = UsedExportRule {
         path: PathRule::new("src/**/*.ts").with_excluded_regexes(["[unclosed"]),
@@ -3181,45 +3182,18 @@ fn process_config_result_strips_invalid_regex_in_used_exports() {
         used_exports: vec![rule],
         ..Default::default()
     };
-    process_config_result("test-plugin", config_result, &mut aggregated, None);
+    let errors =
+        process_config_result("test-plugin", config_result, &mut aggregated, None).unwrap_err();
 
-    assert_eq!(aggregated.used_exports.len(), 1);
-    assert!(
-        aggregated.used_exports[0]
-            .rule
-            .path
-            .exclude_regexes
-            .is_empty(),
-        "invalid regex on used_exports rule should be stripped"
-    );
+    assert!(aggregated.used_exports.is_empty());
+    assert_eq!(errors.len(), 1);
+    let rendered = format_plugin_regex_errors(&errors);
+    assert!(rendered.contains("used_exports[].path.exclude_regexes"));
+    assert!(rendered.contains("[unclosed"));
 }
 
 #[test]
-fn tanstack_route_file_ignore_pattern_warning_names_js_regex_compatibility() {
-    let pattern = ["^(", "?!layout\\.tsx$|__root\\.tsx$).+\\.tsx$"].concat();
-    let err = regex::Regex::new(&pattern).unwrap_err();
-    let warning = invalid_excluded_segment_regex_warning(
-        "tanstack-router",
-        Some(Path::new("/proj/vite.config.ts")),
-        &pattern,
-        "src/routes/**/*.{ts,tsx,js,jsx}",
-        &err,
-    );
-
-    assert!(warning.contains("plugin 'tanstack-router' in /proj/vite.config.ts"));
-    assert!(warning.contains("routeFileIgnorePattern"));
-    assert!(warning.contains("syntax unsupported by fallow's Rust regex engine"));
-    assert!(warning.contains("src/routes/**/*.{ts,tsx,js,jsx}"));
-    assert!(warning.contains(&pattern));
-    assert!(warning.contains(&err.to_string()));
-    assert!(
-        !warning.contains("future release"),
-        "TanStack JavaScript regex compatibility warnings should not threaten hard failure"
-    );
-}
-
-#[test]
-fn tanstack_route_file_ignore_pattern_unsupported_patterns_are_warn_and_drop() {
+fn tanstack_route_file_ignore_pattern_unsupported_patterns_are_hard_errors() {
     let unsupported_patterns = [
         "^(?!layout\\.tsx$|__root\\.tsx$).+\\.tsx$",
         "^_(?!_)",
@@ -3235,19 +3209,22 @@ fn tanstack_route_file_ignore_pattern_unsupported_patterns_are_warn_and_drop() {
             ..Default::default()
         };
 
-        process_config_result(
+        let errors = process_config_result(
             "tanstack-router",
             config_result,
             &mut aggregated,
             Some(Path::new("/proj/vite.config.ts")),
-        );
+        )
+        .unwrap_err();
 
-        assert_eq!(aggregated.entry_patterns.len(), 1);
-        let (kept, _name) = &aggregated.entry_patterns[0];
-        assert_eq!(
-            kept.exclude_segment_regexes,
-            vec!["valid_segment".to_string()],
-            "unsupported TanStack pattern should be stripped without failing: {pattern}"
+        assert!(aggregated.entry_patterns.is_empty());
+        let rendered = format_plugin_regex_errors(&errors);
+        assert!(rendered.contains("plugin 'tanstack-router' in /proj/vite.config.ts"));
+        assert!(rendered.contains("entry_patterns[].exclude_segment_regexes"));
+        assert!(rendered.contains(pattern));
+        assert!(
+            !rendered.contains("future release"),
+            "promoted invalid-regex errors should not carry a future-release tail"
         );
     }
 }

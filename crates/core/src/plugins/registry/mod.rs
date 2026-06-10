@@ -1,6 +1,7 @@
 //! Plugin registry: discovers active plugins, collects patterns, parses configs.
 
 use rustc_hash::FxHashSet;
+use std::fmt;
 use std::path::{Path, PathBuf};
 
 use fallow_config::{
@@ -31,6 +32,71 @@ fn must_parse_workspace_config_when_root_active(plugin_name: &str) -> bool {
 pub struct PluginRegistry {
     plugins: Vec<Box<dyn Plugin>>,
     external_plugins: Vec<ExternalPluginDef>,
+}
+
+/// Invalid user-authored regex extracted from a plugin config file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginRegexValidationError {
+    plugin_name: String,
+    config_path: Option<PathBuf>,
+    rule_kind: &'static str,
+    field: &'static str,
+    rule_pattern: String,
+    regex_pattern: String,
+    source: String,
+}
+
+impl PluginRegexValidationError {
+    pub(crate) fn new(
+        plugin_name: &str,
+        config_path: Option<&Path>,
+        rule_kind: &'static str,
+        field: &'static str,
+        rule_pattern: &str,
+        regex_pattern: &str,
+        source: &regex::Error,
+    ) -> Self {
+        Self {
+            plugin_name: plugin_name.to_owned(),
+            config_path: config_path.map(Path::to_path_buf),
+            rule_kind,
+            field,
+            rule_pattern: rule_pattern.to_owned(),
+            regex_pattern: regex_pattern.to_owned(),
+            source: source.to_string(),
+        }
+    }
+}
+
+impl fmt::Display for PluginRegexValidationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let location = self
+            .config_path
+            .as_ref()
+            .map(|path| format!(" in {}", path.display()))
+            .unwrap_or_default();
+        write!(
+            f,
+            "plugin '{}'{}: invalid regex '{}' in {}.{} for path rule '{}': {}",
+            self.plugin_name,
+            location,
+            self.regex_pattern,
+            self.rule_kind,
+            self.field,
+            self.rule_pattern,
+            self.source
+        )
+    }
+}
+
+#[must_use]
+pub fn format_plugin_regex_errors(errors: &[PluginRegexValidationError]) -> String {
+    let joined = errors
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n  - ");
+    format!("invalid plugin regex configuration:\n  - {joined}")
 }
 
 /// Aggregated results from all active plugins for a project.
@@ -271,7 +337,18 @@ impl PluginRegistry {
         root: &Path,
         discovered_files: &[PathBuf],
     ) -> AggregatedPluginResult {
-        self.run_with_search_roots(pkg, root, discovered_files, &[root], false)
+        self.try_run(pkg, root, discovered_files)
+            .unwrap_or_else(|errors| panic!("{}", format_plugin_regex_errors(&errors)))
+    }
+
+    /// Run all plugins, returning invalid plugin regexes as hard errors.
+    pub fn try_run(
+        &self,
+        pkg: &PackageJson,
+        root: &Path,
+        discovered_files: &[PathBuf],
+    ) -> Result<AggregatedPluginResult, Vec<PluginRegexValidationError>> {
+        self.try_run_with_search_roots(pkg, root, discovered_files, &[root], false)
     }
 
     /// Run all plugins against a project with explicit config-file search roots.
@@ -293,8 +370,33 @@ impl PluginRegistry {
         config_search_roots: &[&Path],
         production_mode: bool,
     ) -> AggregatedPluginResult {
+        self.try_run_with_search_roots(
+            pkg,
+            root,
+            discovered_files,
+            config_search_roots,
+            production_mode,
+        )
+        .unwrap_or_else(|errors| panic!("{}", format_plugin_regex_errors(&errors)))
+    }
+
+    /// Run all plugins against a project with explicit config-file search roots,
+    /// returning invalid plugin regexes as hard errors.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Plugin discovery phases stay together to preserve the existing registry flow."
+    )]
+    pub fn try_run_with_search_roots(
+        &self,
+        pkg: &PackageJson,
+        root: &Path,
+        discovered_files: &[PathBuf],
+        config_search_roots: &[&Path],
+        production_mode: bool,
+    ) -> Result<AggregatedPluginResult, Vec<PluginRegexValidationError>> {
         let _span = tracing::info_span!("run_plugins").entered();
         let mut result = AggregatedPluginResult::default();
+        let mut regex_errors = Vec::new();
 
         let all_deps = pkg.all_dependency_names();
         let script_packages = script_activation_packages(pkg, root, &all_deps, production_mode);
@@ -384,24 +486,28 @@ impl PluginRegistry {
                     })
                     .collect();
                 for abs_path in plugin_hits {
-                    if let Ok(source) = std::fs::read_to_string(abs_path) {
-                        let plugin_result = plugin.resolve_config(abs_path, &source, root);
-                        if !plugin_result.is_empty() {
-                            resolved_plugins.insert(plugin.name());
-                            tracing::debug!(
-                                plugin = plugin.name(),
-                                config = %abs_path.display(),
-                                entries = plugin_result.entry_patterns.len(),
-                                deps = plugin_result.referenced_dependencies.len(),
-                                "resolved config"
-                            );
-                            process_config_result(
-                                plugin.name(),
-                                plugin_result,
-                                &mut result,
-                                Some(abs_path),
-                            );
-                        }
+                    let Ok(source) = std::fs::read_to_string(abs_path) else {
+                        continue;
+                    };
+                    let plugin_result = plugin.resolve_config(abs_path, &source, root);
+                    if plugin_result.is_empty() {
+                        continue;
+                    }
+                    resolved_plugins.insert(plugin.name());
+                    tracing::debug!(
+                        plugin = plugin.name(),
+                        config = %abs_path.display(),
+                        entries = plugin_result.entry_patterns.len(),
+                        deps = plugin_result.referenced_dependencies.len(),
+                        "resolved config"
+                    );
+                    if let Err(mut errors) = process_config_result(
+                        plugin.name(),
+                        plugin_result,
+                        &mut result,
+                        Some(abs_path),
+                    ) {
+                        regex_errors.append(&mut errors);
                     }
                 }
             }
@@ -427,12 +533,14 @@ impl PluginRegistry {
                             deps = plugin_result.referenced_dependencies.len(),
                             "resolved config (filesystem fallback)"
                         );
-                        process_config_result(
+                        if let Err(mut errors) = process_config_result(
                             plugin.name(),
                             plugin_result,
                             &mut result,
                             Some(abs_path),
-                        );
+                        ) {
+                            regex_errors.append(&mut errors);
+                        }
                     }
                 }
             }
@@ -444,9 +552,14 @@ impl PluginRegistry {
             &relative_files,
             root,
             &mut result,
+            &mut regex_errors,
         );
 
-        result
+        if regex_errors.is_empty() {
+            Ok(result)
+        } else {
+            Err(regex_errors)
+        }
     }
 
     /// Fast variant of `run()` for workspace packages.
@@ -469,8 +582,41 @@ impl PluginRegistry {
         skip_config_plugins: &FxHashSet<&str>,
         production_mode: bool,
     ) -> AggregatedPluginResult {
+        self.try_run_workspace_fast(
+            pkg,
+            root,
+            project_root,
+            precompiled_config_matchers,
+            relative_files,
+            skip_config_plugins,
+            production_mode,
+        )
+        .unwrap_or_else(|errors| panic!("{}", format_plugin_regex_errors(&errors)))
+    }
+
+    /// Fast variant of `try_run()` for workspace packages.
+    ///
+    /// Reuses pre-compiled config matchers and pre-computed relative files from the root
+    /// project run, avoiding repeated glob compilation and path computation per workspace.
+    /// Skips package.json inline config (workspace packages rarely have inline configs).
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Each parameter is a distinct, small value with no natural grouping; \
+                  bundling them into a struct hurts call-site readability."
+    )]
+    pub fn try_run_workspace_fast(
+        &self,
+        pkg: &PackageJson,
+        root: &Path,
+        project_root: &Path,
+        precompiled_config_matchers: &[(&dyn Plugin, Vec<globset::GlobMatcher>)],
+        relative_files: &[(PathBuf, String)],
+        skip_config_plugins: &FxHashSet<&str>,
+        production_mode: bool,
+    ) -> Result<AggregatedPluginResult, Vec<PluginRegexValidationError>> {
         let _span = tracing::info_span!("run_plugins").entered();
         let mut result = AggregatedPluginResult::default();
+        let mut regex_errors = Vec::new();
 
         let all_deps = pkg.all_dependency_names();
         let script_packages = script_activation_packages(pkg, root, &all_deps, production_mode);
@@ -509,7 +655,7 @@ impl PluginRegistry {
         );
 
         if active.is_empty() && result.active_plugins.is_empty() {
-            return result;
+            return Ok(result);
         }
 
         for plugin in &active {
@@ -541,24 +687,28 @@ impl PluginRegistry {
                     })
                     .collect();
                 for abs_path in plugin_hits {
-                    if let Ok(source) = std::fs::read_to_string(abs_path) {
-                        let plugin_result = plugin.resolve_config(abs_path, &source, root);
-                        if !plugin_result.is_empty() {
-                            resolved_ws_plugins.insert(plugin.name());
-                            tracing::debug!(
-                                plugin = plugin.name(),
-                                config = %abs_path.display(),
-                                entries = plugin_result.entry_patterns.len(),
-                                deps = plugin_result.referenced_dependencies.len(),
-                                "resolved config"
-                            );
-                            process_config_result(
-                                plugin.name(),
-                                plugin_result,
-                                &mut result,
-                                Some(abs_path),
-                            );
-                        }
+                    let Ok(source) = std::fs::read_to_string(abs_path) else {
+                        continue;
+                    };
+                    let plugin_result = plugin.resolve_config(abs_path, &source, root);
+                    if plugin_result.is_empty() {
+                        continue;
+                    }
+                    resolved_ws_plugins.insert(plugin.name());
+                    tracing::debug!(
+                        plugin = plugin.name(),
+                        config = %abs_path.display(),
+                        entries = plugin_result.entry_patterns.len(),
+                        deps = plugin_result.referenced_dependencies.len(),
+                        "resolved config"
+                    );
+                    if let Err(mut errors) = process_config_result(
+                        plugin.name(),
+                        plugin_result,
+                        &mut result,
+                        Some(abs_path),
+                    ) {
+                        regex_errors.append(&mut errors);
                     }
                 }
             }
@@ -594,17 +744,23 @@ impl PluginRegistry {
                         deps = plugin_result.referenced_dependencies.len(),
                         "resolved config (workspace filesystem fallback)"
                     );
-                    process_config_result(
+                    if let Err(mut errors) = process_config_result(
                         plugin.name(),
                         plugin_result,
                         &mut result,
                         Some(abs_path),
-                    );
+                    ) {
+                        regex_errors.append(&mut errors);
+                    }
                 }
             }
         }
 
-        result
+        if regex_errors.is_empty() {
+            Ok(result)
+        } else {
+            Err(regex_errors)
+        }
     }
 
     /// Pre-compile config pattern glob matchers for all plugins that have config patterns.
@@ -899,6 +1055,7 @@ fn process_package_json_inline_configs(
     relative_files: &[(PathBuf, String)],
     root: &Path,
     result: &mut AggregatedPluginResult,
+    regex_errors: &mut Vec<PluginRegexValidationError>,
 ) {
     for plugin in active {
         let Some(key) = plugin.package_json_config_key() else {
@@ -928,7 +1085,11 @@ fn process_package_json_inline_configs(
             key = key,
             "resolved inline package.json config"
         );
-        process_config_result(plugin.name(), plugin_result, result, Some(&pkg_path));
+        if let Err(mut errors) =
+            process_config_result(plugin.name(), plugin_result, result, Some(&pkg_path))
+        {
+            regex_errors.append(&mut errors);
+        }
     }
 }
 

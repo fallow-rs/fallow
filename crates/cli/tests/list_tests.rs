@@ -9,11 +9,64 @@ mod common;
 
 use common::{CommandOutput, fallow_bin, parse_json, run_fallow};
 
+use std::fs;
 use std::process::Command;
 
 /// Run `fallow list` with the given args and return structured output.
 fn run_list(fixture: &str, args: &[&str]) -> CommandOutput {
     run_fallow("list", fixture, args)
+}
+
+fn write_project_with_invalid_tanstack_route_ignore_pattern(root: &std::path::Path) {
+    fs::create_dir_all(root.join("src/routes")).expect("create routes dir");
+    fs::write(
+        root.join("src/routes/index.tsx"),
+        "export const Route = {}\n",
+    )
+    .expect("write route file");
+    fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "invalid-tanstack-regex",
+            "dependencies": {
+                "@tanstack/react-router": "latest",
+                "@tanstack/router-plugin": "latest",
+                "vite": "latest"
+            }
+        }"#,
+    )
+    .expect("write package json");
+    fs::write(
+        root.join("vite.config.ts"),
+        r#"import { tanstackRouter } from "@tanstack/router-plugin/vite";
+
+export default {
+    plugins: [
+        tanstackRouter({
+            routeFileIgnorePattern: "^(?!layout\\.tsx$|__root\\.tsx$).+\\.tsx$",
+        }),
+    ],
+};
+"#,
+    )
+    .expect("write vite config");
+}
+
+fn run_fallow_combined_in_root(root: &std::path::Path, args: &[&str]) -> CommandOutput {
+    let output = Command::new(fallow_bin())
+        .arg("--root")
+        .arg(root)
+        .args(args)
+        .env("RUST_LOG", "")
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("failed to run fallow binary");
+
+    CommandOutput {
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        code: output.status.code().unwrap_or(-1),
+    }
 }
 
 #[test]
@@ -685,6 +738,64 @@ fn list_returns_exit_code_0_on_success() {
     assert_eq!(
         output.code, 0,
         "list command should always return exit code 0 on success"
+    );
+}
+
+#[test]
+fn combined_json_errors_on_invalid_plugin_regex() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    write_project_with_invalid_tanstack_route_ignore_pattern(dir.path());
+
+    let output = run_fallow_combined_in_root(dir.path(), &["--format", "json", "--quiet"]);
+
+    assert_eq!(output.code, 2, "stderr: {}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["error"], serde_json::Value::Bool(true));
+    assert_eq!(json["exit_code"], serde_json::Value::from(2));
+    let message = json["message"]
+        .as_str()
+        .expect("message should be a string");
+    assert!(
+        message.contains("invalid plugin regex configuration"),
+        "message: {message}"
+    );
+    assert!(message.contains("tanstack-router"), "message: {message}");
+    assert!(
+        message.contains("entry_patterns[].exclude_segment_regexes"),
+        "message: {message}"
+    );
+    assert!(message.contains("vite.config.ts"), "message: {message}");
+    assert!(
+        !message.contains("future release"),
+        "message should not include old warning tail: {message}"
+    );
+}
+
+#[test]
+fn list_plugins_json_errors_on_invalid_plugin_regex() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    write_project_with_invalid_tanstack_route_ignore_pattern(dir.path());
+
+    let output = run_fallow_combined_in_root(
+        dir.path(),
+        &["list", "--plugins", "--format", "json", "--quiet"],
+    );
+
+    assert_eq!(output.code, 2, "stderr: {}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["error"], serde_json::Value::Bool(true));
+    assert_eq!(json["exit_code"], serde_json::Value::from(2));
+    let message = json["message"]
+        .as_str()
+        .expect("message should be a string");
+    assert!(
+        message.contains("invalid plugin regex configuration"),
+        "message: {message}"
+    );
+    assert!(message.contains("tanstack-router"), "message: {message}");
+    assert!(
+        message.contains("entry_patterns[].exclude_segment_regexes"),
+        "message: {message}"
     );
 }
 

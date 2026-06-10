@@ -485,7 +485,7 @@ pub fn analyze_with_parse_result(
         workspaces,
         root_pkg.as_ref(),
         &workspace_pkgs,
-    );
+    )?;
     let plugins_ms = t.elapsed().as_secs_f64() * 1000.0;
 
     let t = Instant::now();
@@ -639,10 +639,6 @@ pub fn analyze_with_parse_result(
 }
 
 #[expect(
-    clippy::unnecessary_wraps,
-    reason = "Result kept for future error handling"
-)]
-#[expect(
     clippy::too_many_lines,
     reason = "main pipeline function; sequential phases are held together for clarity"
 )]
@@ -708,7 +704,7 @@ fn analyze_full(
         workspaces,
         root_pkg.as_ref(),
         &workspace_pkgs,
-    );
+    )?;
     let plugins_ms = t.elapsed().as_secs_f64() * 1000.0;
 
     let t = Instant::now();
@@ -1207,7 +1203,7 @@ fn run_plugins(
     workspaces: &[fallow_config::WorkspaceInfo],
     root_pkg: Option<&PackageJson>,
     workspace_pkgs: &[LoadedWorkspacePackage<'_>],
-) -> plugins::AggregatedPluginResult {
+) -> Result<plugins::AggregatedPluginResult, FallowError> {
     let registry = plugins::PluginRegistry::new(config.external_plugins.clone());
     let file_paths: Vec<std::path::PathBuf> = files.iter().map(|f| f.path.clone()).collect();
     let root_config_search_roots = collect_config_search_roots(&config.root, &file_paths);
@@ -1216,22 +1212,28 @@ fn run_plugins(
         .map(std::path::PathBuf::as_path)
         .collect();
 
-    let mut result = root_pkg.map_or_else(plugins::AggregatedPluginResult::default, |pkg| {
-        registry.run_with_search_roots(
-            pkg,
-            &config.root,
-            &file_paths,
-            &root_config_search_root_refs,
-            config.production,
-        )
-    });
+    let mut result = if let Some(pkg) = root_pkg {
+        registry
+            .try_run_with_search_roots(
+                pkg,
+                &config.root,
+                &file_paths,
+                &root_config_search_root_refs,
+                config.production,
+            )
+            .map_err(|errors| {
+                FallowError::config(plugins::registry::format_plugin_regex_errors(&errors))
+            })?
+    } else {
+        plugins::AggregatedPluginResult::default()
+    };
     if let Some(pkg) = root_pkg {
         append_package_file_asset_patterns(&mut result, "", pkg);
     }
 
     if workspaces.is_empty() {
         gate_auto_import_entry_patterns(&mut result, config, workspaces);
-        return result;
+        return Ok(result);
     }
 
     append_workspace_package_file_asset_patterns(&mut result, config, workspace_pkgs);
@@ -1246,7 +1248,7 @@ fn run_plugins(
         .par_iter()
         .zip(workspace_relative_files.par_iter())
         .filter_map(|((ws, ws_pkg), relative_files)| {
-            let ws_result = registry.run_workspace_fast(
+            let ws_result = match registry.try_run_workspace_fast(
                 ws_pkg,
                 &ws.root,
                 &config.root,
@@ -1254,7 +1256,10 @@ fn run_plugins(
                 relative_files,
                 &root_active_plugins,
                 config.production,
-            );
+            ) {
+                Ok(result) => result,
+                Err(errors) => return Some(Err(errors)),
+            };
             if ws_result.active_plugins.is_empty() {
                 return None;
             }
@@ -1264,20 +1269,31 @@ fn run_plugins(
                 .unwrap_or(&ws.root)
                 .to_string_lossy()
                 .into_owned();
-            Some((ws_result, ws_prefix))
+            Some(Ok((ws_result, ws_prefix)))
         })
-        .collect();
+        .collect::<Vec<_>>();
 
-    for (mut ws_result, ws_prefix) in ws_results {
-        ws_result.apply_workspace_prefix(&ws_prefix);
-        ws_result.config_patterns.clear();
-        ws_result.script_used_packages.clear();
-        result.merge_into(ws_result);
+    let mut regex_errors = Vec::new();
+    for ws_result in ws_results {
+        match ws_result {
+            Ok((mut ws_result, ws_prefix)) => {
+                ws_result.apply_workspace_prefix(&ws_prefix);
+                ws_result.config_patterns.clear();
+                ws_result.script_used_packages.clear();
+                result.merge_into(ws_result);
+            }
+            Err(mut errors) => regex_errors.append(&mut errors),
+        }
+    }
+    if !regex_errors.is_empty() {
+        return Err(FallowError::config(
+            plugins::registry::format_plugin_regex_errors(&regex_errors),
+        ));
     }
 
     gate_auto_import_entry_patterns(&mut result, config, workspaces);
 
-    result
+    Ok(result)
 }
 
 /// When `autoImports` is enabled, drop the modeled Nuxt convention entry

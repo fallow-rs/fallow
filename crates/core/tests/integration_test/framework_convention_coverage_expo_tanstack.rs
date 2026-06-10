@@ -1003,7 +1003,7 @@ fn tanstack_router_custom_route_dir_replaces_default_used_export_rules() {
 }
 
 #[test]
-fn tanstack_router_invalid_ignore_pattern_only_drops_the_bad_filter() {
+fn tanstack_router_invalid_ignore_pattern_returns_config_error() {
     let temp = tempdir().expect("create temp dir");
     let root = temp.path();
 
@@ -1026,18 +1026,20 @@ fn tanstack_router_invalid_ignore_pattern_only_drops_the_bad_filter() {
     write_project_file(root, "src/routes/index.tsx", "export const Route = {};\n");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
-    let unused_files = collect_unused_files(root, &results);
+    let err = fallow_core::analyze(&config).expect_err("analysis should fail");
+    assert_eq!(err.code(), Some("E004"));
+    let rendered = err.to_string();
     assert!(
-        !unused_files
-            .iter()
-            .any(|path| path == "src/routes/index.tsx"),
-        "invalid ignore patterns should not disable route discovery, unused files: {unused_files:?}"
+        rendered.contains("invalid plugin regex configuration"),
+        "error: {rendered}"
     );
-
-    let unused_exports = collect_unused_exports(root, &results);
+    assert!(rendered.contains("tanstack-router"), "error: {rendered}");
     assert!(
-        !has_unused_export(&unused_exports, "src/routes/index.tsx", "Route"),
-        "invalid ignore patterns should not disable framework-used export rules, found: {unused_exports:?}"
+        rendered.contains("entry_patterns[].exclude_segment_regexes"),
+        "error: {rendered}"
+    );
+    assert!(
+        rendered.contains("used_exports[].path.exclude_segment_regexes"),
+        "error: {rendered}"
     );
 }
