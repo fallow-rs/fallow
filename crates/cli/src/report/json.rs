@@ -249,6 +249,7 @@ fn build_check_summary(results: &AnalysisResults) -> CheckSummary {
         re_export_cycles: results.re_export_cycles.len(),
         boundary_violations: results.boundary_violations.len(),
         boundary_coverage_violations: results.boundary_coverage_violations.len(),
+        boundary_call_violations: results.boundary_call_violations.len(),
         stale_suppressions: results.stale_suppressions.len(),
         unused_catalog_entries: results.unused_catalog_entries.len(),
         empty_catalog_groups: results.empty_catalog_groups.len(),

@@ -159,6 +159,16 @@ pub fn build_compact_lines(results: &AnalysisResults, root: &Path) -> Vec<String
             v.violation.line,
         ));
     }
+    for v in &results.boundary_call_violations {
+        lines.push(format!(
+            "boundary-call:{}:{}:{} forbidden in zone {} (pattern {})",
+            rel(&v.violation.path),
+            v.violation.line,
+            v.violation.callee,
+            v.violation.zone,
+            v.violation.pattern,
+        ));
+    }
     for s in &results.stale_suppressions {
         lines.push(format!(
             "stale-suppression:{}:{}:{}",

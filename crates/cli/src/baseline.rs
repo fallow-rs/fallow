@@ -96,6 +96,9 @@ pub struct BaselineData {
     /// Boundary coverage violations, keyed by `path`.
     #[serde(default)]
     pub boundary_coverage_violations: Vec<String>,
+    /// Boundary call violations, keyed by `path:callee`.
+    #[serde(default)]
+    pub boundary_call_violations: Vec<String>,
     /// Stale suppressions, keyed by `file:line`.
     #[serde(default)]
     pub stale_suppressions: Vec<String>,
@@ -252,6 +255,11 @@ impl BaselineData {
                 .iter()
                 .map(|v| relative_path(&v.violation.path, root))
                 .collect(),
+            boundary_call_violations: results
+                .boundary_call_violations
+                .iter()
+                .map(|v| boundary_call_violation_key(&v.violation, root))
+                .collect(),
             stale_suppressions: results
                 .stale_suppressions
                 .iter()
@@ -313,6 +321,7 @@ impl BaselineData {
             + self.test_only_dependencies.len()
             + self.boundary_violations.len()
             + self.boundary_coverage_violations.len()
+            + self.boundary_call_violations.len()
             + self.stale_suppressions.len()
             + self.unused_catalog_entries.len()
             + self.empty_catalog_groups.len()
@@ -329,6 +338,14 @@ fn boundary_violation_key(v: &fallow_core::results::BoundaryViolation, root: &Pa
         relative_path(&v.from_path, root),
         relative_path(&v.to_path, root),
     )
+}
+
+/// Generate a stable key for a boundary call violation: `path:callee`.
+fn boundary_call_violation_key(
+    v: &fallow_core::results::BoundaryCallViolation,
+    root: &Path,
+) -> String {
+    format!("{}:{}", relative_path(&v.path, root), v.callee)
 }
 
 /// Generate a stable key for a duplicate export: `name|sorted_paths`.
@@ -577,6 +594,16 @@ pub fn filter_new_issues(
     results.boundary_coverage_violations.retain(|v| {
         let key = relative_path(&v.violation.path, root);
         !baseline_boundary_coverage.contains(key.as_str())
+    });
+
+    let baseline_boundary_calls: FxHashSet<&str> = baseline
+        .boundary_call_violations
+        .iter()
+        .map(String::as_str)
+        .collect();
+    results.boundary_call_violations.retain(|v| {
+        let key = boundary_call_violation_key(&v.violation, root);
+        !baseline_boundary_calls.contains(key.as_str())
     });
 
     let baseline_stale: FxHashSet<&str> = baseline
@@ -1425,6 +1452,7 @@ mod tests {
             test_only_dependencies: vec![],
             boundary_violations: vec![],
             boundary_coverage_violations: vec![],
+            boundary_call_violations: vec![],
             stale_suppressions: vec![],
             unused_catalog_entries: vec![],
             empty_catalog_groups: vec![],
@@ -1472,6 +1500,7 @@ mod tests {
             test_only_dependencies: vec![],
             boundary_violations: vec![],
             boundary_coverage_violations: vec![],
+            boundary_call_violations: vec![],
             stale_suppressions: vec![],
             unused_catalog_entries: vec![],
             empty_catalog_groups: vec![],
@@ -1506,6 +1535,7 @@ mod tests {
             test_only_dependencies: vec![],
             boundary_violations: vec![],
             boundary_coverage_violations: vec![],
+            boundary_call_violations: vec![],
             stale_suppressions: vec![],
             unused_catalog_entries: vec![],
             empty_catalog_groups: vec![],
@@ -2242,6 +2272,7 @@ mod tests {
         let baseline = BaselineData {
             boundary_violations: vec!["src/a.ts->src/b.ts".to_string()],
             boundary_coverage_violations: vec![],
+            boundary_call_violations: vec![],
             ..BaselineData::from_results(&AnalysisResults::default(), Path::new(""))
         };
         let mut results = AnalysisResults::default();

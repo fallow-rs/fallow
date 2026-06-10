@@ -570,6 +570,36 @@ fn push_boundary_coverage_issues(
     }
 }
 
+fn push_boundary_call_issues(
+    issues: &mut Vec<CodeClimateIssue>,
+    violations: &[fallow_types::output_dead_code::BoundaryCallViolationFinding],
+    root: &Path,
+    severity: Severity,
+) {
+    if violations.is_empty() {
+        return;
+    }
+    let level = severity_to_codeclimate(severity);
+    for entry in violations {
+        let v = &entry.violation;
+        let path = cc_path(&v.path, root);
+        let fp = fingerprint_hash(&["fallow/boundary-call-violation", &path, &v.callee]);
+        let line = if v.line > 0 { Some(v.line) } else { None };
+        issues.push(cc_issue(
+            "fallow/boundary-call-violation",
+            &format!(
+                "Boundary call: `{}` matches forbidden pattern `{}` in zone '{}'",
+                v.callee, v.pattern, v.zone
+            ),
+            level,
+            "Bug Risk",
+            &path,
+            line,
+            &fp,
+        ));
+    }
+}
+
 fn push_stale_suppression_issues(
     issues: &mut Vec<CodeClimateIssue>,
     suppressions: &[fallow_core::results::StaleSuppression],
@@ -959,6 +989,12 @@ pub fn build_codeclimate(
     push_boundary_coverage_issues(
         &mut issues,
         &results.boundary_coverage_violations,
+        root,
+        rules.boundary_violation,
+    );
+    push_boundary_call_issues(
+        &mut issues,
+        &results.boundary_call_violations,
         root,
         rules.boundary_violation,
     );

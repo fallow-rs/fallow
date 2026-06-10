@@ -1132,7 +1132,8 @@ fn build_structure_section(
         || !results.circular_dependencies.is_empty()
         || !results.re_export_cycles.is_empty()
         || !results.boundary_violations.is_empty()
-        || !results.boundary_coverage_violations.is_empty();
+        || !results.boundary_coverage_violations.is_empty()
+        || !results.boundary_call_violations.is_empty();
     if !has_structure {
         return;
     }
@@ -1169,6 +1170,13 @@ fn build_structure_section(
     build_boundary_coverage_violations_section(
         lines,
         &results.boundary_coverage_violations,
+        severity_to_level(rules.boundary_violation),
+        root,
+        total_issues,
+    );
+    build_boundary_call_violations_section(
+        lines,
+        &results.boundary_call_violations,
         severity_to_level(rules.boundary_violation),
         root,
         total_issues,
@@ -1723,6 +1731,45 @@ fn build_boundary_coverage_violations_section(
     lines.push(String::new());
 }
 
+/// Build the forbidden-call section. Renders the written callee path next to
+/// the matched pattern and the zone, so users learn the segment-aware
+/// matching rule from the output itself.
+fn build_boundary_call_violations_section(
+    lines: &mut Vec<String>,
+    items: &[fallow_types::output_dead_code::BoundaryCallViolationFinding],
+    level: Level,
+    root: &Path,
+    total_issues: usize,
+) {
+    if items.is_empty() {
+        return;
+    }
+    let title = "Boundary calls";
+    lines.push(build_section_header(title, items.len(), level));
+
+    let shown = items.len().min(MAX_FLAT_ITEMS);
+    for entry in &items[..shown] {
+        let v = &entry.violation;
+        let path = relative_path(&v.path, root).display().to_string();
+        lines.push(format!(
+            "  {}:{} {} {}",
+            path,
+            v.line,
+            v.callee,
+            format!("matches forbidden `{}` in zone '{}'", v.pattern, v.zone).dimmed(),
+        ));
+    }
+    if items.len() > MAX_FLAT_ITEMS {
+        let remaining = items.len() - MAX_FLAT_ITEMS;
+        lines.push(format!(
+            "  {}",
+            truncation_hint(remaining, total_issues).dimmed()
+        ));
+    }
+    push_section_footer_with_count(lines, title, items.len());
+    lines.push(String::new());
+}
+
 fn build_stale_suppressions_section(
     lines: &mut Vec<String>,
     items: &[fallow_core::results::StaleSuppression],
@@ -1805,6 +1852,9 @@ fn collect_matching_rules(
         check(&b.violation.from_path);
     }
     for b in &results.boundary_coverage_violations {
+        check(&b.violation.path);
+    }
+    for b in &results.boundary_call_violations {
         check(&b.violation.path);
     }
     for s in &results.stale_suppressions {
@@ -2308,6 +2358,34 @@ mod tests {
         assert!(text.contains("Structure"));
         assert!(text.contains("Boundary coverage (1)"));
         assert!(text.contains("src/middleware/error.ts:1"));
+    }
+
+    #[test]
+    fn boundary_calls_alone_render_structure_section() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .boundary_call_violations
+            .push(BoundaryCallViolationFinding::with_actions(
+                BoundaryCallViolation {
+                    path: root.join("src/domain/policy.ts"),
+                    line: 5,
+                    col: 2,
+                    zone: "domain".to_string(),
+                    callee: "execSync".to_string(),
+                    pattern: "child_process.*".to_string(),
+                },
+            ));
+
+        let lines = build_human_lines(&results, &root, &RulesConfig::default(), None);
+        let text = plain(&lines);
+
+        assert!(text.contains("Structure"));
+        assert!(text.contains("Boundary calls (1)"));
+        assert!(text.contains("src/domain/policy.ts:5"));
+        assert!(text.contains("execSync"));
+        assert!(text.contains("child_process.*"));
+        assert!(text.contains("zone 'domain'"));
     }
 
     #[test]

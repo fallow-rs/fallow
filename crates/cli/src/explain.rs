@@ -204,6 +204,14 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#boundary-violations",
     },
     RuleDef {
+        id: "fallow/boundary-call-violation",
+        category: "Architecture",
+        name: "Boundary Call Violation",
+        short: "Zoned file calls a callee its zone forbids",
+        full: "A file classified into a boundary zone calls a callee matching one of the zone's boundaries.calls.forbidden patterns. The check is syntactic: it matches the written callee path and the import-resolved canonical path, and it only applies to files classified into a zone. Move the call behind an allowed abstraction, or adjust the zone's forbidden patterns if the rule was wrong.",
+        docs_path: "explanations/dead-code#boundary-violations",
+    },
+    RuleDef {
         id: "fallow/stale-suppression",
         category: "Suppressions",
         name: "Stale Suppressions",
@@ -320,6 +328,7 @@ pub fn rule_by_token(token: &str) -> Option<&'static RuleDef> {
         "circular-deps" | "circular-dependencies" => Some("fallow/circular-dependency"),
         "boundary-violations" => Some("fallow/boundary-violation"),
         "boundary-coverage" | "boundary-coverage-violations" => Some("fallow/boundary-coverage"),
+        "boundary-calls" | "boundary-call-violations" => Some("fallow/boundary-call-violation"),
         "stale-suppressions" => Some("fallow/stale-suppression"),
         "unused-catalog-entries" | "unused-catalog-entry" | "catalog" => {
             Some("fallow/unused-catalog-entry")
@@ -462,6 +471,10 @@ pub fn rule_guide(rule: &RuleDef) -> RuleGuide {
         "fallow/boundary-coverage" => RuleGuide {
             example: "src/generated/client.ts is reachable but does not match any boundaries.zones[].patterns entry.",
             how_to_fix: "Add the file to the intended zone pattern, move it under a zoned directory, or add a generated-file glob to boundaries.coverage.allowUnmatched.",
+        },
+        "fallow/boundary-call-violation" => RuleGuide {
+            example: "src/domain/policy.ts calls execSync from node:child_process while boundaries.calls.forbidden bans child_process.* from the domain zone.",
+            how_to_fix: "Move the call into a zone that may perform the effect, route it through an allowed abstraction, or narrow the forbidden pattern if the rule was wrong.",
         },
         "fallow/stale-suppression" => RuleGuide {
             example: "// fallow-ignore-next-line unused-export remains above an export that is now used.",
@@ -1975,7 +1988,7 @@ mod tests {
 
     #[test]
     fn check_rules_count() {
-        assert_eq!(CHECK_RULES.len(), 24);
+        assert_eq!(CHECK_RULES.len(), 25);
     }
 
     #[test]

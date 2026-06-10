@@ -4,12 +4,12 @@ use std::process::ExitCode;
 use fallow_config::{RulesConfig, Severity};
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::{
-    AnalysisResults, BoundaryCoverageViolation, BoundaryViolation, CircularDependency,
-    DuplicateExportFinding, EmptyCatalogGroupFinding, MisconfiguredDependencyOverrideFinding,
-    PrivateTypeLeak, StaleSuppression, TestOnlyDependency, TypeOnlyDependency,
-    UnlistedDependencyFinding, UnresolvedCatalogReferenceFinding, UnresolvedImport,
-    UnusedCatalogEntryFinding, UnusedDependency, UnusedDependencyOverrideFinding, UnusedExport,
-    UnusedFile, UnusedMember,
+    AnalysisResults, BoundaryCallViolation, BoundaryCoverageViolation, BoundaryViolation,
+    CircularDependency, DuplicateExportFinding, EmptyCatalogGroupFinding,
+    MisconfiguredDependencyOverrideFinding, PrivateTypeLeak, StaleSuppression, TestOnlyDependency,
+    TypeOnlyDependency, UnlistedDependencyFinding, UnresolvedCatalogReferenceFinding,
+    UnresolvedImport, UnusedCatalogEntryFinding, UnusedDependency, UnusedDependencyOverrideFinding,
+    UnusedExport, UnusedFile, UnusedMember,
 };
 use rustc_hash::FxHashMap;
 
@@ -448,6 +448,25 @@ fn sarif_boundary_coverage_fields(
     }
 }
 
+fn sarif_boundary_call_fields(
+    violation: &BoundaryCallViolation,
+    root: &Path,
+    level: &'static str,
+) -> SarifFields {
+    SarifFields {
+        rule_id: "fallow/boundary-call-violation",
+        level,
+        message: format!(
+            "Call to `{}` matches forbidden pattern `{}` in zone '{}'",
+            violation.callee, violation.pattern, violation.zone
+        ),
+        uri: relative_uri(&violation.path, root),
+        region: Some((violation.line, violation.col + 1)),
+        source_path: Some(violation.path.clone()),
+        properties: None,
+    }
+}
+
 fn sarif_stale_suppression_fields(
     suppression: &StaleSuppression,
     root: &Path,
@@ -743,6 +762,11 @@ fn build_sarif_rules(rules: &RulesConfig) -> Vec<serde_json::Value> {
         (
             "fallow/boundary-coverage",
             "Source file matches no architecture boundary zone",
+            rules.boundary_violation,
+        ),
+        (
+            "fallow/boundary-call-violation",
+            "Zoned file calls a callee its zone forbids",
             rules.boundary_violation,
         ),
         (
@@ -1043,6 +1067,18 @@ fn push_graph_sarif_results(
         snippets,
         |v| {
             sarif_boundary_coverage_fields(
+                &v.violation,
+                root,
+                severity_to_sarif_level(rules.boundary_violation),
+            )
+        },
+    );
+    push_sarif_results(
+        sarif_results,
+        &results.boundary_call_violations,
+        snippets,
+        |v| {
+            sarif_boundary_call_fields(
                 &v.violation,
                 root,
                 severity_to_sarif_level(rules.boundary_violation),
@@ -1793,7 +1829,7 @@ mod tests {
         let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
             .as_array()
             .expect("rules should be an array");
-        assert_eq!(rules.len(), 24);
+        assert_eq!(rules.len(), 25);
 
         let rule_ids: Vec<&str> = rules.iter().map(|r| r["id"].as_str().unwrap()).collect();
         assert!(rule_ids.contains(&"fallow/unused-file"));
@@ -1814,6 +1850,7 @@ mod tests {
         assert!(rule_ids.contains(&"fallow/re-export-cycle"));
         assert!(rule_ids.contains(&"fallow/boundary-violation"));
         assert!(rule_ids.contains(&"fallow/boundary-coverage"));
+        assert!(rule_ids.contains(&"fallow/boundary-call-violation"));
         assert!(rule_ids.contains(&"fallow/unused-catalog-entry"));
         assert!(rule_ids.contains(&"fallow/empty-catalog-group"));
         assert!(rule_ids.contains(&"fallow/unresolved-catalog-reference"));

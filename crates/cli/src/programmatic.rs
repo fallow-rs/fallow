@@ -604,6 +604,7 @@ fn filter_for_circular_dependencies(results: &AnalysisResults) -> AnalysisResult
     filtered.test_only_dependencies.clear();
     filtered.boundary_violations.clear();
     filtered.boundary_coverage_violations.clear();
+    filtered.boundary_call_violations.clear();
     filtered.stale_suppressions.clear();
     filtered
 }
@@ -686,7 +687,8 @@ pub fn detect_circular_dependencies(
 }
 
 /// Run the boundary-violation analysis and return the standard dead-code JSON envelope
-/// filtered down to the `boundary_violations` category.
+/// filtered down to the boundary family: `boundary_violations`,
+/// `boundary_coverage_violations`, and `boundary_call_violations`.
 pub fn detect_boundary_violations(
     options: &DeadCodeOptions,
 ) -> ProgrammaticResult<serde_json::Value> {
@@ -1394,6 +1396,49 @@ mod tests {
         assert_eq!(coverage.len(), 1);
         assert_eq!(coverage[0]["path"], "src/index.ts");
         assert_eq!(json["summary"]["boundary_coverage_violations"], 1);
+    }
+
+    #[test]
+    fn detect_boundary_violations_includes_boundary_calls() {
+        let project = tiny_project();
+        let root = project.path();
+        std::fs::write(
+            root.join("src/index.ts"),
+            "console.log('hello');\nexport const x = 1;\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join(".fallowrc.json"),
+            r#"{
+              "boundaries": {
+                "zones": [
+                  { "name": "domain", "patterns": ["src/**"] }
+                ],
+                "calls": {
+                  "forbidden": [
+                    { "from": "domain", "callee": "console.*" }
+                  ]
+                }
+              }
+            }"#,
+        )
+        .unwrap();
+
+        let json = detect_boundary_violations(&DeadCodeOptions {
+            analysis: analysis_at(root),
+            ..DeadCodeOptions::default()
+        })
+        .expect("boundary-violation analysis should succeed");
+
+        let calls = json["boundary_call_violations"]
+            .as_array()
+            .expect("boundary call findings should be an array");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0]["path"], "src/index.ts");
+        assert_eq!(calls[0]["zone"], "domain");
+        assert_eq!(calls[0]["callee"], "console.log");
+        assert_eq!(calls[0]["pattern"], "console.*");
+        assert_eq!(json["summary"]["boundary_call_violations"], 1);
     }
 
     #[test]

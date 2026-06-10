@@ -134,6 +134,7 @@ pub fn apply_rules(results: &mut fallow_core::results::AnalysisResults, config: 
     if rules.boundary_violation == Severity::Off {
         results.boundary_violations.clear();
         results.boundary_coverage_violations.clear();
+        results.boundary_call_violations.clear();
     }
     if rules.unused_catalog_entries == Severity::Off {
         results.unused_catalog_entries.clear();
@@ -163,6 +164,12 @@ fn apply_boundary_override_rules(
             != Severity::Off
     });
     results.boundary_coverage_violations.retain(|v| {
+        config
+            .resolve_rules_for_path(&v.violation.path)
+            .boundary_violation
+            != Severity::Off
+    });
+    results.boundary_call_violations.retain(|v| {
         config
             .resolve_rules_for_path(&v.violation.path)
             .boundary_violation
@@ -227,6 +234,11 @@ pub fn has_error_severity_issues(
                     .resolve_rules_for_path(&v.violation.path)
                     .boundary_violation
                     == Severity::Error
+            }) || results.boundary_call_violations.iter().any(|v| {
+                config
+                    .resolve_rules_for_path(&v.violation.path)
+                    .boundary_violation
+                    == Severity::Error
             }) || results.circular_dependencies.iter().any(|c| {
                 c.cycle.files.iter().any(|path| {
                     config.resolve_rules_for_path(path).circular_dependencies == Severity::Error
@@ -275,6 +287,9 @@ pub fn has_error_severity_issues(
         || (!has_overrides
             && rules.boundary_violation == Severity::Error
             && !results.boundary_coverage_violations.is_empty())
+        || (!has_overrides
+            && rules.boundary_violation == Severity::Error
+            && !results.boundary_call_violations.is_empty())
         || (rules.unused_catalog_entries == Severity::Error
             && !results.unused_catalog_entries.is_empty())
         || (rules.empty_catalog_groups == Severity::Error

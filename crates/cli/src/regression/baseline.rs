@@ -719,6 +719,7 @@ mod tests {
             test_only_dependencies: 0,
             boundary_violations: 0,
             boundary_coverage_violations: 0,
+            boundary_call_violations: 0,
         };
         let dupes = DupesCounts {
             clone_groups: 4,

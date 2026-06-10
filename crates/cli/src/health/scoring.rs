@@ -1731,6 +1731,7 @@ mod tests {
             tainted_bindings: Vec::new(),
             sanitized_sink_args: Vec::new(),
             security_control_sites: Vec::new(),
+            callee_uses: Vec::new(),
         };
 
         let (cyc, cog, funcs, lines) = aggregate_complexity(&module);
@@ -1777,6 +1778,7 @@ mod tests {
             tainted_bindings: Vec::new(),
             sanitized_sink_args: Vec::new(),
             security_control_sites: Vec::new(),
+            callee_uses: Vec::new(),
             line_offsets: vec![0, 10, 20, 30, 40], // 5 lines
             complexity: vec![fallow_types::extract::FunctionComplexity {
                 name: "doStuff".into(),
@@ -1835,6 +1837,7 @@ mod tests {
             tainted_bindings: Vec::new(),
             sanitized_sink_args: Vec::new(),
             security_control_sites: Vec::new(),
+            callee_uses: Vec::new(),
             line_offsets: vec![0, 10, 20], // 3 lines
             complexity: vec![
                 fallow_types::extract::FunctionComplexity {
@@ -2112,6 +2115,7 @@ mod tests {
             tainted_bindings: Vec::new(),
             sanitized_sink_args: Vec::new(),
             security_control_sites: Vec::new(),
+            callee_uses: Vec::new(),
         }
     }
 

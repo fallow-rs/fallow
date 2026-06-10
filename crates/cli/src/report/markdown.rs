@@ -282,6 +282,21 @@ fn push_markdown_graph_sections(
     );
     markdown_section(
         out,
+        &results.boundary_call_violations,
+        "Boundary calls",
+        |v| {
+            vec![format!(
+                "- `{}`:{} `{}` forbidden in zone `{}` (pattern `{}`)",
+                rel(&v.violation.path),
+                v.violation.line,
+                v.violation.callee,
+                v.violation.zone,
+                v.violation.pattern,
+            )]
+        },
+    );
+    markdown_section(
+        out,
         &results.stale_suppressions,
         "Stale suppressions",
         |s| {

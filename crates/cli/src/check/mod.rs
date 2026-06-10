@@ -122,6 +122,7 @@ impl IssueFilters {
         if !self.boundary_violations {
             results.boundary_violations.clear();
             results.boundary_coverage_violations.clear();
+            results.boundary_call_violations.clear();
         }
         if !self.stale_suppressions {
             results.stale_suppressions.clear();

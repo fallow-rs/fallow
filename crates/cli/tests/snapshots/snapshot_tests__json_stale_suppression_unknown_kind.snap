@@ -26,6 +26,7 @@ expression: redact_version(&json_str)
     "re_export_cycles": 0,
     "boundary_violations": 0,
     "boundary_coverage_violations": 0,
+    "boundary_call_violations": 0,
     "stale_suppressions": 2,
     "unused_catalog_entries": 0,
     "empty_catalog_groups": 0,
@@ -51,6 +52,7 @@ expression: redact_version(&json_str)
   "re_export_cycles": [],
   "boundary_violations": [],
   "boundary_coverage_violations": [],
+  "boundary_call_violations": [],
   "stale_suppressions": [
     {
       "path": "src/utils.ts",

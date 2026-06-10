@@ -79,6 +79,9 @@ pub fn filter_to_workspaces(
     results
         .boundary_coverage_violations
         .retain(|v| any_under(&v.violation.path));
+    results
+        .boundary_call_violations
+        .retain(|v| any_under(&v.violation.path));
 
     results.stale_suppressions.retain(|s| any_under(&s.path));
 

@@ -248,6 +248,19 @@ expression: redact_sarif_version(&json_str)
               }
             },
             {
+              "id": "fallow/boundary-call-violation",
+              "shortDescription": {
+                "text": "Zoned file calls a callee its zone forbids"
+              },
+              "fullDescription": {
+                "text": "A file classified into a boundary zone calls a callee matching one of the zone's boundaries.calls.forbidden patterns. The check is syntactic: it matches the written callee path and the import-resolved canonical path, and it only applies to files classified into a zone. Move the call behind an allowed abstraction, or adjust the zone's forbidden patterns if the rule was wrong."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#boundary-violations",
+              "defaultConfiguration": {
+                "level": "error"
+              }
+            },
+            {
               "id": "fallow/stale-suppression",
               "shortDescription": {
                 "text": "Suppression comment or tag no longer matches any issue"

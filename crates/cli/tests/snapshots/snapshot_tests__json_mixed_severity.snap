@@ -26,6 +26,7 @@ expression: redact_version(&json_str)
     "re_export_cycles": 1,
     "boundary_violations": 0,
     "boundary_coverage_violations": 0,
+    "boundary_call_violations": 0,
     "stale_suppressions": 0,
     "unused_catalog_entries": 2,
     "empty_catalog_groups": 1,
@@ -426,6 +427,7 @@ expression: redact_version(&json_str)
   ],
   "boundary_violations": [],
   "boundary_coverage_violations": [],
+  "boundary_call_violations": [],
   "stale_suppressions": [],
   "unused_catalog_entries": [
     {
