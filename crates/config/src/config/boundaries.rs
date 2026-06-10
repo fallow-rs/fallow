@@ -880,6 +880,12 @@ impl BoundaryConfig {
                         pattern: pattern.to_owned(),
                         reason: "contains an empty path segment".to_owned(),
                     });
+                } else if let Some(reason) = wildcard_placement_error(trimmed) {
+                    errors.push(InvalidForbiddenCallee {
+                        rule_index: i,
+                        pattern: pattern.to_owned(),
+                        reason,
+                    });
                 }
             }
         }
@@ -960,6 +966,39 @@ impl BoundaryConfig {
             calls_forbidden_by_zone,
         }
     }
+}
+
+/// Reject `*` placements the segment-aware callee matcher cannot honor.
+/// Callee patterns are not globs: `*` must be a whole segment, and only the
+/// leading object position (`*.member`) or the trailing member position
+/// (`object.*`) is supported, never both and never mid-path.
+fn wildcard_placement_error(pattern: &str) -> Option<String> {
+    let segments: Vec<&str> = pattern.split('.').collect();
+    let last = segments.len() - 1;
+    if segments
+        .iter()
+        .any(|segment| segment.contains('*') && *segment != "*")
+    {
+        return Some(
+            "uses `*` inside a segment; callee patterns are not globs, so `*` must be a \
+             whole segment (`*.member` or `object.*`)"
+                .to_owned(),
+        );
+    }
+    let star_positions: Vec<usize> = segments
+        .iter()
+        .enumerate()
+        .filter(|(_, segment)| **segment == "*")
+        .map(|(i, _)| i)
+        .collect();
+    if star_positions.len() > 1 || star_positions.iter().any(|&i| i != 0 && i != last) {
+        return Some(
+            "may use `*` only as the leading object segment (`*.member`) or the trailing \
+             member segment (`object.*`), not both and not mid-path"
+                .to_owned(),
+        );
+    }
+    None
 }
 
 /// Normalize a zone root for classification.
@@ -1420,6 +1459,27 @@ callee = ["console.*"]
         assert!(errors[1].reason.contains("must not be empty"));
         assert!(errors[2].reason.contains("empty path segment"));
         assert!(errors[3].reason.contains("at least one callee pattern"));
+    }
+
+    #[test]
+    fn validate_call_rules_rejects_misplaced_wildcards() {
+        let json = r#"{
+            "zones": [{ "name": "domain", "patterns": ["src/domain/**"] }],
+            "calls": {
+                "forbidden": [
+                    { "from": "domain", "callee": "a.*.b" },
+                    { "from": "domain", "callee": "*.query.*" },
+                    { "from": "domain", "callee": "con*ole.log" },
+                    { "from": "domain", "callee": ["console.*", "*.innerHTML", "child_process.exec"] }
+                ]
+            }
+        }"#;
+        let config: BoundaryConfig = serde_json::from_str(json).unwrap();
+        let errors = config.validate_call_rules();
+        assert_eq!(errors.len(), 3);
+        assert!(errors[0].reason.contains("not both and not mid-path"));
+        assert!(errors[1].reason.contains("not both and not mid-path"));
+        assert!(errors[2].reason.contains("not globs"));
     }
 
     #[test]

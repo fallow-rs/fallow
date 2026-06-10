@@ -417,6 +417,49 @@ fn run_circular_dep_detector(
         .collect()
 }
 
+/// Thin wrapper around
+/// [`boundary_coverage::find_boundary_coverage_violations`] that gates on the
+/// shared `boundary-violation` severity. Extracted alongside
+/// [`run_circular_dep_detector`].
+fn run_boundary_coverage_detector(
+    graph: &ModuleGraph,
+    config: &ResolvedConfig,
+    suppressions: &crate::suppress::SuppressionContext<'_>,
+) -> Vec<BoundaryCoverageViolationFinding> {
+    if config.rules.boundary_violation == Severity::Off {
+        return Vec::new();
+    }
+    boundary_coverage::find_boundary_coverage_violations(graph, config, suppressions)
+        .into_iter()
+        .map(BoundaryCoverageViolationFinding::with_actions)
+        .collect()
+}
+
+/// Thin wrapper around [`boundary_calls::find_boundary_call_violations`] that
+/// gates on the shared `boundary-violation` severity. Extracted alongside
+/// [`run_circular_dep_detector`].
+fn run_boundary_call_detector(
+    graph: &ModuleGraph,
+    modules: &[ModuleInfo],
+    config: &ResolvedConfig,
+    suppressions: &crate::suppress::SuppressionContext<'_>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+) -> Vec<BoundaryCallViolationFinding> {
+    if config.rules.boundary_violation == Severity::Off {
+        return Vec::new();
+    }
+    boundary_calls::find_boundary_call_violations(
+        graph,
+        modules,
+        config,
+        suppressions,
+        line_offsets_by_file,
+    )
+    .into_iter()
+    .map(BoundaryCallViolationFinding::with_actions)
+    .collect()
+}
+
 /// Thin wrapper around [`re_export_cycles::find_re_export_cycles`] that gates
 /// on `Severity::Off`. Extracted alongside [`run_circular_dep_detector`].
 fn run_re_export_cycle_detector(
@@ -676,42 +719,20 @@ pub fn find_dead_code_full(
                                         || {
                                             rayon::join(
                                                 || {
-                                                    if config.rules.boundary_violation
-                                                        != Severity::Off
-                                                    {
-                                                        boundary_coverage::find_boundary_coverage_violations(
-                                                            graph,
-                                                            config,
-                                                            &suppressions,
-                                                        )
-                                                        .into_iter()
-                                                        .map(
-                                                            BoundaryCoverageViolationFinding::with_actions,
-                                                        )
-                                                        .collect::<Vec<_>>()
-                                                    } else {
-                                                        Vec::new()
-                                                    }
+                                                    run_boundary_coverage_detector(
+                                                        graph,
+                                                        config,
+                                                        &suppressions,
+                                                    )
                                                 },
                                                 || {
-                                                    if config.rules.boundary_violation
-                                                        != Severity::Off
-                                                    {
-                                                        boundary_calls::find_boundary_call_violations(
-                                                            graph,
-                                                            modules,
-                                                            config,
-                                                            &suppressions,
-                                                            &line_offsets_by_file,
-                                                        )
-                                                        .into_iter()
-                                                        .map(
-                                                            BoundaryCallViolationFinding::with_actions,
-                                                        )
-                                                        .collect::<Vec<_>>()
-                                                    } else {
-                                                        Vec::new()
-                                                    }
+                                                    run_boundary_call_detector(
+                                                        graph,
+                                                        modules,
+                                                        config,
+                                                        &suppressions,
+                                                        &line_offsets_by_file,
+                                                    )
                                                 },
                                             )
                                         },

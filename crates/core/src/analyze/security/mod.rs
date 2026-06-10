@@ -37,7 +37,7 @@ pub use tainted_sink::{CategoryFilter, TaintedSinkContext, find_tainted_sinks};
 
 /// Segment-aware callee pattern matcher, re-exported for the boundary
 /// forbidden-call detector (`analyze::boundary_calls`).
-pub(crate) use catalogue::CalleePattern;
+pub use catalogue::CalleePattern;
 
 #[must_use]
 pub fn catalogue_title(id: &str) -> Option<&'static str> {
