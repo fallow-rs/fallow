@@ -27,7 +27,7 @@ fn fixture_config(rule_packs: Vec<String>) -> fallow_config::ResolvedConfig {
 
 #[test]
 fn rule_pack_reports_banned_calls_and_imports_end_to_end() {
-    let config = fixture_config(vec![".fallow/rule-packs/team-policy.jsonc".to_string()]);
+    let config = fixture_config(vec!["packs/team-policy.jsonc".to_string()]);
     assert_eq!(config.rule_packs.len(), 1, "pack should load from disk");
 
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
@@ -106,7 +106,7 @@ fn no_rule_packs_configured_means_zero_policy_findings() {
 
 #[test]
 fn master_off_disables_the_evaluator_entirely() {
-    let mut config = fixture_config(vec![".fallow/rule-packs/team-policy.jsonc".to_string()]);
+    let mut config = fixture_config(vec!["packs/team-policy.jsonc".to_string()]);
     config.rules.policy_violation = Severity::Off;
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
     assert!(

@@ -755,6 +755,49 @@ fn config_with_redundant_boundary_root_prefix_exits_2() {
 }
 
 #[test]
+fn config_with_invalid_rule_pack_exits_2() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    std::fs::write(root.join("package.json"), r#"{"name":"test"}"#).expect("write package.json");
+    std::fs::create_dir_all(root.join("packs")).expect("create packs dir");
+    std::fs::write(
+        root.join("packs/bad-kind.json"),
+        r#"{
+            "version": 1,
+            "name": "bad-kind",
+            "rules": [
+                { "id": "no-foo", "kind": "banned-callee", "callees": ["foo.*"] }
+            ]
+        }"#,
+    )
+    .expect("write pack");
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        r#"{ "rulePacks": ["packs/bad-kind.json", "packs/nonexistent.json"] }"#,
+    )
+    .expect("write config");
+
+    let output = run_fallow_in_root("check", root, &["--quiet"]);
+    assert_eq!(
+        output.code, 2,
+        "an invalid or missing rule pack must fail the run instead of silently \
+         skipping policy, stderr: {}",
+        output.stderr
+    );
+
+    let stderr = &output.stderr;
+    assert!(stderr.contains("invalid rule pack"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("bad-kind.json"),
+        "stderr should name the unparsable pack: {stderr}"
+    );
+    assert!(
+        stderr.contains("nonexistent.json"),
+        "stderr should collect the missing pack too: {stderr}"
+    );
+}
+
+#[test]
 fn fallow_config_subcommand_rejects_unknown_boundary_zone() {
     let dir = tempfile::tempdir().expect("create temp dir");
     let root = dir.path();

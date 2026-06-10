@@ -235,6 +235,18 @@ pub fn load_config_for_analysis(
         return Err(crate::error::emit_error(&msg, 2, output));
     }
 
+    // A pack that fails to load must fail the run: silently skipping policy
+    // is the exact failure mode rule packs document themselves as preventing.
+    if let Err(errors) = fallow_config::load_rule_packs(root, &final_config.rule_packs) {
+        let joined = errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n  - ");
+        let msg = format!("invalid rule pack:\n  - {joined}");
+        return Err(crate::error::emit_error(&msg, 2, output));
+    }
+
     let cache_max_size_mb = resolve_cache_max_size_env();
     let mut resolved = final_config.resolve(
         root.to_path_buf(),
