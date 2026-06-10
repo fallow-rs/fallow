@@ -1065,10 +1065,80 @@ git diff --cached --unified=0 | fallow security --gate new --diff-stdin
 {
   "kind": "security",
   "schema_version": "4",
+  "version": "2.91.0",
+  "elapsed_ms": 42,
+  "config": {
+    "rules": {
+      "security_client_server_leak": {
+        "configured": "off",
+        "effective": "warn"
+      },
+      "security_sink": {
+        "configured": "off",
+        "effective": "warn"
+      }
+    },
+    "categories_include": null,
+    "categories_exclude": null
+  },
   "security_findings": [],
   "unresolved_edge_files": 0,
   "unresolved_callee_sites": 0,
   "unresolved_callee_diagnostics": null
+}
+```
+
+`fallow security --summary --format json --quiet` emits the same `kind`, `schema_version`, `version`, `elapsed_ms`, and `config` metadata, but replaces candidate arrays with `summary` aggregate counts:
+
+```json
+{
+  "kind": "security",
+  "schema_version": "4",
+  "version": "2.91.0",
+  "elapsed_ms": 42,
+  "config": {
+    "rules": {
+      "security_client_server_leak": {
+        "configured": "off",
+        "effective": "warn"
+      },
+      "security_sink": {
+        "configured": "off",
+        "effective": "warn"
+      }
+    },
+    "categories_include": null,
+    "categories_exclude": null
+  },
+  "summary": {
+    "security_findings": 0,
+    "by_severity": {
+      "high": 0,
+      "medium": 0,
+      "low": 0
+    },
+    "by_category": {},
+    "by_reachability": {
+      "entry_reachable": 0,
+      "untrusted_source_reachable": 0,
+      "arg_level": 0,
+      "module_level": 0,
+      "crosses_boundary": 0,
+      "source_backed": 0
+    },
+    "by_runtime_state": {
+      "runtime_hot": 0,
+      "runtime_cold": 0,
+      "never_executed": 0,
+      "low_traffic": 0,
+      "coverage_unavailable": 0,
+      "runtime_unknown": 0,
+      "not_collected": 0
+    },
+    "unresolved_edge_files": 0,
+    "unresolved_callee_sites": 0,
+    "attack_surface_entries": 0
+  }
 }
 ```
 

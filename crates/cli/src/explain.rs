@@ -1267,6 +1267,28 @@ pub fn security_meta() -> Meta {
                     .to_string(),
             ),
             (
+                "summary.security_findings".to_string(),
+                "Number of security candidates after all filters, gates, and scopes.".to_string(),
+            ),
+            (
+                "summary.by_severity".to_string(),
+                "Fixed high, medium, and low severity counts for summary JSON.".to_string(),
+            ),
+            (
+                "summary.by_category".to_string(),
+                "Candidate counts by catalogue category, or by kind for uncategorized findings."
+                    .to_string(),
+            ),
+            (
+                "summary.by_reachability".to_string(),
+                "Fixed reachability and source-backed ranking-signal counts for summary JSON."
+                    .to_string(),
+            ),
+            (
+                "summary.by_runtime_state".to_string(),
+                "Fixed production-runtime coverage state counts for summary JSON.".to_string(),
+            ),
+            (
                 "unresolved_edge_files".to_string(),
                 "Number of client files whose import cone contains dynamic edges the graph could not follow."
                     .to_string(),

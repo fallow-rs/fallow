@@ -256,6 +256,15 @@ pub struct SecurityUnresolvedCalleeReasonCount {
 pub struct SecuritySummaryOutput {
     /// Schema version of this envelope.
     pub schema_version: SecuritySchemaVersion,
+    /// Fallow CLI version that produced this output.
+    pub version: ToolVersion,
+    /// Wall-clock milliseconds spent producing the report.
+    pub elapsed_ms: ElapsedMs,
+    /// Privacy-safe config context relevant to security candidate generation.
+    pub config: SecurityOutputConfig,
+    /// Security-specific rule and field metadata, emitted with `--explain`.
+    #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
+    pub meta: Option<Meta>,
     /// Gate verdict, present only when `--gate <mode>` was set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gate: Option<SecurityGate>,
@@ -274,6 +283,10 @@ pub struct SecuritySummary {
     /// Finding counts by catalogue category, or by kind for findings without a
     /// catalogue category.
     pub by_category: BTreeMap<String, usize>,
+    /// Fixed reachability counts for ranking and triage signals.
+    pub by_reachability: SecurityReachabilityCounts,
+    /// Fixed runtime coverage counts for runtime-state triage signals.
+    pub by_runtime_state: SecurityRuntimeStateCounts,
     /// Number of client files whose dynamic imports could not be followed.
     pub unresolved_edge_files: usize,
     /// Number of sink-shaped callees that could not be statically flattened.
@@ -289,6 +302,31 @@ pub struct SecuritySeverityCounts {
     pub high: usize,
     pub medium: usize,
     pub low: usize,
+}
+
+/// Fixed reachability counters for summary JSON.
+#[derive(Debug, Clone, Copy, Default, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecurityReachabilityCounts {
+    pub entry_reachable: usize,
+    pub untrusted_source_reachable: usize,
+    pub arg_level: usize,
+    pub module_level: usize,
+    pub crosses_boundary: usize,
+    pub source_backed: usize,
+}
+
+/// Fixed runtime coverage counters for summary JSON.
+#[derive(Debug, Clone, Copy, Default, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecurityRuntimeStateCounts {
+    pub runtime_hot: usize,
+    pub runtime_cold: usize,
+    pub never_executed: usize,
+    pub low_traffic: usize,
+    pub coverage_unavailable: usize,
+    pub runtime_unknown: usize,
+    pub not_collected: usize,
 }
 
 /// Options for `fallow security`, mirroring the global CLI flags it honors.
@@ -1478,6 +1516,10 @@ pub fn render_json(output: &SecurityOutput) -> String {
 pub fn render_json_summary(output: &SecurityOutput) -> String {
     let summary = SecuritySummaryOutput {
         schema_version: output.schema_version,
+        version: output.version.clone(),
+        elapsed_ms: output.elapsed_ms,
+        config: output.config.clone(),
+        meta: output.meta.clone(),
         gate: output.gate,
         summary: security_summary(output),
     };
@@ -1493,6 +1535,8 @@ pub fn render_json_summary(output: &SecurityOutput) -> String {
 
 fn security_summary(output: &SecurityOutput) -> SecuritySummary {
     let mut by_severity = SecuritySeverityCounts::default();
+    let mut by_reachability = SecurityReachabilityCounts::default();
+    let mut by_runtime_state = SecurityRuntimeStateCounts::default();
     let mut by_category = BTreeMap::new();
 
     for finding in &output.security_findings {
@@ -1506,12 +1550,46 @@ fn security_summary(output: &SecurityOutput) -> SecuritySummary {
             .clone()
             .unwrap_or_else(|| security_kind_key(finding.kind).to_owned());
         *by_category.entry(category).or_insert(0) += 1;
+
+        if finding.source_backed {
+            by_reachability.source_backed += 1;
+        }
+        if let Some(reachability) = &finding.reachability {
+            if reachability.reachable_from_entry {
+                by_reachability.entry_reachable += 1;
+            }
+            if reachability.reachable_from_untrusted_source {
+                by_reachability.untrusted_source_reachable += 1;
+            }
+            if reachability.crosses_boundary {
+                by_reachability.crosses_boundary += 1;
+            }
+            match reachability.taint_confidence {
+                Some(TaintConfidence::ArgLevel) => by_reachability.arg_level += 1,
+                Some(TaintConfidence::ModuleLevel) => by_reachability.module_level += 1,
+                None => {}
+            }
+        }
+
+        match finding.runtime.as_ref().map(|runtime| runtime.state) {
+            Some(SecurityRuntimeState::RuntimeHot) => by_runtime_state.runtime_hot += 1,
+            Some(SecurityRuntimeState::RuntimeCold) => by_runtime_state.runtime_cold += 1,
+            Some(SecurityRuntimeState::NeverExecuted) => by_runtime_state.never_executed += 1,
+            Some(SecurityRuntimeState::LowTraffic) => by_runtime_state.low_traffic += 1,
+            Some(SecurityRuntimeState::CoverageUnavailable) => {
+                by_runtime_state.coverage_unavailable += 1;
+            }
+            Some(SecurityRuntimeState::RuntimeUnknown) => by_runtime_state.runtime_unknown += 1,
+            None => by_runtime_state.not_collected += 1,
+        }
     }
 
     SecuritySummary {
         security_findings: output.security_findings.len(),
         by_severity,
         by_category,
+        by_reachability,
+        by_runtime_state,
         unresolved_edge_files: output.unresolved_edge_files,
         unresolved_callee_sites: output.unresolved_callee_sites,
         attack_surface_entries: output.attack_surface.as_ref().map_or(0, Vec::len),
@@ -2934,8 +3012,27 @@ mod tests {
         sink.kind = SecurityFindingKind::TaintedSink;
         sink.category = Some("dangerous-html".to_string());
         sink.severity = SecuritySeverity::Medium;
+        sink.source_backed = true;
+        sink.reachability = Some(SecurityReachability {
+            reachable_from_entry: true,
+            reachable_from_untrusted_source: true,
+            taint_confidence: Some(TaintConfidence::ArgLevel),
+            untrusted_source_hop_count: Some(0),
+            untrusted_source_trace: vec![],
+            blast_radius: 3,
+            crosses_boundary: true,
+        });
+        sink.runtime = Some(SecurityRuntimeContext {
+            state: SecurityRuntimeState::RuntimeHot,
+            function: "render".to_owned(),
+            line: 10,
+            invocations: Some(120),
+            stable_id: Some("src/app.tsx::render:10".to_owned()),
+            evidence: Some("production hot path observed".to_owned()),
+        });
 
         let mut output = output_with(vec![leak, sink], 2);
+        output.elapsed_ms = ElapsedMs(17);
         output.unresolved_callee_sites = 3;
 
         let rendered = render_json_summary(&output);
@@ -2943,6 +3040,9 @@ mod tests {
 
         assert_eq!(value["kind"], "security");
         assert_eq!(value["schema_version"], "4");
+        assert_eq!(value["version"], "test");
+        assert_eq!(value["elapsed_ms"], 17);
+        assert!(value.get("config").is_some());
         assert!(value.get("security_findings").is_none());
         assert!(value.get("attack_surface").is_none());
         assert!(value.get("_meta").is_none());
@@ -2952,9 +3052,44 @@ mod tests {
         assert_eq!(value["summary"]["by_severity"]["low"], 0);
         assert_eq!(value["summary"]["by_category"]["client-server-leak"], 1);
         assert_eq!(value["summary"]["by_category"]["dangerous-html"], 1);
+        assert_eq!(value["summary"]["by_reachability"]["entry_reachable"], 1);
+        assert_eq!(
+            value["summary"]["by_reachability"]["untrusted_source_reachable"],
+            1
+        );
+        assert_eq!(value["summary"]["by_reachability"]["arg_level"], 1);
+        assert_eq!(value["summary"]["by_reachability"]["module_level"], 0);
+        assert_eq!(value["summary"]["by_reachability"]["crosses_boundary"], 1);
+        assert_eq!(value["summary"]["by_reachability"]["source_backed"], 1);
+        assert_eq!(value["summary"]["by_runtime_state"]["runtime_hot"], 1);
+        assert_eq!(value["summary"]["by_runtime_state"]["runtime_cold"], 0);
+        assert_eq!(value["summary"]["by_runtime_state"]["never_executed"], 0);
+        assert_eq!(value["summary"]["by_runtime_state"]["low_traffic"], 0);
+        assert_eq!(
+            value["summary"]["by_runtime_state"]["coverage_unavailable"],
+            0
+        );
+        assert_eq!(value["summary"]["by_runtime_state"]["runtime_unknown"], 0);
+        assert_eq!(value["summary"]["by_runtime_state"]["not_collected"], 1);
         assert_eq!(value["summary"]["unresolved_edge_files"], 2);
         assert_eq!(value["summary"]["unresolved_callee_sites"], 3);
         assert_eq!(value["summary"]["attack_surface_entries"], 0);
+    }
+
+    #[test]
+    fn json_summary_carries_security_meta_when_explain_requested() {
+        let root = Path::new("/proj/root");
+        let mut output = output_with(vec![relativize_finding(sample_finding(root), root)], 0);
+        output.meta = Some(crate::explain::security_meta());
+
+        let rendered = render_json_summary(&output);
+        let value: serde_json::Value = serde_json::from_str(&rendered).expect("valid JSON");
+
+        assert!(value.get("security_findings").is_none());
+        assert!(value["_meta"]["field_definitions"]["security_findings[]"].is_string());
+        assert!(value["_meta"]["field_definitions"]["summary.by_reachability"].is_string());
+        assert!(value["_meta"]["field_definitions"]["summary.by_runtime_state"].is_string());
+        assert!(value["_meta"]["field_definitions"]["unresolved_callee_sites"].is_string());
     }
 
     #[test]

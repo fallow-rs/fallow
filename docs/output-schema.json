@@ -11149,6 +11149,29 @@
           "description": "Schema version of this envelope.",
           "$ref": "#/definitions/SecuritySchemaVersion"
         },
+        "version": {
+          "description": "Fallow CLI version that produced this output.",
+          "$ref": "#/definitions/ToolVersion"
+        },
+        "elapsed_ms": {
+          "description": "Wall-clock milliseconds spent producing the report.",
+          "$ref": "#/definitions/ElapsedMs"
+        },
+        "config": {
+          "description": "Privacy-safe config context relevant to security candidate generation.",
+          "$ref": "#/definitions/SecurityOutputConfig"
+        },
+        "_meta": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Meta"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Security-specific rule and field metadata, emitted with `--explain`."
+        },
         "gate": {
           "anyOf": [
             {
@@ -11167,6 +11190,9 @@
       },
       "required": [
         "schema_version",
+        "version",
+        "elapsed_ms",
+        "config",
         "summary"
       ],
       "description": "Compact `fallow security --summary --format json` payload. Uses the same\n`kind: \"security\"` discriminator as the full payload, but omits candidate\narrays and exposes only aggregate counts."
@@ -11189,6 +11215,14 @@
           },
           "description": "Finding counts by catalogue category, or by kind for findings without a\ncatalogue category."
         },
+        "by_reachability": {
+          "description": "Fixed reachability counts for ranking and triage signals.",
+          "$ref": "#/definitions/SecurityReachabilityCounts"
+        },
+        "by_runtime_state": {
+          "description": "Fixed runtime coverage counts for runtime-state triage signals.",
+          "$ref": "#/definitions/SecurityRuntimeStateCounts"
+        },
         "unresolved_edge_files": {
           "type": "integer",
           "description": "Number of client files whose dynamic imports could not be followed."
@@ -11206,6 +11240,8 @@
         "security_findings",
         "by_severity",
         "by_category",
+        "by_reachability",
+        "by_runtime_state",
         "unresolved_edge_files",
         "unresolved_callee_sites",
         "attack_surface_entries"
@@ -11387,6 +11423,74 @@
         }
       ],
       "description": "Why a sink-shaped callee could not be flattened into a static catalogue\npath."
+    },
+    "SecurityReachabilityCounts": {
+      "type": "object",
+      "properties": {
+        "entry_reachable": {
+          "type": "integer"
+        },
+        "untrusted_source_reachable": {
+          "type": "integer"
+        },
+        "arg_level": {
+          "type": "integer"
+        },
+        "module_level": {
+          "type": "integer"
+        },
+        "crosses_boundary": {
+          "type": "integer"
+        },
+        "source_backed": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "entry_reachable",
+        "untrusted_source_reachable",
+        "arg_level",
+        "module_level",
+        "crosses_boundary",
+        "source_backed"
+      ],
+      "description": "Fixed reachability counters for summary JSON."
+    },
+    "SecurityRuntimeStateCounts": {
+      "type": "object",
+      "properties": {
+        "runtime_hot": {
+          "type": "integer"
+        },
+        "runtime_cold": {
+          "type": "integer"
+        },
+        "never_executed": {
+          "type": "integer"
+        },
+        "low_traffic": {
+          "type": "integer"
+        },
+        "coverage_unavailable": {
+          "type": "integer"
+        },
+        "runtime_unknown": {
+          "type": "integer"
+        },
+        "not_collected": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "runtime_hot",
+        "runtime_cold",
+        "never_executed",
+        "low_traffic",
+        "coverage_unavailable",
+        "runtime_unknown",
+        "not_collected"
+      ],
+      "description": "Fixed runtime coverage counters for summary JSON."
     }
   }
 }

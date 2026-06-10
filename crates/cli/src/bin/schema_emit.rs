@@ -60,7 +60,8 @@ use fallow_cli::report::dupes_grouping::{
     AttributedCloneGroup, AttributedInstance, DuplicationGroup,
 };
 use fallow_cli::security::{
-    SecurityGate, SecurityGateMode, SecurityGateVerdict, SecurityOutput, SecuritySchemaVersion,
+    SecurityGate, SecurityGateMode, SecurityGateVerdict, SecurityOutput,
+    SecurityReachabilityCounts, SecurityRuntimeStateCounts, SecuritySchemaVersion,
     SecuritySeverityCounts, SecuritySummary, SecuritySummaryOutput,
     SecurityUnresolvedCalleeDiagnostics, SecurityUnresolvedCalleeReasonCount,
     SecurityUnresolvedCalleeSample, SecurityUnresolvedCalleeTopFile,
@@ -351,6 +352,8 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
         "SecuritySummaryOutput",
         "SecuritySummary",
         "SecuritySeverityCounts",
+        "SecurityReachabilityCounts",
+        "SecurityRuntimeStateCounts",
         "SecuritySchemaVersion",
         "SecurityGate",
         "SecurityGateMode",
@@ -595,6 +598,8 @@ fn derived_definitions() -> Map<String, Value> {
     let _ = generator.subschema_for::<SecuritySummaryOutput>();
     let _ = generator.subschema_for::<SecuritySummary>();
     let _ = generator.subschema_for::<SecuritySeverityCounts>();
+    let _ = generator.subschema_for::<SecurityReachabilityCounts>();
+    let _ = generator.subschema_for::<SecurityRuntimeStateCounts>();
 
     let _ = generator.subschema_for::<FallowOutput>();
 
