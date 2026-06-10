@@ -254,6 +254,7 @@ pub fn cached_to_module_opts(
         tainted_bindings: cached.tainted_bindings.clone(),
         sanitized_sink_args: cached.sanitized_sink_args.clone(),
         security_control_sites: cached.security_control_sites.clone(),
+        callee_uses: cached.callee_uses.clone(),
     }
 }
 
@@ -451,5 +452,6 @@ pub fn module_to_cached(
         tainted_bindings: module.tainted_bindings.clone(),
         sanitized_sink_args: module.sanitized_sink_args.clone(),
         security_control_sites: module.security_control_sites.clone(),
+        callee_uses: module.callee_uses.clone(),
     }
 }

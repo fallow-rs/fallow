@@ -318,7 +318,12 @@ use crate::MemberKind;
 /// Bumped to 146 for issue #1146: JS/TS extraction now chains tainted local
 /// bindings through up to three same-module hops, so warm caches written
 /// before the bump lack the chained `tainted_bindings` records.
-pub(super) const CACHE_VERSION: u32 = 146;
+///
+/// Bumped to 147 for issue #1147: JS/TS extraction now captures deduped
+/// statically flattenable callee paths (`callee_uses`) for the
+/// `boundaries.calls.forbidden` detector, so warm caches written before the
+/// bump would report zero forbidden-call findings.
+pub(super) const CACHE_VERSION: u32 = 147;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -361,7 +366,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 784);
+assert_cached_type_size!(CachedModule, 808);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 56);
@@ -375,6 +380,7 @@ assert_cached_type_size!(CachedReExport, 88);
 assert_cached_type_size!(CachedMember, 64);
 assert_cached_type_size!(CachedDynamicImportPattern, 56);
 assert_cached_type_size!(crate::MemberAccess, 48);
+assert_cached_type_size!(fallow_types::extract::CalleeUse, 32);
 assert_cached_type_size!(fallow_types::extract::SinkSite, 216);
 assert_cached_type_size!(fallow_types::extract::FunctionComplexity, 96);
 assert_cached_type_size!(fallow_types::extract::ComplexityContribution, 16);
@@ -480,6 +486,10 @@ pub struct CachedModule {
     pub sanitized_sink_args: Vec<fallow_types::extract::SanitizedSinkArg>,
     /// Defensive control call sites for security surface output.
     pub security_control_sites: Vec<fallow_types::extract::SecurityControlSite>,
+    /// Deduped statically flattenable callee paths. Round-trips so the
+    /// `boundaries.calls.forbidden` detector sees call sites on warm-cache
+    /// loads.
+    pub callee_uses: Vec<fallow_types::extract::CalleeUse>,
 }
 
 /// Cached namespace-object alias.

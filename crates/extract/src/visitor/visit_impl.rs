@@ -14,10 +14,11 @@ use crate::{
     MemberAccess, ReExportInfo, RequireCallInfo, VisibilityTag,
 };
 use fallow_types::extract::{
-    ClassHeritageInfo, LocalTypeDeclaration, PublicSignatureTypeReference, SanitizedSinkArg,
-    SanitizerScope, SecurityControlKind, SecurityControlSite, SecurityUrlShape, SinkArgKind,
-    SinkLiteralValue, SinkObjectProperty, SinkShape, SinkSite, SkippedSecurityCalleeExpressionKind,
-    SkippedSecurityCalleeReason, SkippedSecurityCalleeSite, TaintedBinding,
+    CalleeUse, ClassHeritageInfo, LocalTypeDeclaration, PublicSignatureTypeReference,
+    SanitizedSinkArg, SanitizerScope, SecurityControlKind, SecurityControlSite, SecurityUrlShape,
+    SinkArgKind, SinkLiteralValue, SinkObjectProperty, SinkShape, SinkSite,
+    SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason, SkippedSecurityCalleeSite,
+    TaintedBinding,
 };
 
 use crate::asset_url::normalize_asset_url;
@@ -3346,6 +3347,8 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
         self.capture_security_call_sites(expr);
 
+        self.record_callee_use(expr);
+
         walk::walk_call_expression(self, expr);
     }
 
@@ -6104,6 +6107,24 @@ impl ModuleInfoExtractor {
         self.capture_redos_regex_sink(expr);
         self.capture_declarative_validation_control(expr);
         self.capture_call_sink(expr);
+    }
+
+    /// Record the statically flattenable callee path of a call site, deduped
+    /// per unique path (first occurrence wins). Capture is unconditional
+    /// because extraction is config-blind; the `boundaries.calls.forbidden`
+    /// detector consumes these at analyze time. Computed members, dynamic
+    /// dispatch, and optional-chaining callees flatten to `None` and stay
+    /// uncaptured (documented false negatives).
+    fn record_callee_use(&mut self, expr: &CallExpression<'_>) {
+        let Some(callee_path) = flatten_callee_path(&expr.callee) else {
+            return;
+        };
+        if self.seen_callee_paths.insert(callee_path.clone()) {
+            self.callee_uses.push(CalleeUse {
+                callee_path,
+                span_start: expr.span.start,
+            });
+        }
     }
 
     fn record_skipped_security_callee(

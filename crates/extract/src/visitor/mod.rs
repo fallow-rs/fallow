@@ -15,9 +15,9 @@ use crate::{
     MemberAccess, MemberInfo, MemberKind, ModuleInfo, ReExportInfo, RequireCallInfo, VisibilityTag,
 };
 use fallow_types::extract::{
-    ClassHeritageInfo, LocalTypeDeclaration, PublicSignatureTypeReference, SanitizedSinkArg,
-    SanitizerScope, SecurityControlSite, SinkLiteralValue, SinkSite, SkippedSecurityCalleeSite,
-    TaintedBinding,
+    CalleeUse, ClassHeritageInfo, LocalTypeDeclaration, PublicSignatureTypeReference,
+    SanitizedSinkArg, SanitizerScope, SecurityControlSite, SinkLiteralValue, SinkSite,
+    SkippedSecurityCalleeSite, TaintedBinding,
 };
 use helpers::LitCustomElementDecorator;
 
@@ -209,6 +209,15 @@ pub(crate) struct ModuleInfoExtractor {
     pub(crate) sanitized_sink_args: Vec<SanitizedSinkArg>,
     /// Defensive control call sites for security surface output.
     pub(crate) security_control_sites: Vec<SecurityControlSite>,
+    /// Statically flattenable callee paths, deduped per unique path (first
+    /// occurrence wins). Consumed by the `boundaries.calls.forbidden`
+    /// detector.
+    pub(crate) callee_uses: Vec<CalleeUse>,
+    /// Dedup guard for `callee_uses`. Working state only: not persisted and
+    /// not merged across SFC script blocks (each block dedups independently;
+    /// the detector matches per unique path, so cross-block duplicates only
+    /// cost one extra entry).
+    pub(crate) seen_callee_paths: FxHashSet<String>,
     /// Module-scope default, namespace, or require bindings imported from
     /// DOMPurify-compatible packages.
     pub(crate) dompurify_bindings: FxHashSet<String>,
@@ -913,6 +922,7 @@ impl ModuleInfoExtractor {
             tainted_bindings: self.tainted_bindings,
             sanitized_sink_args: self.sanitized_sink_args,
             security_control_sites: self.security_control_sites,
+            callee_uses: self.callee_uses,
         }
     }
 
@@ -966,6 +976,7 @@ impl ModuleInfoExtractor {
         info.sanitized_sink_args.extend(self.sanitized_sink_args);
         info.security_control_sites
             .extend(self.security_control_sites);
+        info.callee_uses.extend(self.callee_uses);
     }
 }
 

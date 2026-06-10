@@ -967,7 +967,7 @@ pub struct MemberAccess {
 /// `child_process.exec`, `console.log`). One entry per unique `callee_path`
 /// per module; the span anchors the first occurrence. Consumed by the
 /// `boundaries.calls.forbidden` detector.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode)]
 pub struct CalleeUse {
     /// The dotted or bare callee path as written at the call site.
     pub callee_path: String,
@@ -1279,6 +1279,7 @@ mod tests {
             tainted_bindings: Vec::new(),
             sanitized_sink_args: Vec::new(),
             security_control_sites: Vec::new(),
+            callee_uses: Vec::new(),
         };
 
         module.release_resolution_payload();
