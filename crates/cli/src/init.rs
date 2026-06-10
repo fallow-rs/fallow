@@ -7,6 +7,9 @@ use fallow_core::git_env::clear_ambient_git_env;
 use crate::validate;
 
 const AGENTS_GUIDE_FILENAME: &str = "AGENTS.md";
+/// Static template used as the ground truth for the empty-project case and
+/// regression tests. Production code uses `build_agents_guide` instead.
+#[cfg(test)]
 const AGENTS_GUIDE_TEMPLATE: &str = r"# AGENTS.md
 
 This file gives coding agents project-specific context. Keep it short and update it when workflows change.
@@ -52,6 +55,14 @@ pub struct ProjectInfo {
     pub test_framework: Option<String>,
     pub ui_framework: Option<String>,
     pub has_storybook: bool,
+    /// Canonical package manager parsed from the `packageManager` field in
+    /// `package.json` (the part before `@`, e.g. `"pnpm@9.1.0"` gives `pnpm`).
+    pub package_manager: Option<String>,
+    /// True when more than one of vitest / jest / @playwright/test is present
+    /// in the dependency name set. When true, `test_framework` holds the
+    /// first-match value but the AGENTS.md scaffold leaves `- Test:` blank
+    /// to avoid a confident mislabel.
+    pub test_framework_ambiguous: bool,
 }
 
 /// Inspect the project root and detect frameworks, workspace setup, etc.
@@ -92,11 +103,17 @@ pub fn detect_project(root: &Path) -> ProjectInfo {
         .map(PackageJson::all_dependency_names)
         .unwrap_or_default();
 
-    let test_framework = if all_deps.iter().any(|d| d == "vitest") {
+    let has_vitest = all_deps.iter().any(|d| d == "vitest");
+    let has_jest = all_deps.iter().any(|d| d == "jest");
+    let has_playwright = all_deps.iter().any(|d| d == "@playwright/test");
+    let test_framework_count = u8::from(has_vitest) + u8::from(has_jest) + u8::from(has_playwright);
+    let test_framework_ambiguous = test_framework_count > 1;
+
+    let test_framework = if has_vitest {
         Some("Vitest".to_string())
-    } else if all_deps.iter().any(|d| d == "jest") {
+    } else if has_jest {
         Some("Jest".to_string())
-    } else if all_deps.iter().any(|d| d == "@playwright/test") {
+    } else if has_playwright {
         Some("Playwright".to_string())
     } else {
         None
@@ -114,6 +131,14 @@ pub fn detect_project(root: &Path) -> ProjectInfo {
         None
     };
 
+    // Extract just the manager name from `packageManager` (e.g. "pnpm@9.1.0" -> "pnpm").
+    let package_manager = pkg
+        .as_ref()
+        .and_then(|p| p.package_manager.as_deref())
+        .and_then(|pm| pm.split('@').next())
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned);
+
     ProjectInfo {
         is_monorepo,
         workspace_patterns,
@@ -122,6 +147,8 @@ pub fn detect_project(root: &Path) -> ProjectInfo {
         test_framework,
         ui_framework,
         has_storybook,
+        package_manager,
+        test_framework_ambiguous,
     }
 }
 
@@ -228,6 +255,153 @@ fn insert_json_duplicates_template(output: &mut String) {
         "  \"duplicates\": {\n    // Hide pair-only clones; focus on widespread copy-paste\n    // worth refactoring. Lower to 2 to report every duplicate pair.\n    \"minOccurrences\": 3\n    // Common additions (uncomment to enable):\n    // \"ignore\": [\n    //   \"**/lib/**\",          // for repos that publish transpiled output to lib/\n    //   \"**/legacy/**\",       // for repos with legacy-build artifacts\n    //   \"**/__generated__/**\", // Relay, GraphQL Code Generator\n    //   \"**/generated/**\"     // OpenAPI, Protobuf codegen\n    // ]\n  },\n  \"rules\":",
         1,
     );
+}
+
+/// Build an AGENTS.md guide string tailored to the detected project.
+///
+/// Prefill rules:
+/// - `Primary app or package:` is always blank (human-judgment field).
+/// - `Module boundaries:` is filled for monorepos only; the tool label uses
+///   the same trust ladder as `Install:` (a lockfile-default-sniffed
+///   yarn/npm `workspace_tool` stays unlabeled, e.g. a Bun workspace must
+///   not read "npm workspaces").
+/// - No UI-framework or Storybook lines (presence-based, misfire on peer deps).
+/// - A provenance HTML comment is emitted under `## Commands` only when at
+///   least one Commands line is prefilled.
+/// - `Install:` from `package_manager` when Some; else from `workspace_tool`
+///   when it is `pnpm` (driven by pnpm-workspace.yaml, reliable); else blank.
+/// - `Test:` only when `test_framework` is Some AND not ambiguous; capitalized.
+/// - `Typecheck or lint:` filled with `tsc --noEmit` only when `has_typescript`.
+pub fn build_agents_guide(info: &ProjectInfo) -> String {
+    // Determine prefilled Commands lines.
+    let install_line = agents_install_line(info);
+    let test_line = agents_test_line(info);
+    let typecheck_line = if info.has_typescript {
+        "tsc --noEmit".to_string()
+    } else {
+        String::new()
+    };
+
+    let any_commands_prefilled =
+        !install_line.is_empty() || !test_line.is_empty() || !typecheck_line.is_empty();
+
+    let provenance_comment = if any_commands_prefilled {
+        "<!-- fallow init prefilled these from package.json; confirm before relying on them -->\n"
+    } else {
+        ""
+    };
+
+    let module_boundaries = agents_module_boundaries_line(info);
+
+    format!(
+        r"# AGENTS.md
+
+This file gives coding agents project-specific context. Keep it short and update it when workflows change.
+
+## Project Overview
+
+- Primary app or package:
+- Main entry points:
+- Important directories:
+
+## Architecture Notes
+
+- Module boundaries:{module_boundaries_suffix}
+- Generated or vendored code:
+- Sensitive areas:
+
+## Commands
+
+{provenance_comment}- Install:{install_suffix}
+- Build:
+- Test:{test_suffix}
+- Typecheck or lint:{typecheck_suffix}
+
+## Fallow
+
+- Use `fallow audit --format json --quiet` before committing AI-generated changes.
+- Use `fallow dead-code --format json --quiet`, `fallow dupes --format json --quiet`, and `fallow health --format json --quiet` for targeted checks.
+- Use `fallow list --entry-points --format json --quiet` and `fallow list --boundaries --format json --quiet` to inspect project shape.
+
+## Agent Rules
+
+- Do not edit:
+- Always ask before:
+- Preferred style:
+",
+        module_boundaries_suffix = if module_boundaries.is_empty() {
+            String::new()
+        } else {
+            format!(" {module_boundaries}")
+        },
+        provenance_comment = provenance_comment,
+        install_suffix = if install_line.is_empty() {
+            String::new()
+        } else {
+            format!(" {install_line}")
+        },
+        test_suffix = if test_line.is_empty() {
+            String::new()
+        } else {
+            format!(" {test_line}")
+        },
+        typecheck_suffix = if typecheck_line.is_empty() {
+            String::new()
+        } else {
+            format!(" {typecheck_line}")
+        },
+    )
+}
+
+/// Compute the `Install:` value for the AGENTS.md Commands section.
+///
+/// Prefers `package_manager` (canonical field in package.json), falls back to
+/// `workspace_tool == "pnpm"` (inferred from pnpm-workspace.yaml). Never
+/// emits a lockfile-sniffed `yarn install`/`npm install` to avoid false
+/// labelling.
+fn agents_install_line(info: &ProjectInfo) -> String {
+    if let Some(pm) = &info.package_manager {
+        return format!("{pm} install");
+    }
+    if info.workspace_tool.as_deref() == Some("pnpm") {
+        return "pnpm install".to_string();
+    }
+    String::new()
+}
+
+/// Compute the `Test:` value for the AGENTS.md Commands section.
+///
+/// Returns the capitalized framework name only when exactly one framework is
+/// detected. Returns an empty string when the framework is ambiguous or absent.
+fn agents_test_line(info: &ProjectInfo) -> String {
+    if info.test_framework_ambiguous {
+        return String::new();
+    }
+    info.test_framework.clone().unwrap_or_default()
+}
+
+/// Compute the `Module boundaries:` suffix for the Architecture Notes section.
+///
+/// Returns a string like `pnpm workspaces (packages/*, apps/*)` for monorepos,
+/// or an empty string for non-monorepos. The tool label follows the same trust
+/// ladder as [`agents_install_line`]: the `packageManager` field, then pnpm
+/// (driven by pnpm-workspace.yaml). The lockfile-default-sniffed yarn/npm
+/// values of `workspace_tool` are NOT used, because they confidently mislabel
+/// e.g. Bun workspaces (package.json `workspaces` + bun.lock) as
+/// "npm workspaces"; those emit the tool-neutral `workspaces (...)` form.
+fn agents_module_boundaries_line(info: &ProjectInfo) -> String {
+    if !info.is_monorepo || info.workspace_patterns.is_empty() {
+        return String::new();
+    }
+    let patterns = info.workspace_patterns.join(", ");
+    let tool = info
+        .package_manager
+        .as_deref()
+        .or_else(|| (info.workspace_tool.as_deref() == Some("pnpm")).then_some("pnpm"));
+    match tool {
+        Some(tool) => format!("{tool} workspaces ({patterns})"),
+        None => format!("workspaces ({patterns})"),
+    }
 }
 
 /// Build a TOML config string tailored to the detected project.
@@ -431,7 +605,9 @@ fn run_init_agents(root: &Path) -> ExitCode {
         return ExitCode::from(2);
     }
 
-    if let Err(e) = std::fs::write(&agents_path, AGENTS_GUIDE_TEMPLATE) {
+    let info = detect_project(root);
+    let guide = build_agents_guide(&info);
+    if let Err(e) = std::fs::write(&agents_path, guide) {
         eprintln!("Error: Failed to write {AGENTS_GUIDE_FILENAME}: {e}");
         return ExitCode::from(2);
     }
@@ -966,10 +1142,247 @@ mod tests {
 
     #[test]
     fn init_agents_template_is_not_a_readiness_score() {
+        // Static template baseline.
         let template = AGENTS_GUIDE_TEMPLATE.to_lowercase();
         assert!(!template.contains("readiness"));
         assert!(!template.contains("score"));
         assert!(!template.contains("grade"));
+
+        // Fully-prefilled output (fixture 1 equivalent).
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("pnpm-workspace.yaml"),
+            "packages:\n  - 'packages/*'\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("tsconfig.json"), "{}").unwrap();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"devDependencies": {"vitest": "^1"}}"#,
+        )
+        .unwrap();
+        let info = detect_project(root);
+        let generated = build_agents_guide(&info).to_lowercase();
+        assert!(!generated.contains("readiness"));
+        assert!(!generated.contains("score"));
+        assert!(!generated.contains("grade"));
+
+        // Empty-project output (fixture 4 equivalent).
+        let empty_info = ProjectInfo {
+            is_monorepo: false,
+            workspace_patterns: Vec::new(),
+            workspace_tool: None,
+            has_typescript: false,
+            test_framework: None,
+            ui_framework: None,
+            has_storybook: false,
+            package_manager: None,
+            test_framework_ambiguous: false,
+        };
+        let empty_generated = build_agents_guide(&empty_info).to_lowercase();
+        assert!(!empty_generated.contains("readiness"));
+        assert!(!empty_generated.contains("score"));
+        assert!(!empty_generated.contains("grade"));
+    }
+
+    #[test]
+    fn agents_guide_prefills_monorepo_pnpm_vitest() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("pnpm-workspace.yaml"),
+            "packages:\n  - 'packages/*'\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("tsconfig.json"), "{}").unwrap();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"devDependencies": {"vitest": "^1"}}"#,
+        )
+        .unwrap();
+
+        let exit = run_init(&agents_opts(root));
+        assert_eq!(exit, ExitCode::SUCCESS);
+        let content = std::fs::read_to_string(root.join("AGENTS.md")).unwrap();
+
+        assert!(content.contains("- Install: pnpm install"), "Install line");
+        assert!(content.contains("- Test: Vitest"), "Test line");
+        assert!(
+            content.contains("- Typecheck or lint: tsc --noEmit"),
+            "Typecheck line"
+        );
+        assert!(
+            content.contains("- Module boundaries: pnpm workspaces (packages/*)"),
+            "Module boundaries line"
+        );
+        assert!(
+            content.contains(
+                "<!-- fallow init prefilled these from package.json; confirm before relying on them -->"
+            ),
+            "Provenance comment"
+        );
+        // Primary app stays blank.
+        assert!(
+            content.contains("- Primary app or package:"),
+            "Primary app blank"
+        );
+        let primary_line = content
+            .lines()
+            .find(|l| l.contains("Primary app or package:"))
+            .unwrap();
+        assert_eq!(
+            primary_line.trim(),
+            "- Primary app or package:",
+            "Primary app line must have nothing after the colon"
+        );
+        // No UI framework or Storybook lines.
+        assert!(!content.contains("UI framework"), "No UI framework line");
+        assert!(!content.contains("Storybook"), "No Storybook line");
+    }
+
+    #[test]
+    fn agents_guide_respects_package_manager_field() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"packageManager": "yarn@4.1.0"}"#,
+        )
+        .unwrap();
+
+        let exit = run_init(&agents_opts(root));
+        assert_eq!(exit, ExitCode::SUCCESS);
+        let content = std::fs::read_to_string(root.join("AGENTS.md")).unwrap();
+        assert!(
+            content.contains("- Install: yarn install"),
+            "yarn from packageManager field"
+        );
+    }
+
+    #[test]
+    fn agents_guide_ambiguous_test_framework_stays_blank() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"devDependencies": {"vitest": "^1", "jest": "^29"}}"#,
+        )
+        .unwrap();
+
+        let exit = run_init(&agents_opts(root));
+        assert_eq!(exit, ExitCode::SUCCESS);
+        let content = std::fs::read_to_string(root.join("AGENTS.md")).unwrap();
+        // Test line must be blank (just "- Test:" with nothing after the colon).
+        let test_line = content
+            .lines()
+            .find(|l| l.trim_start().starts_with("- Test:"))
+            .expect("- Test: line should be present");
+        assert_eq!(
+            test_line.trim(),
+            "- Test:",
+            "Ambiguous test framework must leave - Test: blank"
+        );
+    }
+
+    #[test]
+    fn agents_guide_bun_workspace_stays_tool_neutral() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        // Bun-shaped workspace: package.json `workspaces` + bun.lock, no
+        // packageManager field, no pnpm-workspace.yaml. workspace_tool falls
+        // back to "npm", which must NOT leak into the scaffold.
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"workspaces": ["packages/*"]}"#,
+        )
+        .unwrap();
+        std::fs::write(root.join("bun.lock"), "{}").unwrap();
+
+        let exit = run_init(&agents_opts(root));
+        assert_eq!(exit, ExitCode::SUCCESS);
+        let content = std::fs::read_to_string(root.join("AGENTS.md")).unwrap();
+        assert!(
+            content.contains("- Module boundaries: workspaces (packages/*)"),
+            "tool-neutral boundaries label, got: {content}"
+        );
+        assert!(
+            !content.contains("npm workspaces"),
+            "lockfile-default npm label must not appear"
+        );
+    }
+
+    #[test]
+    fn agents_guide_package_manager_labels_boundaries() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"workspaces": ["packages/*"], "packageManager": "bun@1.2.0"}"#,
+        )
+        .unwrap();
+
+        let exit = run_init(&agents_opts(root));
+        assert_eq!(exit, ExitCode::SUCCESS);
+        let content = std::fs::read_to_string(root.join("AGENTS.md")).unwrap();
+        assert!(
+            content.contains("- Module boundaries: bun workspaces (packages/*)"),
+            "packageManager field labels boundaries, got: {content}"
+        );
+        assert!(content.contains("- Install: bun install"), "Install line");
+    }
+
+    #[test]
+    fn agents_guide_empty_project_keeps_placeholders() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        // Empty fixture: no files at all.
+        let exit = run_init(&agents_opts(root));
+        assert_eq!(exit, ExitCode::SUCCESS);
+        let content = std::fs::read_to_string(root.join("AGENTS.md")).unwrap();
+        // Must be byte-identical to the static template.
+        assert_eq!(
+            content, AGENTS_GUIDE_TEMPLATE,
+            "Empty-project output must be byte-identical to the static AGENTS_GUIDE_TEMPLATE"
+        );
+        // No provenance comment when nothing was prefilled.
+        assert!(
+            !content.contains("fallow init prefilled"),
+            "No provenance comment for empty project"
+        );
+    }
+
+    #[test]
+    fn detect_test_framework_ambiguous_vitest_and_jest() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("package.json"),
+            r#"{"devDependencies": {"vitest": "^1", "jest": "^29"}}"#,
+        )
+        .unwrap();
+        let info = detect_project(dir.path());
+        assert!(
+            info.test_framework_ambiguous,
+            "both vitest and jest present => ambiguous"
+        );
+        // test_framework still holds the first-match value.
+        assert_eq!(info.test_framework.as_deref(), Some("Vitest"));
+    }
+
+    #[test]
+    fn detect_package_manager_field() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("package.json"),
+            r#"{"packageManager": "pnpm@9.0.0"}"#,
+        )
+        .unwrap();
+        let info = detect_project(dir.path());
+        assert_eq!(
+            info.package_manager.as_deref(),
+            Some("pnpm"),
+            "packageManager parsed to just the manager name"
+        );
     }
 
     #[test]
@@ -1375,6 +1788,8 @@ mod tests {
             test_framework: None,
             ui_framework: None,
             has_storybook: false,
+            package_manager: None,
+            test_framework_ambiguous: false,
         };
         let json = build_json_config(&info);
         let parsed = parse_jsonc_config(&json);
@@ -1395,6 +1810,8 @@ mod tests {
             test_framework: None,
             ui_framework: None,
             has_storybook: false,
+            package_manager: None,
+            test_framework_ambiguous: false,
         };
         let json = build_json_config(&info);
         assert!(json.contains("{ts,tsx,js,jsx}"));
@@ -1410,6 +1827,8 @@ mod tests {
             test_framework: None,
             ui_framework: None,
             has_storybook: false,
+            package_manager: None,
+            test_framework_ambiguous: false,
         };
         let json = build_json_config(&info);
         let parsed = parse_jsonc_config(&json);
@@ -1428,6 +1847,8 @@ mod tests {
             test_framework: None,
             ui_framework: None,
             has_storybook: true,
+            package_manager: None,
+            test_framework_ambiguous: false,
         };
         let json = build_json_config(&info);
         let parsed = parse_jsonc_config(&json);
@@ -1445,6 +1866,8 @@ mod tests {
             test_framework: Some("Vitest".to_string()),
             ui_framework: None,
             has_storybook: false,
+            package_manager: None,
+            test_framework_ambiguous: false,
         };
         let json = build_json_config(&info);
         let parsed = parse_jsonc_config(&json);
@@ -1461,6 +1884,8 @@ mod tests {
             test_framework: None,
             ui_framework: None,
             has_storybook: false,
+            package_manager: None,
+            test_framework_ambiguous: false,
         };
         let toml = build_toml_config(&info);
         assert!(toml.contains("[workspaces]"));
@@ -1477,6 +1902,8 @@ mod tests {
             test_framework: None,
             ui_framework: None,
             has_storybook: true,
+            package_manager: None,
+            test_framework_ambiguous: false,
         };
         let toml = build_toml_config(&info);
         assert!(toml.contains("ignorePatterns = [\".storybook/**\"]"));

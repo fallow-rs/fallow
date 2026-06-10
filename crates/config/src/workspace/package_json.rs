@@ -127,6 +127,14 @@ pub struct PackageJson {
     pub napi: Option<NapiConfig>,
     #[serde(default)]
     pub workspaces: Option<serde_json::Value>,
+    /// The `packageManager` field (e.g. `"pnpm@9.1.0"`), used to determine
+    /// the canonical package manager for the project.
+    #[serde(
+        default,
+        rename = "packageManager",
+        deserialize_with = "deserialize_optional_string_lenient"
+    )]
+    pub package_manager: Option<String>,
 }
 
 impl PackageJson {
