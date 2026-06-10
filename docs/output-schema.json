@@ -93,6 +93,13 @@
         "base_ref": {
           "type": "string"
         },
+        "base_description": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Human-readable provenance of `base_ref`, e.g. `merge-base with\norigin/main`, `local main`, or `FALLOW_AUDIT_BASE=upstream/main`.\nPresent when the base was auto-detected or set via `FALLOW_AUDIT_BASE`;\nabsent for an explicit `--base` (the ref the user typed is already\nself-describing)."
+        },
         "head_sha": {
           "type": [
             "string",

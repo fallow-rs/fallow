@@ -123,14 +123,39 @@ export const AUDIT_CANDIDATE_HEADER =
   "Audit verdict for your current changes (static candidates, verify before acting).";
 
 /**
+ * Abbreviate a 40-char hex SHA to 12 chars for display; leave branch names and
+ * refspecs untouched. Mirrors the CLI's `short_base_ref` so an auto-detected
+ * `merge-base` base shows `611d151e8250` rather than a raw 40-char SHA (#1168).
+ */
+const shortBaseRef = (baseRef: string): string =>
+  /^[0-9a-f]{40}$/.test(baseRef) ? baseRef.slice(0, 12) : baseRef;
+
+/**
+ * Display form of the audit base: the abbreviated `base_ref` plus its
+ * provenance when present, e.g. `611d151e8250 (merge-base with origin/main)`.
+ * `base_description` is absent for an explicit `--base`, so those show the ref
+ * the user typed verbatim. `escape` is applied per-component for the
+ * trusted-markdown tooltip; the plain-text toast passes it through unchanged.
+ */
+const formatAuditBase = (audit: AuditOutput, escape: (s: string) => string): string => {
+  const baseRef = escape(shortBaseRef(audit.base_ref));
+  if (!audit.base_description) {
+    return baseRef;
+  }
+  return `${baseRef} (${escape(audit.base_description)})`;
+};
+
+/**
  * Plain-text change-set scope summary for the audit verdict, e.g.
- * `1 changed file vs main`. Used in the disabled-status-bar info toast so the
- * verdict word carries scope context rather than standing alone (#908 n3).
- * Plain text (not markdown), since it goes into a `showInformationMessage`.
+ * `1 changed file vs 611d151e8250 (merge-base with origin/main)`. Used in the
+ * disabled-status-bar info toast so the verdict word carries scope context
+ * rather than standing alone (#908 n3). Plain text (not markdown), since it
+ * goes into a `showInformationMessage`.
  */
 export const auditScopeSummary = (audit: AuditOutput): string => {
   const fileWord = audit.changed_files_count === 1 ? "file" : "files";
-  return `${audit.changed_files_count} changed ${fileWord} vs ${audit.base_ref}`;
+  const base = formatAuditBase(audit, (s) => s);
+  return `${audit.changed_files_count} changed ${fileWord} vs ${base}`;
 };
 
 /**
@@ -185,8 +210,9 @@ const gatingRows = (audit: AuditOutput): readonly GatingRow[] => {
  * category gating breakdown (non-zero rows only), and command-link footer.
  * Finding-level wording uses "candidate" framing (#903), never "defects" or
  * "problems"; the verdict words pass/warn/fail are the CLI's own gate language
- * and are kept verbatim. The `base_ref` is markdown-escaped because it can be a
- * user-supplied ref containing markdown metacharacters.
+ * and are kept verbatim. The `base_ref` and `base_description` are
+ * markdown-escaped because they can carry user-supplied refs containing
+ * markdown metacharacters.
  */
 export const buildAuditTooltipMarkdown = (
   audit: AuditOutput,
@@ -196,9 +222,9 @@ export const buildAuditTooltipMarkdown = (
   const count = gatingCount(audit);
   const lines: string[] = [`**Fallow Audit** - ${AUDIT_CANDIDATE_HEADER}\n`];
 
-  const baseRef = escapeMarkdownText(audit.base_ref);
+  const base = formatAuditBase(audit, escapeMarkdownText);
   const fileWord = audit.changed_files_count === 1 ? "file" : "files";
-  lines.push(`$(git-branch) ${audit.changed_files_count} changed ${fileWord} vs ${baseRef}`);
+  lines.push(`$(git-branch) ${audit.changed_files_count} changed ${fileWord} vs ${base}`);
 
   if (changedSinceRef) {
     lines.push(`$(history) Scoped to changes since ${escapeMarkdownText(changedSinceRef)}`);

@@ -270,12 +270,46 @@ describe("auditScopeSummary", () => {
       "3 changed files vs develop",
     );
   });
+
+  it("abbreviates a merge-base SHA and appends its provenance", () => {
+    expect(
+      auditScopeSummary({
+        ...failAudit,
+        changed_files_count: 1,
+        base_ref: "611d151e8250146426ff3178e94207f8a8d3cc7b",
+        base_description: "merge-base with origin/main",
+      }),
+    ).toBe("1 changed file vs 611d151e8250 (merge-base with origin/main)");
+  });
+
+  it("leaves a non-SHA base ref untouched when provenance is present", () => {
+    expect(
+      auditScopeSummary({
+        ...failAudit,
+        changed_files_count: 2,
+        base_ref: "origin/main",
+        base_description: "FALLOW_AUDIT_BASE=origin/main",
+      }),
+    ).toBe("2 changed files vs origin/main (FALLOW_AUDIT_BASE=origin/main)");
+  });
 });
 
 describe("buildAuditTooltipMarkdown", () => {
   it("includes the scope line with changed file count and base ref", () => {
     const md = buildAuditTooltipMarkdown(failAudit);
     expect(md).toContain("1 changed file vs main");
+  });
+
+  it("abbreviates a merge-base SHA and shows provenance in the scope line", () => {
+    const md = buildAuditTooltipMarkdown({
+      ...failAudit,
+      changed_files_count: 1,
+      base_ref: "611d151e8250146426ff3178e94207f8a8d3cc7b",
+      base_description: "merge-base with origin/main",
+    });
+    // The tooltip is trusted markdown, so the hyphen in "merge-base" is escaped.
+    expect(md).toContain("1 changed file vs 611d151e8250 (merge\\-base with origin/main)");
+    expect(md).not.toContain("611d151e8250146426ff3178e94207f8a8d3cc7b");
   });
 
   it("lists only non-zero gating categories", () => {

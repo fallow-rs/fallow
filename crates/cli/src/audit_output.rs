@@ -325,6 +325,12 @@ fn print_audit_json(result: &AuditResult) -> ExitCode {
         "base_ref".into(),
         serde_json::Value::String(result.base_ref.clone()),
     );
+    if let Some(ref description) = result.base_description {
+        obj.insert(
+            "base_description".into(),
+            serde_json::Value::String(description.clone()),
+        );
+    }
     if let Some(ref sha) = result.head_sha {
         obj.insert("head_sha".into(), serde_json::Value::String(sha.clone()));
     }

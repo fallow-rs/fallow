@@ -229,6 +229,13 @@ pub struct AuditOutput {
     pub verdict: AuditVerdict,
     pub changed_files_count: u32,
     pub base_ref: String,
+    /// Human-readable provenance of `base_ref`, e.g. `merge-base with
+    /// origin/main`, `local main`, or `FALLOW_AUDIT_BASE=upstream/main`.
+    /// Present when the base was auto-detected or set via `FALLOW_AUDIT_BASE`;
+    /// absent for an explicit `--base` (the ref the user typed is already
+    /// self-describing).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub head_sha: Option<String>,
     pub elapsed_ms: ElapsedMs,
