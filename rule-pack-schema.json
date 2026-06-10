@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RulePackDef",
+  "description": "A declarative rule pack loaded from a standalone JSON or JSONC file listed\nin the `rulePacks` config key.\n\nRule packs are pure data: loading a pack never executes project code. They\nencode project-specific policy (banned calls, banned imports) evaluated\nover fallow's static extraction data, reporting as `policy-violation`\nfindings.\n\n```jsonc\n{\n  \"$schema\": \"https://raw.githubusercontent.com/fallow-rs/fallow/main/rule-pack-schema.json\",\n  \"version\": 1,\n  \"name\": \"team-policy\",\n  \"description\": \"House rules for the platform team\",\n  \"rules\": [\n    {\n      \"id\": \"no-child-process\",\n      \"kind\": \"banned-call\",\n      \"callees\": [\"child_process.*\"],\n      \"message\": \"Use the sandboxed runner instead.\",\n      \"severity\": \"error\"\n    },\n    {\n      \"id\": \"no-moment\",\n      \"kind\": \"banned-import\",\n      \"specifiers\": [\"moment\"],\n      \"message\": \"Use date-fns.\"\n    }\n  ]\n}\n```",
+  "type": "object",
+  "properties": {
+    "version": {
+      "description": "Pack format version. Must be `1`; the field exists so future rule\nkinds can be added without breaking older fallow builds silently.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "name": {
+      "description": "Pack name, unique across all loaded packs. Part of each finding's\n`\"<pack>/<id>\"` policy identity.",
+      "type": "string"
+    },
+    "description": {
+      "description": "Optional human description of the pack's intent.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "rules": {
+      "description": "The policy rules this pack enforces. Must be non-empty: an empty pack\nwould silently enforce nothing.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/RulePackRule"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "name",
+    "rules"
+  ],
+  "$defs": {
+    "RulePackRule": {
+      "description": "One declarative policy rule inside a rule pack.\n\n`callees` applies only to `banned-call` rules; `specifiers` and\n`ignoreTypeOnly` apply only to `banned-import` rules. Setting a field on\nthe wrong kind is a load error (fail loud, never silently ignore policy).",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Rule id, unique within the pack. `\"<pack>/<id>\"` is the finding's\npolicy identity across output formats and baselines.",
+          "type": "string"
+        },
+        "kind": {
+          "description": "Which check this rule performs.",
+          "$ref": "#/$defs/RulePackRuleKind"
+        },
+        "callees": {
+          "description": "Callee patterns to ban (`banned-call` only). Matching is segment-aware\nand import-resolved, identical to `boundaries.calls.forbidden`:\n`child_process.*` covers `import { exec } from \"node:child_process\"`,\nthe bare specifier, and namespace/default imports; `fetch` matches only\nthe global `fetch`; a leading `*.member` matches any object.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "specifiers": {
+          "description": "Import specifiers to ban (`banned-import` only). Matched segment-aware\nagainst the RAW specifier: `moment` covers `moment` and\n`moment/locale/nl` but not `moment-timezone`. Aliased or rewritten\nspecifiers (e.g. `npm:moment`) are not matched.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "ignoreTypeOnly": {
+          "description": "When `true`, type-only imports (`import type ...` and type-only\nre-exports) are ignored by this `banned-import` rule. Defaults to\n`false`: type-only imports are flagged too.",
+          "type": "boolean"
+        },
+        "files": {
+          "description": "Optional include globs (project-root-relative). Empty or absent means\nthe rule applies to every analyzed file.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "exclude": {
+          "description": "Optional exclude globs (project-root-relative), applied after `files`.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "message": {
+          "description": "Author-provided message naming the sanctioned alternative. Rendered\nnext to each finding.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "severity": {
+          "description": "Per-rule severity overriding the `rules.\"policy-violation\"` master.\n`off` disables this rule. When the master itself is `off`, the whole\nevaluator is disabled and per-rule severity cannot resurrect it.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind"
+      ]
+    },
+    "RulePackRuleKind": {
+      "description": "Which check a rule-pack rule performs.",
+      "oneOf": [
+        {
+          "description": "Ban call sites whose callee path matches one of `callees`.",
+          "type": "string",
+          "const": "banned-call"
+        },
+        {
+          "description": "Ban imports and re-exports whose raw specifier matches one of\n`specifiers`.",
+          "type": "string",
+          "const": "banned-import"
+        }
+      ]
+    },
+    "Severity": {
+      "description": "Severity level for rules.\n\nControls whether an issue type causes CI failure (`error`), is reported\nwithout failing (`warn`), or is suppressed entirely (`off`).",
+      "oneOf": [
+        {
+          "description": "Report and fail CI (non-zero exit code).",
+          "type": "string",
+          "const": "error"
+        },
+        {
+          "description": "Report but don't fail CI.",
+          "type": "string",
+          "const": "warn"
+        },
+        {
+          "description": "Don't detect or report.",
+          "type": "string",
+          "const": "off"
+        }
+      ]
+    }
+  }
+}

@@ -71,6 +71,12 @@ impl CompiledRule<'_> {
 /// occurrence wins). Banned-import matching is segment-aware on the RAW
 /// specifier over imports and re-exports; `require()` calls and dynamic
 /// `import()` are documented false negatives in v1.
+///
+/// Multi-rule matching is intentionally asymmetric: for `banned-call` the
+/// first applicable rule in config order wins per callee (mirroring the
+/// boundary forbidden-call behavior), while every `banned-import` rule that
+/// matches a specifier emits its own finding, because each rule carries its
+/// own message and severity.
 pub fn find_policy_violations(
     graph: &ModuleGraph,
     modules: &[ModuleInfo],
