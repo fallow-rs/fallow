@@ -851,6 +851,18 @@ pub trait Plugin: Send + Sync {
         PluginResult::default()
     }
 
+    /// Dependencies referenced by the package's own package.json metadata.
+    ///
+    /// Unlike config-derived dependencies, these credits apply only to the
+    /// package.json that produced them.
+    fn package_json_referenced_dependencies(
+        &self,
+        _pkg: &PackageJson,
+        _root: &Path,
+    ) -> Vec<String> {
+        Vec::new()
+    }
+
     /// Parse a config file's AST to discover additional entries, dependencies, etc.
     ///
     /// Called for each config file matching `config_patterns()`. The source code

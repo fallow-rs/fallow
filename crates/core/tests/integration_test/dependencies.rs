@@ -344,6 +344,76 @@ fn napi_rs_optional_prebuild_dependencies_are_not_reported_in_workspaces() {
 }
 
 #[test]
+fn napi_rs_optional_prebuild_credits_are_workspace_scoped() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let root = tmp.path();
+    let native_root = root.join("packages/native");
+    let other_root = root.join("packages/other");
+    fs::create_dir_all(native_root.join("src")).expect("create native workspace package");
+    fs::create_dir_all(other_root.join("src")).expect("create other workspace package");
+    fs::write(
+        root.join("package.json"),
+        r#"{
+  "private": true,
+  "workspaces": ["packages/*"]
+}"#,
+    )
+    .expect("write root package.json");
+    fs::write(
+        native_root.join("package.json"),
+        r#"{
+  "name": "native",
+  "main": "src/index.ts",
+  "optionalDependencies": {
+    "native-linux-x64-gnu": "1.0.0"
+  },
+  "napi": {
+    "targets": ["x86_64-unknown-linux-gnu"]
+  }
+}"#,
+    )
+    .expect("write native package.json");
+    fs::write(
+        native_root.join("src/index.ts"),
+        "export const value = 1;\n",
+    )
+    .expect("write native source");
+    fs::write(
+        other_root.join("package.json"),
+        r#"{
+  "name": "other",
+  "main": "src/index.ts",
+  "optionalDependencies": {
+    "native-linux-x64-gnu": "1.0.0"
+  }
+}"#,
+    )
+    .expect("write other package.json");
+    fs::write(other_root.join("src/index.ts"), "export const value = 1;\n")
+        .expect("write other source");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results.unused_optional_dependencies.iter().any(|dep| {
+            dep.dep.package_name == "native-linux-x64-gnu"
+                && dep.dep.path.ends_with("packages/other/package.json")
+        }),
+        "same-named optional dependency in a non-napi workspace should still be reported, found: {:?}",
+        results.unused_optional_dependencies
+    );
+    assert!(
+        !results.unused_optional_dependencies.iter().any(|dep| {
+            dep.dep.package_name == "native-linux-x64-gnu"
+                && dep.dep.path.ends_with("packages/native/package.json")
+        }),
+        "napi-generated optional dependency should be credited only in its declaring workspace, found: {:?}",
+        results.unused_optional_dependencies
+    );
+}
+
+#[test]
 fn unused_workspace_dependency_reports_other_workspace_usage() {
     let root = fixture_path("cross-workspace-dependency-context");
     let config = create_config(root.clone());

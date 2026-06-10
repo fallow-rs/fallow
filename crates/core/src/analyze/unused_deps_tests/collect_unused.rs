@@ -5,6 +5,7 @@ fn collect_unused_empty_deps_returns_empty() {
     let (pr, pt, su, id) = empty_shared_sets();
     let shared = SharedDepSets {
         plugin_referenced: &pr,
+        package_plugin_referenced: &pr,
         plugin_tooling: &pt,
         script_used: &su,
         ignore_deps: &id,
@@ -32,6 +33,7 @@ fn collect_unused_all_used_returns_empty() {
     let (pr, pt, su, id) = empty_shared_sets();
     let shared = SharedDepSets {
         plugin_referenced: &pr,
+        package_plugin_referenced: &pr,
         plugin_tooling: &pt,
         script_used: &su,
         ignore_deps: &id,
@@ -60,6 +62,7 @@ fn collect_unused_some_unused_are_flagged() {
     let (pr, pt, su, id) = empty_shared_sets();
     let shared = SharedDepSets {
         plugin_referenced: &pr,
+        package_plugin_referenced: &pr,
         plugin_tooling: &pt,
         script_used: &su,
         ignore_deps: &id,
@@ -99,6 +102,7 @@ fn collect_unused_implicit_filter_skips_react_dom() {
     let (pr, pt, su, id) = empty_shared_sets();
     let shared = SharedDepSets {
         plugin_referenced: &pr,
+        package_plugin_referenced: &pr,
         plugin_tooling: &pt,
         script_used: &su,
         ignore_deps: &id,
@@ -128,6 +132,7 @@ fn collect_unused_implicit_filter_disabled_keeps_react_dom() {
     let (pr, pt, su, id) = empty_shared_sets();
     let shared = SharedDepSets {
         plugin_referenced: &pr,
+        package_plugin_referenced: &pr,
         plugin_tooling: &pt,
         script_used: &su,
         ignore_deps: &id,
@@ -157,6 +162,7 @@ fn collect_unused_known_tooling_filter_skips_jest() {
     let (pr, pt, su, id) = empty_shared_sets();
     let shared = SharedDepSets {
         plugin_referenced: &pr,
+        package_plugin_referenced: &pr,
         plugin_tooling: &pt,
         script_used: &su,
         ignore_deps: &id,
@@ -192,6 +198,7 @@ fn collect_unused_plugin_tooling_filter() {
     pt.insert("my-runtime");
     let shared = SharedDepSets {
         plugin_referenced: &pr,
+        package_plugin_referenced: &pr,
         plugin_tooling: &pt,
         script_used: &su,
         ignore_deps: &id,
@@ -227,6 +234,7 @@ fn collect_unused_plugin_tooling_disabled_keeps_dep() {
     pt.insert("my-runtime");
     let shared = SharedDepSets {
         plugin_referenced: &pr,
+        package_plugin_referenced: &pr,
         plugin_tooling: &pt,
         script_used: &su,
         ignore_deps: &id,

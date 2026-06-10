@@ -120,6 +120,8 @@ pub struct AggregatedPluginResult {
     pub used_class_members: Vec<UsedClassMemberRule>,
     /// Dependencies referenced in config files (should not be flagged unused).
     pub referenced_dependencies: Vec<String>,
+    /// Dependencies referenced by package.json metadata, scoped to that package.json path.
+    pub package_referenced_dependencies: Vec<(PathBuf, String)>,
     /// Additional always-used files discovered from config parsing: (pattern, plugin_name).
     pub discovered_always_used: Vec<(String, String)>,
     /// Setup files discovered from config parsing: (path, plugin_name).
@@ -245,6 +247,7 @@ impl AggregatedPluginResult {
             used_exports,
             used_class_members,
             referenced_dependencies,
+            package_referenced_dependencies,
             discovered_always_used,
             setup_files,
             tooling_dependencies,
@@ -271,6 +274,8 @@ impl AggregatedPluginResult {
         self.used_exports.extend(used_exports);
         self.used_class_members.extend(used_class_members);
         self.referenced_dependencies.extend(referenced_dependencies);
+        self.package_referenced_dependencies
+            .extend(package_referenced_dependencies);
         self.discovered_always_used.extend(discovered_always_used);
         self.setup_files.extend(setup_files);
         self.tooling_dependencies.extend(tooling_dependencies);

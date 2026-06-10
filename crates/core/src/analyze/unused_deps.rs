@@ -75,6 +75,7 @@ pub struct DepCategoryConfig {
 /// Shared sets used by `collect_unused_for_category` to filter dependencies.
 pub struct SharedDepSets<'a> {
     pub plugin_referenced: &'a FxHashSet<&'a str>,
+    pub package_plugin_referenced: &'a FxHashSet<&'a str>,
     pub plugin_tooling: &'a FxHashSet<&'a str>,
     pub script_used: &'a FxHashSet<&'a str>,
     pub ignore_deps: &'a FxHashSet<&'a str>,
@@ -190,6 +191,22 @@ fn collect_workspace_used_packages<'a>(
     by_ws
 }
 
+fn shared_dep_sets<'a>(
+    plugin_referenced: &'a FxHashSet<&'a str>,
+    package_plugin_referenced: &'a FxHashSet<&'a str>,
+    plugin_tooling: &'a FxHashSet<&'a str>,
+    script_used: &'a FxHashSet<&'a str>,
+    ignore_deps: &'a FxHashSet<&'a str>,
+) -> SharedDepSets<'a> {
+    SharedDepSets {
+        plugin_referenced,
+        package_plugin_referenced,
+        plugin_tooling,
+        script_used,
+        ignore_deps,
+    }
+}
+
 /// Collect unused dependencies for a single category (prod, dev, or optional).
 ///
 /// Filters `dep_names` against usage data and category-specific rules, returning
@@ -215,6 +232,7 @@ pub fn collect_unused_for_category(
             !category.check_plugin_tooling || !shared.plugin_tooling.contains(dep.as_str())
         })
         .filter(|dep| !shared.plugin_referenced.contains(dep.as_str()))
+        .filter(|dep| !shared.package_plugin_referenced.contains(dep.as_str()))
         .filter(|dep| !shared.ignore_deps.contains(dep.as_str()))
         .map(|dep| {
             let line = pkg_content.map_or(1, |c| find_dep_line_in_json(c, &dep));
@@ -307,6 +325,48 @@ const fn optional_category() -> DepCategoryConfig {
     }
 }
 
+fn package_referenced_dependencies_by_path(
+    plugin_result: &crate::plugins::AggregatedPluginResult,
+) -> FxHashMap<PathBuf, FxHashSet<&str>> {
+    let mut by_path: FxHashMap<PathBuf, FxHashSet<&str>> = FxHashMap::default();
+    for (pkg_path, dep) in &plugin_result.package_referenced_dependencies {
+        by_path
+            .entry(pkg_path.clone())
+            .or_default()
+            .insert(dep.as_str());
+    }
+    by_path
+}
+
+fn plugin_referenced_set(
+    plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
+) -> FxHashSet<&str> {
+    plugin_result
+        .map(|pr| {
+            pr.referenced_dependencies
+                .iter()
+                .map(String::as_str)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn plugin_tooling_set(
+    plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
+) -> FxHashSet<&str> {
+    plugin_result
+        .map(|pr| pr.tooling_dependencies.iter().map(String::as_str).collect())
+        .unwrap_or_default()
+}
+
+fn script_used_set(
+    plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
+) -> FxHashSet<&str> {
+    plugin_result
+        .map(|pr| pr.script_used_packages.iter().map(String::as_str).collect())
+        .unwrap_or_default()
+}
+
 /// Find dependencies in package.json that are never imported.
 ///
 /// Checks both the root package.json and each workspace's package.json.
@@ -327,22 +387,14 @@ pub fn find_unused_dependencies(
     Vec<UnusedDependency>,
     Vec<UnusedDependency>,
 ) {
-    let plugin_referenced: FxHashSet<&str> = plugin_result
-        .map(|pr| {
-            pr.referenced_dependencies
-                .iter()
-                .map(String::as_str)
-                .collect()
-        })
-        .unwrap_or_default();
+    let plugin_referenced = plugin_referenced_set(plugin_result);
+    let plugin_tooling = plugin_tooling_set(plugin_result);
+    let script_used = script_used_set(plugin_result);
 
-    let plugin_tooling: FxHashSet<&str> = plugin_result
-        .map(|pr| pr.tooling_dependencies.iter().map(String::as_str).collect())
+    let package_referenced = plugin_result
+        .map(package_referenced_dependencies_by_path)
         .unwrap_or_default();
-
-    let script_used: FxHashSet<&str> = plugin_result
-        .map(|pr| pr.script_used_packages.iter().map(String::as_str).collect())
-        .unwrap_or_default();
+    let empty_package_referenced: FxHashSet<&str> = FxHashSet::default();
 
     let ignore_deps: FxHashSet<&str> = config
         .ignore_dependencies
@@ -358,13 +410,17 @@ pub fn find_unused_dependencies(
 
     let root_pkg_path = config.root.join("package.json");
     let root_pkg_content = read_pkg_json_content(&root_pkg_path);
+    let root_package_referenced = package_referenced
+        .get(&root_pkg_path)
+        .unwrap_or(&empty_package_referenced);
 
-    let shared = SharedDepSets {
-        plugin_referenced: &plugin_referenced,
-        plugin_tooling: &plugin_tooling,
-        script_used: &script_used,
-        ignore_deps: &ignore_deps,
-    };
+    let shared = shared_dep_sets(
+        &plugin_referenced,
+        root_package_referenced,
+        &plugin_tooling,
+        &script_used,
+        &ignore_deps,
+    );
 
     let is_used_globally = |dep: &str| used_packages.contains(dep) || root_peer_used.contains(dep);
     let no_workspace_context = |_dep: &str| Vec::new();
@@ -424,6 +480,16 @@ pub fn find_unused_dependencies(
             let Ok(ws_pkg) = serde_json::from_str::<PackageJson>(&ws_pkg_content) else {
                 return (Vec::new(), Vec::new(), Vec::new());
             };
+            let ws_package_referenced = package_referenced
+                .get(&ws_pkg_path)
+                .unwrap_or(&empty_package_referenced);
+            let ws_shared = shared_dep_sets(
+                &plugin_referenced,
+                ws_package_referenced,
+                &plugin_tooling,
+                &script_used,
+                &ignore_deps,
+            );
 
             let ws_root = ws.root.as_path();
             let ws_used_packages: FxHashSet<&str> = workspace_used_packages
@@ -445,7 +511,7 @@ pub fn find_unused_dependencies(
             let prod = collect_unused_for_category(
                 ws_pkg.production_dependency_names(),
                 &prod_category(),
-                &shared,
+                &ws_shared,
                 is_used_in_workspace,
                 used_in_workspaces,
                 &ws_pkg_path,
@@ -455,7 +521,7 @@ pub fn find_unused_dependencies(
             let dev = collect_unused_for_category(
                 ws_pkg.dev_dependency_names(),
                 &dev_category(),
-                &shared,
+                &ws_shared,
                 is_used_in_workspace,
                 used_in_workspaces,
                 &ws_pkg_path,
@@ -465,7 +531,7 @@ pub fn find_unused_dependencies(
             let optional = collect_unused_for_category(
                 ws_pkg.optional_dependency_names(),
                 &optional_category(),
-                &shared,
+                &ws_shared,
                 is_used_in_workspace,
                 used_in_workspaces,
                 &ws_pkg_path,

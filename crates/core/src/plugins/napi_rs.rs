@@ -9,7 +9,7 @@ use std::path::Path;
 use fallow_config::{NapiConfig, PackageJson};
 use rustc_hash::FxHashSet;
 
-use super::{Plugin, PluginResult};
+use super::Plugin;
 
 pub struct NapiRsPlugin;
 
@@ -26,12 +26,8 @@ impl Plugin for NapiRsPlugin {
         })
     }
 
-    fn resolve_package_json(&self, pkg: &PackageJson, _root: &Path) -> PluginResult {
-        let referenced_dependencies = referenced_optional_dependencies(pkg);
-        PluginResult {
-            referenced_dependencies,
-            ..PluginResult::default()
-        }
+    fn package_json_referenced_dependencies(&self, pkg: &PackageJson, _root: &Path) -> Vec<String> {
+        referenced_optional_dependencies(pkg)
     }
 }
 

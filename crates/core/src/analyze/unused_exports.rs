@@ -1974,6 +1974,7 @@ mod tests {
             scss_include_paths: vec![],
             entry_point_roles: FxHashMap::default(),
             referenced_dependencies: vec![],
+            package_referenced_dependencies: vec![],
             discovered_always_used: vec![],
             setup_files: vec![],
             tooling_dependencies: vec![],
