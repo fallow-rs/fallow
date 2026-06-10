@@ -6,8 +6,8 @@ use rmcp::{ErrorData as McpError, ServerHandler, tool, tool_router};
 use crate::params::{
     AnalyzeParams, AuditParams, CheckChangedParams, CheckRuntimeCoverageParams, CodeExecuteParams,
     ExplainParams, FeatureFlagsParams, FindDupesParams, FixParams, HealthParams, ImpactParams,
-    ListBoundariesParams, ProjectInfoParams, SecurityCandidatesParams, TraceCloneParams,
-    TraceDependencyParams, TraceExportParams, TraceFileParams,
+    InspectTargetParams, ListBoundariesParams, ProjectInfoParams, SecurityCandidatesParams,
+    TraceCloneParams, TraceDependencyParams, TraceExportParams, TraceFileParams,
 };
 use crate::tools::{
     build_analyze_args, build_audit_args, build_check_changed_args,
@@ -17,7 +17,7 @@ use crate::tools::{
     build_get_importance_args, build_health_args, build_impact_args, build_list_boundaries_args,
     build_project_info_args, build_security_candidates_args, build_trace_clone_args,
     build_trace_dependency_args, build_trace_export_args, build_trace_file_args, execute_code_mode,
-    run_tool, run_tool_with_top_level_warnings,
+    inspect_target, run_tool, run_tool_with_top_level_warnings,
 };
 
 #[cfg(test)]
@@ -123,6 +123,17 @@ impl FallowMcp {
             Ok(args) => run_tool(&self.binary, "security_candidates", &args).await,
             Err(msg) => Ok(CallToolResult::error(vec![Content::text(msg)])),
         }
+    }
+
+    #[tool(
+        description = "Inspect one file or exported symbol and return one typed evidence bundle. Address a file with target={type:\"file\", file:\"src/a.ts\"}; address a symbol with target={type:\"symbol\", file:\"src/a.ts\", export_name:\"foo\"}. Composes existing read-only analysis systems only: trace_file, trace_export for symbols, file-scoped dead-code actions, duplication groups filtered to the file, complexity findings filtered to the file, and security candidates scoped to the file. production is forwarded only to child analyses that support it: trace, dead-code, and health. Symbol targets include file-scoped evidence with explicit scope fields because file:line enclosing-symbol mapping is a follow-up. Large repositories can exceed the default 120s subprocess timeout; raise FALLOW_TIMEOUT_SECS accordingly.",
+        annotations(read_only_hint = true, open_world_hint = true)
+    )]
+    async fn inspect_target(
+        &self,
+        params: Parameters<InspectTargetParams>,
+    ) -> Result<CallToolResult, McpError> {
+        inspect_target(&self.binary, &params.0).await
     }
 
     #[tool(
@@ -368,6 +379,7 @@ impl ServerHandler for FallowMcp {
                  Tools: code_execute (bounded read-only Code Mode composition over fallow analysis tools), \
                  analyze (full analysis), check_changed (incremental/PR analysis), \
                  security_candidates (unverified local security candidates for agent verification), \
+                 inspect_target (one evidence bundle for a file or exported symbol), \
                  find_dupes (code duplication), fix_preview/fix_apply (auto-fix), \
                  project_info (plugins, files, entry points, boundary zones), \
                  trace_export / trace_file / trace_dependency / trace_clone (graph and clone evidence), \

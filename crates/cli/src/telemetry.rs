@@ -63,6 +63,7 @@ const MCP_TOOLS: &[&str] = &[
     "analyze",
     "check_changed",
     "security_candidates",
+    "inspect_target",
     "find_dupes",
     "check_health",
     "check_runtime_coverage",
@@ -2645,6 +2646,10 @@ mod tests {
     fn mcp_tool_value_is_allowlist_validated() {
         // Known tool names round-trip to the static allowlist entry.
         assert_eq!(mcp_tool_from_value("code_execute"), Some("code_execute"));
+        assert_eq!(
+            mcp_tool_from_value("inspect_target"),
+            Some("inspect_target")
+        );
         assert_eq!(mcp_tool_from_value("find_dupes"), Some("find_dupes"));
         assert_eq!(mcp_tool_from_value("  audit  "), Some("audit"));
         // Anything off-allowlist is dropped, never echoed into the payload.

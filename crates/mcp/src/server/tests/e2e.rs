@@ -11,7 +11,7 @@ use rmcp::model::RawContent;
 use crate::tools::{
     build_analyze_args, build_health_args, build_project_info_args, build_security_candidates_args,
     build_trace_clone_args, build_trace_dependency_args, build_trace_export_args,
-    build_trace_file_args, execute_code_mode, run_fallow,
+    build_trace_file_args, execute_code_mode, inspect_target, run_fallow,
 };
 
 /// Resolve the fallow binary from `FALLOW_BIN`, or the workspace target dir.
@@ -311,6 +311,96 @@ async fn e2e_trace_file_returns_json() {
     assert!(
         json["exports"].is_array(),
         "trace_file should include exports"
+    );
+}
+
+#[tokio::test]
+async fn e2e_inspect_target_file_returns_evidence_bundle() {
+    let bin = fallow_binary();
+    let root = fixture_path("basic-project");
+    let result = inspect_target(
+        &bin,
+        &crate::params::InspectTargetParams {
+            target: crate::params::InspectTarget::File {
+                file: "src/utils.ts".to_string(),
+            },
+            root: Some(root.to_string_lossy().to_string()),
+            config: None,
+            production: None,
+            workspace: None,
+            no_cache: None,
+            threads: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(result.is_error, Some(false));
+
+    let text = extract_text(&result);
+    let json: serde_json::Value = serde_json::from_str(text)
+        .unwrap_or_else(|e| panic!("should parse as JSON: {e}\ntext: {text}"));
+    assert_eq!(json["kind"].as_str(), Some("inspect_target"));
+    assert_eq!(json["target"]["type"].as_str(), Some("file"));
+    assert_eq!(json["identity"]["file"].as_str(), Some("src/utils.ts"));
+    assert_eq!(
+        json["evidence"]["trace_file"]["status"].as_str(),
+        Some("ok")
+    );
+    assert_eq!(json["evidence"]["dead_code"]["status"].as_str(), Some("ok"));
+    assert!(json["evidence"]["trace_export"].is_null());
+}
+
+#[tokio::test]
+async fn e2e_inspect_target_symbol_returns_symbol_and_file_evidence() {
+    let bin = fallow_binary();
+    let root = fixture_path("basic-project");
+    let result = inspect_target(
+        &bin,
+        &crate::params::InspectTargetParams {
+            target: crate::params::InspectTarget::Symbol {
+                file: "src/utils.ts".to_string(),
+                export_name: "usedFunction".to_string(),
+            },
+            root: Some(root.to_string_lossy().to_string()),
+            config: None,
+            production: None,
+            workspace: None,
+            no_cache: None,
+            threads: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(result.is_error, Some(false));
+
+    let text = extract_text(&result);
+    let json: serde_json::Value = serde_json::from_str(text)
+        .unwrap_or_else(|e| panic!("should parse as JSON: {e}\ntext: {text}"));
+    assert_eq!(json["kind"].as_str(), Some("inspect_target"));
+    assert_eq!(json["target"]["type"].as_str(), Some("symbol"));
+    assert_eq!(json["identity"]["file"].as_str(), Some("src/utils.ts"));
+    assert_eq!(
+        json["identity"]["export_name"].as_str(),
+        Some("usedFunction")
+    );
+    assert_eq!(json["identity"]["is_used"].as_bool(), Some(true));
+    assert_eq!(
+        json["evidence"]["trace_export"]["status"].as_str(),
+        Some("ok")
+    );
+    assert_eq!(
+        json["evidence"]["duplication"]["scope"].as_str(),
+        Some("project_filtered_to_file")
+    );
+    assert!(
+        json["warnings"]
+            .as_array()
+            .is_some_and(|warnings| warnings.iter().any(|warning| warning
+                .as_str()
+                .is_some_and(|warning| warning.contains("file-scoped")))),
+        "symbol bundles should make file-scoped evidence explicit"
     );
 }
 

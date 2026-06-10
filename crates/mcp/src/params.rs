@@ -217,6 +217,43 @@ pub struct ProjectInfoParams {
     pub threads: Option<usize>,
 }
 
+/// Parameters for the `inspect_target` tool.
+///
+/// The tool composes several existing read-only analyses into one evidence
+/// bundle. Large repositories can exceed the default MCP subprocess timeout;
+/// raise `FALLOW_TIMEOUT_SECS` in the server environment when needed.
+#[derive(Deserialize, JsonSchema)]
+pub struct InspectTargetParams {
+    pub target: InspectTarget,
+
+    pub root: Option<String>,
+
+    pub config: Option<String>,
+
+    pub production: Option<bool>,
+
+    pub workspace: Option<String>,
+
+    pub no_cache: Option<bool>,
+
+    pub threads: Option<usize>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum InspectTarget {
+    File {
+        #[schemars(length(min = 1))]
+        file: String,
+    },
+    Symbol {
+        #[schemars(length(min = 1))]
+        file: String,
+        #[schemars(length(min = 1))]
+        export_name: String,
+    },
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub struct TraceExportParams {
     #[schemars(length(min = 1))]

@@ -25,6 +25,7 @@ fn all_tools_registered() {
     assert!(names.contains(&"analyze".to_string()));
     assert!(names.contains(&"check_changed".to_string()));
     assert!(names.contains(&"security_candidates".to_string()));
+    assert!(names.contains(&"inspect_target".to_string()));
     assert!(names.contains(&"find_dupes".to_string()));
     assert!(names.contains(&"fix_preview".to_string()));
     assert!(names.contains(&"fix_apply".to_string()));
@@ -44,7 +45,7 @@ fn all_tools_registered() {
     assert!(names.contains(&"get_importance".to_string()));
     assert!(names.contains(&"get_cleanup_candidates".to_string()));
     assert!(names.contains(&"impact".to_string()));
-    assert_eq!(tools.len(), 23);
+    assert_eq!(tools.len(), 24);
 }
 
 #[test]
@@ -56,6 +57,7 @@ fn read_only_tools_have_annotations() {
         "analyze",
         "check_changed",
         "security_candidates",
+        "inspect_target",
         "find_dupes",
         "fix_preview",
         "project_info",
@@ -130,6 +132,7 @@ fn open_world_hint_on_analysis_tools() {
         "analyze",
         "check_changed",
         "security_candidates",
+        "inspect_target",
         "find_dupes",
         "fix_preview",
         "project_info",
@@ -199,6 +202,7 @@ fn server_instructions_mention_all_tools() {
     assert!(instructions.contains("analyze"));
     assert!(instructions.contains("check_changed"));
     assert!(instructions.contains("security_candidates"));
+    assert!(instructions.contains("inspect_target"));
     assert!(instructions.contains("find_dupes"));
     assert!(instructions.contains("fix_preview"));
     assert!(instructions.contains("fix_apply"));
@@ -393,6 +397,55 @@ fn security_candidates_description_frames_candidates_and_scope() {
         assert!(
             desc.contains(expected),
             "security_candidates description should mention {expected}"
+        );
+    }
+}
+
+#[test]
+fn inspect_target_schema_contains_expected_properties() {
+    let server = FallowMcp::new();
+    let tools = server.tool_router.list_all();
+    let tool = tools.iter().find(|t| t.name == "inspect_target").unwrap();
+    let schema = serde_json::to_string(&tool.input_schema).unwrap();
+    for prop in [
+        "target",
+        "type",
+        "file",
+        "export_name",
+        "root",
+        "config",
+        "production",
+        "workspace",
+        "no_cache",
+        "threads",
+    ] {
+        assert!(
+            schema.contains(prop),
+            "inspect_target schema should contain property '{prop}'"
+        );
+    }
+    let schema: serde_json::Value = serde_json::to_value(&tool.input_schema).unwrap();
+    assert_required_fields(&schema, &["target"]);
+}
+
+#[test]
+fn inspect_target_description_frames_scope_and_timeout() {
+    let server = FallowMcp::new();
+    let tools = server.tool_router.list_all();
+    let tool = tools.iter().find(|t| t.name == "inspect_target").unwrap();
+    let desc = tool.description.as_deref().unwrap();
+    for expected in [
+        "one typed evidence bundle",
+        "target={type:\"file\"",
+        "target={type:\"symbol\"",
+        "trace_file",
+        "trace_export",
+        "file-scoped",
+        "FALLOW_TIMEOUT_SECS",
+    ] {
+        assert!(
+            desc.contains(expected),
+            "inspect_target description should mention {expected}"
         );
     }
 }

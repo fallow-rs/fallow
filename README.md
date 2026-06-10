@@ -204,6 +204,8 @@ For full adoption instead of one-off review, see the [Fallow compliance happy pa
 
 See [Agent integration](https://docs.fallow.tools/integrations/mcp) for MCP setup and the full list of structured tools.
 
+The MCP server includes `inspect_target` for agents that need one evidence bundle for a file or exported symbol, combining trace, dead-code, duplication, complexity, and security signals without inventing a new analysis pass.
+
 The MCP server also exposes `code_execute`, a bounded read-only Code Mode tool for composing multiple fallow analysis calls in one JavaScript snippet. It can call analysis helpers such as `fallow.projectInfo`, `fallow.audit`, and `fallow.checkHealth`, but it does not expose mutating fix tools.
 
 For security review loops, see the [Security agent verification recipe](docs/security-agent-verification.md). It shows how to combine `fallow security --format json --surface`, candidate evidence, and MCP `security_candidates` output without adding model calls to fallow core.

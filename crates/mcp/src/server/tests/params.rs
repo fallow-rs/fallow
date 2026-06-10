@@ -105,6 +105,51 @@ fn security_candidates_params_all_fields_deserialize() {
 }
 
 #[test]
+fn inspect_target_params_file_deserialize() {
+    let json = r#"{
+        "target": {"type": "file", "file": "src/utils.ts"},
+        "root": "/project",
+        "config": "fallow.toml",
+        "production": true,
+        "workspace": "apps/web",
+        "no_cache": true,
+        "threads": 4
+    }"#;
+    let params: InspectTargetParams = serde_json::from_str(json).unwrap();
+    match params.target {
+        InspectTarget::File { file } => assert_eq!(file, "src/utils.ts"),
+        InspectTarget::Symbol { .. } => panic!("expected file target"),
+    }
+    assert_eq!(params.root.as_deref(), Some("/project"));
+    assert_eq!(params.config.as_deref(), Some("fallow.toml"));
+    assert_eq!(params.production, Some(true));
+    assert_eq!(params.workspace.as_deref(), Some("apps/web"));
+    assert_eq!(params.no_cache, Some(true));
+    assert_eq!(params.threads, Some(4));
+}
+
+#[test]
+fn inspect_target_params_symbol_deserialize() {
+    let json = r#"{"target":{"type":"symbol","file":"src/utils.ts","export_name":"usedFunction"}}"#;
+    let params: InspectTargetParams = serde_json::from_str(json).unwrap();
+    match params.target {
+        InspectTarget::Symbol { file, export_name } => {
+            assert_eq!(file, "src/utils.ts");
+            assert_eq!(export_name, "usedFunction");
+        }
+        InspectTarget::File { .. } => panic!("expected symbol target"),
+    }
+    assert!(params.root.is_none());
+    assert!(params.config.is_none());
+}
+
+#[test]
+fn inspect_target_params_require_target() {
+    let result: Result<InspectTargetParams, _> = serde_json::from_str("{}");
+    assert!(result.is_err());
+}
+
+#[test]
 fn check_runtime_coverage_params_require_coverage() {
     let json = "{}";
     let result: Result<CheckRuntimeCoverageParams, _> = serde_json::from_str(json);
