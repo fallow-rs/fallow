@@ -359,6 +359,130 @@ fn non_concat_binary_expression_does_not_bind_as_source() {
     ));
 }
 
+// ── #1146 bounded multi-hop taint binding chains ──
+
+#[test]
+fn two_hop_template_chain_binds_with_the_original_source_metadata() {
+    let info = parse("const a = req.query.id;\nconst b = `wrap-${a}`;");
+    let root = info
+        .tainted_bindings
+        .iter()
+        .find(|binding| binding.local == "a" && binding.source_path == "req.query")
+        .expect("direct source binding for `a`");
+    let chained = info
+        .tainted_bindings
+        .iter()
+        .find(|binding| binding.local == "b" && binding.source_path == "req.query")
+        .expect("chained binding for `b` carrying the original source path");
+    assert_ne!(root.source_span_start, 0, "the direct read has a real span");
+    assert_eq!(
+        chained.source_span_start, root.source_span_start,
+        "the chained binding anchors at the ORIGINAL source read, not the chain step"
+    );
+}
+
+#[test]
+fn bare_identifier_alias_chains() {
+    assert!(has_tainted_binding(
+        "const a = req.query.id; const b = a;",
+        "b",
+        "req.query"
+    ));
+}
+
+#[test]
+fn member_root_read_does_not_chain() {
+    // A property read off a tainted local frequently strips taint in practice
+    // (`a.length`, `a.startsWith("/")`), so member roots are excluded from the
+    // binding-side chain even though the sink-side collector admits them.
+    assert!(!has_tainted_binding(
+        "const a = req.query.id; const b = a.id;",
+        "b",
+        "req.query"
+    ));
+    assert!(!has_tainted_binding(
+        "const a = req.query.id; const len = a.length;",
+        "len",
+        "req.query"
+    ));
+}
+
+#[test]
+fn call_logical_and_conditional_expressions_do_not_chain() {
+    assert!(!has_tainted_binding(
+        "const a = req.query.id; const b = wrap(a);",
+        "b",
+        "req.query"
+    ));
+    assert!(!has_tainted_binding(
+        r#"const a = req.query.id; const b = a || "x";"#,
+        "b",
+        "req.query"
+    ));
+    assert!(!has_tainted_binding(
+        r#"const a = req.query.id; const b = cond ? a : "x";"#,
+        "b",
+        "req.query"
+    ));
+}
+
+#[test]
+fn chain_records_through_the_cap_and_drops_beyond_it() {
+    // a = hop 1, b = hop 2, c = hop 3 (the cap, still recorded), d = hop 4
+    // (dropped: degrades to module-level instead of a false arg-level claim).
+    let source =
+        "const a = req.query.id; const b = `1-${a}`; const c = `2-${b}`; const d = `3-${c}`;";
+    assert!(has_tainted_binding(source, "c", "req.query"));
+    assert!(!has_tainted_binding(source, "d", "req.query"));
+}
+
+#[test]
+fn hops_are_tracked_per_source_path_not_per_local_name() {
+    // `c` carries req.body at hop 2 (via x) and req.query at hop 3 (via b).
+    // One more step keeps req.body (hop 3, at the cap) but must drop
+    // req.query: a deep path may not ride a shallow sibling under the cap.
+    let source = "const a = req.query.id; const b = `1-${a}`; const x = req.body.y; const c = `${x}-${b}`; const e = `e-${c}`;";
+    assert!(has_tainted_binding(source, "e", "req.body"));
+    assert!(!has_tainted_binding(source, "e", "req.query"));
+}
+
+#[test]
+fn direct_capture_keeps_its_full_chain_budget_when_also_chained() {
+    // `b`'s initializer BOTH reads the source directly (hop 1) and references
+    // the tainted `a` (would be hop 2). The dedup min-merge must keep hop 1,
+    // so two more chain steps still fit under the cap.
+    let source = "const a = req.query.id; const b = `${a}-${req.query.z}`; const c = `c-${b}`; const d = `d-${c}`;";
+    assert!(has_tainted_binding(source, "d", "req.query"));
+}
+
+#[test]
+fn destructure_from_tainted_local_chains_with_the_original_source() {
+    let info = parse("const a = req.query;\nconst { id } = a;");
+    let root = info
+        .tainted_bindings
+        .iter()
+        .find(|binding| binding.local == "a" && binding.source_path == "req.query")
+        .expect("direct source binding for `a`");
+    let chained = info
+        .tainted_bindings
+        .iter()
+        .find(|binding| binding.local == "id" && binding.source_path == "req.query")
+        .expect("chained destructure binding for `id`");
+    assert_eq!(
+        chained.source_span_start, root.source_span_start,
+        "the destructured local anchors at the original source read"
+    );
+}
+
+#[test]
+fn destructure_from_a_call_result_does_not_chain() {
+    assert!(!has_tainted_binding(
+        "const a = req.query.id; const { id } = wrap(a);",
+        "id",
+        "req.query"
+    ));
+}
+
 fn redos_regex_sink(source: &str) -> fallow_types::extract::SinkSite {
     let info = parse(source);
     info.security_sinks

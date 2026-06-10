@@ -1084,6 +1084,30 @@ impl ModuleInfoExtractor {
         }
     }
 
+    /// Record a tainted binding together with its chain-hop depth, deduped on
+    /// `(local, source_path)`. On a duplicate the existing record keeps its
+    /// span (first read wins, matching the analyze layer's name-keyed
+    /// `or_insert`) and the SHALLOWER hop depth, so a direct source capture
+    /// (hop 1) is never demoted past the chain cap by a chained re-record of
+    /// the same pair, and a chained record is never inflated by a later one.
+    fn push_tainted_binding(&mut self, binding: TaintedBinding, hop: u8) {
+        debug_assert_eq!(
+            self.tainted_bindings.len(),
+            self.tainted_binding_hops.len(),
+            "tainted_binding_hops must stay aligned with tainted_bindings"
+        );
+        if let Some(index) = self
+            .tainted_bindings
+            .iter()
+            .position(|b| b.local == binding.local && b.source_path == binding.source_path)
+        {
+            self.tainted_binding_hops[index] = self.tainted_binding_hops[index].min(hop);
+            return;
+        }
+        self.tainted_bindings.push(binding);
+        self.tainted_binding_hops.push(hop);
+    }
+
     /// Record tainted-source bindings for `const <name> = <object>.<prop>` and
     /// for one-hop local expressions that embed a source member access. The
     /// recorded candidates include the exact member path and the flattened
@@ -1094,40 +1118,127 @@ impl ModuleInfoExtractor {
     /// handler reading a function-local source is exactly the target case.
     fn record_tainted_source_binding(&mut self, name: &str, expr: &Expression<'_>) {
         for source_path in binding_source_path_candidates(expr) {
-            if self
-                .tainted_bindings
-                .iter()
-                .any(|b| b.local == name && b.source_path == source_path)
-            {
-                continue;
-            }
-            self.tainted_bindings.push(TaintedBinding {
-                local: name.to_string(),
-                source_path,
-                // The initializer member-access read (`req.query.id`); anchors
-                // the taint trace's source node at the real read line.
-                source_span_start: expr.span().start,
-            });
+            self.push_tainted_binding(
+                TaintedBinding {
+                    local: name.to_string(),
+                    source_path,
+                    // The initializer member-access read (`req.query.id`); anchors
+                    // the taint trace's source node at the real read line.
+                    source_span_start: expr.span().start,
+                },
+                DIRECT_TAINT_HOP,
+            );
         }
     }
 
     fn record_tainted_param_binding(&mut self, name: &str, source_path: &'static str) {
-        if self
-            .tainted_bindings
-            .iter()
-            .any(|b| b.local == name && b.source_path == source_path)
-        {
+        self.push_tainted_binding(
+            TaintedBinding {
+                local: name.to_string(),
+                source_path: source_path.to_string(),
+                // Synthetic framework-handler-param source (e.g. `framework.request`);
+                // no concrete member-access read expression, so the analyze layer
+                // anchors at the sink rather than a spurious line. `0` signals "no
+                // captured read span".
+                source_span_start: 0,
+            },
+            DIRECT_TAINT_HOP,
+        );
+    }
+
+    /// Chain a declarator's taint from already-tainted local bindings that its
+    /// initializer references through the conservative #1095 expression shapes
+    /// plus a bare-identifier alias (issue #1146). Each chained binding carries
+    /// the ORIGINAL `source_path` and `source_span_start`, so the analyze layer
+    /// needs no changes: the chained local matches `source_tainted_locals` and
+    /// anchors its trace at the original source read. Chains only form in
+    /// lexical declarator order within one extractor walk; use-before-declaration
+    /// flows and cross-SFC-block chains are silent false negatives by design
+    /// (FN-preferring, matching the #885 doctrine).
+    fn record_chained_tainted_binding(&mut self, name: &str, init: &Expression<'_>) {
+        let mut idents = Vec::new();
+        collect_chained_taint_idents(init, &mut idents);
+        if idents.is_empty() {
             return;
         }
-        self.tainted_bindings.push(TaintedBinding {
-            local: name.to_string(),
-            source_path: source_path.to_string(),
-            // Synthetic framework-handler-param source (e.g. `framework.request`);
-            // no concrete member-access read expression, so the analyze layer
-            // anchors at the sink rather than a spurious line. `0` signals "no
-            // captured read span".
-            source_span_start: 0,
-        });
+        let chained = self.chained_bindings_for_idents(name, &idents);
+        for (binding, hop) in chained {
+            self.push_tainted_binding(binding, hop);
+        }
+    }
+
+    /// Chained `(binding, hop)` records for a new local named `name` whose
+    /// initializer references `idents`. Referenced bindings already at
+    /// `MAX_TAINT_BINDING_HOPS` contribute nothing, so an over-cap chain is
+    /// simply not recorded and the sink degrades to module-level reachability;
+    /// a false arg-level claim past the cap is structurally impossible.
+    fn chained_bindings_for_idents(
+        &self,
+        name: &str,
+        idents: &[String],
+    ) -> Vec<(TaintedBinding, u8)> {
+        let mut out = Vec::new();
+        for ident in idents {
+            // No `nested_scope_shadows` guard on the referenced ident: tainted
+            // bindings are recorded scope-insensitively and name-keyed (the
+            // direct recorders do the same), and the chain root is normally a
+            // local declared in the SAME function body, which the nested
+            // declaration stack already contains. Guarding on it would reject
+            // the common `const a = req.query.id; const b = ...a...` case
+            // inside a route handler. Cross-scope name collisions are the
+            // accepted Risk 1, bounded by the hop cap.
+            if ident == name {
+                continue;
+            }
+            for (index, binding) in self.tainted_bindings.iter().enumerate() {
+                if binding.local != *ident {
+                    continue;
+                }
+                let hop = self.tainted_binding_hops[index];
+                if hop >= MAX_TAINT_BINDING_HOPS {
+                    tracing::debug!(
+                        local = name,
+                        via = ident.as_str(),
+                        source_path = binding.source_path.as_str(),
+                        "taint binding chain dropped: would exceed MAX_TAINT_BINDING_HOPS"
+                    );
+                    continue;
+                }
+                out.push((
+                    TaintedBinding {
+                        local: name.to_string(),
+                        source_path: binding.source_path.clone(),
+                        source_span_start: binding.source_span_start,
+                    },
+                    hop + 1,
+                ));
+            }
+        }
+        out
+    }
+
+    /// Chain an object destructure from a tainted local (`const { id } = a`
+    /// where `a` is source-tainted), mirroring the shipped
+    /// destructure-from-source capture (issue #1146). Only a bare-identifier
+    /// initializer chains; member-expression initializers stay out for the
+    /// same reason member roots are excluded from
+    /// `collect_chained_taint_idents`.
+    fn record_chained_tainted_destructure_bindings(
+        &mut self,
+        obj_pat: &ObjectPattern<'_>,
+        init: &Expression<'_>,
+    ) {
+        let Expression::Identifier(ident) = unwrap_parens(init) else {
+            return;
+        };
+        let idents = vec![ident.name.to_string()];
+        let mut chained = Vec::new();
+        for local in super::extract_destructured_names(obj_pat) {
+            chained.extend(self.chained_bindings_for_idents(&local, &idents));
+        }
+        for (binding, hop) in chained {
+            self.push_tainted_binding(binding, hop);
+        }
     }
 
     fn record_first_param_source(
@@ -1306,14 +1417,17 @@ impl ModuleInfoExtractor {
         source_paths.sort();
         source_paths.dedup();
         for source_path in source_paths {
-            self.tainted_bindings.push(TaintedBinding {
-                local: name.to_string(),
-                source_path,
-                // One-hop helper-return source: the real read lives inside the
-                // helper body, not at this binding, so no concrete read span is
-                // available here. `0` makes the analyze layer anchor at the sink.
-                source_span_start: 0,
-            });
+            self.push_tainted_binding(
+                TaintedBinding {
+                    local: name.to_string(),
+                    source_path,
+                    // One-hop helper-return source: the real read lives inside the
+                    // helper body, not at this binding, so no concrete read span is
+                    // available here. `0` makes the analyze layer anchor at the sink.
+                    source_span_start: 0,
+                },
+                DIRECT_TAINT_HOP,
+            );
         }
     }
 
@@ -1716,14 +1830,17 @@ impl ModuleInfoExtractor {
             return;
         };
         for local in super::extract_destructured_names(obj_pat) {
-            self.tainted_bindings.push(TaintedBinding {
-                local,
-                source_path: source_path.clone(),
-                // The destructured initializer read (`req.query` in
-                // `const { id } = req.query`); anchors the source node at the
-                // real read line.
-                source_span_start: expr.span().start,
-            });
+            self.push_tainted_binding(
+                TaintedBinding {
+                    local,
+                    source_path: source_path.clone(),
+                    // The destructured initializer read (`req.query` in
+                    // `const { id } = req.query`); anchors the source node at the
+                    // real read line.
+                    source_span_start: expr.span().start,
+                },
+                DIRECT_TAINT_HOP,
+            );
         }
     }
 
@@ -2131,6 +2248,10 @@ impl ModuleInfoExtractor {
             self.record_child_process_fork_target_binding(id.name.as_str(), init);
             self.record_tainted_source_binding(id.name.as_str(), init);
             self.record_tainted_helper_call_binding(id.name.as_str(), init);
+            // #1146 chain step AFTER the direct captures: a same-declarator
+            // direct source read seeds hop 1 first, so the dedup min-merge in
+            // `push_tainted_binding` keeps the direct depth.
+            self.record_chained_tainted_binding(id.name.as_str(), init);
             let sanitizer_scope = self.sanitizer_scope_for_expr(init);
             self.record_sanitizer_binding(id.name.as_str(), sanitizer_scope);
             let allowlist = decl.kind == VariableDeclarationKind::Const
@@ -2930,6 +3051,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
             if let BindingPattern::ObjectPattern(obj_pat) = &declarator.id {
                 self.record_tainted_destructure_bindings(obj_pat, init);
+                self.record_chained_tainted_destructure_bindings(obj_pat, init);
             }
 
             if let BindingPattern::BindingIdentifier(id) = &declarator.id
@@ -4043,6 +4165,64 @@ fn collect_binding_source_path_candidates(expr: &Expression<'_>, out: &mut Vec<S
                     continue;
                 };
                 collect_binding_source_path_candidates(&property.value, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Collect bare identifier references from a declarator initializer for the
+/// #1146 taint chain step, recursing through the same conservative expression
+/// shapes `collect_binding_source_path_candidates` admits (static TS wrappers,
+/// await, template substitutions, `+` concat operands, object-literal property
+/// values) plus the top-level bare-identifier alias (`const b = a`).
+///
+/// Deliberately NOT collected (each chained identifier becomes a fresh
+/// source-backed binding that can chain further, so every arm here is a
+/// false-positive amplifier):
+/// - member-expression roots (`const b = a.id`): a property read off a tainted
+///   local frequently strips taint in practice (`a.length`,
+///   `a.startsWith("/")`); unlike the sink-side `collect_idents_into` member
+///   rule (sound because the whole expression flows into a sink), re-tainting
+///   the result here would propagate boolean/length/index reads
+/// - call expressions (`const b = f(a)`): the call boundary is where
+///   sanitizers live; #878 already covers proven helper-return shapes
+/// - logical / conditional / sequence expressions (`a || "x"`, `c ? a : b`)
+fn collect_chained_taint_idents(expr: &Expression<'_>, out: &mut Vec<String>) {
+    match expr {
+        Expression::Identifier(ident) => push_ident(ident.name.as_str(), out),
+        Expression::ParenthesizedExpression(paren) => {
+            collect_chained_taint_idents(&paren.expression, out);
+        }
+        Expression::TSAsExpression(ts_as) => {
+            collect_chained_taint_idents(&ts_as.expression, out);
+        }
+        Expression::TSSatisfiesExpression(ts_sat) => {
+            collect_chained_taint_idents(&ts_sat.expression, out);
+        }
+        Expression::TSNonNullExpression(ts_non_null) => {
+            collect_chained_taint_idents(&ts_non_null.expression, out);
+        }
+        Expression::AwaitExpression(await_expr) => {
+            collect_chained_taint_idents(&await_expr.argument, out);
+        }
+        Expression::TemplateLiteral(template) => {
+            for expression in &template.expressions {
+                collect_chained_taint_idents(expression, out);
+            }
+        }
+        Expression::BinaryExpression(binary)
+            if binary.operator == oxc_ast::ast::BinaryOperator::Addition =>
+        {
+            collect_chained_taint_idents(&binary.left, out);
+            collect_chained_taint_idents(&binary.right, out);
+        }
+        Expression::ObjectExpression(object) => {
+            for property in &object.properties {
+                let ObjectPropertyKind::ObjectProperty(property) = property else {
+                    continue;
+                };
+                collect_chained_taint_idents(&property.value, out);
             }
         }
         _ => {}

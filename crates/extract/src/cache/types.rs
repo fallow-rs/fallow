@@ -314,7 +314,11 @@ use crate::MemberKind;
 ///
 /// Bumped to 145 for issue #1137: `SinkSite` now carries URL construction shape
 /// metadata for fixed-origin and dynamic-origin URL sink candidates.
-pub(super) const CACHE_VERSION: u32 = 145;
+///
+/// Bumped to 146 for issue #1146: JS/TS extraction now chains tainted local
+/// bindings through up to three same-module hops, so warm caches written
+/// before the bump lack the chained `tainted_bindings` records.
+pub(super) const CACHE_VERSION: u32 = 146;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

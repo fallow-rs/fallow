@@ -193,6 +193,18 @@ pub(crate) struct ModuleInfoExtractor {
     /// (e.g. `const id = req.query.id`). Feeds the security `tainted_sink`
     /// source-to-sink association in the analyze layer.
     pub(crate) tainted_bindings: Vec<TaintedBinding>,
+    /// Chain-hop depth per recorded tainted binding, aligned 1:1 with
+    /// `tainted_bindings` (index `i` describes `tainted_bindings[i]`, so the
+    /// depth is tracked per `(local, source_path)` pair, never approximated
+    /// across a local's candidate paths). Hop 1 is a direct capture (source
+    /// read, framework param, helper return, destructure-from-source); each
+    /// #1146 chain step through another local binding adds 1, capped by
+    /// `MAX_TAINT_BINDING_HOPS`. Working state only: NOT persisted in the
+    /// extract cache and NOT carried across SFC script blocks (`merge_into`
+    /// drops it together with this extractor's binding lookup, so a
+    /// cross-block chain cannot form and the hop accounting cannot drift from
+    /// the bindings it describes).
+    pub(crate) tainted_binding_hops: Vec<u8>,
     /// Direct sink arguments recognized as sanitizer calls.
     pub(crate) sanitized_sink_args: Vec<SanitizedSinkArg>,
     /// Defensive control call sites for security surface output.

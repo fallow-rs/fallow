@@ -24,6 +24,23 @@ pub(super) const MCP_TOOL_INPUT_SOURCE: &str = "mcp.tool-input";
 pub(super) const GRAPHQL_ARGS_SOURCE: &str = "graphql.args";
 pub(super) const TRPC_INPUT_SOURCE: &str = "trpc.input";
 
+/// Hop depth of a directly captured tainted binding: a source read
+/// (`const id = req.query.id`), a framework handler param, a one-hop helper
+/// return, or a destructure-from-source. Chained bindings (issue #1146) start
+/// counting from here.
+pub(super) const DIRECT_TAINT_HOP: u8 = 1;
+
+/// Maximum chained-binding depth for same-module taint propagation (issue
+/// #1146): a direct capture is hop 1 and each chain step through another local
+/// binding (`const b = \`wrap-${a}\``) adds 1, so the issue's headline 2-hop
+/// case (`a` -> `b`) fits with one level of slack. A binding that would exceed
+/// the cap is simply not recorded, so over-cap chains degrade to module-level
+/// reachability instead of claiming a false arg-level tier. Deliberately a
+/// constant, not a config knob: a `RUST_LOG=debug` line fires when a chain is
+/// dropped at the cap, and the #1142 function-local relation layer is the
+/// intended long-term substrate for deeper flows.
+pub(super) const MAX_TAINT_BINDING_HOPS: u8 = 3;
+
 pub(super) type StaticPackageStringBindings = FxHashMap<String, Vec<String>>;
 pub(super) type StaticPackageObjectBindings = FxHashMap<String, FxHashMap<String, Vec<String>>>;
 pub(super) type StaticPackageLoopBindings =
