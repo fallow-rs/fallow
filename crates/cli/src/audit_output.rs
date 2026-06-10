@@ -518,3 +518,30 @@ fn build_audit_codeclimate(result: &AuditResult) -> serde_json::Value {
 
     serde_json::to_value(&all_issues).expect("CodeClimateIssue serializes infallibly")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::short_base_ref;
+
+    #[test]
+    fn short_base_ref_abbreviates_full_sha() {
+        assert_eq!(
+            short_base_ref("611d151e8250146426ff3178e94207f8a8d3cc7b"),
+            "611d151e8250"
+        );
+    }
+
+    #[test]
+    fn short_base_ref_leaves_branch_names_and_refspecs_untouched() {
+        assert_eq!(short_base_ref("main"), "main");
+        assert_eq!(short_base_ref("origin/main"), "origin/main");
+        assert_eq!(short_base_ref("HEAD~5"), "HEAD~5");
+        // Not 40 chars, so not treated as a SHA.
+        assert_eq!(short_base_ref("611d151e8250"), "611d151e8250");
+        // 40 chars but contains a non-hex character: left untouched.
+        assert_eq!(
+            short_base_ref("611d151e8250146426ff3178e94207f8a8d3ccZZ"),
+            "611d151e8250146426ff3178e94207f8a8d3ccZZ"
+        );
+    }
+}

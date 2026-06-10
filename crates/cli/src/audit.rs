@@ -1778,6 +1778,37 @@ mod tests {
         );
     }
 
+    /// When the remote default shares no history with HEAD (the merge-base
+    /// failure case a shallow clone also hits), auto-detect falls back to the
+    /// remote-tracking ref tip rather than failing detection.
+    #[test]
+    fn auto_detect_base_ref_falls_back_to_remote_tip_without_common_ancestor() {
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        let repo = init_throwaway_repo(tmp.path(), "repo");
+        // Build an unrelated-history commit and point origin/main at it, so
+        // merge-base(origin/main, HEAD) has no common ancestor.
+        git(&repo, &["checkout", "--orphan", "unrelated"]);
+        commit_file(&repo, "unrelated.txt", "no shared history\n");
+        let unrelated = git_rev_parse(&repo, "HEAD").expect("HEAD should resolve");
+        git(
+            &repo,
+            &["update-ref", "refs/remotes/origin/main", &unrelated],
+        );
+        git(
+            &repo,
+            &[
+                "symbolic-ref",
+                "refs/remotes/origin/HEAD",
+                "refs/remotes/origin/main",
+            ],
+        );
+        git(&repo, &["checkout", "main"]);
+
+        let detected = auto_detect_base_ref(&repo).expect("base should be detected");
+        assert_eq!(detected.git_ref, "origin/main");
+        assert_eq!(detected.description, "origin/main (tip)");
+    }
+
     #[test]
     fn get_head_sha_returns_short_head_for_git_repo() {
         let tmp = tempfile::TempDir::new().expect("temp dir should be created");
