@@ -1,9 +1,16 @@
+import * as fs from "node:fs";
 import * as path from "node:path";
 
 export interface ResolvedPath {
   readonly absolute: string;
   readonly relative: string;
 }
+
+const decodeRouteBrackets = (filePath: string): string =>
+  filePath.replace(/%5B/gi, "[").replace(/%5D/gi, "]");
+
+const resolveAbsolute = (filePath: string, workspaceRoot: string | undefined): string =>
+  workspaceRoot && !path.isAbsolute(filePath) ? path.resolve(workspaceRoot, filePath) : filePath;
 
 export const resolveFilePath = (
   filePath: string | undefined,
@@ -12,9 +19,13 @@ export const resolveFilePath = (
   if (!filePath) {
     return { absolute: "", relative: "" };
   }
+  const rawAbsolute = resolveAbsolute(filePath, workspaceRoot);
+  const decoded = decodeRouteBrackets(filePath);
   const absolute =
-    workspaceRoot && !path.isAbsolute(filePath) ? path.resolve(workspaceRoot, filePath) : filePath;
-  const relative = workspaceRoot ? path.relative(workspaceRoot, absolute) : filePath;
+    decoded === filePath || fs.existsSync(rawAbsolute)
+      ? rawAbsolute
+      : resolveAbsolute(decoded, workspaceRoot);
+  const relative = workspaceRoot ? path.relative(workspaceRoot, absolute) : absolute;
   return { absolute, relative };
 };
 

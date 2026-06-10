@@ -155,6 +155,28 @@ describe("DeadCodeTreeProvider", () => {
     expect(args.absolutePath).not.toContain("%5D");
   });
 
+  it("normalizes encoded dynamic route paths in open commands", () => {
+    const provider = new DeadCodeTreeProvider();
+    provider.update({
+      ...emptyCheck(),
+      unused_files: [
+        {
+          path: "src/app/%5BproductId%5D/page.tsx",
+          actions: [],
+        },
+      ],
+    });
+
+    const categories = provider.getChildren() as TestTreeItem[];
+    const dynamicRoute = firstIssue(provider, findCategory(categories, "Unused Files (1)"));
+    const args = commandArgsOf(dynamicRoute);
+
+    expect(dynamicRoute.description).toBe("src/app/[productId]/page.tsx:1");
+    expect(args.absolutePath).toBe("/workspace/src/app/[productId]/page.tsx");
+    expect(args.absolutePath).not.toContain("%5B");
+    expect(args.absolutePath).not.toContain("%5D");
+  });
+
   it("labels stale suppressions by origin variant", () => {
     const provider = new DeadCodeTreeProvider();
     provider.update({

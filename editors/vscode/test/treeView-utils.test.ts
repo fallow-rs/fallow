@@ -1,3 +1,6 @@
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   ELLIPSIS,
@@ -28,6 +31,28 @@ describe("resolveFilePath", () => {
       absolute: "/workspace/src/foo.ts",
       relative: "src/foo.ts",
     });
+  });
+
+  it("decodes encoded route brackets before opening files", () => {
+    expect(resolveFilePath("src/app/%5BproductId%5D/page.tsx", "/workspace")).toEqual({
+      absolute: "/workspace/src/app/[productId]/page.tsx",
+      relative: "src/app/[productId]/page.tsx",
+    });
+  });
+
+  it("keeps literal percent-encoded bracket filenames when they exist", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "fallow-vscode-path-"));
+    try {
+      fs.mkdirSync(path.join(root, "src/app"), { recursive: true });
+      fs.writeFileSync(path.join(root, "src/app/%5BproductId%5D.ts"), "");
+
+      expect(resolveFilePath("src/app/%5BproductId%5D.ts", root)).toEqual({
+        absolute: path.join(root, "src/app/%5BproductId%5D.ts"),
+        relative: "src/app/%5BproductId%5D.ts",
+      });
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("keeps an absolute path absolute and computes a relative form", () => {
