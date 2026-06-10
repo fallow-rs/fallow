@@ -808,6 +808,38 @@ Each matching call reports as a `boundary_call_violations` finding naming the wr
 
 Forbidden-call findings inherit the `boundary-violation` rule, which defaults to `error` and fails CI on the first matching call. For a staged rollout, start with `"rules": { "boundary-violation": "warn" }` while you triage existing violations, then switch back to `error` to enforce.
 
+To encode project policy that is not tied to architecture zones, list declarative rule packs. A rule pack is a standalone JSON or JSONC file of `banned-call` and `banned-import` rules, loaded as pure data (no project code ever executes):
+
+```jsonc
+// .fallowrc.json
+{ "rulePacks": ["./.fallow/rule-packs/team-policy.jsonc"] }
+```
+
+```jsonc
+// .fallow/rule-packs/team-policy.jsonc
+{
+  "version": 1,
+  "name": "team-policy",
+  "rules": [
+    {
+      "id": "no-child-process",
+      "kind": "banned-call",
+      "callees": ["child_process.*"],
+      "message": "Use the sandboxed runner instead.",
+      "severity": "error"
+    },
+    {
+      "id": "no-moment",
+      "kind": "banned-import",
+      "specifiers": ["moment"],
+      "message": "Use date-fns."
+    }
+  ]
+}
+```
+
+Matches report as `policy-violation` findings identified by `<pack>/<rule-id>` across every output format. `banned-call` matching is segment-aware and import-resolved like `boundaries.calls.forbidden`, so `child_process.*` covers named, namespace, and default imports from `child_process` and `node:child_process`; bare patterns like `fetch` match globals by their written path. `banned-import` matches the RAW specifier segment-aware: `moment` covers `moment` and `moment/locale/nl` but never `moment-timezone`, and aliased or rewritten specifiers (for example Deno-style `npm:moment`) are not matched, so list the form your code actually writes. Rules scope with optional `files` / `exclude` globs, skip type-only imports with `"ignoreTypeOnly": true`, and carry an optional per-rule `severity`. The `rules."policy-violation"` master defaults to `warn` so a new pack never hard-fails CI on its first run; opt individual rules up with `"severity": "error"` once triaged (`off` on the master is a kill switch for the whole evaluator). The exit-code gate reads the effective per-finding severity, so one error-severity rule fails the run even under a warn master. Suppress with `// fallow-ignore-next-line policy-violation`; note the token covers every rule-pack rule on that line (per-rule suppression is a tracked follow-up). Run `fallow rule-pack-schema` to print the pack JSON Schema for editor autocomplete; invalid packs (unknown rule kind, missing file, inert pattern, duplicate ids) fail config load instead of silently enforcing nothing.
+
 Run `fallow list --boundaries` to inspect the expanded rules. TOML also supported (`fallow init --toml`). The init command auto-detects your project structure (monorepo layout, frameworks, existing config) and generates a tailored config. It also adds `.fallow/` to your `.gitignore` (cache and local data). Use `fallow init --agents` to scaffold a starter `AGENTS.md` with project-specific guidance for coding agents. Scaffold a pre-commit `fallow audit` hook with `fallow hooks install --target git`; the hook uses the current branch upstream as its base and falls back to `--branch` (or the detected default branch) when no upstream is set. For agent gates, use `fallow hooks install --target agent`. Migrating from knip or jscpd? Run `fallow migrate`.
 
 Use `ignoreUnresolvedImports` for generated or runtime-provided import specifiers that fallow cannot resolve. Patterns match the raw import string, not a filesystem path: list both `@example/icons` and `@example/icons/**` when you need the bare package and its subpaths. Parent-relative generated specifiers such as `../generated/**` are allowed. Keep patterns narrow, since broad values like `**` can hide real missing modules. This setting affects only `unresolved-import` findings; it does not change dependency usage or resolver behavior.

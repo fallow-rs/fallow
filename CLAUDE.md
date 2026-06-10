@@ -8,7 +8,7 @@ For shared domain vocabulary, term definitions, and flagged ambiguities: see @CO
 
 ```
 crates/
-  config/   -- Configuration types, custom framework presets, package.json parsing, workspace discovery
+  config/   -- Configuration types, custom framework presets, rule packs, package.json parsing, workspace discovery
   types/    -- Shared type definitions (discover, extract, results, suppress, serde_path)
   extract/  -- AST extraction engine (visitor.rs, complexity.rs, sfc.rs, astro.rs, mdx.rs, css.rs, parse.rs, cache.rs, suppress.rs, tests/)
   graph/    -- Module graph construction (graph/), import resolution (resolve.rs), project state (project.rs)

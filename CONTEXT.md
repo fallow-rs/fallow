@@ -22,6 +22,14 @@ _Avoid_: "check" as a synonym (check is also a command name).
 The CI-impact level of an Issue type, set per rule. One of `error`, `warn`, `off`. Determines whether the issue contributes to a non-zero exit code, only renders in output, or is suppressed entirely.
 _Avoid_: "level" (overlaps with logging level).
 
+**Rule pack**
+A standalone declarative JSON/JSONC file of project policy rules (`banned-call`, `banned-import`), listed via the `rulePacks` config key and loaded as pure data (no project code executes). Matches report as `policy-violation` issues identified by `<pack>/<rule-id>`. Distinct from **Rule** (the config severity mapping): a rule pack CONTAINS pack rules; the `rules."policy-violation"` entry is the Rule that sets the issue type's master severity.
+_Avoid_: "custom rules" (collides with the `ConfigShape::CustomRules` telemetry concept, which means "the user changed the `rules` severity map"), "policy file" (underspecified), "plugin" (plugins detect frameworks; packs encode policy).
+
+**Pack rule**
+One entry in a Rule pack's `rules` array: an id, a kind (`banned-call` / `banned-import`), matchers, optional `files`/`exclude` scoping, an optional message, and an optional per-rule severity that overrides the `policy-violation` master per finding.
+_Avoid_: bare "rule" when a config-severity Rule could be meant; qualify as "pack rule".
+
 **Suppress**
 The mechanism to silence an Issue at a specific location. Two forms: `// fallow-ignore-next-line <issue-type>` (single line) and `// fallow-ignore-file <issue-type>` (whole file). Distinct from `rules` config which is project-wide.
 _Avoid_: "ignore", "skip", "exclude" (those have other meanings in config schemas).
@@ -196,6 +204,7 @@ Gitignored directory for in-flight feature plans. `/fallow-implement` writes its
 - A **Plugin** contributes **Entry points** and **Suppress** patterns to a Workspace.
 - An **Issue** has one **Issue type**, one **Severity**, one or more locations, and zero or one **Suppress actions**.
 - A **Rule** maps an **Issue type** to a **Severity** for one Project.
+- A **Rule pack** contains many **Pack rules**; each match produces one `policy-violation` **Issue** carrying its effective per-rule **Severity**.
 - A **Family** groups duplicated regions across one or more **Workspaces**.
 - A **Hotspot** belongs to one **Workspace** and contributes to the **Risk profile** of that workspace's module.
 - A **CRAP score** depends on **Complexity** (always available) plus an optional **Coverage tier** (estimated / Istanbul / binary).
@@ -217,6 +226,7 @@ Terms that have collided historically and need explicit qualification on every u
 - **Audit**: `fallow audit` command vs general code audit (e.g. SIG audit, security audit). Qualify by command name when ambiguous.
 - **Protocol**: `fallow-cov-protocol` crate vs general RPC protocol terminology. Default to the crate in fallow contexts.
 - **Bare**: `bare fallow` (no subcommand, full pipeline) vs bare git repo (the `~/Sites/fallow/` checkout). Distinct concepts that both appear in dev conversations.
+- **Rule**: config severity mapping (`rules` block) vs Pack rule (an entry in a Rule pack's `rules` array). Three `rules` surfaces exist: the config map, the pack file array, and the rule-id in `<pack>/<rule-id>`. Qualify as "pack rule" when not referring to the severity map.
 
 ## Resolved ambiguities
 
