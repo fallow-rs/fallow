@@ -91,6 +91,26 @@ fn empty_catalog_group_key(item: &fallow_core::results::EmptyCatalogGroup, root:
     )
 }
 
+/// Build the set of audit attribution keys for all dead-code findings in
+/// `results`.
+///
+/// Each key is a stable string that uniquely identifies one finding across
+/// runs (e.g. `unused-file:src/dead.ts`, `unused-export:src/a.ts:Foo`).
+/// `retain_introduced_dead_code` and `annotate_dead_code_json` use the same
+/// key format to diff the current run against a base snapshot.
+///
+/// This destructure is deliberately exhaustive: adding a field to
+/// `AnalysisResults` must fail compilation here so the author decides
+/// explicitly whether the new finding type needs an audit key (add a loop)
+/// or has no key representation today (bind with underscore and document why).
+///
+/// Sibling exhaustive sites: `fallow_core::changed_files::filter_results_by_changed_files`,
+/// `dead_code_keys`, `retain_introduced_dead_code`.
+/// Non-exhaustive siblings the compiler will NOT flag (wire manually when a
+/// finding type is added): `annotate_dead_code_json` (same key formats, this
+/// file) and the per-collection severity branches in
+/// `crates/cli/src/check/rules.rs` (`apply_rules`, `has_error_severity_issues`).
+/// TypeScript mirror: `editors/vscode/scripts/codegen-types.mjs` (`BARE_DEAD_CODE_ALIASES`).
 #[expect(
     clippy::too_many_lines,
     reason = "one key-builder block per issue type keeps the audit-attribution key shape local and easy to audit; the count grows linearly with new issue types"
@@ -99,28 +119,70 @@ pub(super) fn dead_code_keys(
     results: &fallow_core::results::AnalysisResults,
     root: &Path,
 ) -> FxHashSet<String> {
+    let fallow_core::results::AnalysisResults {
+        unused_files,
+        unused_exports,
+        unused_types,
+        private_type_leaks,
+        unused_dependencies,
+        unused_dev_dependencies,
+        unused_optional_dependencies,
+        unused_enum_members,
+        unused_class_members,
+        unresolved_imports,
+        unlisted_dependencies,
+        duplicate_exports,
+        type_only_dependencies,
+        test_only_dependencies,
+        circular_dependencies,
+        re_export_cycles,
+        boundary_violations,
+        boundary_coverage_violations,
+        boundary_call_violations,
+        stale_suppressions,
+        unused_catalog_entries,
+        empty_catalog_groups,
+        unresolved_catalog_references,
+        unused_dependency_overrides,
+        misconfigured_dependency_overrides,
+        // Non-finding fields: counts and metadata, not attributable to a key.
+        suppression_count: _suppression_count,
+        active_suppressions: _active_suppressions,
+        feature_flags: _feature_flags,
+        // Security findings are emitted via `fallow security`, not the audit
+        // dead-code gate; they have no dead-code key representation today.
+        security_findings: _security_findings,
+        security_unresolved_edge_files: _security_unresolved_edge_files,
+        security_unresolved_callee_sites: _security_unresolved_callee_sites,
+        security_unresolved_callee_diagnostics: _security_unresolved_callee_diagnostics,
+        // Export usages and entry-point summary are metadata, not issue
+        // collections; no key needed.
+        export_usages: _export_usages,
+        entry_point_summary: _entry_point_summary,
+    } = results;
+
     let mut keys = FxHashSet::default();
-    for item in &results.unused_files {
+    for item in unused_files {
         keys.insert(format!(
             "unused-file:{}",
             relative_key_path(&item.file.path, root)
         ));
     }
-    for item in &results.unused_exports {
+    for item in unused_exports {
         keys.insert(format!(
             "unused-export:{}:{}",
             relative_key_path(&item.export.path, root),
             item.export.export_name
         ));
     }
-    for item in &results.unused_types {
+    for item in unused_types {
         keys.insert(format!(
             "unused-type:{}:{}",
             relative_key_path(&item.export.path, root),
             item.export.export_name
         ));
     }
-    for item in &results.private_type_leaks {
+    for item in private_type_leaks {
         keys.insert(format!(
             "private-type-leak:{}:{}:{}",
             relative_key_path(&item.leak.path, root),
@@ -128,32 +190,31 @@ pub(super) fn dead_code_keys(
             item.leak.type_name
         ));
     }
-    for item in results
-        .unused_dependencies
+    for item in unused_dependencies
         .iter()
         .map(|f| &f.dep)
-        .chain(results.unused_dev_dependencies.iter().map(|f| &f.dep))
-        .chain(results.unused_optional_dependencies.iter().map(|f| &f.dep))
+        .chain(unused_dev_dependencies.iter().map(|f| &f.dep))
+        .chain(unused_optional_dependencies.iter().map(|f| &f.dep))
     {
         keys.insert(unused_dependency_key(item, root));
     }
-    for item in &results.unused_enum_members {
+    for item in unused_enum_members {
         keys.insert(unused_member_key("unused-enum-member", &item.member, root));
     }
-    for item in &results.unused_class_members {
+    for item in unused_class_members {
         keys.insert(unused_member_key("unused-class-member", &item.member, root));
     }
-    for item in &results.unresolved_imports {
+    for item in unresolved_imports {
         keys.insert(format!(
             "unresolved-import:{}:{}",
             relative_key_path(&item.import.path, root),
             item.import.specifier
         ));
     }
-    for item in results.unlisted_dependencies.iter().map(|f| &f.dep) {
+    for item in unlisted_dependencies.iter().map(|f| &f.dep) {
         keys.insert(unlisted_dependency_key(item, root));
     }
-    for item in &results.duplicate_exports {
+    for item in duplicate_exports {
         let mut locations: Vec<String> = item
             .export
             .locations
@@ -168,21 +229,21 @@ pub(super) fn dead_code_keys(
             locations.join("|")
         ));
     }
-    for item in &results.type_only_dependencies {
+    for item in type_only_dependencies {
         keys.insert(format!(
             "type-only-dependency:{}:{}",
             relative_key_path(&item.dep.path, root),
             item.dep.package_name
         ));
     }
-    for item in &results.test_only_dependencies {
+    for item in test_only_dependencies {
         keys.insert(format!(
             "test-only-dependency:{}:{}",
             relative_key_path(&item.dep.path, root),
             item.dep.package_name
         ));
     }
-    for item in &results.circular_dependencies {
+    for item in circular_dependencies {
         let mut files: Vec<String> = item
             .cycle
             .files
@@ -192,7 +253,7 @@ pub(super) fn dead_code_keys(
         files.sort();
         keys.insert(format!("circular-dependency:{}", files.join("|")));
     }
-    for item in &results.re_export_cycles {
+    for item in re_export_cycles {
         let kind = match item.cycle.kind {
             fallow_core::results::ReExportCycleKind::MultiNode => "multi-node",
             fallow_core::results::ReExportCycleKind::SelfLoop => "self-loop",
@@ -206,7 +267,7 @@ pub(super) fn dead_code_keys(
         files.sort();
         keys.insert(format!("re-export-cycle:{kind}:{}", files.join("|")));
     }
-    for item in &results.boundary_violations {
+    for item in boundary_violations {
         keys.insert(format!(
             "boundary-violation:{}:{}:{}",
             relative_key_path(&item.violation.from_path, root),
@@ -214,27 +275,27 @@ pub(super) fn dead_code_keys(
             item.violation.import_specifier
         ));
     }
-    for item in &results.boundary_coverage_violations {
+    for item in boundary_coverage_violations {
         keys.insert(format!(
             "boundary-coverage:{}",
             relative_key_path(&item.violation.path, root)
         ));
     }
-    for item in &results.boundary_call_violations {
+    for item in boundary_call_violations {
         keys.insert(format!(
             "boundary-call:{}:{}",
             relative_key_path(&item.violation.path, root),
             item.violation.callee
         ));
     }
-    for item in &results.stale_suppressions {
+    for item in stale_suppressions {
         keys.insert(format!(
             "stale-suppression:{}:{}",
             relative_key_path(&item.path, root),
             item.description()
         ));
     }
-    for item in &results.unresolved_catalog_references {
+    for item in unresolved_catalog_references {
         keys.insert(format!(
             "unresolved-catalog-reference:{}:{}:{}:{}",
             relative_key_path(&item.reference.path, root),
@@ -243,13 +304,13 @@ pub(super) fn dead_code_keys(
             item.reference.entry_name
         ));
     }
-    for item in &results.unused_catalog_entries {
+    for item in unused_catalog_entries {
         keys.insert(unused_catalog_entry_key(&item.entry, root));
     }
-    for item in &results.empty_catalog_groups {
+    for item in empty_catalog_groups {
         keys.insert(empty_catalog_group_key(&item.group, root));
     }
-    for item in &results.unused_dependency_overrides {
+    for item in unused_dependency_overrides {
         keys.insert(format!(
             "unused-dependency-override:{}:{}:{}",
             relative_key_path(&item.entry.path, root),
@@ -257,7 +318,7 @@ pub(super) fn dead_code_keys(
             item.entry.raw_key
         ));
     }
-    for item in &results.misconfigured_dependency_overrides {
+    for item in misconfigured_dependency_overrides {
         keys.insert(format!(
             "misconfigured-dependency-override:{}:{}:{}",
             relative_key_path(&item.entry.path, root),
@@ -268,6 +329,24 @@ pub(super) fn dead_code_keys(
     keys
 }
 
+/// Retain only findings whose audit key was NOT present in `base` (i.e. was
+/// introduced on the current branch).
+///
+/// When `base` is `None` (no baseline), all findings are kept.
+///
+/// This destructure is deliberately exhaustive: adding a field to
+/// `AnalysisResults` must fail compilation here so the author decides
+/// explicitly whether the new finding type needs an introduced-retain (add a
+/// retain block) or has no key representation today (bind with underscore and
+/// document why).
+///
+/// Sibling exhaustive sites: `fallow_core::changed_files::filter_results_by_changed_files`,
+/// `dead_code_keys`, `retain_introduced_dead_code`.
+/// Non-exhaustive siblings the compiler will NOT flag (wire manually when a
+/// finding type is added): `annotate_dead_code_json` (same key formats, this
+/// file) and the per-collection severity branches in
+/// `crates/cli/src/check/rules.rs` (`apply_rules`, `has_error_severity_issues`).
+/// TypeScript mirror: `editors/vscode/scripts/codegen-types.mjs` (`BARE_DEAD_CODE_ALIASES`).
 #[expect(
     clippy::too_many_lines,
     reason = "one retain block per issue type keeps the gate-filter local and grep-friendly; the count grows linearly with new issue types and parallels dead_code_keys"
@@ -280,32 +359,89 @@ pub(super) fn retain_introduced_dead_code(
     let Some(base) = base else {
         return;
     };
-    results.unused_files.retain(|item| {
+
+    // Compute the introduced set before taking any mutable borrows. Note the
+    // order differs from the pre-destructure code, which narrowed
+    // unused_files/exports/types first and computed keys from the narrowed
+    // results. Computing from the un-narrowed results is equivalent: those
+    // retains keep exactly the items whose key is NOT in `base`, and the
+    // `!base.contains(key)` filter below removes the same base-member keys
+    // from the full key set, so `introduced` is identical either way.
+    let introduced = dead_code_keys(results, root)
+        .into_iter()
+        .filter(|key| !base.contains(key))
+        .collect::<FxHashSet<_>>();
+    let keep = |key: String| introduced.contains(&key);
+
+    let fallow_core::results::AnalysisResults {
+        unused_files,
+        unused_exports,
+        unused_types,
+        private_type_leaks,
+        unused_dependencies,
+        unused_dev_dependencies,
+        unused_optional_dependencies,
+        unused_enum_members,
+        unused_class_members,
+        unresolved_imports,
+        unlisted_dependencies,
+        duplicate_exports,
+        type_only_dependencies,
+        test_only_dependencies,
+        circular_dependencies,
+        re_export_cycles,
+        boundary_violations,
+        boundary_coverage_violations,
+        boundary_call_violations,
+        stale_suppressions,
+        unused_catalog_entries,
+        empty_catalog_groups,
+        unresolved_catalog_references,
+        unused_dependency_overrides,
+        misconfigured_dependency_overrides,
+        // Non-finding fields: counts and metadata, not subject to base-keyed
+        // filtering.
+        suppression_count: _suppression_count,
+        active_suppressions: _active_suppressions,
+        feature_flags: _feature_flags,
+        // Security findings are emitted via `fallow security`, not the audit
+        // dead-code gate; they have no key representation and are not filtered
+        // here.
+        security_findings: _security_findings,
+        security_unresolved_edge_files: _security_unresolved_edge_files,
+        security_unresolved_callee_sites: _security_unresolved_callee_sites,
+        security_unresolved_callee_diagnostics: _security_unresolved_callee_diagnostics,
+        // Export usages and entry-point summary are metadata, not issue
+        // collections; no key needed.
+        export_usages: _export_usages,
+        entry_point_summary: _entry_point_summary,
+    } = results;
+
+    // The three "fast path" retains use a direct base-lookup rather than the
+    // introduced set; both predicates are equivalent for these collections
+    // (see the `introduced` comment above), so this preserves the original
+    // behavior.
+    unused_files.retain(|item| {
         !base.contains(&format!(
             "unused-file:{}",
             relative_key_path(&item.file.path, root)
         ))
     });
-    results.unused_exports.retain(|item| {
+    unused_exports.retain(|item| {
         !base.contains(&format!(
             "unused-export:{}:{}",
             relative_key_path(&item.export.path, root),
             item.export.export_name
         ))
     });
-    results.unused_types.retain(|item| {
+    unused_types.retain(|item| {
         !base.contains(&format!(
             "unused-type:{}:{}",
             relative_key_path(&item.export.path, root),
             item.export.export_name
         ))
     });
-    let introduced = dead_code_keys(results, root)
-        .into_iter()
-        .filter(|key| !base.contains(key))
-        .collect::<FxHashSet<_>>();
-    let keep = |key: String| introduced.contains(&key);
-    results.private_type_leaks.retain(|item| {
+    private_type_leaks.retain(|item| {
         keep(format!(
             "private-type-leak:{}:{}:{}",
             relative_key_path(&item.leak.path, root),
@@ -313,32 +449,22 @@ pub(super) fn retain_introduced_dead_code(
             item.leak.type_name
         ))
     });
-    results
-        .unused_dependencies
-        .retain(|item| keep(unused_dependency_key(&item.dep, root)));
-    results
-        .unused_dev_dependencies
-        .retain(|item| keep(unused_dependency_key(&item.dep, root)));
-    results
-        .unused_optional_dependencies
-        .retain(|item| keep(unused_dependency_key(&item.dep, root)));
-    results
-        .unused_enum_members
+    unused_dependencies.retain(|item| keep(unused_dependency_key(&item.dep, root)));
+    unused_dev_dependencies.retain(|item| keep(unused_dependency_key(&item.dep, root)));
+    unused_optional_dependencies.retain(|item| keep(unused_dependency_key(&item.dep, root)));
+    unused_enum_members
         .retain(|item| keep(unused_member_key("unused-enum-member", &item.member, root)));
-    results
-        .unused_class_members
+    unused_class_members
         .retain(|item| keep(unused_member_key("unused-class-member", &item.member, root)));
-    results.unresolved_imports.retain(|item| {
+    unresolved_imports.retain(|item| {
         keep(format!(
             "unresolved-import:{}:{}",
             relative_key_path(&item.import.path, root),
             item.import.specifier
         ))
     });
-    results
-        .unlisted_dependencies
-        .retain(|item| keep(unlisted_dependency_key(&item.dep, root)));
-    results.duplicate_exports.retain(|item| {
+    unlisted_dependencies.retain(|item| keep(unlisted_dependency_key(&item.dep, root)));
+    duplicate_exports.retain(|item| {
         let mut locations: Vec<String> = item
             .export
             .locations
@@ -353,21 +479,21 @@ pub(super) fn retain_introduced_dead_code(
             locations.join("|")
         ))
     });
-    results.type_only_dependencies.retain(|item| {
+    type_only_dependencies.retain(|item| {
         keep(format!(
             "type-only-dependency:{}:{}",
             relative_key_path(&item.dep.path, root),
             item.dep.package_name
         ))
     });
-    results.test_only_dependencies.retain(|item| {
+    test_only_dependencies.retain(|item| {
         keep(format!(
             "test-only-dependency:{}:{}",
             relative_key_path(&item.dep.path, root),
             item.dep.package_name
         ))
     });
-    results.circular_dependencies.retain(|item| {
+    circular_dependencies.retain(|item| {
         let mut files: Vec<String> = item
             .cycle
             .files
@@ -377,7 +503,7 @@ pub(super) fn retain_introduced_dead_code(
         files.sort();
         keep(format!("circular-dependency:{}", files.join("|")))
     });
-    results.re_export_cycles.retain(|item| {
+    re_export_cycles.retain(|item| {
         let kind = match item.cycle.kind {
             fallow_core::results::ReExportCycleKind::MultiNode => "multi-node",
             fallow_core::results::ReExportCycleKind::SelfLoop => "self-loop",
@@ -391,7 +517,7 @@ pub(super) fn retain_introduced_dead_code(
         files.sort();
         keep(format!("re-export-cycle:{kind}:{}", files.join("|")))
     });
-    results.boundary_violations.retain(|item| {
+    boundary_violations.retain(|item| {
         keep(format!(
             "boundary-violation:{}:{}:{}",
             relative_key_path(&item.violation.from_path, root),
@@ -399,27 +525,27 @@ pub(super) fn retain_introduced_dead_code(
             item.violation.import_specifier
         ))
     });
-    results.boundary_coverage_violations.retain(|item| {
+    boundary_coverage_violations.retain(|item| {
         keep(format!(
             "boundary-coverage:{}",
             relative_key_path(&item.violation.path, root)
         ))
     });
-    results.boundary_call_violations.retain(|item| {
+    boundary_call_violations.retain(|item| {
         keep(format!(
             "boundary-call:{}:{}",
             relative_key_path(&item.violation.path, root),
             item.violation.callee
         ))
     });
-    results.stale_suppressions.retain(|item| {
+    stale_suppressions.retain(|item| {
         keep(format!(
             "stale-suppression:{}:{}",
             relative_key_path(&item.path, root),
             item.description()
         ))
     });
-    results.unresolved_catalog_references.retain(|item| {
+    unresolved_catalog_references.retain(|item| {
         keep(format!(
             "unresolved-catalog-reference:{}:{}:{}:{}",
             relative_key_path(&item.reference.path, root),
@@ -428,13 +554,9 @@ pub(super) fn retain_introduced_dead_code(
             item.reference.entry_name
         ))
     });
-    results
-        .unused_catalog_entries
-        .retain(|item| keep(unused_catalog_entry_key(&item.entry, root)));
-    results
-        .empty_catalog_groups
-        .retain(|item| keep(empty_catalog_group_key(&item.group, root)));
-    results.unused_dependency_overrides.retain(|item| {
+    unused_catalog_entries.retain(|item| keep(unused_catalog_entry_key(&item.entry, root)));
+    empty_catalog_groups.retain(|item| keep(empty_catalog_group_key(&item.group, root)));
+    unused_dependency_overrides.retain(|item| {
         keep(format!(
             "unused-dependency-override:{}:{}:{}",
             relative_key_path(&item.entry.path, root),
@@ -442,7 +564,7 @@ pub(super) fn retain_introduced_dead_code(
             item.entry.raw_key
         ))
     });
-    results.misconfigured_dependency_overrides.retain(|item| {
+    misconfigured_dependency_overrides.retain(|item| {
         keep(format!(
             "misconfigured-dependency-override:{}:{}:{}",
             relative_key_path(&item.entry.path, root),

@@ -345,6 +345,11 @@ pub fn get_changed_files(root: &Path, git_ref: &str) -> Option<FxHashSet<PathBuf
 /// deps, test-only deps) are intentionally NOT filtered here. Unlike
 /// file-level issues, a dependency being "unused" is a function of the entire
 /// import graph and can't be attributed to individual changed source files.
+///
+/// This destructure is deliberately exhaustive: adding a field to
+/// `AnalysisResults` must fail compilation here so the author decides
+/// explicitly whether the new finding type is file-attributable (add a retain)
+/// or graph-global (bind with underscore and document why).
 #[expect(
     clippy::implicit_hasher,
     reason = "fallow standardizes on FxHashSet across the workspace"
@@ -353,68 +358,86 @@ pub fn filter_results_by_changed_files(
     results: &mut AnalysisResults,
     changed_files: &FxHashSet<PathBuf>,
 ) {
-    let cf = normalize_changed_files_set(changed_files);
-    results
-        .unused_files
-        .retain(|f| contains_normalized(&cf, &f.file.path));
-    results
-        .unused_exports
-        .retain(|e| contains_normalized(&cf, &e.export.path));
-    results
-        .unused_types
-        .retain(|e| contains_normalized(&cf, &e.export.path));
-    results
-        .private_type_leaks
-        .retain(|e| contains_normalized(&cf, &e.leak.path));
-    results
-        .unused_enum_members
-        .retain(|m| contains_normalized(&cf, &m.member.path));
-    results
-        .unused_class_members
-        .retain(|m| contains_normalized(&cf, &m.member.path));
-    results
-        .unresolved_imports
-        .retain(|i| contains_normalized(&cf, &i.import.path));
+    let AnalysisResults {
+        unused_files,
+        unused_exports,
+        unused_types,
+        private_type_leaks,
+        // Dependency-level issues are graph-global: "unused" is a function of
+        // the whole import graph and cannot be attributed to a changed file.
+        unused_dependencies: _unused_dependencies,
+        unused_dev_dependencies: _unused_dev_dependencies,
+        unused_optional_dependencies: _unused_optional_dependencies,
+        unused_enum_members,
+        unused_class_members,
+        unresolved_imports,
+        unlisted_dependencies,
+        duplicate_exports,
+        // Type-only and test-only dependency issues are graph-global for the
+        // same reason as the other dependency kinds above.
+        type_only_dependencies: _type_only_dependencies,
+        test_only_dependencies: _test_only_dependencies,
+        circular_dependencies,
+        re_export_cycles,
+        boundary_violations,
+        boundary_coverage_violations,
+        boundary_call_violations,
+        stale_suppressions,
+        // Catalog entries are workspace-global: whether a catalog entry is
+        // unused depends on all workspace packages, not a single changed file.
+        unused_catalog_entries: _unused_catalog_entries,
+        empty_catalog_groups,
+        unresolved_catalog_references,
+        unused_dependency_overrides,
+        misconfigured_dependency_overrides,
+        // Non-finding fields: counts and metadata, not issue collections.
+        suppression_count: _suppression_count,
+        active_suppressions: _active_suppressions,
+        feature_flags: _feature_flags,
+        security_findings,
+        security_unresolved_edge_files: _security_unresolved_edge_files,
+        security_unresolved_callee_sites: _security_unresolved_callee_sites,
+        security_unresolved_callee_diagnostics,
+        // Export usages and entry-point summary are metadata, not issue
+        // collections; they are not changed-files filtered.
+        export_usages: _export_usages,
+        entry_point_summary: _entry_point_summary,
+    } = &mut *results;
 
-    results.unlisted_dependencies.retain(|d| {
+    let cf = normalize_changed_files_set(changed_files);
+    unused_files.retain(|f| contains_normalized(&cf, &f.file.path));
+    unused_exports.retain(|e| contains_normalized(&cf, &e.export.path));
+    unused_types.retain(|e| contains_normalized(&cf, &e.export.path));
+    private_type_leaks.retain(|e| contains_normalized(&cf, &e.leak.path));
+    unused_enum_members.retain(|m| contains_normalized(&cf, &m.member.path));
+    unused_class_members.retain(|m| contains_normalized(&cf, &m.member.path));
+    unresolved_imports.retain(|i| contains_normalized(&cf, &i.import.path));
+
+    unlisted_dependencies.retain(|d| {
         d.dep
             .imported_from
             .iter()
             .any(|s| contains_normalized(&cf, &s.path))
     });
 
-    for dup in &mut results.duplicate_exports {
+    for dup in &mut *duplicate_exports {
         dup.export
             .locations
             .retain(|loc| contains_normalized(&cf, &loc.path));
     }
-    results
-        .duplicate_exports
-        .retain(|d| d.export.locations.len() >= 2);
+    duplicate_exports.retain(|d| d.export.locations.len() >= 2);
 
-    results
-        .circular_dependencies
-        .retain(|c| c.cycle.files.iter().any(|f| contains_normalized(&cf, f)));
+    circular_dependencies.retain(|c| c.cycle.files.iter().any(|f| contains_normalized(&cf, f)));
 
-    results
-        .re_export_cycles
-        .retain(|c| c.cycle.files.iter().any(|f| contains_normalized(&cf, f)));
+    re_export_cycles.retain(|c| c.cycle.files.iter().any(|f| contains_normalized(&cf, f)));
 
-    results
-        .boundary_violations
-        .retain(|v| contains_normalized(&cf, &v.violation.from_path));
-    results
-        .boundary_coverage_violations
-        .retain(|v| contains_normalized(&cf, &v.violation.path));
-    results
-        .boundary_call_violations
-        .retain(|v| contains_normalized(&cf, &v.violation.path));
+    boundary_violations.retain(|v| contains_normalized(&cf, &v.violation.from_path));
+    boundary_coverage_violations.retain(|v| contains_normalized(&cf, &v.violation.path));
+    boundary_call_violations.retain(|v| contains_normalized(&cf, &v.violation.path));
 
-    results
-        .stale_suppressions
-        .retain(|s| contains_normalized(&cf, &s.path));
+    stale_suppressions.retain(|s| contains_normalized(&cf, &s.path));
 
-    results.security_findings.retain(|f| {
+    security_findings.retain(|f| {
         contains_normalized(&cf, &f.path)
             || f.trace
                 .iter()
@@ -426,23 +449,13 @@ pub fn filter_results_by_changed_files(
                     .any(|hop| contains_normalized(&cf, &hop.path))
             })
     });
-    results
-        .security_unresolved_callee_diagnostics
-        .retain(|d| contains_normalized(&cf, &d.path));
+    security_unresolved_callee_diagnostics.retain(|d| contains_normalized(&cf, &d.path));
 
-    results
-        .unresolved_catalog_references
-        .retain(|r| contains_normalized(&cf, &r.reference.path));
-    results
-        .empty_catalog_groups
-        .retain(|g| normalized_set_contains_path(&cf, &g.group.path));
+    unresolved_catalog_references.retain(|r| contains_normalized(&cf, &r.reference.path));
+    empty_catalog_groups.retain(|g| normalized_set_contains_path(&cf, &g.group.path));
 
-    results
-        .unused_dependency_overrides
-        .retain(|o| contains_normalized(&cf, &o.entry.path));
-    results
-        .misconfigured_dependency_overrides
-        .retain(|o| contains_normalized(&cf, &o.entry.path));
+    unused_dependency_overrides.retain(|o| contains_normalized(&cf, &o.entry.path));
+    misconfigured_dependency_overrides.retain(|o| contains_normalized(&cf, &o.entry.path));
 }
 
 /// Pre-normalise a `changed_files` set through `dunce::simplified` so each
