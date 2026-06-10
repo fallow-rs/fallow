@@ -909,7 +909,9 @@ enum Command {
     /// Purpose-built for reviewing AI-generated code and PR quality gates.
     /// Combines dead-code + complexity + duplication scoped to changed files
     /// and returns a verdict (pass/warn/fail).
-    /// Auto-detects the base branch when `--changed-since`/`--base` is unset.
+    /// When `--changed-since`/`--base` is unset, the base is the git merge-base
+    /// against the branch's upstream or the remote default (`origin/HEAD`,
+    /// `origin/main`, `origin/master`); set `FALLOW_AUDIT_BASE` to pin it.
     /// By default, only findings introduced by the changeset affect the verdict;
     /// inherited findings are reported with new-vs-inherited attribution and
     /// individual JSON findings include `introduced: true/false`. Use

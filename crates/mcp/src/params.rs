@@ -603,8 +603,10 @@ pub struct AuditParams {
     /// Path to fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
     pub config: Option<String>,
 
-    /// Git ref to compare against (e.g., "main", "HEAD~5").
-    /// Auto-detects the default branch if not specified.
+    /// Git ref to compare against (e.g., "main", "HEAD~5"). When unset, the
+    /// base is the git merge-base against the branch's upstream or the remote
+    /// default (`origin/main`); set `FALLOW_AUDIT_BASE` in the server env to pin
+    /// it.
     pub base: Option<String>,
 
     /// Only analyze production code (excludes tests, stories, dev files).
