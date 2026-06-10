@@ -434,6 +434,10 @@ fn sql_injection_literal_does_not_fire() {
         !anchored_on(&results, "src/safe.ts"),
         "a literal SQL string must not be flagged"
     );
+    assert!(
+        !anchored_on(&results, "src/constant-safe.ts"),
+        "a constant-only raw SQL fragment must not be flagged"
+    );
 }
 
 #[test]

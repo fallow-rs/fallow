@@ -92,6 +92,87 @@ impl ModuleInfoExtractor {
             .unwrap_or(false)
     }
 
+    fn record_static_sink_literal_binding(
+        &mut self,
+        decl: &VariableDeclaration<'_>,
+        declarator: &VariableDeclarator<'_>,
+        init: &Expression<'_>,
+    ) {
+        if !self.is_module_scope() {
+            return;
+        }
+        let BindingPattern::BindingIdentifier(id) = &declarator.id else {
+            return;
+        };
+        if decl.kind != VariableDeclarationKind::Const {
+            self.module_static_sink_literals.remove(id.name.as_str());
+            return;
+        }
+        if let Some(value) = self.static_sink_literal_value(init) {
+            self.module_static_sink_literals
+                .insert(id.name.to_string(), value);
+        } else {
+            self.module_static_sink_literals.remove(id.name.as_str());
+        }
+    }
+
+    fn static_sink_literal_value(&self, expr: &Expression<'_>) -> Option<SinkLiteralValue> {
+        if let Some(value) = sink_literal_value(expr) {
+            return Some(value);
+        }
+        match unwrap_static_expr(expr) {
+            Expression::Identifier(ident) if !self.nested_scope_shadows(ident.name.as_str()) => {
+                self.module_static_sink_literals
+                    .get(ident.name.as_str())
+                    .cloned()
+            }
+            Expression::UnaryExpression(unary)
+                if unary.operator == UnaryOperator::UnaryNegation
+                    || unary.operator == UnaryOperator::UnaryPlus =>
+            {
+                let SinkLiteralValue::Integer(value) =
+                    self.static_sink_literal_value(&unary.argument)?
+                else {
+                    return None;
+                };
+                if unary.operator == UnaryOperator::UnaryNegation {
+                    value.checked_neg().map(SinkLiteralValue::Integer)
+                } else {
+                    Some(SinkLiteralValue::Integer(value))
+                }
+            }
+            Expression::CallExpression(call) => {
+                let Expression::Identifier(callee) = &call.callee else {
+                    return None;
+                };
+                if callee.name != "String"
+                    || call.arguments.len() != 1
+                    || self.nested_scope_shadows(callee.name.as_str())
+                    || self.local_declaration_names.contains(callee.name.as_str())
+                {
+                    return None;
+                }
+                let arg = call.arguments.first()?.as_expression()?;
+                Some(SinkLiteralValue::String(static_sink_literal_to_string(
+                    &self.static_sink_literal_value(arg)?,
+                )))
+            }
+            Expression::TemplateLiteral(template) => {
+                let mut value = String::new();
+                for (index, quasi) in template.quasis.iter().enumerate() {
+                    value.push_str(quasi.value.cooked.as_ref()?);
+                    if let Some(expression) = template.expressions.get(index) {
+                        value.push_str(&static_sink_literal_to_string(
+                            &self.static_sink_literal_value(expression)?,
+                        ));
+                    }
+                }
+                Some(SinkLiteralValue::String(value))
+            }
+            _ => None,
+        }
+    }
+
     fn record_risky_regex_binding(&mut self, name: &str, pattern: Option<String>) {
         if self.is_module_scope() {
             self.module_risky_regex_bindings
@@ -1929,6 +2010,7 @@ impl ModuleInfoExtractor {
                 self.record_static_package_values(id.name.as_str(), init);
             }
 
+            self.record_static_sink_literal_binding(decl, declarator, init);
             let sources = self.node_module_register_sources_from_expression(init);
             if !sources.is_empty() {
                 self.record_node_module_register_url_binding(id.name.to_string(), sources);
@@ -3986,6 +4068,15 @@ fn sink_literal_value(expr: &Expression<'_>) -> Option<SinkLiteralValue> {
     }
 }
 
+fn static_sink_literal_to_string(value: &SinkLiteralValue) -> String {
+    match value {
+        SinkLiteralValue::String(value) => value.clone(),
+        SinkLiteralValue::Integer(value) => value.to_string(),
+        SinkLiteralValue::Boolean(value) => value.to_string(),
+        SinkLiteralValue::Null => "null".to_string(),
+    }
+}
+
 fn static_string_literal_value(expr: &Expression<'_>) -> Option<String> {
     match unwrap_static_expr(expr) {
         Expression::StringLiteral(lit) => Some(lit.value.to_string()),
@@ -4351,15 +4442,12 @@ fn object_key_metadata(expr: &Expression<'_>) -> ObjectKeyMetadata {
     ObjectKeyMetadata { keys, complete }
 }
 
-fn should_capture_literal_sink_arg(
+fn should_capture_literal_sink_value(
     callee_path: &str,
     sink_shape: SinkShape,
     arg_index: u32,
-    expr: &Expression<'_>,
+    literal: &SinkLiteralValue,
 ) -> bool {
-    let Some(literal) = sink_literal_value(expr) else {
-        return false;
-    };
     match sink_shape {
         SinkShape::Call | SinkShape::MemberCall => match literal {
             SinkLiteralValue::String(value) => {
@@ -4369,10 +4457,10 @@ fn should_capture_literal_sink_arg(
                     || (arg_index == 0 && is_temp_file_literal_callee(callee_path))
                     || (arg_index == 0
                         && is_cleartext_transport_literal_callee(callee_path)
-                        && is_cleartext_transport_literal(&value))
+                        && is_cleartext_transport_literal(value))
                     || (arg_index == 0
                         && is_literal_metadata_url_callee(callee_path)
-                        && is_metadata_service_literal(&value))
+                        && is_metadata_service_literal(value))
             }
             SinkLiteralValue::Integer(_) => arg_index == 1 && is_chmod_literal_callee(callee_path),
             SinkLiteralValue::Boolean(_) | SinkLiteralValue::Null => false,
@@ -4381,7 +4469,7 @@ fn should_capture_literal_sink_arg(
             SinkLiteralValue::String(value) => {
                 arg_index == 0
                     && (callee_path == "Function"
-                        || (callee_path == "WebSocket" && is_cleartext_websocket_literal(&value)))
+                        || (callee_path == "WebSocket" && is_cleartext_websocket_literal(value)))
             }
             SinkLiteralValue::Integer(_)
             | SinkLiteralValue::Boolean(_)
@@ -5494,7 +5582,8 @@ impl ModuleInfoExtractor {
             let Ok(arg_index) = u32::try_from(index) else {
                 continue;
             };
-            let arg_is_non_literal = is_non_literal_arg(arg_expr);
+            let arg_literal = self.static_sink_literal_value(arg_expr);
+            let arg_is_non_literal = arg_literal.is_none() && is_non_literal_arg(arg_expr);
             if arg_is_non_literal
                 && should_skip_clamped_resource_amplification_arg(
                     &callee_path,
@@ -5506,7 +5595,9 @@ impl ModuleInfoExtractor {
                 continue;
             }
             if !arg_is_non_literal
-                && !should_capture_literal_sink_arg(&callee_path, sink_shape, arg_index, arg_expr)
+                && !arg_literal.as_ref().is_some_and(|literal| {
+                    should_capture_literal_sink_value(&callee_path, sink_shape, arg_index, literal)
+                })
             {
                 continue;
             }
@@ -5524,7 +5615,7 @@ impl ModuleInfoExtractor {
                 } else {
                     SinkArgKind::Literal
                 },
-                arg_literal: sink_literal_value(arg_expr),
+                arg_literal,
                 object_properties: object_literal_properties(arg_expr),
                 object_property_keys: object_keys.keys,
                 object_property_keys_complete: object_keys.complete,
@@ -5580,7 +5671,8 @@ impl ModuleInfoExtractor {
             let Ok(arg_index) = u32::try_from(index) else {
                 continue;
             };
-            let arg_is_non_literal = is_non_literal_arg(arg_expr);
+            let arg_literal = self.static_sink_literal_value(arg_expr);
+            let arg_is_non_literal = arg_literal.is_none() && is_non_literal_arg(arg_expr);
             if arg_is_non_literal
                 && should_skip_clamped_resource_amplification_arg(
                     &callee_path,
@@ -5592,12 +5684,14 @@ impl ModuleInfoExtractor {
                 continue;
             }
             if !arg_is_non_literal
-                && !should_capture_literal_sink_arg(
-                    &callee_path,
-                    SinkShape::NewExpression,
-                    arg_index,
-                    arg_expr,
-                )
+                && !arg_literal.as_ref().is_some_and(|literal| {
+                    should_capture_literal_sink_value(
+                        &callee_path,
+                        SinkShape::NewExpression,
+                        arg_index,
+                        literal,
+                    )
+                })
             {
                 continue;
             }
@@ -5612,7 +5706,7 @@ impl ModuleInfoExtractor {
                 } else {
                     SinkArgKind::Literal
                 },
-                arg_literal: sink_literal_value(arg_expr),
+                arg_literal,
                 object_properties: object_literal_properties(arg_expr),
                 object_property_keys: object_keys.keys,
                 object_property_keys_complete: object_keys.complete,
@@ -5711,14 +5805,12 @@ impl ModuleInfoExtractor {
             return;
         };
         let callee_path = format!("{}.{}", object_path, member.property.name);
-        let arg_is_non_literal = is_non_literal_arg(&expr.right);
+        let arg_literal = self.static_sink_literal_value(&expr.right);
+        let arg_is_non_literal = arg_literal.is_none() && is_non_literal_arg(&expr.right);
         if !arg_is_non_literal
-            && !should_capture_literal_sink_arg(
-                &callee_path,
-                SinkShape::MemberAssign,
-                0,
-                &expr.right,
-            )
+            && !arg_literal.as_ref().is_some_and(|literal| {
+                should_capture_literal_sink_value(&callee_path, SinkShape::MemberAssign, 0, literal)
+            })
         {
             return;
         }
@@ -5736,7 +5828,7 @@ impl ModuleInfoExtractor {
             } else {
                 SinkArgKind::Literal
             },
-            arg_literal: sink_literal_value(&expr.right),
+            arg_literal,
             object_properties: object_literal_properties(&expr.right),
             object_property_keys: object_keys.keys,
             object_property_keys_complete: object_keys.complete,

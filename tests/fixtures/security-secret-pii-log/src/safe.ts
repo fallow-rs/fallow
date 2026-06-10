@@ -17,3 +17,8 @@ export function logsPublicEnv(): void {
   console.log(process.env.NEXT_PUBLIC_API_URL);
   console.info(import.meta.env.VITE_BUILD_ID);
 }
+
+export function logsPublicCiMetadata(): void {
+  const tagRef = process.env.TAG_REF;
+  console.error(`unexpected TAG_REF: ${tagRef}`);
+}

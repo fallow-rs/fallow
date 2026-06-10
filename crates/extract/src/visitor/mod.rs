@@ -16,7 +16,8 @@ use crate::{
 };
 use fallow_types::extract::{
     ClassHeritageInfo, LocalTypeDeclaration, PublicSignatureTypeReference, SanitizedSinkArg,
-    SanitizerScope, SecurityControlSite, SinkSite, SkippedSecurityCalleeSite, TaintedBinding,
+    SanitizerScope, SecurityControlSite, SinkLiteralValue, SinkSite, SkippedSecurityCalleeSite,
+    TaintedBinding,
 };
 use helpers::LitCustomElementDecorator;
 
@@ -207,6 +208,9 @@ pub(crate) struct ModuleInfoExtractor {
     /// Module-scope literal-backed string allowlists. `false` means the name
     /// shadows an outer allowlist but is not trusted itself.
     pub(crate) module_literal_allowlist_bindings: FxHashMap<String, bool>,
+    /// Module-scope literal constants that can be propagated into security sink
+    /// argument classification.
+    pub(crate) module_static_sink_literals: FxHashMap<String, SinkLiteralValue>,
     /// Nested lexical literal allowlist bindings.
     pub(crate) literal_allowlist_binding_stack: Vec<FxHashMap<String, bool>>,
     /// Module-scope locals initialized from risky literal regex patterns.

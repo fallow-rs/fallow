@@ -302,7 +302,11 @@ use crate::MemberKind;
 /// diagnostics for security sink-shaped callees that could not be flattened, so
 /// warm-cache `fallow security` runs can report the same blind-spot metadata as
 /// cold extraction.
-pub(super) const CACHE_VERSION: u32 = 142;
+///
+/// Bumped to 143 for issue #1138: JS/TS extraction now propagates simple
+/// module-scope literal constants into security sink argument metadata and
+/// filters public CI metadata env vars before source matching.
+pub(super) const CACHE_VERSION: u32 = 143;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

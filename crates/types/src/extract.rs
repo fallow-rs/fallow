@@ -502,11 +502,40 @@ pub const PUBLIC_ENV_PREFIXES: &[&str] = &[
 /// Exact env var names that are public by convention (no prefix).
 pub const PUBLIC_ENV_EXACT: &[&str] = &["NODE_ENV"];
 
+/// Env var-name tokens that usually describe public build or deployment
+/// metadata rather than secrets. Secret-shaped names win over these tokens.
+pub const PUBLIC_ENV_METADATA_TOKENS: &[&str] =
+    &["BRANCH", "ENVIRONMENT", "MODE", "REF", "SHA", "TAG"];
+
+/// Env var-name tokens that should keep a variable source-backed even when the
+/// name also contains public metadata tokens such as `REF` or `SHA`.
+pub const SECRET_ENV_TOKENS: &[&str] = &[
+    "AUTH",
+    "CREDENTIAL",
+    "CREDENTIALS",
+    "KEY",
+    "PASS",
+    "PASSWORD",
+    "PRIVATE",
+    "SECRET",
+    "TOKEN",
+];
+
+fn env_name_has_token(name: &str, tokens: &[&str]) -> bool {
+    name.split(|ch: char| !ch.is_ascii_alphanumeric())
+        .filter(|part| !part.is_empty())
+        .any(|part| tokens.contains(&part))
+}
+
 /// Whether an env var name is public-by-convention (build-inlined into the
 /// client bundle), and therefore not a secret.
 #[must_use]
 pub fn is_public_env_var(name: &str) -> bool {
-    PUBLIC_ENV_EXACT.contains(&name) || PUBLIC_ENV_PREFIXES.iter().any(|p| name.starts_with(p))
+    if PUBLIC_ENV_EXACT.contains(&name) || PUBLIC_ENV_PREFIXES.iter().any(|p| name.starts_with(p)) {
+        return true;
+    }
+    env_name_has_token(name, PUBLIC_ENV_METADATA_TOKENS)
+        && !env_name_has_token(name, SECRET_ENV_TOKENS)
 }
 
 /// Whether a flattened member path is a PUBLIC env-secret read
@@ -1065,6 +1094,23 @@ mod tests {
             assert!($values.is_empty());
             assert_eq!($values.capacity(), 0);
         }};
+    }
+
+    #[test]
+    fn public_env_var_includes_public_ci_metadata() {
+        for name in ["TAG_REF", "GITHUB_SHA", "CI_COMMIT_BRANCH", "APP_MODE"] {
+            assert!(is_public_env_var(name), "{name} should be public metadata");
+        }
+    }
+
+    #[test]
+    fn public_env_var_keeps_secret_shaped_names_source_backed() {
+        for name in ["GITHUB_TOKEN", "REFRESH_TOKEN", "API_KEY", "SECRET_SHA"] {
+            assert!(
+                !is_public_env_var(name),
+                "{name} should remain secret-shaped"
+            );
+        }
     }
 
     #[test]

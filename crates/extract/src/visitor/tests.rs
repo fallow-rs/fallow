@@ -249,6 +249,32 @@ fn public_env_is_not_a_secret_source() {
 }
 
 #[test]
+fn public_ci_metadata_env_is_not_a_secret_source() {
+    let info = parse(
+        r"
+            const tagRef = process.env.TAG_REF;
+            const buildSha = import.meta.env.GITHUB_SHA;
+            console.error(tagRef);
+            console.warn(buildSha);
+        ",
+    );
+
+    assert!(
+        info.tainted_bindings
+            .iter()
+            .all(|binding| binding.source_path != "process.env"
+                && binding.source_path != "import.meta.env"),
+        "public CI metadata env reads must not create secret-source bindings"
+    );
+    assert!(
+        info.security_sinks
+            .iter()
+            .all(|sink| sink.arg_source_paths.is_empty()),
+        "public CI metadata env sink args must not record env source paths"
+    );
+}
+
+#[test]
 fn import_meta_env_secret_binds_as_a_source() {
     // Issue #890: a non-public `import.meta.env.X` (Vite) read is a secret source
     // like `process.env`, via the new flatten_member_path MetaProperty arm.
@@ -685,6 +711,70 @@ fn security_chmod_capture_records_integer_literal_argument() {
     assert!(!sink.arg_is_non_literal);
     assert_eq!(sink.arg_kind, SinkArgKind::Literal);
     assert_eq!(sink.arg_literal, Some(SinkLiteralValue::Integer(511)));
+}
+
+#[test]
+fn security_sink_constant_string_coercion_is_classified_as_literal() {
+    let info = parse(
+        r"
+            const MISSING_LINE_NUMBER_SENTINEL = -1;
+            sql.raw(String(MISSING_LINE_NUMBER_SENTINEL));
+        ",
+    );
+
+    assert!(
+        !info
+            .security_sinks
+            .iter()
+            .any(|sink| sink.callee_path == "sql.raw"),
+        "a numeric constant coerced through String() must not be captured as a non-literal raw SQL sink"
+    );
+}
+
+#[test]
+fn security_sink_constant_template_is_classified_as_literal() {
+    let info = parse(
+        r#"
+            const SCHEME = "http";
+            const HOST = "api.example.com";
+            const URL = `${SCHEME}://${HOST}/status`;
+            fetch(URL);
+        "#,
+    );
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|sink| sink.callee_path == "fetch" && sink.arg_index == 0)
+        .expect("cleartext fetch sink captured");
+
+    assert!(!sink.arg_is_non_literal);
+    assert_eq!(sink.arg_kind, SinkArgKind::Literal);
+    assert_eq!(
+        sink.arg_literal,
+        Some(SinkLiteralValue::String(
+            "http://api.example.com/status".to_string()
+        ))
+    );
+}
+
+#[test]
+fn security_sink_shadowed_constant_stays_dynamic() {
+    let info = parse(
+        r"
+            const MISSING_LINE_NUMBER_SENTINEL = -1;
+            function run(MISSING_LINE_NUMBER_SENTINEL: number): void {
+                sql.raw(String(MISSING_LINE_NUMBER_SENTINEL));
+            }
+        ",
+    );
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|sink| sink.callee_path == "sql.raw")
+        .expect("shadowed constant sink stays captured");
+
+    assert!(sink.arg_is_non_literal);
+    assert_eq!(sink.arg_kind, SinkArgKind::Call);
 }
 
 #[test]
