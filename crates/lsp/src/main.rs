@@ -2426,10 +2426,22 @@ export function choose(value: number): string {
                     },
                 ),
             ],
+            boundary_call_violations: vec![
+                fallow_core::results::BoundaryCallViolationFinding::with_actions(
+                    fallow_core::results::BoundaryCallViolation {
+                        path: "/zoned.ts".into(),
+                        line: 14,
+                        col: 0,
+                        zone: "domain".to_string(),
+                        callee: "console.log".to_string(),
+                        pattern: "console.*".to_string(),
+                    },
+                ),
+            ],
             export_usages: vec![ExportUsage {
                 path: "/f.ts".into(),
                 export_name: "used".to_string(),
-                line: 14,
+                line: 15,
                 col: 0,
                 reference_count: 3,
                 reference_locations: vec![],

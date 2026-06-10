@@ -370,6 +370,35 @@ pub fn push_boundary_violation_diagnostics(
             ..Default::default()
         });
     }
+
+    for v in &results.boundary_call_violations {
+        let Some(uri) = Uri::from_file_path(&v.violation.path) else {
+            continue;
+        };
+        let line = v.violation.line.saturating_sub(1);
+        map.entry(uri).or_default().push(Diagnostic {
+            range: Range {
+                start: Position {
+                    line,
+                    character: v.violation.col,
+                },
+                end: Position {
+                    line,
+                    character: u32::MAX,
+                },
+            },
+            severity: Some(DiagnosticSeverity::WARNING),
+            source: Some("fallow".to_string()),
+            code: Some(NumberOrString::String("boundary-violation".to_string())),
+            code_description: doc_link("boundary-violations"),
+            message: format!(
+                "Boundary call: `{}` matches forbidden pattern `{}` in zone '{}'",
+                v.violation.callee, v.violation.pattern, v.violation.zone
+            ),
+            related_information: None,
+            ..Default::default()
+        });
+    }
 }
 
 #[cfg(test)]
@@ -796,6 +825,48 @@ mod tests {
         assert_eq!(d.range.start.line, 2); // 1-based 3 -> 0-based 2
         assert_eq!(d.range.start.character, 10);
         assert_eq!(d.range.end.character, u32::MAX);
+    }
+
+    #[test]
+    fn boundary_call_violation_produces_warning_under_expected_uri() {
+        let root = test_root();
+        let file = root.join("src/domain/policy.ts");
+
+        let mut results = AnalysisResults::default();
+        results.boundary_call_violations.push(
+            fallow_core::results::BoundaryCallViolationFinding::with_actions(
+                fallow_core::results::BoundaryCallViolation {
+                    path: file.clone(),
+                    line: 5,
+                    col: 2,
+                    zone: "domain".to_string(),
+                    callee: "execSync".to_string(),
+                    pattern: "child_process.*".to_string(),
+                },
+            ),
+        );
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, &root);
+
+        let uri = Uri::from_file_path(&file).unwrap();
+        let file_diags = diags
+            .get(&uri)
+            .expect("boundary call diagnostic should land under the file URI");
+        assert_eq!(file_diags.len(), 1);
+
+        let d = &file_diags[0];
+        assert_eq!(d.severity, Some(DiagnosticSeverity::WARNING));
+        assert_eq!(
+            d.code,
+            Some(NumberOrString::String("boundary-violation".to_string()))
+        );
+        assert!(d.message.contains("Boundary call"));
+        assert!(d.message.contains("execSync"));
+        assert!(d.message.contains("child_process.*"));
+        assert!(d.message.contains("domain"));
+        assert_eq!(d.range.start.line, 4); // 1-based 5 -> 0-based 4
+        assert_eq!(d.range.start.character, 2);
     }
 
     #[test]
