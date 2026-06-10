@@ -1269,3 +1269,110 @@ fn audit_coverage_env_fallback_feeds_crap_scoring() {
     let json = parse_json(&output);
     assert_eq!(json["verdict"].as_str(), Some("pass"));
 }
+
+/// Run `fallow audit` against `root` with string env vars set on the child
+/// process. The path-typed `run_fallow_raw_with_env` cannot carry a git ref
+/// value, so this builds the command directly.
+fn run_audit_string_env(
+    root: &std::path::Path,
+    extra_args: &[&str],
+    env: &[(&str, &str)],
+) -> common::CommandOutput {
+    let mut cmd = Command::new(fallow_bin());
+    cmd.env("RUST_LOG", "").env("NO_COLOR", "1");
+    for (key, value) in env {
+        cmd.env(key, value);
+    }
+    cmd.args(["audit", "--root"]);
+    cmd.arg(root);
+    cmd.args(["--format", "json", "--quiet"]);
+    cmd.args(extra_args);
+    let output = cmd.output().expect("failed to run fallow binary");
+    common::CommandOutput {
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        code: output.status.code().unwrap_or(-1),
+    }
+}
+
+/// Add a second commit so `HEAD~1` resolves, then return the fixture.
+fn audit_fixture_with_two_commits() -> TempDir {
+    let tmp = create_audit_fixture("env-base");
+    fs::write(
+        tmp.path().join("src/utils.ts"),
+        "export const used = () => 43;\nexport const unused = () => 0;\n",
+    )
+    .unwrap();
+    commit_all(tmp.path(), "second commit");
+    tmp
+}
+
+#[test]
+fn audit_honors_fallow_audit_base_env_when_no_flag() {
+    let dir = audit_fixture_with_two_commits();
+    let output = run_audit_string_env(dir.path(), &[], &[("FALLOW_AUDIT_BASE", "HEAD~1")]);
+
+    assert_eq!(
+        output.code, 0,
+        "audit with FALLOW_AUDIT_BASE should run. stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(
+        json["base_ref"].as_str(),
+        Some("HEAD~1"),
+        "FALLOW_AUDIT_BASE should set the base ref"
+    );
+    assert_eq!(
+        json["base_description"].as_str(),
+        Some("FALLOW_AUDIT_BASE=HEAD~1"),
+        "env-set base should carry its provenance"
+    );
+}
+
+#[test]
+fn audit_base_flag_wins_over_fallow_audit_base_env() {
+    let dir = audit_fixture_with_two_commits();
+    let output = run_audit_string_env(
+        dir.path(),
+        &["--base", "HEAD"],
+        &[("FALLOW_AUDIT_BASE", "HEAD~1")],
+    );
+
+    assert_eq!(
+        output.code, 0,
+        "explicit --base HEAD has no changes, should pass. stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(
+        json["base_ref"].as_str(),
+        Some("HEAD"),
+        "the --base flag must win over FALLOW_AUDIT_BASE"
+    );
+    assert!(
+        json.get("base_description").is_none() || json["base_description"].is_null(),
+        "an explicit --base carries no provenance description"
+    );
+}
+
+#[test]
+fn audit_rejects_malformed_fallow_audit_base_env() {
+    let dir = audit_fixture_with_two_commits();
+    let output = run_audit_string_env(dir.path(), &[], &[("FALLOW_AUDIT_BASE", "bad;ref")]);
+
+    assert_eq!(
+        output.code, 2,
+        "a malformed FALLOW_AUDIT_BASE must exit 2, not be silently ignored. stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["error"].as_bool(), Some(true));
+    assert!(
+        json["message"]
+            .as_str()
+            .is_some_and(|m| m.contains("FALLOW_AUDIT_BASE")),
+        "the error should name the offending env var, got: {}",
+        json["message"]
+    );
+}
