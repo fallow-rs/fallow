@@ -1,5 +1,6 @@
 import * as path from "node:path";
 import * as vscode from "vscode";
+import { escapeMarkdownMultiline } from "./markdown-utils.js";
 import type { ComplexityContribution, ComplexityContributionKind, HealthFinding } from "./types.js";
 import { resolveFilePath } from "./treeView-utils.js";
 
@@ -157,7 +158,7 @@ const lineHover = (aggregate: LineAggregate): vscode.MarkdownString => {
 const functionHover = (finding: HealthFinding): vscode.MarkdownString => {
   const md = new vscode.MarkdownString();
   md.appendMarkdown(
-    `**${finding.name}** · cyclomatic ${finding.cyclomatic} · cognitive ${finding.cognitive}\n\n`,
+    `**${escapeMarkdownMultiline(finding.name)}** · cyclomatic ${finding.cyclomatic} · cognitive ${finding.cognitive}\n\n`,
   );
   const crap = crapExplanation(finding);
   if (crap) {

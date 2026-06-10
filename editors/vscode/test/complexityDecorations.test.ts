@@ -140,6 +140,17 @@ describe("hoverForLine", () => {
     expect(md?.value).toContain("cyclomatic 13");
   });
 
+  it("backslash-escapes markdown control characters in finding.name", () => {
+    const f = finding({
+      name: "a`*[x](command:evil)*<b>",
+      line: 10,
+      contributions: [contribution(12, "cyclomatic", "if", 1)],
+    });
+    const md = hoverForLine([f], 10);
+    expect(md?.value).toContain("a\\`\\*\\[x\\]\\(command:evil\\)\\*\\<b\\>");
+    expect(md?.value).not.toContain("(command:evil)");
+  });
+
   it("returns the per-line breakdown on a contribution line", () => {
     const f = finding({ line: 10, contributions: [contribution(12, "cognitive", "for", 2, 1)] });
     const md = hoverForLine([f], 12);

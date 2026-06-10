@@ -9,6 +9,7 @@ import {
   validateEmail,
   validateJwtShape,
 } from "../src/license-utils.js";
+import { escapeMarkdownMultiline } from "../src/markdown-utils.js";
 import type { LicenseState, LicenseStatusJson } from "../src/license-types.js";
 
 const ALL_STATES: ReadonlyArray<LicenseState> = [
@@ -189,6 +190,10 @@ describe("escapeMarkdown", () => {
   it("escapes characters that could break a trusted command link", () => {
     expect(escapeMarkdown("a]b)c")).toBe("a\\]b\\)c");
     expect(escapeMarkdown("plain")).toBe("plain");
+  });
+
+  it("is referentially identical to escapeMarkdownMultiline (delegation pin)", () => {
+    expect(escapeMarkdown).toBe(escapeMarkdownMultiline);
   });
 });
 

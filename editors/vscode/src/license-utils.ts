@@ -5,6 +5,7 @@
  * `statusBar-utils.ts` vs `statusBar.ts`).
  */
 
+import { escapeMarkdownMultiline } from "./markdown-utils.js";
 import type { LicenseParseResult, LicenseState, LicenseStatusJson } from "./license-types.js";
 
 /**
@@ -101,13 +102,11 @@ export interface LicenseStatusBarParts {
 }
 
 /**
- * Escape text destined for a trusted `MarkdownString`. Tier / feature strings
- * come from a verified JWT, not arbitrary input, but we escape defensively per
- * the global trusted-markdown rule (command-link injection vector). Strips the
- * markdown control characters that could break out of the tooltip.
+ * Escape text destined for a trusted `MarkdownString`. Alias of
+ * `escapeMarkdownMultiline` kept for call-site readability; delegates to the
+ * canonical implementation in `markdown-utils.ts`.
  */
-export const escapeMarkdown = (raw: string): string =>
-  raw.replace(/[\\`*_{}[\]()#+\-.!|<>]/g, (ch) => `\\${ch}`);
+export const escapeMarkdown = escapeMarkdownMultiline;
 
 /**
  * Whether any license material is present, mirroring the source precedence in

@@ -17,6 +17,7 @@ import {
   severityThemeColor,
   topPenalties,
 } from "../src/health-utils.js";
+import { escapeMarkdownMultiline } from "../src/markdown-utils.js";
 import type { HealthReport, HealthScorePenalties } from "../src/types.js";
 
 const baseArgs = {
@@ -259,6 +260,10 @@ describe("escapeHealthMarkdown", () => {
   it("leaves plain text untouched", () => {
     expect(escapeHealthMarkdown("src/foo/bar.ts")).toBe("src/foo/bar\\.ts");
     expect(escapeHealthMarkdown("plain name")).toBe("plain name");
+  });
+
+  it("is referentially identical to escapeMarkdownMultiline (delegation pin)", () => {
+    expect(escapeHealthMarkdown).toBe(escapeMarkdownMultiline);
   });
 });
 

@@ -1,3 +1,4 @@
+import { escapeMarkdownMultiline } from "./markdown-utils.js";
 import type { FindingSeverity, HealthReport, HealthScorePenalties } from "./types.js";
 
 /**
@@ -78,16 +79,11 @@ export const buildHealthArgs = (options: HealthArgsOptions): string[] => {
 };
 
 /**
- * Escape text destined for a trusted `MarkdownString` health tooltip. Health
- * tooltips interpolate user-controlled strings (file paths, finding names,
- * recommendation text) into bold/list markdown. Those tooltips are trusted
- * (`appendMarkdown` on a default-trusted `MarkdownString`), so per the global
- * trusted-markdown rule any user-derived field is escaped to neutralize markdown
- * control characters (a command-link injection vector). Strips the control
- * characters that could break out of the bold span or inject a link.
+ * Escape text destined for a trusted `MarkdownString` health tooltip. Alias of
+ * `escapeMarkdownMultiline` kept for call-site readability; delegates to the
+ * canonical implementation in `markdown-utils.ts`.
  */
-export const escapeHealthMarkdown = (raw: string): string =>
-  raw.replace(/[\\`*_{}[\]()#+\-.!|<>]/g, (ch) => `\\${ch}`);
+export const escapeHealthMarkdown = escapeMarkdownMultiline;
 
 /**
  * Detect a clap "unrecognized subcommand" error for `health`, raised when the
