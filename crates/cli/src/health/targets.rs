@@ -1,8 +1,10 @@
 use crate::health_types::{
-    COGNITIVE_EXTRACTION_THRESHOLD, Confidence, ContributingFactor, EffortEstimate,
-    EvidenceFunction, FileHealthScore, HotspotEntry, RecommendationCategory, RefactoringTarget,
-    TargetEvidence, TargetThresholds,
+    COGNITIVE_EXTRACTION_THRESHOLD, CloneSiblingEvidence, Confidence, ContributingFactor,
+    DirectCallerEvidence, EffortEstimate, EvidenceFunction, FileHealthScore, HotspotEntry,
+    RecommendationCategory, RefactoringTarget, TargetEvidence, TargetThresholds,
 };
+
+const MAX_CLONE_SIBLING_EVIDENCE: usize = 5;
 
 /// Auxiliary data used by `compute_refactoring_targets` to generate evidence and apply rules.
 pub(super) struct TargetAuxData<'a> {
@@ -12,10 +14,15 @@ pub(super) struct TargetAuxData<'a> {
     pub value_export_counts: &'a rustc_hash::FxHashMap<std::path::PathBuf, usize>,
     pub unused_export_names: &'a rustc_hash::FxHashMap<std::path::PathBuf, Vec<String>>,
     pub cycle_members: &'a rustc_hash::FxHashMap<std::path::PathBuf, Vec<std::path::PathBuf>>,
+    pub direct_callers: &'a rustc_hash::FxHashMap<std::path::PathBuf, Vec<DirectCallerEvidence>>,
+    pub clone_siblings: &'a rustc_hash::FxHashMap<std::path::PathBuf, Vec<CloneSiblingEvidence>>,
 }
 
-impl<'a> From<&'a super::scoring::FileScoreOutput> for TargetAuxData<'a> {
-    fn from(output: &'a super::scoring::FileScoreOutput) -> Self {
+impl<'a> TargetAuxData<'a> {
+    pub(super) fn from_output(
+        output: &'a super::scoring::FileScoreOutput,
+        clone_siblings: &'a rustc_hash::FxHashMap<std::path::PathBuf, Vec<CloneSiblingEvidence>>,
+    ) -> Self {
         Self {
             circular_files: &output.circular_files,
             top_complex_fns: &output.top_complex_fns,
@@ -23,6 +30,8 @@ impl<'a> From<&'a super::scoring::FileScoreOutput> for TargetAuxData<'a> {
             value_export_counts: &output.value_export_counts,
             unused_export_names: &output.unused_export_names,
             cycle_members: &output.cycle_members,
+            direct_callers: &output.direct_callers,
+            clone_siblings,
         }
     }
 }
@@ -283,6 +292,8 @@ pub(super) fn compute_refactoring_targets(
             aux.unused_export_names,
             top_fns,
             aux.cycle_members,
+            aux.direct_callers,
+            aux.clone_siblings,
         );
 
         targets.push(RefactoringTarget {
@@ -480,19 +491,19 @@ fn build_evidence(
     unused_export_names: &rustc_hash::FxHashMap<std::path::PathBuf, Vec<String>>,
     top_fns: Option<&Vec<(String, u32, u16)>>,
     cycle_members: &rustc_hash::FxHashMap<std::path::PathBuf, Vec<std::path::PathBuf>>,
+    direct_callers: &rustc_hash::FxHashMap<std::path::PathBuf, Vec<DirectCallerEvidence>>,
+    clone_siblings: &rustc_hash::FxHashMap<std::path::PathBuf, Vec<CloneSiblingEvidence>>,
 ) -> Option<TargetEvidence> {
+    let mut evidence = TargetEvidence {
+        direct_callers: direct_callers.get(path).cloned().unwrap_or_default(),
+        clone_siblings: clone_siblings.get(path).cloned().unwrap_or_default(),
+        ..Default::default()
+    };
+
     match category {
         RecommendationCategory::RemoveDeadCode => {
             let exports = unused_export_names.get(path).cloned().unwrap_or_default();
-            if exports.is_empty() {
-                None
-            } else {
-                Some(TargetEvidence {
-                    unused_exports: exports,
-                    complex_functions: vec![],
-                    cycle_path: vec![],
-                })
-            }
+            evidence.unused_exports = exports;
         }
         RecommendationCategory::ExtractComplexFunctions => {
             let functions = top_fns
@@ -507,15 +518,7 @@ fn build_evidence(
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
-            if functions.is_empty() {
-                None
-            } else {
-                Some(TargetEvidence {
-                    unused_exports: vec![],
-                    complex_functions: functions,
-                    cycle_path: vec![],
-                })
-            }
+            evidence.complex_functions = functions;
         }
         RecommendationCategory::BreakCircularDependency => {
             let members = cycle_members
@@ -527,15 +530,7 @@ fn build_evidence(
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
-            if members.is_empty() {
-                None
-            } else {
-                Some(TargetEvidence {
-                    unused_exports: vec![],
-                    complex_functions: vec![],
-                    cycle_path: members,
-                })
-            }
+            evidence.cycle_path = members;
         }
         RecommendationCategory::AddTestCoverage => {
             let functions = top_fns
@@ -549,18 +544,68 @@ fn build_evidence(
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
-            if functions.is_empty() {
-                None
-            } else {
-                Some(TargetEvidence {
-                    unused_exports: vec![],
-                    complex_functions: functions,
-                    cycle_path: vec![],
-                })
+            evidence.complex_functions = functions;
+        }
+        _ => {}
+    }
+
+    if target_evidence_is_empty(&evidence) {
+        None
+    } else {
+        Some(evidence)
+    }
+}
+
+fn target_evidence_is_empty(evidence: &TargetEvidence) -> bool {
+    evidence.unused_exports.is_empty()
+        && evidence.complex_functions.is_empty()
+        && evidence.cycle_path.is_empty()
+        && evidence.direct_callers.is_empty()
+        && evidence.clone_siblings.is_empty()
+}
+
+pub(super) fn build_clone_sibling_evidence(
+    report: &fallow_core::duplicates::DuplicationReport,
+) -> rustc_hash::FxHashMap<std::path::PathBuf, Vec<CloneSiblingEvidence>> {
+    let mut by_path: rustc_hash::FxHashMap<std::path::PathBuf, Vec<CloneSiblingEvidence>> =
+        rustc_hash::FxHashMap::default();
+
+    for group in &report.clone_groups {
+        let fingerprint = fallow_core::duplicates::clone_fingerprint(&group.instances);
+        for (idx, instance) in group.instances.iter().enumerate() {
+            let siblings = by_path.entry(instance.file.clone()).or_default();
+            for (sibling_idx, sibling) in group.instances.iter().enumerate() {
+                if sibling_idx == idx {
+                    continue;
+                }
+                siblings.push(CloneSiblingEvidence {
+                    path: sibling.file.clone(),
+                    start_line: sibling.start_line,
+                    end_line: sibling.end_line,
+                    fingerprint: fingerprint.clone(),
+                });
             }
         }
-        _ => None,
     }
+
+    for siblings in by_path.values_mut() {
+        siblings.sort_by(|a, b| {
+            a.path
+                .cmp(&b.path)
+                .then_with(|| a.start_line.cmp(&b.start_line))
+                .then_with(|| a.end_line.cmp(&b.end_line))
+                .then_with(|| a.fingerprint.cmp(&b.fingerprint))
+        });
+        siblings.dedup_by(|a, b| {
+            a.path == b.path
+                && a.start_line == b.start_line
+                && a.end_line == b.end_line
+                && a.fingerprint == b.fingerprint
+        });
+        siblings.truncate(MAX_CLONE_SIBLING_EVIDENCE);
+    }
+
+    by_path
 }
 
 #[cfg(test)]
@@ -812,6 +857,8 @@ mod tests {
             .collect(),
             unused_export_names: &rustc_hash::FxHashMap::default(),
             cycle_members: &rustc_hash::FxHashMap::default(),
+            direct_callers: &rustc_hash::FxHashMap::default(),
+            clone_siblings: &rustc_hash::FxHashMap::default(),
         };
         let (targets, _thresholds) = compute_refactoring_targets(&scores, &aux, &[]);
         assert!(targets.len() >= 2, "expected at least 2 targets");
@@ -821,6 +868,93 @@ mod tests {
             targets[0].efficiency,
             targets[1].efficiency
         );
+    }
+
+    #[test]
+    fn target_evidence_includes_direct_callers_and_clone_siblings() {
+        let path = std::path::PathBuf::from("/src/foo.ts");
+        let caller_path = std::path::PathBuf::from("/src/consumer.ts");
+        let clone_path = std::path::PathBuf::from("/src/peer.ts");
+        let mut direct_callers = rustc_hash::FxHashMap::default();
+        direct_callers.insert(
+            path.clone(),
+            vec![DirectCallerEvidence {
+                path: caller_path.clone(),
+                symbols: vec![crate::health_types::DirectCallerSymbolEvidence {
+                    imported: "foo".into(),
+                    local: "fooAlias".into(),
+                    type_only: false,
+                }],
+            }],
+        );
+        let mut clone_siblings = rustc_hash::FxHashMap::default();
+        clone_siblings.insert(
+            path.clone(),
+            vec![CloneSiblingEvidence {
+                path: clone_path.clone(),
+                start_line: 10,
+                end_line: 18,
+                fingerprint: "dup:12345678".into(),
+            }],
+        );
+
+        let evidence = build_evidence(
+            &RecommendationCategory::ExtractDependencies,
+            &path,
+            &rustc_hash::FxHashMap::default(),
+            None,
+            &rustc_hash::FxHashMap::default(),
+            &direct_callers,
+            &clone_siblings,
+        )
+        .expect("generic evidence should keep target evidence present");
+
+        assert_eq!(evidence.direct_callers[0].path, caller_path);
+        assert_eq!(evidence.direct_callers[0].symbols[0].local, "fooAlias");
+        assert_eq!(evidence.clone_siblings[0].path, clone_path);
+        assert_eq!(evidence.clone_siblings[0].fingerprint, "dup:12345678");
+    }
+
+    #[test]
+    fn clone_sibling_evidence_maps_each_instance_to_peers() {
+        let report = fallow_core::duplicates::DuplicationReport {
+            clone_groups: vec![fallow_core::duplicates::CloneGroup {
+                instances: vec![
+                    fallow_core::duplicates::CloneInstance {
+                        file: "/src/a.ts".into(),
+                        start_line: 1,
+                        end_line: 5,
+                        start_col: 0,
+                        end_col: 1,
+                        fragment: "const value = call();".into(),
+                    },
+                    fallow_core::duplicates::CloneInstance {
+                        file: "/src/b.ts".into(),
+                        start_line: 20,
+                        end_line: 24,
+                        start_col: 0,
+                        end_col: 1,
+                        fragment: "const value = call();".into(),
+                    },
+                ],
+                token_count: 8,
+                line_count: 5,
+            }],
+            ..Default::default()
+        };
+
+        let evidence = build_clone_sibling_evidence(&report);
+        let a_siblings = evidence
+            .get(&std::path::PathBuf::from("/src/a.ts"))
+            .expect("a.ts should have sibling evidence");
+        let b_siblings = evidence
+            .get(&std::path::PathBuf::from("/src/b.ts"))
+            .expect("b.ts should have sibling evidence");
+
+        assert_eq!(a_siblings[0].path, std::path::PathBuf::from("/src/b.ts"));
+        assert_eq!(a_siblings[0].start_line, 20);
+        assert_eq!(b_siblings[0].path, std::path::PathBuf::from("/src/a.ts"));
+        assert!(a_siblings[0].fingerprint.starts_with("dup:"));
     }
 
     #[test]
@@ -1064,6 +1198,8 @@ mod tests {
             &unused,
             None,
             &cycle_members,
+            &rustc_hash::FxHashMap::default(),
+            &rustc_hash::FxHashMap::default(),
         );
         assert!(ev.is_some());
         let ev = ev.unwrap();
@@ -1082,6 +1218,8 @@ mod tests {
             &unused,
             None,
             &cycle_members,
+            &rustc_hash::FxHashMap::default(),
+            &rustc_hash::FxHashMap::default(),
         );
         assert!(ev.is_none());
     }
@@ -1101,6 +1239,8 @@ mod tests {
             &unused,
             Some(&fns),
             &cycle_members,
+            &rustc_hash::FxHashMap::default(),
+            &rustc_hash::FxHashMap::default(),
         );
         assert!(ev.is_some());
         let ev = ev.unwrap();
@@ -1127,6 +1267,8 @@ mod tests {
             &unused,
             None,
             &cycle_members,
+            &rustc_hash::FxHashMap::default(),
+            &rustc_hash::FxHashMap::default(),
         );
         assert!(ev.is_some());
         let ev = ev.unwrap();
@@ -1145,6 +1287,8 @@ mod tests {
             &unused,
             Some(&fns),
             &cycle_members,
+            &rustc_hash::FxHashMap::default(),
+            &rustc_hash::FxHashMap::default(),
         );
         assert!(ev.is_some());
         let ev = ev.unwrap();
@@ -1162,6 +1306,8 @@ mod tests {
             &unused,
             None,
             &cycle_members,
+            &rustc_hash::FxHashMap::default(),
+            &rustc_hash::FxHashMap::default(),
         );
         assert!(ev.is_none());
     }
@@ -1263,6 +1409,8 @@ mod tests {
             value_export_counts: &value_exports,
             unused_export_names: &rustc_hash::FxHashMap::default(),
             cycle_members: &rustc_hash::FxHashMap::default(),
+            direct_callers: &rustc_hash::FxHashMap::default(),
+            clone_siblings: &rustc_hash::FxHashMap::default(),
         };
         let (targets, _) = compute_refactoring_targets(&scores, &aux, &hotspots);
         assert!(!targets.is_empty());
@@ -1286,6 +1434,8 @@ mod tests {
             value_export_counts: &value_exports,
             unused_export_names: &rustc_hash::FxHashMap::default(),
             cycle_members: &rustc_hash::FxHashMap::default(),
+            direct_callers: &rustc_hash::FxHashMap::default(),
+            clone_siblings: &rustc_hash::FxHashMap::default(),
         };
         let (targets, _) = compute_refactoring_targets(&scores, &aux, &[]);
         assert!(!targets.is_empty());
@@ -1307,6 +1457,8 @@ mod tests {
             value_export_counts: &value_exports,
             unused_export_names: &rustc_hash::FxHashMap::default(),
             cycle_members: &rustc_hash::FxHashMap::default(),
+            direct_callers: &rustc_hash::FxHashMap::default(),
+            clone_siblings: &rustc_hash::FxHashMap::default(),
         };
         let (targets, _) = compute_refactoring_targets(&scores, &aux, &[]);
         assert!(!targets.is_empty());
@@ -1331,6 +1483,8 @@ mod tests {
             value_export_counts: &value_exports,
             unused_export_names: &rustc_hash::FxHashMap::default(),
             cycle_members: &rustc_hash::FxHashMap::default(),
+            direct_callers: &rustc_hash::FxHashMap::default(),
+            clone_siblings: &rustc_hash::FxHashMap::default(),
         };
         let (targets, _) = compute_refactoring_targets(&scores, &aux, &[]);
         assert!(!targets.is_empty());
@@ -1353,6 +1507,8 @@ mod tests {
             value_export_counts: &value_exports,
             unused_export_names: &rustc_hash::FxHashMap::default(),
             cycle_members: &rustc_hash::FxHashMap::default(),
+            direct_callers: &rustc_hash::FxHashMap::default(),
+            clone_siblings: &rustc_hash::FxHashMap::default(),
         };
         let (targets, _) = compute_refactoring_targets(&scores, &aux, &[]);
         assert!(!targets.is_empty());
@@ -1377,6 +1533,8 @@ mod tests {
             value_export_counts: &value_exports,
             unused_export_names: &rustc_hash::FxHashMap::default(),
             cycle_members: &rustc_hash::FxHashMap::default(),
+            direct_callers: &rustc_hash::FxHashMap::default(),
+            clone_siblings: &rustc_hash::FxHashMap::default(),
         };
         let (targets, _) = compute_refactoring_targets(&scores, &aux, &[]);
         assert!(!targets.is_empty());
@@ -1407,6 +1565,8 @@ mod tests {
             value_export_counts: &value_exports,
             unused_export_names: &rustc_hash::FxHashMap::default(),
             cycle_members: &rustc_hash::FxHashMap::default(),
+            direct_callers: &rustc_hash::FxHashMap::default(),
+            clone_siblings: &rustc_hash::FxHashMap::default(),
         };
         let (targets, _) = compute_refactoring_targets(&scores, &aux, &[]);
         assert!(targets.is_empty());

@@ -1,4 +1,4 @@
-use crate::health_types::FileHealthScore;
+use crate::health_types::{DirectCallerEvidence, DirectCallerSymbolEvidence, FileHealthScore};
 
 use super::coverage_gaps::compute_coverage_gaps;
 pub(super) use super::coverage_gaps::{CoverageGapData, build_coverage_summary};
@@ -20,6 +20,8 @@ pub(super) struct FileScoreOutput {
     pub unused_export_names: rustc_hash::FxHashMap<std::path::PathBuf, Vec<String>>,
     /// Cycle members per file: maps each file to the other files in its cycle.
     pub cycle_members: rustc_hash::FxHashMap<std::path::PathBuf, Vec<std::path::PathBuf>>,
+    /// Direct importers per file, with the symbols imported by each caller.
+    pub direct_callers: rustc_hash::FxHashMap<std::path::PathBuf, Vec<DirectCallerEvidence>>,
     /// Aggregate counts from AnalysisResults for vital signs (project-wide).
     pub analysis_counts: crate::vital_signs::AnalysisCounts,
     /// Per-path snapshot of analysis findings, used to recompute
@@ -371,6 +373,7 @@ const DIRECT_TEST_COVERAGE_ESTIMATE: f64 = 85.0;
 /// referenced by tests. The file is imported by tests, so the function may
 /// be exercised indirectly, but with lower confidence.
 const INDIRECT_TEST_COVERAGE_ESTIMATE: f64 = 40.0;
+const MAX_DIRECT_CALLER_EVIDENCE: usize = 5;
 
 /// Compute per-function CRAP scores using graph-based coverage estimation.
 ///
@@ -597,6 +600,44 @@ fn build_test_referenced_exports(
         }
     }
     set
+}
+
+fn collect_direct_callers(
+    graph: &fallow_core::graph::ModuleGraph,
+    file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
+) -> rustc_hash::FxHashMap<std::path::PathBuf, Vec<DirectCallerEvidence>> {
+    let mut callers_by_target = rustc_hash::FxHashMap::default();
+    for node in &graph.modules {
+        let Some(target_path) = file_paths.get(&node.file_id) else {
+            continue;
+        };
+        let mut callers = graph
+            .direct_importer_summaries(node.file_id)
+            .into_iter()
+            .filter_map(|summary| {
+                file_paths
+                    .get(&summary.source)
+                    .map(|caller_path| DirectCallerEvidence {
+                        path: (*caller_path).clone(),
+                        symbols: summary
+                            .symbols
+                            .into_iter()
+                            .map(|symbol| DirectCallerSymbolEvidence {
+                                imported: symbol.imported,
+                                local: symbol.local,
+                                type_only: symbol.type_only,
+                            })
+                            .collect(),
+                    })
+            })
+            .collect::<Vec<_>>();
+        callers.sort_by(|a, b| a.path.cmp(&b.path));
+        callers.truncate(MAX_DIRECT_CALLER_EVIDENCE);
+        if !callers.is_empty() {
+            callers_by_target.insert((*target_path).clone(), callers);
+        }
+    }
+    callers_by_target
 }
 
 /// Canonical CRAP formula: `CC^2 * (1 - cov/100)^3 + CC`.
@@ -1071,6 +1112,7 @@ pub(super) fn compute_file_scores(
     let circular_files = collect_circular_files(results);
     let top_complex_fns = collect_top_complex_fns(modules, file_paths);
     let cycle_members = collect_cycle_members(results);
+    let direct_callers = collect_direct_callers(&graph, file_paths);
     let mut unused_export_names = collect_unused_export_names(results);
 
     let mut entry_points: rustc_hash::FxHashSet<std::path::PathBuf> =
@@ -1256,6 +1298,7 @@ pub(super) fn compute_file_scores(
         value_export_counts,
         unused_export_names,
         cycle_members,
+        direct_callers,
         analysis_counts: crate::vital_signs::AnalysisCounts {
             total_exports,
             dead_files: results.unused_files.len(),

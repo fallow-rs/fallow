@@ -6019,6 +6019,20 @@
             "type": "string"
           },
           "description": "Files forming the import cycle (populated for `BreakCircularDependency` targets)."
+        },
+        "direct_callers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DirectCallerEvidence"
+          },
+          "description": "Files that directly import this target, with imported and local symbols."
+        },
+        "clone_siblings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CloneSiblingEvidence"
+          },
+          "description": "Other duplicate-code instances that share a clone group with this target."
         }
       },
       "description": "Evidence linking a target back to specific analysis data.\n\nProvides enough detail for an AI agent to act on a recommendation\nwithout a second tool call."
@@ -11491,6 +11505,77 @@
         "not_collected"
       ],
       "description": "Fixed runtime coverage counters for summary JSON."
+    },
+    "DirectCallerEvidence": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File that directly imports the target."
+        },
+        "symbols": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DirectCallerSymbolEvidence"
+          },
+          "description": "Symbols imported from the target by this file."
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "description": "A direct importer referenced in target evidence."
+    },
+    "DirectCallerSymbolEvidence": {
+      "type": "object",
+      "properties": {
+        "imported": {
+          "type": "string",
+          "description": "Imported binding name."
+        },
+        "local": {
+          "type": "string",
+          "description": "Local binding name in the importing file."
+        },
+        "type_only": {
+          "type": "boolean",
+          "description": "Whether the import is type-only."
+        }
+      },
+      "required": [
+        "imported",
+        "local",
+        "type_only"
+      ],
+      "description": "Symbol details for a direct importer."
+    },
+    "CloneSiblingEvidence": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File containing the sibling clone instance."
+        },
+        "start_line": {
+          "type": "integer",
+          "description": "1-based start line of the sibling clone."
+        },
+        "end_line": {
+          "type": "integer",
+          "description": "1-based end line of the sibling clone."
+        },
+        "fingerprint": {
+          "type": "string",
+          "description": "Stable duplicate-group handle, matching `dupes --trace dup:<id>`."
+        }
+      },
+      "required": [
+        "path",
+        "start_line",
+        "end_line",
+        "fingerprint"
+      ],
+      "description": "A duplicate-code sibling referenced in target evidence."
     }
   }
 }

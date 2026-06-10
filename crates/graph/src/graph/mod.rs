@@ -99,6 +99,27 @@ pub(super) struct ImportedSymbol {
     pub(super) is_type_only: bool,
 }
 
+/// Importer details for one file that directly imports a target module.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DirectImporterSummary {
+    /// Source file that imports the requested target.
+    pub source: FileId,
+    /// Symbols imported from the target by this source file.
+    pub symbols: Vec<ImportedSymbolSummary>,
+}
+
+/// Symbol details for a direct import edge.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportedSymbolSummary {
+    /// Imported binding name, using `default`, `*`, and `side-effect` for
+    /// non-named imports.
+    pub imported: String,
+    /// Local binding name in the importing file.
+    pub local: String,
+    /// Whether this symbol came from a type-only import.
+    pub type_only: bool,
+}
+
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<Edge>() == 32);
 #[cfg(target_pointer_width = "64")]
@@ -234,6 +255,46 @@ impl ModuleGraph {
         self.edges[range.clone()].iter().map(|e| e.target).collect()
     }
 
+    /// Summarize files that directly import `target`.
+    ///
+    /// Uses existing reverse dependency and edge indexes. Returns an empty
+    /// list when the target is out of range or has no importers.
+    #[must_use]
+    pub fn direct_importer_summaries(&self, target: FileId) -> Vec<DirectImporterSummary> {
+        let Some(importers) = self.reverse_deps.get(target.0 as usize) else {
+            return Vec::new();
+        };
+
+        let mut summaries = Vec::new();
+        for &source in importers {
+            let idx = source.0 as usize;
+            let Some(source_node) = self.modules.get(idx) else {
+                continue;
+            };
+            let mut symbols = Vec::new();
+            for edge in &self.edges[source_node.edge_range.clone()] {
+                if edge.target != target {
+                    continue;
+                }
+                symbols.extend(edge.symbols.iter().map(|symbol| ImportedSymbolSummary {
+                    imported: imported_name_label(&symbol.imported_name),
+                    local: symbol.local_name.clone(),
+                    type_only: symbol.is_type_only,
+                }));
+            }
+            symbols.sort_by(|a, b| {
+                a.imported
+                    .cmp(&b.imported)
+                    .then_with(|| a.local.cmp(&b.local))
+                    .then_with(|| a.type_only.cmp(&b.type_only))
+            });
+            symbols.dedup();
+            summaries.push(DirectImporterSummary { source, symbols });
+        }
+        summaries.sort_by_key(|summary| summary.source.0);
+        summaries
+    }
+
     /// Find the byte offset of the import statement from `source` to `target`.
     ///
     /// Mixed type/value imports to the same target are stored as one edge. Prefer
@@ -295,6 +356,15 @@ impl ModuleGraph {
                 .map(|s| s.import_span.start);
             (edge.target, all_type_only, span)
         })
+    }
+}
+
+fn imported_name_label(name: &ImportedName) -> String {
+    match name {
+        ImportedName::Named(name) => name.clone(),
+        ImportedName::Default => "default".to_string(),
+        ImportedName::Namespace => "*".to_string(),
+        ImportedName::SideEffect => "side-effect".to_string(),
     }
 }
 
@@ -862,6 +932,24 @@ mod tests {
         let graph = build_simple_graph();
         let targets = graph.edges_for(FileId(999));
         assert!(targets.is_empty());
+    }
+
+    #[test]
+    fn graph_direct_importer_summaries_include_symbols() {
+        let graph = build_simple_graph();
+        let summaries = graph.direct_importer_summaries(FileId(1));
+
+        assert_eq!(
+            summaries,
+            vec![DirectImporterSummary {
+                source: FileId(0),
+                symbols: vec![ImportedSymbolSummary {
+                    imported: "foo".to_string(),
+                    local: "foo".to_string(),
+                    type_only: false,
+                }],
+            }]
+        );
     }
 
     #[test]

@@ -462,6 +462,17 @@ fn execute_health_inner(
 
     let loaded_baseline = apply_health_baseline_and_top(opts, &config, &mut findings)?;
 
+    let candidate_paths = collect_candidate_paths(
+        &files,
+        &config,
+        changed_files.as_ref(),
+        ws_roots.as_deref(),
+        &ignore_set,
+    );
+
+    let (dupes_report, duplication_ms) =
+        compute_health_duplication_report(opts, &config, &files, &candidate_paths);
+
     let (hotspots, hotspot_summary, hotspots_ms) = compute_filtered_hotspots(
         opts,
         &config,
@@ -480,6 +491,7 @@ fn execute_health_inner(
         loaded_baseline.as_ref(),
         &config,
         diff_index,
+        dupes_report.as_ref(),
     );
 
     filter_runtime_coverage_report(
@@ -498,14 +510,6 @@ fn execute_health_inner(
         runtime_coverage.as_ref(),
         &targets,
     )?;
-
-    let candidate_paths = collect_candidate_paths(
-        &files,
-        &config,
-        changed_files.as_ref(),
-        ws_roots.as_deref(),
-        &ignore_set,
-    );
 
     let project_subset = if candidate_paths.len() == files.len() {
         SubsetFilter::Full
@@ -526,11 +530,9 @@ fn execute_health_inner(
     };
     let (mut vital_signs, mut counts) = compute_vital_signs_and_counts(&vital_signs_input);
 
-    let (health_score, duplication_ms) = compute_health_score_metrics(
+    let health_score = compute_health_score_metrics(
         opts,
-        &config,
-        &files,
-        &candidate_paths,
+        dupes_report.as_ref(),
         &mut vital_signs,
         &mut counts,
         total_files_scoped,
@@ -949,6 +951,10 @@ fn compute_filtered_hotspots(
     )
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "target filtering coordinates independent health scope inputs"
+)]
 fn compute_filtered_targets(
     opts: &HealthOptions<'_>,
     score_output: Option<&scoring::FileScoreOutput>,
@@ -957,6 +963,7 @@ fn compute_filtered_targets(
     loaded_baseline: Option<&HealthBaselineData>,
     config: &ResolvedConfig,
     diff_index: Option<&crate::report::ci::diff_filter::DiffIndex>,
+    dupes_report: Option<&fallow_core::duplicates::DuplicationReport>,
 ) -> (Vec<RefactoringTarget>, Option<TargetThresholds>, f64) {
     let t = Instant::now();
     let (mut targets, target_thresholds) = compute_targets(
@@ -966,6 +973,7 @@ fn compute_filtered_targets(
         hotspots,
         loaded_baseline,
         &config.root,
+        dupes_report,
     );
     if let Some(diff_index) = diff_index {
         filter_refactoring_targets_by_diff(&mut targets, diff_index, &config.root);
@@ -1016,19 +1024,16 @@ fn save_health_baseline_if_requested(
     Ok(())
 }
 
-fn compute_health_score_metrics(
+fn compute_health_duplication_report(
     opts: &HealthOptions<'_>,
     config: &ResolvedConfig,
     files: &[fallow_types::discover::DiscoveredFile],
     candidate_paths: &rustc_hash::FxHashSet<std::path::PathBuf>,
-    vital_signs: &mut crate::health_types::VitalSigns,
-    counts: &mut crate::health_types::VitalSignsCounts,
-    total_files_scoped: usize,
-) -> (Option<HealthScore>, f64) {
+) -> (Option<fallow_core::duplicates::DuplicationReport>, f64) {
     let t = Instant::now();
-    if opts.score {
+    let dupes_report = if opts.score || opts.targets {
         let scoped_files = filter_files_to_paths(files, candidate_paths);
-        let dupes_report = if opts.no_cache {
+        Some(if opts.no_cache {
             fallow_core::duplicates::find_duplicates(
                 &config.root,
                 &scoped_files,
@@ -1041,14 +1046,27 @@ fn compute_health_score_metrics(
                 &config.duplicates,
                 &config.cache_dir,
             )
-        };
-        apply_duplication_metrics(vital_signs, counts, &dupes_report);
+        })
+    } else {
+        None
+    };
+    (dupes_report, t.elapsed().as_secs_f64() * 1000.0)
+}
+
+fn compute_health_score_metrics(
+    opts: &HealthOptions<'_>,
+    dupes_report: Option<&fallow_core::duplicates::DuplicationReport>,
+    vital_signs: &mut crate::health_types::VitalSigns,
+    counts: &mut crate::health_types::VitalSignsCounts,
+    total_files_scoped: usize,
+) -> Option<HealthScore> {
+    if opts.score
+        && let Some(report) = dupes_report
+    {
+        apply_duplication_metrics(vital_signs, counts, report);
     }
-    let duplication_ms = t.elapsed().as_secs_f64() * 1000.0;
-    let health_score = opts
-        .score
-        .then(|| vital_signs::compute_health_score(vital_signs, total_files_scoped));
-    (health_score, duplication_ms)
+    opts.score
+        .then(|| vital_signs::compute_health_score(vital_signs, total_files_scoped))
 }
 
 #[expect(
@@ -1321,6 +1339,7 @@ fn compute_targets(
     hotspots: &[HotspotEntry],
     loaded_baseline: Option<&HealthBaselineData>,
     config_root: &std::path::Path,
+    dupes_report: Option<&fallow_core::duplicates::DuplicationReport>,
 ) -> (Vec<RefactoringTarget>, Option<TargetThresholds>) {
     if !opts.targets {
         return (Vec::new(), None);
@@ -1328,7 +1347,10 @@ fn compute_targets(
     let Some(output) = score_output else {
         return (Vec::new(), None);
     };
-    let target_aux = TargetAuxData::from(output);
+    let clone_siblings = dupes_report.map_or_else(rustc_hash::FxHashMap::default, |report| {
+        targets::build_clone_sibling_evidence(report)
+    });
+    let target_aux = TargetAuxData::from_output(output, &clone_siblings);
     let (mut tgts, thresholds) =
         compute_refactoring_targets(file_scores_slice, &target_aux, hotspots);
     if let Some(baseline) = loaded_baseline {

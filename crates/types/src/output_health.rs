@@ -1,17 +1,91 @@
 //! Per-action types attached to each health finding by the JSON output
 //! layer.
 //!
-//! These types are the typed wire shape for the `actions[]` array on health
-//! findings, hotspots, refactoring targets, and coverage-gap entries. The
-//! JSON emission path constructs them through typed wrappers (for example
-//! `UntestedFileFinding` in `crates/cli/src/health_types/coverage.rs`) and
-//! serializes them via serde; the schemars derive renders the matching
-//! per-action shape in `docs/output-schema.json`.
+//! These types are the typed wire shape for health output data shared outside
+//! the CLI crate, including `actions[]` arrays and refactoring target
+//! evidence. The JSON emission path constructs action entries through typed
+//! wrappers (for example `UntestedFileFinding` in
+//! `crates/cli/src/health_types/coverage.rs`) and serializes them via serde;
+//! the schemars derive renders matching shapes in `docs/output-schema.json`.
 //!
 //! Whenever a new action variant or optional field is added, update the
 //! matching type here so the drift gate flags the divergence before review.
 
+use std::path::PathBuf;
+
 use serde::Serialize;
+
+/// Evidence linking a refactoring target back to specific analysis data.
+#[derive(Debug, Clone, Default, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct TargetEvidence {
+    /// Names of unused exports.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unused_exports: Vec<String>,
+    /// Complex functions with line numbers and cognitive scores.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub complex_functions: Vec<EvidenceFunction>,
+    /// Files forming the import cycle.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cycle_path: Vec<String>,
+    /// Files that directly import this target, with imported and local symbols.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub direct_callers: Vec<DirectCallerEvidence>,
+    /// Other duplicate-code instances that share a clone group with this target.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub clone_siblings: Vec<CloneSiblingEvidence>,
+}
+
+/// A function referenced in target evidence.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct EvidenceFunction {
+    /// Function name.
+    pub name: String,
+    /// 1-based line number.
+    pub line: u32,
+    /// Cognitive complexity score.
+    pub cognitive: u16,
+}
+
+/// A direct importer referenced in target evidence.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct DirectCallerEvidence {
+    /// File that directly imports the target.
+    #[serde(serialize_with = "crate::serde_path::serialize")]
+    pub path: PathBuf,
+    /// Symbols imported from the target by this file.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub symbols: Vec<DirectCallerSymbolEvidence>,
+}
+
+/// Symbol details for a direct importer.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct DirectCallerSymbolEvidence {
+    /// Imported binding name.
+    pub imported: String,
+    /// Local binding name in the importing file.
+    pub local: String,
+    /// Whether the import is type-only.
+    pub type_only: bool,
+}
+
+/// A duplicate-code sibling referenced in target evidence.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CloneSiblingEvidence {
+    /// File containing the sibling clone instance.
+    #[serde(serialize_with = "crate::serde_path::serialize")]
+    pub path: PathBuf,
+    /// 1-based start line of the sibling clone.
+    pub start_line: usize,
+    /// 1-based end line of the sibling clone.
+    pub end_line: usize,
+    /// Stable duplicate-group handle, matching `dupes --trace dup:<id>`.
+    pub fingerprint: String,
+}
 
 /// Suggested action attached to a [`ComplexityViolation`].
 ///

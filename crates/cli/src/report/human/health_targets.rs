@@ -105,6 +105,8 @@ pub(super) fn render_refactoring_targets(
             generated_tag,
         ));
 
+        render_target_evidence(lines, target, root);
+
         lines.push(String::new());
     }
     if report.targets.len() > MAX_FLAT_ITEMS {
@@ -126,6 +128,67 @@ pub(super) fn render_refactoring_targets(
         .dimmed()
     ));
     lines.push(String::new());
+}
+
+fn render_target_evidence(
+    lines: &mut Vec<String>,
+    target: &crate::health_types::RefactoringTarget,
+    root: &Path,
+) {
+    let Some(evidence) = &target.evidence else {
+        return;
+    };
+
+    if !evidence.direct_callers.is_empty() {
+        let callers = evidence
+            .direct_callers
+            .iter()
+            .map(|caller| {
+                let path = relative_path(&caller.path, root).display().to_string();
+                if caller.symbols.is_empty() {
+                    path
+                } else {
+                    let symbols = caller
+                        .symbols
+                        .iter()
+                        .map(|symbol| {
+                            if symbol.local.is_empty() || symbol.imported == symbol.local {
+                                symbol.imported.clone()
+                            } else {
+                                format!("{} as {}", symbol.imported, symbol.local)
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!("{path} ({symbols})")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        lines.push(format!(
+            "         {}",
+            format!("callers: {callers}").dimmed()
+        ));
+    }
+
+    if !evidence.clone_siblings.is_empty() {
+        let siblings = evidence
+            .clone_siblings
+            .iter()
+            .map(|sibling| {
+                let path = relative_path(&sibling.path, root).display().to_string();
+                format!(
+                    "{}:{}-{} {}",
+                    path, sibling.start_line, sibling.end_line, sibling.fingerprint
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        lines.push(format!(
+            "         {}",
+            format!("clones: {siblings}").dimmed()
+        ));
+    }
 }
 
 fn recommendation_mentions_generated(recommendation: &str) -> bool {

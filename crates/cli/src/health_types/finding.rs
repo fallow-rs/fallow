@@ -910,6 +910,7 @@ mod hotspot_target_tests {
                 cognitive: 30,
             }],
             cycle_path: Vec::new(),
+            ..Default::default()
         });
         let finding = RefactoringTargetFinding::with_actions(target);
         assert_eq!(finding.actions.len(), 2);

@@ -3021,6 +3021,46 @@ mod tests {
     }
 
     #[test]
+    fn refactoring_targets_render_non_empty_relation_evidence() {
+        let root = PathBuf::from("/project");
+        let mut report = empty_report();
+        report.targets = vec![
+            crate::health_types::RefactoringTarget {
+                path: root.join("src/legacy.ts"),
+                priority: 65.0,
+                efficiency: 65.0,
+                recommendation: "Extract complex logic into helper functions".to_string(),
+                category: crate::health_types::RecommendationCategory::ExtractComplexFunctions,
+                effort: crate::health_types::EffortEstimate::Low,
+                confidence: crate::health_types::Confidence::High,
+                factors: vec![],
+                evidence: Some(crate::health_types::TargetEvidence {
+                    direct_callers: vec![crate::health_types::DirectCallerEvidence {
+                        path: root.join("src/consumer.ts"),
+                        symbols: vec![crate::health_types::DirectCallerSymbolEvidence {
+                            imported: "loadLegacy".into(),
+                            local: "load".into(),
+                            type_only: false,
+                        }],
+                    }],
+                    clone_siblings: vec![crate::health_types::CloneSiblingEvidence {
+                        path: root.join("src/peer.ts"),
+                        start_line: 12,
+                        end_line: 20,
+                        fingerprint: "dup:12345678".into(),
+                    }],
+                    ..Default::default()
+                }),
+            }
+            .into(),
+        ];
+        let lines = build_health_human_lines(&report, &root);
+        let text = plain(&lines);
+        assert!(text.contains("callers: src/consumer.ts (loadLegacy as load)"));
+        assert!(text.contains("clones: src/peer.ts:12-20 dup:12345678"));
+    }
+
+    #[test]
     fn refactoring_targets_mixed_effort() {
         let root = PathBuf::from("/project");
         let mut report = empty_report();

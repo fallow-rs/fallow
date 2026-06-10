@@ -3817,6 +3817,14 @@ complex_functions?: EvidenceFunction[]
  * Files forming the import cycle (populated for `BreakCircularDependency` targets).
  */
 cycle_path?: string[]
+/**
+ * Files that directly import this target, with imported and local symbols.
+ */
+direct_callers?: DirectCallerEvidence[]
+/**
+ * Other duplicate-code instances that share a clone group with this target.
+ */
+clone_siblings?: CloneSiblingEvidence[]
 }
 /**
  * A function referenced in target evidence.
@@ -3834,6 +3842,57 @@ line: number
  * Cognitive complexity score.
  */
 cognitive: number
+}
+/**
+ * A direct importer referenced in target evidence.
+ */
+export interface DirectCallerEvidence {
+/**
+ * File that directly imports the target.
+ */
+path: string
+/**
+ * Symbols imported from the target by this file.
+ */
+symbols?: DirectCallerSymbolEvidence[]
+}
+/**
+ * Symbol details for a direct importer.
+ */
+export interface DirectCallerSymbolEvidence {
+/**
+ * Imported binding name.
+ */
+imported: string
+/**
+ * Local binding name in the importing file.
+ */
+local: string
+/**
+ * Whether the import is type-only.
+ */
+type_only: boolean
+}
+/**
+ * A duplicate-code sibling referenced in target evidence.
+ */
+export interface CloneSiblingEvidence {
+/**
+ * File containing the sibling clone instance.
+ */
+path: string
+/**
+ * 1-based start line of the sibling clone.
+ */
+start_line: number
+/**
+ * 1-based end line of the sibling clone.
+ */
+end_line: number
+/**
+ * Stable duplicate-group handle, matching `dupes --trace dup:<id>`.
+ */
+fingerprint: string
 }
 /**
  * Suggested action attached to a [`RefactoringTarget`].
