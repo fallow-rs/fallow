@@ -13,6 +13,7 @@
 
 use fallow_config::Severity;
 use fallow_core::results::{AnalysisResults, SecurityFinding, SecurityFindingKind};
+use fallow_types::extract::SecurityUrlShape;
 
 use super::common::{create_config, create_config_with_rules, fixture_path};
 
@@ -101,6 +102,15 @@ fn finding_on<'a>(results: &'a AnalysisResults, suffix: &str) -> &'a SecurityFin
                 .ends_with(suffix)
         })
         .unwrap_or_else(|| panic!("{suffix} should produce a security finding"))
+}
+
+fn assert_url_shape(results: &AnalysisResults, suffix: &str, shape: SecurityUrlShape) {
+    let finding = finding_on(results, suffix);
+    assert_eq!(
+        finding.candidate.sink.url_shape,
+        Some(shape),
+        "url shape for {suffix}"
+    );
 }
 
 fn no_tainted_sinks(results: &AnalysisResults) -> bool {
@@ -518,6 +528,39 @@ fn ssrf_helper_predicate_still_fires() {
 }
 
 #[test]
+fn ssrf_fixed_origin_dynamic_path_is_classified() {
+    let results = analyze_with_security_sink("security-ssrf");
+    assert_candidate(&results, "src/fixed-origin.ts", "ssrf", 918);
+    assert_url_shape(
+        &results,
+        "src/fixed-origin.ts",
+        SecurityUrlShape::FixedOriginDynamicPath,
+    );
+}
+
+#[test]
+fn ssrf_dynamic_origin_is_classified() {
+    let results = analyze_with_security_sink("security-ssrf");
+    assert_candidate(&results, "src/dynamic-origin.ts", "ssrf", 918);
+    assert_url_shape(
+        &results,
+        "src/dynamic-origin.ts",
+        SecurityUrlShape::DynamicOrigin,
+    );
+}
+
+#[test]
+fn ssrf_opaque_helper_url_remains_dynamic_origin_candidate() {
+    let results = analyze_with_security_sink("security-ssrf");
+    let finding = finding_on(&results, "src/opaque-helper.ts");
+    assert_eq!(finding.category.as_deref(), Some("ssrf"));
+    assert_eq!(
+        finding.candidate.sink.url_shape,
+        Some(SecurityUrlShape::DynamicOrigin)
+    );
+}
+
+#[test]
 fn ssrf_default_off_emits_nothing() {
     assert!(no_tainted_sinks(&analyze_default_off("security-ssrf")));
 }
@@ -626,6 +669,37 @@ fn open_redirect_reassigned_guarded_target_still_fires() {
 fn open_redirect_post_guard_still_fires() {
     let results = analyze_with_security_sink("security-open-redirect");
     assert_candidate(&results, "src/post-guard.ts", "open-redirect", 601);
+}
+
+#[test]
+fn open_redirect_fixed_origin_dynamic_query_is_classified() {
+    let results = analyze_with_security_sink("security-open-redirect");
+    assert_candidate(&results, "src/fixed-origin.ts", "open-redirect", 601);
+    assert_url_shape(
+        &results,
+        "src/fixed-origin.ts",
+        SecurityUrlShape::FixedOriginDynamicPath,
+    );
+}
+
+#[test]
+fn open_redirect_dynamic_origin_is_classified() {
+    let results = analyze_with_security_sink("security-open-redirect");
+    assert_candidate(&results, "src/dynamic-origin.ts", "open-redirect", 601);
+    assert_url_shape(
+        &results,
+        "src/dynamic-origin.ts",
+        SecurityUrlShape::DynamicOrigin,
+    );
+}
+
+#[test]
+fn open_redirect_static_identifier_origin_is_omitted() {
+    let results = analyze_with_security_sink("security-open-redirect");
+    assert!(
+        !anchored_on(&results, "src/static-origin.ts"),
+        "constant literal origins should not produce nonliteral URL candidates"
+    );
 }
 
 #[test]

@@ -949,6 +949,7 @@ mod tests {
                     category: Some("dangerous-html".to_string()),
                     cwe: Some(79),
                     callee: None,
+                    url_shape: None,
                 },
                 boundary: SecurityCandidateBoundary::default(),
                 network: None,

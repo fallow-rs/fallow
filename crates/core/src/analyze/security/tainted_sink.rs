@@ -15,7 +15,7 @@ use std::sync::OnceLock;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_types::extract::{
-    ModuleInfo, SanitizedSinkArg, SanitizerScope, SinkSite, TaintedBinding,
+    ModuleInfo, SanitizedSinkArg, SanitizerScope, SecurityUrlShape, SinkSite, TaintedBinding,
 };
 use fallow_types::output::{IssueAction, SuppressFileAction, SuppressFileKind};
 use fallow_types::results::{
@@ -234,6 +234,50 @@ fn is_html_sanitizable_category(id: &str) -> bool {
 
 fn is_url_sanitizable_category(id: &str) -> bool {
     matches!(id, "open-redirect" | "nextjs-open-redirect" | "ssrf")
+}
+
+fn candidate_url_shape(category: &str, sink: &SinkSite) -> Option<SecurityUrlShape> {
+    is_url_sanitizable_category(category)
+        .then_some(sink.url_shape)
+        .flatten()
+}
+
+fn tainted_sink_evidence(
+    matcher: &Matcher,
+    sink: &SinkSite,
+    source_title: Option<&str>,
+    url_shape: Option<SecurityUrlShape>,
+) -> String {
+    let pattern = matcher
+        .first_matching_pattern(&sink.callee_path)
+        .map_or("", super::catalogue::CalleePattern::raw);
+    // The `{callee}` / `{pattern}` tokens are catalogue placeholders, not Rust
+    // format args; the clippy lint misreads the literal.
+    #[expect(
+        clippy::literal_string_with_formatting_args,
+        reason = "catalogue evidence placeholders, not format args"
+    )]
+    let mut evidence = matcher
+        .evidence_template
+        .replace("{callee}", &sink.callee_path)
+        .replace("{pattern}", pattern)
+        .replace(
+            "{regex}",
+            sink.regex_pattern.as_deref().unwrap_or("unknown"),
+        );
+    if matches!(url_shape, Some(SecurityUrlShape::FixedOriginDynamicPath)) {
+        evidence = format!(
+            "Fixed-origin dynamic URL at {}. Verify the dynamic path or query encoding and destination policy. {evidence}",
+            sink.callee_path
+        );
+    }
+    match source_title {
+        Some(title) => format!(
+            "Untrusted source reaches this sink (an argument traces to {}). {evidence}",
+            title.to_ascii_lowercase()
+        ),
+        None => evidence,
+    }
 }
 
 fn is_path_sanitizable_category(id: &str) -> bool {
@@ -492,35 +536,10 @@ pub fn find_tainted_sinks(
                 continue;
             }
 
-            let pattern = matcher
-                .first_matching_pattern(&sink.callee_path)
-                .map_or("", super::catalogue::CalleePattern::raw);
-            // The `{callee}` / `{pattern}` tokens are catalogue placeholders, not
-            // Rust format args; the clippy lint misreads the literal.
-            #[expect(
-                clippy::literal_string_with_formatting_args,
-                reason = "catalogue evidence placeholders, not format args"
-            )]
-            let base_evidence = matcher
-                .evidence_template
-                .replace("{callee}", &sink.callee_path)
-                .replace("{pattern}", pattern)
-                .replace(
-                    "{regex}",
-                    sink.regex_pattern.as_deref().unwrap_or("unknown"),
-                );
-
+            let url_shape = candidate_url_shape(&matcher.id, sink);
             let source_backed = source.is_some();
-            // Annotate the evidence when source-backed so the ranking signal is
-            // visible in every output format (the boolean drives ordering; the
-            // prefix names the matched untrusted-input class as the rationale).
-            let evidence = match source {
-                Some((_, title, _)) => format!(
-                    "Untrusted source reaches this sink (an argument traces to {}). {base_evidence}",
-                    title.to_ascii_lowercase()
-                ),
-                None => base_evidence,
-            };
+            let evidence =
+                tainted_sink_evidence(matcher, sink, source.map(|(_, title, _)| title), url_shape);
 
             // Arg-level source-read anchor (issue #1093): for a source-backed
             // finding, point the trace's source node at the real read. The
@@ -558,6 +577,7 @@ pub fn find_tainted_sinks(
                     category: Some(matcher.id.clone()),
                     cwe: Some(matcher.cwe),
                     callee: Some(sink.callee_path.clone()),
+                    url_shape,
                 },
                 boundary: SecurityCandidateBoundary::default(),
                 network,
@@ -672,6 +692,7 @@ mod tests {
             span_start: 0,
             span_end: 1,
             url_arg_literal: None,
+            url_shape: None,
         }
     }
 

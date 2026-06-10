@@ -7,7 +7,7 @@ use crate::tests::parse_ts as parse;
 use crate::{ImportedName, MemberKind};
 use fallow_types::discover::FileId;
 use fallow_types::extract::{
-    SecurityControlKind, SinkArgKind, SinkLiteralValue, SinkShape,
+    SecurityControlKind, SecurityUrlShape, SinkArgKind, SinkLiteralValue, SinkShape,
     SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason,
 };
 use helpers::regex_pattern_to_suffix;
@@ -216,6 +216,35 @@ fn network_sink_dynamic_url_has_no_literal_destination() {
         sink.url_arg_literal.is_none(),
         "a dynamic URL must not record a literal destination"
     );
+}
+
+#[test]
+fn network_sink_classifies_static_base_template_url_shape() {
+    let info = parse(
+        r#"const API_URL = "https://api.example.com"; fetch(`${API_URL}/v1/${encodeURIComponent(token)}`);"#,
+    );
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|s| s.callee_path == "fetch" && s.arg_index == 0)
+        .expect("fetch URL sink captured");
+
+    assert_eq!(
+        sink.url_shape,
+        Some(SecurityUrlShape::FixedOriginDynamicPath)
+    );
+}
+
+#[test]
+fn network_sink_classifies_dynamic_base_template_url_shape() {
+    let info = parse(r"fetch(`${origin}/v1/${encodeURIComponent(token)}`);");
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|s| s.callee_path == "fetch" && s.arg_index == 0)
+        .expect("fetch URL sink captured");
+
+    assert_eq!(sink.url_shape, Some(SecurityUrlShape::DynamicOrigin));
 }
 
 #[test]

@@ -311,7 +311,10 @@ use crate::MemberKind;
 /// proven local HTML escape helpers, renderer helpers, and SQL identifier
 /// quoting helpers. Pre-144 entries can lack those sanitizer domains until the
 /// file is re-extracted.
-pub(super) const CACHE_VERSION: u32 = 144;
+///
+/// Bumped to 145 for issue #1137: `SinkSite` now carries URL construction shape
+/// metadata for fixed-origin and dynamic-origin URL sink candidates.
+pub(super) const CACHE_VERSION: u32 = 145;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -368,7 +371,7 @@ assert_cached_type_size!(CachedReExport, 88);
 assert_cached_type_size!(CachedMember, 64);
 assert_cached_type_size!(CachedDynamicImportPattern, 56);
 assert_cached_type_size!(crate::MemberAccess, 48);
-assert_cached_type_size!(fallow_types::extract::SinkSite, 208);
+assert_cached_type_size!(fallow_types::extract::SinkSite, 216);
 assert_cached_type_size!(fallow_types::extract::FunctionComplexity, 96);
 assert_cached_type_size!(fallow_types::extract::ComplexityContribution, 16);
 assert_cached_type_size!(fallow_types::extract::FlagUse, 80);

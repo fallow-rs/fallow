@@ -10028,6 +10028,16 @@
           "type": "string",
           "const": "4",
           "description": "Adds bounded diagnostics for unresolved callee blind spots."
+        },
+        {
+          "type": "string",
+          "const": "5",
+          "description": "Adds summary metadata to security summary JSON."
+        },
+        {
+          "type": "string",
+          "const": "6",
+          "description": "Adds `candidate.sink.url_shape` for URL-shaped security candidates."
         }
       ],
       "description": "The `fallow security --format json` schema version. Independently versioned\nfrom the main contract, mirroring `ImpactReportSchemaVersion`."
@@ -10699,6 +10709,17 @@
             "null"
           ],
           "description": "The sink callee (the dangerous function or member path, e.g.\n`\"el.innerHTML\"`, `\"child_process.exec\"`) captured by the catalogue match.\n`None` for `client-server-leak` and matches that name no callee."
+        },
+        "url_shape": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SecurityUrlShape"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "URL construction shape for SSRF and open-redirect style candidates when\nfallow can classify whether the origin is fixed or dynamic. Absent for\nnon-URL sinks and unclassified URL expressions."
         }
       },
       "required": [
@@ -11576,6 +11597,21 @@
         "fingerprint"
       ],
       "description": "A duplicate-code sibling referenced in target evidence."
+    },
+    "SecurityUrlShape": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "fixed-origin-dynamic-path",
+          "description": "The sink target has a fixed origin, scheme, or relative root while only\npath or query components are dynamic."
+        },
+        {
+          "type": "string",
+          "const": "dynamic-origin",
+          "description": "The sink target's scheme or origin is dynamic or opaque."
+        }
+      ],
+      "description": "Static URL construction shape captured for URL-shaped security sinks."
     }
   }
 }

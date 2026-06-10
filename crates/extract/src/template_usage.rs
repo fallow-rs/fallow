@@ -257,6 +257,7 @@ pub fn template_html_sink(snippet: &str, span_start: usize, span_end: usize) -> 
         span_start: u32::try_from(span_start).ok()?,
         span_end: u32::try_from(span_end).ok()?,
         url_arg_literal: None,
+        url_shape: None,
     })
 }
 

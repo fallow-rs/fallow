@@ -32,7 +32,7 @@ For each `security_findings[]` item, build a verifier packet from these fields:
 - `kind`, `category`, `cwe`, `path`, `line`, `col`, and `evidence`
 - `severity`, the review-priority tier, not a verified vulnerability verdict
 - `candidate.source_kind`, the deterministic untrusted-input kind or `null`
-- `candidate.sink`, the sink location and catalogue metadata
+- `candidate.sink`, the sink location and catalogue metadata. For URL categories it may include `url_shape` (`fixed-origin-dynamic-path` or `dynamic-origin`) so verifiers can prioritize origin-control cases without parsing evidence prose.
 - `candidate.boundary`, the crossed boundary fallow can derive
 - `trace`, the structural import-hop trace
 - `taint_flow`, if present

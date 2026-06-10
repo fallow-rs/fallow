@@ -354,6 +354,7 @@ fn client_leak_candidate(path: std::path::PathBuf, line: u32, col: u32) -> Secur
             category: None,
             cwe: None,
             callee: None,
+            url_shape: None,
         },
         boundary: SecurityCandidateBoundary::default(),
         network: None,

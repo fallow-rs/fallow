@@ -72,8 +72,22 @@ pub enum SecuritySchemaVersion {
     #[serde(rename = "3")]
     V3,
     /// Adds bounded diagnostics for unresolved callee blind spots.
+    #[allow(
+        dead_code,
+        reason = "kept so the generated schema documents historical v4"
+    )]
     #[serde(rename = "4")]
     V4,
+    /// Adds summary metadata to security summary JSON.
+    #[allow(
+        dead_code,
+        reason = "kept so the generated schema documents historical v5"
+    )]
+    #[serde(rename = "5")]
+    V5,
+    /// Adds `candidate.sink.url_shape` for URL-shaped security candidates.
+    #[serde(rename = "6")]
+    V6,
 }
 
 /// Gate mode for `fallow security --gate <mode>`.
@@ -494,7 +508,7 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
         && !findings.is_empty();
 
     let output = SecurityOutput {
-        schema_version: SecuritySchemaVersion::V4,
+        schema_version: SecuritySchemaVersion::V6,
         version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
         elapsed_ms: ElapsedMs(started.elapsed().as_millis() as u64),
         config: security_output_config(
@@ -2365,6 +2379,7 @@ mod tests {
                     category: None,
                     cwe: None,
                     callee: None,
+                    url_shape: None,
                 },
                 boundary: SecurityCandidateBoundary {
                     client_server: true,
@@ -2381,7 +2396,7 @@ mod tests {
 
     fn output_with(findings: Vec<SecurityFinding>, unresolved_edge_files: usize) -> SecurityOutput {
         SecurityOutput {
-            schema_version: SecuritySchemaVersion::V4,
+            schema_version: SecuritySchemaVersion::V6,
             version: ToolVersion("test".to_string()),
             elapsed_ms: ElapsedMs(0),
             config: test_output_config(),
@@ -2397,7 +2412,7 @@ mod tests {
 
     fn output_with_gate(verdict: SecurityGateVerdict, new_count: usize) -> SecurityOutput {
         SecurityOutput {
-            schema_version: SecuritySchemaVersion::V4,
+            schema_version: SecuritySchemaVersion::V6,
             version: ToolVersion("test".to_string()),
             elapsed_ms: ElapsedMs(0),
             config: test_output_config(),
@@ -2959,7 +2974,7 @@ mod tests {
         let finding = relativize_finding(sample_finding(root), root);
         let rendered = render_json(&output_with(vec![finding], 1));
         let value: serde_json::Value = serde_json::from_str(&rendered).expect("valid JSON");
-        assert_eq!(value["schema_version"], "4");
+        assert_eq!(value["schema_version"], "6");
         assert_eq!(value["version"], "test");
         assert_eq!(value["elapsed_ms"], 0);
         assert_eq!(
@@ -3039,7 +3054,7 @@ mod tests {
         let value: serde_json::Value = serde_json::from_str(&rendered).expect("valid JSON");
 
         assert_eq!(value["kind"], "security");
-        assert_eq!(value["schema_version"], "4");
+        assert_eq!(value["schema_version"], "6");
         assert_eq!(value["version"], "test");
         assert_eq!(value["elapsed_ms"], 17);
         assert!(value.get("config").is_some());

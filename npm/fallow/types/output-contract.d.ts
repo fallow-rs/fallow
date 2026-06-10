@@ -612,7 +612,7 @@ export type ImpactTrendDirection = ("improving" | "declining" | "stable")
  * The `fallow security --format json` schema version. Independently versioned
  * from the main contract, mirroring `ImpactReportSchemaVersion`.
  */
-export type SecuritySchemaVersion = ("1" | "2" | "3" | "4")
+export type SecuritySchemaVersion = ("1" | "2" | "3" | "4" | "5" | "6")
 /**
  * Severity level for rules.
  *
@@ -657,6 +657,10 @@ export type SecurityDeadCodeKind = ("unused-file" | "unused-export")
  * rank, never gate).
  */
 export type TaintConfidence = ("arg-level" | "module-level")
+/**
+ * Static URL construction shape captured for URL-shaped security sinks.
+ */
+export type SecurityUrlShape = ("fixed-origin-dynamic-path" | "dynamic-origin")
 /**
  * Runtime coverage state for the function enclosing a security sink.
  * This is production-observation evidence, not an exploitability verdict.
@@ -5324,6 +5328,12 @@ cwe?: (number | null)
  * `None` for `client-server-leak` and matches that name no callee.
  */
 callee?: (string | null)
+/**
+ * URL construction shape for SSRF and open-redirect style candidates when
+ * fallow can classify whether the origin is fixed or dynamic. Absent for
+ * non-URL sinks and unclassified URL expressions.
+ */
+url_shape?: (SecurityUrlShape | null)
 }
 /**
  * The boundary slot of a [`SecurityCandidate`]: which structural boundaries the

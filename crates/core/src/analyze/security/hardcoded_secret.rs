@@ -92,6 +92,7 @@ pub fn find_hardcoded_secret_candidates(
                     category: Some(CATEGORY_ID.to_string()),
                     cwe: Some(CWE_ID),
                     callee: Some(sink.callee_path.clone()),
+                    url_shape: None,
                 },
                 boundary: SecurityCandidateBoundary::default(),
                 network: None,

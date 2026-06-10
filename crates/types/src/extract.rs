@@ -377,6 +377,28 @@ pub enum SinkArgKind {
     Other,
 }
 
+/// Static URL construction shape captured for URL-shaped security sinks.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    bitcode::Encode,
+    bitcode::Decode,
+)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum SecurityUrlShape {
+    /// The sink target has a fixed origin, scheme, or relative root while only
+    /// path or query components are dynamic.
+    FixedOriginDynamicPath,
+    /// The sink target's scheme or origin is dynamic or opaque.
+    DynamicOrigin,
+}
+
 /// Literal values attached to literal-aware security sink captures.
 #[derive(
     Debug,
@@ -476,6 +498,10 @@ pub struct SinkSite {
     /// the credential's own provider), `None` when it is dynamic (the suspicious
     /// case). `None` for non-call sinks and calls with no arg 0.
     pub url_arg_literal: Option<String>,
+    /// URL construction shape for URL-like sink arguments when the extractor can
+    /// classify it syntactically. `None` for non-URL sinks and URL expressions
+    /// whose shape is not visible at the sink.
+    pub url_shape: Option<SecurityUrlShape>,
 }
 
 impl SinkSite {
@@ -1015,7 +1041,7 @@ const _: () = assert!(std::mem::size_of::<ImportedName>() == 24);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<SinkSite>() == 208);
+const _: () = assert!(std::mem::size_of::<SinkSite>() == 216);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 768);
 
@@ -1303,6 +1329,19 @@ mod tests {
     }
 
     #[test]
+    fn security_url_shape_bitcode_roundtrip() {
+        for shape in [
+            SecurityUrlShape::FixedOriginDynamicPath,
+            SecurityUrlShape::DynamicOrigin,
+        ] {
+            let encoded = bitcode::encode(&shape);
+            let decoded: SecurityUrlShape =
+                bitcode::decode(&encoded).expect("decode security url shape");
+            assert_eq!(shape, decoded);
+        }
+    }
+
+    #[test]
     fn sink_site_bitcode_roundtrip() {
         let site = SinkSite {
             sink_shape: SinkShape::MemberAssign,
@@ -1323,6 +1362,7 @@ mod tests {
             span_start: 10,
             span_end: 20,
             url_arg_literal: Some("https://api.example.com".to_string()),
+            url_shape: Some(SecurityUrlShape::FixedOriginDynamicPath),
         };
         let encoded = bitcode::encode(&site);
         let decoded: SinkSite = bitcode::decode(&encoded).expect("decode sink site");
@@ -1340,6 +1380,7 @@ mod tests {
         );
         assert_eq!(decoded.arg_idents, site.arg_idents);
         assert_eq!(decoded.arg_source_paths, site.arg_source_paths);
+        assert_eq!(decoded.url_shape, site.url_shape);
         assert_eq!(decoded.span(), site.span());
     }
 

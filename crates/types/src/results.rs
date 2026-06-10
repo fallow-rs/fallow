@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::extract::{
-    MemberKind, SecurityControlKind, SkippedSecurityCalleeExpressionKind,
+    MemberKind, SecurityControlKind, SecurityUrlShape, SkippedSecurityCalleeExpressionKind,
     SkippedSecurityCalleeReason,
 };
 use crate::output::IssueAction;
@@ -1040,6 +1040,11 @@ pub struct SecurityCandidateSink {
     /// `None` for `client-server-leak` and matches that name no callee.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub callee: Option<String>,
+    /// URL construction shape for SSRF and open-redirect style candidates when
+    /// fallow can classify whether the origin is fixed or dynamic. Absent for
+    /// non-URL sinks and unclassified URL expressions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url_shape: Option<SecurityUrlShape>,
 }
 
 /// A declared architecture-zone crossing, recovered by correlating a finding's

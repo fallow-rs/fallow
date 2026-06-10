@@ -15,8 +15,8 @@ use crate::{
 };
 use fallow_types::extract::{
     ClassHeritageInfo, LocalTypeDeclaration, PublicSignatureTypeReference, SanitizedSinkArg,
-    SanitizerScope, SecurityControlKind, SecurityControlSite, SinkArgKind, SinkLiteralValue,
-    SinkObjectProperty, SinkShape, SinkSite, SkippedSecurityCalleeExpressionKind,
+    SanitizerScope, SecurityControlKind, SecurityControlSite, SecurityUrlShape, SinkArgKind,
+    SinkLiteralValue, SinkObjectProperty, SinkShape, SinkSite, SkippedSecurityCalleeExpressionKind,
     SkippedSecurityCalleeReason, SkippedSecurityCalleeSite, TaintedBinding,
 };
 
@@ -4349,6 +4349,95 @@ fn classify_arg_kind(expr: &Expression<'_>) -> SinkArgKind {
     }
 }
 
+fn classify_url_shape(
+    expr: &Expression<'_>,
+    static_string_bindings: &FxHashMap<String, String>,
+) -> Option<SecurityUrlShape> {
+    match unwrap_static_expr(expr) {
+        Expression::TemplateLiteral(tpl) => {
+            classify_template_url_shape(tpl, static_string_bindings)
+        }
+        Expression::BinaryExpression(bin) if bin.operator == BinaryOperator::Addition => {
+            classify_concat_url_shape(bin, static_string_bindings)
+        }
+        Expression::Identifier(ident) => Some(
+            static_string_bindings
+                .get(ident.name.as_str())
+                .map_or(SecurityUrlShape::DynamicOrigin, |value| {
+                    classify_url_prefix(value)
+                }),
+        ),
+        Expression::StringLiteral(_) => None,
+        _ => Some(SecurityUrlShape::DynamicOrigin),
+    }
+}
+
+fn classify_template_url_shape(
+    tpl: &TemplateLiteral<'_>,
+    static_string_bindings: &FxHashMap<String, String>,
+) -> Option<SecurityUrlShape> {
+    let first = tpl.quasis.first()?.value.raw.as_ref();
+    if !first.is_empty() {
+        return Some(classify_url_prefix(first));
+    }
+    let first_expr = tpl.expressions.first()?;
+    let Expression::Identifier(ident) = unwrap_static_expr(first_expr) else {
+        return Some(SecurityUrlShape::DynamicOrigin);
+    };
+    Some(
+        static_string_bindings
+            .get(ident.name.as_str())
+            .map_or(SecurityUrlShape::DynamicOrigin, |base| {
+                classify_url_prefix(base)
+            }),
+    )
+}
+
+fn classify_concat_url_shape(
+    bin: &BinaryExpression<'_>,
+    static_string_bindings: &FxHashMap<String, String>,
+) -> Option<SecurityUrlShape> {
+    match unwrap_static_expr(&bin.left) {
+        Expression::StringLiteral(lit) => Some(classify_url_prefix(lit.value.as_str())),
+        Expression::TemplateLiteral(tpl) if tpl.expressions.is_empty() => tpl
+            .quasis
+            .first()
+            .map(|quasi| classify_url_prefix(quasi.value.raw.as_ref())),
+        Expression::Identifier(ident) => Some(
+            static_string_bindings
+                .get(ident.name.as_str())
+                .map_or(SecurityUrlShape::DynamicOrigin, |value| {
+                    classify_url_prefix(value)
+                }),
+        ),
+        Expression::BinaryExpression(left) if left.operator == BinaryOperator::Addition => {
+            classify_concat_url_shape(left, static_string_bindings)
+        }
+        _ => Some(SecurityUrlShape::DynamicOrigin),
+    }
+}
+
+fn classify_url_prefix(prefix: &str) -> SecurityUrlShape {
+    if has_fixed_url_origin_or_root(prefix) {
+        SecurityUrlShape::FixedOriginDynamicPath
+    } else {
+        SecurityUrlShape::DynamicOrigin
+    }
+}
+
+fn has_fixed_url_origin_or_root(prefix: &str) -> bool {
+    let trimmed = prefix.trim_start();
+    trimmed.starts_with('/')
+        || trimmed.find("://").is_some_and(|scheme_end| {
+            scheme_end > 0
+                && !trimmed[scheme_end + 3..]
+                    .split(['/', '?', '#'])
+                    .next()
+                    .unwrap_or_default()
+                    .is_empty()
+        })
+}
+
 fn sink_literal_value(expr: &Expression<'_>) -> Option<SinkLiteralValue> {
     match unwrap_static_expr(expr) {
         Expression::StringLiteral(lit) => Some(SinkLiteralValue::String(lit.value.to_string())),
@@ -5688,6 +5777,7 @@ impl ModuleInfoExtractor {
             span_start: expr.span.start,
             span_end: expr.span.end,
             url_arg_literal: None,
+            url_shape: None,
         });
     }
 
@@ -5935,6 +6025,11 @@ impl ModuleInfoExtractor {
                 span_start: expr.span.start,
                 span_end: expr.span.end,
                 url_arg_literal: url_arg_literal.clone(),
+                url_shape: if arg_is_non_literal {
+                    classify_url_shape(arg_expr, &self.static_string_bindings)
+                } else {
+                    None
+                },
             });
         }
         if should_capture_missing_jwt_verify_options(&callee_path, sink_shape, expr.arguments.len())
@@ -5955,6 +6050,7 @@ impl ModuleInfoExtractor {
                 span_start: expr.span.start,
                 span_end: expr.span.end,
                 url_arg_literal: None,
+                url_shape: None,
             });
         }
     }
@@ -6026,6 +6122,11 @@ impl ModuleInfoExtractor {
                 span_start: expr.span.start,
                 span_end: expr.span.end,
                 url_arg_literal: None,
+                url_shape: if arg_is_non_literal {
+                    classify_url_shape(arg_expr, &self.static_string_bindings)
+                } else {
+                    None
+                },
             });
         }
     }
@@ -6056,6 +6157,7 @@ impl ModuleInfoExtractor {
             span_start: span.start,
             span_end: span.end,
             url_arg_literal: None,
+            url_shape: None,
         });
     }
 
@@ -6087,6 +6189,7 @@ impl ModuleInfoExtractor {
             span_start: span.start,
             span_end: span.end,
             url_arg_literal: None,
+            url_shape: None,
         });
     }
 
@@ -6148,6 +6251,11 @@ impl ModuleInfoExtractor {
             span_start: expr.span.start,
             span_end: expr.span.end,
             url_arg_literal: None,
+            url_shape: if arg_is_non_literal {
+                classify_url_shape(&expr.right, &self.static_string_bindings)
+            } else {
+                None
+            },
         });
     }
 
@@ -6184,6 +6292,7 @@ impl ModuleInfoExtractor {
             span_start: expr.span.start,
             span_end: expr.span.end,
             url_arg_literal: None,
+            url_shape: None,
         });
     }
 
@@ -6222,6 +6331,7 @@ impl ModuleInfoExtractor {
             span_start: attr.span.start,
             span_end: attr.span.end,
             url_arg_literal: None,
+            url_shape: None,
         });
     }
 
