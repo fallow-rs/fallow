@@ -6,6 +6,43 @@ use fallow_core::git_env::clear_ambient_git_env;
 
 use crate::validate;
 
+const AGENTS_GUIDE_FILENAME: &str = "AGENTS.md";
+const AGENTS_GUIDE_TEMPLATE: &str = r"# AGENTS.md
+
+This file gives coding agents project-specific context. Keep it short and update it when workflows change.
+
+## Project Overview
+
+- Primary app or package:
+- Main entry points:
+- Important directories:
+
+## Architecture Notes
+
+- Module boundaries:
+- Generated or vendored code:
+- Sensitive areas:
+
+## Commands
+
+- Install:
+- Build:
+- Test:
+- Typecheck or lint:
+
+## Fallow
+
+- Use `fallow audit --format json --quiet` before committing AI-generated changes.
+- Use `fallow dead-code --format json --quiet`, `fallow dupes --format json --quiet`, and `fallow health --format json --quiet` for targeted checks.
+- Use `fallow list --entry-points --format json --quiet` and `fallow list --boundaries --format json --quiet` to inspect project shape.
+
+## Agent Rules
+
+- Do not edit:
+- Always ask before:
+- Preferred style:
+";
+
 /// Detected project characteristics used to tailor config scaffolding.
 pub struct ProjectInfo {
     pub is_monorepo: bool,
@@ -311,6 +348,7 @@ fn print_detection_summary(info: &ProjectInfo) {
 pub struct InitOptions<'a> {
     pub root: &'a Path,
     pub use_toml: bool,
+    pub agents: bool,
     pub hooks: bool,
     pub branch: Option<&'a str>,
 }
@@ -331,6 +369,9 @@ pub struct GitHooksUninstallOptions<'a> {
 }
 
 pub fn run_init(opts: &InitOptions<'_>) -> ExitCode {
+    if opts.agents {
+        return run_init_agents(opts.root);
+    }
     if opts.hooks {
         return run_git_hooks_install(&GitHooksInstallOptions {
             root: opts.root,
@@ -380,6 +421,22 @@ fn run_init_config(root: &Path, use_toml: bool) -> ExitCode {
     print_detection_summary(&info);
     ensure_gitignore(root);
 
+    ExitCode::SUCCESS
+}
+
+fn run_init_agents(root: &Path) -> ExitCode {
+    let agents_path = root.join(AGENTS_GUIDE_FILENAME);
+    if agents_path.exists() {
+        eprintln!("{AGENTS_GUIDE_FILENAME} already exists");
+        return ExitCode::from(2);
+    }
+
+    if let Err(e) = std::fs::write(&agents_path, AGENTS_GUIDE_TEMPLATE) {
+        eprintln!("Error: Failed to write {AGENTS_GUIDE_FILENAME}: {e}");
+        return ExitCode::from(2);
+    }
+
+    eprintln!("Created {AGENTS_GUIDE_FILENAME}");
     ExitCode::SUCCESS
 }
 
@@ -731,6 +788,17 @@ mod tests {
         InitOptions {
             root,
             use_toml,
+            agents: false,
+            hooks: false,
+            branch: None,
+        }
+    }
+
+    fn agents_opts(root: &Path) -> InitOptions<'_> {
+        InitOptions {
+            root,
+            use_toml: false,
+            agents: true,
             hooks: false,
             branch: None,
         }
@@ -740,6 +808,7 @@ mod tests {
         InitOptions {
             root,
             use_toml: false,
+            agents: false,
             hooks: true,
             branch,
         }
@@ -866,6 +935,41 @@ mod tests {
         std::fs::write(root.join(".fallowrc.json"), "{}").unwrap();
         assert_eq!(run_init(&config_opts(root, false)), ExitCode::from(2));
         assert_eq!(run_init(&config_opts(root, true)), ExitCode::from(2));
+    }
+
+    #[test]
+    fn init_agents_creates_agents_guide() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let exit = run_init(&agents_opts(root));
+        assert_eq!(exit, ExitCode::SUCCESS);
+        let path = root.join("AGENTS.md");
+        assert!(path.exists());
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("# AGENTS.md"));
+        assert!(content.contains("Project Overview"));
+        assert!(content.contains("fallow audit --format json --quiet"));
+        assert!(!root.join(".fallowrc.json").exists());
+        assert!(!root.join("fallow.toml").exists());
+    }
+
+    #[test]
+    fn init_agents_refuses_to_overwrite_existing_guide() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("AGENTS.md"), "# Existing guide\n").unwrap();
+        let exit = run_init(&agents_opts(root));
+        assert_eq!(exit, ExitCode::from(2));
+        let content = std::fs::read_to_string(root.join("AGENTS.md")).unwrap();
+        assert_eq!(content, "# Existing guide\n");
+    }
+
+    #[test]
+    fn init_agents_template_is_not_a_readiness_score() {
+        let template = AGENTS_GUIDE_TEMPLATE.to_lowercase();
+        assert!(!template.contains("readiness"));
+        assert!(!template.contains("score"));
+        assert!(!template.contains("grade"));
     }
 
     #[test]

@@ -546,8 +546,8 @@ enum Command {
         no_create_config: bool,
     },
 
-    /// Initialize a .fallowrc.json configuration file (optionally a git
-    /// pre-commit hook). Use `.fallowrc.jsonc` for editor-native JSON-with-comments
+    /// Initialize a .fallowrc.json configuration file, AGENTS.md guide, or git
+    /// pre-commit hook. Use `.fallowrc.jsonc` for editor-native JSON-with-comments
     /// support; both extensions are auto-discovered.
     ///
     /// `--hooks` scaffolds a shell-level Git pre-commit hook under
@@ -558,6 +558,10 @@ enum Command {
         /// Generate TOML instead of JSONC
         #[arg(long)]
         toml: bool,
+
+        /// Scaffold a starter AGENTS.md guidance file for coding agents
+        #[arg(long, conflicts_with_all = ["toml", "hooks", "branch"])]
+        agents: bool,
 
         /// Scaffold a shell-level pre-commit git hook in `.git/hooks/` that
         /// runs fallow on changed files. Alias for
@@ -3105,11 +3109,13 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
         ),
         Command::Init {
             toml,
+            agents,
             hooks,
             branch,
         } => init::run_init(&init::InitOptions {
             root,
             use_toml: toml,
+            agents,
             hooks,
             branch: branch.as_deref(),
         }),

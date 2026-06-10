@@ -186,6 +186,8 @@ Agents can ask:
 
 Fallow exposes this through JSON output, typed output contracts (`import type { CheckOutput } from "fallow/types"`), the MCP server, and the LSP. Every issue in `--format json` carries a machine-actionable `actions` array with an `auto_fixable` flag so agents can self-correct.
 
+Run `fallow init --agents` to scaffold a starter `AGENTS.md` for project-specific navigation, command, architecture, and safety guidance. The file is guidance for agents, not a readiness score, and fallow will not overwrite an existing guide.
+
 Common agent workflow:
 
 1. generate or edit code
@@ -770,7 +772,7 @@ directory into its own zone while rules still reference the logical parent:
 
 When an `autoDiscover` zone also has `patterns`, discovered child zones are matched first and top-level files fall back to the parent zone. The parent rule automatically allows its discovered children, so `src/features/index.ts` barrels can re-export feature modules while non-barrel top-level files such as `src/features/types.ts` still follow the parent `features` rule. Omit `patterns` when you want only discovered child directories classified.
 
-Run `fallow list --boundaries` to inspect the expanded rules. TOML also supported (`fallow init --toml`). The init command auto-detects your project structure (monorepo layout, frameworks, existing config) and generates a tailored config. It also adds `.fallow/` to your `.gitignore` (cache and local data). Scaffold a pre-commit `fallow audit` hook with `fallow hooks install --target git`; the hook uses the current branch upstream as its base and falls back to `--branch` (or the detected default branch) when no upstream is set. For agent gates, use `fallow hooks install --target agent`. Migrating from knip or jscpd? Run `fallow migrate`.
+Run `fallow list --boundaries` to inspect the expanded rules. TOML also supported (`fallow init --toml`). The init command auto-detects your project structure (monorepo layout, frameworks, existing config) and generates a tailored config. It also adds `.fallow/` to your `.gitignore` (cache and local data). Use `fallow init --agents` to scaffold a starter `AGENTS.md` with project-specific guidance for coding agents. Scaffold a pre-commit `fallow audit` hook with `fallow hooks install --target git`; the hook uses the current branch upstream as its base and falls back to `--branch` (or the detected default branch) when no upstream is set. For agent gates, use `fallow hooks install --target agent`. Migrating from knip or jscpd? Run `fallow migrate`.
 
 Use `ignoreUnresolvedImports` for generated or runtime-provided import specifiers that fallow cannot resolve. Patterns match the raw import string, not a filesystem path: list both `@example/icons` and `@example/icons/**` when you need the bare package and its subpaths. Parent-relative generated specifiers such as `../generated/**` are allowed. Keep patterns narrow, since broad values like `**` can hide real missing modules. This setting affects only `unresolved-import` findings; it does not change dependency usage or resolver behavior.
 
