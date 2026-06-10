@@ -76,6 +76,7 @@ pub fn apply_rules(results: &mut fallow_core::results::AnalysisResults, config: 
                 config.resolve_rules_for_path(path).circular_dependencies != Severity::Off
             })
         });
+        apply_boundary_override_rules(results, config);
     } else {
         if rules.unused_files == Severity::Off {
             results.unused_files.clear();
@@ -149,6 +150,24 @@ pub fn apply_rules(results: &mut fallow_core::results::AnalysisResults, config: 
     if rules.misconfigured_dependency_overrides == Severity::Off {
         results.misconfigured_dependency_overrides.clear();
     }
+}
+
+fn apply_boundary_override_rules(
+    results: &mut fallow_core::results::AnalysisResults,
+    config: &ResolvedConfig,
+) {
+    results.boundary_violations.retain(|v| {
+        config
+            .resolve_rules_for_path(&v.violation.from_path)
+            .boundary_violation
+            != Severity::Off
+    });
+    results.boundary_coverage_violations.retain(|v| {
+        config
+            .resolve_rules_for_path(&v.violation.path)
+            .boundary_violation
+            != Severity::Off
+    });
 }
 
 /// Check whether any issue type with `Severity::Error` has remaining issues.
@@ -250,8 +269,11 @@ pub fn has_error_severity_issues(
             && rules.circular_dependencies == Severity::Error
             && !results.circular_dependencies.is_empty())
         || (rules.re_export_cycle == Severity::Error && !results.re_export_cycles.is_empty())
-        || (rules.boundary_violation == Severity::Error && !results.boundary_violations.is_empty())
-        || (rules.boundary_violation == Severity::Error
+        || (!has_overrides
+            && rules.boundary_violation == Severity::Error
+            && !results.boundary_violations.is_empty())
+        || (!has_overrides
+            && rules.boundary_violation == Severity::Error
             && !results.boundary_coverage_violations.is_empty())
         || (rules.unused_catalog_entries == Severity::Error
             && !results.unused_catalog_entries.is_empty())
@@ -846,6 +868,59 @@ mod tests {
         )
     }
 
+    fn config_with_boundary_override(pattern: &str, severity: Severity) -> ResolvedConfig {
+        fallow_config::FallowConfig {
+            schema: None,
+            extends: vec![],
+            entry: vec![],
+            ignore_patterns: vec![],
+            framework: vec![],
+            workspaces: None,
+            ignore_dependencies: vec![],
+            ignore_unresolved_imports: vec![],
+            ignore_exports: vec![],
+            ignore_catalog_references: vec![],
+            ignore_dependency_overrides: vec![],
+            ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+            used_class_members: vec![],
+            ignore_decorators: vec![],
+            duplicates: fallow_config::DuplicatesConfig::default(),
+            health: fallow_config::HealthConfig::default(),
+            rules: RulesConfig::default(),
+            boundaries: fallow_config::BoundaryConfig::default(),
+            production: false.into(),
+            plugins: vec![],
+            dynamically_loaded: vec![],
+            regression: None,
+            audit: fallow_config::AuditConfig::default(),
+            codeowners: None,
+            public_packages: vec![],
+            flags: fallow_config::FlagsConfig::default(),
+            security: fallow_config::SecurityConfig::default(),
+            fix: fallow_config::FixConfig::default(),
+            resolve: fallow_config::ResolveConfig::default(),
+            sealed: false,
+            include_entry_exports: false,
+            auto_imports: false,
+            cache: fallow_config::CacheConfig::default(),
+            overrides: vec![fallow_config::ConfigOverride {
+                files: vec![pattern.to_string()],
+                rules: fallow_config::PartialRulesConfig {
+                    boundary_violation: Some(severity),
+                    ..Default::default()
+                },
+            }],
+        }
+        .resolve(
+            PathBuf::from("/project"),
+            fallow_config::OutputFormat::Human,
+            1,
+            true,
+            true,
+            None,
+        )
+    }
+
     fn circular_dependency(files: &[&str]) -> CircularDependencyFinding {
         CircularDependencyFinding::with_actions(CircularDependency {
             files: files.iter().map(PathBuf::from).collect(),
@@ -854,6 +929,26 @@ mod tests {
             col: 0,
             edges: Vec::new(),
             is_cross_package: false,
+        })
+    }
+
+    fn boundary_violation(path: &str) -> BoundaryViolationFinding {
+        BoundaryViolationFinding::with_actions(BoundaryViolation {
+            from_path: PathBuf::from(path),
+            to_path: PathBuf::from("/project/src/db/query.ts"),
+            from_zone: "ui".to_string(),
+            to_zone: "db".to_string(),
+            import_specifier: "../db/query".to_string(),
+            line: 1,
+            col: 0,
+        })
+    }
+
+    fn boundary_coverage_violation(path: &str) -> BoundaryCoverageViolationFinding {
+        BoundaryCoverageViolationFinding::with_actions(BoundaryCoverageViolation {
+            path: PathBuf::from(path),
+            line: 1,
+            col: 0,
         })
     }
 
@@ -931,6 +1026,40 @@ mod tests {
         apply_rules(&mut results, &config);
 
         assert_eq!(results.circular_dependencies.len(), 1);
+    }
+
+    #[test]
+    fn apply_rules_with_override_filters_boundary_findings() {
+        let mut results = AnalysisResults::default();
+        results
+            .boundary_violations
+            .push(boundary_violation("/project/src/generated/a.ts"));
+        results
+            .boundary_coverage_violations
+            .push(boundary_coverage_violation("/project/src/generated/a.ts"));
+
+        let config = config_with_boundary_override("src/generated/**", Severity::Off);
+        apply_rules(&mut results, &config);
+
+        assert!(results.boundary_violations.is_empty());
+        assert!(results.boundary_coverage_violations.is_empty());
+    }
+
+    #[test]
+    fn apply_rules_with_override_preserves_unmatched_boundary_findings() {
+        let mut results = AnalysisResults::default();
+        results
+            .boundary_violations
+            .push(boundary_violation("/project/src/live/a.ts"));
+        results
+            .boundary_coverage_violations
+            .push(boundary_coverage_violation("/project/src/live/a.ts"));
+
+        let config = config_with_boundary_override("src/generated/**", Severity::Off);
+        apply_rules(&mut results, &config);
+
+        assert_eq!(results.boundary_violations.len(), 1);
+        assert_eq!(results.boundary_coverage_violations.len(), 1);
     }
 
     #[test]
@@ -1012,6 +1141,25 @@ mod tests {
         assert!(
             has_error_severity_issues(&results, rules, Some(&config)),
             "a cycle touching any Error-severity file should still fail"
+        );
+    }
+
+    #[test]
+    fn has_error_with_override_boundary_findings_use_file_severity() {
+        let mut results = AnalysisResults::default();
+        results
+            .boundary_violations
+            .push(boundary_violation("/project/src/generated/a.ts"));
+        results
+            .boundary_coverage_violations
+            .push(boundary_coverage_violation("/project/src/generated/a.ts"));
+
+        let config = config_with_boundary_override("src/generated/**", Severity::Warn);
+        let rules = &config.rules;
+
+        assert!(
+            !has_error_severity_issues(&results, rules, Some(&config)),
+            "boundary findings downgraded to Warn should not produce an Error verdict"
         );
     }
 

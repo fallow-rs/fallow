@@ -1131,7 +1131,8 @@ fn build_structure_section(
     let has_structure = !results.duplicate_exports.is_empty()
         || !results.circular_dependencies.is_empty()
         || !results.re_export_cycles.is_empty()
-        || !results.boundary_violations.is_empty();
+        || !results.boundary_violations.is_empty()
+        || !results.boundary_coverage_violations.is_empty();
     if !has_structure {
         return;
     }
@@ -2285,6 +2286,28 @@ mod tests {
         let lines = build_human_lines(&results, &root, &rules, None);
         let text = plain(&lines);
         assert!(text.contains("Unused files (5)"));
+    }
+
+    #[test]
+    fn boundary_coverage_alone_renders_structure_section() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .boundary_coverage_violations
+            .push(BoundaryCoverageViolationFinding::with_actions(
+                BoundaryCoverageViolation {
+                    path: root.join("src/middleware/error.ts"),
+                    line: 1,
+                    col: 0,
+                },
+            ));
+
+        let lines = build_human_lines(&results, &root, &RulesConfig::default(), None);
+        let text = plain(&lines);
+
+        assert!(text.contains("Structure"));
+        assert!(text.contains("Boundary coverage (1)"));
+        assert!(text.contains("src/middleware/error.ts:1"));
     }
 
     #[test]

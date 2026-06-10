@@ -272,6 +272,10 @@ pub fn strip_root_prefix(value: &mut serde_json::Value, prefix: &str) {
                 let normalized_prefix = normalize_uri(prefix);
                 if let Some(rest) = normalized.strip_prefix(&normalized_prefix) {
                     *s = rest.to_string();
+                } else if let Some(stripped) =
+                    strip_embedded_root_prefixes(&normalized, &normalized_prefix)
+                {
+                    *s = stripped;
                 }
             }
         }
@@ -287,6 +291,41 @@ pub fn strip_root_prefix(value: &mut serde_json::Value, prefix: &str) {
         }
         _ => {}
     }
+}
+
+fn strip_embedded_root_prefixes(value: &str, prefix: &str) -> Option<String> {
+    let mut output = String::with_capacity(value.len());
+    let mut changed = false;
+    let mut last = 0;
+    let mut search_from = 0;
+
+    while let Some(offset) = value[search_from..].find(prefix) {
+        let index = search_from + offset;
+        let can_strip = index > 0
+            && value[..index]
+                .chars()
+                .next_back()
+                .is_some_and(is_embedded_path_boundary);
+
+        if can_strip {
+            output.push_str(&value[last..index]);
+            last = index + prefix.len();
+            changed = true;
+        }
+
+        search_from = index + prefix.len();
+    }
+
+    if changed {
+        output.push_str(&value[last..]);
+        Some(output)
+    } else {
+        None
+    }
+}
+
+fn is_embedded_path_boundary(c: char) -> bool {
+    c.is_whitespace() || matches!(c, '"' | '\'' | '`' | '(' | '[' | '{' | ':' | '=')
 }
 
 type SuppressAnchor = (String, u64);
@@ -1662,6 +1701,17 @@ mod tests {
     }
 
     #[test]
+    fn strip_root_prefix_rewrites_embedded_path_strings() {
+        let mut value =
+            serde_json::json!("Add \"/project/src/file.ts\" to boundaries.coverage.allowUnmatched");
+        strip_root_prefix(&mut value, "/project/");
+        assert_eq!(
+            value,
+            "Add \"src/file.ts\" to boundaries.coverage.allowUnmatched"
+        );
+    }
+
+    #[test]
     fn strip_root_prefix_handles_empty_string_after_strip() {
         let mut value = serde_json::json!("/project/");
         strip_root_prefix(&mut value, "/project/");
@@ -1919,6 +1969,34 @@ mod tests {
         assert_eq!(
             actions[1]["comment"],
             "// fallow-ignore-next-line unused-export"
+        );
+    }
+
+    #[test]
+    fn json_boundary_coverage_action_descriptions_use_relative_paths() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .boundary_coverage_violations
+            .push(BoundaryCoverageViolationFinding::with_actions(
+                BoundaryCoverageViolation {
+                    path: root.join("src/middleware/error.ts"),
+                    line: 1,
+                    col: 0,
+                },
+            ));
+
+        let output = build_json(&results, &root, Duration::ZERO).unwrap();
+        let action = &output["boundary_coverage_violations"][0]["actions"][1];
+
+        assert_eq!(
+            output["boundary_coverage_violations"][0]["path"],
+            "src/middleware/error.ts"
+        );
+        assert_eq!(action["value"], "src/middleware/error.ts");
+        assert_eq!(
+            action["description"],
+            "Add \"src/middleware/error.ts\" to boundaries.coverage.allowUnmatched in fallow config"
         );
     }
 
