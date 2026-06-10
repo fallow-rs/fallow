@@ -524,6 +524,45 @@ ISSUES=$(grep '^issues=' "$ANALYZE_TMP/output" | cut -d= -f2)
 [ "$GATE" = "new-only" ] && pass "analyze: emits gate to GITHUB_OUTPUT for audit" || fail "analyze: gate output" "expected new-only, got '$GATE'"
 [ "$ISSUES" = "1" ] && pass "analyze: still emits issues count for audit" || fail "analyze: issues output" "expected 1, got '$ISSUES'"
 
+cat > "$ANALYZE_TMP/bin/fallow" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *"security"*"--gate newly-reachable"*)
+    printf '%s\n' '{"kind":"security","gate":{"mode":"newly-reachable","verdict":"fail","new_count":2},"summary":{"security_findings":5},"security_findings":[]}'
+    ;;
+  *"security"*)
+    printf '%s\n' '{"kind":"security","summary":{"security_findings":3},"security_findings":[]}'
+    ;;
+  *) printf '{"total_issues":0}\n' ;;
+esac
+SH
+chmod +x "$ANALYZE_TMP/bin/fallow"
+
+cd "$ANALYZE_TMP/work" && rm -f "$ANALYZE_TMP/output"
+OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
+  INPUT_ROOT="." INPUT_COMMAND="security" INPUT_FORMAT="json" INPUT_SECURITY_GATE="newly-reachable" \
+  bash "$DIR/../scripts/analyze.sh" 2>&1) || true
+cd "$DIR"
+GATE=$(grep '^gate=' "$ANALYZE_TMP/output" | cut -d= -f2)
+ISSUES=$(grep '^issues=' "$ANALYZE_TMP/output" | cut -d= -f2)
+ARGS=$(cat "$ANALYZE_TMP/work/fallow-analysis-args.sh")
+[ "$GATE" = "newly-reachable" ] && pass "analyze: emits gate to GITHUB_OUTPUT for security" || fail "analyze: security gate output" "expected newly-reachable, got '$GATE'"
+[ "$ISSUES" = "2" ] && pass "analyze: security gate uses new_count for issues" || fail "analyze: security gate issues" "expected 2, got '$ISSUES'"
+assert_contains "$ARGS" "--gate newly-reachable" "analyze: forwards security-gate to fallow"
+
+cd "$ANALYZE_TMP/work" && rm -f "$ANALYZE_TMP/output"
+OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
+  INPUT_ROOT="." INPUT_COMMAND="security" INPUT_FORMAT="json" INPUT_SECURITY_GATE="all" \
+  bash "$DIR/../scripts/analyze.sh" 2>&1)
+cmd_status=$?
+cd "$DIR"
+if [ "$cmd_status" -eq 2 ]; then
+  pass "analyze: rejects invalid security-gate"
+else
+  fail "analyze: rejects invalid security-gate" "expected exit 2, got $cmd_status"
+fi
+assert_contains "$OUT" "security-gate must be 'new' or 'newly-reachable'" "analyze: invalid security-gate error is clear"
+
 # Non-audit commands must NOT emit verdict / gate (empty values are fine).
 cat > "$ANALYZE_TMP/bin/fallow" <<'SH'
 #!/usr/bin/env bash
@@ -669,6 +708,24 @@ assert_not_contains "$OUT_CLEAN" "WARNING" "clean: no warning"
 OUT_UNKNOWN_KIND_SUMMARY=$(jq '.unused_files = [] | .unused_exports = [] | .unused_types = [] | .unused_dependencies = [] | .unused_dev_dependencies = [] | .unused_optional_dependencies = [] | .unused_enum_members = [] | .unused_class_members = [] | .unresolved_imports = [] | .unlisted_dependencies = [] | .duplicate_exports = [] | .circular_dependencies = [] | .boundary_violations = [] | .type_only_dependencies = [] | .test_only_dependencies = [] | .unused_catalog_entries = [] | .empty_catalog_groups = [] | .unresolved_catalog_references = [] | .unused_dependency_overrides = [] | .misconfigured_dependency_overrides = [] | .private_type_leaks = [] | .stale_suppressions = [{"path": "src/utils.ts", "line": 1, "col": 0, "origin": {"type": "comment", "issue_kind": "complexity-typo", "is_file_level": false, "kind_known": false}}] | .total_issues = 1' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/summary-check.jq" 2>&1)
 assert_contains "$OUT_UNKNOWN_KIND_SUMMARY" 'unknown kind' "summary unknown kind: prefix renders"
 assert_contains "$OUT_UNKNOWN_KIND_SUMMARY" 'complexity-typo' "summary unknown kind: verbatim token renders"
+
+echo "  summary-security.jq:"
+OUT=$(jq -n '{
+  kind: "security",
+  elapsed_ms: 12,
+  gate: {mode: "new", verdict: "fail", new_count: 1},
+  security_findings: [{
+    path: "src/api.ts",
+    line: 10,
+    kind: "tainted-sink",
+    severity: "high",
+    candidate: {sink: {callee: "exec"}}
+  }]
+}' | jq -r -f "$JQ_DIR/summary-security.jq" 2>&1)
+assert_valid_markdown "$OUT" "produces output"
+assert_contains "$OUT" "Fallow Security" "security: has title"
+assert_contains "$OUT" "Security gate: \`new\`" "security: shows gate"
+assert_contains "$OUT" "src/api.ts:10" "security: lists candidate location"
 
 echo "  summary-fix.jq:"
 OUT=$(jq -r -f "$JQ_DIR/summary-fix.jq" "$FIXTURES/fix.json" 2>&1)

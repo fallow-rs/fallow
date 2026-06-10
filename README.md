@@ -488,6 +488,13 @@ steps:
       command: audit
       sarif: true
 
+# Security delta gate
+- uses: fallow-rs/fallow@v2
+  with:
+    command: security
+    changed-since: ${{ github.event.pull_request.base.sha }}
+    security-gate: new           # or newly-reachable
+
 # Health score, trend, hotspots, and refactor targets
 - uses: fallow-rs/fallow@v2
   with:
@@ -531,7 +538,7 @@ Action outputs include:
 
 - `issues` -- command-specific issue count; for audit, this is gate-aware
 - `verdict` -- audit verdict (`pass`, `warn`, `fail`)
-- `gate` -- audit gate (`new-only` or `all`)
+- `gate` -- audit gate (`new-only` or `all`) or security gate (`new` or `newly-reachable`)
 - `results` / `sarif` -- generated artifact paths
 - `changed-files-unavailable` -- `true` if PR file enumeration degraded and analysis ran less scoped than expected
 - `dedup-lookup-failed` / `post-skipped-reason` -- comment/review posting degradation signals
@@ -561,6 +568,8 @@ fallow:
     FALLOW_COVERAGE: "artifacts/coverage-final.json"
     FALLOW_COVERAGE_ROOT: "/home/runner/work/myapp"
 ```
+
+To gate only security candidates introduced by a merge request, use `FALLOW_COMMAND: "security"` and `FALLOW_SECURITY_GATE: "new"`. Use `newly-reachable` when an existing candidate becoming reachable from entry points should block review. Security gate failures exit 8, and the wrapper count reflects only the candidates that matched the selected gate.
 
 `FALLOW_COMMENT` and `FALLOW_REVIEW` require `GITLAB_TOKEN` with API scope. In MR pipelines, the template auto-sets `FALLOW_CHANGED_SINCE` from the MR diff base SHA when possible and derives `FALLOW_DIFF_FILE` for line-level filtering. For monorepos, set `FALLOW_CHANGED_WORKSPACES: "origin/main"` to scope analysis to touched workspaces. Set `FALLOW_SUMMARY_SCOPE=diff` when the sticky summary should hide pre-existing project-level findings outside the diff.
 
@@ -592,6 +601,9 @@ npx fallow audit --changed-since origin/main --diff-file fallow-pr.diff
 
 # Health score gate
 npx fallow health --score --min-score 80 --quiet
+
+# Security candidate gate
+npx fallow security --gate new --changed-since origin/main --format json --quiet
 ```
 
 Common CI flags:
@@ -601,6 +613,7 @@ Common CI flags:
 - `--changed-since main` -- analyze only files touched in a PR
 - `--diff-file <path>` / `--diff-stdin` -- filter source-anchored findings to added diff hunks, while project-level package findings bypass analysis line filtering. Sticky summary comments can use `FALLOW_SUMMARY_SCOPE=diff` to filter project-level findings too
 - `--changed-workspaces origin/main` -- scope monorepo analysis to workspaces containing any changed file (CI primitive; fails hard on git errors so CI never silently widens back to the full repo)
+- `fallow security --gate new|newly-reachable` -- fail only on security candidates introduced by the change or newly reachable from entry points. The official Action exposes this as `security-gate`, and GitLab exposes it as `FALLOW_SECURITY_GATE`
 - `--baseline` / `--save-baseline` -- fail only on **new** issues for individual analyses; audit uses the per-analysis baselines shown above
 - `--fail-on-regression` / `--tolerance 2%` -- fail only if issues **grew** beyond tolerance
 - `--format sarif` -- upload to GitHub Code Scanning

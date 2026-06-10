@@ -8,7 +8,7 @@ branding:
 
 inputs:
   command:
-    description: 'Command to run: dead-code (unused code), dupes (code duplication), health (complexity), audit (changed-file quality gate), fix (auto-remove unused code). Default runs all analyses. Legacy alias: check = dead-code.'
+    description: 'Command to run: dead-code (unused code), dupes (code duplication), health (complexity), audit (changed-file quality gate), security (security candidates), fix (auto-remove unused code). Default runs all analyses. Legacy alias: check = dead-code.'
     required: false
     default: ''
   root:
@@ -237,6 +237,9 @@ inputs:
   gate:
     description: 'Audit verdict gate: new-only (default) fails only introduced findings, all fails on every finding in changed files.'
     required: false
+  security-gate:
+    description: 'Security regression gate: new fails on candidates introduced on changed lines, newly-reachable fails on existing candidates that became reachable from entry points.'
+    required: false
   dead-code-baseline:
     description: 'Path to a dead-code baseline for the audit command.'
     required: false
@@ -290,13 +293,13 @@ outputs:
     description: 'Path to SARIF results file'
     value: ${{ steps.analyze.outputs.sarif }}
   issues:
-    description: 'Number of issues (dead-code), clone groups (dupes), introduced findings counted by the audit verdict (audit), or fixes proposed/applied (fix). Audit count is gate-aware: with `gate: new-only` (default) it sums attribution.*_introduced; with `gate: all` it sums summary.* totals. For audit, prefer `outputs.verdict` for severity-aware gating.'
+    description: 'Number of issues (dead-code), clone groups (dupes), security candidates (security), introduced findings counted by the audit verdict (audit), or fixes proposed/applied (fix). Audit count is gate-aware: with `gate: new-only` (default) it sums attribution.*_introduced; with `gate: all` it sums summary.* totals. Security count is gate-aware when `security-gate` is set. For audit, prefer `outputs.verdict` for severity-aware gating.'
     value: ${{ steps.analyze.outputs.issues }}
   verdict:
     description: 'Audit verdict (pass/warn/fail). Empty when command is not audit. The threshold step gates on this for audit so warn-tier findings do not fail CI.'
     value: ${{ steps.analyze.outputs.verdict }}
   gate:
-    description: 'Audit gate that was applied (new-only/all). Empty when command is not audit.'
+    description: 'Audit gate (new-only/all) or security gate (new/newly-reachable) that was applied. Empty when no gate ran.'
     value: ${{ steps.analyze.outputs.gate }}
   changed-files-unavailable:
     description: 'true when the analyze step could not enumerate PR-changed files (transient GitHub API failure, expired token, missing permissions); false on the happy path. Always emitted, regardless of whether changed-since was requested. Gate on this in downstream workflow steps to detect when analysis ran unscoped vs scoped.'
@@ -383,6 +386,7 @@ runs:
         INPUT_ISSUE_TYPES: ${{ inputs.issue-types }}
         INPUT_INCLUDE_ENTRY_EXPORTS: ${{ inputs.include-entry-exports }}
         INPUT_GATE: ${{ inputs.gate }}
+        INPUT_SECURITY_GATE: ${{ inputs.security-gate }}
         INPUT_DEAD_CODE_BASELINE: ${{ inputs.dead-code-baseline }}
         INPUT_HEALTH_BASELINE: ${{ inputs.health-baseline }}
         INPUT_DUPES_BASELINE: ${{ inputs.dupes-baseline }}
@@ -420,6 +424,7 @@ runs:
         inputs.annotations == 'true' &&
         inputs.review-comments != 'true' &&
         inputs.command != 'fix' &&
+        inputs.command != 'security' &&
         steps.analyze.outputs.issues != '' &&
         steps.analyze.outputs.issues != '0'
       shell: bash
@@ -462,6 +467,7 @@ runs:
       if: >-
         inputs.comment == 'true' &&
         github.event_name == 'pull_request' &&
+        inputs.command != 'security' &&
         always() &&
         steps.analyze.outputs.issues != ''
       shell: bash
@@ -490,6 +496,7 @@ runs:
         inputs.review-comments == 'true' &&
         github.event_name == 'pull_request' &&
         inputs.command != 'fix' &&
+        inputs.command != 'security' &&
         always() &&
         steps.analyze.outputs.issues != ''
       shell: bash
@@ -518,6 +525,7 @@ runs:
         INPUT_COMMAND: ${{ inputs.command }}
         INPUT_FAIL_ON_ISSUES: ${{ inputs.fail-on-issues }}
         INPUT_GATE: ${{ inputs.gate }}
+        INPUT_SECURITY_GATE: ${{ inputs.security-gate }}
         ISSUES: ${{ steps.analyze.outputs.issues }}
         VERDICT: ${{ steps.analyze.outputs.verdict }}
       run: |
@@ -538,6 +546,13 @@ runs:
             dead-code|check) echo "::error::Fallow found ${ISSUES} unused code issues" ;;
             dupes)           echo "::error::Fallow found ${ISSUES} clone groups" ;;
             health)          echo "::error::Fallow found ${ISSUES} health findings" ;;
+            security)
+              if [ -n "$INPUT_SECURITY_GATE" ]; then
+                echo "::error::Fallow security gate failed (gate: ${INPUT_SECURITY_GATE}, ${ISSUES} candidate(s))"
+                exit 8
+              fi
+              echo "::error::Fallow found ${ISSUES} security candidates"
+              ;;
             fix)             echo "::error::Fallow found ${ISSUES} fixable issues" ;;
             "")              echo "::error::Fallow found ${ISSUES} issues" ;;
           esac

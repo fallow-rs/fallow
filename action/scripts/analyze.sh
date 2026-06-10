@@ -17,7 +17,7 @@ set +e -o pipefail
 #   INPUT_TARGETS, INPUT_COMPLEXITY, INPUT_SINCE, INPUT_MIN_COMMITS,
 #   INPUT_COVERAGE, INPUT_PRODUCTION_COVERAGE, INPUT_COVERAGE_ROOT, INPUT_MIN_INVOCATIONS_HOT,
 #   INPUT_MIN_OBSERVATION_VOLUME, INPUT_LOW_TRAFFIC_THRESHOLD,
-#   INPUT_GATE, INPUT_DEAD_CODE_BASELINE, INPUT_HEALTH_BASELINE, INPUT_DUPES_BASELINE,
+#   INPUT_GATE, INPUT_SECURITY_GATE, INPUT_DEAD_CODE_BASELINE, INPUT_HEALTH_BASELINE, INPUT_DUPES_BASELINE,
 #   INPUT_SCORE, INPUT_SAVE_SNAPSHOT, INPUT_TREND, INPUT_ISSUE_TYPES, INPUT_NO_CACHE, INPUT_THREADS,
 #   INPUT_ONLY, INPUT_SKIP, INPUT_ARTIFACTS_DIR
 
@@ -202,6 +202,9 @@ build_command_args() {
       [ -n "${INPUT_GATE:-}" ] && ARGS+=(--gate "$INPUT_GATE")
       [ "${INPUT_INCLUDE_ENTRY_EXPORTS:-}" = "true" ] && ARGS+=(--include-entry-exports)
       ;;
+    security)
+      [ -n "${INPUT_SECURITY_GATE:-}" ] && ARGS+=(--gate "$INPUT_SECURITY_GATE")
+      ;;
     fix)
       if [ "${INPUT_DRY_RUN:-}" = "true" ]; then
         ARGS+=(--dry-run)
@@ -233,8 +236,8 @@ build_command_args() {
 # --- Validation ---
 
 case "$INPUT_COMMAND" in
-  ""|dead-code|check|dupes|health|audit|fix) ;;
-  *) echo "::error::Invalid command: ${INPUT_COMMAND}. Must be dead-code, dupes, health, audit, fix, or empty (runs all)."; exit 2 ;;
+  ""|dead-code|check|dupes|health|audit|security|fix) ;;
+  *) echo "::error::Invalid command: ${INPUT_COMMAND}. Must be dead-code, dupes, health, audit, security, fix, or empty (runs all)."; exit 2 ;;
 esac
 
 if [ "$INPUT_COMMAND" = "audit" ] && { [ -n "${INPUT_BASELINE:-}" ] || [ -n "${INPUT_SAVE_BASELINE:-}" ]; }; then
@@ -244,6 +247,9 @@ fi
 
 if [ -n "${INPUT_GATE:-}" ] && [ "$INPUT_GATE" != "new-only" ] && [ "$INPUT_GATE" != "all" ]; then
   echo "::error::gate must be 'new-only' or 'all', got: ${INPUT_GATE}"; exit 2
+fi
+if [ -n "${INPUT_SECURITY_GATE:-}" ] && [ "$INPUT_SECURITY_GATE" != "new" ] && [ "$INPUT_SECURITY_GATE" != "newly-reachable" ]; then
+  echo "::error::security-gate must be 'new' or 'newly-reachable', got: ${INPUT_SECURITY_GATE}"; exit 2
 fi
 
 for name_val in "min-tokens:${INPUT_MIN_TOKENS:-}" "min-lines:${INPUT_MIN_LINES:-}" \
@@ -563,6 +569,8 @@ GATE=""
 if [ "$INPUT_COMMAND" = "audit" ]; then
   VERDICT=$(jq -r '.verdict // ""' "$RESULTS_FILE")
   GATE=$(jq -r '.attribution.gate // ""' "$RESULTS_FILE")
+elif [ "$INPUT_COMMAND" = "security" ]; then
+  GATE=$(jq -r '.gate.mode // ""' "$RESULTS_FILE")
 fi
 
 case "$INPUT_COMMAND" in
@@ -570,6 +578,7 @@ case "$INPUT_COMMAND" in
   dupes)           ISSUES=$(jq -r '.stats.clone_groups' "$RESULTS_FILE") ;;
   health)          ISSUES=$(jq -r '((.summary.functions_above_threshold // 0) + ((.runtime_coverage.findings // []) | map(select(.verdict == "safe_to_delete" or .verdict == "review_required" or .verdict == "low_traffic")) | length))' "$RESULTS_FILE") ;;
   audit)           ISSUES=$(jq -r 'if (.attribution.gate // "new-only") == "all" then ((.summary.dead_code_issues // 0) + (.summary.complexity_findings // 0) + (.summary.duplication_clone_groups // 0)) else ((.attribution.dead_code_introduced // 0) + (.attribution.complexity_introduced // 0) + (.attribution.duplication_introduced // 0)) end' "$RESULTS_FILE") ;;
+  security)        ISSUES=$(jq -r 'if .gate then (.gate.new_count // 0) else (.summary.security_findings // ((.security_findings // []) | length)) end' "$RESULTS_FILE") ;;
   fix)             ISSUES=$(jq -r '(.fixes | length)' "$RESULTS_FILE") ;;
   "")              ISSUES=$(jq -r '((.check.total_issues // 0) + (.dupes.stats.clone_groups // 0) + (.health.summary.functions_above_threshold // 0) + ((.health.runtime_coverage.findings // []) | map(select(.verdict == "safe_to_delete" or .verdict == "review_required" or .verdict == "low_traffic")) | length))' "$RESULTS_FILE") ;;
 esac
@@ -595,6 +604,7 @@ if [ "$ISSUES" -gt 0 ]; then
     dupes)           echo "::warning::Fallow found ${ISSUES} clone groups" ;;
     health)          echo "::warning::Fallow found ${ISSUES} high complexity functions" ;;
     audit)           echo "::warning::Fallow audit found ${ISSUES} introduced issues in changed files" ;;
+    security)        echo "::warning::Fallow found ${ISSUES} security candidates" ;;
     fix)             echo "::warning::Fallow proposed ${ISSUES} fixes" ;;
     "")              echo "::warning::Fallow found ${ISSUES} issues" ;;
   esac

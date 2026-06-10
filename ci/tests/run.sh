@@ -295,6 +295,24 @@ else
     "asymmetric: action=$ACTION_HAS_VERDICT_EXTRACT, gitlab=$CI_HAS_VERDICT_EXTRACT"
 fi
 
+# Security gate support must stay symmetric across the official wrappers.
+assert_contains "$(cat "$ACTION_ANALYZE_SH")" 'INPUT_COMMAND" in' \
+  "parity: action validates commands"
+assert_contains "$(cat "$ACTION_ANALYZE_SH")" "security-gate must be 'new' or 'newly-reachable'" \
+  "parity: action validates security gate values"
+assert_contains "$(cat "$ACTION_ANALYZE_SH")" 'INPUT_SECURITY_GATE' \
+  "parity: action wires security gate input"
+assert_contains "$(cat "$CI_TEMPLATE_YAML")" 'FALLOW_COMMAND" in' \
+  "parity: gitlab validates commands"
+assert_contains "$(cat "$CI_TEMPLATE_YAML")" "FALLOW_SECURITY_GATE must be 'new' or 'newly-reachable'" \
+  "parity: gitlab validates security gate values"
+assert_contains "$(cat "$CI_TEMPLATE_YAML")" 'FALLOW_SECURITY_GATE' \
+  "parity: gitlab wires security gate variable"
+assert_contains "$(cat "$ACTION_ANALYZE_SH")" '.gate.new_count' \
+  "parity: action counts security gate new_count"
+assert_contains "$(cat "$CI_TEMPLATE_YAML")" '.gate.new_count' \
+  "parity: gitlab counts security gate new_count"
+
 # =========================================================================
 # GitLab-specific summary jq tests
 # =========================================================================
@@ -621,6 +639,7 @@ assert_contains "$(cat "$CI_YAML")" "FALLOW_MAX_COMMENTS" "has FALLOW_MAX_COMMEN
 assert_contains "$(cat "$CI_YAML")" "FALLOW_COMMENT" "has FALLOW_COMMENT variable"
 assert_contains "$(cat "$CI_YAML")" "FALLOW_SUMMARY_SCOPE" "has FALLOW_SUMMARY_SCOPE variable"
 assert_contains "$(cat "$CI_YAML")" "FALLOW_CODEQUALITY" "has FALLOW_CODEQUALITY variable"
+assert_contains "$(cat "$CI_YAML")" "FALLOW_SECURITY_GATE" "has FALLOW_SECURITY_GATE variable"
 assert_contains "$(cat "$CI_YAML")" "project_fallow_spec" "reads package.json fallow pin"
 assert_contains "$(cat "$CI_YAML")" "is_safe_version_spec" "validates fallow install spec"
 assert_contains "$(cat "$CI_YAML")" "FALLOW_INSTALL_DRY_RUN" "supports install dry-run testing"

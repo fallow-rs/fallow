@@ -31,7 +31,7 @@
 #   - Automatic cleanup of previous fallow comments on re-runs
 #   - Auto --changed-since in MR context (scopes to changed files)
 #   - Incremental caching of parse results
-#   - All fallow commands: dead-code, dupes, health, fix
+#   - All fallow commands: dead-code, dupes, health, audit, security, fix
 #   - Configurable failure thresholds
 #
 # Examples:
@@ -76,7 +76,7 @@ variables:
 
   # Core
   FALLOW_VERSION: ""             # Empty reads package.json fallow dependency, then falls back to latest
-  FALLOW_COMMAND: ""            # dead-code, dupes, health, audit, fix, or empty (runs all)
+  FALLOW_COMMAND: ""            # dead-code, dupes, health, audit, security, fix, or empty (runs all)
   FALLOW_ROOT: "."
   FALLOW_CONFIG: ""             # Path to .fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml
   FALLOW_PRODUCTION: ""                # "true"/"false" enables production for every analysis. Empty defers to config.
@@ -160,6 +160,9 @@ variables:
   FALLOW_AUDIT_DEAD_CODE_BASELINE: ""   # Baseline from fallow dead-code --save-baseline
   FALLOW_AUDIT_HEALTH_BASELINE: ""      # Baseline from fallow health --save-baseline
   FALLOW_AUDIT_DUPES_BASELINE: ""       # Baseline from fallow dupes --save-baseline
+
+  # Security specific
+  FALLOW_SECURITY_GATE: ""       # new or newly-reachable
 
   # Fix specific
   FALLOW_DRY_RUN: "true"
@@ -361,7 +364,7 @@ variables:
 
       # ── Validate inputs ──────────────────────────────────────────────
       case "$FALLOW_COMMAND" in
-        ""|dead-code|check|dupes|health|audit|fix) ;;
+        ""|dead-code|check|dupes|health|audit|security|fix) ;;
         *) echo "ERROR: Invalid command: ${FALLOW_COMMAND}"; exit 2 ;;
       esac
       if [ "$FALLOW_COMMAND" = "audit" ] && { [ -n "$FALLOW_BASELINE" ] || [ -n "$FALLOW_SAVE_BASELINE" ]; }; then
@@ -370,6 +373,9 @@ variables:
       fi
       if [ -n "$FALLOW_AUDIT_GATE" ] && [ "$FALLOW_AUDIT_GATE" != "new-only" ] && [ "$FALLOW_AUDIT_GATE" != "all" ]; then
         echo "ERROR: FALLOW_AUDIT_GATE must be 'new-only' or 'all', got: ${FALLOW_AUDIT_GATE}"; exit 2
+      fi
+      if [ -n "$FALLOW_SECURITY_GATE" ] && [ "$FALLOW_SECURITY_GATE" != "new" ] && [ "$FALLOW_SECURITY_GATE" != "newly-reachable" ]; then
+        echo "ERROR: FALLOW_SECURITY_GATE must be 'new' or 'newly-reachable', got: ${FALLOW_SECURITY_GATE}"; exit 2
       fi
 
       for name_val in "min-tokens:$FALLOW_MIN_TOKENS" "min-lines:$FALLOW_MIN_LINES" \
@@ -517,6 +523,9 @@ variables:
           [ -n "$FALLOW_AUDIT_GATE" ]         && ARGS+=(--gate "$FALLOW_AUDIT_GATE")
           [ "$FALLOW_INCLUDE_ENTRY_EXPORTS" = "true" ] && ARGS+=(--include-entry-exports)
           ;;
+        security)
+          [ -n "$FALLOW_SECURITY_GATE" ] && ARGS+=(--gate "$FALLOW_SECURITY_GATE")
+          ;;
         fix)
           [ "$FALLOW_DRY_RUN" = "true" ] && ARGS+=(--dry-run) || ARGS+=(--yes)
           ;;
@@ -585,6 +594,7 @@ variables:
         dupes)           ISSUES=$(jq -r '.stats.clone_groups // 0' fallow-results.json) ;;
         health)          ISSUES=$(jq -r '((.summary.functions_above_threshold // 0) + ((.runtime_coverage.findings // []) | map(select(.verdict == "safe_to_delete" or .verdict == "review_required" or .verdict == "low_traffic")) | length))' fallow-results.json) ;;
         audit)           ISSUES=$(jq -r 'if (.attribution.gate // "new-only") == "all" then ((.summary.dead_code_issues // 0) + (.summary.complexity_findings // 0) + (.summary.duplication_clone_groups // 0)) else ((.attribution.dead_code_introduced // 0) + (.attribution.complexity_introduced // 0) + (.attribution.duplication_introduced // 0)) end' fallow-results.json) ;;
+        security)        ISSUES=$(jq -r 'if .gate then (.gate.new_count // 0) else (.summary.security_findings // ((.security_findings // []) | length)) end' fallow-results.json) ;;
         fix)             ISSUES=$(jq -r '(.fixes | length)' fallow-results.json) ;;
         "")              ISSUES=$(jq -r '((.check.total_issues // 0) + (.dupes.stats.clone_groups // 0) + (.health.summary.functions_above_threshold // 0) + ((.health.runtime_coverage.findings // []) | map(select(.verdict == "safe_to_delete" or .verdict == "review_required" or .verdict == "low_traffic")) | length))' fallow-results.json) ;;
       esac
@@ -596,7 +606,7 @@ variables:
 
       # ── GitLab Code Quality report (CodeClimate format) ──────────────
       # Uses fallow's native --format codeclimate for inline MR annotations.
-      if [ "$FALLOW_CODEQUALITY" = "true" ] && [ "$FALLOW_COMMAND" != "fix" ]; then
+      if [ "$FALLOW_CODEQUALITY" = "true" ] && [ "$FALLOW_COMMAND" != "fix" ] && [ "$FALLOW_COMMAND" != "security" ]; then
         echo "Generating Code Quality report..."
         # Re-run with --format codeclimate instead of json
         CQ_ARGS=()
@@ -621,7 +631,7 @@ variables:
       fi
 
       # ── MR summary comment ──────────────────────────────────────────
-      if [ "$FALLOW_COMMENT" = "true" ] && [ -n "${CI_MERGE_REQUEST_IID:-}" ]; then
+      if [ "$FALLOW_COMMENT" = "true" ] && [ "$FALLOW_COMMAND" != "security" ] && [ -n "${CI_MERGE_REQUEST_IID:-}" ]; then
         if [ -x "/tmp/fallow-scripts/comment.sh" ]; then
           echo "Posting MR summary comment..."
           export CHANGED_SINCE="$FALLOW_CHANGED_SINCE"
@@ -633,7 +643,7 @@ variables:
       fi
 
       # ── Inline MR review discussions ─────────────────────────────────
-      if [ "$FALLOW_REVIEW" = "true" ] && [ -n "${CI_MERGE_REQUEST_IID:-}" ] && [ "$FALLOW_COMMAND" != "fix" ]; then
+      if [ "$FALLOW_REVIEW" = "true" ] && [ -n "${CI_MERGE_REQUEST_IID:-}" ] && [ "$FALLOW_COMMAND" != "fix" ] && [ "$FALLOW_COMMAND" != "security" ]; then
         if [ -x "/tmp/fallow-scripts/review.sh" ]; then
           echo "Posting inline MR review..."
           export MAX_COMMENTS="$FALLOW_MAX_COMMENTS"
@@ -660,6 +670,13 @@ variables:
             dead-code|check) echo "ERROR: Fallow found ${ISSUES} unused code issues" ;;
             dupes)           echo "ERROR: Fallow found ${ISSUES} clone groups" ;;
             health)          echo "ERROR: Fallow found ${ISSUES} health findings" ;;
+            security)
+              if [ -n "$FALLOW_SECURITY_GATE" ]; then
+                echo "ERROR: Fallow security gate failed (gate: ${FALLOW_SECURITY_GATE}, ${ISSUES} candidate(s))"
+                exit 8
+              fi
+              echo "ERROR: Fallow found ${ISSUES} security candidates"
+              ;;
             fix)             echo "ERROR: Fallow found ${ISSUES} fixable issues" ;;
             "")              echo "ERROR: Fallow found ${ISSUES} issues" ;;
           esac

@@ -1032,7 +1032,7 @@ enum Command {
     /// the `audit` gate. Build-config and test files are excluded, and public
     /// env prefixes such as `NEXT_PUBLIC_` and `VITE_` are treated as public.
     /// Honors
-    /// `--root`, `--format {human,json,sarif}`, `--changed-since`, `--file`, `--diff-file`,
+    /// `--root`, `--format {human,json,sarif}`, `--changed-since`, `--file`, `--gate`, `--diff-file`,
     /// `--diff-stdin`, `--workspace`, `--changed-workspaces`, `--ci`,
     /// `--fail-on-issues`, `--sarif-file`, `--summary`, `--explain`, and `--surface`.
     Security {
