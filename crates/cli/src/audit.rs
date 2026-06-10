@@ -3979,4 +3979,136 @@ export function App() {
                 .any(|instance| instance.file == changed_path)
         }));
     }
+
+    // ── Unit tests for js_ts_tokens_equivalent, is_analysis_input, is_non_behavioral_doc ──
+
+    #[test]
+    fn tokens_equivalent_whitespace_only() {
+        // Reformatting (indentation, blank lines) must not change token identity.
+        let a = "export const x = 1;\nexport const y = 2;\n";
+        let b = "export const x = 1;\n\n\nexport const y = 2;\n";
+        assert!(
+            js_ts_tokens_equivalent(Path::new("a.ts"), a, b),
+            "whitespace-only change must be treated as equivalent"
+        );
+    }
+
+    #[test]
+    fn tokens_equivalent_comment_only_change() {
+        // Comments do not produce tokens; adding or removing a comment should be
+        // treated as equivalent by the tokenizer.
+        let a = "export const x = 1;\n";
+        let b = "// note\nexport const x = 1;\n";
+        assert!(
+            js_ts_tokens_equivalent(Path::new("a.ts"), a, b),
+            "comment-only change must be treated as equivalent (comments emit no tokens)"
+        );
+    }
+
+    #[test]
+    fn tokens_equivalent_identifier_rename_is_not_equivalent() {
+        // Identifier carries its text payload; a rename must not be reusable.
+        let a = "export const a = 1;\n";
+        let b = "export const b = 1;\n";
+        assert!(
+            !js_ts_tokens_equivalent(Path::new("a.ts"), a, b),
+            "identifier rename must be treated as non-equivalent"
+        );
+    }
+
+    #[test]
+    fn tokens_equivalent_string_literal_change_is_not_equivalent() {
+        // StringLiteral carries its text payload; a changed import path must not be reusable.
+        let a = r#"import x from "./a";"#;
+        let b = r#"import x from "./b";"#;
+        assert!(
+            !js_ts_tokens_equivalent(Path::new("a.ts"), a, b),
+            "string-literal change must be treated as non-equivalent"
+        );
+    }
+
+    #[test]
+    fn tokens_equivalent_fallow_ignore_marker_forces_false() {
+        // The guard fires before tokenization; even identical content containing the
+        // marker must return false so suppression changes are never skipped.
+        let code = "// fallow-ignore-next-line unused-exports\nexport const x = 1;\n";
+        assert!(
+            !js_ts_tokens_equivalent(Path::new("a.ts"), code, code),
+            "fallow-ignore marker in either side must force false"
+        );
+    }
+
+    #[test]
+    fn tokens_equivalent_non_js_extension_is_false() {
+        // The extension check fires before tokenization; CSS content cannot be reused.
+        let a = ".foo { color: red; }\n";
+        let b = ".foo {\n  color: red;\n}\n";
+        assert!(
+            !js_ts_tokens_equivalent(Path::new("styles.css"), a, b),
+            "non-JS/TS extension must always return false"
+        );
+    }
+
+    /// KNOWN SOUNDNESS GAP: `TokenKind::TemplateLiteral` carries no payload
+    /// (see `crates/core/src/duplicates/token_types.rs`), so a change to the
+    /// content of a template literal is invisible to the tokenizer and is
+    /// treated as equivalent. This is safe for most template strings but
+    /// unsound for dynamic `import(\`...\`)` patterns where the quasi prefix
+    /// feeds module-resolution pattern edges. This test pins the current
+    /// behavior. A follow-up fix should give `TemplateLiteral` a payload to
+    /// close the gap.
+    #[test]
+    fn tokens_equivalent_template_literal_content_change_is_equivalent_known_gap() {
+        let a = "const p = import(`./pages/${x}`);\n";
+        let b = "const p = import(`./views/${x}`);\n";
+        // KNOWN GAP: changing the quasi string of a template literal is NOT
+        // detected as a behavioral change because TokenKind::TemplateLiteral
+        // has no payload. Expected: true (equivalent), which is incorrect for
+        // dynamic-import prefixes but documents the current reality.
+        assert!(
+            js_ts_tokens_equivalent(Path::new("a.ts"), a, b),
+            "template-literal content change is CURRENTLY treated as equivalent (known gap)"
+        );
+    }
+
+    /// Companion to the template-literal gap test: a regex-literal content
+    /// change is also invisible to the tokenizer.
+    #[test]
+    fn tokens_equivalent_regex_literal_content_change_is_equivalent_known_gap() {
+        let a = "const re = /^foo/;\n";
+        let b = "const re = /^bar/;\n";
+        // KNOWN GAP: TokenKind::RegExpLiteral has no payload.
+        assert!(
+            js_ts_tokens_equivalent(Path::new("a.ts"), a, b),
+            "regex-literal content change is CURRENTLY treated as equivalent (known gap)"
+        );
+    }
+
+    #[test]
+    fn analysis_input_and_doc_classification() {
+        // Analysis inputs: JS/TS variants and component formats are behavioral.
+        assert!(is_analysis_input(Path::new("src/app.ts")));
+        assert!(is_analysis_input(Path::new("src/app.tsx")));
+        assert!(is_analysis_input(Path::new("src/app.js")));
+        assert!(is_analysis_input(Path::new("src/app.jsx")));
+        assert!(is_analysis_input(Path::new("src/app.mts")));
+        assert!(is_analysis_input(Path::new("src/app.vue")));
+        assert!(is_analysis_input(Path::new("src/styles.css")));
+
+        // Non-analysis inputs.
+        assert!(!is_analysis_input(Path::new("README.md")));
+        assert!(!is_analysis_input(Path::new("package.json")));
+        assert!(!is_analysis_input(Path::new("image.png")));
+
+        // Non-behavioral docs.
+        assert!(is_non_behavioral_doc(Path::new("README.md")));
+        assert!(is_non_behavioral_doc(Path::new("CHANGELOG.txt")));
+        assert!(is_non_behavioral_doc(Path::new("docs/guide.rst")));
+        assert!(is_non_behavioral_doc(Path::new("docs/guide.adoc")));
+
+        // .json is neither an analysis input nor a non-behavioral doc, so the
+        // predicate treats it as behavioral (can_reuse returns false for it).
+        assert!(!is_analysis_input(Path::new("package.json")));
+        assert!(!is_non_behavioral_doc(Path::new("package.json")));
+    }
 }

@@ -1376,3 +1376,286 @@ fn audit_rejects_malformed_fallow_audit_base_env() {
         json["message"]
     );
 }
+
+// Base-reuse predicate characterization tests
+//
+// These tests pin the behavior of `can_reuse_current_as_base` end-to-end
+// through the `fallow audit --gate new-only` path. Each test establishes a
+// committed base and a committed head, then asserts on the JSON attribution
+// fields `dead_code_introduced` and `dead_code_inherited` to confirm whether
+// the reuse predicate correctly skipped the base-snapshot rebuild.
+//
+// They serve as the safety net for refactors of the underlying helpers
+// (for example, batching the per-file `git show` calls).
+
+/// A whitespace-only reformat of a TS file must be treated as equivalent by
+/// the tokenizer and allow the base snapshot to be reused. The audit should
+/// report zero introduced dead-code findings.
+#[test]
+fn audit_whitespace_only_change_reports_no_introduced_findings() {
+    let dir = create_audit_fixture("reuse-whitespace");
+    let root = dir.path();
+    let base_sha = {
+        let output = Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(root)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .output()
+            .expect("git rev-parse should succeed");
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    };
+
+    // Reformat src/utils.ts with whitespace only (no semantic change).
+    fs::write(
+        root.join("src/utils.ts"),
+        "export const used = () => 42;\n\n\nexport const unused = () => 0;\n",
+    )
+    .unwrap();
+    commit_all(root, "reformat utils");
+
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        root.to_str().unwrap(),
+        "--base",
+        &base_sha,
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    assert!(
+        output.code == 0 || output.code == 1,
+        "audit should not crash on whitespace-only change. stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(
+        json["attribution"]["dead_code_introduced"].as_u64(),
+        Some(0),
+        "whitespace-only change must introduce zero dead-code findings. full json: {}",
+        serde_json::to_string_pretty(&json).unwrap_or_default()
+    );
+    // The pre-existing `unused` export should be inherited, not introduced.
+    assert!(
+        json["attribution"]["dead_code_inherited"]
+            .as_u64()
+            .is_some_and(|n| n >= 1),
+        "pre-existing unused export must appear as inherited"
+    );
+}
+
+/// Adding a genuinely new unused export must be classified as introduced.
+#[test]
+fn audit_semantic_change_reports_introduced_finding() {
+    let dir = create_audit_fixture("reuse-semantic");
+    let root = dir.path();
+    let base_sha = {
+        let output = Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(root)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .output()
+            .expect("git rev-parse should succeed");
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    };
+
+    // Add a new unused export.
+    fs::write(
+        root.join("src/utils.ts"),
+        "export const used = () => 42;\nexport const unused = () => 0;\nexport const extra = 1;\n",
+    )
+    .unwrap();
+    commit_all(root, "add extra unused export");
+
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        root.to_str().unwrap(),
+        "--base",
+        &base_sha,
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    assert!(
+        output.code == 0 || output.code == 1,
+        "audit should not crash. stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert!(
+        json["attribution"]["dead_code_introduced"]
+            .as_u64()
+            .is_some_and(|n| n >= 1),
+        "new unused export must be attributed as introduced. full json: {}",
+        serde_json::to_string_pretty(&json).unwrap_or_default()
+    );
+}
+
+/// Changing only a Markdown README must not introduce dead-code findings.
+/// `is_non_behavioral_doc` classifies `.md` as non-behavioral, so the reuse
+/// predicate returns true for a doc-only diff.
+#[test]
+fn audit_doc_only_change_reports_no_introduced_findings() {
+    let dir = create_audit_fixture("reuse-doc");
+    let root = dir.path();
+    let base_sha = {
+        let output = Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(root)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .output()
+            .expect("git rev-parse should succeed");
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    };
+
+    fs::write(root.join("README.md"), "# My project\nUpdated docs.\n").unwrap();
+    commit_all(root, "update readme");
+
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        root.to_str().unwrap(),
+        "--base",
+        &base_sha,
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    assert!(
+        output.code == 0 || output.code == 1,
+        "audit should not crash on doc-only change. stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(
+        json["attribution"]["dead_code_introduced"].as_u64(),
+        Some(0),
+        "doc-only change must introduce zero dead-code findings. full json: {}",
+        serde_json::to_string_pretty(&json).unwrap_or_default()
+    );
+}
+
+/// Adding a brand-new TS file with an unused export forces a real base-snapshot
+/// computation (the file does not exist in base, so `git_show_file` returns
+/// None and the reuse predicate returns false). The new export should be
+/// attributed as introduced.
+#[test]
+fn audit_new_file_is_treated_as_behavioral() {
+    let dir = create_audit_fixture("reuse-newfile");
+    let root = dir.path();
+    let base_sha = {
+        let output = Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(root)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .output()
+            .expect("git rev-parse should succeed");
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    };
+
+    // Add a new file with an unused export; it has no counterpart in base.
+    fs::write(
+        root.join("src/new.ts"),
+        "export const brandNew = 'nobody uses me';\n",
+    )
+    .unwrap();
+    commit_all(root, "add new file with unused export");
+
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        root.to_str().unwrap(),
+        "--base",
+        &base_sha,
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    assert!(
+        output.code == 0 || output.code == 1,
+        "audit should complete successfully even when a new file forces a base-snapshot rebuild. stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert!(
+        json["attribution"]["dead_code_introduced"]
+            .as_u64()
+            .is_some_and(|n| n >= 1),
+        "new unused export in a new file must be attributed as introduced. full json: {}",
+        serde_json::to_string_pretty(&json).unwrap_or_default()
+    );
+}
+
+/// Changing only `package.json` is neither an analysis-input file nor a
+/// non-behavioral doc (`.json` passes neither check), so the reuse predicate
+/// treats it as behavioral. The audit must complete and produce a coherent
+/// verdict; this test checks exit success rather than a specific attribution
+/// count because the JSON change may or may not affect dead-code counts.
+#[test]
+fn audit_json_only_change_is_behavioral() {
+    let dir = create_audit_fixture("reuse-json");
+    let root = dir.path();
+    let base_sha = {
+        let output = Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(root)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .output()
+            .expect("git rev-parse should succeed");
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    };
+
+    // Remove the unused dependency from package.json: a plausible behavioral change.
+    fs::write(
+        root.join("package.json"),
+        r#"{"name": "audit-test", "main": "src/index.ts", "dependencies": {}}"#,
+    )
+    .unwrap();
+    commit_all(root, "remove unused dep from package.json");
+
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        root.to_str().unwrap(),
+        "--base",
+        &base_sha,
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    // The audit must complete and produce a parseable verdict; it may pass or
+    // fail depending on analysis results, but must not crash (exit 2+).
+    assert!(
+        output.code == 0 || output.code == 1,
+        "audit on a package.json-only change must complete without crashing. stderr: {}\nstdout: {}",
+        output.stderr,
+        output.stdout
+    );
+    let json = parse_json(&output);
+    assert!(
+        json.get("verdict").is_some(),
+        "audit must produce a verdict field in JSON output. full json: {}",
+        serde_json::to_string_pretty(&json).unwrap_or_default()
+    );
+    // The attribution block must be present.
+    assert!(
+        json.get("attribution").is_some(),
+        "audit must produce an attribution block even when package.json is the only change"
+    );
+}
