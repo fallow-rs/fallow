@@ -3,6 +3,8 @@ def rel_path:
   if startswith("/") then
     (split("/") | if length > 3 then .[-3:] | join("/") else join("/") end)
   else . end;
+def path_line:
+  "`\(.path | rel_path)\(if .line then ":\(.line)" else "" end)`";
 def finding_count:
   if .gate then (.gate.new_count // 0)
   else (.summary.security_findings // ((.security_findings // []) | length))
@@ -13,7 +15,7 @@ def gate_line:
   else "" end;
 def finding_rows:
   [(.security_findings // [])[:15][] |
-    "| `\(.path | rel_path):\(.line)` | \(.kind) | \(.severity // "unknown") | \(.candidate.sink.callee // "-") |"
+    "| \(path_line) | \(.kind) | \(.severity // "unknown") | \(.candidate.sink.callee // "-") |"
   ];
 
 finding_count as $count |

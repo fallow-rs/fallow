@@ -727,6 +727,18 @@ assert_contains "$OUT" "Fallow Security" "security: has title"
 assert_contains "$OUT" "Security gate: \`new\`" "security: shows gate"
 assert_contains "$OUT" "src/api.ts:10" "security: lists candidate location"
 
+OUT_NO_LINE=$(jq -n '{
+  kind: "security",
+  elapsed_ms: 1,
+  security_findings: [{
+    path: "src/a.ts",
+    kind: "tainted-sink",
+    candidate: {sink: {}}
+  }]
+}' | jq -r -f "$JQ_DIR/summary-security.jq" 2>&1)
+assert_contains "$OUT_NO_LINE" "\`src/a.ts\`" "security: missing line renders path only"
+assert_not_contains "$OUT_NO_LINE" "null" "security: missing line does not render null"
+
 echo "  summary-fix.jq:"
 OUT=$(jq -r -f "$JQ_DIR/summary-fix.jq" "$FIXTURES/fix.json" 2>&1)
 assert_valid_markdown "$OUT" "produces output"
