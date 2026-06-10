@@ -304,6 +304,7 @@ fn build_human_lines_with_explain(
         total_issues,
     );
     build_structure_section(&mut lines, results, root, rules, total_issues);
+    build_policy_section(&mut lines, results, root, total_issues);
     build_maintenance_section(&mut lines, results, root, rules, total_issues);
 
     if explain {
@@ -1183,6 +1184,78 @@ fn build_structure_section(
     );
 }
 
+/// Build the Policy category (rule-pack findings). Separate from Structure
+/// because policy is user-authored project rules, not architecture analysis.
+fn build_policy_section(
+    lines: &mut Vec<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    total_issues: usize,
+) {
+    if results.policy_violations.is_empty() {
+        return;
+    }
+    push_category_header(lines, "Policy");
+    build_policy_violations_section(lines, &results.policy_violations, root, total_issues);
+}
+
+/// Build the rule-pack policy-violation section. The header level reflects
+/// the EFFECTIVE per-finding severities (error when any finding is error),
+/// because rule-level `severity` overrides the `policy-violation` master.
+fn build_policy_violations_section(
+    lines: &mut Vec<String>,
+    items: &[fallow_types::output_dead_code::PolicyViolationFinding],
+    root: &Path,
+    total_issues: usize,
+) {
+    use fallow_types::results::PolicyViolationSeverity;
+
+    if items.is_empty() {
+        return;
+    }
+    let level = if items
+        .iter()
+        .any(|f| f.violation.severity == PolicyViolationSeverity::Error)
+    {
+        Level::Error
+    } else {
+        Level::Warn
+    };
+    let title = "Policy violations";
+    lines.push(build_section_header(title, items.len(), level));
+
+    let shown = items.len().min(MAX_FLAT_ITEMS);
+    for entry in &items[..shown] {
+        let v = &entry.violation;
+        let path = relative_path(&v.path, root).display().to_string();
+        let detail = match &v.message {
+            Some(message) => format!("banned by `{}/{}`: {message}", v.pack, v.rule_id),
+            None => format!("banned by `{}/{}`", v.pack, v.rule_id),
+        };
+        lines.push(format!(
+            "  {}:{} {} {}",
+            path,
+            v.line,
+            v.matched,
+            detail.dimmed(),
+        ));
+    }
+    if items.len() > MAX_FLAT_ITEMS {
+        let remaining = items.len() - MAX_FLAT_ITEMS;
+        lines.push(format!(
+            "  {}",
+            truncation_hint(remaining, total_issues).dimmed()
+        ));
+    }
+    lines.push(format!(
+        "  {}",
+        "suppress: // fallow-ignore-next-line policy-violation (one token covers every rule-pack rule)"
+            .dimmed()
+    ));
+    push_section_footer_with_count(lines, title, items.len());
+    lines.push(String::new());
+}
+
 fn build_maintenance_section(
     lines: &mut Vec<String>,
     results: &AnalysisResults,
@@ -1865,6 +1938,9 @@ fn collect_matching_rules(
     for b in &results.boundary_call_violations {
         check(&b.violation.path);
     }
+    for v in &results.policy_violations {
+        check(&v.violation.path);
+    }
     for s in &results.stale_suppressions {
         check(&s.path);
     }
@@ -2397,6 +2473,36 @@ mod tests {
         // The rule id is boundary-call-violation but the working token is the
         // family token; the section must teach the literal token.
         assert!(text.contains("// fallow-ignore-next-line boundary-violation"));
+    }
+
+    #[test]
+    fn policy_violations_render_policy_section_with_message() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .policy_violations
+            .push(PolicyViolationFinding::with_actions(PolicyViolation {
+                path: root.join("src/app.ts"),
+                line: 7,
+                col: 2,
+                pack: "team-policy".to_string(),
+                rule_id: "no-moment".to_string(),
+                kind: fallow_types::results::PolicyRuleKind::BannedImport,
+                matched: "moment/locale/nl".to_string(),
+                severity: fallow_types::results::PolicyViolationSeverity::Error,
+                message: Some("Use date-fns.".to_string()),
+            }));
+
+        let lines = build_human_lines(&results, &root, &RulesConfig::default(), None);
+        let text = plain(&lines);
+
+        assert!(text.contains("Policy"));
+        assert!(text.contains("Policy violations (1)"));
+        assert!(text.contains("src/app.ts:7"));
+        assert!(text.contains("moment/locale/nl"));
+        assert!(text.contains("team-policy/no-moment"));
+        assert!(text.contains("Use date-fns."));
+        assert!(text.contains("fallow-ignore-next-line policy-violation"));
     }
 
     #[test]

@@ -563,7 +563,7 @@ impl PolicyViolationFinding {
             crate::results::PolicyRuleKind::BannedImport => "import",
         };
         let description = match &violation.message {
-            Some(message) => format!("Replace the `{}` {what}: {message}", violation.matched,),
+            Some(message) => format!("Replace the `{}` {what}: {message}", violation.matched),
             None => format!("Replace the `{}` {what}", violation.matched),
         };
         let actions = vec![

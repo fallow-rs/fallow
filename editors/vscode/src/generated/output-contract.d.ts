@@ -170,7 +170,7 @@ export type IssueAction = (FixAction | SuppressLineAction | SuppressFileAction |
  * Discriminant string for [`FixAction`]. Kebab-case per the JSON output
  * contract.
  */
-export type FixActionType = ("remove-export" | "delete-file" | "remove-dependency" | "move-dependency" | "remove-enum-member" | "remove-class-member" | "resolve-import" | "install-dependency" | "remove-duplicate" | "move-to-dev" | "refactor-cycle" | "refactor-re-export-cycle" | "refactor-boundary" | "export-type" | "remove-catalog-entry" | "remove-empty-catalog-group" | "update-catalog-reference" | "add-catalog-entry" | "remove-catalog-reference" | "remove-dependency-override" | "fix-dependency-override")
+export type FixActionType = ("remove-export" | "delete-file" | "remove-dependency" | "move-dependency" | "remove-enum-member" | "remove-class-member" | "resolve-import" | "install-dependency" | "remove-duplicate" | "move-to-dev" | "refactor-cycle" | "refactor-re-export-cycle" | "refactor-boundary" | "export-type" | "remove-catalog-entry" | "remove-empty-catalog-group" | "update-catalog-reference" | "add-catalog-entry" | "remove-catalog-reference" | "remove-dependency-override" | "fix-dependency-override" | "resolve-policy-violation")
 /**
  * Singleton discriminant for [`SuppressLineAction`].
  */
@@ -232,6 +232,17 @@ export type MemberKind = ("enum_member" | "class_method" | "class_property" | "n
  * Discriminator for [`ReExportCycle`]: which structural shape was detected.
  */
 export type ReExportCycleKind = ("multi-node" | "self-loop")
+/**
+ * Which rule-pack rule kind produced a [`PolicyViolation`].
+ */
+export type PolicyRuleKind = ("banned-call" | "banned-import")
+/**
+ * Effective severity of a single [`PolicyViolation`]. Per-rule `severity`
+ * overrides the `rules."policy-violation"` master; `off` rules emit nothing,
+ * so only `error` and `warn` appear on the wire. The exit-code gate inspects
+ * this per-finding value, not the master severity.
+ */
+export type PolicyViolationSeverity = ("error" | "warn")
 /**
  * The origin of a stale suppression: inline comment or JSDoc tag.
  */
@@ -966,6 +977,13 @@ boundary_coverage_violations?: BoundaryCoverageViolationFinding[]
  */
 boundary_call_violations?: BoundaryCallViolationFinding[]
 /**
+ * Banned calls and banned imports matched by declarative rule packs
+ * (`rulePacks` config). Wrapped in [`PolicyViolationFinding`] so each
+ * entry carries a typed `actions` array natively. Each finding carries
+ * its effective per-rule severity.
+ */
+policy_violations?: PolicyViolationFinding[]
+/**
  * Suppression comments or JSDoc tags that no longer match any issue.
  */
 stale_suppressions?: StaleSuppression[]
@@ -1115,6 +1133,10 @@ boundary_coverage_violations?: number
  * Calls from zoned files to callees forbidden for that zone.
  */
 boundary_call_violations?: number
+/**
+ * Banned calls and banned imports matched by declarative rule packs.
+ */
+policy_violations?: number
 /**
  * Suppression comments that no longer match a finding.
  */
@@ -2032,6 +2054,55 @@ callee: string
  * consumers can see both the written path and the rule that fired.
  */
 pattern: string
+/**
+ * Suggested next steps.
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+}
+/**
+ * Wire-shape envelope for a [`PolicyViolation`] finding. Carries actions for
+ * replacing the banned call or import, or suppressing it with the
+ * `policy-violation` token.
+ */
+export interface PolicyViolationFinding {
+/**
+ * The source file containing the banned call or import.
+ */
+path: string
+/**
+ * 1-based line number of the call site or import declaration.
+ */
+line: number
+/**
+ * 0-based byte column offset of the call site or import declaration.
+ */
+col: number
+/**
+ * Name of the rule pack that declared the matching rule.
+ */
+pack: string
+/**
+ * Id of the matching rule inside the pack. `pack` plus `rule_id` is the
+ * finding's policy identity.
+ */
+rule_id: string
+kind: PolicyRuleKind
+/**
+ * What matched: the written callee path for `banned-call` (e.g.
+ * `cp.exec`), or the raw import specifier for `banned-import` (e.g.
+ * `moment/locale/nl`).
+ */
+matched: string
+severity: PolicyViolationSeverity
+/**
+ * The rule's author-provided message, when set.
+ */
+message?: (string | null)
 /**
  * Suggested next steps.
  */
@@ -4940,6 +5011,13 @@ boundary_coverage_violations?: BoundaryCoverageViolationFinding[]
  * `actions` array natively.
  */
 boundary_call_violations?: BoundaryCallViolationFinding[]
+/**
+ * Banned calls and banned imports matched by declarative rule packs
+ * (`rulePacks` config). Wrapped in [`PolicyViolationFinding`] so each
+ * entry carries a typed `actions` array natively. Each finding carries
+ * its effective per-rule severity.
+ */
+policy_violations?: PolicyViolationFinding[]
 /**
  * Suppression comments or JSDoc tags that no longer match any issue.
  */

@@ -491,6 +491,41 @@ fn run_policy_detector(
         .collect()
 }
 
+/// Run the boundary-coverage, boundary-call, and rule-pack policy detectors
+/// in parallel. Extracted so the main `find_dead_code_full` join tree stays
+/// within the nesting budget.
+fn run_boundary_aux_detectors(
+    graph: &ModuleGraph,
+    modules: &[ModuleInfo],
+    config: &ResolvedConfig,
+    suppressions: &crate::suppress::SuppressionContext<'_>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+) -> (
+    Vec<BoundaryCoverageViolationFinding>,
+    (
+        Vec<BoundaryCallViolationFinding>,
+        Vec<PolicyViolationFinding>,
+    ),
+) {
+    rayon::join(
+        || run_boundary_coverage_detector(graph, config, suppressions),
+        || {
+            rayon::join(
+                || {
+                    run_boundary_call_detector(
+                        graph,
+                        modules,
+                        config,
+                        suppressions,
+                        line_offsets_by_file,
+                    )
+                },
+                || run_policy_detector(graph, modules, config, suppressions, line_offsets_by_file),
+            )
+        },
+    )
+}
+
 /// Thin wrapper around [`re_export_cycles::find_re_export_cycles`] that gates
 /// on `Severity::Off`. Extracted alongside [`run_circular_dep_detector`].
 fn run_re_export_cycle_detector(
@@ -754,36 +789,12 @@ pub fn find_dead_code_full(
                                             }
                                         },
                                         || {
-                                            rayon::join(
-                                                || {
-                                                    run_boundary_coverage_detector(
-                                                        graph,
-                                                        config,
-                                                        &suppressions,
-                                                    )
-                                                },
-                                                || {
-                                                    rayon::join(
-                                                        || {
-                                                            run_boundary_call_detector(
-                                                                graph,
-                                                                modules,
-                                                                config,
-                                                                &suppressions,
-                                                                &line_offsets_by_file,
-                                                            )
-                                                        },
-                                                        || {
-                                                            run_policy_detector(
-                                                                graph,
-                                                                modules,
-                                                                config,
-                                                                &suppressions,
-                                                                &line_offsets_by_file,
-                                                            )
-                                                        },
-                                                    )
-                                                },
+                                            run_boundary_aux_detectors(
+                                                graph,
+                                                modules,
+                                                config,
+                                                &suppressions,
+                                                &line_offsets_by_file,
                                             )
                                         },
                                     )

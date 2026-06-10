@@ -600,6 +600,45 @@ fn push_boundary_call_issues(
     }
 }
 
+fn push_policy_violation_issues(
+    issues: &mut Vec<CodeClimateIssue>,
+    violations: &[fallow_types::output_dead_code::PolicyViolationFinding],
+    root: &Path,
+) {
+    use fallow_core::results::PolicyViolationSeverity;
+
+    for entry in violations {
+        let v = &entry.violation;
+        let path = cc_path(&v.path, root);
+        let rule = format!("{}/{}", v.pack, v.rule_id);
+        let fp = fingerprint_hash(&["fallow/policy-violation", &path, &rule, &v.matched]);
+        let line = if v.line > 0 { Some(v.line) } else { None };
+        // Severity comes from the EFFECTIVE per-finding value, not the
+        // policy-violation master, so a severity: "error" rule under a warn
+        // master maps to blocker-level just like the exit-code gate.
+        let level = severity_to_codeclimate(match v.severity {
+            PolicyViolationSeverity::Error => Severity::Error,
+            PolicyViolationSeverity::Warn => Severity::Warn,
+        });
+        let message = match &v.message {
+            Some(message) => format!(
+                "Policy violation: `{}` is banned by `{rule}`. {message}",
+                v.matched
+            ),
+            None => format!("Policy violation: `{}` is banned by `{rule}`", v.matched),
+        };
+        issues.push(cc_issue(
+            "fallow/policy-violation",
+            &message,
+            level,
+            "Bug Risk",
+            &path,
+            line,
+            &fp,
+        ));
+    }
+}
+
 fn push_stale_suppression_issues(
     issues: &mut Vec<CodeClimateIssue>,
     suppressions: &[fallow_core::results::StaleSuppression],
@@ -998,6 +1037,7 @@ pub fn build_codeclimate(
         root,
         rules.boundary_violation,
     );
+    push_policy_violation_issues(&mut issues, &results.policy_violations, root);
     push_stale_suppression_issues(
         &mut issues,
         &results.stale_suppressions,

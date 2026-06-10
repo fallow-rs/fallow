@@ -169,7 +169,8 @@
         "unused-dependency-overrides": "warn",
         "misconfigured-dependency-overrides": "error",
         "security-client-server-leak": "off",
-        "security-sink": "off"
+        "security-sink": "off",
+        "policy-violation": "warn"
       }
     },
     "boundaries": {
@@ -211,6 +212,13 @@
         "type": "string"
       },
       "default": []
+    },
+    "rulePacks": {
+      "description": "Paths to declarative rule-pack files (JSON or JSONC), relative to the\nproject root. Each pack declares `banned-call` / `banned-import` rules\nthat report as `policy-violation` findings. Packs are pure data: no\nproject code is executed. Invalid or missing packs fail config load.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
     },
     "dynamicallyLoaded": {
       "type": "array",
@@ -992,6 +1000,11 @@
           "description": "Opt-in (default off): a syntactic tainted-sink candidate matched against\nthe data-driven catalogue (`security_matchers.toml`). ONE knob gates ALL\ncatalogue categories. Surfaced only by `fallow security`; never under\nbare `fallow` or the `audit` gate.",
           "$ref": "#/$defs/Severity",
           "default": "off"
+        },
+        "policy-violation": {
+          "description": "Master severity for rule-pack findings (`rulePacks` config). Defaults\nto `warn` so enabling a brand-new policy pack never hard-fails CI on\nits first run; individual pack rules opt up via `\"severity\": \"error\"`.\n`off` is a kill switch that disables the whole evaluator (per-rule\nseverity cannot resurrect it).",
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
         }
       }
     },
@@ -1672,6 +1685,16 @@
               "type": "null"
             }
           ]
+        },
+        "policy-violation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -1802,6 +1825,12 @@
           "default": 0
         },
         "boundaryCallViolations": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        },
+        "policyViolations": {
           "type": "integer",
           "format": "uint",
           "minimum": 0,

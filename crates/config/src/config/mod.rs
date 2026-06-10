@@ -10,6 +10,10 @@ mod resolve;
 mod rules;
 mod used_class_members;
 
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "this module is glob re-exported from lib.rs, so `pub` would leak the helper into the public API; pub(crate) keeps it internal to the crate"
+)]
 pub(crate) use boundaries::wildcard_placement_error;
 pub use boundaries::{
     AuthoredRule, BoundaryCallsConfig, BoundaryConfig, BoundaryCoverageConfig, BoundaryPreset,
@@ -503,6 +507,8 @@ pub struct RegressionBaseline {
     pub boundary_coverage_violations: usize,
     #[serde(default)]
     pub boundary_call_violations: usize,
+    #[serde(default)]
+    pub policy_violations: usize,
 }
 
 #[cfg(test)]

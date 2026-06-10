@@ -378,6 +378,10 @@ pub fn discover_external_plugins(
 }
 
 /// Check if a path resolves within the canonical root (follows symlinks).
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "this module is glob re-exported from lib.rs, so `pub` would leak this helper into the public API; pub(crate) is the minimal widening for the rule-pack loader"
+)]
 pub(crate) fn is_within_root(path: &Path, canonical_root: &Path) -> bool {
     let canonical = dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     canonical.starts_with(canonical_root)

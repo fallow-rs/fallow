@@ -699,6 +699,18 @@ assert_contains "$OUT" 'packages/client' "shows dependency workspace context val
 assert_contains "$OUT" "Empty catalog groups" "shows empty catalog group row"
 assert_contains "$OUT" 'legacy' "shows empty catalog group name"
 
+OUT_POLICY=$(jq '.policy_violations = [{"path": "src/app.ts", "line": 7, "col": 2, "pack": "team-policy", "rule_id": "no-moment", "kind": "banned-import", "matched": "moment", "severity": "error", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_POLICY" "Policy violations" "policy: shows summary row and section"
+assert_contains "$OUT_POLICY" "team-policy/no-moment" "policy: shows pack/rule identity"
+
+OUT_POLICY_ANNOTATIONS=$(jq '.policy_violations = [{"path": "src/app.ts", "line": 7, "col": 2, "pack": "team-policy", "rule_id": "no-moment", "kind": "banned-import", "matched": "moment", "severity": "error", "message": "Use date-fns.", "actions": []}]' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/annotations-check.jq" 2>&1)
+assert_contains "$OUT_POLICY_ANNOTATIONS" "::error file=src/app.ts,line=7,col=3,title=Policy violation::" "policy: error-severity annotation"
+assert_contains "$OUT_POLICY_ANNOTATIONS" "banned by rule 'team-policy/no-moment'" "policy: annotation names the rule"
+assert_contains "$OUT_POLICY_ANNOTATIONS" "Use date-fns." "policy: annotation carries the rule message"
+
+OUT_POLICY_FILTERED=$(jq '.policy_violations = [{"path": "src/app.ts", "line": 7, "col": 2, "pack": "team-policy", "rule_id": "no-moment", "kind": "banned-import", "matched": "moment", "severity": "warn", "actions": []}, {"path": "src/other.ts", "line": 1, "col": 0, "pack": "team-policy", "rule_id": "no-moment", "kind": "banned-import", "matched": "moment", "severity": "warn", "actions": []}]' "$FIXTURES/check.json" | jq --argjson changed '["src/app.ts"]' -f "$JQ_DIR/filter-changed.jq" 2>&1)
+assert_json_value "$OUT_POLICY_FILTERED" '.policy_violations | length' "1" "policy: filter-changed keeps only changed-file findings"
+
 OUT_CLEAN=$(jq -r -f "$JQ_DIR/summary-check.jq" "$FIXTURES/check-clean.json" 2>&1)
 assert_contains "$OUT_CLEAN" "No issues found" "clean: shows no issues"
 assert_not_contains "$OUT_CLEAN" "WARNING" "clean: no warning"

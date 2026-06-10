@@ -6,10 +6,11 @@ use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::{
     AnalysisResults, BoundaryCallViolation, BoundaryCoverageViolation, BoundaryViolation,
     CircularDependency, DuplicateExportFinding, EmptyCatalogGroupFinding,
-    MisconfiguredDependencyOverrideFinding, PrivateTypeLeak, StaleSuppression, TestOnlyDependency,
-    TypeOnlyDependency, UnlistedDependencyFinding, UnresolvedCatalogReferenceFinding,
-    UnresolvedImport, UnusedCatalogEntryFinding, UnusedDependency, UnusedDependencyOverrideFinding,
-    UnusedExport, UnusedFile, UnusedMember,
+    MisconfiguredDependencyOverrideFinding, PolicyViolation, PolicyViolationSeverity,
+    PrivateTypeLeak, StaleSuppression, TestOnlyDependency, TypeOnlyDependency,
+    UnlistedDependencyFinding, UnresolvedCatalogReferenceFinding, UnresolvedImport,
+    UnusedCatalogEntryFinding, UnusedDependency, UnusedDependencyOverrideFinding, UnusedExport,
+    UnusedFile, UnusedMember,
 };
 use rustc_hash::FxHashMap;
 
@@ -467,6 +468,39 @@ fn sarif_boundary_call_fields(
     }
 }
 
+fn sarif_policy_violation_fields(violation: &PolicyViolation, root: &Path) -> SarifFields {
+    let level = match violation.severity {
+        PolicyViolationSeverity::Error => "error",
+        PolicyViolationSeverity::Warn => "warning",
+    };
+    let message = match &violation.message {
+        Some(message) => format!(
+            "Policy violation `{}/{}`: `{}` is banned. {message}",
+            violation.pack, violation.rule_id, violation.matched
+        ),
+        None => format!(
+            "Policy violation `{}/{}`: `{}` is banned",
+            violation.pack, violation.rule_id, violation.matched
+        ),
+    };
+    SarifFields {
+        rule_id: "fallow/policy-violation",
+        level,
+        message,
+        uri: relative_uri(&violation.path, root),
+        region: Some((violation.line, violation.col + 1)),
+        source_path: Some(violation.path.clone()),
+        // The SARIF rule id is the static `fallow/policy-violation`; the
+        // per-rule policy identity rides in properties so code-scanning
+        // consumers can group or filter per pack rule without parsing the
+        // message. Dynamic per-rule SARIF rule synthesis is a tracked
+        // follow-up shared with boundary zone rules.
+        properties: Some(serde_json::json!({
+            "policyRule": format!("{}/{}", violation.pack, violation.rule_id),
+        })),
+    }
+}
+
 fn sarif_stale_suppression_fields(
     suppression: &StaleSuppression,
     root: &Path,
@@ -768,6 +802,11 @@ fn build_sarif_rules(rules: &RulesConfig) -> Vec<serde_json::Value> {
             "fallow/boundary-call-violation",
             "Zoned file calls a callee its zone forbids",
             rules.boundary_violation,
+        ),
+        (
+            "fallow/policy-violation",
+            "Banned call or import matched a rule-pack rule",
+            rules.policy_violation,
         ),
         (
             "fallow/stale-suppression",
@@ -1085,6 +1124,9 @@ fn push_graph_sarif_results(
             )
         },
     );
+    push_sarif_results(sarif_results, &results.policy_violations, snippets, |v| {
+        sarif_policy_violation_fields(&v.violation, root)
+    });
     push_sarif_results(sarif_results, &results.stale_suppressions, snippets, |s| {
         sarif_stale_suppression_fields(s, root, severity_to_sarif_level(rules.stale_suppressions))
     });
@@ -1829,7 +1871,7 @@ mod tests {
         let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
             .as_array()
             .expect("rules should be an array");
-        assert_eq!(rules.len(), 25);
+        assert_eq!(rules.len(), 26);
 
         let rule_ids: Vec<&str> = rules.iter().map(|r| r["id"].as_str().unwrap()).collect();
         assert!(rule_ids.contains(&"fallow/unused-file"));
@@ -1851,6 +1893,7 @@ mod tests {
         assert!(rule_ids.contains(&"fallow/boundary-violation"));
         assert!(rule_ids.contains(&"fallow/boundary-coverage"));
         assert!(rule_ids.contains(&"fallow/boundary-call-violation"));
+        assert!(rule_ids.contains(&"fallow/policy-violation"));
         assert!(rule_ids.contains(&"fallow/unused-catalog-entry"));
         assert!(rule_ids.contains(&"fallow/empty-catalog-group"));
         assert!(rule_ids.contains(&"fallow/unresolved-catalog-reference"));

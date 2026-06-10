@@ -50,6 +50,8 @@ def dependency_action(pkg):
     "::warning file=\(.path | san)\(if .line > 0 then ",line=\(.line),col=\(.col + 1)" else "" end),title=Boundary coverage::File does not match any configured architecture boundary zone.\(nl)\(nl)Add the file to a zone pattern or allow-list it with boundaries.coverage.allowUnmatched."),
   (.boundary_call_violations[]? |
     "::warning file=\(.path | san)\(if .line > 0 then ",line=\(.line),col=\(.col + 1)" else "" end),title=Boundary call violation::Call to '\(.callee | san)' matches forbidden pattern '\(.pattern | san)' in zone '\(.zone | san)'.\(nl)\(nl)Move the call behind an allowed abstraction or adjust boundaries.calls.forbidden."),
+  (.policy_violations[]? |
+    "::\(if .severity == "error" then "error" else "warning" end) file=\(.path | san)\(if .line > 0 then ",line=\(.line),col=\(.col + 1)" else "" end),title=Policy violation::'\(.matched | san)' is banned by rule '\(.pack | san)/\(.rule_id | san)'.\(if .message then "\(nl)\(nl)\(.message | san)" else "" end)"),
   (.type_only_dependencies[]? |
     "::warning file=\(.path | san)\(if .line > 0 then ",line=\(.line)" else "" end),title=Type-only dependency::Package '\(.package_name | san)' is only used via type imports.\(nl)\(nl)Move it from dependencies to devDependencies to reduce production bundle size."),
   (.stale_suppressions[]? |

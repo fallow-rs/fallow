@@ -401,6 +401,58 @@ pub fn push_boundary_violation_diagnostics(
     }
 }
 
+/// Surface rule-pack policy violations. Severity maps from the EFFECTIVE
+/// per-finding severity (rule-level `severity` over the `policy-violation`
+/// master), so an error-severity rule renders as an error squiggle while a
+/// warn rule renders as a warning. Paths are absolute internally, so the URI
+/// is built directly (no `root.join`).
+pub fn push_policy_violation_diagnostics(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+) {
+    use fallow_core::results::PolicyViolationSeverity;
+
+    for v in &results.policy_violations {
+        let Some(uri) = Uri::from_file_path(&v.violation.path) else {
+            continue;
+        };
+        let line = v.violation.line.saturating_sub(1);
+        let severity = match v.violation.severity {
+            PolicyViolationSeverity::Error => DiagnosticSeverity::ERROR,
+            PolicyViolationSeverity::Warn => DiagnosticSeverity::WARNING,
+        };
+        let message = match &v.violation.message {
+            Some(message) => format!(
+                "Policy violation: `{}` is banned by `{}/{}`. {message}",
+                v.violation.matched, v.violation.pack, v.violation.rule_id
+            ),
+            None => format!(
+                "Policy violation: `{}` is banned by `{}/{}`",
+                v.violation.matched, v.violation.pack, v.violation.rule_id
+            ),
+        };
+        map.entry(uri).or_default().push(Diagnostic {
+            range: Range {
+                start: Position {
+                    line,
+                    character: v.violation.col,
+                },
+                end: Position {
+                    line,
+                    character: u32::MAX,
+                },
+            },
+            severity: Some(severity),
+            source: Some("fallow".to_string()),
+            code: Some(NumberOrString::String("policy-violation".to_string())),
+            code_description: doc_link("policy-violations"),
+            message,
+            related_information: None,
+            ..Default::default()
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -866,6 +918,49 @@ mod tests {
         assert!(d.message.contains("child_process.*"));
         assert!(d.message.contains("domain"));
         assert_eq!(d.range.start.line, 4); // 1-based 5 -> 0-based 4
+        assert_eq!(d.range.start.character, 2);
+    }
+
+    #[test]
+    fn policy_violation_produces_diagnostic_with_per_finding_severity() {
+        let root = test_root();
+        let file = root.join("src/app.ts");
+
+        let mut results = AnalysisResults::default();
+        results
+            .policy_violations
+            .push(fallow_core::results::PolicyViolationFinding::with_actions(
+                fallow_core::results::PolicyViolation {
+                    path: file.clone(),
+                    line: 7,
+                    col: 2,
+                    pack: "team-policy".to_string(),
+                    rule_id: "no-moment".to_string(),
+                    kind: fallow_core::results::PolicyRuleKind::BannedImport,
+                    matched: "moment".to_string(),
+                    severity: fallow_core::results::PolicyViolationSeverity::Error,
+                    message: Some("Use date-fns.".to_string()),
+                },
+            ));
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, &root);
+
+        let uri = Uri::from_file_path(&file).unwrap();
+        let file_diags = diags
+            .get(&uri)
+            .expect("policy diagnostic should land under the file URI");
+        assert_eq!(file_diags.len(), 1);
+
+        let d = &file_diags[0];
+        assert_eq!(d.severity, Some(DiagnosticSeverity::ERROR));
+        assert_eq!(
+            d.code,
+            Some(NumberOrString::String("policy-violation".to_string()))
+        );
+        assert!(d.message.contains("team-policy/no-moment"));
+        assert!(d.message.contains("Use date-fns."));
+        assert_eq!(d.range.start.line, 6); // 1-based 7 -> 0-based 6
         assert_eq!(d.range.start.character, 2);
     }
 

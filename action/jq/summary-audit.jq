@@ -29,6 +29,7 @@ def dead_code_rows:
    [ (.dead_code.boundary_violations // [])[] | {kind:"Boundary violation", location:("`\(.from_path | rel_path):\(.line)`"), item:("\(.from_zone) -> \(.to_zone)"), introduced:.introduced} ] +
    [ (.dead_code.boundary_coverage_violations // [])[] | {kind:"Boundary coverage", location:("`\(.path | rel_path):\(.line)`"), item:"no matching zone", introduced:.introduced} ] +
    [ (.dead_code.boundary_call_violations // [])[] | {kind:"Boundary call", location:("`\(.path | rel_path):\(.line)`"), item:("`\(.callee)` in \(.zone)"), introduced:.introduced} ] +
+   [ (.dead_code.policy_violations // [])[] | {kind:"Policy violation", location:("`\(.path | rel_path):\(.line)`"), item:("`\(.matched)` banned by \(.pack)/\(.rule_id)"), introduced:.introduced} ] +
    [ (.dead_code.type_only_dependencies // [])[] | {kind:"Type-only dependency", location:path_line, item:("`\(.package_name)`"), introduced:.introduced} ] +
    [ (.dead_code.test_only_dependencies // [])[] | {kind:"Test-only dependency", location:path_line, item:("`\(.package_name)`"), introduced:.introduced} ] +
    [ (.dead_code.stale_suppressions // [])[] | {kind:"Stale suppression", location:path_line, item:(.description // "suppression"), introduced:.introduced} ] +

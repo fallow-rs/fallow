@@ -212,6 +212,14 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#boundary-violations",
     },
     RuleDef {
+        id: "fallow/policy-violation",
+        category: "Policy",
+        name: "Policy Violation",
+        short: "Banned call or import matched a rule-pack rule",
+        full: "A call site or import matched a banned-call or banned-import rule from a configured rule pack (the rulePacks config key). Packs are pure declarative data; the check is syntactic and does not follow aliased or re-bound callees, and import matching uses the raw specifier. Replace the banned usage per the rule's message, scope the rule with files/exclude globs, or adjust its severity.",
+        docs_path: "explanations/dead-code#policy-violations",
+    },
+    RuleDef {
         id: "fallow/stale-suppression",
         category: "Suppressions",
         name: "Stale Suppressions",
@@ -329,6 +337,7 @@ pub fn rule_by_token(token: &str) -> Option<&'static RuleDef> {
         "boundary-violations" => Some("fallow/boundary-violation"),
         "boundary-coverage" | "boundary-coverage-violations" => Some("fallow/boundary-coverage"),
         "boundary-calls" | "boundary-call-violations" => Some("fallow/boundary-call-violation"),
+        "policy-violation" | "policy-violations" => Some("fallow/policy-violation"),
         "stale-suppressions" => Some("fallow/stale-suppression"),
         "unused-catalog-entries" | "unused-catalog-entry" | "catalog" => {
             Some("fallow/unused-catalog-entry")
@@ -475,6 +484,10 @@ pub fn rule_guide(rule: &RuleDef) -> RuleGuide {
         "fallow/boundary-call-violation" => RuleGuide {
             example: "src/domain/policy.ts calls execSync from node:child_process while boundaries.calls.forbidden bans child_process.* from the domain zone.",
             how_to_fix: "Move the call into a zone that may perform the effect, route it through an allowed abstraction, or narrow the forbidden pattern if the rule was wrong. To suppress, use the boundary family token: `// fallow-ignore-next-line boundary-violation` governs import, coverage, and call findings alike (the rule-id-shaped `boundary-call-violation` is accepted as an alias).",
+        },
+        "fallow/policy-violation" => RuleGuide {
+            example: "src/app.ts imports moment while a rule pack bans the moment specifier with the message 'Use date-fns.'",
+            how_to_fix: "Replace the banned call or import with the alternative named in the rule's message. To waive a single line, use `// fallow-ignore-next-line policy-violation`; note the token covers every rule-pack rule on that line, and the file-level form covers the whole file.",
         },
         "fallow/stale-suppression" => RuleGuide {
             example: "// fallow-ignore-next-line unused-export remains above an export that is now used.",
@@ -1988,7 +2001,7 @@ mod tests {
 
     #[test]
     fn check_rules_count() {
-        assert_eq!(CHECK_RULES.len(), 25);
+        assert_eq!(CHECK_RULES.len(), 26);
     }
 
     #[test]
@@ -2066,6 +2079,7 @@ mod tests {
             "Architecture",
             "Suppressions",
             "Security",
+            "Policy",
         ];
         for rule in CHECK_RULES
             .iter()

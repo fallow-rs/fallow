@@ -187,6 +187,11 @@ const DIAGNOSTIC_ISSUE_TYPES: &[DiagnosticIssueType] = &[
         label: "Boundary Violations",
     },
     DiagnosticIssueType {
+        config_key: Some("policy-violation"),
+        code: "policy-violation",
+        label: "Policy Violations",
+    },
+    DiagnosticIssueType {
         config_key: Some("stale-suppressions"),
         code: "stale-suppression",
         label: "Stale Suppressions",

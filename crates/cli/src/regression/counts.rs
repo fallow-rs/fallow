@@ -76,6 +76,8 @@ pub struct CheckCounts {
     pub boundary_coverage_violations: usize,
     #[serde(default)]
     pub boundary_call_violations: usize,
+    #[serde(default)]
+    pub policy_violations: usize,
 }
 
 impl CheckCounts {
@@ -101,6 +103,7 @@ impl CheckCounts {
             boundary_violations: results.boundary_violations.len(),
             boundary_coverage_violations: results.boundary_coverage_violations.len(),
             boundary_call_violations: results.boundary_call_violations.len(),
+            policy_violations: results.policy_violations.len(),
         }
     }
 
@@ -127,6 +130,7 @@ impl CheckCounts {
             boundary_violations: b.boundary_violations,
             boundary_coverage_violations: b.boundary_coverage_violations,
             boundary_call_violations: b.boundary_call_violations,
+            policy_violations: b.policy_violations,
         }
     }
 
@@ -153,6 +157,7 @@ impl CheckCounts {
             boundary_violations: self.boundary_violations,
             boundary_coverage_violations: self.boundary_coverage_violations,
             boundary_call_violations: self.boundary_call_violations,
+            policy_violations: self.policy_violations,
         }
     }
 
@@ -241,6 +246,11 @@ impl CheckCounts {
                 self.boundary_call_violations,
                 current.boundary_call_violations,
             ),
+            (
+                "policy_violations",
+                self.policy_violations,
+                current.policy_violations,
+            ),
         ];
         pairs
             .into_iter()
@@ -319,6 +329,7 @@ mod tests {
             boundary_violations: 0,
             boundary_coverage_violations: 0,
             boundary_call_violations: 0,
+            policy_violations: 0,
         };
         let current = CheckCounts {
             unused_files: 7,   // +2
@@ -359,6 +370,7 @@ mod tests {
                 boundary_violations: 0,
                 boundary_coverage_violations: 0,
                 boundary_call_violations: 0,
+                policy_violations: 0,
             }),
             dupes: Some(DupesCounts {
                 clone_groups: 12,
@@ -394,6 +406,7 @@ mod tests {
             boundary_violations: 0,
             boundary_coverage_violations: 0,
             boundary_call_violations: 0,
+            policy_violations: 0,
         };
         let config_baseline = counts.to_config_baseline();
         let roundtripped = CheckCounts::from_config_baseline(&config_baseline);
@@ -436,6 +449,7 @@ mod tests {
             boundary_violations: 0,
             boundary_coverage_violations: 0,
             boundary_call_violations: 0,
+            policy_violations: 0,
         };
         let config_baseline = counts.to_config_baseline();
         let roundtripped = CheckCounts::from_config_baseline(&config_baseline);
@@ -465,6 +479,7 @@ mod tests {
             boundary_violations: 0,
             boundary_coverage_violations: 0,
             boundary_call_violations: 0,
+            policy_violations: 0,
         };
         let deltas = counts.deltas(&counts);
         assert!(deltas.is_empty());
@@ -492,6 +507,7 @@ mod tests {
             boundary_violations: 0,
             boundary_coverage_violations: 0,
             boundary_call_violations: 0,
+            policy_violations: 0,
         };
         let current = CheckCounts {
             total_issues: 14,
@@ -513,6 +529,7 @@ mod tests {
             boundary_violations: 1,
             boundary_coverage_violations: 0,
             boundary_call_violations: 0,
+            policy_violations: 0,
         };
         let deltas = baseline.deltas(&current);
         assert_eq!(deltas.len(), 15);
@@ -543,6 +560,7 @@ mod tests {
             boundary_violations: 0,
             boundary_coverage_violations: 0,
             boundary_call_violations: 0,
+            policy_violations: 0,
         };
         let current = CheckCounts {
             unused_files: 3,

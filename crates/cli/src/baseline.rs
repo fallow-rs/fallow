@@ -99,6 +99,9 @@ pub struct BaselineData {
     /// Boundary call violations, keyed by `path:callee`.
     #[serde(default)]
     pub boundary_call_violations: Vec<String>,
+    /// Rule-pack policy violations, keyed by `path:pack/rule_id:matched`.
+    #[serde(default)]
+    pub policy_violations: Vec<String>,
     /// Stale suppressions, keyed by `file:line`.
     #[serde(default)]
     pub stale_suppressions: Vec<String>,
@@ -260,6 +263,11 @@ impl BaselineData {
                 .iter()
                 .map(|v| boundary_call_violation_key(&v.violation, root))
                 .collect(),
+            policy_violations: results
+                .policy_violations
+                .iter()
+                .map(|v| policy_violation_key(&v.violation, root))
+                .collect(),
             stale_suppressions: results
                 .stale_suppressions
                 .iter()
@@ -322,6 +330,7 @@ impl BaselineData {
             + self.boundary_violations.len()
             + self.boundary_coverage_violations.len()
             + self.boundary_call_violations.len()
+            + self.policy_violations.len()
             + self.stale_suppressions.len()
             + self.unused_catalog_entries.len()
             + self.empty_catalog_groups.len()
@@ -346,6 +355,19 @@ fn boundary_call_violation_key(
     root: &Path,
 ) -> String {
     format!("{}:{}", relative_path(&v.path, root), v.callee)
+}
+
+/// Generate a stable key for a rule-pack policy violation:
+/// `path:pack/rule_id:matched`. Line numbers are deliberately excluded so a
+/// baselined finding survives unrelated edits above it.
+fn policy_violation_key(v: &fallow_core::results::PolicyViolation, root: &Path) -> String {
+    format!(
+        "{}:{}/{}:{}",
+        relative_path(&v.path, root),
+        v.pack,
+        v.rule_id,
+        v.matched
+    )
 }
 
 /// Generate a stable key for a duplicate export: `name|sorted_paths`.
@@ -604,6 +626,16 @@ pub fn filter_new_issues(
     results.boundary_call_violations.retain(|v| {
         let key = boundary_call_violation_key(&v.violation, root);
         !baseline_boundary_calls.contains(key.as_str())
+    });
+
+    let baseline_policy: FxHashSet<&str> = baseline
+        .policy_violations
+        .iter()
+        .map(String::as_str)
+        .collect();
+    results.policy_violations.retain(|v| {
+        let key = policy_violation_key(&v.violation, root);
+        !baseline_policy.contains(key.as_str())
     });
 
     let baseline_stale: FxHashSet<&str> = baseline
@@ -1453,6 +1485,7 @@ mod tests {
             boundary_violations: vec![],
             boundary_coverage_violations: vec![],
             boundary_call_violations: vec![],
+            policy_violations: vec![],
             stale_suppressions: vec![],
             unused_catalog_entries: vec![],
             empty_catalog_groups: vec![],
@@ -1501,6 +1534,7 @@ mod tests {
             boundary_violations: vec![],
             boundary_coverage_violations: vec![],
             boundary_call_violations: vec![],
+            policy_violations: vec![],
             stale_suppressions: vec![],
             unused_catalog_entries: vec![],
             empty_catalog_groups: vec![],
@@ -1536,6 +1570,7 @@ mod tests {
             boundary_violations: vec![],
             boundary_coverage_violations: vec![],
             boundary_call_violations: vec![],
+            policy_violations: vec![],
             stale_suppressions: vec![],
             unused_catalog_entries: vec![],
             empty_catalog_groups: vec![],
@@ -2273,6 +2308,7 @@ mod tests {
             boundary_violations: vec!["src/a.ts->src/b.ts".to_string()],
             boundary_coverage_violations: vec![],
             boundary_call_violations: vec![],
+            policy_violations: vec![],
             ..BaselineData::from_results(&AnalysisResults::default(), Path::new(""))
         };
         let mut results = AnalysisResults::default();

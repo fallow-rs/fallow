@@ -559,6 +559,13 @@
           },
           "description": "Calls from zoned files to callees forbidden for that zone via\n`boundaries.calls.forbidden`. Wrapped in\n[`BoundaryCallViolationFinding`] so each entry carries a typed\n`actions` array natively."
         },
+        "policy_violations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PolicyViolationFinding"
+          },
+          "description": "Banned calls and banned imports matched by declarative rule packs\n(`rulePacks` config). Wrapped in [`PolicyViolationFinding`] so each\nentry carries a typed `actions` array natively. Each finding carries\nits effective per-rule severity."
+        },
         "stale_suppressions": {
           "type": "array",
           "items": {
@@ -868,6 +875,13 @@
             "$ref": "#/definitions/BoundaryCallViolationFinding"
           },
           "description": "Calls from zoned files to callees forbidden for that zone via\n`boundaries.calls.forbidden`. Wrapped in\n[`BoundaryCallViolationFinding`] so each entry carries a typed\n`actions` array natively."
+        },
+        "policy_violations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PolicyViolationFinding"
+          },
+          "description": "Banned calls and banned imports matched by declarative rule packs\n(`rulePacks` config). Wrapped in [`PolicyViolationFinding`] so each\nentry carries a typed `actions` array natively. Each finding carries\nits effective per-rule severity."
         },
         "stale_suppressions": {
           "type": "array",
@@ -4598,6 +4612,10 @@
           "type": "integer",
           "description": "Calls from zoned files to callees forbidden for that zone."
         },
+        "policy_violations": {
+          "type": "integer",
+          "description": "Banned calls and banned imports matched by declarative rule packs."
+        },
         "stale_suppressions": {
           "type": "integer",
           "description": "Suppression comments that no longer match a finding."
@@ -5256,6 +5274,13 @@
           },
           "description": "Calls from zoned files to callees forbidden for that zone via\n`boundaries.calls.forbidden`. Wrapped in\n[`BoundaryCallViolationFinding`] so each entry carries a typed\n`actions` array natively."
         },
+        "policy_violations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PolicyViolationFinding"
+          },
+          "description": "Banned calls and banned imports matched by declarative rule packs\n(`rulePacks` config). Wrapped in [`PolicyViolationFinding`] so each\nentry carries a typed `actions` array natively. Each finding carries\nits effective per-rule severity."
+        },
         "stale_suppressions": {
           "type": "array",
           "items": {
@@ -5752,6 +5777,11 @@
           "type": "string",
           "const": "fix-dependency-override",
           "description": "Fix a misconfigured dependency override entry (unparsable key or empty\nvalue)."
+        },
+        {
+          "type": "string",
+          "const": "resolve-policy-violation",
+          "description": "Replace a banned call or banned import flagged by a rule-pack rule\n(manual; the rule's message usually names the sanctioned alternative)."
         }
       ],
       "description": "Discriminant string for [`FixAction`]. Kebab-case per the JSON output\ncontract."
@@ -11775,6 +11805,110 @@
         "actions"
       ],
       "description": "Wire-shape envelope for a [`BoundaryCallViolation`] finding. Carries\nactions for refactoring the forbidden call out of the zone or suppressing\nit with the shared `boundary-violation` token."
+    },
+    "PolicyViolationFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The source file containing the banned call or import."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the call site or import declaration."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset of the call site or import declaration."
+        },
+        "pack": {
+          "type": "string",
+          "description": "Name of the rule pack that declared the matching rule."
+        },
+        "rule_id": {
+          "type": "string",
+          "description": "Id of the matching rule inside the pack. `pack` plus `rule_id` is the\nfinding's policy identity."
+        },
+        "kind": {
+          "description": "Which rule kind matched.",
+          "$ref": "#/definitions/PolicyRuleKind"
+        },
+        "matched": {
+          "type": "string",
+          "description": "What matched: the written callee path for `banned-call` (e.g.\n`cp.exec`), or the raw import specifier for `banned-import` (e.g.\n`moment/locale/nl`)."
+        },
+        "severity": {
+          "description": "Effective severity for this finding (per-rule `severity`, else the\n`rules.\"policy-violation\"` master).",
+          "$ref": "#/definitions/PolicyViolationSeverity"
+        },
+        "message": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The rule's author-provided message, when set."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "path",
+        "line",
+        "col",
+        "pack",
+        "rule_id",
+        "kind",
+        "matched",
+        "severity",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for a [`PolicyViolation`] finding. Carries actions for\nreplacing the banned call or import, or suppressing it with the\n`policy-violation` token."
+    },
+    "PolicyRuleKind": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "banned-call",
+          "description": "A call site matched a `banned-call` rule's callee patterns."
+        },
+        {
+          "type": "string",
+          "const": "banned-import",
+          "description": "An import or re-export specifier matched a `banned-import` rule."
+        }
+      ],
+      "description": "Which rule-pack rule kind produced a [`PolicyViolation`]."
+    },
+    "PolicyViolationSeverity": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "error",
+          "description": "Fails CI (non-zero exit code)."
+        },
+        {
+          "type": "string",
+          "const": "warn",
+          "description": "Reported without failing CI."
+        }
+      ],
+      "description": "Effective severity of a single [`PolicyViolation`]. Per-rule `severity`\noverrides the `rules.\"policy-violation\"` master; `off` rules emit nothing,\nso only `error` and `warn` appear on the wire. The exit-code gate inspects\nthis per-finding value, not the master severity."
     }
   }
 }

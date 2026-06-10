@@ -169,6 +169,16 @@ pub fn build_compact_lines(results: &AnalysisResults, root: &Path) -> Vec<String
             v.violation.pattern,
         ));
     }
+    for v in &results.policy_violations {
+        lines.push(format!(
+            "policy-violation:{}:{}:{} banned by {}/{}",
+            rel(&v.violation.path),
+            v.violation.line,
+            v.violation.matched,
+            v.violation.pack,
+            v.violation.rule_id,
+        ));
+    }
     for s in &results.stale_suppressions {
         lines.push(format!(
             "stale-suppression:{}:{}:{}",

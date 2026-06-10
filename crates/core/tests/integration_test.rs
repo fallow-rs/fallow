@@ -98,6 +98,8 @@ mod boundary_violations;
 mod config_file_loading;
 #[path = "integration_test/css_modules_unused.rs"]
 mod css_modules_unused;
+#[path = "integration_test/policy_violations.rs"]
+mod policy_violations;
 #[path = "integration_test/private_type_leaks.rs"]
 mod private_type_leaks;
 #[path = "integration_test/production_mode.rs"]

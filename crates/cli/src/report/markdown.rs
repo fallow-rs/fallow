@@ -295,6 +295,21 @@ fn push_markdown_graph_sections(
             )]
         },
     );
+    markdown_section(out, &results.policy_violations, "Policy violations", |v| {
+        vec![format!(
+            "- `{}`:{} `{}` banned by `{}/{}`{}",
+            rel(&v.violation.path),
+            v.violation.line,
+            v.violation.matched,
+            v.violation.pack,
+            v.violation.rule_id,
+            v.violation
+                .message
+                .as_deref()
+                .map(|m| format!(" ({m})"))
+                .unwrap_or_default(),
+        )]
+    });
     markdown_section(
         out,
         &results.stale_suppressions,

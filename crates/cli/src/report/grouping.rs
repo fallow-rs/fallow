@@ -320,6 +320,13 @@ pub fn group_analysis_results(
             .boundary_call_violations
             .push(item.clone());
     }
+    for item in &results.policy_violations {
+        groups
+            .entry(key_for(&item.violation.path))
+            .or_default()
+            .policy_violations
+            .push(item.clone());
+    }
     for item in &results.stale_suppressions {
         groups
             .entry(key_for(&item.path))

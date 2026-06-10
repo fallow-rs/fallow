@@ -956,6 +956,20 @@ pub fn run_plugin_schema() -> ExitCode {
     }
 }
 
+pub fn run_rule_pack_schema() -> ExitCode {
+    let schema = fallow_config::RulePackDef::json_schema();
+    match serde_json::to_string_pretty(&schema) {
+        Ok(json) => {
+            println!("{json}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("Error: failed to serialize rule pack schema: {e}");
+            ExitCode::from(2)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

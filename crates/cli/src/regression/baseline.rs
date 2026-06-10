@@ -720,6 +720,7 @@ mod tests {
             boundary_violations: 0,
             boundary_coverage_violations: 0,
             boundary_call_violations: 0,
+            policy_violations: 0,
         };
         let dupes = DupesCounts {
             clone_groups: 4,

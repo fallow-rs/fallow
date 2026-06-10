@@ -334,6 +334,10 @@ assert_not_contains "$OUT" '!\[NOTE\]' "no GitHub callout NOTE"
 assert_not_contains "$OUT" '!\[WARNING\]' "no GitHub callout WARNING"
 assert_not_contains "$OUT" '!\[TIP\]' "no GitHub callout TIP"
 
+OUT_POLICY=$(jq '.policy_violations = [{"path": "src/app.ts", "line": 7, "col": 2, "pack": "team-policy", "rule_id": "no-moment", "kind": "banned-import", "matched": "moment", "severity": "error", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$CI_JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_POLICY" "Policy violations" "policy: shows summary row and section"
+assert_contains "$OUT_POLICY" "team-policy/no-moment" "policy: shows pack/rule identity"
+
 OUT_CLEAN=$(jq -r -f "$CI_JQ_DIR/summary-check.jq" "$FIXTURES/check-clean.json" 2>&1)
 assert_contains "$OUT_CLEAN" "No issues found" "clean: shows no issues"
 
