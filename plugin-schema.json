@@ -207,10 +207,10 @@
       ]
     },
     "UsedClassMemberRule": {
-      "description": "A `usedClassMembers` entry from config or an external plugin.\n\nSupports either a plain member name (`\"agInit\"`) or a scoped rule that\nonly applies when a class matches specific `extends` / `implements`\nheritage clauses.",
+      "description": "A `usedClassMembers` entry from config or an external plugin.\n\nSupports either a plain member name or glob pattern (`\"agInit\"`,\n`\"enter*\"`) or a scoped rule that only applies when a class matches\nspecific `extends` / `implements` heritage clauses.",
       "anyOf": [
         {
-          "description": "Globally suppress this class member name for all classes.",
+          "description": "Globally suppress this class member name or glob pattern for all classes.",
           "type": "string"
         },
         {
@@ -238,7 +238,7 @@
           ]
         },
         "members": {
-          "description": "Member names that should be treated as framework-used.",
+          "description": "Member names or glob patterns that should be treated as framework-used.",
           "type": "array",
           "items": {
             "type": "string"
