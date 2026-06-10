@@ -879,6 +879,7 @@ mod tests {
             directives: vec![],
             security_sinks: vec![],
             security_sinks_skipped: 0,
+            security_unresolved_callee_sites: Vec::new(),
             tainted_bindings: vec![],
             sanitized_sink_args: vec![],
             security_control_sites: vec![],

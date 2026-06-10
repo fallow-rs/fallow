@@ -16,7 +16,8 @@ use crate::{
 use fallow_types::extract::{
     ClassHeritageInfo, LocalTypeDeclaration, PublicSignatureTypeReference, SanitizedSinkArg,
     SanitizerScope, SecurityControlKind, SecurityControlSite, SinkArgKind, SinkLiteralValue,
-    SinkObjectProperty, SinkShape, SinkSite, TaintedBinding,
+    SinkObjectProperty, SinkShape, SinkSite, SkippedSecurityCalleeExpressionKind,
+    SkippedSecurityCalleeReason, SkippedSecurityCalleeSite, TaintedBinding,
 };
 
 use crate::asset_url::normalize_asset_url;
@@ -3587,6 +3588,27 @@ fn flatten_callee_path(expr: &Expression<'_>) -> Option<String> {
     }
 }
 
+fn contains_computed_member(expr: &Expression<'_>) -> bool {
+    match unwrap_parens(expr) {
+        Expression::ComputedMemberExpression(_) => true,
+        Expression::StaticMemberExpression(member) => contains_computed_member(&member.object),
+        _ => false,
+    }
+}
+
+fn skipped_callee_expression_kind(expr: &Expression<'_>) -> SkippedSecurityCalleeExpressionKind {
+    match unwrap_parens(expr) {
+        Expression::StaticMemberExpression(_) => {
+            SkippedSecurityCalleeExpressionKind::StaticMemberExpression
+        }
+        Expression::ComputedMemberExpression(_) => {
+            SkippedSecurityCalleeExpressionKind::ComputedMemberExpression
+        }
+        Expression::Identifier(_) => SkippedSecurityCalleeExpressionKind::Identifier,
+        _ => SkippedSecurityCalleeExpressionKind::Other,
+    }
+}
+
 fn terminal_static_member_name<'a>(expr: &'a Expression<'_>) -> Option<&'a str> {
     match unwrap_parens(expr) {
         Expression::StaticMemberExpression(member) => Some(member.property.name.as_str()),
@@ -5424,6 +5446,22 @@ impl ModuleInfoExtractor {
         self.capture_call_sink(expr);
     }
 
+    fn record_skipped_security_callee(
+        &mut self,
+        callee: &Expression<'_>,
+        reason: SkippedSecurityCalleeReason,
+    ) {
+        let callee = unwrap_parens(callee);
+        self.security_sinks_skipped += 1;
+        self.security_unresolved_callee_sites
+            .push(SkippedSecurityCalleeSite {
+                reason,
+                expression_kind: skipped_callee_expression_kind(callee),
+                span_start: callee.span().start,
+                span_end: callee.span().end,
+            });
+    }
+
     /// Capture a call/member-call sink site (category-blind). Pushes one
     /// `SinkSite` per admitted positional argument; a callee that cannot be
     /// flattened to a static path increments the blind-spot counter instead.
@@ -5432,7 +5470,12 @@ impl ModuleInfoExtractor {
             if self.redos_regex_application(expr).is_some() {
                 return;
             }
-            self.security_sinks_skipped += 1;
+            let reason = if contains_computed_member(&expr.callee) {
+                SkippedSecurityCalleeReason::ComputedMember
+            } else {
+                SkippedSecurityCalleeReason::DynamicDispatch
+            };
+            self.record_skipped_security_callee(&expr.callee, reason);
             return;
         };
         self.capture_security_control_call(&callee_path, expr.span);
@@ -5661,7 +5704,10 @@ impl ModuleInfoExtractor {
             return;
         };
         let Some(object_path) = flatten_callee_path(&member.object) else {
-            self.security_sinks_skipped += 1;
+            self.record_skipped_security_callee(
+                &member.object,
+                SkippedSecurityCalleeReason::UnsupportedAssignmentObject,
+            );
             return;
         };
         let callee_path = format!("{}.{}", object_path, member.property.name);

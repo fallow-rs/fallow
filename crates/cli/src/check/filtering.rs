@@ -80,6 +80,9 @@ pub fn filter_to_workspaces(
     results.stale_suppressions.retain(|s| any_under(&s.path));
 
     results.security_findings.retain(|f| any_under(&f.path));
+    results
+        .security_unresolved_callee_diagnostics
+        .retain(|d| any_under(&d.path));
 
     results.unused_catalog_entries.clear();
     results.empty_catalog_groups.clear();
@@ -370,6 +373,9 @@ pub fn filter_results_by_diff(
                     .any(|hop| line_in_diff(&hop.path, hop.line))
             })
     });
+    results
+        .security_unresolved_callee_diagnostics
+        .retain(|d| line_in_diff(&d.path, d.line));
 
     for unlisted in &mut results.unlisted_dependencies {
         unlisted
@@ -463,6 +469,9 @@ pub fn retain_gate_new(
                     .any(|hop| taint_hop_added(&hop.path, hop.line, hop.role))
             })
     });
+    results
+        .security_unresolved_callee_diagnostics
+        .retain(|d| line_in_diff(&d.path, d.line));
 }
 
 /// Given a list of discovered workspaces and a set of changed file paths,
@@ -557,12 +566,23 @@ mod tests {
     use super::*;
     use fallow_core::extract::MemberKind;
     use fallow_core::results::*;
+    use fallow_types::extract::{SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason};
     use fallow_types::results::{SecurityReachability, SecuritySeverity};
     use std::path::PathBuf;
 
     /// Test shim: single-workspace variant on top of `filter_to_workspaces`.
     fn filter_to_workspace(results: &mut AnalysisResults, ws_root: &Path) {
         filter_to_workspaces(results, std::slice::from_ref(&ws_root.to_path_buf()));
+    }
+
+    fn unresolved_callee_diagnostic(path: &str, line: u32) -> SecurityUnresolvedCalleeDiagnostic {
+        SecurityUnresolvedCalleeDiagnostic {
+            path: PathBuf::from(path),
+            line,
+            col: 0,
+            reason: SkippedSecurityCalleeReason::DynamicDispatch,
+            expression_kind: SkippedSecurityCalleeExpressionKind::Other,
+        }
     }
 
     #[test]
@@ -586,6 +606,32 @@ mod tests {
         assert_eq!(
             results.unused_files[0].file.path,
             PathBuf::from("/project/packages/ui/src/button.ts")
+        );
+    }
+
+    #[test]
+    fn filter_to_workspace_scopes_unresolved_callee_diagnostics() {
+        let mut results = AnalysisResults::default();
+        results
+            .security_unresolved_callee_diagnostics
+            .push(unresolved_callee_diagnostic(
+                "/project/packages/ui/src/a.ts",
+                3,
+            ));
+        results
+            .security_unresolved_callee_diagnostics
+            .push(unresolved_callee_diagnostic(
+                "/project/packages/api/src/b.ts",
+                3,
+            ));
+
+        let ws_root = PathBuf::from("/project/packages/ui");
+        filter_to_workspace(&mut results, &ws_root);
+
+        assert_eq!(results.security_unresolved_callee_diagnostics.len(), 1);
+        assert_eq!(
+            results.security_unresolved_callee_diagnostics[0].path,
+            PathBuf::from("/project/packages/ui/src/a.ts")
         );
     }
 
@@ -1849,6 +1895,31 @@ mod tests {
     }
 
     #[test]
+    fn filter_by_diff_scopes_unresolved_callee_diagnostics_to_added_lines() {
+        let diff = build_diff(
+            "diff --git a/src/a.ts b/src/a.ts\n\
+             --- a/src/a.ts\n\
+             +++ b/src/a.ts\n\
+             @@ -10,1 +10,2 @@\n\
+              ctx\n\
+             +client[method](req.body.name);\n",
+        );
+        let root = Path::new("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .security_unresolved_callee_diagnostics
+            .push(unresolved_callee_diagnostic("/project/src/a.ts", 11));
+        results
+            .security_unresolved_callee_diagnostics
+            .push(unresolved_callee_diagnostic("/project/src/a.ts", 30));
+
+        filter_results_by_diff(&mut results, &diff, root);
+
+        assert_eq!(results.security_unresolved_callee_diagnostics.len(), 1);
+        assert_eq!(results.security_unresolved_callee_diagnostics[0].line, 11);
+    }
+
+    #[test]
     fn filter_by_diff_keeps_project_level_deps_even_when_diff_misses_package_json() {
         let diff = build_diff(
             "diff --git a/src/a.ts b/src/a.ts\n\
@@ -2041,6 +2112,31 @@ mod tests {
         retain_gate_new(&mut results, &diff, root);
 
         assert_eq!(results.security_findings.len(), 1);
+    }
+
+    #[test]
+    fn gate_new_scopes_unresolved_callee_diagnostics_to_added_lines() {
+        let diff = build_diff(
+            "diff --git a/src/a.ts b/src/a.ts\n\
+             --- a/src/a.ts\n\
+             +++ b/src/a.ts\n\
+             @@ -2,1 +2,2 @@\n\
+              ctx\n\
+             +factory()(req.body.name);\n",
+        );
+        let root = Path::new("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .security_unresolved_callee_diagnostics
+            .push(unresolved_callee_diagnostic("/project/src/a.ts", 3));
+        results
+            .security_unresolved_callee_diagnostics
+            .push(unresolved_callee_diagnostic("/project/src/a.ts", 20));
+
+        retain_gate_new(&mut results, &diff, root);
+
+        assert_eq!(results.security_unresolved_callee_diagnostics.len(), 1);
+        assert_eq!(results.security_unresolved_callee_diagnostics[0].line, 3);
     }
 
     #[test]

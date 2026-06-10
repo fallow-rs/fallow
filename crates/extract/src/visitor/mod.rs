@@ -16,7 +16,7 @@ use crate::{
 };
 use fallow_types::extract::{
     ClassHeritageInfo, LocalTypeDeclaration, PublicSignatureTypeReference, SanitizedSinkArg,
-    SanitizerScope, SecurityControlSite, SinkSite, TaintedBinding,
+    SanitizerScope, SecurityControlSite, SinkSite, SkippedSecurityCalleeSite, TaintedBinding,
 };
 use helpers::LitCustomElementDecorator;
 
@@ -186,6 +186,8 @@ pub(crate) struct ModuleInfoExtractor {
     /// Count of sink-shaped nodes whose callee could not be flattened to a
     /// static path (dynamic dispatch, computed members, aliased bindings).
     pub(crate) security_sinks_skipped: u32,
+    /// Span-level diagnostics for skipped security sink callees.
+    pub(crate) security_unresolved_callee_sites: Vec<SkippedSecurityCalleeSite>,
     /// Local bindings tied to the member-access path they were sourced from
     /// (e.g. `const id = req.query.id`). Feeds the security `tainted_sink`
     /// source-to-sink association in the analyze layer.
@@ -318,6 +320,11 @@ impl ModuleInfoExtractor {
             let span = remap(Span::new(sink.span_start, sink.span_end));
             sink.span_start = span.start;
             sink.span_end = span.end;
+        }
+        for skipped in &mut self.security_unresolved_callee_sites {
+            let span = remap(Span::new(skipped.span_start, skipped.span_end));
+            skipped.span_start = span.start;
+            skipped.span_end = span.end;
         }
         for arg in &mut self.sanitized_sink_args {
             arg.span_start = remap(Span::new(arg.span_start, arg.span_start)).start;
@@ -883,6 +890,7 @@ impl ModuleInfoExtractor {
             directives: self.directives,
             security_sinks: self.security_sinks,
             security_sinks_skipped: self.security_sinks_skipped,
+            security_unresolved_callee_sites: self.security_unresolved_callee_sites,
             tainted_bindings: self.tainted_bindings,
             sanitized_sink_args: self.sanitized_sink_args,
             security_control_sites: self.security_control_sites,
@@ -933,6 +941,8 @@ impl ModuleInfoExtractor {
         info.directives.extend(self.directives);
         info.security_sinks.extend(self.security_sinks);
         info.security_sinks_skipped += self.security_sinks_skipped;
+        info.security_unresolved_callee_sites
+            .extend(self.security_unresolved_callee_sites);
         info.tainted_bindings.extend(self.tainted_bindings);
         info.sanitized_sink_args.extend(self.sanitized_sink_args);
         info.security_control_sites

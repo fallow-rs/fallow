@@ -2553,6 +2553,16 @@ export function choose(value: number): string {
             }],
             security_unresolved_edge_files: 2,
             security_unresolved_callee_sites: 0,
+            security_unresolved_callee_diagnostics: vec![
+                fallow_core::results::SecurityUnresolvedCalleeDiagnostic {
+                    path: "/client.tsx".into(),
+                    line: 2,
+                    col: 0,
+                    reason: fallow_core::extract::SkippedSecurityCalleeReason::DynamicDispatch,
+                    expression_kind:
+                        fallow_core::extract::SkippedSecurityCalleeExpressionKind::Other,
+                },
+            ],
         }
     }
 
@@ -2590,6 +2600,7 @@ export function choose(value: number): string {
         assert_eq!(target.feature_flags.len(), 1);
         assert_eq!(target.security_findings.len(), 1);
         assert_eq!(target.security_unresolved_edge_files, 2);
+        assert_eq!(target.security_unresolved_callee_diagnostics.len(), 1);
         assert_eq!(target.suppression_count, 1);
         assert!(target.entry_point_summary.is_some());
     }

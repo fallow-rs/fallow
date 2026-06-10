@@ -1064,14 +1064,17 @@ git diff --cached --unified=0 | fallow security --gate new --diff-stdin
 ```json
 {
   "kind": "security",
-  "schema_version": "2",
+  "schema_version": "4",
   "security_findings": [],
   "unresolved_edge_files": 0,
-  "unresolved_callee_sites": 0
+  "unresolved_callee_sites": 0,
+  "unresolved_callee_diagnostics": null
 }
 ```
 
 Each finding includes `kind`, `path`, `line`, `col`, `evidence`, `trace`, `actions`, `severity`, and optional `reachability`. `severity` is a review-priority tier (`high`, `medium`, or `low`) derived from reachability, boundary, source-backed, and runtime-hot signals; it is not a verified vulnerability verdict and does not change gate or exit semantics. SARIF maps high and medium candidates to `warning`, and low candidates to `note`. `tainted-sink` findings additionally carry `category` (the catalogue id, e.g. `"dangerous-html"`) and `cwe`; `client-server-leak` findings omit both. `tainted-sink` findings can also include `reachability.untrusted_source_trace` when a module with a known untrusted source imports the sink module; it is ranking and triage context only, not proof that a specific value reaches the sink. When set, `reachability.taint_confidence` tiers the association as `"arg-level"` (the sink argument traces to a same-module source read, strong) or `"module-level"` (only the module is import-reachable from a source, weak); tier from this field rather than the evidence text. For arg-level findings the trace's first hop points at the actual source-read line, and module-level source hops carry the role `"module-source"`. `unresolved_edge_files` (client-server-leak) and `unresolved_callee_sites` (tainted-sink) are in-band blind-spot counters: a zero finding count with a non-zero counter is not a clean bill. Suppress a verified false positive with `// fallow-ignore-file security-client-server-leak` (client-server-leak) or `// fallow-ignore-file security-sink` (any tainted-sink category).
+
+When present, `unresolved_callee_diagnostics` adds bounded unresolved-callee metadata for follow-up review: `sampled[]` rows with `path`, `line`, `col`, `reason`, and `expression_kind`, `top_files[]` counts, `by_reason[]` counts, and the emitted sample/top-file limits. It is blind-spot metadata, not a finding list, and follows the same `--file`, `--workspace`, `--changed-since`, and `--gate new` scoping as security candidates.
 
 Every finding also carries an agent-actionable `candidate { source_kind, sink, boundary }`, an optional `taint_flow { source, sink, path }`, and a stable `finding_id`:
 

@@ -634,6 +634,7 @@ fn bench_cache_round_trip(c: &mut Criterion) {
         directives: Vec::new(),
         security_sinks: Vec::new(),
         security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
         tainted_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),

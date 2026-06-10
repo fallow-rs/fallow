@@ -612,7 +612,7 @@ export type ImpactTrendDirection = ("improving" | "declining" | "stable")
  * The `fallow security --format json` schema version. Independently versioned
  * from the main contract, mirroring `ImpactReportSchemaVersion`.
  */
-export type SecuritySchemaVersion = ("1" | "2" | "3")
+export type SecuritySchemaVersion = ("1" | "2" | "3" | "4")
 /**
  * Severity level for rules.
  *
@@ -666,6 +666,15 @@ export type SecurityRuntimeState = ("runtime-hot" | "runtime-cold" | "never-exec
  * Defensive control family detected on a source to sink path.
  */
 export type SecurityControlKind = ("sanitization" | "validation" | "authentication" | "authorization")
+/**
+ * Why a sink-shaped callee could not be flattened into a static catalogue
+ * path.
+ */
+export type SkippedSecurityCalleeReason = ("computed-member" | "dynamic-dispatch" | "unsupported-assignment-object")
+/**
+ * Syntactic expression shape for a skipped security callee.
+ */
+export type SkippedSecurityCalleeExpressionKind = ("static-member-expression" | "computed-member-expression" | "identifier" | "other")
 /**
  * Discriminator value for [`CodeClimateIssue::kind`].
  */
@@ -4948,6 +4957,10 @@ unresolved_edge_files: number
  * here is NOT a clean bill.
  */
 unresolved_callee_sites: number
+/**
+ * Bounded diagnostics for unresolved callee blind spots.
+ */
+unresolved_callee_diagnostics?: (SecurityUnresolvedCalleeDiagnostics | null)
 }
 /**
  * Allowlisted config context for `fallow security --format json`.
@@ -5436,6 +5449,73 @@ col: number
  * Flattened callee path or a stable synthetic guard name.
  */
 callee: string
+}
+/**
+ * Bounded unresolved-callee diagnostics for `fallow security --format json`.
+ */
+export interface SecurityUnresolvedCalleeDiagnostics {
+/**
+ * Deterministic sample rows, capped by `sample_limit`.
+ */
+sampled: SecurityUnresolvedCalleeSample[]
+/**
+ * Files with the most unresolved callees, capped by `top_files_limit`.
+ */
+top_files: SecurityUnresolvedCalleeTopFile[]
+/**
+ * Full count by unresolved-callee reason, sorted by count then reason.
+ */
+by_reason: SecurityUnresolvedCalleeReasonCount[]
+/**
+ * Maximum number of sample rows emitted.
+ */
+sample_limit: number
+/**
+ * Maximum number of top-file rows emitted.
+ */
+top_files_limit: number
+}
+/**
+ * One sampled unresolved-callee row.
+ */
+export interface SecurityUnresolvedCalleeSample {
+/**
+ * Project-relative source path.
+ */
+path: string
+/**
+ * 1-based source line.
+ */
+line: number
+/**
+ * 0-based byte column.
+ */
+col: number
+reason: SkippedSecurityCalleeReason
+expression_kind: SkippedSecurityCalleeExpressionKind
+}
+/**
+ * Count of unresolved callees in one file.
+ */
+export interface SecurityUnresolvedCalleeTopFile {
+/**
+ * Project-relative source path.
+ */
+path: string
+/**
+ * Number of unresolved callees in this file.
+ */
+count: number
+}
+/**
+ * Count of unresolved callees for one reason.
+ */
+export interface SecurityUnresolvedCalleeReasonCount {
+reason: SkippedSecurityCalleeReason
+/**
+ * Number of unresolved callees with this reason.
+ */
+count: number
 }
 /**
  * Bare `fallow --format json` envelope.

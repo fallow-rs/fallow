@@ -17,10 +17,11 @@ pub use fallow_types::results::{
     SecurityCandidateSink, SecurityDeadCodeContext, SecurityDeadCodeKind,
     SecurityDefensiveBoundary, SecurityDefensiveControl, SecurityFinding, SecurityFindingKind,
     SecurityNetworkContext, SecurityReachability, SecuritySeverity, SecurityTaintFlow,
-    SecurityZoneCrossing, StaleSuppression, SuppressionOrigin, TaintConfidence, TaintEndpoint,
-    TaintPath, TestOnlyDependency, TraceHop, TraceHopRole, TypeOnlyDependency, UnlistedDependency,
-    UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry, UnusedDependency,
-    UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedMember,
+    SecurityUnresolvedCalleeDiagnostic, SecurityZoneCrossing, StaleSuppression, SuppressionOrigin,
+    TaintConfidence, TaintEndpoint, TaintPath, TestOnlyDependency, TraceHop, TraceHopRole,
+    TypeOnlyDependency, UnlistedDependency, UnresolvedCatalogReference, UnresolvedImport,
+    UnusedCatalogEntry, UnusedDependency, UnusedDependencyOverride, UnusedExport, UnusedFile,
+    UnusedMember,
 };
 
 #[cfg(test)]

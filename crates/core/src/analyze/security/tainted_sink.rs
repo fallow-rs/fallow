@@ -20,14 +20,15 @@ use fallow_types::extract::{
 use fallow_types::output::{IssueAction, SuppressFileAction, SuppressFileKind};
 use fallow_types::results::{
     SecurityCandidate, SecurityCandidateBoundary, SecurityCandidateSink, SecurityFinding,
-    SecurityFindingKind, SecurityNetworkContext, SecuritySeverity, TraceHop, TraceHopRole,
+    SecurityFindingKind, SecurityNetworkContext, SecuritySeverity,
+    SecurityUnresolvedCalleeDiagnostic, TraceHop, TraceHopRole,
 };
 use fallow_types::suppress::IssueKind;
 
 use super::catalogue::{Matcher, catalogue};
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 use crate::discover::FileId;
-use crate::graph::ModuleGraph;
+use crate::graph::{ModuleGraph, ModuleNode};
 use crate::suppress::SuppressionContext;
 
 /// The inline suppression kind token for the tainted-sink catalogue rule. ONE
@@ -86,12 +87,14 @@ impl CategoryFilter {
 }
 
 /// In-band blind-spot accounting for the tainted-sink detector.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone)]
 pub struct TaintedSinkStats {
     /// Sink-shaped nodes whose callee could not be flattened to a static path
     /// (dynamic dispatch, computed members, aliased bindings), summed across
     /// scanned modules. Surfaced so an empty result is never reported clean.
     pub sinks_skipped_dynamic_callee: usize,
+    /// Location and reason metadata for skipped sink-shaped callees.
+    pub unresolved_callee_diagnostics: Vec<SecurityUnresolvedCalleeDiagnostic>,
 }
 
 /// Build the machine-actionable file-level suppress hint emitted on every
@@ -357,6 +360,28 @@ fn active_matchers(
         .collect()
 }
 
+fn record_unresolved_callee_diagnostics(
+    stats: &mut TaintedSinkStats,
+    module: &ModuleInfo,
+    node: &ModuleNode,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+) {
+    stats.sinks_skipped_dynamic_callee += module.security_sinks_skipped as usize;
+    stats
+        .unresolved_callee_diagnostics
+        .extend(module.security_unresolved_callee_sites.iter().map(|site| {
+            let (line, col) =
+                byte_offset_to_line_col(line_offsets_by_file, node.file_id, site.span_start);
+            SecurityUnresolvedCalleeDiagnostic {
+                path: node.path.clone(),
+                line,
+                col,
+                reason: site.reason,
+                expression_kind: site.expression_kind,
+            }
+        }));
+}
+
 /// Run the catalogue-driven tainted-sink detector. Returns the findings plus the
 /// in-band blind-spot stats. Callers gate this on the `security_sink` rule
 /// severity; it never runs under bare `fallow` or the `audit` gate.
@@ -390,7 +415,7 @@ pub fn find_tainted_sinks(
             continue;
         };
         // Always count the module's blind spots, even when it has no sinks.
-        stats.sinks_skipped_dynamic_callee += module.security_sinks_skipped as usize;
+        record_unresolved_callee_diagnostics(&mut stats, module, node, line_offsets_by_file);
         if module.security_sinks.is_empty() {
             continue;
         }

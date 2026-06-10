@@ -95,6 +95,11 @@ pub struct ModuleInfo {
     /// Surfaced in-band so an empty catalogue result with a non-zero count is
     /// not a clean bill.
     pub security_sinks_skipped: u32,
+    /// Compact span-level diagnostics for skipped security sink callees. Kept
+    /// next to `security_sinks_skipped` so warm-cache and cold-cache security
+    /// output can explain where the blind spots are concentrated without source
+    /// snippets.
+    pub security_unresolved_callee_sites: Vec<SkippedSecurityCalleeSite>,
     /// Local bindings whose initializer (or destructured object) is a flattened
     /// member-access path. Used by the security `tainted_sink` detector to
     /// back-trace a sink argument to a known untrusted source: the analyze layer
@@ -184,6 +189,8 @@ pub struct SecurityControlSite {
     Copy,
     PartialEq,
     Eq,
+    PartialOrd,
+    Ord,
     serde::Serialize,
     serde::Deserialize,
     bitcode::Encode,
@@ -231,6 +238,72 @@ pub struct TaintedBinding {
     /// helper-return bindings), in which case the analyze layer falls back to the
     /// sink site rather than claiming a spurious line.
     pub source_span_start: u32,
+}
+
+/// Why a sink-shaped callee could not be flattened into a static catalogue
+/// path.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    serde::Serialize,
+    serde::Deserialize,
+    bitcode::Encode,
+    bitcode::Decode,
+)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum SkippedSecurityCalleeReason {
+    /// A computed member access such as `client[method](input)`.
+    ComputedMember,
+    /// A dynamic non-member callee such as `(factory())(input)`.
+    DynamicDispatch,
+    /// An assignment target whose object could not be flattened.
+    UnsupportedAssignmentObject,
+}
+
+/// Syntactic expression shape for a skipped security callee.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    serde::Serialize,
+    serde::Deserialize,
+    bitcode::Encode,
+    bitcode::Decode,
+)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum SkippedSecurityCalleeExpressionKind {
+    /// `obj.prop(...)`.
+    StaticMemberExpression,
+    /// `obj[prop](...)`.
+    ComputedMemberExpression,
+    /// A bare identifier or private identifier callee.
+    Identifier,
+    /// Any other call-like expression that cannot be represented compactly.
+    Other,
+}
+
+/// Span-only diagnostic for a skipped security callee inside one module.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, bitcode::Encode, bitcode::Decode)]
+pub struct SkippedSecurityCalleeSite {
+    /// Why the callee was skipped.
+    pub reason: SkippedSecurityCalleeReason,
+    /// Compact expression shape of the skipped callee.
+    pub expression_kind: SkippedSecurityCalleeExpressionKind,
+    /// Start byte offset of the skipped callee expression.
+    pub span_start: u32,
+    /// End byte offset of the skipped callee expression.
+    pub span_end: u32,
 }
 
 /// The syntactic shape of a captured security sink site. Category-blind: the
@@ -913,7 +986,7 @@ const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 208);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 744);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 768);
 
 /// A re-export declaration.
 #[derive(Debug, Clone)]
@@ -1110,6 +1183,7 @@ mod tests {
             directives: vec!["use client".to_string()],
             security_sinks: Vec::new(),
             security_sinks_skipped: 1,
+            security_unresolved_callee_sites: Vec::new(),
             tainted_bindings: Vec::new(),
             sanitized_sink_args: Vec::new(),
             security_control_sites: Vec::new(),

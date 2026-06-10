@@ -6,7 +6,10 @@ use super::*;
 use crate::tests::parse_ts as parse;
 use crate::{ImportedName, MemberKind};
 use fallow_types::discover::FileId;
-use fallow_types::extract::{SecurityControlKind, SinkArgKind, SinkLiteralValue, SinkShape};
+use fallow_types::extract::{
+    SecurityControlKind, SinkArgKind, SinkLiteralValue, SinkShape,
+    SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason,
+};
 use helpers::regex_pattern_to_suffix;
 
 #[test]
@@ -116,6 +119,71 @@ fn security_literal_sink_capture_records_literal_argument() {
         sink.arg_literal,
         Some(SinkLiteralValue::String("*".to_string()))
     );
+}
+
+#[test]
+fn security_unresolved_callee_records_computed_member_call() {
+    let info = parse("client[method](req.body.name);");
+
+    assert_eq!(info.security_sinks_skipped, 1);
+    let diagnostic = info
+        .security_unresolved_callee_sites
+        .first()
+        .expect("diagnostic recorded");
+    assert_eq!(
+        diagnostic.reason,
+        SkippedSecurityCalleeReason::ComputedMember
+    );
+    assert_eq!(
+        diagnostic.expression_kind,
+        SkippedSecurityCalleeExpressionKind::ComputedMemberExpression
+    );
+}
+
+#[test]
+fn security_unresolved_callee_records_dynamic_dispatch() {
+    let info = parse("factory()(req.body.name);");
+
+    assert_eq!(info.security_sinks_skipped, 1);
+    let diagnostic = info
+        .security_unresolved_callee_sites
+        .first()
+        .expect("diagnostic recorded");
+    assert_eq!(
+        diagnostic.reason,
+        SkippedSecurityCalleeReason::DynamicDispatch
+    );
+    assert_eq!(
+        diagnostic.expression_kind,
+        SkippedSecurityCalleeExpressionKind::Other
+    );
+}
+
+#[test]
+fn security_unresolved_callee_records_member_assignment_object() {
+    let info = parse("getElement().innerHTML = req.body.name;");
+
+    assert_eq!(info.security_sinks_skipped, 1);
+    let diagnostic = info
+        .security_unresolved_callee_sites
+        .first()
+        .expect("diagnostic recorded");
+    assert_eq!(
+        diagnostic.reason,
+        SkippedSecurityCalleeReason::UnsupportedAssignmentObject
+    );
+    assert_eq!(
+        diagnostic.expression_kind,
+        SkippedSecurityCalleeExpressionKind::Other
+    );
+}
+
+#[test]
+fn security_unresolved_callee_skips_redos_regex_application() {
+    let info = parse("pattern.test(req.body.name);");
+
+    assert_eq!(info.security_sinks_skipped, 0);
+    assert!(info.security_unresolved_callee_sites.is_empty());
 }
 
 #[test]

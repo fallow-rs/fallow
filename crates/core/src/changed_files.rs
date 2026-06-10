@@ -420,6 +420,9 @@ pub fn filter_results_by_changed_files(
                     .any(|hop| contains_normalized(&cf, &hop.path))
             })
     });
+    results
+        .security_unresolved_callee_diagnostics
+        .retain(|d| contains_normalized(&cf, &d.path));
 
     results
         .unresolved_catalog_references
@@ -542,8 +545,10 @@ mod tests {
     use crate::duplicates::{CloneGroup, CloneInstance};
     use crate::results::{
         BoundaryViolation, CircularDependency, EmptyCatalogGroup, SecurityFinding,
-        SecurityFindingKind, TraceHop, TraceHopRole, UnusedExport, UnusedFile,
+        SecurityFindingKind, SecurityUnresolvedCalleeDiagnostic, TraceHop, TraceHopRole,
+        UnusedExport, UnusedFile,
     };
+    use fallow_types::extract::{SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason};
     use fallow_types::output_dead_code::{
         BoundaryViolationFinding, CircularDependencyFinding, EmptyCatalogGroupFinding,
         UnusedExportFinding, UnusedFileFinding,
@@ -606,6 +611,40 @@ mod tests {
         assert_eq!(
             validate_git_ref("fallow-baseline").unwrap(),
             "fallow-baseline"
+        );
+    }
+
+    #[test]
+    fn changed_files_filter_scopes_unresolved_callee_diagnostics() {
+        let mut results = AnalysisResults::default();
+        results
+            .security_unresolved_callee_diagnostics
+            .push(SecurityUnresolvedCalleeDiagnostic {
+                path: PathBuf::from("/repo/src/changed.ts"),
+                line: 4,
+                col: 0,
+                reason: SkippedSecurityCalleeReason::DynamicDispatch,
+                expression_kind: SkippedSecurityCalleeExpressionKind::Other,
+            });
+        results
+            .security_unresolved_callee_diagnostics
+            .push(SecurityUnresolvedCalleeDiagnostic {
+                path: PathBuf::from("/repo/src/unchanged.ts"),
+                line: 4,
+                col: 0,
+                reason: SkippedSecurityCalleeReason::ComputedMember,
+                expression_kind: SkippedSecurityCalleeExpressionKind::ComputedMemberExpression,
+            });
+
+        let mut changed: FxHashSet<PathBuf> = FxHashSet::default();
+        changed.insert(PathBuf::from("/repo/src/changed.ts"));
+
+        filter_results_by_changed_files(&mut results, &changed);
+
+        assert_eq!(results.security_unresolved_callee_diagnostics.len(), 1);
+        assert_eq!(
+            results.security_unresolved_callee_diagnostics[0].path,
+            PathBuf::from("/repo/src/changed.ts")
         );
     }
 

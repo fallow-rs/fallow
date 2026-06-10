@@ -4,7 +4,10 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::extract::{MemberKind, SecurityControlKind};
+use crate::extract::{
+    MemberKind, SecurityControlKind, SkippedSecurityCalleeExpressionKind,
+    SkippedSecurityCalleeReason,
+};
 use crate::output::IssueAction;
 use crate::output_dead_code::{
     BoundaryViolationFinding, CircularDependencyFinding, DuplicateExportFinding,
@@ -211,6 +214,11 @@ pub struct AnalysisResults {
     /// Skipped during serialization like [`Self::security_findings`].
     #[serde(skip)]
     pub security_unresolved_callee_sites: usize,
+    /// Location samples for sink-shaped nodes the catalogue detector could not
+    /// flatten to a static callee path. Skipped during default serialization;
+    /// `fallow security` summarizes this metadata in its own envelope.
+    #[serde(skip)]
+    pub security_unresolved_callee_diagnostics: Vec<SecurityUnresolvedCalleeDiagnostic>,
     /// Usage counts for all exports across the project. Used by the LSP for Code Lens.
     /// Not included in issue counts -- this is metadata, not an issue type.
     /// Skipped during serialization: this is internal LSP data, not part of the JSON output schema.
@@ -330,6 +338,7 @@ impl AnalysisResults {
             security_findings,
             security_unresolved_edge_files,
             security_unresolved_callee_sites,
+            security_unresolved_callee_diagnostics,
             export_usages,
             entry_point_summary,
         } = other;
@@ -365,6 +374,8 @@ impl AnalysisResults {
         self.security_findings.extend(security_findings);
         self.security_unresolved_edge_files += security_unresolved_edge_files;
         self.security_unresolved_callee_sites += security_unresolved_callee_sites;
+        self.security_unresolved_callee_diagnostics
+            .extend(security_unresolved_callee_diagnostics);
         self.export_usages.extend(export_usages);
         self.active_suppressions.extend(active_suppressions);
         self.suppression_count += suppression_count;
@@ -587,6 +598,15 @@ impl AnalysisResults {
                 .cmp(&b.path)
                 .then(a.line.cmp(&b.line))
                 .then(a.flag_name.cmp(&b.flag_name))
+        });
+
+        self.security_unresolved_callee_diagnostics.sort_by(|a, b| {
+            a.path
+                .cmp(&b.path)
+                .then(a.line.cmp(&b.line))
+                .then(a.col.cmp(&b.col))
+                .then(a.reason.cmp(&b.reason))
+                .then(a.expression_kind.cmp(&b.expression_kind))
         });
 
         for usage in &mut self.export_usages {
@@ -971,6 +991,24 @@ pub enum SecurityDeadCodeKind {
     UnusedFile,
     /// The candidate's anchor sits on an unused export declaration.
     UnusedExport,
+}
+
+/// Internal row for a security sink-shaped callee that extraction could not
+/// flatten to a static catalogue path.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecurityUnresolvedCalleeDiagnostic {
+    /// File containing the skipped callee. Absolute internally.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// 1-based line of the skipped callee.
+    pub line: u32,
+    /// 0-based byte column of the skipped callee.
+    pub col: u32,
+    /// Why the callee could not be flattened.
+    pub reason: SkippedSecurityCalleeReason,
+    /// Compact syntax shape of the skipped callee.
+    pub expression_kind: SkippedSecurityCalleeExpressionKind,
 }
 
 /// The sink slot of a [`SecurityCandidate`]: a self-contained description of the

@@ -62,6 +62,8 @@ use fallow_cli::report::dupes_grouping::{
 use fallow_cli::security::{
     SecurityGate, SecurityGateMode, SecurityGateVerdict, SecurityOutput, SecuritySchemaVersion,
     SecuritySeverityCounts, SecuritySummary, SecuritySummaryOutput,
+    SecurityUnresolvedCalleeDiagnostics, SecurityUnresolvedCalleeReasonCount,
+    SecurityUnresolvedCalleeSample, SecurityUnresolvedCalleeTopFile,
 };
 use fallow_config::{AuthoredRule, LogicalGroup, LogicalGroupStatus};
 use fallow_core::duplicates::{
@@ -73,7 +75,10 @@ use fallow_types::envelope::{
     EntryPoints, Meta, MetaMetric, MetaRule, RegressionResult, RegressionStatus,
     RegressionToleranceKind, SchemaVersion, TelemetryMeta, ToolVersion,
 };
-use fallow_types::extract::{MemberKind, SecurityControlKind};
+use fallow_types::extract::{
+    MemberKind, SecurityControlKind, SkippedSecurityCalleeExpressionKind,
+    SkippedSecurityCalleeReason,
+};
 use fallow_types::output::{
     AddToConfigAction, AddToConfigKind, AddToConfigValue, FixAction, FixActionType,
     IgnoreExportsRule, IssueAction, SuppressFileAction, SuppressFileKind, SuppressLineAction,
@@ -337,6 +342,12 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
         "ResolutionEvent",
         "TrendSummary",
         "SecurityOutput",
+        "SecurityUnresolvedCalleeDiagnostics",
+        "SecurityUnresolvedCalleeReasonCount",
+        "SecurityUnresolvedCalleeSample",
+        "SecurityUnresolvedCalleeTopFile",
+        "SkippedSecurityCalleeExpressionKind",
+        "SkippedSecurityCalleeReason",
         "SecuritySummaryOutput",
         "SecuritySummary",
         "SecuritySeverityCounts",
@@ -575,6 +586,12 @@ fn derived_definitions() -> Map<String, Value> {
     let _ = generator.subschema_for::<SecurityGate>();
     let _ = generator.subschema_for::<SecuritySchemaVersion>();
     let _ = generator.subschema_for::<SecurityOutput>();
+    let _ = generator.subschema_for::<SecurityUnresolvedCalleeDiagnostics>();
+    let _ = generator.subschema_for::<SecurityUnresolvedCalleeReasonCount>();
+    let _ = generator.subschema_for::<SecurityUnresolvedCalleeSample>();
+    let _ = generator.subschema_for::<SecurityUnresolvedCalleeTopFile>();
+    let _ = generator.subschema_for::<SkippedSecurityCalleeExpressionKind>();
+    let _ = generator.subschema_for::<SkippedSecurityCalleeReason>();
     let _ = generator.subschema_for::<SecuritySummaryOutput>();
     let _ = generator.subschema_for::<SecuritySummary>();
     let _ = generator.subschema_for::<SecuritySeverityCounts>();

@@ -298,7 +298,11 @@ use crate::MemberKind;
 /// Bumped to 141 for issue #1093: `TaintedBinding` gains `source_span_start`
 /// (the byte offset of the source read) so the analyze layer can anchor a taint
 /// trace's source node at the real read line; pre-141 entries lack the offset.
-pub(super) const CACHE_VERSION: u32 = 141;
+/// Bumped to 142 for issue #1134: JS/TS extraction now stores compact
+/// diagnostics for security sink-shaped callees that could not be flattened, so
+/// warm-cache `fallow security` runs can report the same blind-spot metadata as
+/// cold extraction.
+pub(super) const CACHE_VERSION: u32 = 142;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -341,7 +345,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 760);
+assert_cached_type_size!(CachedModule, 784);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 56);
@@ -450,6 +454,8 @@ pub struct CachedModule {
     /// Count of sink-shaped nodes whose callee could not be flattened to a
     /// static path. Round-trips so the in-band blind-spot count is stable.
     pub security_sinks_skipped: u32,
+    /// Span-level diagnostics for skipped security sink callees.
+    pub security_unresolved_callee_sites: Vec<fallow_types::extract::SkippedSecurityCalleeSite>,
     /// Local bindings tied to the member-access path they were sourced from.
     /// Round-trips so the security `tainted_sink` source-to-sink association
     /// sees source-tainted bindings on warm-cache loads.

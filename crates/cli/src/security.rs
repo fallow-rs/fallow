@@ -27,7 +27,8 @@ use fallow_types::discover::DiscoveredFile;
 use fallow_types::envelope::{ElapsedMs, Meta, ToolVersion};
 use fallow_types::extract::ModuleInfo;
 use fallow_types::results::{
-    SecurityRuntimeContext, SecurityRuntimeState, SecuritySeverity, TaintConfidence,
+    SecurityRuntimeContext, SecurityRuntimeState, SecuritySeverity,
+    SecurityUnresolvedCalleeDiagnostic, TaintConfidence,
 };
 use rustc_hash::FxHashSet;
 use serde::Serialize;
@@ -40,6 +41,9 @@ use crate::health_types::{
     RuntimeCoverageFinding, RuntimeCoverageHotPath, RuntimeCoverageReport, RuntimeCoverageVerdict,
 };
 use crate::load_config_for_analysis;
+
+const UNRESOLVED_CALLEE_SAMPLE_LIMIT: usize = 25;
+const UNRESOLVED_CALLEE_TOP_FILES_LIMIT: usize = 10;
 
 /// The `fallow security --format json` schema version. Independently versioned
 /// from the main contract, mirroring `ImpactReportSchemaVersion`.
@@ -61,8 +65,15 @@ pub enum SecuritySchemaVersion {
     #[serde(rename = "2")]
     V2,
     /// Adds version, elapsed time, explain metadata, and safe config metadata.
+    #[allow(
+        dead_code,
+        reason = "kept so the generated schema documents historical v3"
+    )]
     #[serde(rename = "3")]
     V3,
+    /// Adds bounded diagnostics for unresolved callee blind spots.
+    #[serde(rename = "4")]
+    V4,
 }
 
 /// Gate mode for `fallow security --gate <mode>`.
@@ -180,6 +191,61 @@ pub struct SecurityOutput {
     /// members, aliased bindings). A zero finding count with a non-zero value
     /// here is NOT a clean bill.
     pub unresolved_callee_sites: usize,
+    /// Bounded diagnostics for unresolved callee blind spots.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unresolved_callee_diagnostics: Option<SecurityUnresolvedCalleeDiagnostics>,
+}
+
+/// Bounded unresolved-callee diagnostics for `fallow security --format json`.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecurityUnresolvedCalleeDiagnostics {
+    /// Deterministic sample rows, capped by `sample_limit`.
+    pub sampled: Vec<SecurityUnresolvedCalleeSample>,
+    /// Files with the most unresolved callees, capped by `top_files_limit`.
+    pub top_files: Vec<SecurityUnresolvedCalleeTopFile>,
+    /// Full count by unresolved-callee reason, sorted by count then reason.
+    pub by_reason: Vec<SecurityUnresolvedCalleeReasonCount>,
+    /// Maximum number of sample rows emitted.
+    pub sample_limit: usize,
+    /// Maximum number of top-file rows emitted.
+    pub top_files_limit: usize,
+}
+
+/// One sampled unresolved-callee row.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecurityUnresolvedCalleeSample {
+    /// Project-relative source path.
+    pub path: String,
+    /// 1-based source line.
+    pub line: u32,
+    /// 0-based byte column.
+    pub col: u32,
+    /// Why the callee was skipped.
+    pub reason: fallow_types::extract::SkippedSecurityCalleeReason,
+    /// Compact syntax shape of the skipped callee.
+    pub expression_kind: fallow_types::extract::SkippedSecurityCalleeExpressionKind,
+}
+
+/// Count of unresolved callees in one file.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecurityUnresolvedCalleeTopFile {
+    /// Project-relative source path.
+    pub path: String,
+    /// Number of unresolved callees in this file.
+    pub count: usize,
+}
+
+/// Count of unresolved callees for one reason.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecurityUnresolvedCalleeReasonCount {
+    /// Why the callees were skipped.
+    pub reason: fallow_types::extract::SkippedSecurityCalleeReason,
+    /// Number of unresolved callees with this reason.
+    pub count: usize,
 }
 
 /// Compact `fallow security --summary --format json` payload. Uses the same
@@ -338,6 +404,10 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
 
     let unresolved_edge_files = analysis.results.security_unresolved_edge_files;
     let unresolved_callee_sites = analysis.results.security_unresolved_callee_sites;
+    let unresolved_callee_diagnostics = unresolved_callee_diagnostics(
+        &analysis.results.security_unresolved_callee_diagnostics,
+        &config.root,
+    );
     let runtime_report = match security_runtime_report(opts, &mut analysis) {
         Ok(report) => report,
         Err(code) => return code,
@@ -386,7 +456,7 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
         && !findings.is_empty();
 
     let output = SecurityOutput {
-        schema_version: SecuritySchemaVersion::V3,
+        schema_version: SecuritySchemaVersion::V4,
         version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
         elapsed_ms: ElapsedMs(started.elapsed().as_millis() as u64),
         config: security_output_config(
@@ -402,6 +472,7 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
         attack_surface,
         unresolved_edge_files,
         unresolved_callee_sites,
+        unresolved_callee_diagnostics,
     };
     crate::telemetry::note_result_count(output.security_findings.len());
 
@@ -1228,6 +1299,68 @@ fn path_key(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
+fn unresolved_callee_diagnostics(
+    diagnostics: &[SecurityUnresolvedCalleeDiagnostic],
+    root: &Path,
+) -> Option<SecurityUnresolvedCalleeDiagnostics> {
+    if diagnostics.is_empty() {
+        return None;
+    }
+
+    let mut sorted = diagnostics.to_vec();
+    sorted.sort_by(|a, b| {
+        a.path
+            .cmp(&b.path)
+            .then(a.line.cmp(&b.line))
+            .then(a.col.cmp(&b.col))
+            .then(a.reason.cmp(&b.reason))
+            .then(a.expression_kind.cmp(&b.expression_kind))
+    });
+
+    let sampled = sorted
+        .iter()
+        .take(UNRESOLVED_CALLEE_SAMPLE_LIMIT)
+        .map(|diagnostic| SecurityUnresolvedCalleeSample {
+            path: relative_key(&diagnostic.path, root),
+            line: diagnostic.line,
+            col: diagnostic.col,
+            reason: diagnostic.reason,
+            expression_kind: diagnostic.expression_kind,
+        })
+        .collect();
+
+    let mut by_file: BTreeMap<String, usize> = BTreeMap::new();
+    let mut by_reason: BTreeMap<fallow_types::extract::SkippedSecurityCalleeReason, usize> =
+        BTreeMap::new();
+    for diagnostic in &sorted {
+        *by_file
+            .entry(relative_key(&diagnostic.path, root))
+            .or_insert(0) += 1;
+        *by_reason.entry(diagnostic.reason).or_insert(0) += 1;
+    }
+
+    let mut top_files: Vec<_> = by_file
+        .into_iter()
+        .map(|(path, count)| SecurityUnresolvedCalleeTopFile { path, count })
+        .collect();
+    top_files.sort_by(|a, b| b.count.cmp(&a.count).then(a.path.cmp(&b.path)));
+    top_files.truncate(UNRESOLVED_CALLEE_TOP_FILES_LIMIT);
+
+    let mut by_reason: Vec<_> = by_reason
+        .into_iter()
+        .map(|(reason, count)| SecurityUnresolvedCalleeReasonCount { reason, count })
+        .collect();
+    by_reason.sort_by(|a, b| b.count.cmp(&a.count).then(a.reason.cmp(&b.reason)));
+
+    Some(SecurityUnresolvedCalleeDiagnostics {
+        sampled,
+        top_files,
+        by_reason,
+        sample_limit: UNRESOLVED_CALLEE_SAMPLE_LIMIT,
+        top_files_limit: UNRESOLVED_CALLEE_TOP_FILES_LIMIT,
+    })
+}
+
 fn filter_to_files(
     results: &mut fallow_core::results::AnalysisResults,
     root: &Path,
@@ -1422,6 +1555,29 @@ fn gate_human_header(gate: &SecurityGate) -> String {
     }
 }
 
+fn unresolved_callee_human_hint(output: &SecurityOutput) -> Option<String> {
+    let diagnostics = output.unresolved_callee_diagnostics.as_ref()?;
+    let top_reason = diagnostics.by_reason.first()?;
+    let top_file = diagnostics.top_files.first()?;
+    Some(format!(
+        "Most unresolved callees: {} in {}.",
+        unresolved_callee_reason_label(top_reason.reason),
+        top_file.path
+    ))
+}
+
+fn unresolved_callee_reason_label(
+    reason: fallow_types::extract::SkippedSecurityCalleeReason,
+) -> &'static str {
+    match reason {
+        fallow_types::extract::SkippedSecurityCalleeReason::ComputedMember => "computed-member",
+        fallow_types::extract::SkippedSecurityCalleeReason::DynamicDispatch => "dynamic-dispatch",
+        fallow_types::extract::SkippedSecurityCalleeReason::UnsupportedAssignmentObject => {
+            "unsupported-assignment-object"
+        }
+    }
+}
+
 #[must_use]
 fn render_human_summary(output: &SecurityOutput) -> String {
     use crate::report::plural;
@@ -1462,6 +1618,9 @@ fn render_human_summary(output: &SecurityOutput) -> String {
             "Blind spot: {n} call site{} {verb} code patterns that fallow could not resolve.",
             plural(n)
         );
+        if let Some(hint) = unresolved_callee_human_hint(output) {
+            let _ = writeln!(out, "{hint}");
+        }
     }
     out
 }
@@ -1600,6 +1759,9 @@ pub fn render_human(output: &SecurityOutput) -> String {
             "[I]".blue().bold(),
             plural(n),
         ));
+        if let Some(hint) = unresolved_callee_human_hint(output) {
+            out.push_str(&format!("    {hint}\n"));
+        }
     }
 
     out.push_str(&format!(
@@ -2141,7 +2303,7 @@ mod tests {
 
     fn output_with(findings: Vec<SecurityFinding>, unresolved_edge_files: usize) -> SecurityOutput {
         SecurityOutput {
-            schema_version: SecuritySchemaVersion::V3,
+            schema_version: SecuritySchemaVersion::V4,
             version: ToolVersion("test".to_string()),
             elapsed_ms: ElapsedMs(0),
             config: test_output_config(),
@@ -2151,12 +2313,13 @@ mod tests {
             attack_surface: None,
             unresolved_edge_files,
             unresolved_callee_sites: 0,
+            unresolved_callee_diagnostics: None,
         }
     }
 
     fn output_with_gate(verdict: SecurityGateVerdict, new_count: usize) -> SecurityOutput {
         SecurityOutput {
-            schema_version: SecuritySchemaVersion::V3,
+            schema_version: SecuritySchemaVersion::V4,
             version: ToolVersion("test".to_string()),
             elapsed_ms: ElapsedMs(0),
             config: test_output_config(),
@@ -2170,7 +2333,39 @@ mod tests {
             attack_surface: None,
             unresolved_edge_files: 0,
             unresolved_callee_sites: 0,
+            unresolved_callee_diagnostics: None,
         }
+    }
+
+    fn sample_unresolved_callee_diagnostics(root: &Path) -> SecurityUnresolvedCalleeDiagnostics {
+        unresolved_callee_diagnostics(
+            &[
+                SecurityUnresolvedCalleeDiagnostic {
+                    path: root.join("src/z.ts"),
+                    line: 9,
+                    col: 4,
+                    reason: fallow_types::extract::SkippedSecurityCalleeReason::ComputedMember,
+                    expression_kind:
+                        fallow_types::extract::SkippedSecurityCalleeExpressionKind::ComputedMemberExpression,
+                },
+                SecurityUnresolvedCalleeDiagnostic {
+                    path: root.join("src/a.ts"),
+                    line: 3,
+                    col: 2,
+                    reason: fallow_types::extract::SkippedSecurityCalleeReason::DynamicDispatch,
+                    expression_kind: fallow_types::extract::SkippedSecurityCalleeExpressionKind::Other,
+                },
+                SecurityUnresolvedCalleeDiagnostic {
+                    path: root.join("src/a.ts"),
+                    line: 4,
+                    col: 2,
+                    reason: fallow_types::extract::SkippedSecurityCalleeReason::DynamicDispatch,
+                    expression_kind: fallow_types::extract::SkippedSecurityCalleeExpressionKind::Other,
+                },
+            ],
+            root,
+        )
+        .expect("diagnostics summarized")
     }
 
     fn test_output_config() -> SecurityOutputConfig {
@@ -2665,12 +2860,28 @@ mod tests {
     }
 
     #[test]
+    fn human_render_mentions_top_unresolved_callee_reason_and_file() {
+        colored::control::set_override(false);
+        let root = Path::new("/proj/root");
+        let mut output = output_with(vec![], 0);
+        output.unresolved_callee_sites = 3;
+        output.unresolved_callee_diagnostics = Some(sample_unresolved_callee_diagnostics(root));
+
+        let out = render_human(&output);
+
+        assert!(
+            out.contains("Most unresolved callees: dynamic-dispatch in src/a.ts."),
+            "got: {out}"
+        );
+    }
+
+    #[test]
     fn json_render_carries_schema_version_and_findings() {
         let root = Path::new("/proj/root");
         let finding = relativize_finding(sample_finding(root), root);
         let rendered = render_json(&output_with(vec![finding], 1));
         let value: serde_json::Value = serde_json::from_str(&rendered).expect("valid JSON");
-        assert_eq!(value["schema_version"], "3");
+        assert_eq!(value["schema_version"], "4");
         assert_eq!(value["version"], "test");
         assert_eq!(value["elapsed_ms"], 0);
         assert_eq!(
@@ -2692,6 +2903,28 @@ mod tests {
     }
 
     #[test]
+    fn json_render_carries_bounded_unresolved_callee_diagnostics() {
+        let root = Path::new("/proj/root");
+        let mut output = output_with(vec![], 0);
+        output.unresolved_callee_sites = 3;
+        output.unresolved_callee_diagnostics = Some(sample_unresolved_callee_diagnostics(root));
+
+        let rendered = render_json(&output);
+        let value: serde_json::Value = serde_json::from_str(&rendered).expect("valid JSON");
+        let diagnostics = &value["unresolved_callee_diagnostics"];
+
+        assert_eq!(diagnostics["sample_limit"], 25);
+        assert_eq!(diagnostics["top_files_limit"], 10);
+        assert_eq!(diagnostics["sampled"][0]["path"], "src/a.ts");
+        assert_eq!(diagnostics["sampled"][0]["reason"], "dynamic-dispatch");
+        assert_eq!(diagnostics["sampled"][0]["expression_kind"], "other");
+        assert_eq!(diagnostics["top_files"][0]["path"], "src/a.ts");
+        assert_eq!(diagnostics["top_files"][0]["count"], 2);
+        assert_eq!(diagnostics["by_reason"][0]["reason"], "dynamic-dispatch");
+        assert_eq!(diagnostics["by_reason"][0]["count"], 2);
+    }
+
+    #[test]
     fn json_summary_omits_finding_arrays_and_counts_security_findings() {
         let root = Path::new("/proj/root");
         let mut leak = relativize_finding(sample_finding(root), root);
@@ -2709,7 +2942,7 @@ mod tests {
         let value: serde_json::Value = serde_json::from_str(&rendered).expect("valid JSON");
 
         assert_eq!(value["kind"], "security");
-        assert_eq!(value["schema_version"], "3");
+        assert_eq!(value["schema_version"], "4");
         assert!(value.get("security_findings").is_none());
         assert!(value.get("attack_surface").is_none());
         assert!(value.get("_meta").is_none());

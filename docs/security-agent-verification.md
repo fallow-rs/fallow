@@ -22,6 +22,7 @@ The JSON envelope contains:
 - `security_findings[]`, the raw candidates
 - `attack_surface[]`, present only when `--surface` is passed
 - `unresolved_edge_files` and `unresolved_callee_sites`, the in-band blind-spot counters
+- `unresolved_callee_diagnostics`, when present, a bounded sample plus top files and reason counts for unresolved callee blind spots
 
 See [`docs/output-schema.json`](output-schema.json) for the generated fallow output contract. The packet and verdict schemas below are harness-owned conventions, not fields fallow emits.
 
@@ -87,7 +88,8 @@ Normalize each candidate into one packet before prompting a verifier:
   ],
   "blind_spots": {
     "unresolved_edge_files": 0,
-    "unresolved_callee_sites": 0
+    "unresolved_callee_sites": 0,
+    "unresolved_callee_diagnostics": null
   }
 }
 ```
@@ -97,6 +99,7 @@ Use the packet to preserve the separation of duties:
 - `fallow-security-verifier-input/v1` is a recommended harness convention, not a fallow output schema.
 - Fallow-provided fields are deterministic candidate evidence.
 - `source_windows` are caller-collected context.
+- `blind_spots.unresolved_callee_diagnostics` can be copied from the top-level fallow output when a verifier queue wants sample locations for follow-up review. It is bounded metadata, not proof of a vulnerability.
 - The verifier verdict is downstream state and must not be written back into fallow JSON.
 
 ## Prompt Contract

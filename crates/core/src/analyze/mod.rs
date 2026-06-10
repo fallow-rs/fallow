@@ -790,6 +790,7 @@ pub fn find_dead_code_full(
         );
         results.security_findings.extend(sink_findings);
         results.security_unresolved_callee_sites = sink_stats.sinks_skipped_dynamic_callee;
+        results.security_unresolved_callee_diagnostics = sink_stats.unresolved_callee_diagnostics;
         results
             .security_findings
             .extend(security::find_hardcoded_secret_candidates(
@@ -1560,6 +1561,7 @@ mod tests {
                 directives: Vec::new(),
                 security_sinks: Vec::new(),
                 security_sinks_skipped: 0,
+                security_unresolved_callee_sites: Vec::new(),
                 tainted_bindings: Vec::new(),
                 sanitized_sink_args: Vec::new(),
                 security_control_sites: Vec::new(),

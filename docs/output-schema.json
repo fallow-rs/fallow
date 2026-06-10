@@ -9969,6 +9969,17 @@
         "unresolved_callee_sites": {
           "type": "integer",
           "description": "In-band blind spot: number of sink-shaped nodes the catalogue detector\ncould not flatten to a static callee path (dynamic dispatch, computed\nmembers, aliased bindings). A zero finding count with a non-zero value\nhere is NOT a clean bill."
+        },
+        "unresolved_callee_diagnostics": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SecurityUnresolvedCalleeDiagnostics"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Bounded diagnostics for unresolved callee blind spots."
         }
       },
       "required": [
@@ -9998,6 +10009,11 @@
           "type": "string",
           "const": "3",
           "description": "Adds version, elapsed time, explain metadata, and safe config metadata."
+        },
+        {
+          "type": "string",
+          "const": "4",
+          "description": "Adds bounded diagnostics for unresolved callee blind spots."
         }
       ],
       "description": "The `fallow security --format json` schema version. Independently versioned\nfrom the main contract, mirroring `ImpactReportSchemaVersion`."
@@ -11215,6 +11231,162 @@
         "low"
       ],
       "description": "Fixed severity counters for summary JSON."
+    },
+    "SecurityUnresolvedCalleeDiagnostics": {
+      "type": "object",
+      "properties": {
+        "sampled": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SecurityUnresolvedCalleeSample"
+          },
+          "description": "Deterministic sample rows, capped by `sample_limit`."
+        },
+        "top_files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SecurityUnresolvedCalleeTopFile"
+          },
+          "description": "Files with the most unresolved callees, capped by `top_files_limit`."
+        },
+        "by_reason": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SecurityUnresolvedCalleeReasonCount"
+          },
+          "description": "Full count by unresolved-callee reason, sorted by count then reason."
+        },
+        "sample_limit": {
+          "type": "integer",
+          "description": "Maximum number of sample rows emitted."
+        },
+        "top_files_limit": {
+          "type": "integer",
+          "description": "Maximum number of top-file rows emitted."
+        }
+      },
+      "required": [
+        "sampled",
+        "top_files",
+        "by_reason",
+        "sample_limit",
+        "top_files_limit"
+      ],
+      "description": "Bounded unresolved-callee diagnostics for `fallow security --format json`."
+    },
+    "SecurityUnresolvedCalleeReasonCount": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "description": "Why the callees were skipped.",
+          "$ref": "#/definitions/SkippedSecurityCalleeReason"
+        },
+        "count": {
+          "type": "integer",
+          "description": "Number of unresolved callees with this reason."
+        }
+      },
+      "required": [
+        "reason",
+        "count"
+      ],
+      "description": "Count of unresolved callees for one reason."
+    },
+    "SecurityUnresolvedCalleeSample": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Project-relative source path."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based source line."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column."
+        },
+        "reason": {
+          "description": "Why the callee was skipped.",
+          "$ref": "#/definitions/SkippedSecurityCalleeReason"
+        },
+        "expression_kind": {
+          "description": "Compact syntax shape of the skipped callee.",
+          "$ref": "#/definitions/SkippedSecurityCalleeExpressionKind"
+        }
+      },
+      "required": [
+        "path",
+        "line",
+        "col",
+        "reason",
+        "expression_kind"
+      ],
+      "description": "One sampled unresolved-callee row."
+    },
+    "SecurityUnresolvedCalleeTopFile": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Project-relative source path."
+        },
+        "count": {
+          "type": "integer",
+          "description": "Number of unresolved callees in this file."
+        }
+      },
+      "required": [
+        "path",
+        "count"
+      ],
+      "description": "Count of unresolved callees in one file."
+    },
+    "SkippedSecurityCalleeExpressionKind": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "static-member-expression",
+          "description": "`obj.prop(...)`."
+        },
+        {
+          "type": "string",
+          "const": "computed-member-expression",
+          "description": "`obj[prop](...)`."
+        },
+        {
+          "type": "string",
+          "const": "identifier",
+          "description": "A bare identifier or private identifier callee."
+        },
+        {
+          "type": "string",
+          "const": "other",
+          "description": "Any other call-like expression that cannot be represented compactly."
+        }
+      ],
+      "description": "Syntactic expression shape for a skipped security callee."
+    },
+    "SkippedSecurityCalleeReason": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "computed-member",
+          "description": "A computed member access such as `client[method](input)`."
+        },
+        {
+          "type": "string",
+          "const": "dynamic-dispatch",
+          "description": "A dynamic non-member callee such as `(factory())(input)`."
+        },
+        {
+          "type": "string",
+          "const": "unsupported-assignment-object",
+          "description": "An assignment target whose object could not be flattened."
+        }
+      ],
+      "description": "Why a sink-shaped callee could not be flattened into a static catalogue\npath."
     }
   }
 }

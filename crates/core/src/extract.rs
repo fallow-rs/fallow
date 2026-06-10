@@ -11,6 +11,7 @@ pub use fallow_extract::{
     ModuleInfo, PLAYWRIGHT_FIXTURE_DEF_SENTINEL, PLAYWRIGHT_FIXTURE_USE_SENTINEL, ParseResult,
     ReExportInfo, RequireCallInfo, VisibilityTag,
 };
+pub use fallow_types::extract::{SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason};
 
 pub use fallow_extract::{
     extract_astro_frontmatter, extract_css_module_exports, extract_mdx_statements,
