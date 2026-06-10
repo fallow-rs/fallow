@@ -69,6 +69,11 @@ pub struct AuditResult {
     /// files were authoritative this run.
     pub changed_files: Vec<PathBuf>,
     pub base_ref: String,
+    /// Human-readable provenance of `base_ref` for the scope line, e.g.
+    /// `merge-base with origin/main`. `None` for an explicit `--base` (the ref
+    /// the user typed is already self-describing). Not serialized; the JSON
+    /// envelope carries the resolved `base_ref` directly.
+    pub base_description: Option<String>,
     pub head_sha: Option<String>,
     pub output: OutputFormat,
     pub performance: bool,
@@ -123,44 +128,134 @@ pub struct AuditOptions<'a> {
     pub min_invocations_hot: u64,
 }
 
-/// Try to determine the default branch for the repository.
-/// Priority: `git symbolic-ref refs/remotes/origin/HEAD` → `main` → `master`.
-/// Returns `None` if none of these exist.
-fn auto_detect_base_branch(root: &std::path::Path) -> Option<String> {
-    let mut symbolic_ref = std::process::Command::new("git");
-    symbolic_ref
-        .args(["symbolic-ref", "refs/remotes/origin/HEAD"])
-        .current_dir(root);
-    clear_ambient_git_env(&mut symbolic_ref);
-    if let Ok(output) = symbolic_ref.output()
-        && output.status.success()
+/// A base ref resolved by auto-detection: the git ref to diff against plus a
+/// human-readable provenance string for the scope line.
+struct DetectedBase {
+    /// The ref the audit diffs against: a `git merge-base` SHA (the fork
+    /// point), a remote-tracking ref, or a local branch name.
+    git_ref: String,
+    /// How the ref was resolved, e.g. `merge-base with origin/main`. Shown on
+    /// the human audit scope line so the comparison target is checkable.
+    description: String,
+}
+
+/// Run `git <args>` in `root` with ambient git env cleared and return trimmed
+/// stdout, or `None` on non-zero exit / empty output.
+fn git_stdout(root: &std::path::Path, args: &[&str]) -> Option<String> {
+    let mut command = std::process::Command::new("git");
+    command.args(args).current_dir(root);
+    clear_ambient_git_env(&mut command);
+    let output = command.output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let trimmed = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
+}
+
+/// Whether `git_ref` resolves to a commit in this repository.
+fn git_ref_exists(root: &std::path::Path, git_ref: &str) -> bool {
+    git_stdout(root, &["rev-parse", "--verify", "--quiet", git_ref]).is_some()
+}
+
+/// The current branch's configured upstream (`@{upstream}`), e.g. `origin/main`,
+/// or `None` when no tracking branch is set (detached HEAD, fresh worktree).
+fn git_upstream_ref(root: &std::path::Path) -> Option<String> {
+    git_stdout(
+        root,
+        &[
+            "rev-parse",
+            "--abbrev-ref",
+            "--symbolic-full-name",
+            "@{upstream}",
+        ],
+    )
+}
+
+/// The merge-base (fork point) SHA of `a` and `b`, or `None` when there is no
+/// common ancestor (shallow clone, unrelated history).
+fn git_merge_base(root: &std::path::Path, a: &str, b: &str) -> Option<String> {
+    git_stdout(root, &["merge-base", a, b])
+}
+
+/// The remote default branch as a remote-tracking ref (`origin/<branch>`).
+/// Priority: `origin/HEAD` symbolic ref, then `origin/main`, then
+/// `origin/master`. Returns `None` when there is no `origin` remote at all.
+fn detect_remote_default_ref(root: &std::path::Path) -> Option<String> {
+    if let Some(full_ref) = git_stdout(root, &["symbolic-ref", "refs/remotes/origin/HEAD"])
+        && let Some(branch) = full_ref.strip_prefix("refs/remotes/origin/")
     {
-        let full_ref = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if let Some(branch) = full_ref.strip_prefix("refs/remotes/origin/") {
-            return Some(branch.to_string());
+        return Some(format!("origin/{branch}"));
+    }
+    for candidate in ["origin/main", "origin/master"] {
+        if git_ref_exists(root, candidate) {
+            return Some(candidate.to_string());
         }
     }
+    None
+}
 
-    let mut verify_main = std::process::Command::new("git");
-    verify_main
-        .args(["rev-parse", "--verify", "main"])
-        .current_dir(root);
-    clear_ambient_git_env(&mut verify_main);
-    if let Ok(output) = verify_main.output()
-        && output.status.success()
-    {
-        return Some("main".to_string());
+/// Auto-detect the base ref for `fallow audit` when no `--base` / env override
+/// is set.
+///
+/// The base is the `git merge-base` (fork point) against the branch's upstream
+/// or the remote default, mirroring the `fallow hooks install --target git`
+/// pre-commit hook (issue #242). Resolving to the merge-base SHA, rather than a
+/// bare branch name, fixes the long-standing bug where the default branch was
+/// discovered via `origin/HEAD` but returned as the bare name `main` (issue
+/// #1168): git resolves a bare `main` to the LOCAL `refs/heads/main`, which is
+/// stale on worktree checkouts cut from `origin/main`, so the audit diffed
+/// every branch against an ancient base and false-failed the gate.
+///
+/// Resolution order:
+/// 1. `@{upstream}` merge-base, so a branch forked off a non-default
+///    integration branch compares against where it actually forked.
+/// 2. Remote default (`origin/HEAD` -> `origin/main` -> `origin/master`)
+///    merge-base. The remote-tracking ref refreshes on fetch, unlike a
+///    long-stale local branch; the merge-base is also immune to an unfetched
+///    `origin/main` in the false-fail direction.
+/// 3. Local `main` / `master` when there is no `origin` remote, preserving the
+///    historical behavior for air-gapped / local-only repos.
+fn auto_detect_base_ref(root: &std::path::Path) -> Option<DetectedBase> {
+    if let Some(upstream) = git_upstream_ref(root) {
+        if let Some(sha) = git_merge_base(root, &upstream, "HEAD") {
+            return Some(DetectedBase {
+                git_ref: sha,
+                description: format!("merge-base with {upstream}"),
+            });
+        }
+        // No common ancestor (shallow clone / unrelated history): fall back to
+        // the upstream tip rather than failing the detection outright.
+        return Some(DetectedBase {
+            description: format!("{upstream} (tip)"),
+            git_ref: upstream,
+        });
     }
 
-    let mut verify_master = std::process::Command::new("git");
-    verify_master
-        .args(["rev-parse", "--verify", "master"])
-        .current_dir(root);
-    clear_ambient_git_env(&mut verify_master);
-    if let Ok(output) = verify_master.output()
-        && output.status.success()
-    {
-        return Some("master".to_string());
+    if let Some(remote_ref) = detect_remote_default_ref(root) {
+        if let Some(sha) = git_merge_base(root, &remote_ref, "HEAD") {
+            return Some(DetectedBase {
+                git_ref: sha,
+                description: format!("merge-base with {remote_ref}"),
+            });
+        }
+        return Some(DetectedBase {
+            description: format!("{remote_ref} (tip)"),
+            git_ref: remote_ref,
+        });
+    }
+
+    for candidate in ["main", "master"] {
+        if git_ref_exists(root, candidate) {
+            return Some(DetectedBase {
+                git_ref: candidate.to_string(),
+                description: format!("local {candidate}"),
+            });
+        }
     }
 
     None
@@ -958,7 +1053,7 @@ fn run_audit_head_analyses(
 pub fn execute_audit(opts: &AuditOptions<'_>) -> Result<AuditResult, ExitCode> {
     let start = Instant::now();
 
-    let base_ref = resolve_base_ref(opts)?;
+    let (base_ref, base_description) = resolve_base_ref(opts)?;
 
     // Always sweep: prunable orphans (cache dir externally reaped, git admin
     // entry left behind) are reclaimed regardless of the age threshold, so the
@@ -981,7 +1076,12 @@ pub fn execute_audit(opts: &AuditOptions<'_>) -> Result<AuditResult, ExitCode> {
     let changed_files_count = changed_files.len();
 
     if changed_files.is_empty() {
-        return Ok(empty_audit_result(base_ref, opts, start.elapsed()));
+        return Ok(empty_audit_result(
+            base_ref,
+            base_description,
+            opts,
+            start.elapsed(),
+        ));
     }
 
     let changed_since = Some(base_ref.as_str());
@@ -1080,6 +1180,7 @@ pub fn execute_audit(opts: &AuditOptions<'_>) -> Result<AuditResult, ExitCode> {
         changed_files_count,
         changed_files: changed_files.into_iter().collect(),
         base_ref,
+        base_description,
         head_sha: get_head_sha(opts.root),
         output: opts.output,
         performance: opts.performance,
@@ -1090,30 +1191,69 @@ pub fn execute_audit(opts: &AuditOptions<'_>) -> Result<AuditResult, ExitCode> {
     })
 }
 
-/// Resolve the base ref: explicit --changed-since / --base, or auto-detect.
-fn resolve_base_ref(opts: &AuditOptions<'_>) -> Result<String, ExitCode> {
-    if let Some(ref_str) = opts.changed_since {
-        return Ok(ref_str.to_string());
+/// Parse a raw `FALLOW_AUDIT_BASE` value: trim, treat empty / whitespace-only as
+/// unset. Pure helper so the trimming logic is testable without mutating env.
+fn parse_audit_base_override(raw: Option<String>) -> Option<String> {
+    let trimmed = raw?.trim().to_string();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
     }
-    let Some(branch) = auto_detect_base_branch(opts.root) else {
+}
+
+/// The `FALLOW_AUDIT_BASE` override (trimmed), or `None` when unset / empty.
+/// Lets a downstream consumer pin the base without editing the generated agent
+/// gate script (issue #1168), e.g. `FALLOW_AUDIT_BASE=upstream/main` on a fork.
+fn audit_base_env_override() -> Option<String> {
+    parse_audit_base_override(std::env::var("FALLOW_AUDIT_BASE").ok())
+}
+
+/// Resolve the base ref and an optional human-readable provenance for the scope
+/// line. Precedence: explicit `--changed-since` / `--base` flag, then the
+/// `FALLOW_AUDIT_BASE` env override, then auto-detection.
+fn resolve_base_ref(opts: &AuditOptions<'_>) -> Result<(String, Option<String>), ExitCode> {
+    if let Some(ref_str) = opts.changed_since {
+        return Ok((ref_str.to_string(), None));
+    }
+    if let Some(env_ref) = audit_base_env_override() {
+        if let Err(e) = crate::validate::validate_git_ref(&env_ref) {
+            return Err(emit_error(
+                &format!("FALLOW_AUDIT_BASE='{env_ref}' is not a valid git ref: {e}"),
+                2,
+                opts.output,
+            ));
+        }
+        let description = format!("FALLOW_AUDIT_BASE={env_ref}");
+        return Ok((env_ref, Some(description)));
+    }
+    let Some(detected) = auto_detect_base_ref(opts.root) else {
         return Err(emit_error(
             "could not detect base branch. Use --base <ref> to specify the comparison target (e.g., --base main)",
             2,
             opts.output,
         ));
     };
-    if let Err(e) = crate::validate::validate_git_ref(&branch) {
+    if let Err(e) = crate::validate::validate_git_ref(&detected.git_ref) {
         return Err(emit_error(
-            &format!("auto-detected base branch '{branch}' is not a valid git ref: {e}"),
+            &format!(
+                "auto-detected base ref '{}' is not a valid git ref: {e}",
+                detected.git_ref
+            ),
             2,
             opts.output,
         ));
     }
-    Ok(branch)
+    Ok((detected.git_ref, Some(detected.description)))
 }
 
 /// Build an empty pass result when no files have changed.
-fn empty_audit_result(base_ref: String, opts: &AuditOptions<'_>, elapsed: Duration) -> AuditResult {
+fn empty_audit_result(
+    base_ref: String,
+    base_description: Option<String>,
+    opts: &AuditOptions<'_>,
+    elapsed: Duration,
+) -> AuditResult {
     crate::telemetry::note_final_result_count(0);
 
     AuditResult {
@@ -1134,6 +1274,7 @@ fn empty_audit_result(base_ref: String, opts: &AuditOptions<'_>, elapsed: Durati
         changed_files_count: 0,
         changed_files: Vec::new(),
         base_ref,
+        base_description,
         head_sha: get_head_sha(opts.root),
         output: opts.output,
         performance: opts.performance,
@@ -1497,10 +1638,19 @@ mod tests {
         root
     }
 
+    /// Add a tracked file and commit it; return the new HEAD SHA.
+    fn commit_file(repo: &std::path::Path, name: &str, body: &str) -> String {
+        fs::write(repo.join(name), body).expect("file should be written");
+        git(repo, &["add", "."]);
+        git(repo, &["-c", "commit.gpgsign=false", "commit", "-m", name]);
+        git_rev_parse(repo, "HEAD").expect("HEAD should resolve")
+    }
+
     #[test]
-    fn auto_detect_base_branch_prefers_origin_head() {
+    fn auto_detect_base_ref_resolves_origin_default_to_merge_base() {
         let tmp = tempfile::TempDir::new().expect("temp dir should be created");
         let repo = init_throwaway_repo(tmp.path(), "repo");
+        let head = git_rev_parse(&repo, "HEAD").expect("HEAD should resolve");
         git(&repo, &["branch", "trunk"]);
         git(&repo, &["update-ref", "refs/remotes/origin/trunk", "trunk"]);
         git(
@@ -1512,19 +1662,88 @@ mod tests {
             ],
         );
 
-        assert_eq!(auto_detect_base_branch(&repo), Some("trunk".to_string()));
+        let detected = auto_detect_base_ref(&repo).expect("base should be detected");
+        // trunk == HEAD, so the merge-base is HEAD's own SHA (the bare branch
+        // name `trunk` is no longer returned: it would resolve to a local ref).
+        assert_eq!(detected.git_ref, head);
+        assert_eq!(detected.description, "merge-base with origin/trunk");
+    }
+
+    /// Regression for issue #1168: a worktree checkout whose local `main` is
+    /// stale relative to a fresh `origin/main`. The base must be the fork point
+    /// (merge-base with `origin/main`), NOT the stale local-`main` commit that
+    /// the old bare-name resolution diffed against.
+    #[test]
+    fn auto_detect_base_ref_ignores_stale_local_main() {
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        let repo = init_throwaway_repo(tmp.path(), "repo");
+        let stale = git_rev_parse(&repo, "HEAD").expect("HEAD should resolve");
+
+        // origin/main starts at the first commit, then a teammate advances it.
+        git(&repo, &["update-ref", "refs/remotes/origin/main", "main"]);
+        git(
+            &repo,
+            &[
+                "symbolic-ref",
+                "refs/remotes/origin/HEAD",
+                "refs/remotes/origin/main",
+            ],
+        );
+        let fork_point = commit_file(&repo, "teammate.txt", "merged work\n");
+        git(&repo, &["update-ref", "refs/remotes/origin/main", "main"]);
+
+        // Cut a feature branch from the fresh origin tip using the raw SHA (no
+        // upstream tracking), then leave local `main` behind at the stale commit.
+        git(&repo, &["checkout", "-b", "feature", &fork_point]);
+        commit_file(&repo, "feature.txt", "my change\n");
+        git(&repo, &["branch", "-f", "main", &stale]);
+
+        let detected = auto_detect_base_ref(&repo).expect("base should be detected");
+        assert_eq!(
+            detected.git_ref, fork_point,
+            "base must be the fork point (origin/main), not stale local main"
+        );
+        assert_ne!(
+            detected.git_ref, stale,
+            "must not diff against stale local main"
+        );
+        assert_eq!(detected.description, "merge-base with origin/main");
     }
 
     #[test]
-    fn auto_detect_base_branch_falls_back_to_main() {
+    fn auto_detect_base_ref_prefers_configured_upstream() {
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        let repo = init_throwaway_repo(tmp.path(), "repo");
+        let fork_point = git_rev_parse(&repo, "HEAD").expect("HEAD should resolve");
+        // Configure `origin` so refs/remotes/origin/* are recognized as tracking
+        // refs and `--set-upstream-to` is accepted.
+        git(&repo, &["remote", "add", "origin", &repo.to_string_lossy()]);
+        git(&repo, &["update-ref", "refs/remotes/origin/main", "main"]);
+
+        git(&repo, &["checkout", "-b", "feature"]);
+        git(
+            &repo,
+            &["branch", "--set-upstream-to=origin/main", "feature"],
+        );
+        commit_file(&repo, "feature.txt", "my change\n");
+
+        let detected = auto_detect_base_ref(&repo).expect("base should be detected");
+        assert_eq!(detected.git_ref, fork_point);
+        assert_eq!(detected.description, "merge-base with origin/main");
+    }
+
+    #[test]
+    fn auto_detect_base_ref_falls_back_to_local_main_without_remote() {
         let tmp = tempfile::TempDir::new().expect("temp dir should be created");
         let repo = init_throwaway_repo(tmp.path(), "repo");
 
-        assert_eq!(auto_detect_base_branch(&repo), Some("main".to_string()));
+        let detected = auto_detect_base_ref(&repo).expect("base should be detected");
+        assert_eq!(detected.git_ref, "main");
+        assert_eq!(detected.description, "local main");
     }
 
     #[test]
-    fn auto_detect_base_branch_falls_back_to_master() {
+    fn auto_detect_base_ref_falls_back_to_local_master_without_remote() {
         let tmp = tempfile::TempDir::new().expect("temp dir should be created");
         let repo = tmp.path().join("repo");
         fs::create_dir_all(&repo).expect("repo root should be created");
@@ -1536,14 +1755,27 @@ mod tests {
             &["-c", "commit.gpgsign=false", "commit", "-m", "initial"],
         );
 
-        assert_eq!(auto_detect_base_branch(&repo), Some("master".to_string()));
+        let detected = auto_detect_base_ref(&repo).expect("base should be detected");
+        assert_eq!(detected.git_ref, "master");
+        assert_eq!(detected.description, "local master");
     }
 
     #[test]
-    fn auto_detect_base_branch_returns_none_outside_git_repo() {
+    fn auto_detect_base_ref_returns_none_outside_git_repo() {
         let tmp = tempfile::TempDir::new().expect("temp dir should be created");
 
-        assert_eq!(auto_detect_base_branch(tmp.path()), None);
+        assert!(auto_detect_base_ref(tmp.path()).is_none());
+    }
+
+    #[test]
+    fn parse_audit_base_override_trims_and_rejects_empty() {
+        assert_eq!(parse_audit_base_override(None), None);
+        assert_eq!(parse_audit_base_override(Some(String::new())), None);
+        assert_eq!(parse_audit_base_override(Some("   ".to_string())), None);
+        assert_eq!(
+            parse_audit_base_override(Some("  origin/main  ".to_string())),
+            Some("origin/main".to_string())
+        );
     }
 
     #[test]
