@@ -11,8 +11,9 @@ mod rules;
 mod used_class_members;
 
 pub use boundaries::{
-    AuthoredRule, BoundaryConfig, BoundaryCoverageConfig, BoundaryPreset, BoundaryRule,
-    BoundaryZone, LogicalGroup, LogicalGroupStatus, RedundantRootPrefix, ResolvedBoundaryConfig,
+    AuthoredRule, BoundaryCallsConfig, BoundaryConfig, BoundaryCoverageConfig, BoundaryPreset,
+    BoundaryRule, BoundaryZone, ForbiddenCallRule, ForbiddenCallee, InvalidForbiddenCallee,
+    LogicalGroup, LogicalGroupStatus, RedundantRootPrefix, ResolvedBoundaryConfig,
     ResolvedBoundaryCoverageConfig, ResolvedBoundaryRule, ResolvedZone, UnknownZoneRef,
     ZoneReferenceKind, ZoneValidationError,
 };
@@ -492,6 +493,8 @@ pub struct RegressionBaseline {
     pub boundary_violations: usize,
     #[serde(default)]
     pub boundary_coverage_violations: usize,
+    #[serde(default)]
+    pub boundary_call_violations: usize,
 }
 
 #[cfg(test)]

@@ -1,7 +1,7 @@
 use fallow_config::{
-    BoundaryConfig, BoundaryCoverageConfig, BoundaryPreset, BoundaryRule, BoundaryZone,
-    DuplicatesConfig, FallowConfig, FlagsConfig, HealthConfig, OutputFormat, ResolveConfig,
-    RulesConfig, Severity,
+    BoundaryCallsConfig, BoundaryConfig, BoundaryCoverageConfig, BoundaryPreset, BoundaryRule,
+    BoundaryZone, DuplicatesConfig, FallowConfig, FlagsConfig, HealthConfig, OutputFormat,
+    ResolveConfig, RulesConfig, Severity,
 };
 
 use super::common::fixture_path;
@@ -65,6 +65,7 @@ fn detects_boundary_violation() {
     let root = fixture_path("boundary-violations");
     let boundaries = BoundaryConfig {
         coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
         preset: None,
         zones: vec![
             BoundaryZone {
@@ -213,6 +214,7 @@ fn no_violations_when_rule_is_off() {
     let root = fixture_path("boundary-violations");
     let boundaries = BoundaryConfig {
         coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
         preset: None,
         zones: vec![
             BoundaryZone {
@@ -287,6 +289,7 @@ fn preset_detects_boundary_violation() {
     let root = fixture_path("boundary-preset");
     let boundaries = BoundaryConfig {
         coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
         preset: Some(BoundaryPreset::Hexagonal),
         zones: vec![],
         rules: vec![],
@@ -360,6 +363,7 @@ fn root_field_classifies_per_subtree() {
     let root = fixture_path("boundary-root");
     let boundaries = BoundaryConfig {
         coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
         preset: None,
         zones: vec![
             BoundaryZone {
@@ -476,6 +480,7 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
 
     let flat_boundaries = BoundaryConfig {
         coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
         preset: None,
         zones: vec![BoundaryZone {
             name: "ui".to_string(),
@@ -537,6 +542,7 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
 
     let scoped_boundaries = BoundaryConfig {
         coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
         preset: None,
         zones: vec![
             BoundaryZone {
@@ -614,6 +620,7 @@ fn auto_discover_isolates_child_boundary_zones() {
     let root = fixture_path("boundary-auto-discover");
     let boundaries = BoundaryConfig {
         coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
         preset: None,
         zones: vec![
             BoundaryZone {
@@ -690,6 +697,7 @@ fn bulletproof_preset_detects_violation() {
     let root = fixture_path("boundary-bulletproof");
     let boundaries = BoundaryConfig {
         coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
         preset: Some(BoundaryPreset::Bulletproof),
         zones: vec![],
         rules: vec![],
@@ -792,6 +800,7 @@ fn bulletproof_top_level_features_file_is_strict_without_barrel_false_positive()
     let root = fixture_path("boundary-bulletproof-toplevel");
     let boundaries = BoundaryConfig {
         coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
         preset: Some(BoundaryPreset::Bulletproof),
         zones: vec![],
         rules: vec![],
@@ -887,6 +896,7 @@ fn bulletproof_top_level_features_file_is_strict_without_barrel_false_positive()
 fn type_only_boundaries(allow_type_only_db: Vec<String>) -> BoundaryConfig {
     BoundaryConfig {
         coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
         preset: None,
         zones: vec![
             BoundaryZone {

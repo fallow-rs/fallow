@@ -138,8 +138,8 @@ mod tests {
     use crate::resolve::ResolvedModule;
     use crate::suppress::Suppression;
     use fallow_config::{
-        BoundaryConfig, BoundaryCoverageConfig, BoundaryRule, BoundaryZone, FallowConfig,
-        OutputFormat, ResolvedConfig, RulesConfig, Severity,
+        BoundaryCallsConfig, BoundaryConfig, BoundaryCoverageConfig, BoundaryRule, BoundaryZone,
+        FallowConfig, OutputFormat, ResolvedConfig, RulesConfig, Severity,
     };
     use rustc_hash::FxHashSet;
     use std::path::PathBuf;
@@ -247,6 +247,7 @@ mod tests {
         let root = PathBuf::from("/tmp/boundary-test");
         let boundaries = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -286,6 +287,7 @@ mod tests {
         let root = PathBuf::from("/tmp/boundary-test");
         let boundaries = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -333,6 +335,7 @@ mod tests {
         let root = PathBuf::from("/tmp/boundary-test");
         let boundaries = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
@@ -364,6 +367,7 @@ mod tests {
         let root = PathBuf::from("/tmp/boundary-test");
         let boundaries = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
@@ -395,6 +399,7 @@ mod tests {
         let root = PathBuf::from("/tmp/boundary-test");
         let boundaries = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -442,6 +447,7 @@ mod tests {
     fn ui_db_boundaries(allow_type_only: Vec<String>) -> BoundaryConfig {
         BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -549,6 +555,7 @@ mod tests {
         let root = PathBuf::from("/tmp/boundary-test");
         let boundaries = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {

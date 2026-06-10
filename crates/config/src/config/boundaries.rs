@@ -24,12 +24,14 @@ pub enum ZoneReferenceKind {
     Allow,
     /// One entry in the rule's `allowTypeOnly` list names an undefined zone.
     AllowTypeOnly,
+    /// A `boundaries.calls.forbidden[]` entry's `from` names an undefined zone.
+    CallsFrom,
 }
 
 impl ZoneReferenceKind {
     fn config_field(self) -> &'static str {
         match self {
-            Self::From => "from",
+            Self::From | Self::CallsFrom => "from",
             Self::Allow => "allow",
             Self::AllowTypeOnly => "allowTypeOnly",
         }
@@ -58,6 +60,17 @@ pub struct RedundantRootPrefix {
     pub root: String,
 }
 
+/// One rejected `boundaries.calls.forbidden[]` callee pattern.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InvalidForbiddenCallee {
+    /// Zero-based index into `boundaries.calls.forbidden[]`.
+    pub rule_index: usize,
+    /// The offending pattern as authored.
+    pub pattern: String,
+    /// Why the pattern was rejected.
+    pub reason: String,
+}
+
 /// Validation error from `FallowConfig::validate_resolved_boundaries`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ZoneValidationError {
@@ -65,17 +78,31 @@ pub enum ZoneValidationError {
     UnknownZoneReference(UnknownZoneRef),
     /// A zone pattern repeats the zone root.
     RedundantRootPrefix(RedundantRootPrefix),
+    /// A forbidden-call entry carries an unusable callee pattern.
+    InvalidForbiddenCallee(InvalidForbiddenCallee),
 }
 
 impl fmt::Display for ZoneValidationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::UnknownZoneReference(err) if err.kind == ZoneReferenceKind::CallsFrom => {
+                write!(
+                    f,
+                    "boundaries.calls.forbidden[{}].from: references undefined zone '{}'",
+                    err.rule_index, err.zone_name,
+                )
+            }
             Self::UnknownZoneReference(err) => write!(
                 f,
                 "boundaries.rules[{}].{}: references undefined zone '{}'",
                 err.rule_index,
                 err.kind.config_field(),
                 err.zone_name,
+            ),
+            Self::InvalidForbiddenCallee(err) => write!(
+                f,
+                "boundaries.calls.forbidden[{}].callee: pattern '{}' {}",
+                err.rule_index, err.pattern, err.reason,
             ),
             Self::RedundantRootPrefix(err) => write!(
                 f,
@@ -235,6 +262,9 @@ pub struct BoundaryConfig {
     /// Optional policy for files that match no zone.
     #[serde(default, skip_serializing_if = "BoundaryCoverageConfig::is_default")]
     pub coverage: BoundaryCoverageConfig,
+    /// Optional forbidden-call policy for zoned files.
+    #[serde(default, skip_serializing_if = "BoundaryCallsConfig::is_default")]
+    pub calls: BoundaryCallsConfig,
 }
 
 /// Boundary zone coverage policy.
@@ -252,6 +282,64 @@ pub struct BoundaryCoverageConfig {
 impl BoundaryCoverageConfig {
     fn is_default(value: &Self) -> bool {
         !value.require_all_files && value.allow_unmatched.is_empty()
+    }
+}
+
+/// Boundary forbidden-call policy. Applies only to files classified into a
+/// zone; unzoned files are unrestricted, matching the import rules.
+#[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BoundaryCallsConfig {
+    /// Callee patterns that files in a zone may not call.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub forbidden: Vec<ForbiddenCallRule>,
+}
+
+impl BoundaryCallsConfig {
+    fn is_default(value: &Self) -> bool {
+        value.forbidden.is_empty()
+    }
+
+    /// Whether no forbidden-call rules are configured.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.forbidden.is_empty()
+    }
+}
+
+/// One forbidden-call entry: files in zone `from` may not call callees
+/// matching `callee`.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ForbiddenCallRule {
+    /// Zone whose files may not make matching calls.
+    pub from: String,
+    /// Forbidden callee pattern(s). Matching is segment-aware, not substring:
+    /// `child_process.*` matches `child_process.exec` (and named imports from
+    /// `child_process` / `node:child_process`), `fetch` matches only `fetch`,
+    /// and a leading `*.` suffix-matches any object (`*.innerHTML`).
+    pub callee: ForbiddenCallee,
+}
+
+/// One callee pattern or a list of patterns for a single `from` zone.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum ForbiddenCallee {
+    /// A single callee pattern.
+    Single(String),
+    /// Multiple callee patterns sharing the same `from` zone.
+    Many(Vec<String>),
+}
+
+impl ForbiddenCallee {
+    /// Iterate the configured pattern strings.
+    pub fn iter(&self) -> impl Iterator<Item = &str> {
+        match self {
+            Self::Single(pattern) => std::slice::from_ref(pattern),
+            Self::Many(patterns) => patterns.as_slice(),
+        }
+        .iter()
+        .map(String::as_str)
     }
 }
 
@@ -297,6 +385,10 @@ pub struct ResolvedBoundaryConfig {
     pub logical_groups: Vec<LogicalGroup>,
     /// Resolved coverage policy.
     pub coverage: ResolvedBoundaryCoverageConfig,
+    /// Forbidden callee patterns grouped by `from` zone, in config order.
+    /// Patterns stay raw strings; the analysis layer parses them into its
+    /// segment-aware matcher.
+    pub calls_forbidden_by_zone: rustc_hash::FxHashMap<String, Vec<String>>,
 }
 
 /// Resolved boundary zone coverage policy.
@@ -387,7 +479,10 @@ impl BoundaryConfig {
     /// Whether any boundaries are configured (including via preset).
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.preset.is_none() && self.zones.is_empty() && !self.coverage.require_all_files
+        self.preset.is_none()
+            && self.zones.is_empty()
+            && !self.coverage.require_all_files
+            && self.calls.is_empty()
     }
 
     /// Expand the preset into explicit zones and rules.
@@ -734,6 +829,60 @@ impl BoundaryConfig {
                 }
             }
         }
+        for (i, rule) in self.calls.forbidden.iter().enumerate() {
+            if !zone_names.contains(rule.from.as_str()) {
+                errors.push(UnknownZoneRef {
+                    rule_index: i,
+                    kind: ZoneReferenceKind::CallsFrom,
+                    zone_name: rule.from.clone(),
+                });
+            }
+        }
+        errors
+    }
+
+    /// Validate `boundaries.calls.forbidden[]` callee patterns. Rejects
+    /// patterns that would parse but silently match nothing (empty or
+    /// whitespace-only patterns, a bare `*` with no callee segments, empty
+    /// dot-segments) and entries with an empty pattern list, so an inert rule
+    /// fails loudly at load time instead of reporting zero findings forever.
+    #[must_use]
+    pub fn validate_call_rules(&self) -> Vec<InvalidForbiddenCallee> {
+        let mut errors = Vec::new();
+        for (i, rule) in self.calls.forbidden.iter().enumerate() {
+            if rule.callee.iter().next().is_none() {
+                errors.push(InvalidForbiddenCallee {
+                    rule_index: i,
+                    pattern: String::new(),
+                    reason: "must list at least one callee pattern".to_owned(),
+                });
+                continue;
+            }
+            for pattern in rule.callee.iter() {
+                let trimmed = pattern.trim();
+                if trimmed.is_empty() {
+                    errors.push(InvalidForbiddenCallee {
+                        rule_index: i,
+                        pattern: pattern.to_owned(),
+                        reason: "must not be empty".to_owned(),
+                    });
+                } else if trimmed == "*" {
+                    errors.push(InvalidForbiddenCallee {
+                        rule_index: i,
+                        pattern: pattern.to_owned(),
+                        reason: "matches nothing: a bare `*` has no callee segments. Name a \
+                                 specific callee such as `console.*` or `child_process.exec`"
+                            .to_owned(),
+                    });
+                } else if trimmed.split('.').any(|segment| segment.trim().is_empty()) {
+                    errors.push(InvalidForbiddenCallee {
+                        rule_index: i,
+                        pattern: pattern.to_owned(),
+                        reason: "contains an empty path segment".to_owned(),
+                    });
+                }
+            }
+        }
         errors
     }
 
@@ -792,11 +941,23 @@ impl BoundaryConfig {
                 .collect(),
         };
 
+        let mut calls_forbidden_by_zone: rustc_hash::FxHashMap<String, Vec<String>> =
+            rustc_hash::FxHashMap::default();
+        for rule in &self.calls.forbidden {
+            let patterns = calls_forbidden_by_zone
+                .entry(rule.from.clone())
+                .or_default();
+            for pattern in rule.callee.iter() {
+                patterns.push(pattern.trim().to_owned());
+            }
+        }
+
         ResolvedBoundaryConfig {
             zones,
             rules,
             logical_groups: Vec::new(),
             coverage,
+            calls_forbidden_by_zone,
         }
     }
 }
@@ -1036,7 +1197,10 @@ impl ResolvedBoundaryConfig {
     /// Whether any boundaries are configured.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.zones.is_empty() && self.logical_groups.is_empty() && !self.coverage.require_all_files
+        self.zones.is_empty()
+            && self.logical_groups.is_empty()
+            && !self.coverage.require_all_files
+            && self.calls_forbidden_by_zone.is_empty()
     }
 
     /// Classify a project-relative path into a zone.
@@ -1165,6 +1329,131 @@ allow = ["db"]
     }
 
     #[test]
+    fn deserialize_boundary_calls_single_and_array() {
+        let json = r#"{
+            "zones": [{ "name": "domain", "patterns": ["src/domain/**"] }],
+            "calls": {
+                "forbidden": [
+                    { "from": "domain", "callee": "child_process.*" },
+                    { "from": "domain", "callee": ["console.*", "process.exit"] }
+                ]
+            }
+        }"#;
+        let config: BoundaryConfig = serde_json::from_str(json).unwrap();
+
+        assert_eq!(config.calls.forbidden.len(), 2);
+        assert_eq!(
+            config.calls.forbidden[0].callee.iter().collect::<Vec<_>>(),
+            vec!["child_process.*"]
+        );
+        assert_eq!(
+            config.calls.forbidden[1].callee.iter().collect::<Vec<_>>(),
+            vec!["console.*", "process.exit"]
+        );
+        assert!(!config.is_empty());
+        assert!(config.validate_zone_references().is_empty());
+        assert!(config.validate_call_rules().is_empty());
+    }
+
+    #[test]
+    fn deserialize_boundary_calls_toml() {
+        let toml_str = r#"
+[[zones]]
+name = "domain"
+patterns = ["src/domain/**"]
+
+[[calls.forbidden]]
+from = "domain"
+callee = "child_process.*"
+
+[[calls.forbidden]]
+from = "domain"
+callee = ["console.*"]
+"#;
+        let config: BoundaryConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.calls.forbidden.len(), 2);
+        assert_eq!(
+            config.calls.forbidden[0].callee.iter().collect::<Vec<_>>(),
+            vec!["child_process.*"]
+        );
+        assert_eq!(
+            config.calls.forbidden[1].callee.iter().collect::<Vec<_>>(),
+            vec!["console.*"]
+        );
+    }
+
+    #[test]
+    fn validate_zone_references_calls_from_unknown() {
+        let json = r#"{
+            "zones": [{ "name": "domain", "patterns": ["src/domain/**"] }],
+            "calls": { "forbidden": [{ "from": "nonexistent", "callee": "console.*" }] }
+        }"#;
+        let config: BoundaryConfig = serde_json::from_str(json).unwrap();
+        let errors = config.validate_zone_references();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].kind, ZoneReferenceKind::CallsFrom);
+        assert_eq!(errors[0].zone_name, "nonexistent");
+        let rendered = ZoneValidationError::UnknownZoneReference(errors[0].clone()).to_string();
+        assert!(
+            rendered.contains("boundaries.calls.forbidden[0].from"),
+            "unexpected rendering: {rendered}"
+        );
+    }
+
+    #[test]
+    fn validate_call_rules_rejects_inert_patterns() {
+        let json = r#"{
+            "zones": [{ "name": "domain", "patterns": ["src/domain/**"] }],
+            "calls": {
+                "forbidden": [
+                    { "from": "domain", "callee": "*" },
+                    { "from": "domain", "callee": "  " },
+                    { "from": "domain", "callee": "foo..bar" },
+                    { "from": "domain", "callee": [] }
+                ]
+            }
+        }"#;
+        let config: BoundaryConfig = serde_json::from_str(json).unwrap();
+        let errors = config.validate_call_rules();
+        assert_eq!(errors.len(), 4);
+        assert!(errors[0].reason.contains("matches nothing"));
+        assert!(errors[1].reason.contains("must not be empty"));
+        assert!(errors[2].reason.contains("empty path segment"));
+        assert!(errors[3].reason.contains("at least one callee pattern"));
+    }
+
+    #[test]
+    fn resolve_groups_calls_by_zone() {
+        let json = r#"{
+            "zones": [
+                { "name": "domain", "patterns": ["src/domain/**"] },
+                { "name": "ui", "patterns": ["src/ui/**"] }
+            ],
+            "calls": {
+                "forbidden": [
+                    { "from": "domain", "callee": "child_process.*" },
+                    { "from": "domain", "callee": ["console.*"] },
+                    { "from": "ui", "callee": "process.exit" }
+                ]
+            }
+        }"#;
+        let config: BoundaryConfig = serde_json::from_str(json).unwrap();
+        let resolved = config.resolve();
+        assert_eq!(
+            resolved.calls_forbidden_by_zone.get("domain"),
+            Some(&vec![
+                "child_process.*".to_string(),
+                "console.*".to_string()
+            ])
+        );
+        assert_eq!(
+            resolved.calls_forbidden_by_zone.get("ui"),
+            Some(&vec!["process.exit".to_string()])
+        );
+        assert!(!resolved.is_empty());
+    }
+
+    #[test]
     fn auto_discover_expands_child_zones_and_parent_rules() {
         let temp = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
@@ -1172,6 +1461,7 @@ allow = ["db"]
 
         let mut config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -1245,6 +1535,7 @@ allow = ["db"]
 
         let mut config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -1364,6 +1655,7 @@ allow = ["db"]
 
             let mut config = BoundaryConfig {
                 coverage: BoundaryCoverageConfig::default(),
+                calls: BoundaryCallsConfig::default(),
                 preset: None,
                 zones: vec![
                     BoundaryZone {
@@ -1413,6 +1705,7 @@ allow = ["db"]
 
         let mut config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -1459,6 +1752,7 @@ allow = ["db"]
 
         let mut config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "features".to_string(),
@@ -1482,6 +1776,7 @@ allow = ["db"]
 
         let mut config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "features".to_string(),
@@ -1504,6 +1799,7 @@ allow = ["db"]
         std::fs::create_dir_all(temp.path().join("src/features")).unwrap();
         let mut config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "features".to_string(),
@@ -1525,6 +1821,7 @@ allow = ["db"]
         let temp = tempfile::tempdir().unwrap();
         let mut config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "features".to_string(),
@@ -1547,6 +1844,7 @@ allow = ["db"]
         std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
         let mut config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "features".to_string(),
@@ -1572,6 +1870,7 @@ allow = ["db"]
 
         let mut config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -1609,6 +1908,7 @@ allow = ["db"]
 
         let mut config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -1645,6 +1945,7 @@ allow = ["db"]
 
         let mut config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "features".to_string(),
@@ -1665,6 +1966,7 @@ allow = ["db"]
 
         let mut config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "features".to_string(),
@@ -1688,6 +1990,7 @@ allow = ["db"]
 
         let mut config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "features".to_string(),
@@ -1709,6 +2012,7 @@ allow = ["db"]
 
         let mut config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "features".to_string(),
@@ -1734,6 +2038,7 @@ allow = ["db"]
 
         let mut config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "features".to_string(),
@@ -1755,6 +2060,7 @@ allow = ["db"]
 
         let mut config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -1797,6 +2103,7 @@ allow = ["db"]
 
         let mut config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -1832,6 +2139,7 @@ allow = ["db"]
 
         let mut config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -1870,6 +2178,7 @@ allow = ["db"]
         let temp = tempfile::tempdir().unwrap();
         let mut config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
@@ -1890,6 +2199,7 @@ allow = ["db"]
 
         let mut config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "features".to_string(),
@@ -1911,6 +2221,7 @@ allow = ["db"]
     fn validate_zone_references_valid() {
         let config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -1939,6 +2250,7 @@ allow = ["db"]
     fn validate_zone_references_invalid_from() {
         let config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
@@ -1963,6 +2275,7 @@ allow = ["db"]
     fn validate_zone_references_invalid_allow() {
         let config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
@@ -1986,6 +2299,7 @@ allow = ["db"]
     fn validate_zone_references_invalid_allow_type_only() {
         let config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
@@ -2009,6 +2323,7 @@ allow = ["db"]
     fn resolve_and_classify() {
         let config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -2039,6 +2354,7 @@ allow = ["db"]
     fn first_match_wins() {
         let config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -2071,6 +2387,7 @@ allow = ["db"]
     fn self_import_always_allowed() {
         let config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
@@ -2092,6 +2409,7 @@ allow = ["db"]
     fn unrestricted_zone_allows_all() {
         let config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -2117,6 +2435,7 @@ allow = ["db"]
     fn restricted_zone_blocks_unlisted() {
         let config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -2153,6 +2472,7 @@ allow = ["db"]
     fn empty_allow_blocks_all_except_self() {
         let config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -2183,6 +2503,7 @@ allow = ["db"]
     fn zone_root_filters_classification_to_subtree() {
         let config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -2218,6 +2539,7 @@ allow = ["db"]
     fn zone_root_is_case_sensitive() {
         let config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
@@ -2249,6 +2571,7 @@ allow = ["db"]
     fn zone_root_normalizes_trailing_slash_and_dot_prefix() {
         let config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -2283,6 +2606,7 @@ allow = ["db"]
     fn validate_root_prefixes_flags_redundant_pattern() {
         let config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
@@ -2316,6 +2640,7 @@ allow = ["db"]
     fn validate_root_prefixes_handles_unnormalized_root() {
         let config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
@@ -2333,6 +2658,7 @@ allow = ["db"]
     fn validate_root_prefixes_empty_when_no_overlap() {
         let config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
@@ -2361,6 +2687,7 @@ allow = ["db"]
         for raw_root in ["", ".", "./"] {
             let config = BoundaryConfig {
                 coverage: BoundaryCoverageConfig::default(),
+                calls: BoundaryCallsConfig::default(),
                 preset: None,
                 zones: vec![BoundaryZone {
                     name: "ui".to_string(),
@@ -2437,6 +2764,7 @@ allow = ["db"]
     fn preset_makes_config_non_empty() {
         let config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: Some(BoundaryPreset::Layered),
             zones: vec![],
             rules: vec![],
@@ -2448,6 +2776,7 @@ allow = ["db"]
     fn expand_layered_produces_four_zones() {
         let mut config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: Some(BoundaryPreset::Layered),
             zones: vec![],
             rules: vec![],
@@ -2464,6 +2793,7 @@ allow = ["db"]
     fn expand_layered_rules_correct() {
         let mut config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: Some(BoundaryPreset::Layered),
             zones: vec![],
             rules: vec![],
@@ -2495,6 +2825,7 @@ allow = ["db"]
     fn expand_hexagonal_produces_three_zones() {
         let mut config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: Some(BoundaryPreset::Hexagonal),
             zones: vec![],
             rules: vec![],
@@ -2511,6 +2842,7 @@ allow = ["db"]
     fn expand_feature_sliced_produces_six_zones() {
         let mut config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: Some(BoundaryPreset::FeatureSliced),
             zones: vec![],
             rules: vec![],
@@ -2533,6 +2865,7 @@ allow = ["db"]
     fn expand_bulletproof_produces_four_zones() {
         let mut config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: Some(BoundaryPreset::Bulletproof),
             zones: vec![],
             rules: vec![],
@@ -2567,6 +2900,7 @@ allow = ["db"]
     fn expand_bulletproof_rules_correct() {
         let mut config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: Some(BoundaryPreset::Bulletproof),
             zones: vec![],
             rules: vec![],
@@ -2586,6 +2920,7 @@ allow = ["db"]
     fn expand_bulletproof_then_resolve_classifies() {
         let mut config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: Some(BoundaryPreset::Bulletproof),
             zones: vec![],
             rules: vec![],
@@ -2629,6 +2964,7 @@ allow = ["db"]
 
         let mut config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: Some(BoundaryPreset::Bulletproof),
             zones: vec![],
             rules: vec![],
@@ -2659,6 +2995,7 @@ allow = ["db"]
     fn expand_uses_custom_source_root() {
         let mut config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: Some(BoundaryPreset::Hexagonal),
             zones: vec![],
             rules: vec![],
@@ -2672,6 +3009,7 @@ allow = ["db"]
     fn user_zone_replaces_preset_zone() {
         let mut config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: Some(BoundaryPreset::Hexagonal),
             zones: vec![BoundaryZone {
                 name: "domain".to_string(),
@@ -2691,6 +3029,7 @@ allow = ["db"]
     fn user_zone_adds_to_preset() {
         let mut config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: Some(BoundaryPreset::Hexagonal),
             zones: vec![BoundaryZone {
                 name: "shared".to_string(),
@@ -2709,6 +3048,7 @@ allow = ["db"]
     fn user_rule_replaces_preset_rule() {
         let mut config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: Some(BoundaryPreset::Hexagonal),
             zones: vec![],
             rules: vec![BoundaryRule {
@@ -2730,6 +3070,7 @@ allow = ["db"]
     fn expand_without_preset_is_noop() {
         let mut config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
@@ -2748,6 +3089,7 @@ allow = ["db"]
     fn expand_then_validate_succeeds() {
         let mut config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: Some(BoundaryPreset::Layered),
             zones: vec![],
             rules: vec![],
@@ -2760,6 +3102,7 @@ allow = ["db"]
     fn expand_then_resolve_classifies() {
         let mut config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: Some(BoundaryPreset::Hexagonal),
             zones: vec![],
             rules: vec![],
@@ -2779,6 +3122,7 @@ allow = ["db"]
     fn preset_name_returns_correct_string() {
         let config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: Some(BoundaryPreset::FeatureSliced),
             zones: vec![],
             rules: vec![],
@@ -2800,6 +3144,7 @@ allow = ["db"]
         for (preset, expected_name) in cases {
             let config = BoundaryConfig {
                 coverage: BoundaryCoverageConfig::default(),
+                calls: BoundaryCallsConfig::default(),
                 preset: Some(preset),
                 zones: vec![],
                 rules: vec![],
@@ -2822,6 +3167,7 @@ allow = ["db"]
     fn resolved_boundary_config_with_zones_not_empty() {
         let config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
@@ -2853,6 +3199,7 @@ allow = ["db"]
                 child_source_indices: vec![],
             }],
             coverage: ResolvedBoundaryCoverageConfig::default(),
+            calls_forbidden_by_zone: rustc_hash::FxHashMap::default(),
         };
         assert!(!resolved.is_empty());
     }
@@ -2861,6 +3208,7 @@ allow = ["db"]
     fn boundary_config_with_only_rules_is_empty() {
         let config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![],
             rules: vec![BoundaryRule {
@@ -2876,6 +3224,7 @@ allow = ["db"]
     fn boundary_config_with_zones_not_empty() {
         let config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
@@ -2892,6 +3241,7 @@ allow = ["db"]
     fn zone_with_multiple_patterns_matches_any() {
         let config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
@@ -2922,6 +3272,7 @@ allow = ["db"]
     fn validate_zone_references_multiple_errors() {
         let config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
@@ -2950,6 +3301,7 @@ allow = ["db"]
     fn expand_feature_sliced_with_custom_root() {
         let mut config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: Some(BoundaryPreset::FeatureSliced),
             zones: vec![],
             rules: vec![],
@@ -2963,6 +3315,7 @@ allow = ["db"]
     fn zone_not_in_rules_is_unrestricted() {
         let config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -3025,6 +3378,7 @@ allow = ["db"]
     fn resolve_panics_on_unvalidated_invalid_zone_glob() {
         let config = BoundaryConfig {
             coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "broken".to_string(),

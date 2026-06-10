@@ -1062,6 +1062,12 @@ impl FallowConfig {
                 .into_iter()
                 .map(ZoneValidationError::RedundantRootPrefix),
         );
+        errors.extend(
+            boundaries
+                .validate_call_rules()
+                .into_iter()
+                .map(ZoneValidationError::InvalidForbiddenCallee),
+        );
 
         if errors.is_empty() {
             Ok(())
@@ -3609,6 +3615,7 @@ minTokens = 100
         let config = FallowConfig {
             boundaries: crate::BoundaryConfig {
                 coverage: crate::BoundaryCoverageConfig::default(),
+                calls: crate::BoundaryCallsConfig::default(),
                 preset: None,
                 zones: vec![
                     crate::BoundaryZone {
@@ -3643,6 +3650,7 @@ minTokens = 100
         let config = FallowConfig {
             boundaries: crate::BoundaryConfig {
                 coverage: crate::BoundaryCoverageConfig::default(),
+                calls: crate::BoundaryCallsConfig::default(),
                 preset: None,
                 zones: vec![crate::BoundaryZone {
                     name: "ui".to_string(),
@@ -3699,6 +3707,7 @@ minTokens = 100
         let config = FallowConfig {
             boundaries: crate::BoundaryConfig {
                 coverage: crate::BoundaryCoverageConfig::default(),
+                calls: crate::BoundaryCallsConfig::default(),
                 preset: None,
                 zones: vec![crate::BoundaryZone {
                     name: "ui".to_string(),
@@ -3726,6 +3735,7 @@ minTokens = 100
         let config = FallowConfig {
             boundaries: crate::BoundaryConfig {
                 coverage: crate::BoundaryCoverageConfig::default(),
+                calls: crate::BoundaryCallsConfig::default(),
                 preset: None,
                 zones: vec![crate::BoundaryZone {
                     name: "ui".to_string(),
@@ -3765,6 +3775,7 @@ minTokens = 100
         let config = FallowConfig {
             boundaries: crate::BoundaryConfig {
                 coverage: crate::BoundaryCoverageConfig::default(),
+                calls: crate::BoundaryCallsConfig::default(),
                 preset: Some(crate::BoundaryPreset::Bulletproof),
                 zones: vec![],
                 rules: vec![],
