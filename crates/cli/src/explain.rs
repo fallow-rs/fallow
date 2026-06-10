@@ -474,7 +474,7 @@ pub fn rule_guide(rule: &RuleDef) -> RuleGuide {
         },
         "fallow/boundary-call-violation" => RuleGuide {
             example: "src/domain/policy.ts calls execSync from node:child_process while boundaries.calls.forbidden bans child_process.* from the domain zone.",
-            how_to_fix: "Move the call into a zone that may perform the effect, route it through an allowed abstraction, or narrow the forbidden pattern if the rule was wrong.",
+            how_to_fix: "Move the call into a zone that may perform the effect, route it through an allowed abstraction, or narrow the forbidden pattern if the rule was wrong. To suppress, use the boundary family token: `// fallow-ignore-next-line boundary-violation` governs import, coverage, and call findings alike (the rule-id-shaped `boundary-call-violation` is accepted as an alias).",
         },
         "fallow/stale-suppression" => RuleGuide {
             example: "// fallow-ignore-next-line unused-export remains above an export that is now used.",

@@ -1766,6 +1766,14 @@ fn build_boundary_call_violations_section(
             truncation_hint(remaining, total_issues).dimmed()
         ));
     }
+    // The rule id is boundary-call-violation but the suppression token is the
+    // boundary FAMILY token, so spell it out; users would otherwise derive the
+    // wrong token by analogy with every finding where rule id and token align.
+    lines.push(format!(
+        "  {}",
+        "suppress: // fallow-ignore-next-line boundary-violation (one token covers all boundary findings)"
+            .dimmed()
+    ));
     push_section_footer_with_count(lines, title, items.len());
     lines.push(String::new());
 }
@@ -2386,6 +2394,9 @@ mod tests {
         assert!(text.contains("execSync"));
         assert!(text.contains("child_process.*"));
         assert!(text.contains("zone 'domain'"));
+        // The rule id is boundary-call-violation but the working token is the
+        // family token; the section must teach the literal token.
+        assert!(text.contains("// fallow-ignore-next-line boundary-violation"));
     }
 
     #[test]
