@@ -180,6 +180,9 @@ pub enum FixActionType {
     /// Fix a misconfigured dependency override entry (unparsable key or empty
     /// value).
     FixDependencyOverride,
+    /// Replace a banned call or banned import flagged by a rule-pack rule
+    /// (manual; the rule's message usually names the sanctioned alternative).
+    ResolvePolicyViolation,
 }
 
 /// Inline-comment suppression for a single finding line.

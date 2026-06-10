@@ -25,6 +25,7 @@ fn external_plugin_config(root: &std::path::Path) -> fallow_config::ResolvedConf
         boundaries: fallow_config::BoundaryConfig::default(),
         production: false.into(),
         plugins: vec![],
+        rule_packs: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,

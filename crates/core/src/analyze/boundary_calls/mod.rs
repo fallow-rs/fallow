@@ -145,7 +145,7 @@ fn first_matching_pattern<'p>(
 /// internals are governed by the import rules), as do type-only imports
 /// (their binding cannot be a runtime callee) and unmatched leading segments
 /// (globals like `console` match on the written path instead).
-fn canonical_callee_path(module: &ModuleInfo, callee_path: &str) -> Option<String> {
+pub(crate) fn canonical_callee_path(module: &ModuleInfo, callee_path: &str) -> Option<String> {
     let (head, rest) = match callee_path.split_once('.') {
         Some((head, rest)) => (head, Some(rest)),
         None => (callee_path, None),

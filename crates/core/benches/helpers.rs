@@ -37,6 +37,7 @@ pub fn make_config(root: PathBuf, no_cache: bool) -> fallow_config::ResolvedConf
         boundaries: BoundaryConfig::default(),
         production: false.into(),
         plugins: vec![],
+        rule_packs: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,

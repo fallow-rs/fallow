@@ -181,6 +181,11 @@ pub struct ResolvedConfig {
     pub health: HealthConfig,
     pub rules: RulesConfig,
     pub boundaries: ResolvedBoundaryConfig,
+    /// Rule packs loaded from the `rulePacks` config key, in config order.
+    /// Validated at config load (`load_rule_packs` is also the validation
+    /// gate in the CLI and programmatic entry points); a pack that fails to
+    /// load here is skipped with a `tracing::error!` as defense in depth.
+    pub rule_packs: Vec<crate::rule_pack::RulePackDef>,
     pub production: bool,
     pub quiet: bool,
     pub external_plugins: Vec<ExternalPluginDef>,
@@ -310,6 +315,14 @@ impl FallowConfig {
 
         let mut external_plugins = discover_external_plugins(&root, &self.plugins);
         external_plugins.extend(self.framework);
+
+        let rule_packs =
+            crate::rule_pack::load_rule_packs(&root, &self.rule_packs).unwrap_or_else(|errors| {
+                for error in &errors {
+                    tracing::error!("invalid rule pack: {error}");
+                }
+                Vec::new()
+            });
 
         let mut boundaries = self.boundaries;
         if boundaries.preset.is_some() {
@@ -448,6 +461,7 @@ impl FallowConfig {
             health: self.health,
             rules,
             boundaries,
+            rule_packs,
             production,
             quiet,
             external_plugins,
@@ -544,6 +558,7 @@ mod tests {
             boundaries: BoundaryConfig::default(),
             production: false.into(),
             plugins: vec![],
+            rule_packs: vec![],
             dynamically_loaded: vec![],
             overrides: vec![],
             regression: None,
@@ -594,6 +609,7 @@ mod tests {
             boundaries: BoundaryConfig::default(),
             production: false.into(),
             plugins: vec![],
+            rule_packs: vec![],
             dynamically_loaded: vec![],
             overrides: vec![ConfigOverride {
                 files: vec!["*.test.ts".to_string()],
@@ -655,6 +671,7 @@ mod tests {
             boundaries: BoundaryConfig::default(),
             production: false.into(),
             plugins: vec![],
+            rule_packs: vec![],
             dynamically_loaded: vec![],
             overrides: vec![
                 ConfigOverride {
@@ -724,6 +741,7 @@ mod tests {
             boundaries: BoundaryConfig::default(),
             production: false.into(),
             plugins: vec![],
+            rule_packs: vec![],
             dynamically_loaded: vec![],
             overrides: vec![ConfigOverride {
                 files: vec!["**/ui/**".to_string()],
@@ -825,6 +843,7 @@ mod tests {
             boundaries: BoundaryConfig::default(),
             production: false.into(),
             plugins: vec![],
+            rule_packs: vec![],
             dynamically_loaded: vec![],
             overrides: vec![ConfigOverride {
                 files: files.clone(),
@@ -885,6 +904,7 @@ mod tests {
             boundaries: BoundaryConfig::default(),
             production: production.into(),
             plugins: vec![],
+            rule_packs: vec![],
             dynamically_loaded: vec![],
             overrides: vec![],
             regression: None,

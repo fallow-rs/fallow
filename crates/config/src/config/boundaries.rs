@@ -972,7 +972,7 @@ impl BoundaryConfig {
 /// Callee patterns are not globs: `*` must be a whole segment, and only the
 /// leading object position (`*.member`) or the trailing member position
 /// (`object.*`) is supported, never both and never mid-path.
-fn wildcard_placement_error(pattern: &str) -> Option<String> {
+pub(crate) fn wildcard_placement_error(pattern: &str) -> Option<String> {
     let segments: Vec<&str> = pattern.split('.').collect();
     let last = segments.len() - 1;
     if segments

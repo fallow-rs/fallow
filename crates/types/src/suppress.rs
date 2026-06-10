@@ -83,6 +83,10 @@ pub enum IssueKind {
     /// security matcher catalogue (`security_matchers.toml`). ONE suppression
     /// token covers all catalogue categories.
     SecuritySink,
+    /// A banned call or banned import matched by a declarative rule pack
+    /// (`rulePacks` config). ONE suppression token covers every pack rule;
+    /// per-rule suppression is a tracked follow-up.
+    PolicyViolation,
 }
 
 impl IssueKind {
@@ -128,6 +132,7 @@ impl IssueKind {
             }
             "security-client-server-leak" => Some(Self::SecurityClientServerLeak),
             "security-sink" => Some(Self::SecuritySink),
+            "policy-violation" | "policy-violations" => Some(Self::PolicyViolation),
             _ => None,
         }
     }
@@ -164,6 +169,7 @@ impl IssueKind {
             Self::ReExportCycle => 26,
             Self::SecurityClientServerLeak => 27,
             Self::SecuritySink => 28,
+            Self::PolicyViolation => 29,
         }
     }
 
@@ -199,6 +205,7 @@ impl IssueKind {
             26 => Some(Self::ReExportCycle),
             27 => Some(Self::SecurityClientServerLeak),
             28 => Some(Self::SecuritySink),
+            29 => Some(Self::PolicyViolation),
             _ => None,
         }
     }
@@ -301,6 +308,8 @@ pub const KNOWN_ISSUE_KIND_NAMES: &[&str] = &[
     "misconfigured-dependency-overrides",
     "security-client-server-leak",
     "security-sink",
+    "policy-violation",
+    "policy-violations",
 ];
 
 /// Levenshtein edit distance between two ASCII-leaning strings.
@@ -502,6 +511,14 @@ mod tests {
             IssueKind::parse("security-sink"),
             Some(IssueKind::SecuritySink)
         );
+        assert_eq!(
+            IssueKind::parse("policy-violation"),
+            Some(IssueKind::PolicyViolation)
+        );
+        assert_eq!(
+            IssueKind::parse("policy-violations"),
+            Some(IssueKind::PolicyViolation)
+        );
     }
 
     #[test]
@@ -522,10 +539,10 @@ mod tests {
     fn discriminant_out_of_range() {
         assert_eq!(IssueKind::from_discriminant(0), None);
         assert_eq!(
-            IssueKind::from_discriminant(28),
-            Some(IssueKind::SecuritySink)
+            IssueKind::from_discriminant(29),
+            Some(IssueKind::PolicyViolation)
         );
-        assert_eq!(IssueKind::from_discriminant(29), None);
+        assert_eq!(IssueKind::from_discriminant(30), None);
         assert_eq!(IssueKind::from_discriminant(u8::MAX), None);
     }
 
@@ -560,6 +577,7 @@ mod tests {
             IssueKind::MisconfiguredDependencyOverride,
             IssueKind::SecurityClientServerLeak,
             IssueKind::SecuritySink,
+            IssueKind::PolicyViolation,
         ] {
             assert_eq!(
                 IssueKind::from_discriminant(kind.to_discriminant()),
@@ -567,7 +585,7 @@ mod tests {
             );
         }
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(29), None);
+        assert_eq!(IssueKind::from_discriminant(30), None);
     }
 
     #[test]
@@ -601,6 +619,7 @@ mod tests {
             IssueKind::MisconfiguredDependencyOverride,
             IssueKind::SecurityClientServerLeak,
             IssueKind::SecuritySink,
+            IssueKind::PolicyViolation,
         ];
         let discriminants: Vec<u8> = all_kinds.iter().map(|k| k.to_discriminant()).collect();
         let mut sorted = discriminants.clone();

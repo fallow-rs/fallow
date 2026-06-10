@@ -128,6 +128,9 @@ pub struct CheckSummary {
     /// Calls from zoned files to callees forbidden for that zone.
     #[serde(default)]
     pub boundary_call_violations: usize,
+    /// Banned calls and banned imports matched by declarative rule packs.
+    #[serde(default)]
+    pub policy_violations: usize,
     /// Suppression comments that no longer match a finding.
     pub stale_suppressions: usize,
     /// Unused pnpm-workspace catalog entries.

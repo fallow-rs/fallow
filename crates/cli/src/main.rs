@@ -455,6 +455,10 @@ enum Command {
         #[arg(long)]
         boundary_violations: bool,
 
+        /// Only report rule-pack policy violations
+        #[arg(long)]
+        policy_violations: bool,
+
         /// Only report stale suppressions
         #[arg(long)]
         stale_suppressions: bool,
@@ -3048,6 +3052,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             circular_deps,
             re_export_cycles,
             boundary_violations,
+            policy_violations,
             stale_suppressions,
             unused_catalog_entries,
             empty_catalog_groups,
@@ -3077,6 +3082,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
                     circular_deps,
                     re_export_cycles,
                     boundary_violations,
+                    policy_violations,
                     stale_suppressions,
                     unused_catalog_entries,
                     empty_catalog_groups,

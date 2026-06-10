@@ -382,6 +382,7 @@ pub fn filter_results_by_changed_files(
         boundary_violations,
         boundary_coverage_violations,
         boundary_call_violations,
+        policy_violations,
         stale_suppressions,
         // Catalog entries are workspace-global: whether a catalog entry is
         // unused depends on all workspace packages, not a single changed file.
@@ -434,6 +435,7 @@ pub fn filter_results_by_changed_files(
     boundary_violations.retain(|v| contains_normalized(&cf, &v.violation.from_path));
     boundary_coverage_violations.retain(|v| contains_normalized(&cf, &v.violation.path));
     boundary_call_violations.retain(|v| contains_normalized(&cf, &v.violation.path));
+    policy_violations.retain(|v| contains_normalized(&cf, &v.violation.path));
 
     stale_suppressions.retain(|s| contains_normalized(&cf, &s.path));
 

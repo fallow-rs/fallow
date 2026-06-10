@@ -2438,6 +2438,19 @@ export function choose(value: number): string {
                     },
                 ),
             ],
+            policy_violations: vec![fallow_core::results::PolicyViolationFinding::with_actions(
+                fallow_core::results::PolicyViolation {
+                    path: "/zoned.ts".into(),
+                    line: 15,
+                    col: 0,
+                    pack: "team-policy".to_string(),
+                    rule_id: "no-console".to_string(),
+                    kind: fallow_core::results::PolicyRuleKind::BannedCall,
+                    matched: "console.log".to_string(),
+                    severity: fallow_core::results::PolicyViolationSeverity::Warn,
+                    message: None,
+                },
+            )],
             export_usages: vec![ExportUsage {
                 path: "/f.ts".into(),
                 export_name: "used".to_string(),
@@ -2611,6 +2624,8 @@ export function choose(value: number): string {
         assert_eq!(target.circular_dependencies.len(), 1);
         assert_eq!(target.re_export_cycles.len(), 1);
         assert_eq!(target.boundary_violations.len(), 1);
+        assert_eq!(target.boundary_call_violations.len(), 1);
+        assert_eq!(target.policy_violations.len(), 1);
         assert_eq!(target.stale_suppressions.len(), 1);
         assert_eq!(target.unused_catalog_entries.len(), 1);
         assert_eq!(target.empty_catalog_groups.len(), 1);

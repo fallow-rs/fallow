@@ -139,6 +139,7 @@ pub(super) fn dead_code_keys(
         boundary_violations,
         boundary_coverage_violations,
         boundary_call_violations,
+        policy_violations,
         stale_suppressions,
         unused_catalog_entries,
         empty_catalog_groups,
@@ -288,6 +289,15 @@ pub(super) fn dead_code_keys(
             item.violation.callee
         ));
     }
+    for item in policy_violations {
+        keys.insert(format!(
+            "policy-violation:{}:{}/{}:{}",
+            relative_key_path(&item.violation.path, root),
+            item.violation.pack,
+            item.violation.rule_id,
+            item.violation.matched
+        ));
+    }
     for item in stale_suppressions {
         keys.insert(format!(
             "stale-suppression:{}:{}",
@@ -393,6 +403,7 @@ pub(super) fn retain_introduced_dead_code(
         boundary_violations,
         boundary_coverage_violations,
         boundary_call_violations,
+        policy_violations,
         stale_suppressions,
         unused_catalog_entries,
         empty_catalog_groups,
@@ -536,6 +547,15 @@ pub(super) fn retain_introduced_dead_code(
             "boundary-call:{}:{}",
             relative_key_path(&item.violation.path, root),
             item.violation.callee
+        ))
+    });
+    policy_violations.retain(|item| {
+        keep(format!(
+            "policy-violation:{}:{}/{}:{}",
+            relative_key_path(&item.violation.path, root),
+            item.violation.pack,
+            item.violation.rule_id,
+            item.violation.matched
         ))
     });
     stale_suppressions.retain(|item| {
@@ -864,6 +884,22 @@ fn annotate_graph_json(
                     "boundary-call:{}:{}",
                     relative_key_path(&item.violation.path, root),
                     item.violation.callee
+                ),
+                base,
+            )
+        }),
+    );
+    annotate_issue_array(
+        json,
+        "policy_violations",
+        results.policy_violations.iter().map(|item| {
+            issue_was_introduced(
+                &format!(
+                    "policy-violation:{}:{}/{}:{}",
+                    relative_key_path(&item.violation.path, root),
+                    item.violation.pack,
+                    item.violation.rule_id,
+                    item.violation.matched
                 ),
                 base,
             )

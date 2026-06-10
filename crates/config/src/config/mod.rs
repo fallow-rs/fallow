@@ -10,6 +10,7 @@ mod resolve;
 mod rules;
 mod used_class_members;
 
+pub(crate) use boundaries::wildcard_placement_error;
 pub use boundaries::{
     AuthoredRule, BoundaryCallsConfig, BoundaryConfig, BoundaryCoverageConfig, BoundaryPreset,
     BoundaryRule, BoundaryZone, ForbiddenCallRule, ForbiddenCallee, InvalidForbiddenCallee,
@@ -190,6 +191,13 @@ pub struct FallowConfig {
 
     #[serde(default)]
     pub plugins: Vec<String>,
+
+    /// Paths to declarative rule-pack files (JSON or JSONC), relative to the
+    /// project root. Each pack declares `banned-call` / `banned-import` rules
+    /// that report as `policy-violation` findings. Packs are pure data: no
+    /// project code is executed. Invalid or missing packs fail config load.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rule_packs: Vec<String>,
 
     #[serde(default)]
     pub dynamically_loaded: Vec<String>,

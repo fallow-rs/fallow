@@ -378,7 +378,7 @@ pub fn discover_external_plugins(
 }
 
 /// Check if a path resolves within the canonical root (follows symlinks).
-fn is_within_root(path: &Path, canonical_root: &Path) -> bool {
+pub(crate) fn is_within_root(path: &Path, canonical_root: &Path) -> bool {
     let canonical = dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     canonical.starts_with(canonical_root)
 }

@@ -4,6 +4,7 @@ mod boundary_coverage;
 pub mod feature_flags;
 mod iconify;
 mod package_json_utils;
+mod policy;
 mod predicates;
 mod re_export_cycles;
 mod security;
@@ -34,12 +35,12 @@ use crate::resolve::ResolvedModule;
 use fallow_types::output_dead_code::{
     BoundaryCallViolationFinding, BoundaryCoverageViolationFinding, BoundaryViolationFinding,
     CircularDependencyFinding, DuplicateExportFinding, EmptyCatalogGroupFinding,
-    MisconfiguredDependencyOverrideFinding, PrivateTypeLeakFinding, ReExportCycleFinding,
-    TestOnlyDependencyFinding, TypeOnlyDependencyFinding, UnlistedDependencyFinding,
-    UnresolvedCatalogReferenceFinding, UnresolvedImportFinding, UnusedCatalogEntryFinding,
-    UnusedClassMemberFinding, UnusedDependencyFinding, UnusedDependencyOverrideFinding,
-    UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
-    UnusedOptionalDependencyFinding, UnusedTypeFinding,
+    MisconfiguredDependencyOverrideFinding, PolicyViolationFinding, PrivateTypeLeakFinding,
+    ReExportCycleFinding, TestOnlyDependencyFinding, TypeOnlyDependencyFinding,
+    UnlistedDependencyFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
+    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedDependencyFinding,
+    UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
+    UnusedExportFinding, UnusedFileFinding, UnusedOptionalDependencyFinding, UnusedTypeFinding,
 };
 
 use crate::results::{AnalysisResults, CircularDependency, CircularDependencyEdge};
@@ -470,6 +471,26 @@ fn run_boundary_call_detector(
     .collect()
 }
 
+/// Thin wrapper around [`policy::find_policy_violations`] that gates on the
+/// `policy-violation` master severity (a kill switch: per-rule severity
+/// cannot resurrect it) and on at least one configured rule pack. Extracted
+/// alongside [`run_circular_dep_detector`].
+fn run_policy_detector(
+    graph: &ModuleGraph,
+    modules: &[ModuleInfo],
+    config: &ResolvedConfig,
+    suppressions: &crate::suppress::SuppressionContext<'_>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+) -> Vec<PolicyViolationFinding> {
+    if config.rules.policy_violation == Severity::Off || config.rule_packs.is_empty() {
+        return Vec::new();
+    }
+    policy::find_policy_violations(graph, modules, config, suppressions, line_offsets_by_file)
+        .into_iter()
+        .map(PolicyViolationFinding::with_actions)
+        .collect()
+}
+
 /// Thin wrapper around [`re_export_cycles::find_re_export_cycles`] that gates
 /// on `Severity::Off`. Extracted alongside [`run_circular_dep_detector`].
 fn run_re_export_cycle_detector(
@@ -609,7 +630,13 @@ pub fn find_dead_code_full(
             (
                 (unresolved_imports, duplicate_exports),
                 (
-                    (boundary_violations, (boundary_coverage_violations, boundary_call_violations)),
+                    (
+                        boundary_violations,
+                        (
+                            boundary_coverage_violations,
+                            (boundary_call_violations, policy_violations),
+                        ),
+                    ),
                     (circular_dependencies, (re_export_cycles, export_usages)),
                 ),
             ),
@@ -736,12 +763,25 @@ pub fn find_dead_code_full(
                                                     )
                                                 },
                                                 || {
-                                                    run_boundary_call_detector(
-                                                        graph,
-                                                        modules,
-                                                        config,
-                                                        &suppressions,
-                                                        &line_offsets_by_file,
+                                                    rayon::join(
+                                                        || {
+                                                            run_boundary_call_detector(
+                                                                graph,
+                                                                modules,
+                                                                config,
+                                                                &suppressions,
+                                                                &line_offsets_by_file,
+                                                            )
+                                                        },
+                                                        || {
+                                                            run_policy_detector(
+                                                                graph,
+                                                                modules,
+                                                                config,
+                                                                &suppressions,
+                                                                &line_offsets_by_file,
+                                                            )
+                                                        },
                                                     )
                                                 },
                                             )
@@ -806,6 +846,7 @@ pub fn find_dead_code_full(
         boundary_violations,
         boundary_coverage_violations,
         boundary_call_violations,
+        policy_violations,
         circular_dependencies,
         re_export_cycles,
         export_usages,
@@ -1482,6 +1523,7 @@ mod tests {
                 misconfigured_dependency_overrides: Severity::Off,
                 security_client_server_leak: Severity::Off,
                 security_sink: Severity::Off,
+                policy_violation: Severity::Off,
             };
             let config = make_config_with_rules(rules);
             let results = find_dead_code(&graph, &config);

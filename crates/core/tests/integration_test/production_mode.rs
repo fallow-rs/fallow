@@ -23,6 +23,7 @@ fn create_production_config(root: std::path::PathBuf) -> fallow_config::Resolved
         boundaries: fallow_config::BoundaryConfig::default(),
         production: true.into(),
         plugins: vec![],
+        rule_packs: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,

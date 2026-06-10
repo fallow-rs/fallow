@@ -135,6 +135,13 @@ pub struct RulesConfig {
     /// bare `fallow` or the `audit` gate.
     #[serde(default = "Severity::default_off")]
     pub security_sink: Severity,
+    /// Master severity for rule-pack findings (`rulePacks` config). Defaults
+    /// to `warn` so enabling a brand-new policy pack never hard-fails CI on
+    /// its first run; individual pack rules opt up via `"severity": "error"`.
+    /// `off` is a kill switch that disables the whole evaluator (per-rule
+    /// severity cannot resurrect it).
+    #[serde(default = "Severity::default_warn", alias = "policy-violations")]
+    pub policy_violation: Severity,
 }
 
 impl Default for RulesConfig {
@@ -167,6 +174,7 @@ impl Default for RulesConfig {
             misconfigured_dependency_overrides: Severity::Error,
             security_client_server_leak: Severity::Off,
             security_sink: Severity::Off,
+            policy_violation: Severity::Warn,
         }
     }
 }
@@ -254,6 +262,9 @@ impl RulesConfig {
         }
         if let Some(s) = partial.security_sink {
             self.security_sink = s;
+        }
+        if let Some(s) = partial.policy_violation {
+            self.policy_violation = s;
         }
     }
 }
@@ -418,6 +429,12 @@ pub struct PartialRulesConfig {
     pub security_client_server_leak: Option<Severity>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub security_sink: Option<Severity>,
+    #[serde(
+        default,
+        alias = "policy-violations",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub policy_violation: Option<Severity>,
 }
 
 /// Every rule name accepted by `RulesConfig` deserialization, in kebab-case.
@@ -458,6 +475,8 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "misconfigured-dependency-overrides",
     "security-client-server-leak",
     "security-sink",
+    "policy-violation",
+    "policy-violations",
     "unused-file",
     "unused-export",
     "unused-type",
@@ -776,6 +795,7 @@ mod tests {
             misconfigured_dependency_overrides: Some(Severity::Off),
             security_client_server_leak: Some(Severity::Off),
             security_sink: Some(Severity::Off),
+            policy_violation: Some(Severity::Off),
         };
         rules.apply_partial(&partial);
         assert_eq!(rules.unused_files, Severity::Off);
@@ -788,12 +808,26 @@ mod tests {
         assert_eq!(rules.feature_flags, Severity::Off);
         assert_eq!(rules.stale_suppressions, Severity::Off);
         assert_eq!(rules.security_sink, Severity::Off);
+        assert_eq!(rules.policy_violation, Severity::Off);
     }
 
     #[test]
     fn rules_config_defaults_include_optional_deps() {
         let rules = RulesConfig::default();
         assert_eq!(rules.unused_optional_dependencies, Severity::Warn);
+    }
+
+    #[test]
+    fn policy_violation_defaults_to_warn() {
+        let rules = RulesConfig::default();
+        assert_eq!(rules.policy_violation, Severity::Warn);
+    }
+
+    #[test]
+    fn policy_violation_accepts_plural_alias() {
+        let json = r#"{ "policy-violations": "error" }"#;
+        let rules: RulesConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(rules.policy_violation, Severity::Error);
     }
 
     #[test]
@@ -818,7 +852,7 @@ mod tests {
 
     #[test]
     fn known_rule_names_count_matches_struct() {
-        assert_eq!(KNOWN_RULE_NAMES.len(), 54);
+        assert_eq!(KNOWN_RULE_NAMES.len(), 56);
     }
 
     #[test]
@@ -859,8 +893,8 @@ mod tests {
 
         assert_eq!(
             aliases_found.len(),
-            54,
-            "expected 54 source-level alias attrs (27 per struct); got {}: {:?}",
+            56,
+            "expected 56 source-level alias attrs (28 per struct); got {}: {:?}",
             aliases_found.len(),
             aliases_found
         );

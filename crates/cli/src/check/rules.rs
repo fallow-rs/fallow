@@ -136,6 +136,9 @@ pub fn apply_rules(results: &mut fallow_core::results::AnalysisResults, config: 
         results.boundary_coverage_violations.clear();
         results.boundary_call_violations.clear();
     }
+    if rules.policy_violation == Severity::Off {
+        results.policy_violations.clear();
+    }
     if rules.unused_catalog_entries == Severity::Off {
         results.unused_catalog_entries.clear();
     }
@@ -173,6 +176,12 @@ fn apply_boundary_override_rules(
         config
             .resolve_rules_for_path(&v.violation.path)
             .boundary_violation
+            != Severity::Off
+    });
+    results.policy_violations.retain(|v| {
+        config
+            .resolve_rules_for_path(&v.violation.path)
+            .policy_violation
             != Severity::Off
     });
 }
@@ -298,6 +307,14 @@ pub fn has_error_severity_issues(
             && !results.unused_dependency_overrides.is_empty())
         || (rules.misconfigured_dependency_overrides == Severity::Error
             && !results.misconfigured_dependency_overrides.is_empty())
+        // Policy violations gate on the EFFECTIVE per-finding severity baked
+        // by the evaluator (per-file override master + per-rule override),
+        // not on `rules.policy_violation`: a master of `warn` with one
+        // `severity: "error"` rule must still fail the run.
+        || results
+            .policy_violations
+            .iter()
+            .any(|v| v.violation.severity == fallow_core::results::PolicyViolationSeverity::Error)
 }
 
 /// Promote all `Warn` severities to `Error` for a single run.
@@ -373,6 +390,23 @@ pub fn promote_warns_to_errors(rules: &mut RulesConfig) {
     }
     if rules.misconfigured_dependency_overrides == Severity::Warn {
         rules.misconfigured_dependency_overrides = Severity::Error;
+    }
+    if rules.policy_violation == Severity::Warn {
+        rules.policy_violation = Severity::Error;
+    }
+}
+
+/// Promote per-finding `warn` policy-violation severities to `error` for a
+/// strict (fail-on-issues) run. Policy findings carry their effective
+/// severity baked by the evaluator, so the rule-level promotion in
+/// [`promote_warns_to_errors`] alone would not flip findings whose rule
+/// explicitly opted down to `warn`; under strict mode every warning fails.
+pub fn promote_policy_finding_warns(results: &mut fallow_core::results::AnalysisResults) {
+    use fallow_core::results::PolicyViolationSeverity;
+    for finding in &mut results.policy_violations {
+        if finding.violation.severity == PolicyViolationSeverity::Warn {
+            finding.violation.severity = PolicyViolationSeverity::Error;
+        }
     }
 }
 
@@ -507,6 +541,7 @@ mod tests {
             boundaries: fallow_config::BoundaryConfig::default(),
             production: false.into(),
             plugins: vec![],
+            rule_packs: vec![],
             dynamically_loaded: vec![],
             overrides: vec![],
             regression: None,
@@ -597,6 +632,7 @@ mod tests {
             misconfigured_dependency_overrides: Severity::Off,
             security_client_server_leak: Severity::Off,
             security_sink: Severity::Off,
+            policy_violation: Severity::Warn,
         };
         let config = config_with_rules(rules);
         apply_rules(&mut results, &config);
@@ -710,6 +746,7 @@ mod tests {
             misconfigured_dependency_overrides: Severity::Error,
             security_client_server_leak: Severity::Off,
             security_sink: Severity::Off,
+            policy_violation: Severity::Warn,
         };
         assert!(!has_error_severity_issues(&results, &rules, None));
     }
@@ -750,6 +787,7 @@ mod tests {
             misconfigured_dependency_overrides: Severity::Error,
             security_client_server_leak: Severity::Off,
             security_sink: Severity::Off,
+            policy_violation: Severity::Warn,
         };
         assert!(!has_error_severity_issues(&results, &rules, None));
 
@@ -799,6 +837,7 @@ mod tests {
             boundaries: fallow_config::BoundaryConfig::default(),
             production: false.into(),
             plugins: vec![],
+            rule_packs: vec![],
             dynamically_loaded: vec![],
             regression: None,
             audit: fallow_config::AuditConfig::default(),
@@ -852,6 +891,7 @@ mod tests {
             boundaries: fallow_config::BoundaryConfig::default(),
             production: false.into(),
             plugins: vec![],
+            rule_packs: vec![],
             dynamically_loaded: vec![],
             regression: None,
             audit: fallow_config::AuditConfig::default(),
@@ -905,6 +945,7 @@ mod tests {
             boundaries: fallow_config::BoundaryConfig::default(),
             production: false.into(),
             plugins: vec![],
+            rule_packs: vec![],
             dynamically_loaded: vec![],
             regression: None,
             audit: fallow_config::AuditConfig::default(),
@@ -1208,6 +1249,7 @@ mod tests {
             misconfigured_dependency_overrides: Severity::Error,
             security_client_server_leak: Severity::Off,
             security_sink: Severity::Off,
+            policy_violation: Severity::Warn,
         };
         promote_warns_to_errors(&mut rules);
 
@@ -1260,6 +1302,7 @@ mod tests {
             misconfigured_dependency_overrides: Severity::Off,
             security_client_server_leak: Severity::Off,
             security_sink: Severity::Off,
+            policy_violation: Severity::Warn,
         };
         promote_warns_to_errors(&mut rules);
 

@@ -12,12 +12,12 @@ use crate::output::IssueAction;
 use crate::output_dead_code::{
     BoundaryCallViolationFinding, BoundaryCoverageViolationFinding, BoundaryViolationFinding,
     CircularDependencyFinding, DuplicateExportFinding, EmptyCatalogGroupFinding,
-    MisconfiguredDependencyOverrideFinding, PrivateTypeLeakFinding, ReExportCycleFinding,
-    TestOnlyDependencyFinding, TypeOnlyDependencyFinding, UnlistedDependencyFinding,
-    UnresolvedCatalogReferenceFinding, UnresolvedImportFinding, UnusedCatalogEntryFinding,
-    UnusedClassMemberFinding, UnusedDependencyFinding, UnusedDependencyOverrideFinding,
-    UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
-    UnusedOptionalDependencyFinding, UnusedTypeFinding,
+    MisconfiguredDependencyOverrideFinding, PolicyViolationFinding, PrivateTypeLeakFinding,
+    ReExportCycleFinding, TestOnlyDependencyFinding, TypeOnlyDependencyFinding,
+    UnlistedDependencyFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
+    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedDependencyFinding,
+    UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
+    UnusedExportFinding, UnusedFileFinding, UnusedOptionalDependencyFinding, UnusedTypeFinding,
 };
 use crate::serde_path;
 use crate::suppress::{IssueKind, closest_known_kind_name};
@@ -148,6 +148,12 @@ pub struct AnalysisResults {
     /// `actions` array natively.
     #[serde(default)]
     pub boundary_call_violations: Vec<BoundaryCallViolationFinding>,
+    /// Banned calls and banned imports matched by declarative rule packs
+    /// (`rulePacks` config). Wrapped in [`PolicyViolationFinding`] so each
+    /// entry carries a typed `actions` array natively. Each finding carries
+    /// its effective per-rule severity.
+    #[serde(default)]
+    pub policy_violations: Vec<PolicyViolationFinding>,
     /// Suppression comments or JSDoc tags that no longer match any issue.
     #[serde(default)]
     pub stale_suppressions: Vec<StaleSuppression>,
@@ -294,6 +300,7 @@ impl AnalysisResults {
             + self.boundary_violations.len()
             + self.boundary_coverage_violations.len()
             + self.boundary_call_violations.len()
+            + self.policy_violations.len()
             + self.stale_suppressions.len()
             + self.unused_catalog_entries.len()
             + self.empty_catalog_groups.len()
@@ -341,6 +348,7 @@ impl AnalysisResults {
             boundary_violations,
             boundary_coverage_violations,
             boundary_call_violations,
+            policy_violations,
             stale_suppressions,
             unused_catalog_entries,
             empty_catalog_groups,
@@ -380,6 +388,7 @@ impl AnalysisResults {
             .extend(boundary_coverage_violations);
         self.boundary_call_violations
             .extend(boundary_call_violations);
+        self.policy_violations.extend(policy_violations);
         self.stale_suppressions.extend(stale_suppressions);
         self.unused_catalog_entries.extend(unused_catalog_entries);
         self.empty_catalog_groups.extend(empty_catalog_groups);
@@ -559,6 +568,15 @@ impl AnalysisResults {
                 .then(a.violation.line.cmp(&b.violation.line))
                 .then(a.violation.col.cmp(&b.violation.col))
                 .then(a.violation.callee.cmp(&b.violation.callee))
+        });
+
+        self.policy_violations.sort_by(|a, b| {
+            a.violation
+                .path
+                .cmp(&b.violation.path)
+                .then(a.violation.line.cmp(&b.violation.line))
+                .then(a.violation.col.cmp(&b.violation.col))
+                .then(a.violation.rule_id.cmp(&b.violation.rule_id))
         });
 
         self.stale_suppressions.sort_by(|a, b| {
@@ -1802,6 +1820,65 @@ pub struct BoundaryCallViolation {
     /// The configured pattern that matched (e.g. `child_process.*`), so
     /// consumers can see both the written path and the rule that fired.
     pub pattern: String,
+}
+
+/// Which rule-pack rule kind produced a [`PolicyViolation`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum PolicyRuleKind {
+    /// A call site matched a `banned-call` rule's callee patterns.
+    BannedCall,
+    /// An import or re-export specifier matched a `banned-import` rule.
+    BannedImport,
+}
+
+/// Effective severity of a single [`PolicyViolation`]. Per-rule `severity`
+/// overrides the `rules."policy-violation"` master; `off` rules emit nothing,
+/// so only `error` and `warn` appear on the wire. The exit-code gate inspects
+/// this per-finding value, not the master severity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "lowercase")]
+pub enum PolicyViolationSeverity {
+    /// Fails CI (non-zero exit code).
+    Error,
+    /// Reported without failing CI.
+    Warn,
+}
+
+/// A banned call or banned import matched by a declarative rule pack
+/// (`rulePacks` config). Banned-call findings report one entry per unique
+/// callee path per file (first occurrence wins, matching
+/// `boundary_call_violations`); banned-import findings anchor at each
+/// matching import or re-export declaration.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PolicyViolation {
+    /// The source file containing the banned call or import.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// 1-based line number of the call site or import declaration.
+    pub line: u32,
+    /// 0-based byte column offset of the call site or import declaration.
+    pub col: u32,
+    /// Name of the rule pack that declared the matching rule.
+    pub pack: String,
+    /// Id of the matching rule inside the pack. `pack` plus `rule_id` is the
+    /// finding's policy identity.
+    pub rule_id: String,
+    /// Which rule kind matched.
+    pub kind: PolicyRuleKind,
+    /// What matched: the written callee path for `banned-call` (e.g.
+    /// `cp.exec`), or the raw import specifier for `banned-import` (e.g.
+    /// `moment/locale/nl`).
+    pub matched: String,
+    /// Effective severity for this finding (per-rule `severity`, else the
+    /// `rules."policy-violation"` master).
+    pub severity: PolicyViolationSeverity,
+    /// The rule's author-provided message, when set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
 }
 
 /// The origin of a stale suppression: inline comment or JSDoc tag.

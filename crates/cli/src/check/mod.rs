@@ -37,6 +37,7 @@ pub struct IssueFilters {
     pub circular_deps: bool,
     pub re_export_cycles: bool,
     pub boundary_violations: bool,
+    pub policy_violations: bool,
     pub stale_suppressions: bool,
     pub unused_catalog_entries: bool,
     pub empty_catalog_groups: bool,
@@ -60,6 +61,7 @@ impl IssueFilters {
             || self.circular_deps
             || self.re_export_cycles
             || self.boundary_violations
+            || self.policy_violations
             || self.stale_suppressions
             || self.unused_catalog_entries
             || self.empty_catalog_groups
@@ -123,6 +125,9 @@ impl IssueFilters {
             results.boundary_violations.clear();
             results.boundary_coverage_violations.clear();
             results.boundary_call_violations.clear();
+        }
+        if !self.policy_violations {
+            results.policy_violations.clear();
         }
         if !self.stale_suppressions {
             results.stale_suppressions.clear();
@@ -372,6 +377,10 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
     }
 
     rules::apply_rules(&mut results, &config);
+
+    if opts.fail_on_issues {
+        rules::promote_policy_finding_warns(&mut results);
+    }
 
     opts.filters.apply(&mut results);
 
@@ -696,6 +705,7 @@ mod tests {
             circular_deps: false,
             re_export_cycles: false,
             boundary_violations: false,
+            policy_violations: false,
             stale_suppressions: false,
             unused_catalog_entries: false,
             empty_catalog_groups: false,
@@ -1082,6 +1092,7 @@ mod tests {
             circular_deps: true,
             re_export_cycles: true,
             boundary_violations: true,
+            policy_violations: true,
             stale_suppressions: true,
             unused_catalog_entries: true,
             empty_catalog_groups: true,

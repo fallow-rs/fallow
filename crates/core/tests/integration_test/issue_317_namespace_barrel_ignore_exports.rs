@@ -31,6 +31,7 @@ fn make_config(
         boundaries: fallow_config::BoundaryConfig::default(),
         production: false.into(),
         plugins: vec![],
+        rule_packs: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,

@@ -38,9 +38,10 @@ use crate::output::{
 use crate::results::{
     BoundaryCallViolation, BoundaryCoverageViolation, BoundaryViolation, CircularDependency,
     DependencyOverrideSource, DuplicateExport, EmptyCatalogGroup, MisconfiguredDependencyOverride,
-    PrivateTypeLeak, ReExportCycle, ReExportCycleKind, TestOnlyDependency, TypeOnlyDependency,
-    UnlistedDependency, UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry,
-    UnusedDependency, UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedMember,
+    PolicyViolation, PrivateTypeLeak, ReExportCycle, ReExportCycleKind, TestOnlyDependency,
+    TypeOnlyDependency, UnlistedDependency, UnresolvedCatalogReference, UnresolvedImport,
+    UnusedCatalogEntry, UnusedDependency, UnusedDependencyOverride, UnusedExport, UnusedFile,
+    UnusedMember,
 };
 
 /// Shared note for the `duplicate-exports` fix action. Mirrors the const used
@@ -526,6 +527,71 @@ impl BoundaryCallViolationFinding {
                 description: "Suppress with a file-level comment at the top of the file"
                     .to_string(),
                 comment: "// fallow-ignore-file boundary-violation".to_string(),
+            }),
+        ];
+        Self {
+            violation,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for a [`PolicyViolation`] finding. Carries actions for
+/// replacing the banned call or import, or suppressing it with the
+/// `policy-violation` token.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PolicyViolationFinding {
+    /// The underlying rule-pack policy entry.
+    #[serde(flatten)]
+    pub violation: PolicyViolation,
+    /// Suggested next steps.
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl PolicyViolationFinding {
+    /// Build the wrapper from a raw [`PolicyViolation`].
+    #[must_use]
+    pub fn with_actions(violation: PolicyViolation) -> Self {
+        let what = match violation.kind {
+            crate::results::PolicyRuleKind::BannedCall => "call",
+            crate::results::PolicyRuleKind::BannedImport => "import",
+        };
+        let description = match &violation.message {
+            Some(message) => format!("Replace the `{}` {what}: {message}", violation.matched,),
+            None => format!("Replace the `{}` {what}", violation.matched),
+        };
+        let actions = vec![
+            IssueAction::Fix(FixAction {
+                kind: FixActionType::ResolvePolicyViolation,
+                auto_fixable: false,
+                description,
+                note: Some(format!(
+                    "Rule `{}/{}` from the configured rule packs bans this {what}. The check is syntactic: it does not follow aliased or re-bound callees, and import matching uses the raw specifier",
+                    violation.pack, violation.rule_id,
+                )),
+                available_in_catalogs: None,
+                suggested_target: None,
+            }),
+            IssueAction::SuppressLine(SuppressLineAction {
+                kind: SuppressLineKind::SuppressLine,
+                auto_fixable: false,
+                description: "Suppress with an inline comment above the line. The token covers every rule-pack rule on that line"
+                    .to_string(),
+                comment: "// fallow-ignore-next-line policy-violation".to_string(),
+                scope: None,
+            }),
+            IssueAction::SuppressFile(SuppressFileAction {
+                kind: SuppressFileKind::SuppressFile,
+                auto_fixable: false,
+                description: "Suppress with a file-level comment at the top of the file. The token covers every rule-pack rule in the file, not just this rule"
+                    .to_string(),
+                comment: "// fallow-ignore-file policy-violation".to_string(),
             }),
         ];
         Self {
@@ -1578,6 +1644,7 @@ mod position_0_invariants {
                 FixActionType::RemoveCatalogReference => "remove-catalog-reference",
                 FixActionType::RemoveDependencyOverride => "remove-dependency-override",
                 FixActionType::FixDependencyOverride => "fix-dependency-override",
+                FixActionType::ResolvePolicyViolation => "resolve-policy-violation",
             },
             IssueAction::SuppressLine(_) => "suppress-line",
             IssueAction::SuppressFile(_) => "suppress-file",

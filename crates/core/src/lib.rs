@@ -1433,6 +1433,14 @@ pub fn config_for_project(
                         .join("\n  - ");
                     FallowError::config(format!("invalid boundary configuration:\n  - {joined}"))
                 })?;
+            fallow_config::load_rule_packs(root, &config.rule_packs).map_err(|errors| {
+                let joined = errors
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("\n  - ");
+                FallowError::config(format!("invalid rule pack:\n  - {joined}"))
+            })?;
             (
                 config.resolve(
                     root.to_path_buf(),

@@ -205,6 +205,7 @@ mod tests {
             production: false,
             quiet: true,
             external_plugins: vec![],
+            rule_packs: vec![],
             dynamically_loaded: vec![],
             overrides: vec![],
             regression: None,

@@ -114,6 +114,7 @@ pub struct DeadCodeFilters {
     pub circular_deps: bool,
     pub re_export_cycles: bool,
     pub boundary_violations: bool,
+    pub policy_violations: bool,
     pub stale_suppressions: bool,
     pub unused_catalog_entries: bool,
     pub empty_catalog_groups: bool,
@@ -517,6 +518,7 @@ fn to_issue_filters(filters: &DeadCodeFilters) -> IssueFilters {
         circular_deps: filters.circular_deps,
         re_export_cycles: filters.re_export_cycles,
         boundary_violations: filters.boundary_violations,
+        policy_violations: filters.policy_violations,
         stale_suppressions: filters.stale_suppressions,
         unused_catalog_entries: filters.unused_catalog_entries,
         empty_catalog_groups: filters.empty_catalog_groups,
@@ -605,6 +607,7 @@ fn filter_for_circular_dependencies(results: &AnalysisResults) -> AnalysisResult
     filtered.boundary_violations.clear();
     filtered.boundary_coverage_violations.clear();
     filtered.boundary_call_violations.clear();
+    filtered.policy_violations.clear();
     filtered.stale_suppressions.clear();
     filtered
 }
