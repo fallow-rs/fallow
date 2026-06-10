@@ -1049,6 +1049,10 @@
         "coverage": {
           "description": "Optional policy for files that match no zone.",
           "$ref": "#/$defs/BoundaryCoverageConfig"
+        },
+        "calls": {
+          "description": "Optional forbidden-call policy for zoned files.",
+          "$ref": "#/$defs/BoundaryCallsConfig"
         }
       }
     },
@@ -1155,6 +1159,53 @@
           }
         }
       }
+    },
+    "BoundaryCallsConfig": {
+      "description": "Boundary forbidden-call policy. Applies only to files classified into a\nzone; unzoned files are unrestricted, matching the import rules.",
+      "type": "object",
+      "properties": {
+        "forbidden": {
+          "description": "Callee patterns that files in a zone may not call.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ForbiddenCallRule"
+          }
+        }
+      }
+    },
+    "ForbiddenCallRule": {
+      "description": "One forbidden-call entry: files in zone `from` may not call callees\nmatching `callee`.",
+      "type": "object",
+      "properties": {
+        "from": {
+          "description": "Zone whose files may not make matching calls.",
+          "type": "string"
+        },
+        "callee": {
+          "description": "Forbidden callee pattern(s). Matching is segment-aware, not substring:\n`child_process.*` matches `child_process.exec` (and named imports from\n`child_process` / `node:child_process`), `fetch` matches only `fetch`,\nand a leading `*.` suffix-matches any object (`*.innerHTML`).",
+          "$ref": "#/$defs/ForbiddenCallee"
+        }
+      },
+      "required": [
+        "from",
+        "callee"
+      ]
+    },
+    "ForbiddenCallee": {
+      "description": "One callee pattern or a list of patterns for a single `from` zone.",
+      "anyOf": [
+        {
+          "description": "A single callee pattern.",
+          "type": "string"
+        },
+        {
+          "description": "Multiple callee patterns sharing the same `from` zone.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      ]
     },
     "FlagsConfig": {
       "description": "Feature flag detection configuration.\n\nControls which patterns fallow uses to detect feature flags in source code.\nConfigured via the `flags` section in `.fallowrc.json`, `.fallowrc.jsonc`, `fallow.toml`, or `.fallow.toml`.\n\n# Examples\n\n```json\n{\n  \"flags\": {\n    \"sdkPatterns\": [\n      { \"function\": \"useFlag\", \"nameArg\": 0, \"provider\": \"LaunchDarkly\" }\n    ],\n    \"envPrefixes\": [\"FEATURE_\", \"NEXT_PUBLIC_ENABLE_\"],\n    \"configObjectHeuristics\": false\n  }\n}\n```",
@@ -1745,6 +1796,12 @@
           "default": 0
         },
         "boundaryCoverageViolations": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        },
+        "boundaryCallViolations": {
           "type": "integer",
           "format": "uint",
           "minimum": 0,

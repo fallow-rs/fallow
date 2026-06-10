@@ -959,6 +959,13 @@ boundary_violations?: BoundaryViolationFinding[]
  */
 boundary_coverage_violations?: BoundaryCoverageViolationFinding[]
 /**
+ * Calls from zoned files to callees forbidden for that zone via
+ * `boundaries.calls.forbidden`. Wrapped in
+ * [`BoundaryCallViolationFinding`] so each entry carries a typed
+ * `actions` array natively.
+ */
+boundary_call_violations?: BoundaryCallViolationFinding[]
+/**
  * Suppression comments or JSDoc tags that no longer match any issue.
  */
 stale_suppressions?: StaleSuppression[]
@@ -1104,6 +1111,10 @@ boundary_violations: number
  * Files that match no architecture boundary zone.
  */
 boundary_coverage_violations?: number
+/**
+ * Calls from zoned files to callees forbidden for that zone.
+ */
+boundary_call_violations?: number
 /**
  * Suppression comments that no longer match a finding.
  */
@@ -1980,6 +1991,47 @@ line: number
  * 0-based byte column offset used for diagnostics.
  */
 col: number
+/**
+ * Suggested next steps.
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+}
+/**
+ * Wire-shape envelope for a [`BoundaryCallViolation`] finding. Carries
+ * actions for refactoring the forbidden call out of the zone or suppressing
+ * it with the shared `boundary-violation` token.
+ */
+export interface BoundaryCallViolationFinding {
+/**
+ * The zoned source file making the forbidden call.
+ */
+path: string
+/**
+ * 1-based line number of the call site.
+ */
+line: number
+/**
+ * 0-based byte column offset of the call site.
+ */
+col: number
+/**
+ * The zone the calling file is classified into.
+ */
+zone: string
+/**
+ * The callee path as written at the call site (e.g. `cp.exec`).
+ */
+callee: string
+/**
+ * The configured pattern that matched (e.g. `child_process.*`), so
+ * consumers can see both the written path and the rule that fired.
+ */
+pattern: string
 /**
  * Suggested next steps.
  */
@@ -4881,6 +4933,13 @@ boundary_violations?: BoundaryViolationFinding[]
  * `boundaries.coverage.requireAllFiles` was enabled.
  */
 boundary_coverage_violations?: BoundaryCoverageViolationFinding[]
+/**
+ * Calls from zoned files to callees forbidden for that zone via
+ * `boundaries.calls.forbidden`. Wrapped in
+ * [`BoundaryCallViolationFinding`] so each entry carries a typed
+ * `actions` array natively.
+ */
+boundary_call_violations?: BoundaryCallViolationFinding[]
 /**
  * Suppression comments or JSDoc tags that no longer match any issue.
  */

@@ -552,6 +552,13 @@
           },
           "description": "Files that matched no architecture boundary zone while\n`boundaries.coverage.requireAllFiles` was enabled."
         },
+        "boundary_call_violations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/BoundaryCallViolationFinding"
+          },
+          "description": "Calls from zoned files to callees forbidden for that zone via\n`boundaries.calls.forbidden`. Wrapped in\n[`BoundaryCallViolationFinding`] so each entry carries a typed\n`actions` array natively."
+        },
         "stale_suppressions": {
           "type": "array",
           "items": {
@@ -854,6 +861,13 @@
             "$ref": "#/definitions/BoundaryCoverageViolationFinding"
           },
           "description": "Files that matched no architecture boundary zone while\n`boundaries.coverage.requireAllFiles` was enabled."
+        },
+        "boundary_call_violations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/BoundaryCallViolationFinding"
+          },
+          "description": "Calls from zoned files to callees forbidden for that zone via\n`boundaries.calls.forbidden`. Wrapped in\n[`BoundaryCallViolationFinding`] so each entry carries a typed\n`actions` array natively."
         },
         "stale_suppressions": {
           "type": "array",
@@ -4580,6 +4594,10 @@
           "type": "integer",
           "description": "Files that match no architecture boundary zone."
         },
+        "boundary_call_violations": {
+          "type": "integer",
+          "description": "Calls from zoned files to callees forbidden for that zone."
+        },
         "stale_suppressions": {
           "type": "integer",
           "description": "Suppression comments that no longer match a finding."
@@ -5230,6 +5248,13 @@
             "$ref": "#/definitions/BoundaryCoverageViolationFinding"
           },
           "description": "Files that matched no architecture boundary zone while\n`boundaries.coverage.requireAllFiles` was enabled."
+        },
+        "boundary_call_violations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/BoundaryCallViolationFinding"
+          },
+          "description": "Calls from zoned files to callees forbidden for that zone via\n`boundaries.calls.forbidden`. Wrapped in\n[`BoundaryCallViolationFinding`] so each entry carries a typed\n`actions` array natively."
         },
         "stale_suppressions": {
           "type": "array",
@@ -11693,6 +11718,63 @@
         "actions"
       ],
       "description": "Wire-shape envelope for a [`BoundaryCoverageViolation`] finding. Carries\nactions for assigning the file to a zone or explicitly allowing it to stay\nunmatched."
+    },
+    "BoundaryCallViolationFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The zoned source file making the forbidden call."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the call site."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset of the call site."
+        },
+        "zone": {
+          "type": "string",
+          "description": "The zone the calling file is classified into."
+        },
+        "callee": {
+          "type": "string",
+          "description": "The callee path as written at the call site (e.g. `cp.exec`)."
+        },
+        "pattern": {
+          "type": "string",
+          "description": "The configured pattern that matched (e.g. `child_process.*`), so\nconsumers can see both the written path and the rule that fired."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "path",
+        "line",
+        "col",
+        "zone",
+        "callee",
+        "pattern",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for a [`BoundaryCallViolation`] finding. Carries\nactions for refactoring the forbidden call out of the zone or suppressing\nit with the shared `boundary-violation` token."
     }
   }
 }
