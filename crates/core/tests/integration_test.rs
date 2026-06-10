@@ -120,6 +120,8 @@ mod security_framework_entry_sources;
 mod security_framework_sinks;
 #[path = "integration_test/security_hardcoded_secret.rs"]
 mod security_hardcoded_secret;
+#[path = "integration_test/security_multihop_taint.rs"]
+mod security_multihop_taint;
 #[path = "integration_test/security_request_receivers.rs"]
 mod security_request_receivers;
 #[path = "integration_test/security_secret_to_network.rs"]
