@@ -1972,6 +1972,7 @@ mod tests {
             tainted_bindings: Vec::new(),
             sanitized_sink_args: Vec::new(),
             security_control_sites: Vec::new(),
+            callee_uses: Vec::new(),
         }
     }
 

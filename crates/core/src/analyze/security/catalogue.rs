@@ -144,22 +144,38 @@ pub struct ObjectPropertyPredicate {
 }
 
 /// A pre-segmented callee pattern. Matching is segment-aware (NOT substring):
-/// the pattern is split on `.`, and a leading `*` segment means "any object",
-/// so `*.innerHTML` matches `el.innerHTML` and `this.node.innerHTML` by
-/// suffix-matching the trailing non-`*` segments.
+/// the pattern is split on `.`, a leading `*` segment means "any object"
+/// (`*.innerHTML` matches `el.innerHTML` and `this.node.innerHTML` by
+/// suffix-matching the trailing non-`*` segments), and a trailing `*` segment
+/// means "any member" (`child_process.*` matches `child_process.exec` by
+/// prefix-matching the leading non-`*` segments). The security catalogue uses
+/// exact and leading-wildcard rows; the trailing form serves the boundary
+/// forbidden-call detector.
 #[derive(Debug, Clone)]
 pub struct CalleePattern {
     /// The literal source pattern (`"*.innerHTML"`, `"child_process.exec"`),
     /// surfaced in evidence rendering as `{pattern}`.
     raw: String,
-    /// Trailing segments after any leading `*` (e.g. `["innerHTML"]` for
-    /// `*.innerHTML`, `["child_process", "exec"]` for the exact dotted form).
+    /// Segments between any leading and trailing `*` (e.g. `["innerHTML"]`
+    /// for `*.innerHTML`, `["child_process"]` for `child_process.*`,
+    /// `["child_process", "exec"]` for the exact dotted form).
     suffix_segments: Vec<String>,
     /// Whether the pattern began with a `*` wildcard object segment.
     leading_wildcard: bool,
+    /// Whether the pattern ended with a `*` wildcard member segment.
+    trailing_wildcard: bool,
 }
 
 impl CalleePattern {
+    /// Parse a raw pattern string into its segmented form. Returns `None` for
+    /// an empty or whitespace-only pattern. Public constructor for non-security
+    /// reusers of the segment-aware matcher (the boundary forbidden-call
+    /// detector); the catalogue's own rows go through the same parser.
+    #[must_use]
+    pub fn parse(raw: &str) -> Option<Self> {
+        parse_callee_pattern(raw)
+    }
+
     /// The original pattern text, for evidence templating.
     #[must_use]
     pub fn raw(&self) -> &str {
@@ -170,11 +186,19 @@ impl CalleePattern {
     ///
     /// With a leading `*`, the trailing segments must equal the tail of the
     /// candidate's segments (suffix match), so `*.innerHTML` matches
-    /// `el.innerHTML` but not `el.innerHTMLFoo`. Without it, the whole
-    /// segment list must match exactly, so `fetch` matches `fetch` but not
-    /// `myfetch`.
+    /// `el.innerHTML` but not `el.innerHTMLFoo`. With a trailing `*`, the
+    /// leading segments must equal the head of the candidate's segments
+    /// (prefix match), so `child_process.*` matches `child_process.exec` but
+    /// not the bare `child_process`. Without either, the whole segment list
+    /// must match exactly, so `fetch` matches `fetch` but not `myfetch`.
+    /// Patterns carrying BOTH wildcards match nothing (rejected by the config
+    /// layer; never produced by catalogue rows).
     #[must_use]
     pub fn matches(&self, callee_path: &str) -> bool {
+        // With only wildcards and no concrete segments, match nothing.
+        if self.suffix_segments.is_empty() || (self.leading_wildcard && self.trailing_wildcard) {
+            return false;
+        }
         let candidate: Vec<&str> = callee_path.split('.').collect();
         if self.leading_wildcard {
             // A leading `*.` requires at least one object segment before the
@@ -183,14 +207,22 @@ impl CalleePattern {
             if self.suffix_segments.len() >= candidate.len() {
                 return false;
             }
-            // With only a `*` and no trailing segments, match nothing concrete.
-            if self.suffix_segments.is_empty() {
-                return false;
-            }
             let tail = &candidate[candidate.len() - self.suffix_segments.len()..];
             self.suffix_segments
                 .iter()
                 .zip(tail)
+                .all(|(pat, seg)| pat == seg)
+        } else if self.trailing_wildcard {
+            // A trailing `.*` requires at least one member segment after the
+            // prefix (`child_process.*` matches `child_process.exec`, not the
+            // bare `child_process`).
+            if self.suffix_segments.len() >= candidate.len() {
+                return false;
+            }
+            let head = &candidate[..self.suffix_segments.len()];
+            self.suffix_segments
+                .iter()
+                .zip(head)
                 .all(|(pat, seg)| pat == seg)
         } else {
             self.suffix_segments.len() == candidate.len()
@@ -234,10 +266,15 @@ fn parse_callee_pattern(raw: &str) -> Option<CalleePattern> {
     if leading_wildcard {
         segments.remove(0);
     }
+    let trailing_wildcard = segments.last() == Some(&"*");
+    if trailing_wildcard {
+        segments.pop();
+    }
     Some(CalleePattern {
         raw: raw.to_string(),
         suffix_segments: segments.into_iter().map(str::to_string).collect(),
         leading_wildcard,
+        trailing_wildcard,
     })
 }
 
@@ -1115,6 +1152,30 @@ evidence_template = "   "
         let star = parse_callee_pattern("*").unwrap();
         assert!(!star.matches("el.innerHTML"));
         assert!(!star.matches("anything"));
+    }
+
+    #[test]
+    fn trailing_wildcard_prefix_matches() {
+        let trailing = parse_callee_pattern("child_process.*").unwrap();
+        assert!(trailing.matches("child_process.exec"));
+        assert!(trailing.matches("child_process.exec.call"));
+        assert!(!trailing.matches("child_process")); // requires a member
+        assert!(!trailing.matches("my_child_process.exec"));
+        assert!(!trailing.matches("exec"));
+
+        let console = parse_callee_pattern("console.*").unwrap();
+        assert!(console.matches("console.log"));
+        assert!(!console.matches("myconsole.log"));
+    }
+
+    #[test]
+    fn double_wildcard_pattern_matches_nothing() {
+        // `*.x.*` and `*.*` are rejected by config validation; the matcher
+        // guards against them anyway.
+        let both = parse_callee_pattern("*.query.*").unwrap();
+        assert!(!both.matches("db.query.run"));
+        let stars = parse_callee_pattern("*.*").unwrap();
+        assert!(!stars.matches("a.b"));
     }
 
     #[test]

@@ -209,6 +209,98 @@ fn allow_unmatched_excludes_boundary_coverage_findings() {
     );
 }
 
+fn calls_boundaries(forbidden: Vec<fallow_config::ForbiddenCallRule>) -> BoundaryConfig {
+    BoundaryConfig {
+        zones: vec![
+            BoundaryZone {
+                name: "domain".to_string(),
+                patterns: vec!["src/domain/**".to_string()],
+                auto_discover: vec![],
+                root: None,
+            },
+            BoundaryZone {
+                name: "ui".to_string(),
+                patterns: vec!["src/ui/**".to_string()],
+                auto_discover: vec![],
+                root: None,
+            },
+        ],
+        calls: BoundaryCallsConfig { forbidden },
+        ..BoundaryConfig::default()
+    }
+}
+
+fn forbid_call(from: &str, callee: &str) -> fallow_config::ForbiddenCallRule {
+    fallow_config::ForbiddenCallRule {
+        from: from.to_string(),
+        callee: fallow_config::ForbiddenCallee::Single(callee.to_string()),
+    }
+}
+
+#[test]
+fn reports_forbidden_calls_from_zoned_files() {
+    let root = fixture_path("boundary-violations");
+    let boundaries = calls_boundaries(vec![
+        forbid_call("domain", "child_process.*"),
+        forbid_call("domain", "console.*"),
+    ]);
+    let config = create_boundary_config_with_entry(root, boundaries, "src/**/*.ts");
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let entries: Vec<(String, String, String, String)> = results
+        .boundary_call_violations
+        .iter()
+        .map(|v| {
+            (
+                v.violation.path.to_string_lossy().replace('\\', "/"),
+                v.violation.zone.clone(),
+                v.violation.callee.clone(),
+                v.violation.pattern.clone(),
+            )
+        })
+        .collect();
+
+    assert!(
+        entries.iter().any(|(path, zone, callee, pattern)| {
+            path.ends_with("src/domain/policy.ts")
+                && zone == "domain"
+                && callee == "execSync"
+                && pattern == "child_process.*"
+        }),
+        "expected the named-import execSync call to canonicalize and fire, got {entries:?}"
+    );
+    assert!(
+        entries.iter().any(|(path, zone, callee, pattern)| {
+            path.ends_with("src/domain/policy.ts")
+                && zone == "domain"
+                && callee == "console.log"
+                && pattern == "console.*"
+        }),
+        "expected the global console.log call to fire on the written path, got {entries:?}"
+    );
+    assert!(
+        entries
+            .iter()
+            .all(|(path, _, _, _)| !path.ends_with("src/ui/App.ts")),
+        "ui zone has no forbidden-call rule, so its console.log must stay quiet: {entries:?}"
+    );
+    assert!(
+        entries
+            .iter()
+            .all(|(path, _, _, _)| !path.ends_with("src/domain/suppressed.ts")),
+        "file-level boundary-violation suppression must be consumed: {entries:?}"
+    );
+}
+
+#[test]
+fn no_forbidden_call_findings_without_calls_config() {
+    let root = fixture_path("boundary-violations");
+    let boundaries = calls_boundaries(vec![]);
+    let config = create_boundary_config_with_entry(root, boundaries, "src/**/*.ts");
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    assert!(results.boundary_call_violations.is_empty());
+}
+
 #[test]
 fn no_violations_when_rule_is_off() {
     let root = fixture_path("boundary-violations");

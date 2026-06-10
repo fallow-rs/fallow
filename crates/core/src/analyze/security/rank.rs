@@ -883,6 +883,7 @@ mod tests {
             tainted_bindings: vec![],
             sanitized_sink_args: vec![],
             security_control_sites: vec![],
+            callee_uses: vec![],
         }
     }
 

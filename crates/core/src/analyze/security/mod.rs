@@ -35,6 +35,10 @@ pub use hardcoded_secret::find_hardcoded_secret_candidates;
 pub use rank::{annotate_dead_code_cross_links, derive_security_severity, rank_security_findings};
 pub use tainted_sink::{CategoryFilter, TaintedSinkContext, find_tainted_sinks};
 
+/// Segment-aware callee pattern matcher, re-exported for the boundary
+/// forbidden-call detector (`analyze::boundary_calls`).
+pub(crate) use catalogue::CalleePattern;
+
 #[must_use]
 pub fn catalogue_title(id: &str) -> Option<&'static str> {
     if id == hardcoded_secret::CATEGORY_ID {
