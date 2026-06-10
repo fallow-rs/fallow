@@ -6,7 +6,7 @@ paths:
 
 # Plugin system
 
-121 built-in plugins implementing the `Plugin` trait with enablers (package.json detection), static patterns, and optional `resolve_config()` for AST-based config parsing.
+122 built-in plugins implementing the `Plugin` trait with enablers (package.json detection), static patterns, package.json metadata hooks, and optional `resolve_config()` for AST-based config parsing.
 
 ## Rich config parsing (26 plugins)
 
@@ -42,6 +42,7 @@ paths:
 `config_parser::extract_config_aliases[_kinded]` (used by Vite, Webpack, Nuxt, SvelteKit, AdonisJS for `resolve.alias` / `alias` / `kit.alias` / `aliases`, by the TypeScript plugin for `compilerOptions.paths`, and by Vitest/`test_alias` for `test.alias`) resolves an alias value that is not an inline literal: an identifier bound to a local `const NAME = [...] | {...}` or imported one hop from a relative sibling file (`import { sharedAliases } from "./vite.shared.js"`, read and parsed for `export const NAME` / `export default` / `export { NAME }`), plus array spread elements (`[...a, ...b]`) and object spread properties (`{ ...a, "@": "./src" }`). Bare-package imports of an alias module, regex `find` keys, and dynamically-built arrays remain out of scope (non-static). Bounded by an identifier-hop cap and a per-file visited set (import cycles terminate). See issue #811.
 
 ## Plugin trait extensions
+- `resolve_package_json()` for package metadata conventions that credit dynamic runtime dependencies without parsing a standalone config file. The napi-rs plugin uses this to credit only exact prebuilt platform packages present in the same package's `optionalDependencies`.
 - `auto_imports()` for framework convention auto-imports (Nuxt `<Card001 />` components and script identifiers like `useCounter()`). Returns `AutoImportRule { name, source, kind }` built from a filesystem scan; the resolver matches a file's captured `auto_import_candidates` against the table and synthesizes a graph edge at graph-build time (never cached). See `detection.md` and issues #704 / #739.
 - `path_aliases()` for framework-specific alias resolution (Nuxt `~/`, Next.js `@/`)
 - `virtual_module_prefixes()` for framework virtual modules (Docusaurus `@theme/`, `@docusaurus/`, rspress `@theme/` / `@theme-original/`, TanStack Start `tanstack-start-manifest:`)

@@ -1,4 +1,4 @@
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de::Error};
 
 /// Type alias for standard `HashMap` used in serde-deserialized structs.
 /// `rustc-hash` v2 does not have a `serde` feature, so fields deserialized
@@ -34,10 +34,54 @@ where
     })
 }
 
+fn deserialize_optional_string_lenient<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    Ok(match value {
+        Some(serde_json::Value::String(value)) if !value.trim().is_empty() => Some(value),
+        _ => None,
+    })
+}
+
+fn deserialize_optional_napi_config<'de, D>(deserializer: D) -> Result<Option<NapiConfig>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    match value {
+        Some(serde_json::Value::Object(map)) => {
+            serde_json::from_value(serde_json::Value::Object(map))
+                .map(Some)
+                .map_err(D::Error::custom)
+        }
+        _ => Ok(None),
+    }
+}
+
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct PeerDependencyMeta {
     #[serde(default)]
     pub optional: bool,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct NapiConfig {
+    #[serde(
+        default,
+        rename = "binaryName",
+        deserialize_with = "deserialize_optional_string_lenient"
+    )]
+    pub binary_name: Option<String>,
+    #[serde(
+        default,
+        rename = "packageName",
+        deserialize_with = "deserialize_optional_string_lenient"
+    )]
+    pub package_name: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_string_array_lenient")]
+    pub targets: Vec<String>,
 }
 
 /// Parsed package.json with fields relevant to fallow.
@@ -79,6 +123,8 @@ pub struct PackageJson {
     pub optional_dependencies: Option<StdHashMap<String, String>>,
     #[serde(default)]
     pub scripts: Option<StdHashMap<String, String>>,
+    #[serde(default, deserialize_with = "deserialize_optional_napi_config")]
+    pub napi: Option<NapiConfig>,
     #[serde(default)]
     pub workspaces: Option<serde_json::Value>,
 }
@@ -390,6 +436,56 @@ mod tests {
         let pkg: PackageJson =
             serde_json::from_str(r#"{"files": ["template-*", 42, false, null]}"#).unwrap();
         assert_eq!(pkg.files, vec!["template-*"]);
+    }
+
+    #[test]
+    fn package_json_napi_config_preserves_current_string_fields() {
+        let pkg: PackageJson = serde_json::from_str(
+            r#"{
+                "napi": {
+                    "binaryName": "srcmap-codec",
+                    "packageName": "@srcmap/codec",
+                    "targets": [
+                        "aarch64-apple-darwin",
+                        "x86_64-unknown-linux-gnu"
+                    ]
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let napi = pkg.napi.expect("napi config");
+        assert_eq!(napi.binary_name.as_deref(), Some("srcmap-codec"));
+        assert_eq!(napi.package_name.as_deref(), Some("@srcmap/codec"));
+        assert_eq!(
+            napi.targets,
+            vec![
+                "aarch64-apple-darwin".to_string(),
+                "x86_64-unknown-linux-gnu".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn package_json_napi_config_ignores_unexpected_shapes() {
+        let pkg: PackageJson = serde_json::from_str(r#"{"napi": "enabled"}"#).unwrap();
+        assert!(pkg.napi.is_none());
+
+        let pkg: PackageJson = serde_json::from_str(
+            r#"{
+                "napi": {
+                    "binaryName": 42,
+                    "packageName": "",
+                    "targets": ["x86_64-apple-darwin", false, null]
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let napi = pkg.napi.expect("napi config");
+        assert!(napi.binary_name.is_none());
+        assert!(napi.package_name.is_none());
+        assert_eq!(napi.targets, vec!["x86_64-apple-darwin"]);
     }
 
     #[test]

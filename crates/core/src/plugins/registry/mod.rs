@@ -18,7 +18,7 @@ mod helpers;
 use helpers::{
     check_has_config_file, discover_config_files, is_external_plugin_active,
     prepare_config_pattern, process_config_result, process_external_plugins,
-    process_static_patterns,
+    process_package_json_metadata, process_static_patterns,
 };
 
 fn must_parse_workspace_config_when_root_active(plugin_name: &str) -> bool {
@@ -380,6 +380,7 @@ impl PluginRegistry {
             .filter(|p| {
                 p.is_enabled_with_files(&all_deps, root, discovered_files)
                     || p.is_enabled_with_scripts(&script_packages, root)
+                    || p.is_enabled_with_package_json(pkg, root)
             })
             .map(AsRef::as_ref)
             .collect();
@@ -400,6 +401,7 @@ impl PluginRegistry {
         for plugin in &active {
             process_static_patterns(*plugin, root, &mut result);
         }
+        process_package_json_metadata(&active, pkg, root, &mut result, &mut regex_errors);
 
         process_external_plugins(
             &self.external_plugins,
@@ -606,6 +608,7 @@ impl PluginRegistry {
             .filter(|p| {
                 p.is_enabled_with_files(&all_deps, root, &workspace_files)
                     || p.is_enabled_with_scripts(&script_packages, root)
+                    || p.is_enabled_with_package_json(pkg, root)
             })
             .map(AsRef::as_ref)
             .collect();
@@ -636,6 +639,7 @@ impl PluginRegistry {
         for plugin in &active {
             process_static_patterns(*plugin, root, &mut result);
         }
+        process_package_json_metadata(&active, pkg, root, &mut result, &mut regex_errors);
 
         let active_names: FxHashSet<&str> = active.iter().map(|p| p.name()).collect();
         let workspace_matchers: Vec<_> = precompiled_config_matchers

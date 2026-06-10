@@ -841,6 +841,16 @@ pub trait Plugin: Send + Sync {
         Vec::new()
     }
 
+    /// Check whether parsed package.json metadata activates this plugin.
+    fn is_enabled_with_package_json(&self, _pkg: &PackageJson, _root: &Path) -> bool {
+        false
+    }
+
+    /// Resolve parsed package.json metadata into dynamic plugin facts.
+    fn resolve_package_json(&self, _pkg: &PackageJson, _root: &Path) -> PluginResult {
+        PluginResult::default()
+    }
+
     /// Parse a config file's AST to discover additional entries, dependencies, etc.
     ///
     /// Called for each config file matching `config_patterns()`. The source code
@@ -1156,6 +1166,7 @@ mod markdownlint;
 mod mintlify;
 mod mocha;
 mod msw;
+mod napi_rs;
 mod nestjs;
 mod next_intl;
 mod nextjs;
@@ -1485,6 +1496,17 @@ mod tests {
     }
 
     #[test]
+    fn default_package_json_metadata_hooks_are_empty() {
+        let pkg = PackageJson::default();
+        assert!(!MinimalPlugin.is_enabled_with_package_json(&pkg, Path::new("/")));
+        assert!(
+            MinimalPlugin
+                .resolve_package_json(&pkg, Path::new("/"))
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn default_package_json_config_key_is_none() {
         assert!(MinimalPlugin.package_json_config_key().is_none());
     }
@@ -1506,12 +1528,15 @@ mod tests {
     }
 
     #[test]
-    fn all_builtin_plugins_have_enablers() {
+    fn all_builtin_plugins_have_activation_signals() {
+        const PACKAGE_JSON_METADATA_PLUGINS: &[&str] = &["napi-rs"];
         let plugins = registry::builtin::create_builtin_plugins();
         for p in &plugins {
             assert!(
-                !p.enablers().is_empty(),
-                "plugin '{}' has no enablers",
+                !p.enablers().is_empty()
+                    || !p.script_enablers().is_empty()
+                    || PACKAGE_JSON_METADATA_PLUGINS.contains(&p.name()),
+                "plugin '{}' has no activation signal",
                 p.name()
             );
         }

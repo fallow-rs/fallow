@@ -16,7 +16,7 @@ pub use diagnostics::{
     clear_source_discovery_diagnostics, stash_workspace_diagnostics, workspace_diagnostics_for,
 };
 use diagnostics::{emit_diagnostics, is_skip_listed_dir};
-pub use package_json::PackageJson;
+pub use package_json::{NapiConfig, PackageJson};
 pub use parsers::parse_tsconfig_root_dir;
 use parsers::{
     expand_workspace_glob_with_diagnostics, parse_pnpm_workspace_yaml,
