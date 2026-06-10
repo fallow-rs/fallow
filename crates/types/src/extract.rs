@@ -115,6 +115,12 @@ pub struct ModuleInfo {
     /// Known defensive control call sites found in this module. Consumed only by
     /// the `fallow security --surface` agent JSON path.
     pub security_control_sites: Vec<SecurityControlSite>,
+    /// Statically flattenable callee paths invoked in this module, deduped per
+    /// unique path (first occurrence wins). Consumed by the
+    /// `boundaries.calls.forbidden` detector. Captured unconditionally because
+    /// extraction is config-blind; the per-module cost is bounded by the
+    /// unique-callee count.
+    pub callee_uses: Vec<CalleeUse>,
 }
 
 impl ModuleInfo {
@@ -957,6 +963,18 @@ pub struct MemberAccess {
     pub member: String,
 }
 
+/// A statically flattenable callee path invoked in a module (e.g. `execSync`,
+/// `child_process.exec`, `console.log`). One entry per unique `callee_path`
+/// per module; the span anchors the first occurrence. Consumed by the
+/// `boundaries.calls.forbidden` detector.
+#[derive(Debug, Clone)]
+pub struct CalleeUse {
+    /// The dotted or bare callee path as written at the call site.
+    pub callee_path: String,
+    /// Start byte offset of the first call site using this path.
+    pub span_start: u32,
+}
+
 #[expect(
     clippy::trivially_copy_pass_by_ref,
     reason = "serde serialize_with requires &T"
@@ -1043,7 +1061,7 @@ const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 216);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 768);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 792);
 
 /// A re-export declaration.
 #[derive(Debug, Clone)]

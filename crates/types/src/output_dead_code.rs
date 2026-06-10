@@ -36,11 +36,11 @@ use crate::output::{
     SuppressLineKind, SuppressLineScope,
 };
 use crate::results::{
-    BoundaryCoverageViolation, BoundaryViolation, CircularDependency, DependencyOverrideSource,
-    DuplicateExport, EmptyCatalogGroup, MisconfiguredDependencyOverride, PrivateTypeLeak,
-    ReExportCycle, ReExportCycleKind, TestOnlyDependency, TypeOnlyDependency, UnlistedDependency,
-    UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry, UnusedDependency,
-    UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedMember,
+    BoundaryCallViolation, BoundaryCoverageViolation, BoundaryViolation, CircularDependency,
+    DependencyOverrideSource, DuplicateExport, EmptyCatalogGroup, MisconfiguredDependencyOverride,
+    PrivateTypeLeak, ReExportCycle, ReExportCycleKind, TestOnlyDependency, TypeOnlyDependency,
+    UnlistedDependency, UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry,
+    UnusedDependency, UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedMember,
 };
 
 /// Shared note for the `duplicate-exports` fix action. Mirrors the const used
@@ -460,6 +460,65 @@ impl BoundaryCoverageViolationFinding {
                     "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/boundaries/properties/coverage/properties/allowUnmatched/items"
                         .to_string(),
                 ),
+            }),
+            IssueAction::SuppressFile(SuppressFileAction {
+                kind: SuppressFileKind::SuppressFile,
+                auto_fixable: false,
+                description: "Suppress with a file-level comment at the top of the file"
+                    .to_string(),
+                comment: "// fallow-ignore-file boundary-violation".to_string(),
+            }),
+        ];
+        Self {
+            violation,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for a [`BoundaryCallViolation`] finding. Carries
+/// actions for refactoring the forbidden call out of the zone or suppressing
+/// it with the shared `boundary-violation` token.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct BoundaryCallViolationFinding {
+    /// The underlying forbidden-call entry.
+    #[serde(flatten)]
+    pub violation: BoundaryCallViolation,
+    /// Suggested next steps.
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl BoundaryCallViolationFinding {
+    /// Build the wrapper from a raw [`BoundaryCallViolation`].
+    #[must_use]
+    pub fn with_actions(violation: BoundaryCallViolation) -> Self {
+        let actions = vec![
+            IssueAction::Fix(FixAction {
+                kind: FixActionType::RefactorBoundary,
+                auto_fixable: false,
+                description: format!(
+                    "Move the `{}` call out of zone '{}' or behind an allowed abstraction",
+                    violation.callee, violation.zone,
+                ),
+                note: Some(format!(
+                    "`boundaries.calls.forbidden` bans callees matching `{}` from zone '{}'. The check is syntactic: it applies only to files classified into a zone and does not follow aliased or re-bound callees",
+                    violation.pattern, violation.zone,
+                )),
+                available_in_catalogs: None,
+                suggested_target: None,
+            }),
+            IssueAction::SuppressLine(SuppressLineAction {
+                kind: SuppressLineKind::SuppressLine,
+                auto_fixable: false,
+                description: "Suppress with an inline comment above the line".to_string(),
+                comment: "// fallow-ignore-next-line boundary-violation".to_string(),
+                scope: None,
             }),
             IssueAction::SuppressFile(SuppressFileAction {
                 kind: SuppressFileKind::SuppressFile,
