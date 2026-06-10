@@ -1967,7 +1967,11 @@ Config files are searched in priority order: `.fallowrc.json` > `.fallowrc.jsonc
     // "rules": [
     //   { "from": "app", "allow": ["features", "shared"] },
     //   { "from": "features", "allow": ["shared"], "allowTypeOnly": ["features"] }
-    // ]
+    // ],
+    // "coverage": {
+    //   "requireAllFiles": true,
+    //   "allowUnmatched": ["src/generated/**"]
+    // }
   },
 
   // Resolve framework convention auto-imports (Nuxt components) as graph edges.

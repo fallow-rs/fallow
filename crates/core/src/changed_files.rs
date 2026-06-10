@@ -403,6 +403,9 @@ pub fn filter_results_by_changed_files(
     results
         .boundary_violations
         .retain(|v| contains_normalized(&cf, &v.violation.from_path));
+    results
+        .boundary_coverage_violations
+        .retain(|v| contains_normalized(&cf, &v.violation.path));
 
     results
         .stale_suppressions

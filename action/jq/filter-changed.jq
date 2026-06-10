@@ -33,6 +33,9 @@ def filter_check:
   (if .boundary_violations then
     .boundary_violations |= map(select(.from_path | in_changed))
   else . end) |
+  (if .boundary_coverage_violations then
+    .boundary_coverage_violations |= map(select(.path | in_changed))
+  else . end) |
   (if .stale_suppressions then
     .stale_suppressions |= map(select(.path | in_changed))
   else . end) |
@@ -66,6 +69,7 @@ def filter_check:
       (.circular_dependencies // [] | length) +
       (.re_export_cycles // [] | length) +
       (.boundary_violations // [] | length) +
+      (.boundary_coverage_violations // [] | length) +
       (.type_only_dependencies // [] | length) +
       (.stale_suppressions // [] | length) +
       (.unused_catalog_entries // [] | length) +

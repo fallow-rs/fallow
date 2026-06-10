@@ -1,4 +1,5 @@
 mod boundary;
+mod boundary_coverage;
 pub mod feature_flags;
 mod iconify;
 mod package_json_utils;
@@ -30,13 +31,14 @@ use crate::extract::ModuleInfo;
 use crate::graph::ModuleGraph;
 use crate::resolve::ResolvedModule;
 use fallow_types::output_dead_code::{
-    BoundaryViolationFinding, CircularDependencyFinding, DuplicateExportFinding,
-    EmptyCatalogGroupFinding, MisconfiguredDependencyOverrideFinding, PrivateTypeLeakFinding,
-    ReExportCycleFinding, TestOnlyDependencyFinding, TypeOnlyDependencyFinding,
-    UnlistedDependencyFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
-    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedDependencyFinding,
-    UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
-    UnusedExportFinding, UnusedFileFinding, UnusedOptionalDependencyFinding, UnusedTypeFinding,
+    BoundaryCoverageViolationFinding, BoundaryViolationFinding, CircularDependencyFinding,
+    DuplicateExportFinding, EmptyCatalogGroupFinding, MisconfiguredDependencyOverrideFinding,
+    PrivateTypeLeakFinding, ReExportCycleFinding, TestOnlyDependencyFinding,
+    TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnresolvedCatalogReferenceFinding,
+    UnresolvedImportFinding, UnusedCatalogEntryFinding, UnusedClassMemberFinding,
+    UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
+    UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
+    UnusedOptionalDependencyFinding, UnusedTypeFinding,
 };
 
 use crate::results::{AnalysisResults, CircularDependency, CircularDependencyEdge};
@@ -552,7 +554,10 @@ pub fn find_dead_code_full(
             (member_results, dependency_results),
             (
                 (unresolved_imports, duplicate_exports),
-                (boundary_violations, (circular_dependencies, (re_export_cycles, export_usages))),
+                (
+                    (boundary_violations, boundary_coverage_violations),
+                    (circular_dependencies, (re_export_cycles, export_usages)),
+                ),
             ),
         ),
     ) = rayon::join(
@@ -649,21 +654,41 @@ pub fn find_dead_code_full(
                         || {
                             rayon::join(
                                 || {
-                                    if config.rules.boundary_violation != Severity::Off
-                                        && !config.boundaries.is_empty()
-                                    {
-                                        boundary::find_boundary_violations(
-                                            graph,
-                                            config,
-                                            &suppressions,
-                                            &line_offsets_by_file,
-                                        )
-                                        .into_iter()
-                                        .map(BoundaryViolationFinding::with_actions)
-                                        .collect::<Vec<_>>()
-                                    } else {
-                                        Vec::new()
-                                    }
+                                    rayon::join(
+                                        || {
+                                            if config.rules.boundary_violation != Severity::Off
+                                                && !config.boundaries.is_empty()
+                                            {
+                                                boundary::find_boundary_violations(
+                                                    graph,
+                                                    config,
+                                                    &suppressions,
+                                                    &line_offsets_by_file,
+                                                )
+                                                .into_iter()
+                                                .map(BoundaryViolationFinding::with_actions)
+                                                .collect::<Vec<_>>()
+                                            } else {
+                                                Vec::new()
+                                            }
+                                        },
+                                        || {
+                                            if config.rules.boundary_violation != Severity::Off {
+                                                boundary_coverage::find_boundary_coverage_violations(
+                                                    graph,
+                                                    config,
+                                                    &suppressions,
+                                                )
+                                                .into_iter()
+                                                .map(
+                                                    BoundaryCoverageViolationFinding::with_actions,
+                                                )
+                                                .collect::<Vec<_>>()
+                                            } else {
+                                                Vec::new()
+                                            }
+                                        },
+                                    )
                                 },
                                 || {
                                     rayon::join(
@@ -721,6 +746,7 @@ pub fn find_dead_code_full(
         unresolved_imports,
         duplicate_exports,
         boundary_violations,
+        boundary_coverage_violations,
         circular_dependencies,
         re_export_cycles,
         export_usages,

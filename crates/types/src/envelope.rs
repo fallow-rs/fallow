@@ -122,6 +122,9 @@ pub struct CheckSummary {
     pub re_export_cycles: usize,
     /// Imports that cross architecture boundary rules.
     pub boundary_violations: usize,
+    /// Files that match no architecture boundary zone.
+    #[serde(default)]
+    pub boundary_coverage_violations: usize,
     /// Suppression comments that no longer match a finding.
     pub stale_suppressions: usize,
     /// Unused pnpm-workspace catalog entries.

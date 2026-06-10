@@ -603,6 +603,7 @@ fn filter_for_circular_dependencies(results: &AnalysisResults) -> AnalysisResult
     filtered.type_only_dependencies.clear();
     filtered.test_only_dependencies.clear();
     filtered.boundary_violations.clear();
+    filtered.boundary_coverage_violations.clear();
     filtered.stale_suppressions.clear();
     filtered
 }
@@ -1362,6 +1363,37 @@ mod tests {
         .expect("boundary-violation analysis should succeed");
         assert_eq!(json["kind"], "dead-code");
         assert!(json["boundary_violations"].is_array());
+    }
+
+    #[test]
+    fn detect_boundary_violations_includes_boundary_coverage() {
+        let project = tiny_project();
+        let root = project.path();
+        std::fs::write(
+            root.join(".fallowrc.json"),
+            r#"{
+              "boundaries": {
+                "zones": [
+                  { "name": "domain", "patterns": ["src/domain/**"] }
+                ],
+                "coverage": { "requireAllFiles": true }
+              }
+            }"#,
+        )
+        .unwrap();
+
+        let json = detect_boundary_violations(&DeadCodeOptions {
+            analysis: analysis_at(root),
+            ..DeadCodeOptions::default()
+        })
+        .expect("boundary-violation analysis should succeed");
+
+        let coverage = json["boundary_coverage_violations"]
+            .as_array()
+            .expect("coverage findings should be an array");
+        assert_eq!(coverage.len(), 1);
+        assert_eq!(coverage[0]["path"], "src/index.ts");
+        assert_eq!(json["summary"]["boundary_coverage_violations"], 1);
     }
 
     #[test]

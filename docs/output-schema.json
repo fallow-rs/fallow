@@ -538,6 +538,13 @@
           },
           "description": "Imports that cross architecture boundary rules. Wrapped in\n[`BoundaryViolationFinding`] so each entry carries a typed `actions`\narray natively."
         },
+        "boundary_coverage_violations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/BoundaryCoverageViolationFinding"
+          },
+          "description": "Files that matched no architecture boundary zone while\n`boundaries.coverage.requireAllFiles` was enabled."
+        },
         "stale_suppressions": {
           "type": "array",
           "items": {
@@ -833,6 +840,13 @@
             "$ref": "#/definitions/BoundaryViolationFinding"
           },
           "description": "Imports that cross architecture boundary rules. Wrapped in\n[`BoundaryViolationFinding`] so each entry carries a typed `actions`\narray natively."
+        },
+        "boundary_coverage_violations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/BoundaryCoverageViolationFinding"
+          },
+          "description": "Files that matched no architecture boundary zone while\n`boundaries.coverage.requireAllFiles` was enabled."
         },
         "stale_suppressions": {
           "type": "array",
@@ -4555,6 +4569,10 @@
           "type": "integer",
           "description": "Imports that cross architecture boundary rules."
         },
+        "boundary_coverage_violations": {
+          "type": "integer",
+          "description": "Files that match no architecture boundary zone."
+        },
         "stale_suppressions": {
           "type": "integer",
           "description": "Suppression comments that no longer match a finding."
@@ -5198,6 +5216,13 @@
             "$ref": "#/definitions/BoundaryViolationFinding"
           },
           "description": "Imports that cross architecture boundary rules. Wrapped in\n[`BoundaryViolationFinding`] so each entry carries a typed `actions`\narray natively."
+        },
+        "boundary_coverage_violations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/BoundaryCoverageViolationFinding"
+          },
+          "description": "Files that matched no architecture boundary zone while\n`boundaries.coverage.requireAllFiles` was enabled."
         },
         "stale_suppressions": {
           "type": "array",
@@ -11619,6 +11644,48 @@
         }
       ],
       "description": "Static URL construction shape captured for URL-shaped security sinks."
+    },
+    "BoundaryCoverageViolationFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The unmatched source file."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number used for diagnostics."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset used for diagnostics."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "path",
+        "line",
+        "col",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for a [`BoundaryCoverageViolation`] finding. Carries\nactions for assigning the file to a zone or explicitly allowing it to stay\nunmatched."
     }
   }
 }

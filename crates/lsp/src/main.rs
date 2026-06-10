@@ -2417,10 +2417,19 @@ export function choose(value: number): string {
                 line: 12,
                 col: 0,
             })],
+            boundary_coverage_violations: vec![
+                fallow_core::results::BoundaryCoverageViolationFinding::with_actions(
+                    fallow_core::results::BoundaryCoverageViolation {
+                        path: "/unzoned.ts".into(),
+                        line: 13,
+                        col: 0,
+                    },
+                ),
+            ],
             export_usages: vec![ExportUsage {
                 path: "/f.ts".into(),
                 export_name: "used".to_string(),
-                line: 13,
+                line: 14,
                 col: 0,
                 reference_count: 3,
                 reference_locations: vec![],

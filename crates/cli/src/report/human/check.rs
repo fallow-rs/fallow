@@ -1165,6 +1165,13 @@ fn build_structure_section(
         root,
         total_issues,
     );
+    build_boundary_coverage_violations_section(
+        lines,
+        &results.boundary_coverage_violations,
+        severity_to_level(rules.boundary_violation),
+        root,
+        total_issues,
+    );
 }
 
 fn build_maintenance_section(
@@ -1679,6 +1686,42 @@ fn build_boundary_violations_section(
     lines.push(String::new());
 }
 
+/// Build boundary coverage section for files matched by no zone.
+fn build_boundary_coverage_violations_section(
+    lines: &mut Vec<String>,
+    items: &[fallow_types::output_dead_code::BoundaryCoverageViolationFinding],
+    level: Level,
+    root: &Path,
+    total_issues: usize,
+) {
+    if items.is_empty() {
+        return;
+    }
+    let title = "Boundary coverage";
+    lines.push(build_section_header(title, items.len(), level));
+
+    let shown = items.len().min(MAX_FLAT_ITEMS);
+    for entry in &items[..shown] {
+        let v = &entry.violation;
+        let path = relative_path(&v.path, root).display().to_string();
+        lines.push(format!(
+            "  {}:{} {}",
+            path,
+            v.line,
+            "no matching boundary zone".dimmed(),
+        ));
+    }
+    if items.len() > MAX_FLAT_ITEMS {
+        let remaining = items.len() - MAX_FLAT_ITEMS;
+        lines.push(format!(
+            "  {}",
+            truncation_hint(remaining, total_issues).dimmed()
+        ));
+    }
+    push_section_footer_with_count(lines, title, items.len());
+    lines.push(String::new());
+}
+
 fn build_stale_suppressions_section(
     lines: &mut Vec<String>,
     items: &[fallow_core::results::StaleSuppression],
@@ -1759,6 +1802,9 @@ fn collect_matching_rules(
     }
     for b in &results.boundary_violations {
         check(&b.violation.from_path);
+    }
+    for b in &results.boundary_coverage_violations {
+        check(&b.violation.path);
     }
     for s in &results.stale_suppressions {
         check(&s.path);

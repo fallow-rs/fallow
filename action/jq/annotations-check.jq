@@ -46,6 +46,8 @@ def dependency_action(pkg):
     "::warning file=\($files[0] | san),title=Re-export cycle::\(if $kind == "self-loop" then "Self-loop: this file re-exports from itself." else "Re-export cycle (" + ($n | tostring) + " files): " + ($files | map(san) | join(" <-> ")) + "." end)\(nl)\(nl)Chain propagation through the loop is a no-op, so imports through any member may silently come up empty.\(nl)\(if $kind == "self-loop" then "Remove the `export * from './'` (or equivalent) inside this file." else "Remove one `export * from` statement on any one member file to break the cycle." end)"),
   (.boundary_violations[]? |
     "::warning file=\(.from_path | san)\(if .line > 0 then ",line=\(.line),col=\(.col + 1)" else "" end),title=Boundary violation::Import from zone '\(.from_zone | san)' to zone '\(.to_zone | san)' is not allowed.\(nl)\(.from_path | san) -> \(.to_path | san)\(nl)\(nl)Route the import through an allowed zone or restructure the dependency."),
+  (.boundary_coverage_violations[]? |
+    "::warning file=\(.path | san)\(if .line > 0 then ",line=\(.line),col=\(.col + 1)" else "" end),title=Boundary coverage::File does not match any configured architecture boundary zone.\(nl)\(nl)Add the file to a zone pattern or allow-list it with boundaries.coverage.allowUnmatched."),
   (.type_only_dependencies[]? |
     "::warning file=\(.path | san)\(if .line > 0 then ",line=\(.line)" else "" end),title=Type-only dependency::Package '\(.package_name | san)' is only used via type imports.\(nl)\(nl)Move it from dependencies to devDependencies to reduce production bundle size."),
   (.stale_suppressions[]? |

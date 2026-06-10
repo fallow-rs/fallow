@@ -11,9 +11,10 @@ mod rules;
 mod used_class_members;
 
 pub use boundaries::{
-    AuthoredRule, BoundaryConfig, BoundaryPreset, BoundaryRule, BoundaryZone, LogicalGroup,
-    LogicalGroupStatus, RedundantRootPrefix, ResolvedBoundaryConfig, ResolvedBoundaryRule,
-    ResolvedZone, UnknownZoneRef, ZoneReferenceKind, ZoneValidationError,
+    AuthoredRule, BoundaryConfig, BoundaryCoverageConfig, BoundaryPreset, BoundaryRule,
+    BoundaryZone, LogicalGroup, LogicalGroupStatus, RedundantRootPrefix, ResolvedBoundaryConfig,
+    ResolvedBoundaryCoverageConfig, ResolvedBoundaryRule, ResolvedZone, UnknownZoneRef,
+    ZoneReferenceKind, ZoneValidationError,
 };
 pub use duplicates_config::{
     DetectionMode, DuplicatesConfig, NormalizationConfig, ResolvedNormalization,
@@ -489,6 +490,8 @@ pub struct RegressionBaseline {
     pub test_only_dependencies: usize,
     #[serde(default)]
     pub boundary_violations: usize,
+    #[serde(default)]
+    pub boundary_coverage_violations: usize,
 }
 
 #[cfg(test)]

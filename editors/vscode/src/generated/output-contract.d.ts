@@ -946,6 +946,11 @@ re_export_cycles?: ReExportCycleFinding[]
  */
 boundary_violations?: BoundaryViolationFinding[]
 /**
+ * Files that matched no architecture boundary zone while
+ * `boundaries.coverage.requireAllFiles` was enabled.
+ */
+boundary_coverage_violations?: BoundaryCoverageViolationFinding[]
+/**
  * Suppression comments or JSDoc tags that no longer match any issue.
  */
 stale_suppressions?: StaleSuppression[]
@@ -1087,6 +1092,10 @@ re_export_cycles?: number
  * Imports that cross architecture boundary rules.
  */
 boundary_violations: number
+/**
+ * Files that match no architecture boundary zone.
+ */
+boundary_coverage_violations?: number
 /**
  * Suppression comments that no longer match a finding.
  */
@@ -1937,6 +1946,34 @@ col: number
 /**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+}
+/**
+ * Wire-shape envelope for a [`BoundaryCoverageViolation`] finding. Carries
+ * actions for assigning the file to a zone or explicitly allowing it to stay
+ * unmatched.
+ */
+export interface BoundaryCoverageViolationFinding {
+/**
+ * The unmatched source file.
+ */
+path: string
+/**
+ * 1-based line number used for diagnostics.
+ */
+line: number
+/**
+ * 0-based byte column offset used for diagnostics.
+ */
+col: number
+/**
+ * Suggested next steps.
  */
 actions: IssueAction[]
 /**
@@ -4831,6 +4868,11 @@ re_export_cycles?: ReExportCycleFinding[]
  * array natively.
  */
 boundary_violations?: BoundaryViolationFinding[]
+/**
+ * Files that matched no architecture boundary zone while
+ * `boundaries.coverage.requireAllFiles` was enabled.
+ */
+boundary_coverage_violations?: BoundaryCoverageViolationFinding[]
 /**
  * Suppression comments or JSDoc tags that no longer match any issue.
  */

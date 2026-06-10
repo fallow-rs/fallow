@@ -1045,6 +1045,10 @@
             "$ref": "#/$defs/BoundaryRule"
           },
           "default": []
+        },
+        "coverage": {
+          "description": "Optional policy for files that match no zone.",
+          "$ref": "#/$defs/BoundaryCoverageConfig"
         }
       }
     },
@@ -1134,6 +1138,23 @@
       "required": [
         "from"
       ]
+    },
+    "BoundaryCoverageConfig": {
+      "description": "Boundary zone coverage policy.",
+      "type": "object",
+      "properties": {
+        "requireAllFiles": {
+          "description": "Report source files that do not match any boundary zone.",
+          "type": "boolean"
+        },
+        "allowUnmatched": {
+          "description": "Glob patterns for files that may remain unmatched by any zone.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
     },
     "FlagsConfig": {
       "description": "Feature flag detection configuration.\n\nControls which patterns fallow uses to detect feature flags in source code.\nConfigured via the `flags` section in `.fallowrc.json`, `.fallowrc.jsonc`, `fallow.toml`, or `.fallow.toml`.\n\n# Examples\n\n```json\n{\n  \"flags\": {\n    \"sdkPatterns\": [\n      { \"function\": \"useFlag\", \"nameArg\": 0, \"provider\": \"LaunchDarkly\" }\n    ],\n    \"envPrefixes\": [\"FEATURE_\", \"NEXT_PUBLIC_ENABLE_\"],\n    \"configObjectHeuristics\": false\n  }\n}\n```",
@@ -1718,6 +1739,12 @@
           "default": 0
         },
         "boundaryViolations": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        },
+        "boundaryCoverageViolations": {
           "type": "integer",
           "format": "uint",
           "minimum": 0,

@@ -138,8 +138,8 @@ mod tests {
     use crate::resolve::ResolvedModule;
     use crate::suppress::Suppression;
     use fallow_config::{
-        BoundaryConfig, BoundaryRule, BoundaryZone, FallowConfig, OutputFormat, ResolvedConfig,
-        RulesConfig, Severity,
+        BoundaryConfig, BoundaryCoverageConfig, BoundaryRule, BoundaryZone, FallowConfig,
+        OutputFormat, ResolvedConfig, RulesConfig, Severity,
     };
     use rustc_hash::FxHashSet;
     use std::path::PathBuf;
@@ -246,6 +246,7 @@ mod tests {
     fn allowed_import_no_violation() {
         let root = PathBuf::from("/tmp/boundary-test");
         let boundaries = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -284,6 +285,7 @@ mod tests {
     fn disallowed_import_produces_violation() {
         let root = PathBuf::from("/tmp/boundary-test");
         let boundaries = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -330,6 +332,7 @@ mod tests {
     fn self_import_always_allowed() {
         let root = PathBuf::from("/tmp/boundary-test");
         let boundaries = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
@@ -360,6 +363,7 @@ mod tests {
     fn unzoned_files_unrestricted() {
         let root = PathBuf::from("/tmp/boundary-test");
         let boundaries = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
@@ -390,6 +394,7 @@ mod tests {
     fn file_level_suppression_skips_file() {
         let root = PathBuf::from("/tmp/boundary-test");
         let boundaries = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -436,6 +441,7 @@ mod tests {
     /// list on the `ui` rule. Used by the type-only escape hatch tests.
     fn ui_db_boundaries(allow_type_only: Vec<String>) -> BoundaryConfig {
         BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -542,6 +548,7 @@ mod tests {
     fn allow_type_only_is_independent_of_allow() {
         let root = PathBuf::from("/tmp/boundary-test");
         let boundaries = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {

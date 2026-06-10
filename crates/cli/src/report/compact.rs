@@ -152,6 +152,13 @@ pub fn build_compact_lines(results: &AnalysisResults, root: &Path) -> Vec<String
             v.violation.to_zone,
         ));
     }
+    for v in &results.boundary_coverage_violations {
+        lines.push(format!(
+            "boundary-coverage:{}:{}:no matching boundary zone",
+            rel(&v.violation.path),
+            v.violation.line,
+        ));
+    }
     for s in &results.stale_suppressions {
         lines.push(format!(
             "stale-suppression:{}:{}:{}",

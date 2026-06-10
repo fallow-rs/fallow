@@ -344,6 +344,32 @@ pub fn push_boundary_violation_diagnostics(
             ..Default::default()
         });
     }
+
+    for v in &results.boundary_coverage_violations {
+        let Some(uri) = Uri::from_file_path(&v.violation.path) else {
+            continue;
+        };
+        let line = v.violation.line.saturating_sub(1);
+        map.entry(uri).or_default().push(Diagnostic {
+            range: Range {
+                start: Position {
+                    line,
+                    character: v.violation.col,
+                },
+                end: Position {
+                    line,
+                    character: u32::MAX,
+                },
+            },
+            severity: Some(DiagnosticSeverity::WARNING),
+            source: Some("fallow".to_string()),
+            code: Some(NumberOrString::String("boundary-violation".to_string())),
+            code_description: doc_link("boundary-violations"),
+            message: "Boundary coverage: file does not match any configured zone".to_string(),
+            related_information: None,
+            ..Default::default()
+        });
+    }
 }
 
 #[cfg(test)]

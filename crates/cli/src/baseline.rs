@@ -93,6 +93,9 @@ pub struct BaselineData {
     /// Boundary violations, keyed by `from_path->to_path`.
     #[serde(default)]
     pub boundary_violations: Vec<String>,
+    /// Boundary coverage violations, keyed by `path`.
+    #[serde(default)]
+    pub boundary_coverage_violations: Vec<String>,
     /// Stale suppressions, keyed by `file:line`.
     #[serde(default)]
     pub stale_suppressions: Vec<String>,
@@ -244,6 +247,11 @@ impl BaselineData {
                 .iter()
                 .map(|v| boundary_violation_key(&v.violation, root))
                 .collect(),
+            boundary_coverage_violations: results
+                .boundary_coverage_violations
+                .iter()
+                .map(|v| relative_path(&v.violation.path, root))
+                .collect(),
             stale_suppressions: results
                 .stale_suppressions
                 .iter()
@@ -304,6 +312,7 @@ impl BaselineData {
             + self.type_only_dependencies.len()
             + self.test_only_dependencies.len()
             + self.boundary_violations.len()
+            + self.boundary_coverage_violations.len()
             + self.stale_suppressions.len()
             + self.unused_catalog_entries.len()
             + self.empty_catalog_groups.len()
@@ -558,6 +567,16 @@ pub fn filter_new_issues(
     results.boundary_violations.retain(|v| {
         let key = boundary_violation_key(&v.violation, root);
         !baseline_boundary.contains(key.as_str())
+    });
+
+    let baseline_boundary_coverage: FxHashSet<&str> = baseline
+        .boundary_coverage_violations
+        .iter()
+        .map(String::as_str)
+        .collect();
+    results.boundary_coverage_violations.retain(|v| {
+        let key = relative_path(&v.violation.path, root);
+        !baseline_boundary_coverage.contains(key.as_str())
     });
 
     let baseline_stale: FxHashSet<&str> = baseline
@@ -1405,6 +1424,7 @@ mod tests {
             type_only_dependencies: vec![],
             test_only_dependencies: vec![],
             boundary_violations: vec![],
+            boundary_coverage_violations: vec![],
             stale_suppressions: vec![],
             unused_catalog_entries: vec![],
             empty_catalog_groups: vec![],
@@ -1451,6 +1471,7 @@ mod tests {
             type_only_dependencies: vec![],
             test_only_dependencies: vec![],
             boundary_violations: vec![],
+            boundary_coverage_violations: vec![],
             stale_suppressions: vec![],
             unused_catalog_entries: vec![],
             empty_catalog_groups: vec![],
@@ -1484,6 +1505,7 @@ mod tests {
             type_only_dependencies: vec![],
             test_only_dependencies: vec![],
             boundary_violations: vec![],
+            boundary_coverage_violations: vec![],
             stale_suppressions: vec![],
             unused_catalog_entries: vec![],
             empty_catalog_groups: vec![],
@@ -2219,6 +2241,7 @@ mod tests {
         use fallow_core::results::BoundaryViolation;
         let baseline = BaselineData {
             boundary_violations: vec!["src/a.ts->src/b.ts".to_string()],
+            boundary_coverage_violations: vec![],
             ..BaselineData::from_results(&AnalysisResults::default(), Path::new(""))
         };
         let mut results = AnalysisResults::default();

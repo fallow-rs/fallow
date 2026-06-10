@@ -4,11 +4,12 @@ use std::process::ExitCode;
 use fallow_config::{RulesConfig, Severity};
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::{
-    AnalysisResults, BoundaryViolation, CircularDependency, DuplicateExportFinding,
-    EmptyCatalogGroupFinding, MisconfiguredDependencyOverrideFinding, PrivateTypeLeak,
-    StaleSuppression, TestOnlyDependency, TypeOnlyDependency, UnlistedDependencyFinding,
-    UnresolvedCatalogReferenceFinding, UnresolvedImport, UnusedCatalogEntryFinding,
-    UnusedDependency, UnusedDependencyOverrideFinding, UnusedExport, UnusedFile, UnusedMember,
+    AnalysisResults, BoundaryCoverageViolation, BoundaryViolation, CircularDependency,
+    DuplicateExportFinding, EmptyCatalogGroupFinding, MisconfiguredDependencyOverrideFinding,
+    PrivateTypeLeak, StaleSuppression, TestOnlyDependency, TypeOnlyDependency,
+    UnlistedDependencyFinding, UnresolvedCatalogReferenceFinding, UnresolvedImport,
+    UnusedCatalogEntryFinding, UnusedDependency, UnusedDependencyOverrideFinding, UnusedExport,
+    UnusedFile, UnusedMember,
 };
 use rustc_hash::FxHashMap;
 
@@ -431,6 +432,22 @@ fn sarif_boundary_violation_fields(
     }
 }
 
+fn sarif_boundary_coverage_fields(
+    violation: &BoundaryCoverageViolation,
+    root: &Path,
+    level: &'static str,
+) -> SarifFields {
+    SarifFields {
+        rule_id: "fallow/boundary-coverage",
+        level,
+        message: "File does not match any configured architecture boundary zone".to_string(),
+        uri: relative_uri(&violation.path, root),
+        region: Some((violation.line, violation.col + 1)),
+        source_path: Some(violation.path.clone()),
+        properties: None,
+    }
+}
+
 fn sarif_stale_suppression_fields(
     suppression: &StaleSuppression,
     root: &Path,
@@ -721,6 +738,11 @@ fn build_sarif_rules(rules: &RulesConfig) -> Vec<serde_json::Value> {
         (
             "fallow/boundary-violation",
             "Import crosses an architecture boundary",
+            rules.boundary_violation,
+        ),
+        (
+            "fallow/boundary-coverage",
+            "Source file matches no architecture boundary zone",
             rules.boundary_violation,
         ),
         (
@@ -1015,6 +1037,18 @@ fn push_graph_sarif_results(
             severity_to_sarif_level(rules.boundary_violation),
         )
     });
+    push_sarif_results(
+        sarif_results,
+        &results.boundary_coverage_violations,
+        snippets,
+        |v| {
+            sarif_boundary_coverage_fields(
+                &v.violation,
+                root,
+                severity_to_sarif_level(rules.boundary_violation),
+            )
+        },
+    );
     push_sarif_results(sarif_results, &results.stale_suppressions, snippets, |s| {
         sarif_stale_suppression_fields(s, root, severity_to_sarif_level(rules.stale_suppressions))
     });
@@ -1759,7 +1793,7 @@ mod tests {
         let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
             .as_array()
             .expect("rules should be an array");
-        assert_eq!(rules.len(), 23);
+        assert_eq!(rules.len(), 24);
 
         let rule_ids: Vec<&str> = rules.iter().map(|r| r["id"].as_str().unwrap()).collect();
         assert!(rule_ids.contains(&"fallow/unused-file"));
@@ -1779,6 +1813,7 @@ mod tests {
         assert!(rule_ids.contains(&"fallow/circular-dependency"));
         assert!(rule_ids.contains(&"fallow/re-export-cycle"));
         assert!(rule_ids.contains(&"fallow/boundary-violation"));
+        assert!(rule_ids.contains(&"fallow/boundary-coverage"));
         assert!(rule_ids.contains(&"fallow/unused-catalog-entry"));
         assert!(rule_ids.contains(&"fallow/empty-catalog-group"));
         assert!(rule_ids.contains(&"fallow/unresolved-catalog-reference"));

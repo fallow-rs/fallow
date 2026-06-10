@@ -270,6 +270,18 @@ fn push_markdown_graph_sections(
     );
     markdown_section(
         out,
+        &results.boundary_coverage_violations,
+        "Boundary coverage",
+        |v| {
+            vec![format!(
+                "- `{}`:{} no matching boundary zone",
+                rel(&v.violation.path),
+                v.violation.line,
+            )]
+        },
+    );
+    markdown_section(
+        out,
         &results.stale_suppressions,
         "Stale suppressions",
         |s| {

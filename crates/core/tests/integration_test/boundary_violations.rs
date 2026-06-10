@@ -1,6 +1,7 @@
 use fallow_config::{
-    BoundaryConfig, BoundaryPreset, BoundaryRule, BoundaryZone, DuplicatesConfig, FallowConfig,
-    FlagsConfig, HealthConfig, OutputFormat, ResolveConfig, RulesConfig, Severity,
+    BoundaryConfig, BoundaryCoverageConfig, BoundaryPreset, BoundaryRule, BoundaryZone,
+    DuplicatesConfig, FallowConfig, FlagsConfig, HealthConfig, OutputFormat, ResolveConfig,
+    RulesConfig, Severity,
 };
 
 use super::common::fixture_path;
@@ -63,6 +64,7 @@ fn create_boundary_config_with_entry(
 fn detects_boundary_violation() {
     let root = fixture_path("boundary-violations");
     let boundaries = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
         preset: None,
         zones: vec![
             BoundaryZone {
@@ -147,9 +149,70 @@ fn no_violations_when_boundaries_disabled() {
 }
 
 #[test]
+fn reports_unmatched_files_when_boundary_coverage_is_required() {
+    let root = fixture_path("boundary-violations");
+    let boundaries = BoundaryConfig {
+        zones: vec![BoundaryZone {
+            name: "ui".to_string(),
+            patterns: vec!["src/ui/**".to_string()],
+            auto_discover: vec![],
+            root: None,
+        }],
+        coverage: BoundaryCoverageConfig {
+            require_all_files: true,
+            allow_unmatched: vec![],
+        },
+        ..BoundaryConfig::default()
+    };
+    let config = create_boundary_config(root, boundaries);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let paths = results
+        .boundary_coverage_violations
+        .iter()
+        .map(|v| v.violation.path.to_string_lossy().replace('\\', "/"))
+        .collect::<Vec<_>>();
+    assert!(
+        paths.iter().any(|p| p.ends_with("src/generated/client.ts")),
+        "expected generated client to be reported as unmatched, got {paths:?}"
+    );
+}
+
+#[test]
+fn allow_unmatched_excludes_boundary_coverage_findings() {
+    let root = fixture_path("boundary-violations");
+    let boundaries = BoundaryConfig {
+        zones: vec![BoundaryZone {
+            name: "ui".to_string(),
+            patterns: vec!["src/ui/**".to_string()],
+            auto_discover: vec![],
+            root: None,
+        }],
+        coverage: BoundaryCoverageConfig {
+            require_all_files: true,
+            allow_unmatched: vec!["src/generated/**".to_string(), "src/db/**".to_string()],
+        },
+        ..BoundaryConfig::default()
+    };
+    let config = create_boundary_config(root, boundaries);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results.boundary_coverage_violations.iter().all(|v| !v
+            .violation
+            .path
+            .to_string_lossy()
+            .replace('\\', "/")
+            .ends_with("src/generated/client.ts")),
+        "allowUnmatched should suppress generated client coverage findings"
+    );
+}
+
+#[test]
 fn no_violations_when_rule_is_off() {
     let root = fixture_path("boundary-violations");
     let boundaries = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
         preset: None,
         zones: vec![
             BoundaryZone {
@@ -223,6 +286,7 @@ fn no_violations_when_rule_is_off() {
 fn preset_detects_boundary_violation() {
     let root = fixture_path("boundary-preset");
     let boundaries = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
         preset: Some(BoundaryPreset::Hexagonal),
         zones: vec![],
         rules: vec![],
@@ -295,6 +359,7 @@ fn preset_detects_boundary_violation() {
 fn root_field_classifies_per_subtree() {
     let root = fixture_path("boundary-root");
     let boundaries = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
         preset: None,
         zones: vec![
             BoundaryZone {
@@ -410,6 +475,7 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
     let root = fixture_path("boundary-root");
 
     let flat_boundaries = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
         preset: None,
         zones: vec![BoundaryZone {
             name: "ui".to_string(),
@@ -470,6 +536,7 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
     );
 
     let scoped_boundaries = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
         preset: None,
         zones: vec![
             BoundaryZone {
@@ -546,6 +613,7 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
 fn auto_discover_isolates_child_boundary_zones() {
     let root = fixture_path("boundary-auto-discover");
     let boundaries = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
         preset: None,
         zones: vec![
             BoundaryZone {
@@ -621,6 +689,7 @@ fn auto_discover_isolates_child_boundary_zones() {
 fn bulletproof_preset_detects_violation() {
     let root = fixture_path("boundary-bulletproof");
     let boundaries = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
         preset: Some(BoundaryPreset::Bulletproof),
         zones: vec![],
         rules: vec![],
@@ -722,6 +791,7 @@ fn bulletproof_preset_detects_violation() {
 fn bulletproof_top_level_features_file_is_strict_without_barrel_false_positive() {
     let root = fixture_path("boundary-bulletproof-toplevel");
     let boundaries = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
         preset: Some(BoundaryPreset::Bulletproof),
         zones: vec![],
         rules: vec![],
@@ -816,6 +886,7 @@ fn bulletproof_top_level_features_file_is_strict_without_barrel_false_positive()
 /// shared/utils.ts importers).
 fn type_only_boundaries(allow_type_only_db: Vec<String>) -> BoundaryConfig {
     BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
         preset: None,
         zones: vec![
             BoundaryZone {

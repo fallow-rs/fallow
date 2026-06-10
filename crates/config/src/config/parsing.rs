@@ -861,6 +861,7 @@ impl FallowConfig {
     /// `dynamicallyLoaded`, `duplicates.ignore`, `health.ignore`,
     /// `overrides[].files`, `ignoreExports[].file`,
     /// `ignoreCatalogReferences[].consumer`, `boundaries.zones[].patterns`,
+    /// `boundaries.coverage.allowUnmatched`,
     /// plus every glob-bearing field on inline `framework[]` plugin
     /// definitions (entry points, always-used, config patterns, used-exports
     /// patterns, and `fileExists` detection patterns; the last reaches
@@ -931,6 +932,11 @@ impl FallowConfig {
                 &mut errors,
             );
         }
+        validate_user_globs(
+            &self.boundaries.coverage.allow_unmatched,
+            "boundaries.coverage.allowUnmatched",
+            &mut errors,
+        );
 
         for plugin in &self.framework {
             if let Err(mut plugin_errors) = plugin.validate_user_globs() {
@@ -1598,6 +1604,24 @@ unknown_field = true
         let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
         assert!(config.sealed);
         assert_eq!(config.ignore_patterns, vec!["gen/**"]);
+    }
+
+    #[test]
+    fn load_rejects_invalid_boundary_coverage_allow_unmatched_glob() {
+        let dir = test_dir("boundary-coverage-invalid-glob");
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            r#"{"boundaries":{"coverage":{"allowUnmatched":["[invalid"]}}}"#,
+        )
+        .unwrap();
+
+        let result = FallowConfig::load(&dir.path().join(".fallowrc.json"));
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(
+            err_msg.contains("boundaries.coverage.allowUnmatched"),
+            "expected coverage field in error, got: {err_msg}"
+        );
     }
 
     #[test]
@@ -3584,6 +3608,7 @@ minTokens = 100
         let dir = test_dir("boundaries-valid");
         let config = FallowConfig {
             boundaries: crate::BoundaryConfig {
+                coverage: crate::BoundaryCoverageConfig::default(),
                 preset: None,
                 zones: vec![
                     crate::BoundaryZone {
@@ -3617,6 +3642,7 @@ minTokens = 100
         let dir = test_dir("boundaries-unknown-zones");
         let config = FallowConfig {
             boundaries: crate::BoundaryConfig {
+                coverage: crate::BoundaryCoverageConfig::default(),
                 preset: None,
                 zones: vec![crate::BoundaryZone {
                     name: "ui".to_string(),
@@ -3672,6 +3698,7 @@ minTokens = 100
         let dir = test_dir("boundaries-redundant-prefix");
         let config = FallowConfig {
             boundaries: crate::BoundaryConfig {
+                coverage: crate::BoundaryCoverageConfig::default(),
                 preset: None,
                 zones: vec![crate::BoundaryZone {
                     name: "ui".to_string(),
@@ -3698,6 +3725,7 @@ minTokens = 100
         let dir = test_dir("boundaries-mixed-errors");
         let config = FallowConfig {
             boundaries: crate::BoundaryConfig {
+                coverage: crate::BoundaryCoverageConfig::default(),
                 preset: None,
                 zones: vec![crate::BoundaryZone {
                     name: "ui".to_string(),
@@ -3736,6 +3764,7 @@ minTokens = 100
         std::fs::create_dir_all(dir.path().join("src/features/auth")).unwrap();
         let config = FallowConfig {
             boundaries: crate::BoundaryConfig {
+                coverage: crate::BoundaryCoverageConfig::default(),
                 preset: Some(crate::BoundaryPreset::Bulletproof),
                 zones: vec![],
                 rules: vec![],

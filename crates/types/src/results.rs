@@ -10,13 +10,14 @@ use crate::extract::{
 };
 use crate::output::IssueAction;
 use crate::output_dead_code::{
-    BoundaryViolationFinding, CircularDependencyFinding, DuplicateExportFinding,
-    EmptyCatalogGroupFinding, MisconfiguredDependencyOverrideFinding, PrivateTypeLeakFinding,
-    ReExportCycleFinding, TestOnlyDependencyFinding, TypeOnlyDependencyFinding,
-    UnlistedDependencyFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
-    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedDependencyFinding,
-    UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
-    UnusedExportFinding, UnusedFileFinding, UnusedOptionalDependencyFinding, UnusedTypeFinding,
+    BoundaryCoverageViolationFinding, BoundaryViolationFinding, CircularDependencyFinding,
+    DuplicateExportFinding, EmptyCatalogGroupFinding, MisconfiguredDependencyOverrideFinding,
+    PrivateTypeLeakFinding, ReExportCycleFinding, TestOnlyDependencyFinding,
+    TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnresolvedCatalogReferenceFinding,
+    UnresolvedImportFinding, UnusedCatalogEntryFinding, UnusedClassMemberFinding,
+    UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
+    UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
+    UnusedOptionalDependencyFinding, UnusedTypeFinding,
 };
 use crate::serde_path;
 use crate::suppress::{IssueKind, closest_known_kind_name};
@@ -137,6 +138,10 @@ pub struct AnalysisResults {
     /// array natively.
     #[serde(default)]
     pub boundary_violations: Vec<BoundaryViolationFinding>,
+    /// Files that matched no architecture boundary zone while
+    /// `boundaries.coverage.requireAllFiles` was enabled.
+    #[serde(default)]
+    pub boundary_coverage_violations: Vec<BoundaryCoverageViolationFinding>,
     /// Suppression comments or JSDoc tags that no longer match any issue.
     #[serde(default)]
     pub stale_suppressions: Vec<StaleSuppression>,
@@ -281,6 +286,7 @@ impl AnalysisResults {
             + self.circular_dependencies.len()
             + self.re_export_cycles.len()
             + self.boundary_violations.len()
+            + self.boundary_coverage_violations.len()
             + self.stale_suppressions.len()
             + self.unused_catalog_entries.len()
             + self.empty_catalog_groups.len()
@@ -326,6 +332,7 @@ impl AnalysisResults {
             circular_dependencies,
             re_export_cycles,
             boundary_violations,
+            boundary_coverage_violations,
             stale_suppressions,
             unused_catalog_entries,
             empty_catalog_groups,
@@ -361,6 +368,8 @@ impl AnalysisResults {
         self.circular_dependencies.extend(circular_dependencies);
         self.re_export_cycles.extend(re_export_cycles);
         self.boundary_violations.extend(boundary_violations);
+        self.boundary_coverage_violations
+            .extend(boundary_coverage_violations);
         self.stale_suppressions.extend(stale_suppressions);
         self.unused_catalog_entries.extend(unused_catalog_entries);
         self.empty_catalog_groups.extend(empty_catalog_groups);
@@ -523,6 +532,14 @@ impl AnalysisResults {
                 .then(a.violation.line.cmp(&b.violation.line))
                 .then(a.violation.col.cmp(&b.violation.col))
                 .then(a.violation.to_path.cmp(&b.violation.to_path))
+        });
+
+        self.boundary_coverage_violations.sort_by(|a, b| {
+            a.violation
+                .path
+                .cmp(&b.violation.path)
+                .then(a.violation.line.cmp(&b.violation.line))
+                .then(a.violation.col.cmp(&b.violation.col))
         });
 
         self.stale_suppressions.sort_by(|a, b| {
@@ -1730,6 +1747,19 @@ pub struct BoundaryViolation {
     /// 1-based line number of the import statement in the source file.
     pub line: u32,
     /// 0-based byte column offset of the import statement.
+    pub col: u32,
+}
+
+/// A source file that does not match any configured architecture boundary zone.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct BoundaryCoverageViolation {
+    /// The unmatched source file.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// 1-based line number used for diagnostics.
+    pub line: u32,
+    /// 0-based byte column offset used for diagnostics.
     pub col: u32,
 }
 

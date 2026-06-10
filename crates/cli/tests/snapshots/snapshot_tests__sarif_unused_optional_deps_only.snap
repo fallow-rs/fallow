@@ -1,6 +1,5 @@
 ---
 source: crates/cli/tests/snapshot_tests.rs
-assertion_line: 1926
 expression: redact_sarif_version(&json_str)
 ---
 {
@@ -229,6 +228,19 @@ expression: redact_sarif_version(&json_str)
               },
               "fullDescription": {
                 "text": "A module imports from a zone that its configured boundary rules do not allow. Boundary checks help keep layered architecture, feature slices, and package ownership rules enforceable."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#boundary-violations",
+              "defaultConfiguration": {
+                "level": "error"
+              }
+            },
+            {
+              "id": "fallow/boundary-coverage",
+              "shortDescription": {
+                "text": "Source file matches no configured architecture boundary zone"
+              },
+              "fullDescription": {
+                "text": "A reachable source file is not assigned to any configured boundary zone while boundaries.coverage.requireAllFiles is enabled. Add the file to a zone pattern, move it under an existing zone, or allow-list generated and intentionally unzoned paths with boundaries.coverage.allowUnmatched."
               },
               "helpUri": "https://docs.fallow.tools/explanations/dead-code#boundary-violations",
               "defaultConfiguration": {

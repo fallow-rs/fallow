@@ -44,6 +44,7 @@ else
     table_row("Circular dependencies"; "circular_dependencies"; "circular-dependencies"),
     table_row("Re-export cycles"; "re_export_cycles"; "re-export-cycles"),
     table_row("Boundary violations"; "boundary_violations"; "boundary-violations"),
+    table_row("Boundary coverage"; "boundary_coverage_violations"; "boundary-violations"),
     table_row("Type-only dependencies"; "type_only_dependencies"; "type-only-dependencies"),
     table_row("Test-only dependencies"; "test_only_dependencies"; "test-only-dependencies"),
     table_row("Stale suppressions"; "stale_suppressions"; "stale-suppressions"),
@@ -99,6 +100,9 @@ else
   section("Boundary violations"; "boundary_violations";
     "Imports that cross defined architecture zone boundaries.\n\n| From | To | Zones |\n|------|-----|-------|\n";
     "| `\(.from_path):\(.line)` | `\(.to_path)` | \(.from_zone) \u2192 \(.to_zone) |") +
+  section("Boundary coverage"; "boundary_coverage_violations";
+    "Files that match no configured architecture boundary zone.\n\n| File |\n|------|\n";
+    "| `\(.path):\(.line)` |") +
   section("Type-only dependencies"; "type_only_dependencies";
     "Dependencies only used for type imports \u2014 consider moving to `devDependencies`.\n\n| Package |\n|---------|\n";
     "| `\(.package_name)` |") +

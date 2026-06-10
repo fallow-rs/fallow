@@ -196,6 +196,14 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#boundary-violations",
     },
     RuleDef {
+        id: "fallow/boundary-coverage",
+        category: "Architecture",
+        name: "Boundary Coverage",
+        short: "Source file matches no configured architecture boundary zone",
+        full: "A reachable source file is not assigned to any configured boundary zone while boundaries.coverage.requireAllFiles is enabled. Add the file to a zone pattern, move it under an existing zone, or allow-list generated and intentionally unzoned paths with boundaries.coverage.allowUnmatched.",
+        docs_path: "explanations/dead-code#boundary-violations",
+    },
+    RuleDef {
         id: "fallow/stale-suppression",
         category: "Suppressions",
         name: "Stale Suppressions",
@@ -311,6 +319,7 @@ pub fn rule_by_token(token: &str) -> Option<&'static RuleDef> {
         "duplicate-exports" => Some("fallow/duplicate-export"),
         "circular-deps" | "circular-dependencies" => Some("fallow/circular-dependency"),
         "boundary-violations" => Some("fallow/boundary-violation"),
+        "boundary-coverage" | "boundary-coverage-violations" => Some("fallow/boundary-coverage"),
         "stale-suppressions" => Some("fallow/stale-suppression"),
         "unused-catalog-entries" | "unused-catalog-entry" | "catalog" => {
             Some("fallow/unused-catalog-entry")
@@ -449,6 +458,10 @@ pub fn rule_guide(rule: &RuleDef) -> RuleGuide {
         "fallow/boundary-violation" => RuleGuide {
             example: "features/billing imports app/admin even though the configured boundary only allows imports from shared and entities.",
             how_to_fix: "Move the shared contract to an allowed zone, invert the dependency, or update the boundary config only if the architecture rule was wrong.",
+        },
+        "fallow/boundary-coverage" => RuleGuide {
+            example: "src/generated/client.ts is reachable but does not match any boundaries.zones[].patterns entry.",
+            how_to_fix: "Add the file to the intended zone pattern, move it under a zoned directory, or add a generated-file glob to boundaries.coverage.allowUnmatched.",
         },
         "fallow/stale-suppression" => RuleGuide {
             example: "// fallow-ignore-next-line unused-export remains above an export that is now used.",
@@ -1962,7 +1975,7 @@ mod tests {
 
     #[test]
     fn check_rules_count() {
-        assert_eq!(CHECK_RULES.len(), 23);
+        assert_eq!(CHECK_RULES.len(), 24);
     }
 
     #[test]

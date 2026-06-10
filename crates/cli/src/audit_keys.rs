@@ -214,6 +214,12 @@ pub(super) fn dead_code_keys(
             item.violation.import_specifier
         ));
     }
+    for item in &results.boundary_coverage_violations {
+        keys.insert(format!(
+            "boundary-coverage:{}",
+            relative_key_path(&item.violation.path, root)
+        ));
+    }
     for item in &results.stale_suppressions {
         keys.insert(format!(
             "stale-suppression:{}:{}",
@@ -384,6 +390,12 @@ pub(super) fn retain_introduced_dead_code(
             relative_key_path(&item.violation.from_path, root),
             relative_key_path(&item.violation.to_path, root),
             item.violation.import_specifier
+        ))
+    });
+    results.boundary_coverage_violations.retain(|item| {
+        keep(format!(
+            "boundary-coverage:{}",
+            relative_key_path(&item.violation.path, root)
         ))
     });
     results.stale_suppressions.retain(|item| {
@@ -689,6 +701,19 @@ fn annotate_graph_json(
                     relative_key_path(&item.violation.from_path, root),
                     relative_key_path(&item.violation.to_path, root),
                     item.violation.import_specifier
+                ),
+                base,
+            )
+        }),
+    );
+    annotate_issue_array(
+        json,
+        "boundary_coverage_violations",
+        results.boundary_coverage_violations.iter().map(|item| {
+            issue_was_introduced(
+                &format!(
+                    "boundary-coverage:{}",
+                    relative_key_path(&item.violation.path, root)
                 ),
                 base,
             )

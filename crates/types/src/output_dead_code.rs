@@ -36,9 +36,9 @@ use crate::output::{
     SuppressLineKind, SuppressLineScope,
 };
 use crate::results::{
-    BoundaryViolation, CircularDependency, DependencyOverrideSource, DuplicateExport,
-    EmptyCatalogGroup, MisconfiguredDependencyOverride, PrivateTypeLeak, ReExportCycle,
-    ReExportCycleKind, TestOnlyDependency, TypeOnlyDependency, UnlistedDependency,
+    BoundaryCoverageViolation, BoundaryViolation, CircularDependency, DependencyOverrideSource,
+    DuplicateExport, EmptyCatalogGroup, MisconfiguredDependencyOverride, PrivateTypeLeak,
+    ReExportCycle, ReExportCycleKind, TestOnlyDependency, TypeOnlyDependency, UnlistedDependency,
     UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry, UnusedDependency,
     UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedMember,
 };
@@ -403,6 +403,70 @@ impl BoundaryViolationFinding {
                 description: "Suppress with an inline comment above the line".to_string(),
                 comment: "// fallow-ignore-next-line boundary-violation".to_string(),
                 scope: None,
+            }),
+        ];
+        Self {
+            violation,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for a [`BoundaryCoverageViolation`] finding. Carries
+/// actions for assigning the file to a zone or explicitly allowing it to stay
+/// unmatched.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct BoundaryCoverageViolationFinding {
+    /// The underlying coverage entry.
+    #[serde(flatten)]
+    pub violation: BoundaryCoverageViolation,
+    /// Suggested next steps.
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl BoundaryCoverageViolationFinding {
+    /// Build the wrapper from a raw [`BoundaryCoverageViolation`].
+    #[must_use]
+    pub fn with_actions(violation: BoundaryCoverageViolation) -> Self {
+        let path = violation.path.to_string_lossy().replace('\\', "/");
+        let actions = vec![
+            IssueAction::Fix(FixAction {
+                kind: FixActionType::RefactorBoundary,
+                auto_fixable: false,
+                description: "Add this file to a boundary zone pattern or move it under an existing zone"
+                    .to_string(),
+                note: Some(
+                    "Boundary coverage is enabled, so every analyzed source file must match a zone unless allow-listed"
+                        .to_string(),
+                ),
+                available_in_catalogs: None,
+                suggested_target: None,
+            }),
+            IssueAction::AddToConfig(AddToConfigAction {
+                kind: AddToConfigKind::AddToConfig,
+                auto_fixable: false,
+                description: format!(
+                    "Add \"{path}\" to boundaries.coverage.allowUnmatched in fallow config"
+                ),
+                config_key: "boundaries.coverage.allowUnmatched".to_string(),
+                value: AddToConfigValue::Scalar(path),
+                value_schema: Some(
+                    "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/boundaries/properties/coverage/properties/allowUnmatched/items"
+                        .to_string(),
+                ),
+            }),
+            IssueAction::SuppressFile(SuppressFileAction {
+                kind: SuppressFileKind::SuppressFile,
+                auto_fixable: false,
+                description: "Suppress with a file-level comment at the top of the file"
+                    .to_string(),
+                comment: "// fallow-ignore-file boundary-violation".to_string(),
             }),
         ];
         Self {

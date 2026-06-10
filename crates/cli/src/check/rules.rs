@@ -132,6 +132,7 @@ pub fn apply_rules(results: &mut fallow_core::results::AnalysisResults, config: 
     }
     if rules.boundary_violation == Severity::Off {
         results.boundary_violations.clear();
+        results.boundary_coverage_violations.clear();
     }
     if rules.unused_catalog_entries == Severity::Off {
         results.unused_catalog_entries.clear();
@@ -202,6 +203,11 @@ pub fn has_error_severity_issues(
                     .resolve_rules_for_path(&g.group.path)
                     .empty_catalog_groups
                     == Severity::Error
+            }) || results.boundary_coverage_violations.iter().any(|v| {
+                config
+                    .resolve_rules_for_path(&v.violation.path)
+                    .boundary_violation
+                    == Severity::Error
             }) || results.circular_dependencies.iter().any(|c| {
                 c.cycle.files.iter().any(|path| {
                     config.resolve_rules_for_path(path).circular_dependencies == Severity::Error
@@ -245,6 +251,8 @@ pub fn has_error_severity_issues(
             && !results.circular_dependencies.is_empty())
         || (rules.re_export_cycle == Severity::Error && !results.re_export_cycles.is_empty())
         || (rules.boundary_violation == Severity::Error && !results.boundary_violations.is_empty())
+        || (rules.boundary_violation == Severity::Error
+            && !results.boundary_coverage_violations.is_empty())
         || (rules.unused_catalog_entries == Severity::Error
             && !results.unused_catalog_entries.is_empty())
         || (rules.empty_catalog_groups == Severity::Error
