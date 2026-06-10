@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`fallow security` now suppresses trusted local sanitizer flows.** The tainted-sink detector recognizes syntax-proven local HTML escape helpers, renderer helpers whose dynamic HTML text fragments are fully sanitizer-backed, and SQL identifier quoting helpers used in identifier positions. Mixed HTML or SQL templates with unsanitized dynamic fragments still report as candidates, and SQL identifier quoting is not treated as value parameterization. (Closes [#1136](https://github.com/fallow-rs/fallow/issues/1136).)
 - **`fallow security` now preserves source-backed ranking inside each severity tier.** The final CLI ordering still groups candidates by high, medium, then low severity, but same-tier ties now keep the existing runtime, arg-level/source-backed, module-level source reachability, blast-radius, boundary, and dead-code ranking signals before falling back to path order. This keeps stronger candidates ahead of weaker same-severity candidates without changing schema shape or treating any candidate as a proven vulnerability. (Closes [#1133](https://github.com/fallow-rs/fallow/issues/1133).)
 
 ## [2.91.0] - 2026-06-09

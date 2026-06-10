@@ -203,6 +203,8 @@ pub enum SanitizerScope {
     Url,
     /// Path value checked against a high-confidence containment guard.
     Path,
+    /// SQL identifier quoted with a helper that doubles embedded identifier quotes.
+    SqlIdentifier,
 }
 
 /// A captured sink argument that is itself a recognized sanitizer call.

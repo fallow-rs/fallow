@@ -453,6 +453,32 @@ fn sql_injection_parameterized_template_and_object_do_not_fire() {
 }
 
 #[test]
+fn sql_injection_quoted_identifier_template_does_not_fire() {
+    let results = analyze_with_security_sink("security-sql-injection");
+    assert!(
+        !anchored_on(&results, "src/quoted-ident.ts"),
+        "a quoted identifier in an identifier position must not be flagged"
+    );
+}
+
+#[test]
+fn sql_injection_quoted_identifier_mixed_flow_still_fires() {
+    let results = analyze_with_security_sink("security-sql-injection");
+    assert_candidate(&results, "src/quoted-ident-mixed.ts", "sql-injection", 89);
+}
+
+#[test]
+fn sql_injection_quoted_value_position_still_fires() {
+    let results = analyze_with_security_sink("security-sql-injection");
+    assert_candidate(
+        &results,
+        "src/quoted-value-position.ts",
+        "sql-injection",
+        89,
+    );
+}
+
+#[test]
 fn sql_injection_default_off_emits_nothing() {
     assert!(no_tainted_sinks(&analyze_default_off(
         "security-sql-injection"

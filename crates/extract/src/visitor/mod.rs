@@ -200,6 +200,9 @@ pub(crate) struct ModuleInfoExtractor {
     /// Module-scope default, namespace, or require bindings imported from
     /// DOMPurify-compatible packages.
     pub(crate) dompurify_bindings: FxHashSet<String>,
+    /// Module-scope local helpers whose return value is a proven sanitizer
+    /// output for a narrow sink domain.
+    pub(crate) module_sanitizer_helpers: FxHashMap<String, SanitizerScope>,
     /// Module-scope local sanitizer bindings. `None` means the name is declared
     /// but not sanitizer-backed, shadowing any outer match.
     pub(crate) module_sanitizer_bindings: FxHashMap<String, Option<SanitizerScope>>,

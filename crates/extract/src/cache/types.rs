@@ -306,7 +306,12 @@ use crate::MemberKind;
 /// Bumped to 143 for issue #1138: JS/TS extraction now propagates simple
 /// module-scope literal constants into security sink argument metadata and
 /// filters public CI metadata env vars before source matching.
-pub(super) const CACHE_VERSION: u32 = 143;
+///
+/// Bumped to 144 for issue #1136: JS/TS sanitizer metadata now recognizes
+/// proven local HTML escape helpers, renderer helpers, and SQL identifier
+/// quoting helpers. Pre-144 entries can lack those sanitizer domains until the
+/// file is re-extracted.
+pub(super) const CACHE_VERSION: u32 = 144;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

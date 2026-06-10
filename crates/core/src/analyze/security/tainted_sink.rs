@@ -240,6 +240,10 @@ fn is_path_sanitizable_category(id: &str) -> bool {
     matches!(id, "path-traversal" | "route-send-file" | "zip-slip")
 }
 
+fn is_sql_identifier_sanitizable_category(id: &str) -> bool {
+    id == "sql-injection"
+}
+
 fn has_direct_sanitizer(sink: &SinkSite, args: &[SanitizedSinkArg], scope: SanitizerScope) -> bool {
     args.iter().any(|arg| {
         arg.span_start == sink.span_start && arg.arg_index == sink.arg_index && arg.scope == scope
@@ -473,6 +477,11 @@ pub fn find_tainted_sinks(
             }
             if is_path_sanitizable_category(&matcher.id)
                 && sink_has_sanitizer(module, sink, SanitizerScope::Path)
+            {
+                continue;
+            }
+            if is_sql_identifier_sanitizable_category(&matcher.id)
+                && sink_has_sanitizer(module, sink, SanitizerScope::SqlIdentifier)
             {
                 continue;
             }

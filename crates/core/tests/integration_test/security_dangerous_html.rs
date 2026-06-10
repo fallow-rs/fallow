@@ -102,6 +102,35 @@ fn sanitizer_near_misses_still_fire() {
 }
 
 #[test]
+fn trusted_local_html_escape_helper_does_not_fire() {
+    let results = analyze_with_security_sink();
+    for suffix in ["src/trusted-local-direct.ts", "src/trusted-local-escape.ts"] {
+        assert!(
+            !anchored_on(&results, suffix),
+            "{suffix} must not be flagged"
+        );
+    }
+}
+
+#[test]
+fn trusted_local_html_mixed_flow_still_fires() {
+    let results = analyze_with_security_sink();
+    assert!(
+        anchored_on(&results, "src/trusted-local-mixed.ts"),
+        "a renderer with an unsanitized dynamic fragment must be flagged"
+    );
+}
+
+#[test]
+fn shadowed_local_html_helper_still_fires() {
+    let results = analyze_with_security_sink();
+    assert!(
+        anchored_on(&results, "src/trusted-local-shadowed.ts"),
+        "a shadowing helper parameter must not suppress HTML sink candidates"
+    );
+}
+
+#[test]
 fn shadowed_sanitized_local_still_fires() {
     let results = analyze_with_security_sink();
     assert!(
