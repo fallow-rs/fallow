@@ -184,13 +184,17 @@ Fallow telemetry must not include:
 - config contents or config values
 - environment variable names or values
 - raw errors, logs, or serialized exceptions
-- stable machine, user, project, or repository identifiers
+- machine, user, project, or repository identifiers
 
 Hashing these values is not used as a workaround.
+
+The one exception is the anonymous install grouping token (see "Agent Follow-up" and "Transport And Server Privacy" below). It is a freshly random value, never derived from your machine, user account, repository, project, file paths, environment, or any cloud response. It is created only after you explicitly opt in (or set `FALLOW_TELEMETRY=on`), deleted when you run `fallow telemetry disable`, and sent only as a private transport header for server-side grouping, never as an event property. It lets aggregate dashboards count distinct workflows per install instead of per run, which is why it is stable per install while still carrying none of the identifiers listed above.
 
 ## Agent Follow-up
 
 The `--parent-run` flag is hidden from `--help`. `--parent-run` accepts only short ASCII tokens with letters, numbers, `_`, and `-`; paths and free-form values are dropped before upload. Inspect mode and JSON event properties never include the raw token. Instead, events expose `has_parent_run`, `run_role`, and `followup_kind` so aggregate dashboards can distinguish root runs from follow-up work. When telemetry is uploaded, a sanitized parent-run token may be sent as a private transport correlation header for server-side `distinct_id` grouping, not as an event property. JSON object outputs include `_meta.telemetry.analysis_run_id`, a short local ephemeral token that agents may pass back via `--parent-run` on a later command so Fallow can measure whether follow-up work improved aggregate findings. The token is not derived from repository, path, user, machine, project, or cloud response data.
+
+Separately, when telemetry is enabled Fallow keeps one anonymous install grouping token in `telemetry.json`. It is minted the moment you opt in (`fallow telemetry enable`, or the first upload after `FALLOW_TELEMETRY=on`), reused unchanged on later runs, and deleted when you run `fallow telemetry disable`. It is a freshly random value, never derived from your machine, user, repository, project, file paths, environment, or cloud responses. Like the parent-run token, it is sent only as a private transport header (`X-Fallow-Install`) for server-side grouping, never as an event property, so the events Fallow serializes still carry no identifiers. It exists so aggregate dashboards can count distinct workflows per install per week rather than per run. `fallow telemetry status` reports only whether the token is present (never the token itself); `fallow telemetry inspect --example` lists the transport headers alongside the example payload.
 
 Agents must not enable telemetry automatically. `fallow telemetry enable` requires explicit user action in a human-controlled shell or explicit CI environment configuration.
 
@@ -201,6 +205,7 @@ When telemetry is enabled and sending events:
 - requests are HTTPS POST JSON to `https://api.fallow.cloud/v1/telemetry/events` (override the host with `FALLOW_API_URL`)
 - no cookies are used
 - telemetry requests do not carry an authentication token
+- two private headers may accompany the request, both for server-side grouping and never written into the event body: `X-Fallow-Parent-Run` (a sanitized per-run correlation token, only when `--parent-run` was passed) and `X-Fallow-Install` (the anonymous random install grouping token described under "Agent Follow-up"). The install token is deleted on `fallow telemetry disable`
 - your command never waits on the network: at exit Fallow appends the event to a small local spool file (`telemetry-spool.jsonl`, next to `telemetry.json` in your config directory), which is sub-millisecond and network-free, so telemetry adds no latency to the run
 - a later telemetry-enabled run uploads the spooled events on a background thread while it works, so a fast run now defers its event instead of dropping it; delivery is still best-effort and the spool is bounded, so events on a machine that stays offline (or never runs Fallow again) may be dropped, and counts remain a rough, biased sample rather than an exact usage count
 - network errors are ignored and never affect command output or exit code
