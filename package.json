@@ -4,9 +4,9 @@
   "type": "module",
   "scripts": {
     "commitlint": "commitlint",
-    "lint:js": "oxlint --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src commitlint.config.mjs",
-    "fmt:js": "oxfmt --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src commitlint.config.mjs",
-    "fmt:js:check": "oxfmt --check --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src commitlint.config.mjs"
+    "lint:js": "oxlint --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src scripts commitlint.config.mjs",
+    "fmt:js": "oxfmt --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src scripts commitlint.config.mjs",
+    "fmt:js:check": "oxfmt --check --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src scripts commitlint.config.mjs"
   },
   "devDependencies": {
     "@commitlint/cli": "21.0.2",
