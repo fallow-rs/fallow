@@ -24,6 +24,10 @@ pub mod discover;
 pub mod envelope;
 /// Module extraction types: exports, imports, re-exports, and member info.
 pub mod extract;
+/// Machine-readable manifest of the fallow MCP server's tools, shared by
+/// `fallow schema` and the telemetry tool-name allowlist; kept in sync with
+/// the live tool router by a drift test in `crates/mcp`.
+pub mod mcp_manifest;
 /// JSON-output augmentation types: `IssueAction` enum + variants.
 /// Schema-side counterpart of the augmentations the JSON layer adds to each
 /// dead-code finding. The structs are always compiled (typed dead-code
