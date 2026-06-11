@@ -1546,8 +1546,8 @@ fn audit_doc_only_change_reports_no_introduced_findings() {
 }
 
 /// Adding a brand-new TS file with an unused export forces a real base-snapshot
-/// computation (the file does not exist in base, so `git_show_file` returns
-/// None and the reuse predicate returns false). The new export should be
+/// computation (the file does not exist in base, so `BaseFileReader::read`
+/// returns None and the reuse predicate returns false). The new export should be
 /// attributed as introduced.
 #[test]
 fn audit_new_file_is_treated_as_behavioral() {
@@ -1595,6 +1595,91 @@ fn audit_new_file_is_treated_as_behavioral() {
             .as_u64()
             .is_some_and(|n| n >= 1),
         "new unused export in a new file must be attributed as introduced. full json: {}",
+        serde_json::to_string_pretty(&json).unwrap_or_default()
+    );
+}
+
+/// Whitespace-only edits across many `.ts` files in one commit exercise the
+/// batched base-file reader: the reuse predicate reads the base version of each
+/// changed file sequentially through one `git cat-file --batch` process (the
+/// previous implementation spawned one `git show` per file). Each file is
+/// token-equivalent to its base, so the reuse check should hold and the audit
+/// should introduce zero findings. This pins correctness of multiple
+/// sequential reads through a single batch process (trailing-newline
+/// consumption, lockstep request/response).
+#[test]
+fn audit_reuse_check_handles_many_equivalent_files() {
+    let dir = create_audit_fixture("reuse-many");
+    let root = dir.path();
+
+    // Seed 12 source files that are imported in a chain so each is reachable
+    // (no pre-existing unused-file findings), then commit them as the base.
+    const FILE_COUNT: usize = 12;
+    for i in 0..FILE_COUNT {
+        fs::write(
+            root.join(format!("src/mod{i}.ts")),
+            format!("export const value{i} = {i};\nexport const helper{i} = () => value{i};\n"),
+        )
+        .unwrap();
+    }
+    // Wire every module into the import graph via index.ts so none is orphaned.
+    use std::fmt::Write as _;
+    let mut index = String::from("import { used } from './utils';\nused();\n");
+    for i in 0..FILE_COUNT {
+        writeln!(index, "import {{ helper{i} }} from './mod{i}';").unwrap();
+        writeln!(index, "helper{i}();").unwrap();
+    }
+    fs::write(root.join("src/index.ts"), &index).unwrap();
+    commit_all(root, "seed many modules");
+
+    let base_sha = {
+        let output = Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(root)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .output()
+            .expect("git rev-parse should succeed");
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    };
+
+    // Apply whitespace-only edits to every module in one commit. Each file
+    // stays token-equivalent to its base, so the reuse predicate must accept
+    // all of them across one batch process.
+    for i in 0..FILE_COUNT {
+        fs::write(
+            root.join(format!("src/mod{i}.ts")),
+            format!(
+                "export const value{i}  =  {i};\n\nexport const helper{i} = ()   => value{i};\n"
+            ),
+        )
+        .unwrap();
+    }
+    commit_all(root, "whitespace-only edits across modules");
+
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        root.to_str().unwrap(),
+        "--base",
+        &base_sha,
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    assert!(
+        output.code == 0,
+        "audit over many whitespace-only edits should succeed with no introduced findings. code: {}, stderr: {}",
+        output.code,
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(
+        json["attribution"]["dead_code_introduced"].as_u64(),
+        Some(0),
+        "whitespace-only edits across many files must introduce zero dead-code findings. full json: {}",
         serde_json::to_string_pretty(&json).unwrap_or_default()
     );
 }

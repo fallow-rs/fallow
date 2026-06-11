@@ -856,27 +856,137 @@ fn can_reuse_current_as_base(
     };
     let cache_dir = opts.cache_dir.to_path_buf();
     let canonical_cache_dir = dunce::canonicalize(&cache_dir).ok();
-    changed_files.iter().all(|path| {
+    // Spawn the batched base-file reader lazily: a changeset of only cache
+    // artifacts or docs never touches git, so it spawns zero processes.
+    let mut reader: Option<BaseFileReader> = None;
+    for path in changed_files {
         if is_fallow_cache_artifact(path, &cache_dir, canonical_cache_dir.as_deref()) {
-            return true;
+            continue;
         }
         if !is_analysis_input(path) {
-            return is_non_behavioral_doc(path);
+            if is_non_behavioral_doc(path) {
+                continue;
+            }
+            return false;
         }
         let Ok(current) = std::fs::read_to_string(path) else {
             return false;
         };
-        let Some(relative) = path.strip_prefix(&git_root).ok() else {
+        let Ok(relative) = path.strip_prefix(&git_root) else {
             return false;
         };
-        let Some(base) = git_show_file(opts.root, base_ref, relative) else {
+        let reader = match reader.as_mut() {
+            Some(reader) => reader,
+            None => {
+                let Some(spawned) = BaseFileReader::spawn(opts.root) else {
+                    return false;
+                };
+                reader.insert(spawned)
+            }
+        };
+        let Some(base) = reader.read(base_ref, relative) else {
             return false;
         };
         if current == base {
-            return true;
+            continue;
         }
-        js_ts_tokens_equivalent(path, &current, &base)
-    })
+        if !js_ts_tokens_equivalent(path, &current, &base) {
+            return false;
+        }
+    }
+    true
+}
+
+/// A long-lived `git cat-file --batch` child process used to read the base
+/// version of changed files without spawning one `git show` per file.
+///
+/// Requests and responses are strictly lockstep (one request line, one
+/// response) to avoid pipe-buffer deadlock. Per-file comparison semantics are
+/// byte-identical to the previous `git show` path: a missing object yields
+/// `None` (treated as not reusable), and content is read with lossy UTF-8
+/// conversion to match `String::from_utf8_lossy`.
+struct BaseFileReader {
+    child: std::process::Child,
+    /// Wrapped in `Option` so `Drop` can `take()` and drop it explicitly,
+    /// closing the pipe before `child.wait()` (which would otherwise block).
+    stdin: Option<std::process::ChildStdin>,
+    stdout: std::io::BufReader<std::process::ChildStdout>,
+}
+
+impl BaseFileReader {
+    /// Spawn a single `git cat-file --batch` process rooted at `root`.
+    ///
+    /// Returns `None` on spawn failure or if the child's stdio pipes are
+    /// unavailable; the caller then degrades to "not reusable" (returns
+    /// `false`), mirroring the previous per-file `git show` failure behavior.
+    fn spawn(root: &Path) -> Option<Self> {
+        let mut command = Command::new("git");
+        command
+            .args(["cat-file", "--batch"])
+            .current_dir(root)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null());
+        clear_ambient_git_env(&mut command);
+        let mut child = command.spawn().ok()?;
+        let stdin = child.stdin.take()?;
+        let stdout = child.stdout.take()?;
+        Some(Self {
+            child,
+            stdin: Some(stdin),
+            stdout: std::io::BufReader::new(stdout),
+        })
+    }
+
+    /// Read the base version of `relative` at `base_ref`.
+    ///
+    /// Writes one `<base_ref>:<path>` request line (forward-slash separators)
+    /// and reads exactly one response in lockstep. Returns `None` if the object
+    /// is missing (the ` missing` header path), on any parse or IO error, or if
+    /// the path contains a newline (which would corrupt the request stream).
+    fn read(&mut self, base_ref: &str, relative: &Path) -> Option<String> {
+        use std::io::{BufRead, Read};
+
+        let relative = relative.to_string_lossy().replace('\\', "/");
+        // A newline in the path cannot be expressed as a single batch request
+        // line; treat it as not reusable rather than writing a corrupt request.
+        if relative.contains('\n') {
+            return None;
+        }
+
+        let stdin = self.stdin.as_mut()?;
+        writeln!(stdin, "{base_ref}:{relative}").ok()?;
+        stdin.flush().ok()?;
+
+        let mut header = String::new();
+        if self.stdout.read_line(&mut header).ok()? == 0 {
+            return None;
+        }
+        // `git cat-file --batch` reports a missing object as `<spec> missing\n`.
+        if header.trim_end().ends_with(" missing") {
+            return None;
+        }
+        // Otherwise the header is `<oid> <type> <size>\n`; parse the size.
+        let size: usize = header.trim_end().rsplit(' ').next()?.parse().ok()?;
+        let mut buf = vec![0u8; size];
+        self.stdout.read_exact(&mut buf).ok()?;
+        // Consume the single trailing newline that follows the object content.
+        // An off-by-one here corrupts every subsequent read in the batch.
+        let mut newline = [0u8; 1];
+        self.stdout.read_exact(&mut newline).ok()?;
+
+        Some(String::from_utf8_lossy(&buf).into_owned())
+    }
+}
+
+impl Drop for BaseFileReader {
+    fn drop(&mut self) {
+        // Close stdin so the child sees EOF and exits, then reap it so no
+        // zombie process is left behind. Dropping the `ChildStdin` closes the
+        // pipe; doing this before `wait()` prevents the wait from blocking.
+        self.stdin.take();
+        let _ = self.child.wait();
+    }
 }
 
 fn is_fallow_cache_artifact(
@@ -899,24 +1009,6 @@ fn remap_cache_dir_for_base_worktree(
         return base_worktree_root.join(relative);
     }
     cache_dir.to_path_buf()
-}
-
-fn git_show_file(root: &Path, base_ref: &str, relative: &Path) -> Option<String> {
-    let spec = format!(
-        "{}:{}",
-        base_ref,
-        relative.to_string_lossy().replace('\\', "/")
-    );
-    let mut command = Command::new("git");
-    command
-        .args(["show", "--end-of-options", &spec])
-        .current_dir(root);
-    clear_ambient_git_env(&mut command);
-    let output = command.output().ok()?;
-    output
-        .status
-        .success()
-        .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 fn is_analysis_input(path: &Path) -> bool {
