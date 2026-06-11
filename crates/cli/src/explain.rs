@@ -408,6 +408,7 @@ pub fn rule_by_token(token: &str) -> Option<&'static RuleDef> {
             .iter()
             .chain(HEALTH_RULES.iter())
             .chain(DUPES_RULES.iter())
+            .chain(FLAGS_RULES.iter())
             .chain(SECURITY_RULES.iter())
             .find(|rule| {
                 rule.docs_path.ends_with(&normalized)

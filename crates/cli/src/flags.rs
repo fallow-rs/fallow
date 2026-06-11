@@ -532,7 +532,7 @@ fn print_flags_sarif(flags: &[FeatureFlag], config: &ResolvedConfig) {
     let rules = vec![serde_json::json!({
         "id": "fallow/feature-flag",
         "shortDescription": { "text": "Feature flag pattern detected" },
-        "helpUri": "https://docs.fallow.tools/explanations/feature-flags",
+        "helpUri": "https://docs.fallow.tools/cli/flags",
         "defaultConfiguration": { "level": "note" },
     })];
 
@@ -781,7 +781,7 @@ fn print_flags_json(
                     "medium": "Pattern match with some ambiguity",
                     "low": "Heuristic match (config objects), may produce false positives",
                 },
-                "docs": "https://docs.fallow.tools/explanations/feature-flags",
+                "docs": "https://docs.fallow.tools/cli/flags",
             }
         });
     }
