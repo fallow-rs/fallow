@@ -602,7 +602,14 @@ fn skip_quoted(source: &str, quote_offset: usize) -> Result<usize, ScanError> {
     let mut offset = quote_offset + 1;
     while offset < source.len() {
         match source.as_bytes()[offset] {
-            b'\\' => offset = (offset + 2).min(source.len()),
+            // Advance past the backslash, then one full char: a fixed +2 byte
+            // advance can land mid-character when the escapee is multi-byte.
+            b'\\' => {
+                offset += 1;
+                if offset < source.len() {
+                    offset += source[offset..].chars().next().map_or(0, char::len_utf8);
+                }
+            }
             byte if byte == quote => return Ok(offset + 1),
             _ => offset += source[offset..].chars().next().map_or(1, char::len_utf8),
         }
@@ -864,6 +871,15 @@ mod tests {
             r"<a href='https://example.com?q=1&r=2' [class.x]='a && b' />",
         )
         .expect("template should have complexity");
+        assert!(complexity.cyclomatic >= 2, "{complexity:?}");
+    }
+
+    #[test]
+    fn backslash_before_multibyte_char_in_attribute_does_not_panic() {
+        // U+200B is a 3-byte char, so a +2 byte advance past `\` lands mid-char.
+        let complexity =
+            compute_angular_template_complexity("<a title='x\\\u{200b}y' [class.x]='a && b' />")
+                .expect("template should have complexity");
         assert!(complexity.cyclomatic >= 2, "{complexity:?}");
     }
 }
