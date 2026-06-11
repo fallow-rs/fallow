@@ -102,6 +102,25 @@ pub fn run_fallow_raw(args: &[&str]) -> CommandOutput {
     }
 }
 
+/// Run fallow with raw args and string environment variables.
+pub fn run_fallow_raw_with_env(args: &[&str], env: &[(&str, &str)]) -> CommandOutput {
+    let bin = fallow_bin();
+    let mut cmd = Command::new(&bin);
+    cmd.env("RUST_LOG", "").env("NO_COLOR", "1");
+    for (key, value) in env {
+        cmd.env(key, value);
+    }
+    for arg in args {
+        cmd.arg(arg);
+    }
+    let output = cmd.output().expect("failed to run fallow binary");
+    CommandOutput {
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        code: output.status.code().unwrap_or(-1),
+    }
+}
+
 /// Parse stdout as JSON, panicking with the raw output on failure.
 pub fn parse_json(output: &CommandOutput) -> serde_json::Value {
     serde_json::from_str(&output.stdout).unwrap_or_else(|e| {

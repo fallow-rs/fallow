@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -135,6 +137,20 @@ pub struct HealthConfig {
     #[serde(default = "default_crap_refactor_band")]
     pub crap_refactor_band: u16,
 
+    /// Path to Istanbul-format coverage data for accurate per-function CRAP
+    /// scores. Relative paths resolve against the project root. The CLI
+    /// `--coverage` flag and `FALLOW_COVERAGE` environment variable override
+    /// this value.
+    #[serde(default)]
+    pub coverage: Option<PathBuf>,
+
+    /// Absolute prefix to strip from Istanbul file paths before CRAP matching.
+    /// Use when coverage was generated under a different checkout root in CI
+    /// or Docker. The CLI `--coverage-root` flag and `FALLOW_COVERAGE_ROOT`
+    /// environment variable override this value.
+    #[serde(default)]
+    pub coverage_root: Option<PathBuf>,
+
     /// Glob patterns to exclude from complexity analysis.
     #[serde(default)]
     pub ignore: Vec<String>,
@@ -163,6 +179,8 @@ impl Default for HealthConfig {
             max_cognitive: default_max_cognitive(),
             max_crap: default_max_crap(),
             crap_refactor_band: default_crap_refactor_band(),
+            coverage: None,
+            coverage_root: None,
             ignore: vec![],
             ownership: OwnershipConfig::default(),
             suggest_inline_suppression: default_suggest_inline_suppression(),
@@ -181,6 +199,8 @@ mod tests {
         assert_eq!(config.max_cognitive, 15);
         assert!((config.max_crap - 30.0).abs() < f64::EPSILON);
         assert_eq!(config.crap_refactor_band, 5);
+        assert!(config.coverage.is_none());
+        assert!(config.coverage_root.is_none());
         assert!(config.ignore.is_empty());
     }
 
@@ -191,6 +211,8 @@ mod tests {
             "maxCognitive": 25,
             "maxCrap": 50.0,
             "crapRefactorBand": 3,
+            "coverage": "coverage/coverage-final.json",
+            "coverageRoot": "/ci/workspace",
             "ignore": ["**/generated/**", "vendor/**"]
         }"#;
         let config: HealthConfig = serde_json::from_str(json).unwrap();
@@ -198,6 +220,11 @@ mod tests {
         assert_eq!(config.max_cognitive, 25);
         assert!((config.max_crap - 50.0).abs() < f64::EPSILON);
         assert_eq!(config.crap_refactor_band, 3);
+        assert_eq!(
+            config.coverage,
+            Some(PathBuf::from("coverage/coverage-final.json"))
+        );
+        assert_eq!(config.coverage_root, Some(PathBuf::from("/ci/workspace")));
         assert_eq!(config.ignore, vec!["**/generated/**", "vendor/**"]);
     }
 
@@ -269,6 +296,8 @@ ignore = ["generated/**", "vendor/**"]
             max_crap: 75.0,
             crap_refactor_band: 4,
             ignore: vec!["test/**".to_string()],
+            coverage: None,
+            coverage_root: None,
             ownership: OwnershipConfig::default(),
             suggest_inline_suppression: false,
         };

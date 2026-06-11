@@ -408,6 +408,16 @@ struct Cli {
     #[arg(long, value_name = "PATH", num_args = 0..=1, default_missing_value = "")]
     save_snapshot: Option<Option<String>>,
 
+    /// Path to Istanbul coverage data for exact CRAP scores in combined mode.
+    /// Also settable via `FALLOW_COVERAGE` or `health.coverage`.
+    #[arg(long, value_name = "PATH")]
+    coverage: Option<PathBuf>,
+
+    /// Absolute prefix to strip from Istanbul file paths in combined mode.
+    /// Also settable via `FALLOW_COVERAGE_ROOT` or `health.coverageRoot`.
+    #[arg(long = "coverage-root", value_name = "PATH")]
+    coverage_root: Option<PathBuf>,
+
     /// Report unused exports in entry files instead of auto-marking them as used.
     #[arg(long, global = true)]
     include_entry_exports: bool,
@@ -2604,9 +2614,13 @@ fn main() -> ExitCode {
         save_regression_file: save_regression_file.as_ref(),
         save_to_config,
     };
-    let exit_code = match command {
-        None => dispatch_bare_command(&dispatch),
-        Some(cmd) => dispatch_subcommand(cmd, &dispatch),
+    let exit_code = if command.is_some() && cli_has_bare_coverage_input(&cli) {
+        emit_error(bare_coverage_subcommand_error_message(), 2, output)
+    } else {
+        match command {
+            None => dispatch_bare_command(&dispatch),
+            Some(cmd) => dispatch_subcommand(cmd, &dispatch),
+        }
     };
     if let Some(path) = cli.output_file.as_deref()
         && let Err(code) = finalize_report_file(path, quiet, output)
@@ -2796,11 +2810,6 @@ fn handle_cli_parse_error(err: &clap::Error) -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
-    if is_top_level_coverage_unknown_argument(err, std::env::args_os().skip(1)) {
-        eprintln!("{}", top_level_coverage_error_message());
-        return ExitCode::from(2);
-    }
-
     let exit_code = err.exit_code();
     let _ = err.print();
     ExitCode::from(u8::try_from(exit_code).unwrap_or(2))
@@ -2851,41 +2860,12 @@ fn security_unsupported_global_long(long: &str) -> bool {
     SECURITY_UNSUPPORTED_GLOBAL_LONGS.contains(&long)
 }
 
-fn is_top_level_coverage_unknown_argument<I, S>(err: &clap::Error, args: I) -> bool
-where
-    I: IntoIterator<Item = S>,
-    S: AsRef<OsStr>,
-{
-    err.kind() == clap::error::ErrorKind::UnknownArgument && args_have_top_level_coverage(args)
+fn cli_has_bare_coverage_input(cli: &Cli) -> bool {
+    cli.coverage.is_some() || cli.coverage_root.is_some()
 }
 
-fn args_have_top_level_coverage<I, S>(args: I) -> bool
-where
-    I: IntoIterator<Item = S>,
-    S: AsRef<OsStr>,
-{
-    for arg in args {
-        let arg = arg.as_ref();
-        let arg_str = arg.to_string_lossy();
-        if arg == "--coverage" || arg_str.starts_with("--coverage=") {
-            return true;
-        }
-        if is_top_level_command(&arg_str) {
-            return false;
-        }
-    }
-    false
-}
-
-fn is_top_level_command(arg: &str) -> bool {
-    Cli::command().get_subcommands().any(|command| {
-        command.get_name() == arg || command.get_all_aliases().any(|alias| alias == arg)
-    })
-}
-
-fn top_level_coverage_error_message() -> &'static str {
-    "error: --coverage is a flag on the `health` subcommand, not a top-level flag.\n\n\
-tip: run `fallow health --coverage <coverage-final.json>` for exact CRAP scores, or `fallow coverage setup` to configure runtime coverage."
+fn bare_coverage_subcommand_error_message() -> &'static str {
+    "`--coverage` and `--coverage-root` are bare combined-mode flags. Use `fallow health --coverage <coverage-final.json>` for standalone health analysis, or omit the subcommand to run combined mode."
 }
 
 fn run_telemetry_command_if_requested(
@@ -3015,6 +2995,14 @@ fn dispatch_bare_command(dispatch: &DispatchContext<'_>) -> ExitCode {
         Ok(production) => production,
         Err(code) => return code,
     };
+    let coverage_inputs = match resolve_health_coverage_inputs(
+        dispatch,
+        cli.coverage.as_deref(),
+        cli.coverage_root.as_deref(),
+    ) {
+        Ok(inputs) => inputs,
+        Err(code) => return code,
+    };
     combined::run_combined(&combined::CombinedOptions {
         root: dispatch.root,
         config_path: &cli.config,
@@ -3053,6 +3041,8 @@ fn dispatch_bare_command(dispatch: &DispatchContext<'_>) -> ExitCode {
         score: cli.score || cli.trend,
         trend: cli.trend,
         save_snapshot: cli.save_snapshot.as_ref(),
+        coverage: coverage_inputs.coverage.as_deref(),
+        coverage_root: coverage_inputs.coverage_root.as_deref(),
         include_entry_exports: cli.include_entry_exports,
         regression_opts: dispatch.regression_opts(
             cli.changed_since.is_some()
@@ -3384,7 +3374,6 @@ fn dispatch_health_command(command: Command, dispatch: &DispatchContext<'_>) -> 
         unreachable!("health dispatcher only handles health commands");
     };
 
-    let coverage = coverage.or_else(|| std::env::var("FALLOW_COVERAGE").ok().map(PathBuf::from));
     let ownership = ownership || ownership_emails.is_some();
     let hotspots = hotspots || ownership;
     dispatch_health(
@@ -4266,6 +4255,63 @@ struct HealthDispatchArgs<'a> {
     low_traffic_threshold: Option<f64>,
 }
 
+struct ResolvedHealthCoverageInputs {
+    coverage: Option<PathBuf>,
+    coverage_root: Option<PathBuf>,
+}
+
+fn resolve_health_coverage_inputs(
+    dispatch: &DispatchContext<'_>,
+    cli_coverage: Option<&std::path::Path>,
+    cli_coverage_root: Option<&std::path::Path>,
+) -> Result<ResolvedHealthCoverageInputs, ExitCode> {
+    let env_coverage = path_from_env("FALLOW_COVERAGE");
+    let env_coverage_root = path_from_env("FALLOW_COVERAGE_ROOT");
+    let needs_config_coverage = cli_coverage.is_none() && env_coverage.is_none();
+    let needs_config_coverage_root = cli_coverage_root.is_none() && env_coverage_root.is_none();
+    let config_health = if needs_config_coverage || needs_config_coverage_root {
+        Some(
+            load_config(
+                dispatch.root,
+                &dispatch.cli.config,
+                dispatch.output,
+                dispatch.cli.no_cache,
+                dispatch.threads,
+                dispatch.cli.production,
+                dispatch.quiet,
+            )?
+            .health,
+        )
+    } else {
+        None
+    };
+
+    Ok(ResolvedHealthCoverageInputs {
+        coverage: cli_coverage
+            .map(std::path::Path::to_path_buf)
+            .or(env_coverage)
+            .or_else(|| {
+                config_health
+                    .as_ref()
+                    .and_then(|health| health.coverage.clone())
+            }),
+        coverage_root: cli_coverage_root
+            .map(std::path::Path::to_path_buf)
+            .or(env_coverage_root)
+            .or_else(|| {
+                config_health
+                    .as_ref()
+                    .and_then(|health| health.coverage_root.clone())
+            }),
+    })
+}
+
+fn path_from_env(name: &str) -> Option<PathBuf> {
+    std::env::var_os(name)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
 fn dispatch_health(dispatch: &DispatchContext<'_>, args: HealthDispatchArgs<'_>) -> ExitCode {
     let cli = dispatch.cli;
     let root = dispatch.root;
@@ -4341,6 +4387,10 @@ fn dispatch_health(dispatch: &DispatchContext<'_>, args: HealthDispatchArgs<'_>)
         Ok(modes) => modes.for_analysis(fallow_config::ProductionAnalysis::Health),
         Err(code) => return code,
     };
+    let coverage_inputs = match resolve_health_coverage_inputs(dispatch, coverage, coverage_root) {
+        Ok(inputs) => inputs,
+        Err(code) => return code,
+    };
     health::run_health(&HealthOptions {
         root,
         config_path: &cli.config,
@@ -4386,8 +4436,8 @@ fn dispatch_health(dispatch: &DispatchContext<'_>, args: HealthDispatchArgs<'_>)
         save_snapshot: save_snapshot.map(|opt| PathBuf::from(opt.as_deref().unwrap_or_default())),
         trend,
         group_by: cli.group_by,
-        coverage,
-        coverage_root,
+        coverage: coverage_inputs.coverage.as_deref(),
+        coverage_root: coverage_inputs.coverage_root.as_deref(),
         performance: cli.performance,
         runtime_coverage,
         churn_file: cli.churn_file.as_deref(),
@@ -4825,18 +4875,40 @@ mod tests {
     }
 
     #[test]
-    fn top_level_coverage_flag_reports_health_hint() {
-        let Err(err) = Cli::try_parse_from(["fallow", "--coverage"]) else {
-            panic!("top-level --coverage should fail to parse");
-        };
-        assert!(is_top_level_coverage_unknown_argument(
-            &err,
-            [std::ffi::OsString::from("--coverage")]
-        ));
-        let message = top_level_coverage_error_message();
-        assert!(message.contains("`health` subcommand"));
+    fn bare_coverage_flags_parse_without_subcommand() {
+        let cli = Cli::try_parse_from([
+            "fallow",
+            "--coverage",
+            "coverage/coverage-final.json",
+            "--coverage-root",
+            "/ci/workspace",
+        ])
+        .expect("bare combined coverage flags should parse");
+        assert!(cli.command.is_none());
+        assert_eq!(
+            cli.coverage.as_deref(),
+            Some(std::path::Path::new("coverage/coverage-final.json"))
+        );
+        assert_eq!(
+            cli.coverage_root.as_deref(),
+            Some(std::path::Path::new("/ci/workspace"))
+        );
+    }
+
+    #[test]
+    fn bare_coverage_before_subcommand_is_detectable() {
+        let cli = Cli::try_parse_from([
+            "fallow",
+            "--coverage",
+            "coverage/coverage-final.json",
+            "dead-code",
+        ])
+        .expect("clap should parse pre-subcommand bare coverage for custom rejection");
+        assert!(cli.command.is_some());
+        assert!(cli_has_bare_coverage_input(&cli));
+        let message = bare_coverage_subcommand_error_message();
+        assert!(message.contains("bare combined-mode flags"));
         assert!(message.contains("fallow health --coverage <coverage-final.json>"));
-        assert!(message.contains("fallow coverage setup"));
     }
 
     #[test]
@@ -4844,13 +4916,7 @@ mod tests {
         let Err(err) = Cli::try_parse_from(["fallow", "dead-code", "--coverage"]) else {
             panic!("dead-code --coverage should fail to parse");
         };
-        assert!(!is_top_level_coverage_unknown_argument(
-            &err,
-            [
-                std::ffi::OsString::from("dead-code"),
-                std::ffi::OsString::from("--coverage"),
-            ]
-        ));
+        assert_eq!(err.kind(), clap::error::ErrorKind::UnknownArgument);
     }
 
     #[test]

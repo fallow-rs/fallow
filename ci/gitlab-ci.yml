@@ -137,7 +137,7 @@ variables:
   FALLOW_MAX_CYCLOMATIC: ""
   FALLOW_MAX_COGNITIVE: ""
   FALLOW_MAX_CRAP: ""             # Maximum CRAP score (default 30.0); pair with coverage data for accurate per-function scoring
-  FALLOW_COVERAGE: ""             # Istanbul coverage-final.json for accurate CRAP scoring (health/audit)
+  FALLOW_COVERAGE: ""             # Istanbul coverage-final.json for accurate CRAP scoring (health/audit/default combined)
   FALLOW_PRODUCTION_COVERAGE: ""  # Path to paid runtime coverage input (V8 dir/file or Istanbul coverage-final.json)
   FALLOW_COVERAGE_ROOT: ""        # Rebase Istanbul file paths before matching coverage or runtime coverage input
   FALLOW_MIN_INVOCATIONS_HOT: ""  # Hot-path threshold for runtime coverage findings (default 100)
@@ -539,6 +539,8 @@ variables:
           [ -n "$FALLOW_THRESHOLD" ]         && ARGS+=(--dupes-threshold "$FALLOW_THRESHOLD")
           [ "$FALLOW_SCORE" = "true" ]        && ARGS+=(--score)
           [ "$FALLOW_TREND" = "true" ]        && ARGS+=(--trend)
+          [ -n "$FALLOW_COVERAGE" ]           && ARGS+=(--coverage "$FALLOW_COVERAGE")
+          [ -n "$FALLOW_COVERAGE_ROOT" ]      && ARGS+=(--coverage-root "$FALLOW_COVERAGE_ROOT")
           if [ -n "$FALLOW_SAVE_SNAPSHOT" ]; then
             if [ "$FALLOW_SAVE_SNAPSHOT" = "true" ]; then
               ARGS+=(--save-snapshot)

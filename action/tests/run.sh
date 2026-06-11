@@ -580,6 +580,16 @@ cd "$DIR"
 VERDICT=$(grep '^verdict=' "$ANALYZE_TMP/output" | cut -d= -f2)
 [ -z "$VERDICT" ] && pass "analyze: verdict empty for non-audit command" || fail "analyze: non-audit verdict" "expected empty, got '$VERDICT'"
 
+cd "$ANALYZE_TMP/work" && rm -f "$ANALYZE_TMP/output"
+OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
+  INPUT_ROOT="." INPUT_COMMAND="" INPUT_FORMAT="json" \
+  INPUT_COVERAGE="coverage/coverage-final.json" INPUT_COVERAGE_ROOT="/ci/workspace" \
+  bash "$DIR/../scripts/analyze.sh" 2>&1) || true
+cd "$DIR"
+ARGS=$(cat "$ANALYZE_TMP/work/fallow-analysis-args.sh")
+assert_contains "$ARGS" "--coverage coverage/coverage-final.json" "analyze: forwards coverage to default combined command"
+assert_contains "$ARGS" "--coverage-root /ci/workspace" "analyze: forwards coverage-root to default combined command"
+
 # Issue #735: generated artifacts can be moved out of the workspace root.
 cat > "$ANALYZE_TMP/bin/fallow" <<'SH'
 #!/usr/bin/env bash

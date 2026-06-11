@@ -197,7 +197,7 @@ SH
 chmod +x "$RUNNER_TMP/bin/fallow"
 OUT=$(cd "$RUNNER_TMP" && env \
   PATH="$RUNNER_TMP/bin:$PATH" \
-  FALLOW_COMMAND=dead-code \
+  FALLOW_COMMAND= \
   FALLOW_ROOT="$RUNNER_TMP/root" \
   FALLOW_CONFIG= \
   FALLOW_PRODUCTION= \
@@ -242,9 +242,9 @@ OUT=$(cd "$RUNNER_TMP" && env \
   FALLOW_MAX_CYCLOMATIC= \
   FALLOW_MAX_COGNITIVE= \
   FALLOW_MAX_CRAP= \
-  FALLOW_COVERAGE= \
+  FALLOW_COVERAGE=coverage/coverage-final.json \
   FALLOW_PRODUCTION_COVERAGE= \
-  FALLOW_COVERAGE_ROOT= \
+  FALLOW_COVERAGE_ROOT=/ci/workspace \
   FALLOW_MIN_INVOCATIONS_HOT= \
   FALLOW_MIN_OBSERVATION_VOLUME= \
   FALLOW_LOW_TRAFFIC_THRESHOLD= \
@@ -277,6 +277,9 @@ if [ "$cmd_status" -eq 0 ] && [ -s "$RUNNER_TMP/fallow-results.json" ]; then
 else
   fail "run writer: generated analysis script runs with empty extra args" "$OUT"
 fi
+ARGS=$(cat "$RUNNER_TMP/fallow-analysis-args.sh")
+assert_contains "$ARGS" "--coverage coverage/coverage-final.json" "run writer: forwards coverage to default combined command"
+assert_contains "$ARGS" "--coverage-root /ci/workspace" "run writer: forwards coverage-root to default combined command"
 
 # =========================================================================
 # Behavioral parity between action/scripts/install.sh and ci/gitlab-ci.yml

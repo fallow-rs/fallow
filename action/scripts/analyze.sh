@@ -229,6 +229,8 @@ build_command_args() {
       [ -n "${INPUT_TOLERANCE:-}" ] && [ "${INPUT_TOLERANCE:-}" != "0" ] && ARGS+=(--tolerance "$INPUT_TOLERANCE")
       [ -n "${INPUT_REGRESSION_BASELINE:-}" ] && ARGS+=(--regression-baseline "$INPUT_REGRESSION_BASELINE")
       [ -n "${INPUT_SAVE_REGRESSION_BASELINE:-}" ] && ARGS+=(--save-regression-baseline "$INPUT_SAVE_REGRESSION_BASELINE")
+      [ -n "${INPUT_COVERAGE:-}" ] && ARGS+=(--coverage "$INPUT_COVERAGE")
+      [ -n "${INPUT_COVERAGE_ROOT:-}" ] && ARGS+=(--coverage-root "$INPUT_COVERAGE_ROOT")
       ;;
   esac
 }

@@ -167,7 +167,7 @@ inputs:
     description: 'Maximum CRAP score threshold (health and audit commands, default: 30.0). Functions meeting or exceeding this score are reported alongside complexity findings. Pair with coverage data for accurate per-function scoring.'
     required: false
   coverage:
-    description: 'Path to Istanbul coverage-final.json data for accurate CRAP scoring (health and audit commands).'
+    description: 'Path to Istanbul coverage-final.json data for accurate CRAP scoring (health, audit, and bare command).'
     required: false
   runtime-coverage:
     description: 'Path to paid runtime coverage input for the health command: a V8 coverage directory, V8 JSON file, or Istanbul coverage-final.json'

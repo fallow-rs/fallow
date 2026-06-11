@@ -45,12 +45,18 @@ Key modules:
 - `runtime_support.rs` , Shared `build_ownership_resolver` + `load_config` used by both `main.rs` and `programmatic.rs`, plus the `AnalysisKind` / `GroupBy` clap enums. Extracted out of `main.rs` so the library can reuse them without dragging in the full clap command tree.
 - `programmatic.rs` , One-shot Rust API reused by the NAPI bindings. Exposes `detect_dead_code`, `detect_circular_dependencies`, `detect_boundary_violations`, `detect_duplication`, `compute_complexity`, and `compute_health`, each returning a `serde_json::Value` whose shape matches the CLI's `--format json` contract (`kind`, `schema_version`, `summary`, relative paths, injected `actions`, optional `_meta` under `--explain`). `AnalysisOptions::legacy_envelope` mirrors CLI `--legacy-envelope` for embedders that need the previous root shape without `kind`. Wraps `check::execute_check`, `dupes::execute_dupes`, and `health::execute_health` with a quiet-mode, no-side-effect harness. Structured `ProgrammaticError { message, exit_code, code, help, context }` is the surface errors, preserving the CLI's exit-code ladder (0 ok · 2 generic · 7 network · etc.). Used by `crates/napi` via `pub use fallow_cli::programmatic`.
 
+Coverage input precedence:
+- Standalone `fallow health` and bare combined `fallow` resolve Istanbul coverage inputs independently as CLI flag, env var, config, then auto-detection: `--coverage`, `FALLOW_COVERAGE`, `health.coverage`; `--coverage-root`, `FALLOW_COVERAGE_ROOT`, `health.coverageRoot`.
+- The bare combined flags are intentionally non-global. `fallow --coverage path dead-code` must reject instead of silently ignoring the bare-mode input before a subcommand.
+- `fallow audit` keeps its own CLI/env coverage path and does not consume the `health.coverage` config fallback.
+
 ## Environment variables
 - `FALLOW_FORMAT` , default output format
 - `FALLOW_QUIET` , suppress progress bars
 - `FALLOW_BIN` , binary path for MCP server
 - `FALLOW_CACHE_MAX_SIZE` , extraction cache (`.fallow/cache.bin`) cap in megabytes. Default 256. Wins over the `cache.maxSizeMb` config field. Resolved at `runtime_support::resolve_cache_max_size_env`; threaded into both `CacheStore::load` (size ceiling, `max(max_size_bytes, DEFAULT_CACHE_MAX_SIZE)` so a misconfigured tiny cap does NOT discard a valid existing cache) and `CacheStore::save` (eviction trigger). `--no-cache` short-circuits.
 - `FALLOW_COVERAGE` , path to Istanbul coverage data for accurate CRAP scores
+- `FALLOW_COVERAGE_ROOT` , absolute coverage-data prefix for CI or container rebasing
 - `FALLOW_LICENSE` , license JWT (full string). First-class storage path; intended for shared CI runners.
 - `FALLOW_LICENSE_PATH` , file path containing the license JWT.
 - `FALLOW_LICENSE_SKEW_TOLERANCE_SECONDS` , clock-skew tolerance applied to the JWT's `iat` claim during verification. Default 86_400 (24h). A JWT whose `iat` is more than this many seconds in the future relative to the local clock is rejected as `LicenseError::ClockSkew`. Lenient parsing: unset / empty / unparsable / negative all fall back to the default so a typo in a runner env block does not fail license verification. Consumed by `fallow_license::skew_tolerance_seconds_from_env()`; threaded through `verify_jwt_with_skew` at all CLI license call sites.

@@ -125,6 +125,8 @@
         "maxCognitive": 15,
         "maxCrap": 30.0,
         "crapRefactorBand": 5,
+        "coverage": null,
+        "coverageRoot": null,
         "ignore": [],
         "ownership": {
           "botPatterns": [
@@ -805,6 +807,22 @@
           "minimum": 0,
           "maximum": 65535,
           "default": 5
+        },
+        "coverage": {
+          "description": "Path to Istanbul-format coverage data for accurate per-function CRAP\nscores. Relative paths resolve against the project root. The CLI\n`--coverage` flag and `FALLOW_COVERAGE` environment variable override\nthis value.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "coverageRoot": {
+          "description": "Absolute prefix to strip from Istanbul file paths before CRAP matching.\nUse when coverage was generated under a different checkout root in CI\nor Docker. The CLI `--coverage-root` flag and `FALLOW_COVERAGE_ROOT`\nenvironment variable override this value.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         },
         "ignore": {
           "description": "Glob patterns to exclude from complexity analysis.",
