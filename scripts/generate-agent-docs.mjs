@@ -3,11 +3,15 @@
  * Generate the agent-facing doc tables in the fallow skill tree from the
  * `fallow schema` capability manifest (issue #1188).
  *
- * Targets (v1): `<target>/SKILL.md` only. Three marker-wrapped sections:
+ * Targets (v1): `<target>/SKILL.md` only. Four marker-wrapped sections:
  *
  *   <!-- generated:commands:start -->    ... <!-- generated:commands:end -->
  *   <!-- generated:issue-types:start --> ... <!-- generated:issue-types:end -->
  *   <!-- generated:mcp-tools:start -->   ... <!-- generated:mcp-tools:end -->
+ *   <!-- generated:task-matrix:start --> ... <!-- generated:task-matrix:end -->
+ *
+ * A target whose text contains NEITHER marker of a section has not adopted
+ * that section and is skipped; a half-present marker pair still fails loudly.
  *
  * Merge-splice contract:
  * - IDENTITY columns are always regenerated from the manifest (row set, ids,
@@ -225,7 +229,9 @@ const renderMcpToolsSection = (schema, existing) => {
 
 /** Agent task-to-command matrix (R2). Fully regenerated from the manifest;
  * no curated columns. The Run cell backticks the command and appends the note
- * after a semicolon when present, matching the Rust renderer's table shape. */
+ * after a semicolon when present. Same two-column table as the Rust
+ * `render_task_matrix_markdown`, which renders the note as a parenthesized
+ * suffix instead; only the note separator differs between the two surfaces. */
 const renderTaskMatrixSection = (schema) => {
   const headers = ["When the agent is about to...", "Run"];
   const rows = (schema.task_matrix ?? []).map((row) => {

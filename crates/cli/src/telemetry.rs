@@ -1552,16 +1552,12 @@ fn resolve_install_id_with(mode: EffectiveMode, config_path: Option<&Path>) -> O
         return None;
     }
     let path = config_path?;
-    let mut config = match read_config_from(path) {
-        Ok(config) => config,
-        // No file yet (env-on without a `telemetry.json`): start from default
-        // and mint below, persisting the enabled/prompt_shown state honestly.
-        Err(_) => TelemetryConfig {
-            enabled: true,
-            prompt_shown: true,
-            ..TelemetryConfig::default()
-        },
-    };
+    // No file yet (env-on without a `telemetry.json`): start from the default
+    // (config-level `enabled` stays false) and mint below, so the persisted
+    // file carries ONLY the token. Writing `enabled: true` here would escalate
+    // a per-invocation `FALLOW_TELEMETRY=on` into a persistent user-config
+    // opt-in that outlives the env var.
+    let mut config = read_config_from(path).unwrap_or_default();
     if let Some(existing) = config.install_id.as_deref() {
         return Some(existing.to_owned());
     }
@@ -3233,7 +3229,8 @@ mod tests {
     #[test]
     fn resolve_install_id_mints_lazily_for_env_on_without_file() {
         // FALLOW_TELEMETRY=on with no telemetry.json: the send path mints once
-        // and persists the enabled state honestly.
+        // and persists ONLY the token; the config-level enabled flag must stay
+        // default-off so the env opt-in stays scoped to the invocation.
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("telemetry.json");
         assert!(!path.exists());
@@ -3243,8 +3240,11 @@ mod tests {
         assert!(minted.starts_with(INSTALL_ID_PREFIX));
 
         let written = read_config_from(&path).expect("lazy mint persisted a config");
-        assert!(written.enabled, "lazy-minted config records enabled state");
-        assert!(written.prompt_shown);
+        assert!(
+            !written.enabled,
+            "lazy mint must NOT escalate an env-only opt-in into a persistent user-config opt-in"
+        );
+        assert!(!written.prompt_shown);
         assert_eq!(written.install_id.as_deref(), Some(minted.as_str()));
 
         // A second resolve returns the same persisted token, not a fresh mint.
