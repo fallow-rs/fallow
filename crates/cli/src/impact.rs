@@ -11,7 +11,7 @@ use crate::audit::{AuditSummary, AuditVerdict};
 use crate::report::ci::fingerprint::fingerprint_hash;
 use crate::report::format_display_path;
 
-const STORE_SCHEMA_VERSION: u32 = 2;
+const STORE_SCHEMA_VERSION: u32 = 3;
 
 const MAX_RECORDS: usize = 200;
 
@@ -154,6 +154,8 @@ pub struct ImpactStore {
     pub suppressed_total: usize,
     #[serde(default)]
     pub recent_resolved: Vec<ResolutionEvent>,
+    #[serde(default)]
+    pub onboarding_declined: bool,
 }
 
 fn store_path(root: &Path) -> PathBuf {
@@ -241,6 +243,19 @@ pub fn disable(root: &Path) -> bool {
     store.enabled = false;
     save(&store, root);
     was_enabled
+}
+
+/// Persist that the local user declined the agent onboarding prompt.
+pub fn decline_onboarding(root: &Path) -> bool {
+    let mut store = load(root);
+    let was_declined = store.onboarding_declined;
+    store.onboarding_declined = true;
+    if store.schema_version == 0 {
+        store.schema_version = STORE_SCHEMA_VERSION;
+    }
+    save(&store, root);
+    ensure_fallow_gitignored(root);
+    !was_declined
 }
 
 /// Record an audit run into the rolling store.
@@ -1004,6 +1019,9 @@ pub struct ImpactReport {
     /// upgraded v1 store (no frontier captured), which the renderer uses to show
     /// "resolution tracking starts from your next run" instead of a bare zero.
     pub attribution_active: bool,
+    /// Whether the local agent onboarding prompt has been explicitly declined.
+    /// Stored under `.fallow/` so agents can avoid cross-session nags.
+    pub onboarding_declined: bool,
 }
 
 /// Build a report from the store. Defensive: a single record (or none) yields
@@ -1075,6 +1093,7 @@ pub fn build_report(store: &ImpactStore) -> ImpactReport {
         suppressed_total: store.suppressed_total,
         recent_resolved,
         attribution_active,
+        onboarding_declined: store.onboarding_declined,
     }
 }
 
@@ -1470,6 +1489,22 @@ mod tests {
         let store = load(root);
         assert!(store.records.is_empty());
         assert!(!store.enabled);
+    }
+
+    #[test]
+    fn decline_onboarding_persists_in_existing_store() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        assert!(decline_onboarding(root));
+        assert!(!decline_onboarding(root));
+
+        let store = load(root);
+        assert!(store.onboarding_declined);
+        assert_eq!(store.schema_version, STORE_SCHEMA_VERSION);
+        assert!(root.join(".gitignore").exists());
+        let report = build_report(&store);
+        assert!(report.onboarding_declined);
     }
 
     #[test]
@@ -2131,6 +2166,7 @@ mod tests {
             suppressed_total: 2,
             recent_resolved: vec![],
             attribution_active: true,
+            onboarding_declined: false,
         };
         let human = render_human(&report);
         let resolved_idx = human.find("  RESOLVED").expect("RESOLVED header present");
@@ -2322,6 +2358,7 @@ mod tests {
             suppressed_total: 0,
             recent_resolved: vec![],
             attribution_active,
+            onboarding_declined: false,
         }
     }
 

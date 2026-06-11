@@ -1217,6 +1217,9 @@ enum HooksTargetArg {
 
 #[derive(clap::Subcommand)]
 enum HooksCli {
+    /// Show installed hook state for Git, Claude, and Codex surfaces.
+    Status,
+
     /// Install a fallow-managed hook.
     Install {
         /// Hook surface to install.
@@ -1336,6 +1339,9 @@ enum ImpactCli {
     Disable,
     /// Show whether Impact tracking is enabled and how much history exists.
     Status,
+    /// Persist that the local agent onboarding prompt was declined.
+    #[command(hide = true)]
+    DeclineOnboarding,
 }
 
 #[derive(clap::Subcommand)]
@@ -3500,6 +3506,20 @@ fn dispatch_impact(
             ExitCode::SUCCESS
         }
         Some(ImpactCli::Status) | None => render_impact_status(root, output),
+        Some(ImpactCli::DeclineOnboarding) => {
+            let newly = impact::decline_onboarding(root);
+            if !quiet {
+                println!(
+                    "{}",
+                    if newly {
+                        "Fallow agent onboarding prompt disabled for this project."
+                    } else {
+                        "Fallow agent onboarding prompt was already disabled for this project."
+                    }
+                );
+            }
+            ExitCode::SUCCESS
+        }
     }
 }
 
@@ -3578,6 +3598,7 @@ fn run_hooks_command(
     output: fallow_config::OutputFormat,
 ) -> ExitCode {
     match subcommand {
+        HooksCli::Status => setup_hooks::run_hooks_status(root, output),
         HooksCli::Install {
             target: HooksTargetArg::Git,
             branch,

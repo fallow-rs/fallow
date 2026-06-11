@@ -63,7 +63,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if "${RUNNER[@]}" audit --format json --quiet --explain >"$TMP_JSON" 2>"$TMP_ERR"; then
+if "${RUNNER[@]}" audit --format json --quiet --explain --gate-marker agent >"$TMP_JSON" 2>"$TMP_ERR"; then
   STATUS=0
 else
   STATUS=$?

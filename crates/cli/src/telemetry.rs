@@ -17,7 +17,7 @@ use sha2::{Digest, Sha256};
 
 use crate::api::{api_url, try_api_agent_with_timeout};
 
-const CONFIG_SCHEMA_VERSION: u8 = 1;
+const CONFIG_SCHEMA_VERSION: u8 = 2;
 const TELEMETRY_SCHEMA_VERSION: u8 = 2;
 const CONNECT_TIMEOUT_SECS: u64 = 1;
 const TOTAL_TIMEOUT_SECS: u64 = 1;
@@ -776,6 +776,8 @@ struct TelemetryConfig {
     schema_version: u8,
     enabled: bool,
     prompt_shown: bool,
+    #[serde(default)]
+    explicit_decision: bool,
     /// Anonymous, random, install-scoped grouping token. Minted only after
     /// explicit opt-in (or an explicit `FALLOW_TELEMETRY=on` first send), never
     /// derived from machine, user, repository, path, environment, or cloud data,
@@ -792,6 +794,7 @@ impl Default for TelemetryConfig {
             schema_version: CONFIG_SCHEMA_VERSION,
             enabled: false,
             prompt_shown: false,
+            explicit_decision: false,
             install_id: None,
         }
     }
@@ -1047,6 +1050,11 @@ fn print_status(output: OutputFormat) -> ExitCode {
             .as_deref()
             .and_then(|path| read_config_from(path).ok())
             .is_some_and(|config| config.install_id.is_some());
+    let explicit_decision = effective
+        .config_path
+        .as_deref()
+        .and_then(|path| read_config_from(path).ok())
+        .is_some_and(|config| config.explicit_decision);
     match output {
         OutputFormat::Json => {
             let value = serde_json::json!({
@@ -1055,6 +1063,7 @@ fn print_status(output: OutputFormat) -> ExitCode {
                     "source": source,
                     "config_path": effective.config_path.as_ref().map(|p| p.display().to_string()),
                     "admin_disabled": matches!(effective.mode, EffectiveMode::DisabledByAdmin),
+                    "explicit_decision": explicit_decision,
                     "install_grouping_token": install_grouping_token,
                     "commands": {
                         "enable": "fallow telemetry enable",
@@ -1079,6 +1088,10 @@ fn print_status(output: OutputFormat) -> ExitCode {
                 } else {
                     "none"
                 }
+            );
+            println!(
+                "Explicit decision: {}",
+                if explicit_decision { "yes" } else { "no" }
             );
             println!("Enable:  fallow telemetry enable");
             println!("Disable: fallow telemetry disable");
@@ -1106,6 +1119,7 @@ fn set_enabled(enabled: bool, output: OutputFormat) -> ExitCode {
     let mut config = read_config_from(&path).unwrap_or_default();
     config.enabled = enabled;
     config.prompt_shown = true;
+    config.explicit_decision = true;
     if enabled {
         // Mint the anonymous install grouping token on opt-in (stable across
         // runs once written). The admin kill-switch guard above already blocks
@@ -3096,12 +3110,14 @@ mod tests {
             schema_version: CONFIG_SCHEMA_VERSION,
             enabled: true,
             prompt_shown: true,
+            explicit_decision: true,
             install_id: None,
         };
         write_config_to(&path, &config).expect("write config");
         let loaded = read_config_from(&path).expect("read config");
         assert!(loaded.enabled);
         assert!(loaded.prompt_shown);
+        assert!(loaded.explicit_decision);
         assert_eq!(loaded.schema_version, CONFIG_SCHEMA_VERSION);
         assert_eq!(loaded.install_id, None);
     }
@@ -3114,6 +3130,7 @@ mod tests {
             schema_version: CONFIG_SCHEMA_VERSION,
             enabled: true,
             prompt_shown: true,
+            explicit_decision: true,
             install_id: Some("inst_deadbeef".to_owned()),
         };
         write_config_to(&path, &config).expect("write config");
@@ -3135,6 +3152,7 @@ mod tests {
         let loaded = read_config_from(&path).expect("read legacy config");
         assert!(loaded.enabled, "enabled state must survive the parse");
         assert!(loaded.prompt_shown);
+        assert!(!loaded.explicit_decision);
         assert_eq!(loaded.install_id, None);
     }
 
@@ -3171,6 +3189,7 @@ mod tests {
         let mut config = read_config_from(&path).unwrap_or_default();
         config.enabled = true;
         config.prompt_shown = true;
+        config.explicit_decision = true;
         let minted = ensure_install_id(&mut config).to_owned();
         write_config_to(&path, &config).expect("write enabled config");
 
@@ -3182,6 +3201,7 @@ mod tests {
         let mut reloaded = read_config_from(&path).expect("reload");
         reloaded.enabled = true;
         reloaded.prompt_shown = true;
+        reloaded.explicit_decision = true;
         let _ = ensure_install_id(&mut reloaded);
         assert_eq!(reloaded.install_id.as_deref(), Some(minted.as_str()));
 
@@ -3189,6 +3209,7 @@ mod tests {
         let mut disabling = read_config_from(&path).expect("read for disable");
         disabling.enabled = false;
         disabling.prompt_shown = true;
+        disabling.explicit_decision = true;
         disabling.install_id = None;
         write_config_to(&path, &disabling).expect("write disabled config");
 
@@ -3265,6 +3286,7 @@ mod tests {
             schema_version: CONFIG_SCHEMA_VERSION,
             enabled: true,
             prompt_shown: true,
+            explicit_decision: true,
             install_id: Some("inst_existing".to_owned()),
         };
         write_config_to(&path, &config).expect("seed config");
@@ -3294,6 +3316,7 @@ mod tests {
                 schema_version: CONFIG_SCHEMA_VERSION,
                 enabled: true,
                 prompt_shown: true,
+                explicit_decision: true,
                 install_id: Some("inst_grouping".to_owned()),
             },
         )

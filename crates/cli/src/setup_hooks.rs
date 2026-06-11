@@ -18,6 +18,8 @@ use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use serde::Serialize;
+
 /// Agent target for generated hook artifacts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
 pub enum HookAgentArg {
@@ -72,9 +74,11 @@ pub const AGENTS_BLOCK_END: &str = "<!-- fallow:setup-hooks:end -->";
 /// re-runs replace it in place rather than appending duplicates.
 pub const AGENTS_BLOCK_BODY: &str = "## Fallow local gate
 
-Before any `git commit` or `git push`, run `fallow audit --format json --quiet --explain`. If the verdict is `fail`, fix the reported findings before retrying. Treat JSON runtime errors like `{ \"error\": true, ... }` as non-blocking.
+Before any `git commit` or `git push`, run `fallow audit --format json --quiet --explain --gate-marker agent`. If the verdict is `fail`, fix the reported findings before retrying. Treat JSON runtime errors like `{ \"error\": true, ... }` as non-blocking.
 
 Audit defaults to `gate=new-only`: only findings introduced by the current changeset affect the verdict. Inherited findings on touched files are reported under `attribution` and annotated with `introduced: false`, but do not block the commit. Set `[audit] gate = \"all\"` in `fallow.toml` to gate every finding in changed files.
+
+For non-skill agents, treat the task map below as the local onboarding source: run the listed fallow command before destructive edits, before commits, and before pull request handoff.
 ";
 
 /// Full managed-block body: the gate prose plus the agent task-to-command
@@ -144,6 +148,24 @@ pub fn run_setup_hooks_with_label(opts: &SetupHooksOptions<'_>, command_label: &
     ExitCode::SUCCESS
 }
 
+/// Render read-only status for all supported hook surfaces.
+pub fn run_hooks_status(root: &Path, output: fallow_config::OutputFormat) -> ExitCode {
+    let report = build_hooks_status(root);
+    match output {
+        fallow_config::OutputFormat::Json => {
+            let value = serde_json::json!({ "hooks": report });
+            crate::report::emit_json(&value, "hooks status")
+        }
+        fallow_config::OutputFormat::Human => {
+            println!("Git hook: {}", describe_status(&report.git));
+            println!("Claude hook: {}", describe_status(&report.claude));
+            println!("Codex block: {}", describe_status(&report.codex));
+            ExitCode::SUCCESS
+        }
+        _ => crate::error::emit_error("hooks status supports human and json output", 2, output),
+    }
+}
+
 #[derive(Debug, Default)]
 struct Plan {
     claude: Option<ClaudeTargets>,
@@ -159,6 +181,140 @@ struct ClaudeTargets {
 #[derive(Debug)]
 struct CodexTargets {
     agents_path: PathBuf,
+}
+
+#[derive(Debug, Serialize)]
+struct HooksStatusReport {
+    git: HookSurfaceStatus,
+    claude: HookSurfaceStatus,
+    codex: HookSurfaceStatus,
+}
+
+#[derive(Debug, Serialize)]
+struct HookSurfaceStatus {
+    installed: bool,
+    managed_block_present: bool,
+    user_edited: bool,
+    path: String,
+    script_version: Option<String>,
+    min_version_floor: Option<String>,
+}
+
+fn build_hooks_status(root: &Path) -> HooksStatusReport {
+    HooksStatusReport {
+        git: git_hook_status(root),
+        claude: claude_hook_status(root),
+        codex: codex_hook_status(root),
+    }
+}
+
+fn git_hook_status(root: &Path) -> HookSurfaceStatus {
+    let candidates = [
+        root.join(".husky").join("pre-commit"),
+        root.join(".git").join("hooks").join("pre-commit"),
+    ];
+    let path = candidates
+        .iter()
+        .find(|path| path.exists())
+        .cloned()
+        .unwrap_or_else(|| root.join(".git").join("hooks").join("pre-commit"));
+    let raw = read_optional_text(&path).ok().flatten();
+    let managed = raw
+        .as_deref()
+        .is_some_and(|text| text.contains(crate::init::GIT_HOOK_MARKER));
+    HookSurfaceStatus {
+        installed: managed,
+        managed_block_present: managed,
+        user_edited: raw.is_some() && !managed,
+        path: display_rel(root, &path),
+        script_version: None,
+        min_version_floor: None,
+    }
+}
+
+fn claude_hook_status(root: &Path) -> HookSurfaceStatus {
+    let settings_path = root.join(".claude").join("settings.json");
+    let script_path = root.join(".claude").join("hooks").join("fallow-gate.sh");
+    let settings_has_handler = read_optional_text(&settings_path)
+        .ok()
+        .flatten()
+        .as_deref()
+        .is_some_and(settings_has_fallow_handler);
+    let script = read_optional_text(&script_path).ok().flatten();
+    let script_managed = script
+        .as_deref()
+        .is_some_and(|text| text.contains(HOOK_SCRIPT_MARKER));
+    HookSurfaceStatus {
+        installed: settings_has_handler && script_managed,
+        managed_block_present: settings_has_handler,
+        user_edited: script.is_some() && !script_managed,
+        path: display_rel(root, &script_path),
+        script_version: script.as_deref().and_then(extract_installer_version),
+        min_version_floor: script.as_deref().and_then(extract_min_version_floor),
+    }
+}
+
+fn codex_hook_status(root: &Path) -> HookSurfaceStatus {
+    let path = root.join("AGENTS.md");
+    let raw = read_optional_text(&path).ok().flatten();
+    let has_start = raw
+        .as_deref()
+        .is_some_and(|text| text.contains(AGENTS_BLOCK_START));
+    let has_end = raw
+        .as_deref()
+        .is_some_and(|text| text.contains(AGENTS_BLOCK_END));
+    let managed = has_start && has_end;
+    HookSurfaceStatus {
+        installed: managed,
+        managed_block_present: managed,
+        user_edited: raw.is_some() && has_start != has_end,
+        path: display_rel(root, &path),
+        script_version: None,
+        min_version_floor: None,
+    }
+}
+
+fn settings_has_fallow_handler(raw: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return false;
+    };
+    value
+        .get("hooks")
+        .and_then(|hooks| hooks.get("PreToolUse"))
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|group| group.get("hooks"))
+        .filter_map(serde_json::Value::as_array)
+        .flatten()
+        .any(is_fallow_handler)
+}
+
+fn extract_installer_version(script: &str) -> Option<String> {
+    script.lines().find_map(|line| {
+        line.trim()
+            .strip_prefix("# Installer version: ")
+            .map(ToOwned::to_owned)
+    })
+}
+
+fn extract_min_version_floor(script: &str) -> Option<String> {
+    script.lines().find_map(|line| {
+        line.trim()
+            .strip_prefix("MIN_VERSION=\"${FALLOW_GATE_MIN_VERSION-")
+            .and_then(|value| value.strip_suffix("}\""))
+            .map(ToOwned::to_owned)
+    })
+}
+
+fn describe_status(status: &HookSurfaceStatus) -> String {
+    if status.installed {
+        return format!("installed ({})", status.path);
+    }
+    if status.user_edited {
+        return format!("user-edited ({})", status.path);
+    }
+    "not installed".to_string()
 }
 
 impl Plan {
@@ -1347,6 +1503,59 @@ mod tests {
             "enforced floor must stay maintainer-bumped, not installer-pinned; \
              rendered script was:\n{rendered}"
         );
+    }
+
+    #[test]
+    fn rendered_script_marks_agent_gate_runs() {
+        let rendered = rendered_gate_script();
+        assert!(
+            rendered.contains("audit --format json --quiet --explain --gate-marker agent"),
+            "agent hook must pass --gate-marker agent so Impact containment can record blocked-then-cleared runs; rendered script was:\n{rendered}"
+        );
+    }
+
+    #[test]
+    fn hooks_status_reports_managed_surfaces() {
+        let tmp = tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git/hooks")).unwrap();
+        std::fs::write(
+            tmp.path().join(".git/hooks/pre-commit"),
+            format!(
+                "#!/bin/sh\n{}\nfallow audit --quiet --gate-marker pre-commit\n",
+                crate::init::GIT_HOOK_MARKER
+            ),
+        )
+        .unwrap();
+        let mut o = opts(tmp.path());
+        o.agent = Some(HookAgentArg::Claude);
+        assert_eq!(run_setup_hooks(&o), ExitCode::SUCCESS);
+        o.agent = Some(HookAgentArg::Codex);
+        assert_eq!(run_setup_hooks(&o), ExitCode::SUCCESS);
+
+        let status = build_hooks_status(tmp.path());
+        assert!(status.git.installed);
+        assert!(status.claude.installed);
+        assert!(status.codex.installed);
+        let json = serde_json::to_value(&status).unwrap();
+        assert!(json["git"]["script_version"].is_null());
+        assert!(json["codex"]["min_version_floor"].is_null());
+        assert_eq!(
+            status.claude.script_version.as_deref(),
+            Some(env!("CARGO_PKG_VERSION"))
+        );
+        assert_eq!(status.claude.min_version_floor.as_deref(), Some("2.46.0"));
+    }
+
+    #[test]
+    fn hooks_status_marks_user_edited_agent_script() {
+        let tmp = tempdir().unwrap();
+        let script_path = tmp.path().join(".claude/hooks/fallow-gate.sh");
+        std::fs::create_dir_all(script_path.parent().unwrap()).unwrap();
+        std::fs::write(&script_path, "#!/bin/sh\necho user\n").unwrap();
+
+        let status = build_hooks_status(tmp.path());
+        assert!(!status.claude.installed);
+        assert!(status.claude.user_edited);
     }
 
     #[cfg(unix)]

@@ -9944,6 +9944,10 @@
         "attribution_active": {
           "type": "boolean",
           "description": "Whether per-finding attribution has a baseline yet. False on a freshly\nupgraded v1 store (no frontier captured), which the renderer uses to show\n\"resolution tracking starts from your next run\" instead of a bare zero."
+        },
+        "onboarding_declined": {
+          "type": "boolean",
+          "description": "Whether the local agent onboarding prompt has been explicitly declined.\nStored under `.fallow/` so agents can avoid cross-session nags."
         }
       },
       "required": [
@@ -9955,7 +9959,8 @@
         "resolved_total",
         "suppressed_total",
         "recent_resolved",
-        "attribution_active"
+        "attribution_active",
+        "onboarding_declined"
       ],
       "title": "fallow impact --format json",
       "description": "The rendered impact report, derived purely from the store (no analysis run)."

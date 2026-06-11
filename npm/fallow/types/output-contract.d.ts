@@ -5205,6 +5205,11 @@ recent_resolved: ResolutionEvent[]
  * "resolution tracking starts from your next run" instead of a bare zero.
  */
 attribution_active: boolean
+/**
+ * Whether the local agent onboarding prompt has been explicitly declined.
+ * Stored under `.fallow/` so agents can avoid cross-session nags.
+ */
+onboarding_declined: boolean
 }
 /**
  * Per-category issue counts captured at a recorded run.
