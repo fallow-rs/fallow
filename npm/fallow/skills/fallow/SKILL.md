@@ -107,11 +107,11 @@ Run `fallow <command> --help` for the full flag list per command (see also refer
 | `unused-export` | `--unused-exports` | yes | `// fallow-ignore-next-line unused-export` | Symbols never imported elsewhere |
 | `unused-type` | `--unused-types` | - | `// fallow-ignore-next-line unused-type` | Type aliases and interfaces |
 | `private-type-leak` | `--private-type-leaks` | - | `// fallow-ignore-next-line private-type-leak` | Opt-in API hygiene check (default `off`) for exported signatures whose type references a same-file private type |
-| `unused-dependency` | `--unused-deps` | yes | - | Packages in `dependencies` never imported. In monorepos, internal workspace package names (e.g., `@repo/ui`) declared in another workspace's `package.json` but never imported are reported here too. `--unused-deps` also covers the dev/optional/type-only sibling rows below. |
+| `unused-dependency` | `--unused-deps` | yes | - | Packages in `dependencies` never imported. In monorepos, internal workspace package names (e.g., `@repo/ui`) declared in another workspace's `package.json` but never imported are reported here too. `--unused-deps` also covers the dev/optional/type-only/test-only sibling rows below. |
 | `unused-dev-dependency` | `--unused-deps` | yes | - | Packages in `devDependencies` never imported by test files, config files, or scripts |
 | `unused-optional-dependency` | `--unused-deps` | yes | - | Packages in `optionalDependencies` never imported (often platform-specific; verify before removing) |
 | `type-only-dependency` | `--unused-deps` | - | - | Production dependency only used via type-only imports; Only reported in --production mode; --unused-deps scopes it together with the other dependency kinds |
-| `test-only-dependency` | - | - | - | Production deps only imported from test files (should be devDependencies) |
+| `test-only-dependency` | `--unused-deps` | - | - | Production deps only imported from test files (should be devDependencies) |
 | `unused-enum-member` | `--unused-enum-members` | yes | `// fallow-ignore-next-line unused-enum-member` | Enum values never referenced |
 | `unused-class-member` | `--unused-class-members` | - | `// fallow-ignore-next-line unused-class-member` | Methods and properties |
 | `unresolved-import` | `--unresolved-imports` | - | `// fallow-ignore-next-line unresolved-import` | Imports that can't be resolved |

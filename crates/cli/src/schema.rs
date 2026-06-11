@@ -177,7 +177,7 @@ fn dead_code_issue_meta(bare_id: &str) -> IssueTypeMeta {
             m.filter_flag = Some("--unused-deps");
             m.fixable = true;
             m.note = Some(
-                "--unused-deps controls unused-dependency, unused-dev-dependency, unused-optional-dependency, and type-only-dependency",
+                "--unused-deps controls unused-dependency, unused-dev-dependency, unused-optional-dependency, type-only-dependency, and test-only-dependency",
             );
         }
         "type-only-dependency" => {
@@ -187,7 +187,10 @@ fn dead_code_issue_meta(bare_id: &str) -> IssueTypeMeta {
             );
         }
         "test-only-dependency" => {
-            m.note = Some("Not reported in --production mode (test files are excluded there)");
+            m.filter_flag = Some("--unused-deps");
+            m.note = Some(
+                "Not reported in --production mode (test files are excluded there); --unused-deps scopes it together with the other dependency kinds",
+            );
         }
         "unused-enum-member" => {
             m.filter_flag = Some("--unused-enum-members");

@@ -99,6 +99,7 @@ impl IssueFilters {
             results.unused_dev_dependencies.clear();
             results.unused_optional_dependencies.clear();
             results.type_only_dependencies.clear();
+            results.test_only_dependencies.clear();
         }
         if !self.unused_enum_members {
             results.unused_enum_members.clear();
@@ -769,6 +770,14 @@ mod tests {
                 line: 5,
                 used_in_workspaces: Vec::new(),
             }));
+        r.test_only_dependencies
+            .push(TestOnlyDependencyFinding::with_actions(
+                TestOnlyDependency {
+                    package_name: "msw".into(),
+                    path: PathBuf::from("/project/package.json"),
+                    line: 9,
+                },
+            ));
         r.unused_enum_members
             .push(UnusedEnumMemberFinding::with_actions(UnusedMember {
                 path: PathBuf::from("/project/src/d.ts"),
@@ -901,6 +910,7 @@ mod tests {
         assert!(results.unused_types.is_empty());
         assert!(results.unused_dependencies.is_empty());
         assert!(results.unused_dev_dependencies.is_empty());
+        assert!(results.test_only_dependencies.is_empty());
         assert!(results.unused_enum_members.is_empty());
         assert!(results.unused_class_members.is_empty());
         assert!(results.unresolved_imports.is_empty());
@@ -917,8 +927,28 @@ mod tests {
 
         assert_eq!(results.unused_dependencies.len(), 1);
         assert_eq!(results.unused_dev_dependencies.len(), 1);
+        assert_eq!(results.test_only_dependencies.len(), 1);
         assert!(results.unused_files.is_empty());
         assert!(results.unused_exports.is_empty());
+    }
+
+    #[test]
+    fn apply_single_type_filter_clears_test_only_dependencies() {
+        // Regression for #1192: a single-type filter that is not --unused-deps must clear
+        // test-only-dependency findings, matching every other dependency kind. Before the fix the
+        // --unused-deps clear arm omitted test_only_dependencies, so it leaked into the output of
+        // any single-type filter run (e.g. `fallow dead-code --unused-files`).
+        let mut results = make_results();
+        assert_eq!(results.test_only_dependencies.len(), 1);
+
+        let mut f = no_filters();
+        f.unused_files = true;
+        f.apply(&mut results);
+
+        assert!(
+            results.test_only_dependencies.is_empty(),
+            "test-only-dependency findings must be cleared when --unused-deps is not active"
+        );
     }
 
     #[test]

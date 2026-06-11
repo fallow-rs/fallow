@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Issue-type filter flags no longer leak `test-only-dependency` findings.** `IssueFilters::apply()` clears every category that was not selected by a single-type filter flag, but the `--unused-deps` clear arm was missing `test_only_dependencies`, so a focused run like `fallow dead-code --unused-files` on a project with a production dependency imported only from test files reported that test-only finding alongside the requested issue type. `--unused-deps` now groups `test-only-dependency` with the other dependency kinds (matching how `type-only-dependency` is handled and how the `--file` scope already cleared all five categories), and the `fallow schema` capability manifest reports `--unused-deps` as the filter flag for the `test-only-dependency` row. (Closes [#1192](https://github.com/fallow-rs/fallow/issues/1192).)
+
 - **The GitLab CI template now runs Bash-only setup blocks through Bash explicitly.** GitLab Runner jobs on Alpine can start `before_script` entries with `/bin/sh`, but the fallow template validated versions, prepared MR scripts, and wrote the analysis runner with Bash-specific syntax. Those blocks now invoke `bash -eo pipefail` explicitly after the dependency-install block installs Bash, so the template no longer depends on the runner's default shell. Thanks [@KudrinOleg](https://github.com/KudrinOleg) for the report. (Closes [#1182](https://github.com/fallow-rs/fallow/issues/1182).)
 
 ## [2.92.1] - 2026-06-10
