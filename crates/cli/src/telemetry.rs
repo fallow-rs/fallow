@@ -53,38 +53,6 @@ const AGENT_SOURCE_ENV: &str = "FALLOW_AGENT_SOURCE";
 const INTEGRATION_SURFACE_ENV: &str = "FALLOW_INTEGRATION_SURFACE";
 const MCP_TOOL_ENV: &str = "FALLOW_MCP_TOOL";
 
-/// Allowlist of MCP tool names accepted in the `mcp_tool` dimension. Anything
-/// outside this set is dropped (the field becomes absent) so a user-set or
-/// adversarial `FALLOW_MCP_TOOL` value can never inject a free-form string into
-/// the allowlisted payload. Kept in sync with the tools the MCP server exposes
-/// (see `crates/mcp/src/server/mod.rs`).
-const MCP_TOOLS: &[&str] = &[
-    "code_execute",
-    "analyze",
-    "check_changed",
-    "security_candidates",
-    "inspect_target",
-    "find_dupes",
-    "check_health",
-    "check_runtime_coverage",
-    "get_hot_paths",
-    "get_blast_radius",
-    "get_importance",
-    "get_cleanup_candidates",
-    "audit",
-    "fallow_explain",
-    "fix_preview",
-    "fix_apply",
-    "project_info",
-    "list_boundaries",
-    "feature_flags",
-    "impact",
-    "trace_export",
-    "trace_file",
-    "trace_dependency",
-    "trace_clone",
-];
-
 /// Process-wide accumulator for whether the analysis that ran this invocation
 /// actually surfaced any findings, independent of the exit-code gate.
 ///
@@ -1906,20 +1874,24 @@ fn parse_integration_surface_override(value: &str) -> Option<IntegrationSurface>
 }
 
 /// The MCP tool that triggered this run, when set via `FALLOW_MCP_TOOL` and
-/// present in the allowlist. Returns the `&'static str` from `MCP_TOOLS` (never
-/// the caller's string) so an off-allowlist or adversarial value is dropped to
-/// `None` rather than echoed into the payload.
+/// present in the shared manifest allowlist (never the caller's string), so
+/// an off-allowlist or adversarial value is dropped to `None` rather than
+/// echoed into the payload.
 fn mcp_tool() -> Option<&'static str> {
     mcp_tool_from_value(&std::env::var(MCP_TOOL_ENV).ok()?)
 }
 
 /// Resolve an `FALLOW_MCP_TOOL` value against the allowlist. Pure so it can be
-/// unit-tested without touching process env. Returns the `&'static str` from
-/// `MCP_TOOLS`, so an off-allowlist value drops to `None` and cannot be echoed
-/// into the payload.
+/// unit-tested without touching process env. The allowlist is the shared MCP
+/// tool manifest in `fallow_types::mcp_manifest` (kept in sync with the live
+/// server by a drift test in `crates/mcp`), so an off-allowlist or adversarial
+/// value drops to `None` and cannot inject a free-form string into the payload.
 fn mcp_tool_from_value(value: &str) -> Option<&'static str> {
     let value = value.trim();
-    MCP_TOOLS.iter().copied().find(|name| *name == value)
+    fallow_types::mcp_manifest::MCP_TOOLS
+        .iter()
+        .map(|tool| tool.name)
+        .find(|name| *name == value)
 }
 
 fn output_format_label(output: OutputFormat) -> &'static str {

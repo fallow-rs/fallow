@@ -1,8 +1,12 @@
 use std::process::ExitCode;
 
 use clap::CommandFactory;
+use fallow_types::mcp_manifest::MCP_TOOLS;
 
 use crate::Cli;
+use crate::explain::{
+    CHECK_RULES, DUPES_RULES, FLAGS_RULES, HEALTH_RULES, RuleDef, SECURITY_RULES, rule_docs_url,
+};
 
 pub fn run_schema() -> ExitCode {
     let cmd = Cli::command();
@@ -50,6 +54,7 @@ pub fn build_cli_schema(cmd: &clap::Command) -> serde_json::Value {
     serde_json::json!({
         "name": cmd.get_name(),
         "version": env!("CARGO_PKG_VERSION"),
+        "manifest_version": "1",
         "description": cmd.get_about().map(std::string::ToString::to_string),
         "global_flags": global_flags,
         "commands": commands,
@@ -68,116 +73,304 @@ pub fn build_cli_schema(cmd: &clap::Command) -> serde_json::Value {
             "2": "Error (invalid config, invalid input, etc.). When --format json is active, errors are emitted as structured JSON on stdout: {\"error\": true, \"message\": \"...\", \"exit_code\": 2}"
         },
         "environment_variables": environment_variables_schema(),
-        "severity_levels": ["error", "warn", "off"]
+        "severity_levels": ["error", "warn", "off"],
+        "mcp_tools": mcp_tools_schema(),
+        "plugins": plugins_schema(),
     })
 }
 
+/// Free/paid nuance attached to runtime-coverage capabilities.
+const RUNTIME_LICENSE_NOTE: &str = "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).";
+
+/// Per-issue-type metadata that cannot be derived from the explain rule
+/// registry: CLI filter flag, fixability, suppression-comment shape, and
+/// caveats. A rule without an arm in the per-command meta functions below
+/// gets safe defaults (no filter flag, not fixable, not suppressible);
+/// add an arm when a new rule has any of those capabilities.
+#[derive(Default)]
+struct IssueTypeMeta {
+    filter_flag: Option<&'static str>,
+    fixable: bool,
+    /// `(suppression token, file_level)` when comment-suppressible. The
+    /// token MUST round-trip through `IssueKind::parse`; a test below
+    /// enforces it so agents never copy a no-op suppression comment.
+    suppress: Option<(&'static str, bool)>,
+    note: Option<&'static str>,
+    freemium: bool,
+}
+
 fn issue_types_schema() -> serde_json::Value {
-    serde_json::json!([
-            {
-                "id": "unused-file",
-                "description": "File is not reachable from any entry point",
-                "filter_flag": "--unused-files",
-                "fixable": false,
-                "suppressible": true,
-                "suppress_comment": "// fallow-ignore-file unused-file"
-            },
-            {
-                "id": "unused-export",
-                "description": "Export is never imported by other modules",
-                "filter_flag": "--unused-exports",
-                "fixable": true,
-                "suppressible": true,
-                "suppress_comment": "// fallow-ignore-next-line unused-export"
-            },
-            {
-                "id": "unused-type",
-                "description": "Type export is never imported by other modules",
-                "filter_flag": "--unused-types",
-                "fixable": false,
-                "suppressible": true,
-                "suppress_comment": "// fallow-ignore-next-line unused-type"
-            },
-            {
-                "id": "private-type-leak",
-                "description": "Exported signature references a same-file private type",
-                "filter_flag": "--private-type-leaks",
-                "fixable": false,
-                "suppressible": true,
-                "suppress_comment": "// fallow-ignore-next-line private-type-leak"
-            },
-            {
-                "id": "unused-dependency",
-                "description": "Package in dependencies is never imported",
-                "filter_flag": "--unused-deps",
-                "fixable": true,
-                "suppressible": false,
-                "note": "--unused-deps controls both unused-dependency and unused-dev-dependency"
-            },
-            {
-                "id": "unused-dev-dependency",
-                "description": "Package in devDependencies is never imported",
-                "filter_flag": "--unused-deps",
-                "fixable": true,
-                "suppressible": false,
-                "note": "--unused-deps controls both unused-dependency and unused-dev-dependency"
-            },
-            {
-                "id": "unused-enum-member",
-                "description": "Enum member is never referenced",
-                "filter_flag": "--unused-enum-members",
-                "fixable": true,
-                "suppressible": true,
-                "suppress_comment": "// fallow-ignore-next-line unused-enum-member"
-            },
-            {
-                "id": "unused-class-member",
-                "description": "Class member is never referenced",
-                "filter_flag": "--unused-class-members",
-                "fixable": false,
-                "suppressible": true,
-                "suppress_comment": "// fallow-ignore-next-line unused-class-member"
-            },
-            {
-                "id": "unresolved-import",
-                "description": "Import specifier could not be resolved to a file",
-                "filter_flag": "--unresolved-imports",
-                "fixable": false,
-                "suppressible": true,
-                "suppress_comment": "// fallow-ignore-next-line unresolved-import"
-            },
-            {
-                "id": "unlisted-dependency",
-                "description": "Package is imported but not in package.json",
-                "filter_flag": "--unlisted-deps",
-                "fixable": false,
-                "suppressible": false
-            },
-            {
-                "id": "duplicate-export",
-                "description": "Same export name appears in multiple modules",
-                "filter_flag": "--duplicate-exports",
-                "fixable": false,
-                "suppressible": true,
-                "suppress_comment": "// fallow-ignore-file duplicate-export"
-            },
-            {
-                "id": "type-only-dependency",
-                "description": "Production dependency only used via import type (should be devDependency)",
-                "filter_flag": null,
-                "fixable": false,
-                "suppressible": false,
-                "note": "Only reported in --production mode"
-            },
-            {
-                "id": "circular-dependency",
-                "description": "Files form a circular import chain",
-                "filter_flag": "--circular-deps",
-                "fixable": false,
-                "suppressible": true,
-                "suppress_comment": "// fallow-ignore-next-line circular-dependency"
-            }
-    ])
+    let mut rows = Vec::new();
+    for rule in CHECK_RULES {
+        rows.push(issue_type_row(rule, "dead-code"));
+    }
+    for rule in HEALTH_RULES {
+        rows.push(issue_type_row(rule, "health"));
+    }
+    for rule in DUPES_RULES {
+        rows.push(issue_type_row(rule, "dupes"));
+    }
+    for rule in FLAGS_RULES {
+        rows.push(issue_type_row(rule, "flags"));
+    }
+    for rule in SECURITY_RULES {
+        rows.push(issue_type_row(rule, "security"));
+    }
+    serde_json::Value::Array(rows)
+}
+
+fn issue_type_row(rule: &RuleDef, command: &str) -> serde_json::Value {
+    let bare_id = rule.id.split_once('/').map_or(rule.id, |(_, bare)| bare);
+    let meta = issue_type_meta(bare_id, command);
+    let suppress_comment = meta.suppress.map(|(token, file_level)| {
+        if file_level {
+            format!("// fallow-ignore-file {token}")
+        } else {
+            format!("// fallow-ignore-next-line {token}")
+        }
+    });
+    serde_json::json!({
+        "id": bare_id,
+        "rule_id": rule.id,
+        "command": command,
+        "category": rule.category,
+        "description": rule.short,
+        "filter_flag": meta.filter_flag,
+        "fixable": meta.fixable,
+        "suppressible": meta.suppress.is_some(),
+        "suppress_comment": suppress_comment,
+        "note": meta.note,
+        "license": if meta.freemium { "freemium" } else { "free" },
+        "license_note": meta.freemium.then_some(RUNTIME_LICENSE_NOTE),
+        "docs_url": rule_docs_url(rule),
+    })
+}
+
+fn issue_type_meta(bare_id: &str, command: &str) -> IssueTypeMeta {
+    match command {
+        "dead-code" => dead_code_issue_meta(bare_id),
+        "health" => health_issue_meta(bare_id),
+        "security" => security_issue_meta(bare_id),
+        _ => standalone_issue_meta(bare_id),
+    }
+}
+
+fn dead_code_issue_meta(bare_id: &str) -> IssueTypeMeta {
+    let mut m = IssueTypeMeta::default();
+    match bare_id {
+        "unused-file" => {
+            m.filter_flag = Some("--unused-files");
+            m.suppress = Some(("unused-file", true));
+        }
+        "unused-export" => {
+            m.filter_flag = Some("--unused-exports");
+            m.fixable = true;
+            m.suppress = Some(("unused-export", false));
+        }
+        "unused-type" => {
+            m.filter_flag = Some("--unused-types");
+            m.suppress = Some(("unused-type", false));
+        }
+        "private-type-leak" => {
+            m.filter_flag = Some("--private-type-leaks");
+            m.suppress = Some(("private-type-leak", false));
+            m.note = Some("Opt-in API hygiene check; the rule defaults to off");
+        }
+        "unused-dependency" | "unused-dev-dependency" | "unused-optional-dependency" => {
+            m.filter_flag = Some("--unused-deps");
+            m.fixable = true;
+            m.note = Some(
+                "--unused-deps controls unused-dependency, unused-dev-dependency, unused-optional-dependency, and type-only-dependency",
+            );
+        }
+        "type-only-dependency" => {
+            m.note = Some("Only reported in --production mode");
+        }
+        "test-only-dependency" => {
+            m.note = Some("Not reported in --production mode (test files are excluded there)");
+        }
+        "unused-enum-member" => {
+            m.filter_flag = Some("--unused-enum-members");
+            m.fixable = true;
+            m.suppress = Some(("unused-enum-member", false));
+        }
+        "unused-class-member" => {
+            m.filter_flag = Some("--unused-class-members");
+            m.suppress = Some(("unused-class-member", false));
+        }
+        "unresolved-import" => {
+            m.filter_flag = Some("--unresolved-imports");
+            m.suppress = Some(("unresolved-import", false));
+        }
+        "unlisted-dependency" => {
+            m.filter_flag = Some("--unlisted-deps");
+        }
+        "duplicate-export" => {
+            m.filter_flag = Some("--duplicate-exports");
+            m.suppress = Some(("duplicate-export", true));
+            m.note = Some(
+                "fallow fix can add an ignoreExports rule to the fallow config instead of editing source",
+            );
+        }
+        "circular-dependency" => {
+            m.filter_flag = Some("--circular-deps");
+            m.suppress = Some(("circular-dependency", false));
+        }
+        "re-export-cycle" => {
+            m.filter_flag = Some("--re-export-cycles");
+            m.suppress = Some(("re-export-cycle", true));
+        }
+        "boundary-violation" => {
+            m.filter_flag = Some("--boundary-violations");
+            m.suppress = Some(("boundary-violation", false));
+            m.note = Some("Requires configured boundary zones (boundaries config)");
+        }
+        "boundary-coverage" => {
+            m.suppress = Some(("boundary-violation", true));
+            m.note = Some("Requires boundaries.coverage.requireAllFiles");
+        }
+        "boundary-call-violation" => {
+            m.suppress = Some(("boundary-call-violation", false));
+            m.note = Some("Requires boundaries.calls.forbidden patterns");
+        }
+        "policy-violation" => {
+            m.filter_flag = Some("--policy-violations");
+            m.suppress = Some(("policy-violation", false));
+            m.note = Some("Requires a configured rule pack (rulePacks config)");
+        }
+        "stale-suppression" => {
+            m.filter_flag = Some("--stale-suppressions");
+            m.note = Some("Fix by removing the stale suppression marker itself");
+        }
+        "unused-catalog-entry" => {
+            m.filter_flag = Some("--unused-catalog-entries");
+            m.fixable = true;
+        }
+        "empty-catalog-group" => {
+            m.filter_flag = Some("--empty-catalog-groups");
+        }
+        "unresolved-catalog-reference" => {
+            m.filter_flag = Some("--unresolved-catalog-references");
+        }
+        "unused-dependency-override" => {
+            m.filter_flag = Some("--unused-dependency-overrides");
+        }
+        "misconfigured-dependency-override" => {
+            m.filter_flag = Some("--misconfigured-dependency-overrides");
+        }
+        _ => {}
+    }
+    m
+}
+
+fn health_issue_meta(bare_id: &str) -> IssueTypeMeta {
+    let mut m = IssueTypeMeta::default();
+    match bare_id {
+        "high-cyclomatic-complexity"
+        | "high-cognitive-complexity"
+        | "high-complexity"
+        | "high-crap-score" => {
+            m.filter_flag = Some("--complexity");
+            m.suppress = Some(("complexity", false));
+        }
+        "refactoring-target" => {
+            m.filter_flag = Some("--targets");
+        }
+        "untested-file" | "untested-export" => {
+            m.filter_flag = Some("--coverage-gaps");
+            m.suppress = Some(("coverage-gaps", true));
+        }
+        "runtime-safe-to-delete"
+        | "runtime-review-required"
+        | "runtime-low-traffic"
+        | "runtime-coverage-unavailable"
+        | "runtime-coverage" => {
+            m.freemium = true;
+            m.note =
+                Some("Requires --runtime-coverage input (V8 directory, V8 JSON, or Istanbul map)");
+        }
+        "coverage-intelligence-risky-change"
+        | "coverage-intelligence-delete"
+        | "coverage-intelligence-review"
+        | "coverage-intelligence-refactor" => {
+            m.freemium = true;
+            m.note = Some("Produced by fallow coverage analyze");
+        }
+        _ => {}
+    }
+    m
+}
+
+fn standalone_issue_meta(bare_id: &str) -> IssueTypeMeta {
+    let mut m = IssueTypeMeta::default();
+    match bare_id {
+        "code-duplication" => {
+            m.suppress = Some(("code-duplication", false));
+            m.note = Some("Reported by fallow dupes (and bare fallow / fallow audit)");
+        }
+        "feature-flag" => {
+            m.suppress = Some(("feature-flag", false));
+            m.note = Some("Reported by fallow flags");
+        }
+        _ => {}
+    }
+    m
+}
+
+fn security_issue_meta(bare_id: &str) -> IssueTypeMeta {
+    let mut m = IssueTypeMeta::default();
+    match bare_id {
+        "client-server-leak" => {
+            m.suppress = Some(("security-client-server-leak", true));
+        }
+        "hardcoded-secret" => {
+            m.suppress = Some(("security-sink", false));
+            m.note = Some("Include-required category: enable via security.categories.include");
+        }
+        "tainted-sink" => {
+            m.suppress = Some(("security-sink", false));
+        }
+        // Every other id is a tainted-sink catalogue category; ONE
+        // suppression token (security-sink) covers them all.
+        _ => {
+            m.suppress = Some(("security-sink", false));
+            m.note = Some(
+                "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+            );
+        }
+    }
+    m
+}
+
+fn mcp_tools_schema() -> serde_json::Value {
+    let tools: Vec<serde_json::Value> = MCP_TOOLS
+        .iter()
+        .map(|tool| {
+            serde_json::json!({
+                "name": tool.name,
+                "kind": tool.kind,
+                "description": tool.description,
+                "key_params": tool.key_params,
+                "license": tool.license.as_str(),
+                "license_note": tool.license_note,
+                "read_only": tool.read_only,
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "server": "fallow-mcp",
+        "note": "key_params is a curated subset; the live MCP input schemas (list_tools) are authoritative for the full parameter list",
+        "tools": tools,
+    })
+}
+
+fn plugins_schema() -> serde_json::Value {
+    let names = fallow_core::plugins::registry::builtin_plugin_names();
+    serde_json::json!({
+        "count": names.len(),
+        "note": "Built-in framework plugins, auto-activated when their enabler dependency is present; run fallow list --plugins for the set active in a specific project",
+        "names": names,
+    })
 }
 
 fn environment_variables_schema() -> serde_json::Value {
@@ -190,7 +383,31 @@ fn environment_variables_schema() -> serde_json::Value {
         "FALLOW_PRODUCTION_DUPES": "Set to true/false to override production mode for duplication analysis.",
         "FALLOW_REVIEW_GUIDANCE": "Set to true to append collapsed guidance blocks to review-github/review-gitlab inline comment bodies.",
         "FALLOW_CACHE_DIR": "Directory for fallow's persistent analysis cache. Relative paths resolve from the project root and override cache.dir.",
-        "FALLOW_BIN": "Path to fallow binary (used by fallow-mcp server)."
+        "FALLOW_CACHE_MAX_SIZE": "Extraction cache size cap in megabytes (default 256). Wins over the cache.maxSizeMb config field.",
+        "FALLOW_COVERAGE": "Path to Istanbul coverage data (coverage-final.json) for accurate per-function CRAP scores. CLI --coverage flag overrides this.",
+        "FALLOW_MAX_FILE_SIZE": "Per-file size ceiling in megabytes for source discovery (default 5; 0 = no limit). CLI --max-file-size flag overrides this.",
+        "FALLOW_AUDIT_BASE": "Pins the fallow audit comparison base ref when no --base/--changed-since is passed (e.g. upstream/main).",
+        "FALLOW_AUDIT_CACHE_MAX_AGE_DAYS": "GC threshold in days for reusable audit base-snapshot caches (default 30; 0 disables the sweep).",
+        "FALLOW_ROOT": "Project root used by the review-github/review-gitlab renderers to read source for suggestion blocks. Set it alongside --root when rendering review formats outside the bundled CI integrations.",
+        "FALLOW_LICENSE": "License JWT (full string) for the paid runtime intelligence layer; intended for shared CI runners.",
+        "FALLOW_LICENSE_PATH": "File path containing the license JWT.",
+        "FALLOW_LICENSE_SKEW_TOLERANCE_SECONDS": "Clock-skew tolerance applied to the license JWT's iat claim (default 86400).",
+        "FALLOW_COV_BIN": "Explicit path override for the fallow-cov runtime-coverage sidecar binary.",
+        "FALLOW_API_URL": "Base URL override for fallow cloud API calls (license refresh, trial, coverage uploads).",
+        "FALLOW_API_KEY": "fallow cloud bearer token for coverage upload commands.",
+        "FALLOW_CA_BUNDLE": "Path to a PEM certificate bundle for fallow cloud and provider HTTP calls (replaces the default WebPKI roots).",
+        "FALLOW_UPDATE_CHECK": "Set to off/0/false to disable the human-TTY upgrade nudge and its background version check.",
+        "FALLOW_TELEMETRY": "Opt-in telemetry mode: off, on, or inspect (print the payload to stderr without sending). Telemetry is off by default.",
+        "FALLOW_TELEMETRY_DISABLED": "Admin/fleet kill switch: truthy values hard-disable telemetry and refuse fallow telemetry enable.",
+        "FALLOW_TELEMETRY_DEBUG": "Truthy values alias FALLOW_TELEMETRY=inspect.",
+        "FALLOW_AGENT_SOURCE": "Normalized agent vendor for telemetry classification (e.g. claude_code, codex, cursor). Only read when telemetry is on.",
+        "DO_NOT_TRACK": "Honored as a top-precedence telemetry kill switch (consoledonottrack.com convention).",
+        "FALLOW_BIN": "Path to the fallow binary (used by the fallow-mcp server to spawn the CLI).",
+        "FALLOW_TIMEOUT_SECS": "MCP server: per-tool-call CLI subprocess timeout in seconds (default 120). Raise for long runs like production coverage on large dumps.",
+        "FALLOW_DIFF_FILE": "MCP server: path to a unified diff that scopes all findings by changed line.",
+        "FALLOW_CHANGED_SINCE": "MCP server: git ref that scopes file discovery for analysis tools.",
+        "FALLOW_INTEGRATION_SURFACE": "Telemetry integration_surface override for non-CLI surfaces (mcp/lsp/vscode/napi/programmatic). Set by the MCP server on the CLI it spawns.",
+        "FALLOW_MCP_TOOL": "Telemetry mcp_tool dimension, validated against the MCP tool-name allowlist. Set by the MCP server alongside FALLOW_INTEGRATION_SURFACE=mcp."
     })
 }
 
@@ -235,39 +452,115 @@ fn build_arg_schema(arg: &clap::Arg) -> serde_json::Value {
 
 #[cfg(test)]
 mod tests {
+    use fallow_types::suppress::{DEAD_CODE_FILTER_FLAGS, IssueKind, KNOWN_ISSUE_KIND_NAMES};
+    use rustc_hash::FxHashSet;
+
     use super::*;
+
+    fn schema() -> serde_json::Value {
+        let cmd = Cli::command();
+        build_cli_schema(&cmd)
+    }
+
+    /// Collect every `--long` flag of a subcommand from live clap state.
+    fn subcommand_flags(name: &str) -> FxHashSet<String> {
+        let cmd = Cli::command();
+        let sub = cmd
+            .get_subcommands()
+            .find(|s| s.get_name() == name)
+            .unwrap_or_else(|| panic!("no subcommand named {name}"));
+        sub.get_arguments()
+            .filter_map(|a| a.get_long().map(|l| format!("--{l}")))
+            .collect()
+    }
 
     #[test]
     fn schema_includes_environment_variables() {
-        let cmd = Cli::command();
-        let schema = build_cli_schema(&cmd);
+        let schema = schema();
         let env_vars = &schema["environment_variables"];
         assert!(env_vars["FALLOW_FORMAT"].is_string());
         assert!(env_vars["FALLOW_QUIET"].is_string());
         assert!(env_vars["FALLOW_CACHE_DIR"].is_string());
         assert!(env_vars["FALLOW_BIN"].is_string());
+        assert!(env_vars["FALLOW_CACHE_MAX_SIZE"].is_string());
+        assert!(env_vars["FALLOW_TELEMETRY"].is_string());
+        assert!(env_vars["FALLOW_AUDIT_BASE"].is_string());
+        assert!(env_vars["FALLOW_TIMEOUT_SECS"].is_string());
+        assert!(env_vars["DO_NOT_TRACK"].is_string());
+    }
+
+    /// Internal plumbing vars must NOT leak into the agent-facing manifest.
+    /// Each excluded var carries the reason it stays internal.
+    #[test]
+    fn environment_variables_exclude_internal_plumbing() {
+        const EXCLUDED: &[(&str, &str)] = &[
+            ("FALLOW_TEST_SIGNAL_HELPER", "test harness only"),
+            ("FALLOW_STUB_MODE", "test harness only"),
+            (
+                "FALLOW_RAYON_STACK_PROBE_CHILD",
+                "internal child-process marker",
+            ),
+            (
+                "FALLOW_PROGRAMMATIC_SHARED_DIFF_CHILD",
+                "internal child-process marker",
+            ),
+            (
+                "FALLOW_GITLAB_BASE_SHA",
+                "set by the bundled GitLab CI template, not user-configured",
+            ),
+            (
+                "FALLOW_GITLAB_START_SHA",
+                "set by the bundled GitLab CI template, not user-configured",
+            ),
+            (
+                "FALLOW_GITLAB_HEAD_SHA",
+                "set by the bundled GitLab CI template, not user-configured",
+            ),
+            (
+                "FALLOW_COMMENT_ID",
+                "set by the bundled Action/CI scripts, not user-configured",
+            ),
+            (
+                "FALLOW_MAX_COMMENTS",
+                "set by the bundled Action/CI scripts, not user-configured",
+            ),
+            (
+                "FALLOW_DIFF_FILTER",
+                "set by the bundled Action/CI scripts, not user-configured",
+            ),
+        ];
+        let schema = schema();
+        let env_vars = env_var_map(&schema);
+        for (var, reason) in EXCLUDED {
+            assert!(
+                !env_vars.contains_key(*var),
+                "{var} is internal plumbing ({reason}) and must not be documented in the manifest"
+            );
+        }
+    }
+
+    fn env_var_map(schema: &serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
+        schema["environment_variables"].as_object().unwrap().clone()
     }
 
     #[test]
     fn schema_exit_code_2_mentions_json_errors() {
-        let cmd = Cli::command();
-        let schema = build_cli_schema(&cmd);
+        let schema = schema();
         let exit_2 = schema["exit_codes"]["2"].as_str().unwrap();
         assert!(exit_2.contains("JSON"));
     }
 
     #[test]
     fn schema_has_name_and_version() {
-        let cmd = Cli::command();
-        let schema = build_cli_schema(&cmd);
+        let schema = schema();
         assert_eq!(schema["name"], "fallow");
         assert!(schema["version"].is_string());
+        assert_eq!(schema["manifest_version"], "1");
     }
 
     #[test]
     fn schema_has_commands_array() {
-        let cmd = Cli::command();
-        let schema = build_cli_schema(&cmd);
+        let schema = schema();
         let commands = schema["commands"].as_array().unwrap();
         assert!(!commands.is_empty());
         assert!(
@@ -279,8 +572,7 @@ mod tests {
 
     #[test]
     fn schema_has_global_flags() {
-        let cmd = Cli::command();
-        let schema = build_cli_schema(&cmd);
+        let schema = schema();
         let flags = schema["global_flags"].as_array().unwrap();
         assert!(!flags.iter().any(|f| f["name"].as_str().unwrap() == "help"));
         assert!(
@@ -292,8 +584,7 @@ mod tests {
 
     #[test]
     fn schema_has_issue_types() {
-        let cmd = Cli::command();
-        let schema = build_cli_schema(&cmd);
+        let schema = schema();
         let issue_types = schema["issue_types"].as_array().unwrap();
         assert!(!issue_types.is_empty());
         for issue_type in issue_types {
@@ -302,10 +593,238 @@ mod tests {
         }
     }
 
+    /// Row-source completeness: every rule in every explain slice gets
+    /// exactly one issue_types row, so the manifest cannot drift behind
+    /// the rule registry again.
+    #[test]
+    fn issue_types_cover_every_explain_rule() {
+        let schema = schema();
+        let rows = schema["issue_types"].as_array().unwrap();
+        let expected = CHECK_RULES.len()
+            + HEALTH_RULES.len()
+            + DUPES_RULES.len()
+            + FLAGS_RULES.len()
+            + SECURITY_RULES.len();
+        assert_eq!(rows.len(), expected, "one issue_types row per explain rule");
+
+        let row_rule_ids: FxHashSet<&str> = rows
+            .iter()
+            .map(|r| r["rule_id"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            row_rule_ids.len(),
+            rows.len(),
+            "duplicate rule_id in issue_types"
+        );
+        for rule in CHECK_RULES
+            .iter()
+            .chain(HEALTH_RULES)
+            .chain(DUPES_RULES)
+            .chain(FLAGS_RULES)
+            .chain(SECURITY_RULES)
+        {
+            assert!(
+                row_rule_ids.contains(rule.id),
+                "explain rule {} has no issue_types row",
+                rule.id
+            );
+        }
+    }
+
+    /// Subset cross-check (NOT a bijection): every suppressible/filterable
+    /// `IssueKind` must be represented by at least one row, either via its
+    /// own id or via a suppression-comment token. Complexity is one kind
+    /// covered by several rule rows; that is expected.
+    #[test]
+    fn every_issue_kind_is_covered_by_a_row() {
+        let schema = schema();
+        let rows = schema["issue_types"].as_array().unwrap();
+
+        let mut covered: FxHashSet<u8> = FxHashSet::default();
+        for row in rows {
+            if let Some(kind) = IssueKind::parse(row["id"].as_str().unwrap()) {
+                covered.insert(kind.to_discriminant());
+            }
+            if let Some(comment) = row["suppress_comment"].as_str() {
+                let token = comment.split_whitespace().last().unwrap();
+                if let Some(kind) = IssueKind::parse(token) {
+                    covered.insert(kind.to_discriminant());
+                }
+            }
+        }
+
+        for name in KNOWN_ISSUE_KIND_NAMES {
+            let kind = IssueKind::parse(name).unwrap();
+            assert!(
+                covered.contains(&kind.to_discriminant()),
+                "IssueKind for token '{name}' has no issue_types row (neither id nor suppress token)"
+            );
+        }
+    }
+
+    /// The highest-value guard: every emitted suppress_comment must carry a
+    /// token `IssueKind::parse` accepts, otherwise agents copy a silent
+    /// no-op suppression.
+    #[test]
+    fn suppress_comments_round_trip_through_issue_kind_parse() {
+        let schema = schema();
+        for row in schema["issue_types"].as_array().unwrap() {
+            let suppressible = row["suppressible"].as_bool().unwrap();
+            let comment = &row["suppress_comment"];
+            assert_eq!(
+                comment.is_string(),
+                suppressible,
+                "suppress_comment must be a string iff suppressible ({})",
+                row["id"]
+            );
+            if let Some(comment) = comment.as_str() {
+                assert!(
+                    comment.starts_with("// fallow-ignore-next-line ")
+                        || comment.starts_with("// fallow-ignore-file "),
+                    "unexpected suppress_comment shape: {comment}"
+                );
+                let token = comment.split_whitespace().last().unwrap();
+                assert!(
+                    IssueKind::parse(token).is_some(),
+                    "suppress_comment token '{token}' on row {} does not parse; agents would copy a no-op suppression",
+                    row["id"]
+                );
+            }
+        }
+    }
+
+    /// Nullable fields are ALWAYS present (null when not applicable), so
+    /// consumers never face absent-vs-null ambiguity.
+    #[test]
+    fn issue_type_nullable_fields_are_always_present() {
+        let schema = schema();
+        for row in schema["issue_types"].as_array().unwrap() {
+            let obj = row.as_object().unwrap();
+            for key in [
+                "filter_flag",
+                "suppress_comment",
+                "note",
+                "license_note",
+                "rule_id",
+                "command",
+                "category",
+                "fixable",
+                "suppressible",
+                "license",
+                "docs_url",
+            ] {
+                assert!(
+                    obj.contains_key(key),
+                    "row {} is missing key {key}",
+                    row["id"]
+                );
+            }
+        }
+    }
+
+    /// Filter flags in the manifest must exist on the live clap command,
+    /// and the shared dead-code filter-flag list must be fully represented.
+    #[test]
+    fn filter_flags_exist_on_live_clap_commands() {
+        let schema = schema();
+        let rows = schema["issue_types"].as_array().unwrap();
+        let dead_code_flags = subcommand_flags("dead-code");
+        let health_flags = subcommand_flags("health");
+
+        let mut seen_dead_code_filters: FxHashSet<&str> = FxHashSet::default();
+        for row in rows {
+            let Some(flag) = row["filter_flag"].as_str() else {
+                continue;
+            };
+            match row["command"].as_str().unwrap() {
+                "dead-code" => {
+                    assert!(
+                        DEAD_CODE_FILTER_FLAGS.contains(&flag),
+                        "row {} filter_flag {flag} is not in the shared DEAD_CODE_FILTER_FLAGS list",
+                        row["id"]
+                    );
+                    assert!(
+                        dead_code_flags.contains(flag),
+                        "row {} filter_flag {flag} does not exist on the dead-code subcommand",
+                        row["id"]
+                    );
+                    seen_dead_code_filters
+                        .insert(DEAD_CODE_FILTER_FLAGS.iter().find(|f| **f == flag).unwrap());
+                }
+                "health" => {
+                    assert!(
+                        health_flags.contains(flag),
+                        "row {} filter_flag {flag} does not exist on the health subcommand",
+                        row["id"]
+                    );
+                }
+                other => panic!("unexpected filter_flag on command {other}"),
+            }
+        }
+        for flag in DEAD_CODE_FILTER_FLAGS {
+            assert!(
+                seen_dead_code_filters.contains(flag),
+                "shared filter flag {flag} is not represented by any issue_types row"
+            );
+        }
+    }
+
+    #[test]
+    fn mcp_tools_block_lists_every_manifest_tool() {
+        let schema = schema();
+        let block = &schema["mcp_tools"];
+        assert_eq!(block["server"], "fallow-mcp");
+        let tools = block["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), MCP_TOOLS.len());
+        for tool in tools {
+            let obj = tool.as_object().unwrap();
+            for key in [
+                "name",
+                "kind",
+                "description",
+                "key_params",
+                "license",
+                "license_note",
+                "read_only",
+            ] {
+                assert!(
+                    obj.contains_key(key),
+                    "mcp tool {} missing key {key}",
+                    tool["name"]
+                );
+            }
+            if tool["license"] == "freemium" {
+                assert!(
+                    tool["license_note"].is_string(),
+                    "freemium tool {} must carry a license_note",
+                    tool["name"]
+                );
+            }
+        }
+        let code_execute = tools
+            .iter()
+            .find(|t| t["name"] == "code_execute")
+            .expect("code_execute in mcp_tools");
+        assert_eq!(code_execute["kind"], "composition");
+    }
+
+    #[test]
+    fn plugins_block_reflects_live_registry() {
+        let schema = schema();
+        let block = &schema["plugins"];
+        let names = block["names"].as_array().unwrap();
+        let count = usize::try_from(block["count"].as_u64().unwrap()).unwrap();
+        assert_eq!(names.len(), count);
+        assert_eq!(
+            count,
+            fallow_core::plugins::registry::builtin_plugin_names().len()
+        );
+        assert!(count >= 110, "plugin registry shrank unexpectedly");
+    }
+
     #[test]
     fn schema_output_formats_include_all_formats() {
-        let cmd = Cli::command();
-        let schema = build_cli_schema(&cmd);
+        let schema = schema();
         let formats = schema["output_formats"].as_array().unwrap();
         for expected in [
             "human",
@@ -330,8 +849,7 @@ mod tests {
 
     #[test]
     fn schema_severity_levels() {
-        let cmd = Cli::command();
-        let schema = build_cli_schema(&cmd);
+        let schema = schema();
         let levels = schema["severity_levels"].as_array().unwrap();
         for expected in ["error", "warn", "off"] {
             assert!(

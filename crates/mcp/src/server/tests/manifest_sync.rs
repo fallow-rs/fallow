@@ -45,9 +45,7 @@ fn manifest_key_params_exist_on_live_input_schemas() {
             .input_schema
             .get("properties")
             .and_then(serde_json::Value::as_object)
-            .unwrap_or_else(|| {
-                panic!("tool {} input schema has no properties object", entry.name)
-            });
+            .unwrap_or_else(|| panic!("tool {} input schema has no properties object", entry.name));
         for param in entry.key_params {
             assert!(
                 properties.contains_key(*param),

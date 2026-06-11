@@ -75,7 +75,14 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         name: "analyze",
         kind: "analysis",
         description: "Full dead-code analysis: unused files, exports, types, dependencies, circular dependencies, and boundary violations",
-        key_params: &["issue_types", "production", "workspace", "baseline", "group_by", "file"],
+        key_params: &[
+            "issue_types",
+            "production",
+            "workspace",
+            "baseline",
+            "group_by",
+            "file",
+        ],
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
@@ -120,7 +127,16 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         name: "check_health",
         kind: "analysis",
         description: "Complexity metrics, health score, hotspots, ownership, refactoring targets, and coverage gaps",
-        key_params: &["score", "file_scores", "hotspots", "targets", "coverage", "runtime_coverage", "max_crap", "group_by"],
+        key_params: &[
+            "score",
+            "file_scores",
+            "hotspots",
+            "targets",
+            "coverage",
+            "runtime_coverage",
+            "max_crap",
+            "group_by",
+        ],
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
@@ -129,7 +145,13 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         name: "check_runtime_coverage",
         kind: "runtime-coverage",
         description: "Merge V8 or Istanbul runtime coverage into the health report (hot paths, cold paths, verdicts)",
-        key_params: &["coverage", "min_invocations_hot", "min_observation_volume", "low_traffic_threshold", "group_by"],
+        key_params: &[
+            "coverage",
+            "min_invocations_hot",
+            "min_observation_volume",
+            "low_traffic_threshold",
+            "group_by",
+        ],
         license: McpToolLicense::Freemium,
         license_note: Some(RUNTIME_COVERAGE_LICENSE_NOTE),
         read_only: true,
@@ -360,7 +382,11 @@ mod tests {
     #[test]
     fn descriptions_are_single_line_and_non_empty() {
         for tool in MCP_TOOLS {
-            assert!(!tool.description.is_empty(), "{} has empty description", tool.name);
+            assert!(
+                !tool.description.is_empty(),
+                "{} has empty description",
+                tool.name
+            );
             assert!(
                 !tool.description.contains('\n'),
                 "{} description must be one line",

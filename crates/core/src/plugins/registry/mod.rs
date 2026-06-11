@@ -15,6 +15,18 @@ use super::{PathRule, Plugin, PluginUsedExportRule, ProvidedDependencyRule};
 pub(crate) mod builtin;
 mod helpers;
 
+/// Names of every built-in framework plugin, in registry order.
+///
+/// Derived live from the plugin registry so capability introspection
+/// (`fallow schema`) can list plugins without a hand-maintained mirror.
+#[must_use]
+pub fn builtin_plugin_names() -> Vec<&'static str> {
+    builtin::create_builtin_plugins()
+        .iter()
+        .map(|plugin| plugin.name())
+        .collect()
+}
+
 use helpers::{
     check_has_config_file, discover_config_files, is_external_plugin_active,
     prepare_config_pattern, process_config_result, process_external_plugins,

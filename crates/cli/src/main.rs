@@ -1077,7 +1077,7 @@ enum Command {
         surface: bool,
     },
 
-    /// Dump the CLI interface as machine-readable JSON for agent introspection
+    /// Dump fallow's capability manifest (CLI commands and flags, issue types, MCP tools, framework plugins, env vars) as machine-readable JSON for agent introspection. Always JSON, regardless of --format
     Schema,
 
     /// Print or vendor CI integration templates.

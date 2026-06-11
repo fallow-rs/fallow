@@ -276,6 +276,7 @@ pub fn rule_by_id(id: &str) -> Option<&'static RuleDef> {
         .iter()
         .chain(HEALTH_RULES.iter())
         .chain(DUPES_RULES.iter())
+        .chain(FLAGS_RULES.iter())
         .chain(SECURITY_RULES.iter())
         .find(|r| r.id == id)
 }
@@ -365,6 +366,7 @@ pub fn rule_by_token(token: &str) -> Option<&'static RuleDef> {
         }
         "crap" | "high-crap" | "high-crap-score" => Some("fallow/high-crap-score"),
         "duplication" | "dupes" | "code-duplication" => Some("fallow/code-duplication"),
+        "feature-flag" | "feature-flags" | "flags" => Some("fallow/feature-flag"),
         "security"
         | "security-candidate"
         | "security-candidates"
@@ -865,6 +867,15 @@ pub const DUPES_RULES: &[RuleDef] = &[RuleDef {
     short: "Duplicated code block",
     full: "A block of code that appears in multiple locations with identical or near-identical token sequences. Clone detection uses normalized token comparison: identifier names and literals are abstracted away in non-strict modes.",
     docs_path: "explanations/duplication#clone-groups",
+}];
+
+pub const FLAGS_RULES: &[RuleDef] = &[RuleDef {
+    id: "fallow/feature-flag",
+    category: "Flags",
+    name: "Feature Flags",
+    short: "Detected feature flag pattern",
+    full: "A feature flag pattern detected by `fallow flags`: environment-variable checks, flag SDK calls (LaunchDarkly, Unleash, and similar), or config-object lookups. Long-lived flags accumulate dead branches; review old flags for retirement and pair with dead-code analysis to find branches that can no longer execute.",
+    docs_path: "cli/flags",
 }];
 
 macro_rules! security_catalogue_rule {
@@ -1626,6 +1637,7 @@ mod tests {
             .iter()
             .chain(HEALTH_RULES)
             .chain(DUPES_RULES)
+            .chain(FLAGS_RULES)
             .chain(SECURITY_RULES)
         {
             assert!(seen.insert(rule.id), "duplicate rule id: {}", rule.id);
@@ -2145,6 +2157,11 @@ mod tests {
     }
 
     #[test]
+    fn flags_rules_count() {
+        assert_eq!(FLAGS_RULES.len(), 1);
+    }
+
+    #[test]
     fn security_rules_count() {
         assert_eq!(
             SECURITY_RULES.len(),
@@ -2210,11 +2227,13 @@ mod tests {
             "Suppressions",
             "Security",
             "Policy",
+            "Flags",
         ];
         for rule in CHECK_RULES
             .iter()
             .chain(HEALTH_RULES)
             .chain(DUPES_RULES)
+            .chain(FLAGS_RULES)
             .chain(SECURITY_RULES)
         {
             assert!(
