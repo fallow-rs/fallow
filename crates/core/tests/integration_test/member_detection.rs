@@ -396,6 +396,32 @@ fn playwright_fixture_teardown_credits_factory_getter_member_usage() {
 }
 
 #[test]
+fn playwright_fixture_getter_chain_credits_nested_fixture_methods() {
+    let root = fixture_path("issue-1190-playwright-fixture-getter-chain");
+    let config = create_config_with_ignore_decorators(root, vec!["@step".to_string()]);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<String> = results
+        .unused_class_members
+        .iter()
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&"MessageChecks.hasExpectedRecord".to_string()),
+        "MessageChecks.hasExpectedRecord should be credited through app.assert.messageChecks.hasExpectedRecord(), found: {unused_class_members:?}"
+    );
+    assert!(
+        !unused_class_members.contains(&"MessageChecks.hasMessageForRecordId".to_string()),
+        "MessageChecks.hasMessageForRecordId should be credited through app.assert.messageChecks.hasMessageForRecordId(), found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&"MessageChecks.unusedCheck".to_string()),
+        "a decorated but genuinely unused MessageChecks method should still be reported, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
 fn fluent_builder_chain_credits_intermediate_setters() {
     let root = fixture_path("issue-387-fluent-builder");
     let config = create_config(root);

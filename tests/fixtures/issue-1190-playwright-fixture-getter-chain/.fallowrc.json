@@ -1,0 +1,7 @@
+{
+  "entry": ["tests/**/*.test.ts", "fixture.ts"],
+  "rules": {
+    "unused-class-members": "error"
+  },
+  "ignoreDecorators": ["@step"]
+}
