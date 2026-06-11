@@ -28,7 +28,7 @@
 //! Documented here so future maintainers don't re-derive the trade-off.
 
 use std::io;
-use std::process::{Child, ChildStdin, Command, ExitStatus, Output, Stdio};
+use std::process::{Child, ChildStdin, ChildStdout, Command, ExitStatus, Output, Stdio};
 
 use super::registry;
 
@@ -77,6 +77,15 @@ impl ScopedChild {
     /// or the child has been consumed.
     pub fn take_stdin(&mut self) -> Option<ChildStdin> {
         self.inner.as_mut().and_then(|c| c.stdin.take())
+    }
+
+    /// Take the child's stdout handle, if it was piped. Same semantics as
+    /// `Child::stdout.take()`. Returns `None` if stdout was not piped or the
+    /// child has been consumed. Used by long-lived readers (e.g. the audit
+    /// base-file `cat-file --batch` reader) that drive both pipes while leaving
+    /// the wrapper owning the child for registry tracking and the terminal wait.
+    pub fn take_stdout(&mut self) -> Option<ChildStdout> {
+        self.inner.as_mut().and_then(|c| c.stdout.take())
     }
 
     /// Consume self and wait for the child to exit, collecting stdout

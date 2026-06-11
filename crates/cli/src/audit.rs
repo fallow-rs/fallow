@@ -905,10 +905,17 @@ fn can_reuse_current_as_base(
 /// byte-identical to the previous `git show` path: a missing object yields
 /// `None` (treated as not reusable), and content is read with lossy UTF-8
 /// conversion to match `String::from_utf8_lossy`.
+///
+/// The child is owned through a [`ScopedChild`](crate::signal::ScopedChild) so
+/// an interrupt (SIGINT/SIGTERM) during a large reuse loop kills the long-lived
+/// `cat-file` process via the signal registry instead of orphaning it.
 struct BaseFileReader {
-    child: std::process::Child,
+    /// The registered `cat-file --batch` child. Wrapped in `Option` so `Drop`
+    /// can `take()` it and call the consuming `ScopedChild::wait` after closing
+    /// stdin, reaping the child and deregistering its PID.
+    child: Option<crate::signal::ScopedChild>,
     /// Wrapped in `Option` so `Drop` can `take()` and drop it explicitly,
-    /// closing the pipe before `child.wait()` (which would otherwise block).
+    /// closing the pipe before the blocking wait (which would otherwise block).
     stdin: Option<std::process::ChildStdin>,
     stdout: std::io::BufReader<std::process::ChildStdout>,
 }
@@ -928,11 +935,11 @@ impl BaseFileReader {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null());
         clear_ambient_git_env(&mut command);
-        let mut child = command.spawn().ok()?;
-        let stdin = child.stdin.take()?;
-        let stdout = child.stdout.take()?;
+        let mut child = crate::signal::ScopedChild::spawn(&mut command).ok()?;
+        let stdin = child.take_stdin()?;
+        let stdout = child.take_stdout()?;
         Some(Self {
-            child,
+            child: Some(child),
             stdin: Some(stdin),
             stdout: std::io::BufReader::new(stdout),
         })
@@ -981,11 +988,14 @@ impl BaseFileReader {
 
 impl Drop for BaseFileReader {
     fn drop(&mut self) {
-        // Close stdin so the child sees EOF and exits, then reap it so no
-        // zombie process is left behind. Dropping the `ChildStdin` closes the
-        // pipe; doing this before `wait()` prevents the wait from blocking.
+        // Close stdin so the child sees EOF and exits, then reap it through the
+        // ScopedChild's blocking `wait` (which also deregisters the PID from the
+        // signal registry). Dropping the `ChildStdin` closes the pipe; doing
+        // this before the wait prevents it from blocking.
         self.stdin.take();
-        let _ = self.child.wait();
+        if let Some(child) = self.child.take() {
+            let _ = child.wait();
+        }
     }
 }
 
