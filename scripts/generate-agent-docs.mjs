@@ -1,14 +1,19 @@
 #!/usr/bin/env node
 /**
  * Generate the agent-facing doc tables in the fallow skill tree from the
- * `fallow schema` capability manifest (issue #1188).
+ * `fallow schema` capability manifest (issues #1188 and #1189).
  *
- * Targets (v1): `<target>/SKILL.md` only. Four marker-wrapped sections:
+ * Targets: `<target>/SKILL.md` and, when present,
+ * `<target>/references/cli-reference.md`. SKILL.md sections:
  *
  *   <!-- generated:commands:start -->    ... <!-- generated:commands:end -->
  *   <!-- generated:issue-types:start --> ... <!-- generated:issue-types:end -->
  *   <!-- generated:mcp-tools:start -->   ... <!-- generated:mcp-tools:end -->
  *   <!-- generated:task-matrix:start --> ... <!-- generated:task-matrix:end -->
+ *
+ * CLI reference sections use `generated:flags:*` markers for global flags,
+ * bare `fallow` combined-mode flags, command-local flags, and the dead-code
+ * issue filter table.
  *
  * A target whose text contains NEITHER marker of a section has not adopted
  * that section and is skipped; a half-present marker pair still fails loudly.
@@ -99,6 +104,8 @@ const COMBINED_MODE_FLAGS = [
   "--score",
   "--trend",
   "--save-snapshot",
+  "--coverage",
+  "--coverage-root",
 ];
 
 const CLI_REFERENCE_FLAG_SECTIONS = {
@@ -433,14 +440,7 @@ const flagByName = (schema, name) => {
 
 const flagRefs = (schema, names) =>
   names
-    .filter((name) => {
-      try {
-        flagByName(schema, name);
-        return true;
-      } catch {
-        return false;
-      }
-    })
+    .map((name) => flagByName(schema, name).name)
     .map((name) => `[${code(name)}](#global-flags)`)
     .join(", ");
 

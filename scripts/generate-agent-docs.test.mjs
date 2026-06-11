@@ -66,6 +66,8 @@ const SCHEMA = {
     boolFlag("--score"),
     boolFlag("--trend"),
     stringFlag("--save-snapshot"),
+    stringFlag("--coverage"),
+    stringFlag("--coverage-root"),
     stringFlag("--dupes-random"),
     stringFlag("--root", "Project root directory", { short: "-r" }),
     stringFlag("--config", "Config file path", { short: "-c" }),
@@ -546,8 +548,21 @@ test("CLI reference combined mode uses the explicit allow-list", () => {
     out.indexOf("<!-- generated:flags:fallow-combined:end -->"),
   );
   assert.match(block, /\| `--dupes-mode` \|/);
+  assert.match(block, /\| `--coverage` \|/);
+  assert.match(block, /\| `--coverage-root` \|/);
   assert.match(block, /\| `--only` \| `string` \| - \| Curated only prose \|/);
   assert.doesNotMatch(block, /--dupes-random/);
+});
+
+test("CLI reference fails loudly when an explicit global reference mapping is stale", () => {
+  const schema = {
+    ...SCHEMA,
+    global_flags: SCHEMA.global_flags.filter((flag) => flag.name !== "--format"),
+  };
+  assert.throws(
+    () => regenerateCliReferenceMd(DOC_CLI_REFERENCE, schema),
+    /schema is missing flag '--format'/,
+  );
 });
 
 test("CLI reference ignores command arguments that are not flags", () => {
