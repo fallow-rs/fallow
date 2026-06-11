@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`fallow schema` is now a complete capability manifest for agents.** The introspection JSON previously listed 13 hand-maintained issue types; it now derives one `issue_types` row per registered rule across every analysis (dead-code including re-export cycles, boundary and policy violations, stale suppressions, pnpm catalog and dependency-override hygiene; health including complexity, coverage gaps, refactoring targets, and runtime-coverage verdicts; duplication; feature flags; and all security categories). Each row carries the suppression token as `id`, the SARIF `rule_id`, the owning `command`, `category`, `filter_flag`, `fixable`, `suppressible`, a copy-pasteable `suppress_comment` that is verified to round-trip through the suppression parser, a `note` for caveats, `license` (`free` or `freemium`) with a nuance note on runtime-coverage rows, and a `docs_url`. New top-level blocks: `manifest_version` (`"1"`), `mcp_tools` (all MCP server tools with kind grouping, key params, read-only and license markings, backed by a shared manifest that drift tests keep in sync with the live server), `plugins` (built-in framework plugin count and names derived live from the registry), and a completed `environment_variables` set covering every user-facing `FALLOW_*` variable. `fallow explain feature-flag` now works too: the flags analysis gained its own explain rule.
+
 ## [2.92.1] - 2026-06-10
 
 ### Added
