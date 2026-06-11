@@ -6,25 +6,153 @@ import {
   firstSentence,
   hasSection,
   parseExistingTable,
+  regenerateCliReferenceMd,
   regenerateSkillMd,
   sectionIsAbsent,
   spliceSection,
 } from "./generate-agent-docs.mjs";
 
+const boolFlag = (name, description = `${name} description`) => ({
+  name,
+  type: "bool",
+  required: false,
+  description,
+  possible_values: ["true", "false"],
+});
+
+const stringFlag = (name, description = `${name} description`, extra = {}) => ({
+  name,
+  type: "string",
+  required: false,
+  description,
+  ...extra,
+});
+
 const SCHEMA = {
   version: "0.0.0-test",
   manifest_version: "1",
   default_behavior: "Runs all analyses (check + dupes + health). Use --only/--skip to select.",
+  global_flags: [
+    stringFlag("--format", "Output format", {
+      short: "-f",
+      default: "human",
+      possible_values: ["human", "json"],
+    }),
+    boolFlag("--quiet", "Suppress progress output"),
+    stringFlag("--output-file", "Write the report to a file", { short: "-o" }),
+    boolFlag("--legacy-envelope"),
+    stringFlag("--changed-since"),
+    stringFlag("--max-file-size"),
+    boolFlag("--production"),
+    boolFlag("--no-production"),
+    boolFlag("--production-dead-code"),
+    boolFlag("--production-health"),
+    boolFlag("--production-dupes"),
+    stringFlag("--baseline"),
+    stringFlag("--save-baseline"),
+    stringFlag("--workspace"),
+    stringFlag("--changed-workspaces"),
+    boolFlag("--include-entry-exports"),
+    stringFlag("--only"),
+    stringFlag("--skip"),
+    stringFlag("--dupes-mode"),
+    stringFlag("--dupes-threshold"),
+    stringFlag("--dupes-min-tokens"),
+    stringFlag("--dupes-min-lines"),
+    stringFlag("--dupes-min-occurrences"),
+    boolFlag("--dupes-skip-local"),
+    boolFlag("--dupes-cross-language"),
+    boolFlag("--dupes-ignore-imports"),
+    boolFlag("--score"),
+    boolFlag("--trend"),
+    stringFlag("--save-snapshot"),
+    stringFlag("--dupes-random"),
+    stringFlag("--root", "Project root directory", { short: "-r" }),
+    stringFlag("--config", "Config file path", { short: "-c" }),
+    stringFlag("--churn-file"),
+    stringFlag("--group-by"),
+    boolFlag("--explain"),
+    boolFlag("--explain-skipped"),
+    stringFlag("--diff-file"),
+    boolFlag("--diff-stdin"),
+  ],
   commands: [
     {
       name: "dead-code",
       description: "Analyze project for unused code. Second sentence is cut.",
-      flags: [{ name: "--unused-files" }, { name: "--unused-exports" }],
+      flags: [
+        boolFlag("--unused-files", "Only report unused files"),
+        boolFlag("--unused-exports", "Only report unused exports"),
+        boolFlag("--unused-deps", "Only report unused dependencies"),
+        boolFlag("--trace", "Trace export usage"),
+        stringFlag("--file", "Scope output to files"),
+      ],
     },
     {
       name: "coverage",
       description: "Runtime coverage workflow",
       flags: [],
+    },
+    {
+      name: "dupes",
+      description: "Find clones",
+      flags: [
+        stringFlag("--mode", "Detection mode", {
+          default: "mild",
+          possible_values: ["strict", "mild"],
+        }),
+        stringFlag("--trace", "Trace clones"),
+      ],
+    },
+    {
+      name: "fix",
+      description: "Apply fixes",
+      flags: [boolFlag("--dry-run"), boolFlag("--yes"), boolFlag("--no-create-config")],
+    },
+    {
+      name: "list",
+      description: "List project data",
+      flags: [boolFlag("--entry-points")],
+    },
+    {
+      name: "init",
+      description: "Initialize config",
+      flags: [boolFlag("--toml")],
+    },
+    {
+      name: "migrate",
+      description: "Migrate config",
+      flags: [boolFlag("--dry-run")],
+    },
+    {
+      name: "health",
+      description: "Analyze health",
+      flags: [stringFlag("--top")],
+    },
+    {
+      name: "audit",
+      description: "Audit changed files",
+      flags: [boolFlag("--strict")],
+    },
+    {
+      name: "flags",
+      description: "Analyze feature flags",
+      flags: [stringFlag("--top")],
+    },
+    {
+      name: "security",
+      description: "Analyze security candidates",
+      flags: [stringFlag("--gate")],
+    },
+    {
+      name: "config",
+      description: "Show config",
+      flags: [stringFlag("--path")],
+    },
+    {
+      name: "explain",
+      description: "Explain issue types",
+      flags: [{ name: "issue_type", type: "string", description: "Issue type to explain" }],
     },
   ],
   issue_types: [
@@ -193,6 +321,60 @@ Hand-written intro stays.
 Hand-written outro stays.
 `;
 
+const DOC_CLI_REFERENCE = `# Fallow CLI Reference
+
+## \`dead-code\`: Dead Code Analysis
+
+### Flags
+
+<!-- generated:flags:dead-code:start -->
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| \`--format\` | \`human\\|json\` | \`human\` | Old global row should move out |
+| \`--trace\` | \`bool\` | \`false\` | Curated trace description |
+| \`--removed\` | \`bool\` | \`false\` | Should disappear |
+<!-- generated:flags:dead-code:end -->
+
+### Issue Type Filters
+
+<!-- generated:flags:dead-code-filters:start -->
+| Flag | Issue Type |
+|---|---|
+| \`--unused-files\` | Curated unused files prose |
+<!-- generated:flags:dead-code-filters:end -->
+
+## \`dupes\`: Duplication Detection
+
+### Flags
+
+<!-- generated:flags:dupes:start -->
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| \`--mode\` | \`strict\\|mild\` | \`mild\` | Curated mode prose |
+<!-- generated:flags:dupes:end -->
+
+## \`explain\`: Rule Explanation
+
+Arguments are hand-written here.
+
+## Global Flags
+
+<!-- generated:flags:global:start -->
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| \`-o, --output-file\` | \`string\` | - | Curated output file prose |
+| \`--removed-global\` | \`string\` | - | Should disappear |
+<!-- generated:flags:global:end -->
+
+### Combined Mode Flags
+
+<!-- generated:flags:fallow-combined:start -->
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| \`--only\` | \`string\` | - | Curated only prose |
+<!-- generated:flags:fallow-combined:end -->
+`;
+
 test("escapeCell escapes pipes and collapses whitespace, leaves backticks and angle brackets", () => {
   assert.equal(escapeCell("a | b\nc  d `e` <f>"), "a \\| b c d `e` <f>");
   assert.equal(escapeCell("pre\\|escaped"), "pre\\|escaped");
@@ -330,6 +512,50 @@ test("parseExistingTable honors escaped pipes inside cells", () => {
   assert.equal(rows.get("x").get("Description"), "uses a \\| pipe");
 });
 
+test("CLI reference flag sections regenerate from the manifest and preserve curated cells", () => {
+  const out = regenerateCliReferenceMd(DOC_CLI_REFERENCE, SCHEMA);
+  assert.equal(regenerateCliReferenceMd(out, SCHEMA), out);
+  assert.match(out, /\| `--trace` \| `bool` \| `false` \| Curated trace description \|/);
+  assert.match(out, /\| `--mode` \| `strict\\\|mild` \| `mild` \| Curated mode prose \|/);
+  assert.match(out, /\| `-o, --output-file` \| `string` \| - \| Curated output file prose \|/);
+  assert.doesNotMatch(out, /Old global row should move out/);
+  assert.doesNotMatch(out, /--removed/);
+  assert.doesNotMatch(out, /--removed-global/);
+});
+
+test("CLI reference keeps issue filters separate from command flags", () => {
+  const out = regenerateCliReferenceMd(DOC_CLI_REFERENCE, SCHEMA);
+  const deadCodeBlock = out.slice(
+    out.indexOf("<!-- generated:flags:dead-code:start -->"),
+    out.indexOf("<!-- generated:flags:dead-code:end -->"),
+  );
+  const filterBlock = out.slice(
+    out.indexOf("<!-- generated:flags:dead-code-filters:start -->"),
+    out.indexOf("<!-- generated:flags:dead-code-filters:end -->"),
+  );
+  assert.doesNotMatch(deadCodeBlock, /--unused-files/);
+  assert.match(deadCodeBlock, /--trace/);
+  assert.match(filterBlock, /\| `--unused-files` \| Curated unused files prose \|/);
+  assert.match(filterBlock, /\| `--unused-deps` \|/);
+});
+
+test("CLI reference combined mode uses the explicit allow-list", () => {
+  const out = regenerateCliReferenceMd(DOC_CLI_REFERENCE, SCHEMA);
+  const block = out.slice(
+    out.indexOf("<!-- generated:flags:fallow-combined:start -->"),
+    out.indexOf("<!-- generated:flags:fallow-combined:end -->"),
+  );
+  assert.match(block, /\| `--dupes-mode` \|/);
+  assert.match(block, /\| `--only` \| `string` \| - \| Curated only prose \|/);
+  assert.doesNotMatch(block, /--dupes-random/);
+});
+
+test("CLI reference ignores command arguments that are not flags", () => {
+  const out = regenerateCliReferenceMd(DOC_CLI_REFERENCE, SCHEMA);
+  assert.match(out, /Arguments are hand-written here\./);
+  assert.doesNotMatch(out, /issue_type/);
+});
+
 test("manifest_version and expect-version guards", async () => {
   const { loadSchema } = await import("./generate-agent-docs.mjs");
   const tmp = `${process.env.TMPDIR ?? "/tmp"}/agent-docs-schema-${process.pid}.json`;
@@ -342,20 +568,25 @@ test("manifest_version and expect-version guards", async () => {
 });
 
 test("--check exits 1 on drift, writes nothing, and exits 0 when in sync", async () => {
-  const { mkdtempSync, writeFileSync, readFileSync, rmSync } = await import("node:fs");
+  const { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
   const { main } = await import("./generate-agent-docs.mjs");
 
   const dir = mkdtempSync(join(tmpdir(), "agent-docs-check-"));
+  const referencesDir = join(dir, "references");
   const schemaPath = join(dir, "schema.json");
   writeFileSync(schemaPath, JSON.stringify(SCHEMA));
   writeFileSync(join(dir, "SKILL.md"), DOC);
+  mkdirSync(referencesDir);
+  writeFileSync(join(referencesDir, "cli-reference.md"), DOC_CLI_REFERENCE);
 
   // DOC is stale relative to SCHEMA: --check must report drift without writing.
   const before = readFileSync(join(dir, "SKILL.md"), "utf8");
+  const cliBefore = readFileSync(join(referencesDir, "cli-reference.md"), "utf8");
   assert.equal(main(["--schema", schemaPath, "--target", dir, "--check"]), 1);
   assert.equal(readFileSync(join(dir, "SKILL.md"), "utf8"), before);
+  assert.equal(readFileSync(join(referencesDir, "cli-reference.md"), "utf8"), cliBefore);
 
   // Regenerate for real, then --check must pass.
   assert.equal(main(["--schema", schemaPath, "--target", dir]), 0);

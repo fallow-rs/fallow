@@ -51,17 +51,143 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-export const SECTION_IDS = ["commands", "issue-types", "mcp-tools", "task-matrix"];
+const SKILL_SECTION_IDS = ["commands", "issue-types", "mcp-tools", "task-matrix"];
+const CLI_REFERENCE_SECTION_IDS = [
+  "flags:global",
+  "flags:fallow-combined",
+  "flags:dead-code",
+  "flags:dead-code-filters",
+  "flags:dupes",
+  "flags:fix",
+  "flags:list",
+  "flags:init",
+  "flags:migrate",
+  "flags:health",
+  "flags:audit",
+  "flags:flags",
+  "flags:security",
+  "flags:config",
+];
+export const SECTION_IDS = [...SKILL_SECTION_IDS, ...CLI_REFERENCE_SECTION_IDS];
 
 /** Security family rows kept in the SKILL.md issue-types table; the ~47
  * per-CWE catalogue categories collapse under tainted-sink there. */
 const SECURITY_FAMILY_IDS = new Set(["tainted-sink", "client-server-leak", "hardcoded-secret"]);
 
 const MAX_SEEDED_KEY_FLAGS = 8;
+
+const COMBINED_MODE_FLAGS = [
+  "--only",
+  "--skip",
+  "--production",
+  "--no-production",
+  "--production-dead-code",
+  "--production-health",
+  "--production-dupes",
+  "--dupes-mode",
+  "--dupes-threshold",
+  "--dupes-min-tokens",
+  "--dupes-min-lines",
+  "--dupes-min-occurrences",
+  "--dupes-skip-local",
+  "--dupes-cross-language",
+  "--dupes-ignore-imports",
+  "--score",
+  "--trend",
+  "--save-snapshot",
+];
+
+const CLI_REFERENCE_FLAG_SECTIONS = {
+  "flags:dead-code": {
+    command: "dead-code",
+    excludeIssueFilters: true,
+    globalRefs: [
+      "--format",
+      "--quiet",
+      "--output-file",
+      "--legacy-envelope",
+      "--changed-since",
+      "--max-file-size",
+      "--production",
+      "--no-production",
+      "--production-dead-code",
+      "--baseline",
+      "--save-baseline",
+      "--workspace",
+      "--changed-workspaces",
+      "--include-entry-exports",
+    ],
+  },
+  "flags:dupes": {
+    command: "dupes",
+    globalRefs: [
+      "--format",
+      "--quiet",
+      "--changed-since",
+      "--baseline",
+      "--save-baseline",
+      "--workspace",
+      "--changed-workspaces",
+      "--group-by",
+      "--explain-skipped",
+    ],
+  },
+  "flags:fix": { command: "fix", globalRefs: ["--format", "--quiet"] },
+  "flags:list": { command: "list", globalRefs: ["--format", "--quiet"] },
+  "flags:init": { command: "init", globalRefs: ["--root", "--config"] },
+  "flags:migrate": { command: "migrate", globalRefs: ["--root", "--config"] },
+  "flags:health": {
+    command: "health",
+    globalRefs: [
+      "--format",
+      "--quiet",
+      "--changed-since",
+      "--churn-file",
+      "--workspace",
+      "--group-by",
+      "--baseline",
+      "--save-baseline",
+      "--production",
+      "--no-production",
+      "--explain",
+    ],
+  },
+  "flags:audit": {
+    command: "audit",
+    globalRefs: [
+      "--format",
+      "--quiet",
+      "--changed-since",
+      "--diff-file",
+      "--diff-stdin",
+      "--workspace",
+      "--changed-workspaces",
+      "--group-by",
+      "--output-file",
+    ],
+  },
+  "flags:flags": {
+    command: "flags",
+    globalRefs: ["--format", "--quiet", "--changed-since", "--workspace"],
+  },
+  "flags:security": {
+    command: "security",
+    globalRefs: [
+      "--format",
+      "--quiet",
+      "--changed-since",
+      "--diff-file",
+      "--diff-stdin",
+      "--workspace",
+      "--changed-workspaces",
+    ],
+  },
+  "flags:config": { command: "config", globalRefs: ["--format", "--quiet", "--config", "--root"] },
+};
 
 /** Collapse whitespace and escape unescaped pipes so a cell cannot break the table. */
 export const escapeCell = (text) =>
@@ -83,6 +209,14 @@ export const firstSentence = (text) => {
 const code = (text) => `\`${text}\``;
 const codeOrDash = (text) => (text ? code(text) : "-");
 const yesOrDash = (flag) => (flag ? "yes" : "-");
+
+const LONG_FLAG_PATTERN = /--[a-z][a-z0-9-]*/g;
+
+const canonicalRowKey = (cell) => {
+  const stripped = cell.replace(/`/g, "").trim();
+  const flags = stripped.match(LONG_FLAG_PATTERN);
+  return flags?.at(-1) ?? stripped;
+};
 
 /** Split a markdown table row into raw cells, honoring `\|` escapes. */
 const splitRow = (line) => {
@@ -118,7 +252,7 @@ export const parseExistingTable = (block) => {
     if (cells.length === 0) {
       continue;
     }
-    const key = cells[0].replace(/`/g, "").trim();
+    const key = canonicalRowKey(cells[0]);
     const byHeader = new Map();
     headers.forEach((h, i) => byHeader.set(h, cells[i] ?? ""));
     rows.set(key, byHeader);
@@ -241,11 +375,179 @@ const renderTaskMatrixSection = (schema) => {
   return renderTable(headers, rows);
 };
 
+const flagDisplaySeed = (flag) => (flag.short ? `${flag.short}, ${flag.name}` : flag.name);
+
+const flagDisplayCell = (existing, flag) => {
+  const key = flag.name;
+  const cell = existing.rows.get(key)?.get("Flag");
+  return cell !== undefined && cell !== "" ? cell : code(flagDisplaySeed(flag));
+};
+
+const flagTypeCell = (flag) => {
+  const values = (flag.possible_values ?? []).filter(
+    (value) => value !== "true" && value !== "false",
+  );
+  if (values.length > 0) {
+    return code(escapeCell(values.join("|")));
+  }
+  return code(flag.type ?? "string");
+};
+
+const flagDefaultCell = (flag) => {
+  if (flag.default !== undefined && flag.default !== null) {
+    return code(flag.default);
+  }
+  if (flag.type === "bool") {
+    return code("false");
+  }
+  return "-";
+};
+
+const flagRows = (flags, existing) =>
+  flags.map((flag) => [
+    flagDisplayCell(existing, flag),
+    flagTypeCell(flag),
+    flagDefaultCell(flag),
+    curatedCell(existing, flag.name, "Description", flag.description ?? ""),
+  ]);
+
+const commandByName = (schema, name) => {
+  const command = schema.commands.find((candidate) => candidate.name === name);
+  if (!command) {
+    throw new Error(`schema is missing command '${name}'`);
+  }
+  return command;
+};
+
+const flagByName = (schema, name) => {
+  const flags = [
+    ...(schema.global_flags ?? []),
+    ...schema.commands.flatMap((command) => command.flags ?? []),
+  ];
+  const flag = flags.find((candidate) => candidate.name === name);
+  if (!flag) {
+    throw new Error(`schema is missing flag '${name}'`);
+  }
+  return flag;
+};
+
+const flagRefs = (schema, names) =>
+  names
+    .filter((name) => {
+      try {
+        flagByName(schema, name);
+        return true;
+      } catch {
+        return false;
+      }
+    })
+    .map((name) => `[${code(name)}](#global-flags)`)
+    .join(", ");
+
+const nonArgumentFlags = (flags) => flags.filter((flag) => flag.name.startsWith("--"));
+
+const deadCodeFilterFlags = (schema) =>
+  new Set(
+    schema.issue_types
+      .filter((issue) => issue.command === "dead-code" && issue.filter_flag)
+      .map((issue) => issue.filter_flag),
+  );
+
+const renderGlobalFlagsSection = (schema, existing) =>
+  renderTable(
+    ["Flag", "Type", "Default", "Description"],
+    flagRows(schema.global_flags ?? [], existing),
+  );
+
+const renderCombinedFlagsSection = (schema, existing) => {
+  const flags = COMBINED_MODE_FLAGS.map((name) => flagByName(schema, name));
+  return [
+    renderTable(["Flag", "Type", "Default", "Description"], flagRows(flags, existing)),
+    "",
+    "These are global flags with behavior specific to bare `fallow` combined mode.",
+  ].join("\n");
+};
+
+const issueFilterSet = (schema, config) => {
+  if (!config.excludeIssueFilters) {
+    return new Set();
+  }
+  return deadCodeFilterFlags(schema);
+};
+
+const globalFlagNote = (schema, names) => {
+  if (!names?.length) {
+    return "";
+  }
+  const refs = flagRefs(schema, names);
+  if (!refs) {
+    return "";
+  }
+  return `\n\nCommon global flags for this command: ${refs}.`;
+};
+
+const renderCommandFlags = (schema, existing, sectionId) => {
+  const config = CLI_REFERENCE_FLAG_SECTIONS[sectionId];
+  const command = commandByName(schema, config.command);
+  const issueFilters = issueFilterSet(schema, config);
+  const flags = nonArgumentFlags(command.flags ?? []).filter(
+    (flag) => !issueFilters.has(flag.name),
+  );
+  const table = renderTable(["Flag", "Type", "Default", "Description"], flagRows(flags, existing));
+  return `${table}${globalFlagNote(schema, config.globalRefs)}`;
+};
+
+const renderCommandFlagsSection = (sectionId) => (schema, existing) =>
+  renderCommandFlags(schema, existing, sectionId);
+
+const renderDeadCodeFiltersSection = (schema, existing) => {
+  const flagsByName = new Map(
+    nonArgumentFlags(commandByName(schema, "dead-code").flags ?? []).map((flag) => [
+      flag.name,
+      flag,
+    ]),
+  );
+  const grouped = new Map();
+  for (const issue of schema.issue_types.filter(
+    (candidate) => candidate.command === "dead-code" && candidate.filter_flag,
+  )) {
+    const list = grouped.get(issue.filter_flag) ?? [];
+    list.push(issue);
+    grouped.set(issue.filter_flag, list);
+  }
+  const flagOrder = [...flagsByName.keys()];
+  const rows = [...grouped]
+    .toSorted(([a], [b]) => flagOrder.indexOf(a) - flagOrder.indexOf(b))
+    .map(([filterFlag, issues]) => {
+      const flag = flagsByName.get(filterFlag) ?? { name: filterFlag };
+      const seed = [...new Set(issues.map((issue) => issue.description))].join("; ");
+      return [
+        flagDisplayCell(existing, flag),
+        curatedCell(existing, filterFlag, "Issue Type", seed),
+      ];
+    });
+  return renderTable(["Flag", "Issue Type"], rows);
+};
+
 const RENDERERS = {
   commands: renderCommandsSection,
   "issue-types": renderIssueTypesSection,
   "mcp-tools": renderMcpToolsSection,
   "task-matrix": renderTaskMatrixSection,
+  "flags:global": renderGlobalFlagsSection,
+  "flags:fallow-combined": renderCombinedFlagsSection,
+  "flags:dead-code": renderCommandFlagsSection("flags:dead-code"),
+  "flags:dead-code-filters": renderDeadCodeFiltersSection,
+  "flags:dupes": renderCommandFlagsSection("flags:dupes"),
+  "flags:fix": renderCommandFlagsSection("flags:fix"),
+  "flags:list": renderCommandFlagsSection("flags:list"),
+  "flags:init": renderCommandFlagsSection("flags:init"),
+  "flags:migrate": renderCommandFlagsSection("flags:migrate"),
+  "flags:health": renderCommandFlagsSection("flags:health"),
+  "flags:audit": renderCommandFlagsSection("flags:audit"),
+  "flags:flags": renderCommandFlagsSection("flags:flags"),
+  "flags:security": renderCommandFlagsSection("flags:security"),
+  "flags:config": renderCommandFlagsSection("flags:config"),
 };
 
 /** True only when BOTH the start and end markers for a section are present.
@@ -269,14 +571,14 @@ export const sectionIsAbsent = (text, sectionId) => {
 };
 
 /** Splice one generated section between its markers. Throws on marker misuse. */
-export const spliceSection = (text, sectionId, schema, fileLabel) => {
+export const spliceSection = (text, sectionId, schema, fileLabel, knownSections = SECTION_IDS) => {
   const start = `<!-- generated:${sectionId}:start -->`;
   const end = `<!-- generated:${sectionId}:end -->`;
   const fail = (reason) => {
     throw new Error(
       `${fileLabel}: ${reason} for section '${sectionId}'. Expected exactly one ` +
         `'${start}' ... '${end}' pair (markers on their own lines). ` +
-        `Known sections: ${SECTION_IDS.join(", ")}.`,
+        `Known sections: ${knownSections.join(", ")}.`,
     );
   };
 
@@ -294,23 +596,55 @@ export const spliceSection = (text, sectionId, schema, fileLabel) => {
 
   const existingBlock = text.slice(startIdx + start.length, endIdx);
   const existing = parseExistingTable(existingBlock);
-  const rendered = RENDERERS[sectionId](schema, existing);
+  const renderer = RENDERERS[sectionId];
+  if (!renderer) {
+    fail("unknown generated section");
+  }
+  const rendered = renderer(schema, existing);
   return `${text.slice(0, startIdx + start.length)}\n${rendered}\n${text.slice(endIdx)}`;
+};
+
+const regenerateSections = (text, schema, fileLabel, sectionIds) => {
+  let out = text;
+  for (const sectionId of sectionIds) {
+    if (sectionIsAbsent(out, sectionId)) {
+      continue;
+    }
+    out = spliceSection(out, sectionId, schema, fileLabel, sectionIds);
+  }
+  return out;
 };
 
 /** Regenerate every adopted section in a SKILL.md text; returns the new text.
  * A section whose markers are BOTH absent is skipped (target has not adopted
  * it); a half-present / duplicated / inverted marker pair still throws via
  * `spliceSection`. */
-export const regenerateSkillMd = (text, schema, fileLabel = "SKILL.md") => {
-  let out = text;
-  for (const sectionId of SECTION_IDS) {
-    if (sectionIsAbsent(out, sectionId)) {
-      continue;
-    }
-    out = spliceSection(out, sectionId, schema, fileLabel);
+export const regenerateSkillMd = (text, schema, fileLabel = "SKILL.md") =>
+  regenerateSections(text, schema, fileLabel, SKILL_SECTION_IDS);
+
+export const regenerateCliReferenceMd = (text, schema, fileLabel = "references/cli-reference.md") =>
+  regenerateSections(text, schema, fileLabel, CLI_REFERENCE_SECTION_IDS);
+
+const changedSections = (before, schema, fileLabel, sectionIds) =>
+  sectionIds.filter(
+    (id) =>
+      !sectionIsAbsent(before, id) &&
+      spliceSection(before, id, schema, fileLabel, sectionIds) !== before,
+  );
+
+const processFile = ({ file, before, after, schema, sectionIds, check }) => {
+  if (after === before) {
+    console.log(`up to date: ${file}`);
+    return false;
   }
-  return out;
+  if (check) {
+    const sections = changedSections(before, schema, file, sectionIds);
+    console.error(`DRIFT: ${file} (sections: ${sections.join(", ")})`);
+    return true;
+  }
+  writeFileSync(file, after);
+  console.log(`regenerated: ${file}`);
+  return false;
 };
 
 export const loadSchema = ({ fallowBin, schemaPath, expectVersion }) => {
@@ -376,20 +710,38 @@ export const main = (argv = process.argv.slice(2)) => {
 
   let drifted = 0;
   for (const target of opts.targets) {
-    const file = join(target, "SKILL.md");
-    const before = readFileSync(file, "utf8");
-    const after = regenerateSkillMd(before, schema, file);
-    if (after === before) {
-      console.log(`up to date: ${file}`);
-    } else if (opts.check) {
+    const skillFile = join(target, "SKILL.md");
+    const skillBefore = readFileSync(skillFile, "utf8");
+    const skillAfter = regenerateSkillMd(skillBefore, schema, skillFile);
+    if (
+      processFile({
+        file: skillFile,
+        before: skillBefore,
+        after: skillAfter,
+        schema,
+        sectionIds: SKILL_SECTION_IDS,
+        check: opts.check,
+      })
+    ) {
       drifted += 1;
-      const sections = SECTION_IDS.filter(
-        (id) => !sectionIsAbsent(before, id) && spliceSection(before, id, schema, file) !== before,
-      );
-      console.error(`DRIFT: ${file} (sections: ${sections.join(", ")})`);
-    } else {
-      writeFileSync(file, after);
-      console.log(`regenerated: ${file}`);
+    }
+
+    const cliReferenceFile = join(target, "references", "cli-reference.md");
+    if (existsSync(cliReferenceFile)) {
+      const cliBefore = readFileSync(cliReferenceFile, "utf8");
+      const cliAfter = regenerateCliReferenceMd(cliBefore, schema, cliReferenceFile);
+      if (
+        processFile({
+          file: cliReferenceFile,
+          before: cliBefore,
+          after: cliAfter,
+          schema,
+          sectionIds: CLI_REFERENCE_SECTION_IDS,
+          check: opts.check,
+        })
+      ) {
+        drifted += 1;
+      }
     }
   }
   return drifted === 0 ? 0 : 1;
