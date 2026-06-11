@@ -264,7 +264,7 @@ pub fn disable(root: &Path) -> bool {
 
 /// A due periodic value digest: the headline counters for "what has fallow
 /// done for you here". Returned by [`take_due_digest`] at most once per
-/// [`DIGEST_INTERVAL_SECS`] per project.
+/// `DIGEST_INTERVAL_SECS` per project.
 #[derive(Debug, Clone, Copy)]
 pub struct ImpactDigest {
     pub containment_count: usize,
@@ -275,7 +275,7 @@ pub struct ImpactDigest {
 const DIGEST_INTERVAL_SECS: u64 = 7 * 24 * 60 * 60;
 
 /// Return the periodic value digest when it is due, stamping the store so the
-/// next one is at least [`DIGEST_INTERVAL_SECS`] away. Due means: tracking is
+/// next one is at least `DIGEST_INTERVAL_SECS` away. Due means: tracking is
 /// enabled, there is non-zero value to report (anti-nag: a zero digest never
 /// surfaces), and the previous digest is older than the interval (or never
 /// happened). Best-effort like the rest of the store: a clean run that drops
