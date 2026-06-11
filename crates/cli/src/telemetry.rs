@@ -1764,14 +1764,24 @@ pub fn flush_spool_in_background() {
         return;
     }
     std::thread::spawn(move || {
-        drain_spool_file(&spool, post_telemetry_payload);
+        // Resolve the anonymous install grouping token once per drain, on the
+        // background thread so the hot path stays free of config-dir IO. This
+        // is the lazy-mint site for an env-enabled install with no
+        // `telemetry.json`; absent (unwritable/no config dir) falls back
+        // gracefully to per-run/parent-run grouping with no header. Threaded
+        // into the drain as a parameter so unit tests never read the real
+        // env/config dir (and cannot mint into a developer's telemetry.json).
+        let install_id = resolve_install_id_for_send();
+        drain_spool_file(&spool, install_id.as_deref(), post_telemetry_payload);
     });
 }
 
 /// POST spooled events oldest-first and drop the delivered ones in place.
 ///
 /// Generic over the uploader so tests can inject a fake without touching the
-/// network. The flock is held for the whole drain so a concurrent drain or trim
+/// network, and parameterized on the resolved install grouping token so tests
+/// never read the real env/config dir (the live resolution happens at the
+/// [`flush_spool_in_background`] spawn site). The flock is held for the whole drain so a concurrent drain or trim
 /// cannot rewrite the spool underneath it. Events are delivered oldest-first and
 /// the drain stops at the first POST failure (a likely-unreachable endpoint), so
 /// the removed set is always a prefix; the file is rewritten to the undelivered
@@ -1779,7 +1789,7 @@ pub fn flush_spool_in_background() {
 /// thread is abandoned at process exit mid-upload, no rewrite runs and the spool
 /// is simply retried next run, bounded meanwhile by [`trim_spool_if_oversized`]
 /// rather than by this function completing.
-fn drain_spool_file<P>(spool: &Path, mut post: P)
+fn drain_spool_file<P>(spool: &Path, install_id: Option<&str>, mut post: P)
 where
     P: FnMut(&serde_json::Value, Option<&str>, Option<&str>) -> Result<(), String>,
 {
@@ -1800,19 +1810,13 @@ where
         return;
     }
 
-    // Resolve the anonymous install grouping token once for the whole drain.
-    // This is the lazy-mint site for an env-enabled install with no
-    // `telemetry.json`; absent (unwritable/no config dir) falls back gracefully
-    // to per-run/parent-run grouping with no header.
-    let install_id = resolve_install_id_for_send();
-
     let mut removed = 0usize;
     for line in &lines {
         match parse_spool_line(line) {
             // A corrupt (non-JSON) line cannot be delivered, so it is dropped.
             Err(_) => removed += 1,
             Ok((payload, parent_run)) => {
-                if post(&payload, parent_run.as_deref(), install_id.as_deref()).is_ok() {
+                if post(&payload, parent_run.as_deref(), install_id).is_ok() {
                     removed += 1;
                 } else {
                     // The endpoint is likely unreachable; stop and keep the rest.
@@ -2825,7 +2829,7 @@ mod tests {
         append_spool_line(&spool, "{\"n\":2}").expect("append");
 
         let mut seen = Vec::new();
-        drain_spool_file(&spool, |value, _parent_run, _install| {
+        drain_spool_file(&spool, None, |value, _parent_run, _install| {
             seen.push(
                 value
                     .get("n")
@@ -2848,7 +2852,7 @@ mod tests {
         }
 
         let mut calls = 0;
-        drain_spool_file(&spool, |_value, _parent_run, _install| {
+        drain_spool_file(&spool, None, |_value, _parent_run, _install| {
             calls += 1;
             Err("offline".to_owned())
         });
@@ -2873,7 +2877,7 @@ mod tests {
         append_spool_line(&spool, "{\"n\":7}").expect("append");
 
         let mut seen = Vec::new();
-        drain_spool_file(&spool, |value, _parent_run, _install| {
+        drain_spool_file(&spool, None, |value, _parent_run, _install| {
             seen.push(value.clone());
             Ok(())
         });
@@ -2897,7 +2901,7 @@ mod tests {
 
         // Deliver the first event, then the endpoint goes down for the rest.
         let mut calls = 0;
-        drain_spool_file(&spool, |_value, _parent_run, _install| {
+        drain_spool_file(&spool, None, |_value, _parent_run, _install| {
             calls += 1;
             if calls == 1 {
                 Ok(())
@@ -3027,7 +3031,7 @@ mod tests {
         append_spool_line(&spool, &line).expect("append");
 
         let mut seen = Vec::new();
-        drain_spool_file(&spool, |value, parent_run, _install| {
+        drain_spool_file(&spool, None, |value, parent_run, _install| {
             assert_eq!(parent_run, None);
             seen.push(value.clone());
             Ok(())
@@ -3070,7 +3074,7 @@ mod tests {
         append_spool_line(&spool, &line).expect("append");
 
         let mut seen = Vec::new();
-        drain_spool_file(&spool, |value, parent_run, _install| {
+        drain_spool_file(&spool, None, |value, parent_run, _install| {
             seen.push((value.clone(), parent_run.map(str::to_owned)));
             Ok(())
         });
@@ -3297,16 +3301,26 @@ mod tests {
         append_spool_line(&spool, "{\"event\":\"workflow_completed\"}").expect("append");
 
         let mut seen: Vec<(serde_json::Value, Option<String>)> = Vec::new();
-        // Bypass the env-derived resolver in drain_spool_file by resolving the
-        // id from the seeded config directly, then asserting the poster wiring.
+        // Resolve from the seeded config (the same pure helper the live spawn
+        // site uses) and thread the result into the drain as the parameter, so
+        // the test never reads the real env/config dir.
         let resolved = resolve_install_id_with(EffectiveMode::On, Some(&config_path));
         assert_eq!(resolved.as_deref(), Some("inst_grouping"));
-        drain_spool_file(&spool, |value, _parent_run, install| {
-            seen.push((value.clone(), install.map(str::to_owned)));
-            Ok(())
-        });
+        drain_spool_file(
+            &spool,
+            resolved.as_deref(),
+            |value, _parent_run, install| {
+                seen.push((value.clone(), install.map(str::to_owned)));
+                Ok(())
+            },
+        );
 
         assert_eq!(seen.len(), 1);
+        assert_eq!(
+            seen[0].1.as_deref(),
+            Some("inst_grouping"),
+            "the threaded install id must reach the poster verbatim",
+        );
         assert_eq!(
             seen[0].0.get("install_id"),
             None,
