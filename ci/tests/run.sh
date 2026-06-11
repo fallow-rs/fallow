@@ -15,7 +15,7 @@ ERRORS=()
 # --- Helpers ---
 
 pass() { PASSED=$((PASSED + 1)); echo "  ✓ $1"; }
-fail() { FAILED=$((FAILED + 1)); ERRORS+=("$1: $2"); echo "  ✗ $1 — $2"; }
+fail() { FAILED=$((FAILED + 1)); ERRORS+=("$1: $2"); echo "  x $1: $2"; }
 
 assert_contains() {
   local output="$1" expected="$2" name="$3"
@@ -71,11 +71,13 @@ assert_valid_markdown() {
 echo ""
 echo "=== GitLab install path ==="
 
-gitlab_install_script() {
-  awk '
-    /# Validate and install fallow/ { seen=1; next }
+gitlab_before_script_block() {
+  local start="$1"
+  local end="$2"
+  awk -v start="$start" -v end="$end" '
+    index($0, start) { seen=1; next }
     seen && /^[[:space:]]*-[[:space:]]*\|[[:space:]]*$/ { in_block=1; next }
-    in_block && /# Prepare bash scripts/ { exit }
+    in_block && index($0, end) { exit }
     in_block {
       sub(/^      /, "")
       print
@@ -83,7 +85,13 @@ gitlab_install_script() {
   ' "$DIR/../gitlab-ci.yml"
 }
 
+gitlab_install_script() {
+  gitlab_before_script_block "# Validate and install fallow" "# Prepare bash scripts"
+}
+
 GITLAB_INSTALL_SCRIPT="$(gitlab_install_script)"
+GITLAB_SCRIPT_PREP_SCRIPT="$(gitlab_before_script_block "# Prepare bash scripts for MR integration" "# Write the analysis script")"
+GITLAB_RUN_WRITER_SCRIPT="$(gitlab_before_script_block "# Write the analysis script" "  script:")"
 INSTALL_TMP=$(mktemp -d)
 trap 'rm -rf "$INSTALL_TMP"' EXIT
 mkdir -p "$INSTALL_TMP/pinned" "$INSTALL_TMP/range" "$INSTALL_TMP/unsafe" "$INSTALL_TMP/empty"
@@ -101,8 +109,15 @@ JSON
 run_gitlab_install() {
   local root="$1"
   local version="$2"
-  FALLOW_ROOT="$root" FALLOW_VERSION="$version" FALLOW_INSTALL_DRY_RUN=true bash -eo pipefail -c "$GITLAB_INSTALL_SCRIPT" 2>&1
+  FALLOW_ROOT="$root" FALLOW_VERSION="$version" FALLOW_INSTALL_DRY_RUN=true /bin/sh -c "$GITLAB_INSTALL_SCRIPT" 2>&1
 }
+
+assert_contains "$GITLAB_INSTALL_SCRIPT" "bash -eo pipefail <<'FALLOW_INSTALL_EOF'" \
+  "install: wrapper invokes bash with pipefail"
+assert_contains "$GITLAB_SCRIPT_PREP_SCRIPT" "bash -eo pipefail <<'FALLOW_SCRIPT_PREP_EOF'" \
+  "script prep: wrapper invokes bash with pipefail"
+assert_contains "$GITLAB_RUN_WRITER_SCRIPT" "bash -eo pipefail <<'FALLOW_RUN_WRITER_EOF'" \
+  "run writer: wrapper invokes bash with pipefail"
 
 OUT=$(run_gitlab_install "$INSTALL_TMP/pinned" "")
 assert_contains "$OUT" "Using fallow version from" "install: reads package.json pin"
@@ -142,6 +157,127 @@ else
   fail "install: rejects dash-prefixed extra args in spec" "expected non-zero exit"
 fi
 
+SCRIPT_PREP_TMP="$INSTALL_TMP/script-prep"
+mkdir -p "$SCRIPT_PREP_TMP/ci/scripts"
+printf '%s\n' '#!/usr/bin/env bash' 'echo comment' > "$SCRIPT_PREP_TMP/ci/scripts/comment.sh"
+printf '%s\n' '#!/usr/bin/env bash' 'echo review' > "$SCRIPT_PREP_TMP/ci/scripts/review.sh"
+rm -rf /tmp/fallow-scripts
+OUT=$(cd "$SCRIPT_PREP_TMP" && FALLOW_COMMENT=true FALLOW_REVIEW=false /bin/sh -c "$GITLAB_SCRIPT_PREP_SCRIPT" 2>&1)
+cmd_status=$?
+if [ "$cmd_status" -eq 0 ]; then
+  pass "script prep: wrapped block runs under sh"
+else
+  fail "script prep: wrapped block runs under sh" "$OUT"
+fi
+if [ -x /tmp/fallow-scripts/comment.sh ] && [ -x /tmp/fallow-scripts/review.sh ]; then
+  pass "script prep: copies vendored scripts"
+else
+  fail "script prep: copies vendored scripts" "expected executable scripts in /tmp/fallow-scripts"
+fi
+
+rm -f /tmp/fallow-run.sh
+OUT=$(/bin/sh -c "$GITLAB_RUN_WRITER_SCRIPT" 2>&1)
+cmd_status=$?
+if [ "$cmd_status" -eq 0 ] && [ -x /tmp/fallow-run.sh ]; then
+  pass "run writer: wrapped block runs under sh"
+else
+  fail "run writer: wrapped block runs under sh" "$OUT"
+fi
+if bash -n /tmp/fallow-run.sh 2>/tmp/fallow-run-syntax.err; then
+  pass "run writer: generated analysis script is valid bash"
+else
+  fail "run writer: generated analysis script is valid bash" "$(cat /tmp/fallow-run-syntax.err)"
+fi
+RUNNER_TMP="$INSTALL_TMP/runner"
+mkdir -p "$RUNNER_TMP/bin" "$RUNNER_TMP/root"
+cat > "$RUNNER_TMP/bin/fallow" <<'SH'
+#!/usr/bin/env bash
+printf '{"total_issues":0}\n'
+SH
+chmod +x "$RUNNER_TMP/bin/fallow"
+OUT=$(cd "$RUNNER_TMP" && env \
+  PATH="$RUNNER_TMP/bin:$PATH" \
+  FALLOW_COMMAND=dead-code \
+  FALLOW_ROOT="$RUNNER_TMP/root" \
+  FALLOW_CONFIG= \
+  FALLOW_PRODUCTION= \
+  FALLOW_PRODUCTION_DEAD_CODE= \
+  FALLOW_PRODUCTION_HEALTH= \
+  FALLOW_PRODUCTION_DUPES= \
+  FALLOW_FAIL_ON_ISSUES=false \
+  FALLOW_MIN_SEVERITY= \
+  FALLOW_INCLUDE_ENTRY_EXPORTS=false \
+  FALLOW_ARGS= \
+  FALLOW_COMMENT=false \
+  FALLOW_REVIEW=false \
+  FALLOW_REVIEW_GUIDANCE=false \
+  FALLOW_CODEQUALITY=false \
+  FALLOW_MAX_COMMENTS=50 \
+  FALLOW_COMMENT_ID= \
+  FALLOW_SUMMARY_SCOPE=all \
+  FALLOW_DIFF_FILTER=added \
+  FALLOW_DIFF_FILE= \
+  FALLOW_API_RETRIES=3 \
+  FALLOW_API_RETRY_DELAY=2 \
+  FALLOW_GITLAB_BASE_SHA= \
+  FALLOW_GITLAB_START_SHA= \
+  FALLOW_GITLAB_HEAD_SHA= \
+  FALLOW_CHANGED_SINCE= \
+  FALLOW_BASELINE= \
+  FALLOW_SAVE_BASELINE= \
+  FALLOW_WORKSPACE= \
+  FALLOW_CHANGED_WORKSPACES= \
+  FALLOW_ISSUE_TYPES= \
+  FALLOW_FAIL_ON_REGRESSION=false \
+  FALLOW_TOLERANCE=0 \
+  FALLOW_REGRESSION_BASELINE= \
+  FALLOW_SAVE_REGRESSION_BASELINE= \
+  FALLOW_DUPES_MODE=mild \
+  FALLOW_MIN_TOKENS= \
+  FALLOW_MIN_LINES= \
+  FALLOW_THRESHOLD= \
+  FALLOW_SKIP_LOCAL=false \
+  FALLOW_CROSS_LANGUAGE=false \
+  FALLOW_IGNORE_IMPORTS=false \
+  FALLOW_MAX_CYCLOMATIC= \
+  FALLOW_MAX_COGNITIVE= \
+  FALLOW_MAX_CRAP= \
+  FALLOW_COVERAGE= \
+  FALLOW_PRODUCTION_COVERAGE= \
+  FALLOW_COVERAGE_ROOT= \
+  FALLOW_MIN_INVOCATIONS_HOT= \
+  FALLOW_MIN_OBSERVATION_VOLUME= \
+  FALLOW_LOW_TRAFFIC_THRESHOLD= \
+  FALLOW_TOP= \
+  FALLOW_SORT= \
+  FALLOW_SCORE=false \
+  FALLOW_FILE_SCORES=false \
+  FALLOW_HOTSPOTS=false \
+  FALLOW_TARGETS=false \
+  FALLOW_COMPLEXITY=false \
+  FALLOW_SINCE= \
+  FALLOW_MIN_COMMITS= \
+  FALLOW_SAVE_SNAPSHOT= \
+  FALLOW_TREND=false \
+  FALLOW_AUDIT_GATE= \
+  FALLOW_AUDIT_DEAD_CODE_BASELINE= \
+  FALLOW_AUDIT_HEALTH_BASELINE= \
+  FALLOW_AUDIT_DUPES_BASELINE= \
+  FALLOW_SECURITY_GATE= \
+  FALLOW_DRY_RUN=true \
+  FALLOW_NO_CACHE=false \
+  FALLOW_THREADS= \
+  FALLOW_ONLY= \
+  FALLOW_SKIP= \
+  FALLOW_SCRIPTS_REF= \
+  bash /tmp/fallow-run.sh 2>&1)
+cmd_status=$?
+if [ "$cmd_status" -eq 0 ] && [ -s "$RUNNER_TMP/fallow-results.json" ]; then
+  pass "run writer: generated analysis script runs with empty extra args"
+else
+  fail "run writer: generated analysis script runs with empty extra args" "$OUT"
+fi
+
 # =========================================================================
 # Behavioral parity between action/scripts/install.sh and ci/gitlab-ci.yml
 # =========================================================================
@@ -168,7 +304,7 @@ parity_run_gitlab() {
   local root="$1"
   local version="$2"
   FALLOW_ROOT="$root" FALLOW_VERSION="$version" FALLOW_INSTALL_DRY_RUN=true \
-    bash -eo pipefail -c "$GITLAB_INSTALL_SCRIPT" 2>&1
+    /bin/sh -c "$GITLAB_INSTALL_SCRIPT" 2>&1
 }
 
 extract_install_arg() {
@@ -605,7 +741,7 @@ OUT_CLEAN=$(jq -r -f "$SHARED_JQ_DIR/summary-dupes.jq" "$FIXTURES/dupes-clean.js
 assert_contains "$OUT_CLEAN" "No code duplication" "clean: no duplication"
 
 echo "  summary-fix.jq:"
-# summary-fix needs fix results — test with combined (may not have fix data)
+# summary-fix needs fix results, test with combined (may not have fix data)
 # Just verify it doesn't crash on missing data
 OUT=$(echo '{"fixes":[],"dry_run":true}' | jq -r -f "$SHARED_JQ_DIR/summary-fix.jq" 2>&1)
 assert_contains "$OUT" "No fixable issues" "empty fix: no fixable issues"

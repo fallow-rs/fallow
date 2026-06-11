@@ -3,7 +3,7 @@
 # Find unused code, code duplication, circular dependencies, and complexity
 # hotspots in TypeScript/JavaScript projects.
 #
-# Usage — add to your .gitlab-ci.yml:
+# Usage: add to your .gitlab-ci.yml:
 #
 #   include:
 #     - remote: 'https://raw.githubusercontent.com/fallow-rs/fallow/vX.Y.Z/ci/gitlab-ci.yml'
@@ -180,7 +180,7 @@ variables:
   FALLOW_SCRIPTS_REF: ""
 
 # ---------------------------------------------------------------------------
-# Template job — extend this in your pipeline
+# Template job: extend this in your pipeline
 # ---------------------------------------------------------------------------
 
 .fallow:
@@ -192,7 +192,7 @@ variables:
       - .fallow/
     policy: pull-push
   before_script:
-    # Install dependencies — detect Alpine (apk) vs Debian/Ubuntu (apt-get)
+    # Install dependencies: detect Alpine (apk) vs Debian/Ubuntu (apt-get)
     - |
       if command -v apk > /dev/null 2>&1; then
         apk add --no-cache bash jq git curl > /dev/null 2>&1
@@ -204,6 +204,7 @@ variables:
       fi
     # Validate and install fallow
     - |
+      bash -eo pipefail <<'FALLOW_INSTALL_EOF'
       trim() {
         local value="$1"
         value="${value#"${value%%[![:space:]]*}"}"
@@ -304,8 +305,10 @@ variables:
           echo "WARNING: Installed fallow ${installed_semver}, but ${root}/package.json pins ${project_spec}. Set FALLOW_VERSION or align package.json to keep local and CI results comparable."
         fi
       fi
+      FALLOW_INSTALL_EOF
     # Prepare bash scripts for MR integration
     - |
+      bash -eo pipefail <<'FALLOW_SCRIPT_PREP_EOF'
       FALLOW_SCRIPTS_DIR="/tmp/fallow-scripts"
       mkdir -p "$FALLOW_SCRIPTS_DIR"
 
@@ -351,13 +354,15 @@ variables:
         fi
 
         if [ "$DOWNLOAD_FAILURES" -gt 0 ]; then
-          echo "WARNING: ${DOWNLOAD_FAILURES} script(s) failed to download — MR comments/review may be limited"
+          echo "WARNING: ${DOWNLOAD_FAILURES} script(s) failed to download, MR comments/review may be limited"
         else
           echo "Scripts downloaded"
         fi
       fi
+      FALLOW_SCRIPT_PREP_EOF
     # Write the analysis script (heredoc avoids quoting issues)
     - |
+      bash -eo pipefail <<'FALLOW_RUN_WRITER_EOF'
       cat > /tmp/fallow-run.sh << 'FALLOW_SCRIPT_EOF'
       #!/bin/bash
       set -euo pipefail
@@ -545,19 +550,21 @@ variables:
       esac
 
       EXTRA_ARGS=()
+      RUN_ARGS=("${ARGS[@]}")
       if [ -n "$FALLOW_ARGS" ]; then
         read -ra EXTRA_ARGS <<< "$FALLOW_ARGS"
+        RUN_ARGS+=("${EXTRA_ARGS[@]}")
       fi
 
       # ── Run analysis ─────────────────────────────────────────────────
       {
         printf 'FALLOW_ANALYSIS_ARGS=('
-        printf '%q ' "${ARGS[@]}" "${EXTRA_ARGS[@]}"
+        printf '%q ' "${RUN_ARGS[@]}"
         printf ')\n'
       } > fallow-analysis-args.sh
 
-      echo "Running: fallow ${ARGS[*]} ${EXTRA_ARGS[*]}"
-      if ! fallow "${ARGS[@]}" "${EXTRA_ARGS[@]}" > fallow-results.json 2> fallow-stderr.log; then
+      echo "Running: fallow ${RUN_ARGS[*]}"
+      if ! fallow "${RUN_ARGS[@]}" > fallow-results.json 2> fallow-stderr.log; then
         if [ ! -s fallow-results.json ] || ! jq -e '.' fallow-results.json > /dev/null 2>&1; then
           echo "ERROR: Fallow failed to run"
           [ -s fallow-stderr.log ] && cat fallow-stderr.log
@@ -618,9 +625,13 @@ variables:
           fi
           prev_arg="$arg"
         done
+        CQ_RUN_ARGS=("${CQ_ARGS[@]}")
+        if [ -n "$FALLOW_ARGS" ]; then
+          CQ_RUN_ARGS+=("${EXTRA_ARGS[@]}")
+        fi
         # A findings exit code is still a valid CodeClimate report. Fall back
         # only when the report file is empty, malformed, or not a JSON array.
-        fallow "${CQ_ARGS[@]}" "${EXTRA_ARGS[@]}" > gl-code-quality-report.json 2>/dev/null || true
+        fallow "${CQ_RUN_ARGS[@]}" > gl-code-quality-report.json 2>/dev/null || true
         if [ ! -s gl-code-quality-report.json ] || ! jq -e 'type == "array"' gl-code-quality-report.json > /dev/null 2>&1; then
           echo "[]" > gl-code-quality-report.json
         fi
@@ -638,7 +649,7 @@ variables:
           export INPUT_ROOT="${FALLOW_ROOT:-.}"
           bash /tmp/fallow-scripts/comment.sh || echo "WARNING: MR comment failed"
         else
-          echo "WARNING: comment.sh not available — skipping MR comment"
+          echo "WARNING: comment.sh not available, skipping MR comment"
         fi
       fi
 
@@ -650,7 +661,7 @@ variables:
           export CHANGED_SINCE="$FALLOW_CHANGED_SINCE"
           bash /tmp/fallow-scripts/review.sh || echo "WARNING: MR review failed"
         else
-          echo "WARNING: review.sh not available — skipping MR review"
+          echo "WARNING: review.sh not available, skipping MR review"
         fi
       fi
 
@@ -685,6 +696,7 @@ variables:
       fi
       FALLOW_SCRIPT_EOF
       chmod +x /tmp/fallow-run.sh
+      FALLOW_RUN_WRITER_EOF
   script:
     - bash /tmp/fallow-run.sh
 
