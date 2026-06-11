@@ -595,5 +595,12 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
         }
       ]
     }
+  ],
+  "next_steps": [
+    {
+      "id": "trace-unused-export",
+      "command": "fallow dead-code --trace src/utils.ts:helperFn",
+      "reason": "verify an export is truly unused before deleting"
+    }
   ]
 }

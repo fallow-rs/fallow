@@ -169,7 +169,8 @@ pub fn build_json_with_config_fixable(
     elapsed: Duration,
     config_fixable: bool,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let envelope = build_check_output(results, root, elapsed, config_fixable);
+    let mut envelope = build_check_output(results, root, elapsed, config_fixable);
+    envelope.next_steps = crate::report::suggestions::build_dead_code_next_steps(results, root);
     let mut output = serialize_root_output(FallowOutput::Check(envelope))?;
     postprocess_check_json(&mut output, root);
     Ok(output)
@@ -218,6 +219,10 @@ fn build_check_output(
         regression: None,
         meta: None,
         workspace_diagnostics: crate::runtime_support::workspace_diagnostics_for(root),
+        // Populated only at the standalone-command entry points; the combined
+        // and audit envelopes reuse this struct as a sub-block and aggregate
+        // their own `next_steps` at the top level, so it stays empty here.
+        next_steps: Vec::new(),
     }
 }
 
@@ -525,6 +530,7 @@ pub fn build_health_json(
         groups: None,
         meta: None,
         workspace_diagnostics: crate::runtime_support::workspace_diagnostics_for(root),
+        next_steps: crate::report::suggestions::build_health_next_steps(report, root),
     };
     let mut output = serialize_root_output(FallowOutput::Health(envelope))?;
     let root_prefix = format!("{}/", root.display());
@@ -567,6 +573,7 @@ pub fn build_grouped_health_json(
         groups: None,
         meta: None,
         workspace_diagnostics: crate::runtime_support::workspace_diagnostics_for(root),
+        next_steps: crate::report::suggestions::build_health_next_steps(report, root),
     };
     let mut output = serialize_root_output(FallowOutput::Health(envelope))?;
     strip_root_prefix(&mut output, &root_prefix);
@@ -614,16 +621,19 @@ pub fn build_duplication_json(
     elapsed: Duration,
     explain: bool,
 ) -> Result<serde_json::Value, serde_json::Error> {
+    let payload = DupesReportPayload::from_report(report);
+    let next_steps = crate::report::suggestions::build_dupes_next_steps(&payload, root);
     let envelope = DupesOutput {
         schema_version: SchemaVersion(SCHEMA_VERSION),
         version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
         elapsed_ms: ElapsedMs(elapsed.as_millis() as u64),
-        report: DupesReportPayload::from_report(report),
+        report: payload,
         grouped_by: None,
         total_issues: None,
         groups: None,
         meta: None,
         workspace_diagnostics: crate::runtime_support::workspace_diagnostics_for(root),
+        next_steps,
     };
     let mut output = serialize_root_output(FallowOutput::Dupes(envelope))?;
     let root_prefix = format!("{}/", root.display());
@@ -659,16 +669,19 @@ pub fn build_grouped_duplication_json(
     explain: bool,
 ) -> Result<serde_json::Value, serde_json::Error> {
     let root_prefix = format!("{}/", root.display());
+    let payload = DupesReportPayload::from_report(report);
+    let next_steps = crate::report::suggestions::build_dupes_next_steps(&payload, root);
     let envelope = DupesOutput {
         schema_version: SchemaVersion(SCHEMA_VERSION),
         version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
         elapsed_ms: ElapsedMs(elapsed.as_millis() as u64),
-        report: DupesReportPayload::from_report(report),
+        report: payload,
         grouped_by: Some(group_by_mode_from_label(grouping.mode)),
         total_issues: Some(report.clone_groups.len()),
         groups: None,
         meta: None,
         workspace_diagnostics: crate::runtime_support::workspace_diagnostics_for(root),
+        next_steps,
     };
     let mut output = serialize_root_output(FallowOutput::Dupes(envelope))?;
     strip_root_prefix(&mut output, &root_prefix);
@@ -872,6 +885,7 @@ mod tests {
             groups: None,
             meta: None,
             workspace_diagnostics: Vec::new(),
+            next_steps: Vec::new(),
         };
         let mut output = serde_json::to_value(&envelope).expect("should serialize health envelope");
         strip_root_prefix(&mut output, "/project/");

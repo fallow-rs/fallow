@@ -127,5 +127,12 @@ expression: redact_version(&json_str)
   "empty_catalog_groups": [],
   "unresolved_catalog_references": [],
   "unused_dependency_overrides": [],
-  "misconfigured_dependency_overrides": []
+  "misconfigured_dependency_overrides": [],
+  "next_steps": [
+    {
+      "id": "trace-unused-export",
+      "command": "fallow dead-code --trace src/helpers.ts:capitalize",
+      "reason": "verify an export is truly unused before deleting"
+    }
+  ]
 }

@@ -10,6 +10,7 @@ mod markdown;
 mod sarif;
 mod shared;
 pub mod sink;
+pub mod suggestions;
 #[cfg(test)]
 pub mod test_helpers;
 

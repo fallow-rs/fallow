@@ -62,6 +62,13 @@
               "type": "null"
             }
           ]
+        },
+        "next_steps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/NextStep"
+          },
+          "description": "Read-only follow-up commands aggregated across the combined run's\nfindings. See [`CheckOutput::next_steps`] for the contract."
         }
       },
       "required": [
@@ -160,6 +167,13 @@
               "type": "null"
             }
           ]
+        },
+        "next_steps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/NextStep"
+          },
+          "description": "Read-only follow-up commands computed from this run's findings. See\n[`CheckOutput::next_steps`] for the contract."
         }
       },
       "required": [
@@ -653,6 +667,13 @@
           "items": {
             "$ref": "#/definitions/WorkspaceDiagnostic"
           }
+        },
+        "next_steps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/NextStep"
+          },
+          "description": "Read-only follow-up commands computed from this run's findings, emitted\nat the JSON root so an agent acting on the output is pointed at fallow's\nadjacent verification capabilities (trace, complexity breakdown, audit,\nworkspace scoping). Each command is runnable as-is and never mutating;\nsee [`NextStep`] for both contracts. Omitted when empty or when\n`FALLOW_SUGGESTIONS=off`; does NOT contribute to `total_issues`."
         }
       },
       "required": [
@@ -1130,6 +1151,13 @@
           "items": {
             "$ref": "#/definitions/WorkspaceDiagnostic"
           }
+        },
+        "next_steps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/NextStep"
+          },
+          "description": "Read-only follow-up commands computed from this run's findings. See\n[`CheckOutput::next_steps`] for the contract."
         }
       },
       "required": [
@@ -2105,6 +2133,13 @@
             "$ref": "#/definitions/WorkspaceDiagnostic"
           },
           "description": "Workspace-discovery diagnostics surfaced during config load\n(issue #473). See [`CheckOutput::workspace_diagnostics`] for the full\ncontract; the same list is repeated on each top-level command's\nenvelope so single-command consumers see it without having to look at\na separate top-level field."
+        },
+        "next_steps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/NextStep"
+          },
+          "description": "Read-only follow-up commands computed from this run's findings. See\n[`CheckOutput::next_steps`] for the contract."
         }
       },
       "required": [
@@ -11909,6 +11944,29 @@
         }
       ],
       "description": "Effective severity of a single [`PolicyViolation`]. Per-rule `severity`\noverrides the `rules.\"policy-violation\"` master; `off` rules emit nothing,\nso only `error` and `warn` appear on the wire. The exit-code gate inspects\nthis per-finding value, not the master severity."
+    },
+    "NextStep": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Stable kebab-case key for machine dispatch and de-duplication\n(for example `\"trace-unused-export\"`). Identity is stable across runs;\nthe `command` and `reason` strings may vary with the findings."
+        },
+        "command": {
+          "type": "string",
+          "description": "A runnable, read-only command string. Placeholder-free by contract."
+        },
+        "reason": {
+          "type": "string",
+          "description": "One short phrase explaining why this helps. Carries any value that\ncannot be made concrete in `command`."
+        }
+      },
+      "required": [
+        "id",
+        "command",
+        "reason"
+      ],
+      "description": "A read-only follow-up command fallow surfaces from the current findings,\nemitted as the top-level `next_steps` array on each command's JSON envelope.\n\n`next_steps` exists to point agents and humans sideways to fallow's adjacent\nverification capabilities (trace, complexity breakdown, audit, workspace\nscoping) that telemetry shows agents rarely discover, because they act on the\noutput in front of them rather than on reference docs.\n\n## Two hard contracts\n\n1. **Read-only.** A `next_step` NEVER suggests `fallow fix` or any mutating\n   command. Fallow surfaces evidence and verification paths; deciding and\n   applying the remediation is the agent's job.\n2. **Runnable, placeholder-free.** `command` is always runnable as-is. It\n   never contains an angle-bracket placeholder (`<...>`); finding-derived\n   values are filled in from a real, deterministically-selected finding, and\n   any environment- or user-specific value that cannot be made concrete lives\n   in `reason` instead. An agent can copy `command` and run it without edits.\n\nBoth contracts are enforced by unit tests in\n`crates/cli/src/report/suggestions.rs`."
     }
   }
 }

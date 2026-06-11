@@ -154,6 +154,21 @@ fn print_human_sections(
                 .dimmed()
         );
         println!();
+
+        let dupes_payload = dupes_result
+            .map(|result| crate::output_dupes::DupesReportPayload::from_report(&result.report));
+        if let Some(step) = crate::report::suggestions::top_combined_next_step(
+            check_result.map(|result| &result.results),
+            dupes_payload.as_ref(),
+            health_result.map(|result| &result.report),
+            opts.root,
+        ) {
+            println!(
+                "{}",
+                format!("Next: {}  ({})", step.command, step.reason).dimmed()
+            );
+            println!();
+        }
     }
 
     if let Some(result) = check_result {
@@ -319,6 +334,8 @@ fn print_combined_json(
         check: None,
         dupes: None,
         health: None,
+        // Aggregated and injected into the map below, after the sub-blocks.
+        next_steps: Vec::new(),
     };
     let mut combined = match crate::output_envelope::serialize_root_output(
         crate::output_envelope::FallowOutput::Combined(envelope),
@@ -408,6 +425,29 @@ fn print_combined_json(
             Ok(mut json) => {
                 report::strip_root_prefix(&mut json, &root_prefix);
                 combined.insert("health".into(), json);
+            }
+            Err(e) => {
+                return emit_error(
+                    &format!("JSON serialization error: {e}"),
+                    2,
+                    OutputFormat::Json,
+                );
+            }
+        }
+    }
+
+    let dupes_payload =
+        dupes.map(|result| crate::output_dupes::DupesReportPayload::from_report(&result.report));
+    let next_steps = crate::report::suggestions::build_combined_next_steps(
+        check.map(|result| &result.results),
+        dupes_payload.as_ref(),
+        health.map(|result| &result.report),
+        root,
+    );
+    if !next_steps.is_empty() {
+        match serde_json::to_value(&next_steps) {
+            Ok(value) => {
+                combined.insert("next_steps".into(), value);
             }
             Err(e) => {
                 return emit_error(

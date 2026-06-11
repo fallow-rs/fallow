@@ -11,6 +11,7 @@ use fallow_types::envelope::{
     BaselineDeltas, BaselineMatch, CheckSummary, ElapsedMs, EntryPoints, Meta, RegressionResult,
     SchemaVersion, TelemetryMeta, ToolVersion,
 };
+use fallow_types::output::NextStep;
 use serde::Serialize;
 
 use crate::audit::{AuditAttribution, AuditSummary, AuditVerdict};
@@ -251,6 +252,10 @@ pub struct AuditOutput {
     pub duplication: Option<DupesReportPayload>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub complexity: Option<HealthReport>,
+    /// Read-only follow-up commands computed from this run's findings. See
+    /// [`CheckOutput::next_steps`] for the contract.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub next_steps: Vec<NextStep>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -280,6 +285,10 @@ pub struct CombinedOutput {
     pub dupes: Option<DupesReportPayload>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub health: Option<HealthReport>,
+    /// Read-only follow-up commands aggregated across the combined run's
+    /// findings. See [`CheckOutput::next_steps`] for the contract.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub next_steps: Vec<NextStep>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -343,6 +352,10 @@ pub struct DupesOutput {
     /// a separate top-level field.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub workspace_diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
+    /// Read-only follow-up commands computed from this run's findings. See
+    /// [`CheckOutput::next_steps`] for the contract.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub next_steps: Vec<NextStep>,
 }
 
 /// Envelope emitted by `fallow dead-code --format json` (plus the `check`
@@ -377,6 +390,14 @@ pub struct CheckOutput {
     pub meta: Option<Meta>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub workspace_diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
+    /// Read-only follow-up commands computed from this run's findings, emitted
+    /// at the JSON root so an agent acting on the output is pointed at fallow's
+    /// adjacent verification capabilities (trace, complexity breakdown, audit,
+    /// workspace scoping). Each command is runnable as-is and never mutating;
+    /// see [`NextStep`] for both contracts. Omitted when empty or when
+    /// `FALLOW_SUGGESTIONS=off`; does NOT contribute to `total_issues`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub next_steps: Vec<NextStep>,
 }
 
 /// Envelope emitted by `fallow dead-code --group-by ... --format json`.
@@ -446,6 +467,10 @@ pub struct HealthOutput {
     pub meta: Option<Meta>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub workspace_diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
+    /// Read-only follow-up commands computed from this run's findings. See
+    /// [`CheckOutput::next_steps`] for the contract.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub next_steps: Vec<NextStep>,
 }
 
 /// Envelope emitted by `fallow explain <issue-type> --format json`.
@@ -1099,6 +1124,7 @@ mod tests {
             check: None,
             dupes: None,
             health: None,
+            next_steps: Vec::new(),
         }
     }
 

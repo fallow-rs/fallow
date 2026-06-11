@@ -732,6 +732,11 @@ _meta?: (Meta | null)
 dead_code?: (CheckOutput | null)
 duplication?: (DupesReportPayload | null)
 complexity?: (HealthReport | null)
+/**
+ * Read-only follow-up commands computed from this run's findings. See
+ * [`CheckOutput::next_steps`] for the contract.
+ */
+next_steps?: NextStep[]
 }
 /**
  * Per-category summary counts for the audit result.
@@ -1031,6 +1036,15 @@ baseline?: (BaselineMatch | null)
 regression?: (RegressionResult | null)
 _meta?: (Meta | null)
 workspace_diagnostics?: WorkspaceDiagnostic[]
+/**
+ * Read-only follow-up commands computed from this run's findings, emitted
+ * at the JSON root so an agent acting on the output is pointed at fallow's
+ * adjacent verification capabilities (trace, complexity breakdown, audit,
+ * workspace scoping). Each command is runnable as-is and never mutating;
+ * see [`NextStep`] for both contracts. Omitted when empty or when
+ * `FALLOW_SUGGESTIONS=off`; does NOT contribute to `total_issues`.
+ */
+next_steps?: NextStep[]
 }
 /**
  * Entry-point detection summary embedded in `CheckOutput` and the combined
@@ -2445,6 +2459,46 @@ exceeded: boolean
  * Only present when status is `skipped`.
  */
 reason?: (string | null)
+}
+/**
+ * A read-only follow-up command fallow surfaces from the current findings,
+ * emitted as the top-level `next_steps` array on each command's JSON envelope.
+ *
+ * `next_steps` exists to point agents and humans sideways to fallow's adjacent
+ * verification capabilities (trace, complexity breakdown, audit, workspace
+ * scoping) that telemetry shows agents rarely discover, because they act on the
+ * output in front of them rather than on reference docs.
+ *
+ * ## Two hard contracts
+ *
+ * 1. **Read-only.** A `next_step` NEVER suggests `fallow fix` or any mutating
+ *    command. Fallow surfaces evidence and verification paths; deciding and
+ *    applying the remediation is the agent's job.
+ * 2. **Runnable, placeholder-free.** `command` is always runnable as-is. It
+ *    never contains an angle-bracket placeholder (`<...>`); finding-derived
+ *    values are filled in from a real, deterministically-selected finding, and
+ *    any environment- or user-specific value that cannot be made concrete lives
+ *    in `reason` instead. An agent can copy `command` and run it without edits.
+ *
+ * Both contracts are enforced by unit tests in
+ * `crates/cli/src/report/suggestions.rs`.
+ */
+export interface NextStep {
+/**
+ * Stable kebab-case key for machine dispatch and de-duplication
+ * (for example `"trace-unused-export"`). Identity is stable across runs;
+ * the `command` and `reason` strings may vary with the findings.
+ */
+id: string
+/**
+ * A runnable, read-only command string. Placeholder-free by contract.
+ */
+command: string
+/**
+ * One short phrase explaining why this helps. Carries any value that
+ * cannot be made concrete in `command`.
+ */
+reason: string
 }
 /**
  * Wire-shape payload for `fallow dupes --format json` (the body that
@@ -4623,6 +4677,11 @@ grouped_by?: (GroupByMode | null)
 groups?: (HealthGroup[] | null)
 _meta?: (Meta | null)
 workspace_diagnostics?: WorkspaceDiagnostic[]
+/**
+ * Read-only follow-up commands computed from this run's findings. See
+ * [`CheckOutput::next_steps`] for the contract.
+ */
+next_steps?: NextStep[]
 }
 /**
  * A health report scoped to a single group.
@@ -4766,6 +4825,11 @@ _meta?: (Meta | null)
  * a separate top-level field.
  */
 workspace_diagnostics?: WorkspaceDiagnostic[]
+/**
+ * Read-only follow-up commands computed from this run's findings. See
+ * [`CheckOutput::next_steps`] for the contract.
+ */
+next_steps?: NextStep[]
 }
 /**
  * A single grouped duplication bucket. Per-group `stats` are dedup-aware and
@@ -5866,6 +5930,11 @@ _meta?: (CombinedMeta | null)
 check?: (CheckOutput | null)
 dupes?: (DupesReportPayload | null)
 health?: (HealthReport | null)
+/**
+ * Read-only follow-up commands aggregated across the combined run's
+ * findings. See [`CheckOutput::next_steps`] for the contract.
+ */
+next_steps?: NextStep[]
 }
 export interface CombinedMeta {
 check?: (Meta | null)

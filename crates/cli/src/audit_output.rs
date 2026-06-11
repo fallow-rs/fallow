@@ -437,6 +437,19 @@ fn print_audit_json(result: &AuditResult) -> ExitCode {
         }
     }
 
+    let next_steps = crate::report::suggestions::build_audit_next_steps(
+        result
+            .check
+            .as_ref()
+            .map(|check| (&check.results, check.config.root.as_path())),
+        result.health.as_ref().map(|health| &health.report),
+    );
+    if !next_steps.is_empty()
+        && let Ok(value) = serde_json::to_value(&next_steps)
+    {
+        obj.insert("next_steps".into(), value);
+    }
+
     let mut output = serde_json::Value::Object(obj);
     crate::output_envelope::apply_root_kind(&mut output, "audit");
     report::harmonize_multi_kind_suppress_line_actions(&mut output);

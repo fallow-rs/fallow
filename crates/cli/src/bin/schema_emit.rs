@@ -82,8 +82,8 @@ use fallow_types::extract::{
 };
 use fallow_types::output::{
     AddToConfigAction, AddToConfigKind, AddToConfigValue, FixAction, FixActionType,
-    IgnoreExportsRule, IssueAction, SuppressFileAction, SuppressFileKind, SuppressLineAction,
-    SuppressLineKind, SuppressLineScope,
+    IgnoreExportsRule, IssueAction, NextStep, SuppressFileAction, SuppressFileKind,
+    SuppressLineAction, SuppressLineKind, SuppressLineScope,
 };
 use fallow_types::output_dead_code::{
     BoundaryViolationFinding, CircularDependencyFinding, PrivateTypeLeakFinding,
@@ -223,6 +223,7 @@ const DERIVED_DEFINITION_NAMES: &[&str] = &[
     "AddToConfigAction",
     "FixAction",
     "IssueAction",
+    "NextStep",
     "SuppressFileAction",
     "SuppressLineAction",
     "ComplexityViolation",
@@ -503,6 +504,7 @@ fn register_dead_code_action_definitions(generator: &mut schemars::SchemaGenerat
     let _ = generator.subschema_for::<AddToConfigKind>();
     let _ = generator.subschema_for::<AddToConfigValue>();
     let _ = generator.subschema_for::<IgnoreExportsRule>();
+    let _ = generator.subschema_for::<NextStep>();
 }
 
 fn register_dead_code_finding_definitions(generator: &mut schemars::SchemaGenerator) {

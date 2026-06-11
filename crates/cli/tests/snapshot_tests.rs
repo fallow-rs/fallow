@@ -265,6 +265,42 @@ fn json_output_snapshot() {
 }
 
 #[test]
+fn next_steps_are_read_only_and_placeholder_free() {
+    // The dead-code JSON path emits `next_steps` when findings exist. Every
+    // emitted command must be runnable as-is (no `<...>` placeholder) and never
+    // mutating (`fix`/`init`/`hooks`/`migrate`), per the NextStep contract.
+    let root = PathBuf::from("/project");
+    let results = sample_results(&root);
+    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let steps = value
+        .get("next_steps")
+        .and_then(serde_json::Value::as_array)
+        .expect("dead-code output carries next_steps when findings exist");
+    assert!(!steps.is_empty(), "expected at least one next-step");
+    assert_eq!(
+        steps[0]["id"], "trace-unused-export",
+        "the verification path leads the priority order"
+    );
+    for step in steps {
+        let command = step["command"].as_str().expect("command is a string");
+        assert!(
+            !command.contains('<') && !command.contains('>'),
+            "command must be placeholder-free: {command}"
+        );
+        for verb in ["fix", "init", "hooks", "migrate", "setup-hooks"] {
+            assert!(
+                !command.split_whitespace().any(|token| token == verb),
+                "command must be read-only: {command}"
+            );
+        }
+        assert!(
+            step["reason"].as_str().is_some_and(|r| !r.is_empty()),
+            "each next-step carries a non-empty reason"
+        );
+    }
+}
+
+#[test]
 fn json_empty_results_snapshot() {
     let root = PathBuf::from("/project");
     let results = AnalysisResults::default();

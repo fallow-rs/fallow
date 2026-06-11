@@ -340,3 +340,38 @@ pub struct IgnoreExportsRule {
     /// Names of exports inside `file` to silently treat as used.
     pub exports: Vec<String>,
 }
+
+/// A read-only follow-up command fallow surfaces from the current findings,
+/// emitted as the top-level `next_steps` array on each command's JSON envelope.
+///
+/// `next_steps` exists to point agents and humans sideways to fallow's adjacent
+/// verification capabilities (trace, complexity breakdown, audit, workspace
+/// scoping) that telemetry shows agents rarely discover, because they act on the
+/// output in front of them rather than on reference docs.
+///
+/// ## Two hard contracts
+///
+/// 1. **Read-only.** A `next_step` NEVER suggests `fallow fix` or any mutating
+///    command. Fallow surfaces evidence and verification paths; deciding and
+///    applying the remediation is the agent's job.
+/// 2. **Runnable, placeholder-free.** `command` is always runnable as-is. It
+///    never contains an angle-bracket placeholder (`<...>`); finding-derived
+///    values are filled in from a real, deterministically-selected finding, and
+///    any environment- or user-specific value that cannot be made concrete lives
+///    in `reason` instead. An agent can copy `command` and run it without edits.
+///
+/// Both contracts are enforced by unit tests in
+/// `crates/cli/src/report/suggestions.rs`.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct NextStep {
+    /// Stable kebab-case key for machine dispatch and de-duplication
+    /// (for example `"trace-unused-export"`). Identity is stable across runs;
+    /// the `command` and `reason` strings may vary with the findings.
+    pub id: String,
+    /// A runnable, read-only command string. Placeholder-free by contract.
+    pub command: String,
+    /// One short phrase explaining why this helps. Carries any value that
+    /// cannot be made concrete in `command`.
+    pub reason: String,
+}

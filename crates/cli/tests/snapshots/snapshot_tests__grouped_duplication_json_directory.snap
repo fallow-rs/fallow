@@ -103,6 +103,13 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
   },
   "grouped_by": "directory",
   "total_issues": 2,
+  "next_steps": [
+    {
+      "id": "trace-clone",
+      "command": "fallow dupes --trace dup:71c373ff",
+      "reason": "see sibling locations and an extract-function suggestion"
+    }
+  ],
   "groups": [
     {
       "key": "lib",

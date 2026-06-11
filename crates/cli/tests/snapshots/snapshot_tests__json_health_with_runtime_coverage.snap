@@ -132,5 +132,12 @@ expression: redact_version(&json_str)
         "message": "One dump was incomplete."
       }
     ]
-  }
+  },
+  "next_steps": [
+    {
+      "id": "complexity-breakdown",
+      "command": "fallow health --complexity-breakdown",
+      "reason": "see per-decision-point contributions for a hotspot"
+    }
+  ]
 }
