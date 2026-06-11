@@ -1059,6 +1059,7 @@ dependencies = [
 name = "fallow-mcp"
 version = "2.92.1"
 dependencies = [
+ "fallow-types",
  "regex",
  "rmcp",
  "rquickjs",

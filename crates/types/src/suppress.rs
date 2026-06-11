@@ -312,6 +312,37 @@ pub const KNOWN_ISSUE_KIND_NAMES: &[&str] = &[
     "policy-violations",
 ];
 
+/// CLI filter flags on `fallow dead-code` that scope output to a single
+/// issue type.
+///
+/// Shared home so the agent capability manifest (`fallow schema` in
+/// `crates/cli`), the MCP server's `issue_types` allowlist
+/// (`ISSUE_TYPE_FLAGS` in `crates/mcp`), and the clap flag definitions stay
+/// in sync: each crate carries a drift test asserting its own list against
+/// this one.
+pub const DEAD_CODE_FILTER_FLAGS: &[&str] = &[
+    "--unused-files",
+    "--unused-exports",
+    "--unused-types",
+    "--private-type-leaks",
+    "--unused-deps",
+    "--unused-enum-members",
+    "--unused-class-members",
+    "--unresolved-imports",
+    "--unlisted-deps",
+    "--duplicate-exports",
+    "--circular-deps",
+    "--re-export-cycles",
+    "--boundary-violations",
+    "--policy-violations",
+    "--stale-suppressions",
+    "--unused-catalog-entries",
+    "--empty-catalog-groups",
+    "--unresolved-catalog-references",
+    "--unused-dependency-overrides",
+    "--misconfigured-dependency-overrides",
+];
+
 /// Levenshtein edit distance between two ASCII-leaning strings.
 ///
 /// Local duplicate of the config-crate helper (see
