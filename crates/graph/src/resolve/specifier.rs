@@ -1356,17 +1356,14 @@ pub(super) fn resolve_specifier(
                 return result;
             }
 
-            if used_tsconfig_fallback
+            if (used_tsconfig_fallback || is_bare || is_alias || matches_plugin_alias)
                 && let Some(result) = try_nearest_tsconfig_path_alias(ctx, from_file, specifier)
             {
                 return result;
             }
 
-            if used_tsconfig_fallback
-                && matches_nearest_tsconfig_path_alias(ctx.root, from_file, specifier)
-            {
-                return ResolveResult::Unresolvable(specifier.to_string());
-            }
+            let matches_tsconfig_path_alias =
+                matches_nearest_tsconfig_path_alias(ctx.root, from_file, specifier);
 
             if let Some(result) = try_package_imports_fallback(ctx, from_file, specifier) {
                 return result;
@@ -1388,6 +1385,9 @@ pub(super) fn resolve_specifier(
                 {
                     return result;
                 }
+                if matches_tsconfig_path_alias {
+                    return ResolveResult::Unresolvable(specifier.to_string());
+                }
                 ResolveResult::Unresolvable(specifier.to_string())
             } else if let Some(result) =
                 try_css_relative_subpath_fallback(ctx, from_file, specifier, from_style)
@@ -1398,6 +1398,9 @@ pub(super) fn resolve_specifier(
             } else if is_bare && is_valid_package_name(specifier) {
                 if let Some(result) = try_workspace_package_fallback(ctx, specifier) {
                     return result;
+                }
+                if matches_tsconfig_path_alias {
+                    return ResolveResult::Unresolvable(specifier.to_string());
                 }
                 let pkg_name = extract_package_name(specifier);
                 if ctx.workspace_roots.contains_key(pkg_name.as_str())

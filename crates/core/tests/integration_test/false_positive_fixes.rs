@@ -211,6 +211,79 @@ fn broken_tsconfig_path_alias_is_not_misclassified_as_unlisted_dependency() {
 }
 
 #[test]
+fn unresolved_tsconfig_path_alias_is_not_misclassified_as_unlisted_dependency() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("src")).expect("src dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "alias-unlisted-regression",
+            "private": true,
+            "main": "src/index.ts",
+            "dependencies": {
+                "react": "18.0.0"
+            }
+        }"#,
+    )
+    .expect("package json");
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{
+            "compilerOptions": {
+                "baseUrl": ".",
+                "paths": {
+                    "@app/*": ["src/app/*"]
+                }
+            }
+        }"#,
+    )
+    .expect("tsconfig");
+    std::fs::write(
+        root.join("src/index.ts"),
+        r#"import { missing } from "@app/missing";
+import { external } from "@scope/pkg";
+import React from "react";
+
+console.log(missing, external, React);
+"#,
+    )
+    .expect("index");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unlisted_names: Vec<&str> = results
+        .unlisted_dependencies
+        .iter()
+        .map(|dep| dep.dep.package_name.as_str())
+        .collect();
+    let unresolved_specifiers: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|import| import.import.specifier.as_str())
+        .collect();
+
+    assert!(
+        !unlisted_names.contains(&"@app/missing"),
+        "declared tsconfig path aliases should not be treated as unlisted dependencies: {unlisted_names:?}"
+    );
+    assert!(
+        !unlisted_names.contains(&"react"),
+        "real listed packages should still receive dependency credit: {unlisted_names:?}"
+    );
+    assert!(
+        unlisted_names.contains(&"@scope/pkg"),
+        "real unlisted scoped packages should still be reported in a tsconfig path project: {unlisted_names:?}"
+    );
+    assert!(
+        unresolved_specifiers.contains(&"@app/missing"),
+        "missing local alias targets should stay unresolved instead of becoming package deps: {unresolved_specifiers:?}"
+    );
+}
+
+#[test]
 fn bun_bare_runtime_module_is_not_unlisted() {
     let root = fixture_path("issue-642-bun-builtin");
     let config = create_config(root);
