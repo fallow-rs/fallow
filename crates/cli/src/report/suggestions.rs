@@ -133,7 +133,8 @@ fn setup_pointer(offer_setup: bool) -> Option<NextStep> {
 /// been declined for this project (`fallow init --decline`).
 #[must_use]
 pub fn setup_pointer_applicable(root: &Path) -> bool {
-    fallow_config::FallowConfig::find_config_path(root).is_none()
+    root.exists()
+        && fallow_config::FallowConfig::find_config_path(root).is_none()
         && !crate::telemetry::is_ci()
         && !crate::impact::load(root).onboarding_declined
 }
@@ -491,6 +492,13 @@ mod tests {
         assert_eq!(step.id, "setup");
         assert_eq!(step.command, "fallow schema");
         assert_valid(&step);
+    }
+
+    #[test]
+    fn setup_pointer_gate_ignores_nonexistent_roots() {
+        assert!(!setup_pointer_applicable(Path::new(
+            "/fallow-test-project-does-not-exist"
+        )));
     }
 
     #[test]
