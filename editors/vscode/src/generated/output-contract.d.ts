@@ -2482,6 +2482,13 @@ reason?: (string | null)
  *
  * Both contracts are enforced by unit tests in
  * `crates/cli/src/report/suggestions.rs`.
+ *
+ * Note: a SEPARATE, unrelated `next_steps` field exists on the
+ * `coverage setup` envelope (`CoverageSetupOutput.next_steps`) as a plain
+ * `Vec<String>` of human onboarding steps. Consumers that read multiple
+ * envelope kinds must route on the envelope's `kind` before interpreting a
+ * `next_steps` field: on analysis envelopes it is `Vec<NextStep>` objects, on
+ * `coverage setup` it is `Vec<String>`.
  */
 export interface NextStep {
 /**
@@ -4944,6 +4951,11 @@ grouped_by: GroupByMode
 total_issues: number
 groups: CheckGroupedEntry[]
 _meta?: (Meta | null)
+/**
+ * Read-only follow-up commands computed from the full (ungrouped) findings.
+ * See [`CheckOutput::next_steps`] for the contract.
+ */
+next_steps?: NextStep[]
 }
 /**
  * Single resolver bucket inside `CheckGroupedOutput`. Carries the group's

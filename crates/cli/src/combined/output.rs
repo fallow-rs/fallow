@@ -403,9 +403,13 @@ fn print_combined_json(
 
     let root_prefix = format!("{}/", root.display());
 
-    if let Some(result) = dupes {
-        let payload = crate::output_dupes::DupesReportPayload::from_report(&result.report);
-        match serde_json::to_value(&payload) {
+    // Build the dupes payload once: reused for the sub-block AND the aggregated
+    // next-steps below (fingerprints live on the payload, not the raw report).
+    let dupes_payload =
+        dupes.map(|result| crate::output_dupes::DupesReportPayload::from_report(&result.report));
+
+    if let Some(payload) = dupes_payload.as_ref() {
+        match serde_json::to_value(payload) {
             Ok(mut json) => {
                 report::strip_root_prefix(&mut json, &root_prefix);
                 combined.insert("dupes".into(), json);
@@ -436,8 +440,6 @@ fn print_combined_json(
         }
     }
 
-    let dupes_payload =
-        dupes.map(|result| crate::output_dupes::DupesReportPayload::from_report(&result.report));
     let next_steps = crate::report::suggestions::build_combined_next_steps(
         check.map(|result| &result.results),
         dupes_payload.as_ref(),

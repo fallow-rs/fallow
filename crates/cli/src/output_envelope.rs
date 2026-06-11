@@ -423,6 +423,10 @@ pub struct CheckGroupedOutput {
     pub groups: Vec<CheckGroupedEntry>,
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
+    /// Read-only follow-up commands computed from the full (ungrouped) findings.
+    /// See [`CheckOutput::next_steps`] for the contract.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub next_steps: Vec<NextStep>,
 }
 
 /// Single resolver bucket inside `CheckGroupedOutput`. Carries the group's

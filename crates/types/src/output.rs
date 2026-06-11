@@ -362,6 +362,13 @@ pub struct IgnoreExportsRule {
 ///
 /// Both contracts are enforced by unit tests in
 /// `crates/cli/src/report/suggestions.rs`.
+///
+/// Note: a SEPARATE, unrelated `next_steps` field exists on the
+/// `coverage setup` envelope (`CoverageSetupOutput.next_steps`) as a plain
+/// `Vec<String>` of human onboarding steps. Consumers that read multiple
+/// envelope kinds must route on the envelope's `kind` before interpreting a
+/// `next_steps` field: on analysis envelopes it is `Vec<NextStep>` objects, on
+/// `coverage setup` it is `Vec<String>`.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct NextStep {

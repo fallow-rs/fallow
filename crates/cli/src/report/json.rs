@@ -115,6 +115,7 @@ pub(super) fn print_grouped_json(input: &PrintGroupedJsonInput<'_>) -> ExitCode 
         total_issues: original.total_issues(),
         groups: entries,
         meta: None,
+        next_steps: crate::report::suggestions::build_dead_code_next_steps(original, root),
     };
 
     let mut output = match serialize_root_output(FallowOutput::CheckGrouped(envelope)) {

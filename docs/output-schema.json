@@ -733,6 +733,13 @@
               "type": "null"
             }
           ]
+        },
+        "next_steps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/NextStep"
+          },
+          "description": "Read-only follow-up commands computed from the full (ungrouped) findings.\nSee [`CheckOutput::next_steps`] for the contract."
         }
       },
       "required": [
@@ -11966,7 +11973,7 @@
         "command",
         "reason"
       ],
-      "description": "A read-only follow-up command fallow surfaces from the current findings,\nemitted as the top-level `next_steps` array on each command's JSON envelope.\n\n`next_steps` exists to point agents and humans sideways to fallow's adjacent\nverification capabilities (trace, complexity breakdown, audit, workspace\nscoping) that telemetry shows agents rarely discover, because they act on the\noutput in front of them rather than on reference docs.\n\n## Two hard contracts\n\n1. **Read-only.** A `next_step` NEVER suggests `fallow fix` or any mutating\n   command. Fallow surfaces evidence and verification paths; deciding and\n   applying the remediation is the agent's job.\n2. **Runnable, placeholder-free.** `command` is always runnable as-is. It\n   never contains an angle-bracket placeholder (`<...>`); finding-derived\n   values are filled in from a real, deterministically-selected finding, and\n   any environment- or user-specific value that cannot be made concrete lives\n   in `reason` instead. An agent can copy `command` and run it without edits.\n\nBoth contracts are enforced by unit tests in\n`crates/cli/src/report/suggestions.rs`."
+      "description": "A read-only follow-up command fallow surfaces from the current findings,\nemitted as the top-level `next_steps` array on each command's JSON envelope.\n\n`next_steps` exists to point agents and humans sideways to fallow's adjacent\nverification capabilities (trace, complexity breakdown, audit, workspace\nscoping) that telemetry shows agents rarely discover, because they act on the\noutput in front of them rather than on reference docs.\n\n## Two hard contracts\n\n1. **Read-only.** A `next_step` NEVER suggests `fallow fix` or any mutating\n   command. Fallow surfaces evidence and verification paths; deciding and\n   applying the remediation is the agent's job.\n2. **Runnable, placeholder-free.** `command` is always runnable as-is. It\n   never contains an angle-bracket placeholder (`<...>`); finding-derived\n   values are filled in from a real, deterministically-selected finding, and\n   any environment- or user-specific value that cannot be made concrete lives\n   in `reason` instead. An agent can copy `command` and run it without edits.\n\nBoth contracts are enforced by unit tests in\n`crates/cli/src/report/suggestions.rs`.\n\nNote: a SEPARATE, unrelated `next_steps` field exists on the\n`coverage setup` envelope (`CoverageSetupOutput.next_steps`) as a plain\n`Vec<String>` of human onboarding steps. Consumers that read multiple\nenvelope kinds must route on the envelope's `kind` before interpreting a\n`next_steps` field: on analysis envelopes it is `Vec<NextStep>` objects, on\n`coverage setup` it is `Vec<String>`."
     }
   }
 }
