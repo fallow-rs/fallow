@@ -2290,7 +2290,21 @@ impl ModuleInfoExtractor {
         let bindings = self.collect_playwright_fixture_type_bindings(&alias.type_annotation);
         if !bindings.is_empty() {
             self.playwright_fixture_types
-                .insert(alias.id.name.to_string(), bindings);
+                .insert(alias.id.name.to_string(), bindings.clone());
+            self.member_accesses
+                .extend(
+                    bindings
+                        .into_iter()
+                        .map(|(fixture_name, type_name)| MemberAccess {
+                            object: format!(
+                                "{}{}:{}",
+                                crate::PLAYWRIGHT_FIXTURE_TYPE_SENTINEL,
+                                alias.id.name,
+                                fixture_name
+                            ),
+                            member: type_name,
+                        }),
+                );
         }
     }
 

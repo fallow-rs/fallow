@@ -1,23 +1,14 @@
 import { test as base } from "@playwright/test";
-import { AsserterFactory } from "./asserter-factory";
-import { MessageChecks } from "./message-checks";
+import { FixtureOrchestrator, type AppFixture } from "./fixture-orchestrator";
 
 type MyFixtures = {
-  app: {
-    assert: {
-      messageChecks: MessageChecks;
-    };
-  };
+  app: AppFixture;
 };
 
 export const test = base.extend<MyFixtures>({
   app: async ({}, use) => {
-    const asserterFactory = new AsserterFactory();
+    const orchestrator = new FixtureOrchestrator();
 
-    await use({
-      assert: {
-        messageChecks: asserterFactory.messageChecks,
-      },
-    });
+    await use(orchestrator.createApp());
   },
 });

@@ -2495,6 +2495,34 @@ fn playwright_nested_fixture_alias_type_records_dotted_path_definitions() {
 }
 
 #[test]
+fn playwright_fixture_type_alias_records_nested_type_bindings() {
+    let info = parse(
+        r"
+            import { MessageChecks } from './message-checks';
+
+            type AppFixture = {
+                assert: {
+                    messageChecks: MessageChecks;
+                };
+            };
+        ",
+    );
+
+    assert!(
+        info.member_accesses.iter().any(|a| {
+            a.object
+                == format!(
+                    "{}AppFixture:assert.messageChecks",
+                    crate::PLAYWRIGHT_FIXTURE_TYPE_SENTINEL
+                )
+                && a.member == "MessageChecks"
+        }),
+        "Playwright fixture type alias should record nested type bindings, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
 fn playwright_nested_fixture_destructure_records_dotted_path_uses() {
     let info = parse(
         r"

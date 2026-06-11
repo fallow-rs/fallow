@@ -87,6 +87,14 @@ pub const PLAYWRIGHT_FIXTURE_DEF_SENTINEL: &str = "__fallow_playwright_fixture_d
 /// destructures `fixture` and accesses `fixture.member`.
 pub const PLAYWRIGHT_FIXTURE_USE_SENTINEL: &str = "__fallow_playwright_fixture_use__:";
 
+/// Synthetic member-access object prefix for exported Playwright fixture type aliases.
+///
+/// `MemberAccess { object: format!("{PLAYWRIGHT_FIXTURE_TYPE_SENTINEL}{alias}:{fixture_path}"), member: type_name }`
+/// means a local type alias named `alias` contains a nested fixture path whose
+/// declared type is `type_name`. The analyze layer uses this when a Playwright
+/// fixture generic imports an object type alias from another module.
+pub const PLAYWRIGHT_FIXTURE_TYPE_SENTINEL: &str = "__fallow_playwright_fixture_type__:";
+
 /// Synthetic member-access object prefix for static-factory call returns.
 ///
 /// `MemberAccess { object: format!("{FACTORY_CALL_SENTINEL}{callee}:{method}"), member }`

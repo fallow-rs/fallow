@@ -8,7 +8,8 @@ use crate::discover::FileId;
 use crate::extract::{
     ANGULAR_TPL_SENTINEL, ExportName, FACTORY_CALL_SENTINEL, FLUENT_CHAIN_NEW_SENTINEL,
     FLUENT_CHAIN_SENTINEL, INSTANCE_EXPORT_SENTINEL, MemberKind, ModuleInfo,
-    PLAYWRIGHT_FIXTURE_DEF_SENTINEL, PLAYWRIGHT_FIXTURE_USE_SENTINEL,
+    PLAYWRIGHT_FIXTURE_DEF_SENTINEL, PLAYWRIGHT_FIXTURE_TYPE_SENTINEL,
+    PLAYWRIGHT_FIXTURE_USE_SENTINEL,
 };
 use crate::graph::{ModuleGraph, ReferenceKind};
 use crate::resolve::ResolvedModule;
@@ -808,6 +809,7 @@ fn build_playwright_fixture_targets(
     graph: &ModuleGraph,
     resolved_modules: &[ResolvedModule],
 ) -> FxHashMap<ExportKey, FxHashMap<String, Vec<ExportKey>>> {
+    let type_targets = build_playwright_fixture_type_targets(graph, resolved_modules);
     let mut targets_by_test: FxHashMap<ExportKey, FxHashMap<String, Vec<ExportKey>>> =
         FxHashMap::default();
 
@@ -828,11 +830,91 @@ fn build_playwright_fixture_targets(
             };
 
             for test_key in test_keys {
-                let fixture_targets = targets_by_test
-                    .entry(test_key.clone())
-                    .or_default()
-                    .entry(fixture_name.to_string())
-                    .or_default();
+                let fixture_targets = targets_by_test.entry(test_key.clone()).or_default();
+                for target_key in target_keys {
+                    push_playwright_fixture_target(
+                        graph,
+                        &type_targets,
+                        fixture_targets,
+                        fixture_name,
+                        target_key,
+                    );
+                }
+            }
+        }
+    }
+
+    targets_by_test
+}
+
+fn push_playwright_fixture_target(
+    graph: &ModuleGraph,
+    type_targets: &FxHashMap<ExportKey, FxHashMap<String, Vec<ExportKey>>>,
+    fixture_targets: &mut FxHashMap<String, Vec<ExportKey>>,
+    fixture_name: &str,
+    target_key: &ExportKey,
+) {
+    let origin_keys = export_key_with_origins(graph, target_key);
+    for key in &origin_keys {
+        push_export_key(
+            fixture_targets.entry(fixture_name.to_string()).or_default(),
+            key.clone(),
+        );
+    }
+    for alias_key in origin_keys {
+        push_playwright_fixture_type_target(
+            type_targets,
+            fixture_targets,
+            fixture_name,
+            &alias_key,
+        );
+    }
+}
+
+fn push_playwright_fixture_type_target(
+    type_targets: &FxHashMap<ExportKey, FxHashMap<String, Vec<ExportKey>>>,
+    fixture_targets: &mut FxHashMap<String, Vec<ExportKey>>,
+    fixture_name: &str,
+    alias_key: &ExportKey,
+) {
+    let Some(alias_targets) = type_targets.get(alias_key) else {
+        return;
+    };
+    for (suffix, nested_targets) in alias_targets {
+        let nested_fixture_name = format!("{fixture_name}.{suffix}");
+        let fixture_targets = fixture_targets.entry(nested_fixture_name).or_default();
+        for nested_target in nested_targets {
+            push_export_key(fixture_targets, nested_target.clone());
+        }
+    }
+}
+
+fn build_playwright_fixture_type_targets(
+    graph: &ModuleGraph,
+    resolved_modules: &[ResolvedModule],
+) -> FxHashMap<ExportKey, FxHashMap<String, Vec<ExportKey>>> {
+    let mut targets_by_alias: FxHashMap<ExportKey, FxHashMap<String, Vec<ExportKey>>> =
+        FxHashMap::default();
+
+    for resolved in resolved_modules {
+        let local_to_export_keys = build_local_to_export_keys(resolved);
+        for access in &resolved.member_accesses {
+            let Some((alias_name, fixture_name)) = parse_playwright_fixture_sentinel(
+                access.object.as_str(),
+                PLAYWRIGHT_FIXTURE_TYPE_SENTINEL,
+            ) else {
+                continue;
+            };
+            let Some(alias_keys) = local_to_export_keys.get(alias_name) else {
+                continue;
+            };
+            let Some(target_keys) = local_to_export_keys.get(access.member.as_str()) else {
+                continue;
+            };
+
+            for alias_key in alias_keys {
+                let alias_targets = targets_by_alias.entry(alias_key.clone()).or_default();
+                let fixture_targets = alias_targets.entry(fixture_name.to_string()).or_default();
                 for target_key in target_keys {
                     for key in export_key_with_origins(graph, target_key) {
                         push_export_key(fixture_targets, key);
@@ -842,7 +924,7 @@ fn build_playwright_fixture_targets(
         }
     }
 
-    targets_by_test
+    targets_by_alias
 }
 
 fn propagate_playwright_fixture_accesses(
@@ -1071,6 +1153,7 @@ fn propagate_accesses_through_typed_instance_bindings(
                 || access.object.starts_with(FLUENT_CHAIN_SENTINEL)
                 || access.object.starts_with(FLUENT_CHAIN_NEW_SENTINEL)
                 || access.object.starts_with(PLAYWRIGHT_FIXTURE_DEF_SENTINEL)
+                || access.object.starts_with(PLAYWRIGHT_FIXTURE_TYPE_SENTINEL)
                 || access.object.starts_with(PLAYWRIGHT_FIXTURE_USE_SENTINEL)
                 || access.object == ANGULAR_TPL_SENTINEL
             {
@@ -1094,6 +1177,7 @@ fn propagate_accesses_through_typed_instance_bindings(
             if object_name.starts_with(INSTANCE_EXPORT_SENTINEL)
                 || object_name.starts_with(FACTORY_CALL_SENTINEL)
                 || object_name.starts_with(PLAYWRIGHT_FIXTURE_DEF_SENTINEL)
+                || object_name.starts_with(PLAYWRIGHT_FIXTURE_TYPE_SENTINEL)
                 || object_name.starts_with(PLAYWRIGHT_FIXTURE_USE_SENTINEL)
                 || object_name == ANGULAR_TPL_SENTINEL
             {

@@ -323,7 +323,12 @@ use crate::MemberKind;
 /// statically flattenable callee paths (`callee_uses`) for the
 /// `boundaries.calls.forbidden` detector, so warm caches written before the
 /// bump would report zero forbidden-call findings.
-pub(super) const CACHE_VERSION: u32 = 147;
+///
+/// Bumped to 148 for issue #1190: JS/TS extraction now records nested
+/// Playwright fixture type-alias bindings in `member_accesses`, so warm caches
+/// written before the bump can miss fixture members reached through imported
+/// object type aliases.
+pub(super) const CACHE_VERSION: u32 = 148;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

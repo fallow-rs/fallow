@@ -8,8 +8,8 @@ pub use fallow_extract::{
     ANGULAR_TPL_SENTINEL, DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName,
     FACTORY_CALL_SENTINEL, FLUENT_CHAIN_NEW_SENTINEL, FLUENT_CHAIN_SENTINEL,
     INSTANCE_EXPORT_SENTINEL, ImportInfo, ImportedName, MemberAccess, MemberInfo, MemberKind,
-    ModuleInfo, PLAYWRIGHT_FIXTURE_DEF_SENTINEL, PLAYWRIGHT_FIXTURE_USE_SENTINEL, ParseResult,
-    ReExportInfo, RequireCallInfo, VisibilityTag,
+    ModuleInfo, PLAYWRIGHT_FIXTURE_DEF_SENTINEL, PLAYWRIGHT_FIXTURE_TYPE_SENTINEL,
+    PLAYWRIGHT_FIXTURE_USE_SENTINEL, ParseResult, ReExportInfo, RequireCallInfo, VisibilityTag,
 };
 pub use fallow_types::extract::{SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason};
 
