@@ -157,6 +157,14 @@ mod runtime_support;
     reason = "shared CLI library compiles bin-oriented support modules for reuse"
 )]
 pub mod security;
+/// Agent-discoverability task-to-command matrix shared by `init --agents`,
+/// `hooks install --target agent`, the schema manifest, and root `--help`.
+#[allow(
+    dead_code,
+    unused_imports,
+    reason = "shared CLI library compiles bin-oriented support modules for reuse"
+)]
+mod task_matrix;
 #[allow(
     dead_code,
     unused_imports,

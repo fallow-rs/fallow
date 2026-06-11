@@ -76,7 +76,29 @@ pub fn build_cli_schema(cmd: &clap::Command) -> serde_json::Value {
         "severity_levels": ["error", "warn", "off"],
         "mcp_tools": mcp_tools_schema(),
         "plugins": plugins_schema(),
+        "task_matrix": task_matrix_schema(),
     })
+}
+
+/// Agent-discoverability task-to-command matrix (R2). One row per agent
+/// intent; the `command` may contain `<placeholder>` tokens (docs context),
+/// unlike the runnable-only `next_steps[]` contract. `note` is always present
+/// (null when None) to honor the manifest's no-absent-key convention. Sourced
+/// from the single `crate::task_matrix::TASK_MATRIX` slice that also drives the
+/// `init --agents` template, the agent-hook managed block, and root `--help`.
+fn task_matrix_schema() -> serde_json::Value {
+    serde_json::Value::Array(
+        crate::task_matrix::TASK_MATRIX
+            .iter()
+            .map(|row| {
+                serde_json::json!({
+                    "task": row.task,
+                    "command": row.command,
+                    "note": row.note,
+                })
+            })
+            .collect(),
+    )
 }
 
 /// Per-issue-type metadata that cannot be derived from the explain rule
@@ -1027,6 +1049,79 @@ mod tests {
         let schema = build_arg_schema(quiet_arg);
         if quiet_arg.get_short().is_some() {
             assert!(schema["short"].is_string());
+        }
+    }
+
+    /// Every long flag (`--name`) declared as a global argument on the root.
+    fn global_flag_longs() -> FxHashSet<String> {
+        Cli::command()
+            .get_arguments()
+            .filter_map(|a| a.get_long().map(|l| format!("--{l}")))
+            .collect()
+    }
+
+    #[test]
+    fn schema_has_task_matrix() {
+        let schema = schema();
+        let rows = schema["task_matrix"].as_array().unwrap();
+        assert!(!rows.is_empty(), "task_matrix must have at least one row");
+        for row in rows {
+            let obj = row.as_object().unwrap();
+            for key in ["task", "command", "note"] {
+                assert!(obj.contains_key(key), "task_matrix row missing key {key}");
+            }
+            assert!(obj["task"].is_string());
+            assert!(obj["command"].is_string());
+        }
+    }
+
+    /// The highest-value guard: every row with a runnable `probe` must parse
+    /// through the live clap command tree, so a row can never name a flag or
+    /// subcommand that does not exist.
+    #[test]
+    fn task_matrix_commands_parse_through_clap() {
+        use clap::Parser;
+        for row in crate::task_matrix::TASK_MATRIX {
+            if row.probe.is_empty() {
+                continue;
+            }
+            let argv = std::iter::once("fallow").chain(row.probe.iter().copied());
+            Cli::try_parse_from(argv).unwrap_or_else(|e| {
+                panic!(
+                    "task matrix probe {:?} for command '{}' does not parse: {e}",
+                    row.probe, row.command
+                )
+            });
+        }
+    }
+
+    /// Read-only-evidence contract (R1): no matrix command may name a mutating
+    /// command (`fix`/`init`/`hooks`/`migrate`/`setup-hooks`/`watch`), mirroring
+    /// the `next_steps[]` exclusion in `report/suggestions.rs`.
+    #[test]
+    fn task_matrix_excludes_mutating_commands() {
+        for row in crate::task_matrix::TASK_MATRIX {
+            let after_fallow = row.command.strip_prefix("fallow ").unwrap_or(row.command);
+            let first_token = after_fallow.split_whitespace().next().unwrap_or("");
+            assert!(
+                !crate::task_matrix::MUTATING_COMMANDS.contains(&first_token),
+                "task matrix command '{}' names mutating token '{first_token}'",
+                row.command
+            );
+        }
+    }
+
+    /// The flag-fragment "scope a monorepo" row carries an empty probe, so the
+    /// parse test skips it; assert its global flags exist on the live root
+    /// command instead so the row can never reference a phantom flag.
+    #[test]
+    fn task_matrix_workspace_flags_are_global() {
+        let longs = global_flag_longs();
+        for flag in ["--workspace", "--changed-workspaces"] {
+            assert!(
+                longs.contains(flag),
+                "{flag} is not a global flag on the root command"
+            );
         }
     }
 }

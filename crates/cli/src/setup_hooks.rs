@@ -66,15 +66,28 @@ pub const AGENTS_BLOCK_START: &str = "<!-- fallow:setup-hooks:start -->";
 /// Managed-block end marker for the AGENTS.md Codex fallback.
 pub const AGENTS_BLOCK_END: &str = "<!-- fallow:setup-hooks:end -->";
 
-/// Body of the managed block that `fallow setup-hooks` maintains in
-/// `AGENTS.md`. The `start` and `end` markers bracket this body so re-runs
-/// replace it in place rather than appending duplicates.
+/// Prose body of the managed block that `fallow setup-hooks` maintains in
+/// `AGENTS.md`. The `start` and `end` markers bracket the full body (this
+/// prose plus the task-to-command matrix appended by `agents_block_body`) so
+/// re-runs replace it in place rather than appending duplicates.
 pub const AGENTS_BLOCK_BODY: &str = "## Fallow local gate
 
 Before any `git commit` or `git push`, run `fallow audit --format json --quiet --explain`. If the verdict is `fail`, fix the reported findings before retrying. Treat JSON runtime errors like `{ \"error\": true, ... }` as non-blocking.
 
 Audit defaults to `gate=new-only`: only findings introduced by the current changeset affect the verdict. Inherited findings on touched files are reported under `attribution` and annotated with `introduced: false`, but do not block the commit. Set `[audit] gate = \"all\"` in `fallow.toml` to gate every finding in changed files.
 ";
+
+/// Full managed-block body: the gate prose plus the agent task-to-command
+/// matrix, rendered from the single `crate::task_matrix::TASK_MATRIX` slice so
+/// it stays in sync with the `init --agents` template, the schema manifest,
+/// and the generated SKILL.md section. The matrix refreshes on every reinstall
+/// because `upsert_managed_block` replaces the whole block wholesale.
+fn agents_block_body() -> String {
+    format!(
+        "{AGENTS_BLOCK_BODY}\n## Fallow task map\n\n{}",
+        crate::task_matrix::render_task_matrix_markdown()
+    )
+}
 
 /// Marker embedded in generated hook scripts so uninstall (and upgrades)
 /// can recognize a previously-generated file and remove it without `--force`.
@@ -838,7 +851,10 @@ fn set_executable_bit(_path: &Path) {}
 )]
 fn upsert_managed_block(path: &Path, dry_run: bool) -> std::io::Result<AgentsOutcome> {
     let existing = read_optional_text(path)?.unwrap_or_default();
-    let new_block = format!("{AGENTS_BLOCK_START}\n{AGENTS_BLOCK_BODY}{AGENTS_BLOCK_END}\n");
+    let new_block = format!(
+        "{AGENTS_BLOCK_START}\n{}{AGENTS_BLOCK_END}\n",
+        agents_block_body()
+    );
 
     let (next, outcome) =
         if existing.contains(AGENTS_BLOCK_START) && existing.contains(AGENTS_BLOCK_END) {
@@ -1456,6 +1472,35 @@ mod tests {
         assert!(contents.contains("Fallow local gate"));
         assert!(!contents.contains("stale body"));
         assert!(contents.contains("below"));
+    }
+
+    #[test]
+    fn agents_block_includes_task_matrix_and_is_idempotent() {
+        let tmp = tempdir().unwrap();
+        let agents_path = tmp.path().join("AGENTS.md");
+        std::fs::write(&agents_path, "# Project agents\n").unwrap();
+
+        let mut o = opts(tmp.path());
+        o.agent = Some(HookAgentArg::Codex);
+        assert_eq!(run_setup_hooks(&o), ExitCode::SUCCESS);
+        let after_first = std::fs::read_to_string(&agents_path).unwrap();
+
+        // The managed block carries the task-to-command matrix.
+        assert!(after_first.contains("## Fallow task map"));
+        assert!(after_first.contains("When the agent is about to"));
+        for row in crate::task_matrix::TASK_MATRIX {
+            assert!(
+                after_first.contains(row.command),
+                "managed block missing task-matrix command {}",
+                row.command
+            );
+        }
+
+        // A second reinstall is byte-identical (replace-in-place idempotency).
+        assert_eq!(run_setup_hooks(&o), ExitCode::SUCCESS);
+        let after_second = std::fs::read_to_string(&agents_path).unwrap();
+        assert_eq!(after_second, after_first);
+        assert_eq!(after_second.matches(AGENTS_BLOCK_START).count(), 1);
     }
 
     #[test]

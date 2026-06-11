@@ -4,8 +4,10 @@ import { test } from "node:test";
 import {
   escapeCell,
   firstSentence,
+  hasSection,
   parseExistingTable,
   regenerateSkillMd,
+  sectionIsAbsent,
   spliceSection,
 } from "./generate-agent-docs.mjs";
 
@@ -100,6 +102,18 @@ const SCHEMA = {
       },
     ],
   },
+  task_matrix: [
+    {
+      task: "delete an unused export or file",
+      command: "fallow dead-code --trace <file>:<export>",
+      note: null,
+    },
+    {
+      task: "scope a monorepo",
+      command: "--workspace <glob> / --changed-workspaces <ref>",
+      note: "global flags, prefix any command",
+    },
+  ],
 };
 
 const DOC = `# Skill
@@ -116,6 +130,48 @@ Hand-written intro stays.
 | \`coverage\` | Coverage helper | \`setup\` |
 | \`coverage upload-source-maps\` | Upload source maps from CI | \`--dir dist\` |
 | \`removed-command\` | Should disappear | \`--gone\` |
+<!-- generated:commands:end -->
+
+## Issue Types
+
+<!-- generated:issue-types:start -->
+| Type | Filter flag | Fixable | Suppress comment | Description |
+|---|---|---|---|---|
+| \`unused-file\` | \`--unused-files\` | - | \`// fallow-ignore-file unused-file\` | Curated teaching prose for unused files |
+<!-- generated:issue-types:end -->
+
+## MCP Tools
+
+<!-- generated:mcp-tools:start -->
+| Tool | Kind | License | Key params | Description |
+|---|---|---|---|---|
+| \`analyze\` | analysis | free | \`issue_types\` | Curated long analyze prose with call hints |
+<!-- generated:mcp-tools:end -->
+
+## Task Map
+
+<!-- generated:task-matrix:start -->
+| When the agent is about to... | Run |
+|---|---|
+| stale row that should be regenerated | \`fallow gone\` |
+<!-- generated:task-matrix:end -->
+
+Hand-written outro stays.
+`;
+
+/** A target that has NOT adopted the task-matrix markers. The generator must
+ * regenerate the other three sections and leave this file otherwise intact. */
+const DOC_WITHOUT_TASK_MATRIX = `# Skill
+
+Hand-written intro stays.
+
+## Commands
+
+<!-- generated:commands:start -->
+| Command | Purpose | Key Flags |
+|---|---|---|
+| \`fallow\` | Curated combined purpose | \`--only\`, \`--skip\` |
+| \`dead-code\` | Curated dead code purpose | \`--changed-since\` |
 <!-- generated:commands:end -->
 
 ## Issue Types
@@ -213,6 +269,54 @@ test("missing, duplicated, and inverted markers fail loudly", () => {
     () => spliceSection(inverted, "commands", SCHEMA, "f.md"),
     /end marker before start/,
   );
+});
+
+test("task-matrix section regenerates from the manifest and is idempotent", () => {
+  const once = regenerateSkillMd(DOC, SCHEMA);
+  const twice = regenerateSkillMd(once, SCHEMA);
+  assert.equal(once, twice);
+  // Stale row replaced by the manifest rows.
+  assert.ok(!once.includes("stale row that should be regenerated"));
+  assert.ok(once.includes("| When the agent is about to... | Run |"));
+  assert.ok(once.includes("| delete an unused export or file | `fallow dead-code --trace <file>:<export>` |"));
+  // The flag-fragment row appends its note after a semicolon.
+  assert.ok(
+    once.includes(
+      "| scope a monorepo | `--workspace <glob> / --changed-workspaces <ref>`; global flags, prefix any command |",
+    ),
+  );
+});
+
+test("a target without the task-matrix markers regenerates the other sections and is left intact", () => {
+  assert.ok(sectionIsAbsent(DOC_WITHOUT_TASK_MATRIX, "task-matrix"));
+  assert.ok(!hasSection(DOC_WITHOUT_TASK_MATRIX, "task-matrix"));
+  // Tolerance: regeneration must NOT throw on the absent section.
+  const out = regenerateSkillMd(DOC_WITHOUT_TASK_MATRIX, SCHEMA);
+  // The three adopted sections still regenerate (analyze gains its 2nd param).
+  assert.ok(out.includes("`issue_types`, `production`"));
+  assert.ok(out.includes("`type-only-dependency`"));
+  // No task-matrix markers were injected, and the surrounding prose is intact.
+  assert.ok(!out.includes("generated:task-matrix"));
+  assert.ok(out.startsWith("# Skill\n\nHand-written intro stays."));
+  assert.ok(out.trimEnd().endsWith("Hand-written outro stays."));
+  // Idempotent on the tolerant path too.
+  assert.equal(regenerateSkillMd(out, SCHEMA), out);
+});
+
+test("a half-present task-matrix marker still throws", () => {
+  const halfStart = DOC_WITHOUT_TASK_MATRIX.replace(
+    "## MCP Tools",
+    "<!-- generated:task-matrix:start -->\n\n## MCP Tools",
+  );
+  assert.ok(!sectionIsAbsent(halfStart, "task-matrix"));
+  assert.throws(() => regenerateSkillMd(halfStart, SCHEMA), /missing marker.*task-matrix/s);
+
+  const halfEnd = DOC_WITHOUT_TASK_MATRIX.replace(
+    "## MCP Tools",
+    "<!-- generated:task-matrix:end -->\n\n## MCP Tools",
+  );
+  assert.ok(!sectionIsAbsent(halfEnd, "task-matrix"));
+  assert.throws(() => regenerateSkillMd(halfEnd, SCHEMA), /missing marker.*task-matrix/s);
 });
 
 test("parseExistingTable honors escaped pipes inside cells", () => {

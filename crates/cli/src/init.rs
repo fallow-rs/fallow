@@ -10,7 +10,7 @@ const AGENTS_GUIDE_FILENAME: &str = "AGENTS.md";
 /// Static template used as the ground truth for the empty-project case and
 /// regression tests. Production code uses `build_agents_guide` instead.
 #[cfg(test)]
-const AGENTS_GUIDE_TEMPLATE: &str = r"# AGENTS.md
+const AGENTS_GUIDE_TEMPLATE: &str = r#"# AGENTS.md
 
 This file gives coding agents project-specific context. Keep it short and update it when workflows change.
 
@@ -39,12 +39,28 @@ This file gives coding agents project-specific context. Keep it short and update
 - Use `fallow dead-code --format json --quiet`, `fallow dupes --format json --quiet`, and `fallow health --format json --quiet` for targeted checks.
 - Use `fallow list --entry-points --format json --quiet` and `fallow list --boundaries --format json --quiet` to inspect project shape.
 
+<!-- generated:task-matrix:start -->
+| When the agent is about to... | Run |
+|---|---|
+| delete an "unused" export or file | `fallow dead-code --trace <file>:<export>` |
+| delete an "unused" dependency | `fallow dead-code --trace-dependency <name>` |
+| commit or open a PR | `fallow audit --base <ref>` |
+| prioritize refactoring | `fallow health --hotspots --targets` |
+| ask who owns code | `fallow health --ownership` |
+| check untested-but-reachable code | `fallow health --coverage-gaps` |
+| consolidate duplication | `fallow dupes --trace dup:<fingerprint>` |
+| find feature flags | `fallow flags` |
+| surface security candidates | `fallow security` |
+| understand a finding | `fallow explain <issue-type>` |
+| scope a monorepo | `--workspace <glob> / --changed-workspaces <ref>` (global flags, prefix any command) |
+<!-- generated:task-matrix:end -->
+
 ## Agent Rules
 
 - Do not edit:
 - Always ask before:
 - Preferred style:
-";
+"#;
 
 /// Detected project characteristics used to tailor config scaffolding.
 pub struct ProjectInfo {
@@ -293,6 +309,16 @@ pub fn build_agents_guide(info: &ProjectInfo) -> String {
 
     let module_boundaries = agents_module_boundaries_line(info);
 
+    // The task-to-command matrix is static (not project-derived), rendered
+    // from the single `crate::task_matrix::TASK_MATRIX` slice so it stays in
+    // sync with the agent-hook managed block, the schema manifest, and the
+    // generated SKILL.md section. Wrapped in the same `generated:task-matrix`
+    // markers so `scripts/generate-agent-docs.mjs` can regenerate it in place.
+    let task_matrix_block = format!(
+        "<!-- generated:task-matrix:start -->\n{}<!-- generated:task-matrix:end -->",
+        crate::task_matrix::render_task_matrix_markdown()
+    );
+
     format!(
         r"# AGENTS.md
 
@@ -322,6 +348,8 @@ This file gives coding agents project-specific context. Keep it short and update
 - Use `fallow audit --format json --quiet` before committing AI-generated changes.
 - Use `fallow dead-code --format json --quiet`, `fallow dupes --format json --quiet`, and `fallow health --format json --quiet` for targeted checks.
 - Use `fallow list --entry-points --format json --quiet` and `fallow list --boundaries --format json --quiet` to inspect project shape.
+
+{task_matrix_block}
 
 ## Agent Rules
 
@@ -1139,6 +1167,10 @@ mod tests {
         assert!(content.contains("# AGENTS.md"));
         assert!(content.contains("Project Overview"));
         assert!(content.contains("fallow audit --format json --quiet"));
+        // The task-to-command matrix renders into the scaffolded guide.
+        assert!(content.contains("When the agent is about to"));
+        assert!(content.contains("fallow dead-code --trace <file>:<export>"));
+        assert!(content.contains("<!-- generated:task-matrix:start -->"));
         assert!(!root.join(".fallowrc.json").exists());
         assert!(!root.join("fallow.toml").exists());
     }

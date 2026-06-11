@@ -53,6 +53,7 @@ mod schema;
 mod security;
 mod setup_hooks;
 mod signal;
+mod task_matrix;
 mod telemetry;
 mod update_check;
 mod validate;
@@ -135,7 +136,20 @@ Reference:
   help           Print this message or the help of a command
 
 When no command is given, fallow runs dead-code + dupes + health together.
-Use --only/--skip to select specific analyses.";
+Use --only/--skip to select specific analyses.
+
+When the agent is about to...
+  delete an \"unused\" export or file        fallow dead-code --trace <file>:<export>
+  delete an \"unused\" dependency            fallow dead-code --trace-dependency <name>
+  commit or open a PR                      fallow audit --base <ref>
+  prioritize refactoring                   fallow health --hotspots --targets
+  ask who owns code                        fallow health --ownership
+  check untested-but-reachable code        fallow health --coverage-gaps
+  consolidate duplication                  fallow dupes --trace dup:<fingerprint>
+  find feature flags                       fallow flags
+  surface security candidates              fallow security
+  understand a finding                     fallow explain <issue-type>
+  scope a monorepo                         --workspace <glob> / --changed-workspaces <ref>";
 
 #[derive(Parser)]
 #[command(
@@ -4339,6 +4353,21 @@ mod tests {
     fn cli_definition_has_no_flag_collisions() {
         use clap::CommandFactory;
         Cli::command().debug_assert();
+    }
+
+    /// The root `--help` cheat sheet is a static const that cannot call the
+    /// shared renderer, so this test is the only guard that it stays in sync
+    /// with `TASK_MATRIX`. Every row's command string must appear verbatim.
+    #[test]
+    fn after_help_lists_every_task_matrix_command() {
+        for row in crate::task_matrix::TASK_MATRIX {
+            assert!(
+                TOP_LEVEL_AFTER_HELP.contains(row.command),
+                "root --help cheat sheet is missing task-matrix command '{}'; \
+                 update TOP_LEVEL_AFTER_HELP to match TASK_MATRIX",
+                row.command
+            );
+        }
     }
 
     /// The high-value and coarse admin commands each get a distinct telemetry
