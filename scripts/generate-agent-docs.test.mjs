@@ -232,3 +232,25 @@ test("manifest_version and expect-version guards", async () => {
   assert.throws(() => loadSchema({ schemaPath: tmp, expectVersion: "9.9.9" }), /expected 9\.9\.9/);
   rmSync(tmp);
 });
+
+test("--check exits 1 on drift, writes nothing, and exits 0 when in sync", async () => {
+  const { mkdtempSync, writeFileSync, readFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { main } = await import("./generate-agent-docs.mjs");
+
+  const dir = mkdtempSync(join(tmpdir(), "agent-docs-check-"));
+  const schemaPath = join(dir, "schema.json");
+  writeFileSync(schemaPath, JSON.stringify(SCHEMA));
+  writeFileSync(join(dir, "SKILL.md"), DOC);
+
+  // DOC is stale relative to SCHEMA: --check must report drift without writing.
+  const before = readFileSync(join(dir, "SKILL.md"), "utf8");
+  assert.equal(main(["--schema", schemaPath, "--target", dir, "--check"]), 1);
+  assert.equal(readFileSync(join(dir, "SKILL.md"), "utf8"), before);
+
+  // Regenerate for real, then --check must pass.
+  assert.equal(main(["--schema", schemaPath, "--target", dir]), 0);
+  assert.equal(main(["--schema", schemaPath, "--target", dir, "--check"]), 0);
+  rmSync(dir, { recursive: true });
+});

@@ -11,12 +11,15 @@
  *
  * Merge-splice contract:
  * - IDENTITY columns are always regenerated from the manifest (row set, ids,
- *   filter flags, suppress comments, kind/license/key-params).
+ *   filter flags, fixable, suppress comments; kind/license/key-params on
+ *   mcp-tools).
  * - CURATED columns (`Purpose` and `Key Flags` on commands, `Description` on
  *   issue-types and mcp-tools) are hand-owned: existing cells are preserved
  *   across regenerations, keyed by the row id in the first column. New rows
  *   seed the curated cell from the manifest; rows whose id left the manifest
- *   are dropped.
+ *   are dropped. Note the asymmetry: `Key params` on mcp-tools regenerates
+ *   every run, while `Key Flags` on commands is seeded ONCE from the flag
+ *   list and never auto-updated afterwards (hand-edit it to change it).
  * - Commands rows whose key contains a space (e.g. `coverage
  *   upload-source-maps`) document nested subcommands the schema does not
  *   enumerate; they are preserved verbatim after their parent row as long as
