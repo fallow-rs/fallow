@@ -1,7 +1,7 @@
 use std::process::ExitCode;
 
 use clap::CommandFactory;
-use fallow_types::mcp_manifest::MCP_TOOLS;
+use fallow_types::mcp_manifest::{MCP_TOOLS, RUNTIME_COVERAGE_LICENSE_NOTE};
 
 use crate::Cli;
 use crate::explain::{
@@ -79,9 +79,6 @@ pub fn build_cli_schema(cmd: &clap::Command) -> serde_json::Value {
     })
 }
 
-/// Free/paid nuance attached to runtime-coverage capabilities.
-const RUNTIME_LICENSE_NOTE: &str = "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).";
-
 /// Per-issue-type metadata that cannot be derived from the explain rule
 /// registry: CLI filter flag, fixability, suppression-comment shape, and
 /// caveats. A rule without an arm in the per-command meta functions below
@@ -141,7 +138,7 @@ fn issue_type_row(rule: &RuleDef, command: &str) -> serde_json::Value {
         "suppress_comment": suppress_comment,
         "note": meta.note,
         "license": if meta.freemium { "freemium" } else { "free" },
-        "license_note": meta.freemium.then_some(RUNTIME_LICENSE_NOTE),
+        "license_note": meta.freemium.then_some(RUNTIME_COVERAGE_LICENSE_NOTE),
         "docs_url": rule_docs_url(rule),
     })
 }
@@ -184,7 +181,10 @@ fn dead_code_issue_meta(bare_id: &str) -> IssueTypeMeta {
             );
         }
         "type-only-dependency" => {
-            m.note = Some("Only reported in --production mode");
+            m.filter_flag = Some("--unused-deps");
+            m.note = Some(
+                "Only reported in --production mode; --unused-deps scopes it together with the other dependency kinds",
+            );
         }
         "test-only-dependency" => {
             m.note = Some("Not reported in --production mode (test files are excluded there)");

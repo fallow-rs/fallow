@@ -58,7 +58,9 @@ pub struct McpToolInfo {
     pub read_only: bool,
 }
 
-const RUNTIME_COVERAGE_LICENSE_NOTE: &str = "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).";
+/// Free/paid nuance attached to runtime-coverage capabilities. Shared with
+/// the `fallow schema` issue-type rows so the wording cannot drift.
+pub const RUNTIME_COVERAGE_LICENSE_NOTE: &str = "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).";
 
 /// All tools exposed by the fallow MCP server, in registration order.
 pub const MCP_TOOLS: &[McpToolInfo] = &[
@@ -250,7 +252,10 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         name: "feature_flags",
         kind: "analysis",
         description: "Detect feature flag patterns (environment variables, SDK calls, config objects)",
-        key_params: &["flag_type", "confidence", "workspace"],
+        // flag_type / confidence exist on the schema but are not yet
+        // forwarded by the arg builder (CLI filter pending); list only
+        // params that actually take effect.
+        key_params: &["workspace", "production"],
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,

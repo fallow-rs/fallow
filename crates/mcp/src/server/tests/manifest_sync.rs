@@ -57,6 +57,31 @@ fn manifest_key_params_exist_on_live_input_schemas() {
     }
 }
 
+/// The manifest's `read_only` flag must match the live rmcp
+/// `read_only_hint` annotation, so a future destructive tool cannot ship
+/// with a manifest that still advertises it as read-only.
+#[test]
+fn manifest_read_only_matches_live_annotations() {
+    let server = FallowMcp::new();
+    let tools = server.tool_router.list_all();
+    for entry in MCP_TOOLS {
+        let tool = tools
+            .iter()
+            .find(|t| t.name.as_ref() == entry.name)
+            .unwrap_or_else(|| panic!("manifest tool {} is not registered", entry.name));
+        let live_read_only = tool
+            .annotations
+            .as_ref()
+            .and_then(|a| a.read_only_hint)
+            .unwrap_or(false);
+        assert_eq!(
+            entry.read_only, live_read_only,
+            "manifest read_only for {} diverges from the live read_only_hint annotation",
+            entry.name
+        );
+    }
+}
+
 #[test]
 fn issue_type_flags_match_shared_filter_flag_list() {
     let mcp_flags: BTreeSet<&str> = ISSUE_TYPE_FLAGS.iter().map(|(_, flag)| *flag).collect();
