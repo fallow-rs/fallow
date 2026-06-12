@@ -110,7 +110,7 @@ const SCRIPT_ENTRY_EXTENSIONS: &[&str] = &["ts", "js", "mts", "cts", "mjs", "cjs
 const AUTO_IMPORT_SCRIPT_EXTENSIONS: &[&str] =
     &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"];
 
-/// Implicit dependencies that Nuxt provides — these should not be flagged as unlisted.
+/// Implicit dependencies that Nuxt provides. These should not be flagged as unlisted.
 const TOOLING_DEPENDENCIES: &[&str] = &[
     "nuxt",
     "@nuxt/devtools",
@@ -305,20 +305,10 @@ impl Plugin for NuxtPlugin {
         }
 
         let imports = config_parser::extract_imports(source, config_path);
-        for imp in &imports {
-            let dep = crate::resolve::extract_package_name(imp);
-            result.referenced_dependencies.push(dep);
-        }
+        add_referenced_packages(&mut result, &imports);
 
         let modules = config_parser::extract_config_string_array(source, config_path, &["modules"]);
-        let mut content_module_registered = false;
-        for module in &modules {
-            let dep = crate::resolve::extract_package_name(module);
-            if dep == CONTENT_MODULE {
-                content_module_registered = true;
-            }
-            result.referenced_dependencies.push(dep);
-        }
+        let content_module_registered = add_nuxt_module_dependencies(&mut result, &modules);
 
         if content_module_registered
             && let Some(pattern) = content_config_entry_pattern(config_path, root)
@@ -328,24 +318,11 @@ impl Plugin for NuxtPlugin {
         }
 
         let css = config_parser::extract_config_string_array(source, config_path, &["css"]);
-        for entry in &css {
-            if is_local_css_path(entry) {
-                if let Some(normalized) = normalize_nuxt_path(entry, config_path, root, &src_dir) {
-                    result.always_used_files.push(normalized);
-                }
-            } else {
-                let dep = crate::resolve::extract_package_name(entry);
-                result.referenced_dependencies.push(dep);
-            }
-        }
+        add_nuxt_css_entries(&mut result, &css, config_path, root, &src_dir);
 
         let postcss_plugins =
             config_parser::extract_config_object_keys(source, config_path, &["postcss", "plugins"]);
-        for plugin in &postcss_plugins {
-            result
-                .referenced_dependencies
-                .push(crate::resolve::extract_package_name(plugin));
-        }
+        add_referenced_packages(&mut result, &postcss_plugins);
 
         let mut plugins =
             config_parser::extract_config_string_array(source, config_path, &["plugins"]);
@@ -355,32 +332,11 @@ impl Plugin for NuxtPlugin {
             &["plugins"],
             "src",
         ));
-        for plugin in plugins {
-            if let Some(normalized) = normalize_nuxt_path(&plugin, config_path, root, &src_dir) {
-                let pattern = script_entry_pattern(&normalized);
-                add_default_used_export(&mut result, &pattern);
-                result.push_entry_pattern(pattern);
-            }
-        }
+        add_nuxt_plugin_entries(&mut result, plugins, config_path, root, &src_dir);
 
-        for (find, replacement) in
-            config_parser::extract_config_path_aliases(source, config_path, &["alias"])
-        {
-            let replacement = config_parser::path_to_config_string(&replacement);
-            if let Some(normalized) = normalize_nuxt_path(&replacement, config_path, root, &src_dir)
-            {
-                result.path_aliases.push((find, normalized));
-            }
-        }
+        add_nuxt_aliases(&mut result, source, config_path, root, &src_dir);
 
-        for dir in
-            config_parser::extract_config_string_array(source, config_path, &["imports", "dirs"])
-        {
-            if let Some(pattern) = normalize_imports_dir_pattern(&dir, config_path, root, &src_dir)
-            {
-                result.push_entry_pattern(pattern);
-            }
-        }
+        add_nuxt_import_dirs(&mut result, source, config_path, root, &src_dir);
 
         let mut component_dirs =
             config_parser::extract_config_string_array(source, config_path, &["components"]);
@@ -401,22 +357,116 @@ impl Plugin for NuxtPlugin {
             config_path,
             &["components", "dirs"],
         ));
-        for dir in component_dirs {
-            if let Some(normalized) = normalize_nuxt_path(&dir, config_path, root, &src_dir) {
-                let pattern = component_dir_pattern(&normalized);
-                add_default_used_export(&mut result, &pattern);
-                result.push_entry_pattern(pattern);
-            }
-        }
+        add_nuxt_component_dirs(&mut result, component_dirs, config_path, root, &src_dir);
 
         let extends = config_parser::extract_config_string_array(source, config_path, &["extends"]);
-        for ext in &extends {
-            result
-                .referenced_dependencies
-                .push(crate::resolve::extract_package_name(ext));
-        }
+        add_referenced_packages(&mut result, &extends);
 
         result
+    }
+}
+
+fn add_referenced_packages(result: &mut PluginResult, entries: &[String]) {
+    for entry in entries {
+        result
+            .referenced_dependencies
+            .push(crate::resolve::extract_package_name(entry));
+    }
+}
+
+fn add_nuxt_module_dependencies(result: &mut PluginResult, modules: &[String]) -> bool {
+    let mut content_module_registered = false;
+    for module in modules {
+        let dep = crate::resolve::extract_package_name(module);
+        if dep == CONTENT_MODULE {
+            content_module_registered = true;
+        }
+        result.referenced_dependencies.push(dep);
+    }
+    content_module_registered
+}
+
+fn add_nuxt_css_entries(
+    result: &mut PluginResult,
+    css: &[String],
+    config_path: &Path,
+    root: &Path,
+    src_dir: &Path,
+) {
+    for entry in css {
+        if is_local_css_path(entry) {
+            if let Some(normalized) = normalize_nuxt_path(entry, config_path, root, src_dir) {
+                result.always_used_files.push(normalized);
+            }
+        } else {
+            result
+                .referenced_dependencies
+                .push(crate::resolve::extract_package_name(entry));
+        }
+    }
+}
+
+fn add_nuxt_plugin_entries(
+    result: &mut PluginResult,
+    plugins: Vec<String>,
+    config_path: &Path,
+    root: &Path,
+    src_dir: &Path,
+) {
+    for plugin in plugins {
+        if let Some(normalized) = normalize_nuxt_path(&plugin, config_path, root, src_dir) {
+            let pattern = script_entry_pattern(&normalized);
+            add_default_used_export(result, &pattern);
+            result.push_entry_pattern(pattern);
+        }
+    }
+}
+
+fn add_nuxt_aliases(
+    result: &mut PluginResult,
+    source: &str,
+    config_path: &Path,
+    root: &Path,
+    src_dir: &Path,
+) {
+    for (find, replacement) in
+        config_parser::extract_config_path_aliases(source, config_path, &["alias"])
+    {
+        let replacement = config_parser::path_to_config_string(&replacement);
+        if let Some(normalized) = normalize_nuxt_path(&replacement, config_path, root, src_dir) {
+            result.path_aliases.push((find, normalized));
+        }
+    }
+}
+
+fn add_nuxt_import_dirs(
+    result: &mut PluginResult,
+    source: &str,
+    config_path: &Path,
+    root: &Path,
+    src_dir: &Path,
+) {
+    for dir in config_parser::extract_config_string_array(source, config_path, &["imports", "dirs"])
+    {
+        if let Some(pattern) = normalize_imports_dir_pattern(&dir, config_path, root, src_dir) {
+            result.push_entry_pattern(pattern);
+        }
+    }
+}
+
+fn add_nuxt_component_dirs(
+    result: &mut PluginResult,
+    component_dirs: Vec<String>,
+    config_path: &Path,
+    root: &Path,
+    src_dir: &Path,
+) {
+    for dir in component_dirs {
+        if let Some(normalized) = normalize_nuxt_path(&dir, config_path, root, src_dir) {
+            let pattern = component_dir_pattern(&normalized);
+            add_default_used_export(result, &pattern);
+            result.push_entry_pattern(pattern);
+        }
     }
 }
 

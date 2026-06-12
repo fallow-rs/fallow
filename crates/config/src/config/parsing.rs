@@ -452,20 +452,7 @@ fn resolve_extends_file(
         ));
     }
 
-    let canonical = dunce::canonicalize(path).map_err(|e| {
-        miette::miette!(
-            "Config file not found or unresolvable: {}: {}",
-            path.display(),
-            e
-        )
-    })?;
-
-    if !visited.insert(canonical.to_string_lossy().into_owned()) {
-        return Err(miette::miette!(
-            "Circular extends detected: {} was already visited in the extends chain",
-            path.display()
-        ));
-    }
+    record_extends_visit(path, visited)?;
 
     let mut value = parse_config_to_value(path)?;
     let extends = extract_extends(&mut value);
@@ -479,90 +466,170 @@ fn resolve_extends_file(
         .get("sealed")
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
-    let sealed_dir_canonical = if sealed {
-        Some(dunce::canonicalize(config_dir).map_err(|e| {
-            miette::miette!(
-                "Sealed config directory '{}' could not be canonicalized: {e}",
-                config_dir.display()
-            )
-        })?)
-    } else {
-        None
-    };
+    let sealed_dir_canonical = sealed_config_dir(config_dir, sealed)?;
     let mut merged = serde_json::Value::Object(serde_json::Map::new());
 
     for extend_path_str in &extends {
-        let base = if extend_path_str.starts_with(HTTPS_PREFIX) {
-            if sealed {
-                return Err(miette::miette!(
-                    "'sealed: true' config at {} rejects URL extends '{}'. \
-                     Sealed configs only allow file-relative extends within \
-                     the config's directory",
-                    path.display(),
-                    extend_path_str
-                ));
-            }
-            resolve_url_extends(extend_path_str, visited, depth + 1)?
-        } else if extend_path_str.starts_with(HTTP_PREFIX) {
-            return Err(miette::miette!(
-                "URL extends must use https://, got http:// URL '{}' (in {}). \
-                 Change the URL to use https:// instead",
-                extend_path_str,
-                path.display()
-            ));
-        } else if let Some(npm_specifier) = extend_path_str.strip_prefix(NPM_PREFIX) {
-            if sealed {
-                return Err(miette::miette!(
-                    "'sealed: true' config at {} rejects npm extends '{}'. \
-                     Sealed configs only allow file-relative extends within \
-                     the config's directory",
-                    path.display(),
-                    extend_path_str
-                ));
-            }
-            let npm_path = resolve_npm_package(config_dir, npm_specifier, path)?;
-            resolve_extends_file(&npm_path, visited, depth + 1)?
-        } else {
-            if is_absolute_path_any_platform(Path::new(extend_path_str)) {
-                return Err(miette::miette!(
-                    "extends paths must be relative, got absolute path: {} (in {})",
-                    extend_path_str,
-                    path.display()
-                ));
-            }
-            let p = config_dir.join(extend_path_str);
-            if !p.exists() {
-                return Err(miette::miette!(
-                    "Extended config file not found: {} (referenced from {})",
-                    p.display(),
-                    path.display()
-                ));
-            }
-            if let Some(dir_canonical) = &sealed_dir_canonical {
-                let p_canonical = dunce::canonicalize(&p).map_err(|e| {
-                    miette::miette!(
-                        "Sealed config extends path '{}' could not be canonicalized: {e}",
-                        p.display()
-                    )
-                })?;
-                if !p_canonical.starts_with(dir_canonical) {
-                    return Err(miette::miette!(
-                        "'sealed: true' config at {} rejects extends '{}' which resolves \
-                         outside the config's directory ({}). Sealed configs only allow \
-                         extends within the config's directory",
-                        path.display(),
-                        extend_path_str,
-                        p_canonical.display()
-                    ));
-                }
-            }
-            resolve_extends_file(&p, visited, depth + 1)?
-        };
+        let base = resolve_extends_file_entry(
+            path,
+            config_dir,
+            extend_path_str,
+            sealed,
+            sealed_dir_canonical.as_deref(),
+            visited,
+            depth,
+        )?;
         deep_merge_json(&mut merged, base);
     }
 
     deep_merge_json(&mut merged, value);
     Ok(merged)
+}
+
+fn record_extends_visit(
+    path: &Path,
+    visited: &mut FxHashSet<String>,
+) -> Result<(), miette::Report> {
+    let canonical = dunce::canonicalize(path).map_err(|e| {
+        miette::miette!(
+            "Config file not found or unresolvable: {}: {}",
+            path.display(),
+            e
+        )
+    })?;
+
+    if visited.insert(canonical.to_string_lossy().into_owned()) {
+        Ok(())
+    } else {
+        Err(miette::miette!(
+            "Circular extends detected: {} was already visited in the extends chain",
+            path.display()
+        ))
+    }
+}
+
+fn sealed_config_dir(config_dir: &Path, sealed: bool) -> Result<Option<PathBuf>, miette::Report> {
+    if !sealed {
+        return Ok(None);
+    }
+    dunce::canonicalize(config_dir).map(Some).map_err(|e| {
+        miette::miette!(
+            "Sealed config directory '{}' could not be canonicalized: {e}",
+            config_dir.display()
+        )
+    })
+}
+
+fn resolve_extends_file_entry(
+    path: &Path,
+    config_dir: &Path,
+    entry: &str,
+    sealed: bool,
+    sealed_dir_canonical: Option<&Path>,
+    visited: &mut FxHashSet<String>,
+    depth: usize,
+) -> Result<serde_json::Value, miette::Report> {
+    if entry.starts_with(HTTPS_PREFIX) {
+        reject_sealed_remote_extends(path, entry, sealed, "URL")?;
+        return resolve_url_extends(entry, visited, depth + 1);
+    }
+    if entry.starts_with(HTTP_PREFIX) {
+        return Err(miette::miette!(
+            "URL extends must use https://, got http:// URL '{}' (in {}). \
+             Change the URL to use https:// instead",
+            entry,
+            path.display()
+        ));
+    }
+    if let Some(npm_specifier) = entry.strip_prefix(NPM_PREFIX) {
+        reject_sealed_remote_extends(path, entry, sealed, "npm")?;
+        let npm_path = resolve_npm_package(config_dir, npm_specifier, path)?;
+        return resolve_extends_file(&npm_path, visited, depth + 1);
+    }
+    resolve_relative_extends_file(
+        path,
+        config_dir,
+        entry,
+        sealed_dir_canonical,
+        visited,
+        depth,
+    )
+}
+
+fn reject_sealed_remote_extends(
+    path: &Path,
+    entry: &str,
+    sealed: bool,
+    kind: &str,
+) -> Result<(), miette::Report> {
+    if sealed {
+        Err(miette::miette!(
+            "'sealed: true' config at {} rejects {} extends '{}'. \
+             Sealed configs only allow file-relative extends within \
+             the config's directory",
+            path.display(),
+            kind,
+            entry
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn resolve_relative_extends_file(
+    path: &Path,
+    config_dir: &Path,
+    entry: &str,
+    sealed_dir_canonical: Option<&Path>,
+    visited: &mut FxHashSet<String>,
+    depth: usize,
+) -> Result<serde_json::Value, miette::Report> {
+    if is_absolute_path_any_platform(Path::new(entry)) {
+        return Err(miette::miette!(
+            "extends paths must be relative, got absolute path: {} (in {})",
+            entry,
+            path.display()
+        ));
+    }
+    let p = config_dir.join(entry);
+    if !p.exists() {
+        return Err(miette::miette!(
+            "Extended config file not found: {} (referenced from {})",
+            p.display(),
+            path.display()
+        ));
+    }
+    validate_sealed_relative_extends(path, entry, &p, sealed_dir_canonical)?;
+    resolve_extends_file(&p, visited, depth + 1)
+}
+
+fn validate_sealed_relative_extends(
+    path: &Path,
+    entry: &str,
+    resolved_path: &Path,
+    sealed_dir_canonical: Option<&Path>,
+) -> Result<(), miette::Report> {
+    let Some(dir_canonical) = sealed_dir_canonical else {
+        return Ok(());
+    };
+    let p_canonical = dunce::canonicalize(resolved_path).map_err(|e| {
+        miette::miette!(
+            "Sealed config extends path '{}' could not be canonicalized: {e}",
+            resolved_path.display()
+        )
+    })?;
+    if p_canonical.starts_with(dir_canonical) {
+        Ok(())
+    } else {
+        Err(miette::miette!(
+            "'sealed: true' config at {} rejects extends '{}' which resolves \
+             outside the config's directory ({}). Sealed configs only allow \
+             extends within the config's directory",
+            path.display(),
+            entry,
+            p_canonical.display()
+        ))
+    }
 }
 
 /// Public entry point: resolve a config file with all its extends chain.

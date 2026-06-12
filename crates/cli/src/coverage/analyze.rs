@@ -466,30 +466,13 @@ fn merge_cloud_snapshot(
     static_index: &StaticIndex,
     min_invocations_hot: u64,
 ) -> RuntimeCoverageReport {
-    let mut findings = Vec::new();
-    let mut hot_paths = Vec::new();
-    let mut synthesized_blast_radius = Vec::new();
-    let mut synthesized_importance = Vec::new();
-    let mut unmatched_cloud_functions = 0_usize;
-    for function in &snapshot.functions {
-        let Some(local) = match_cloud_function(function, static_index) else {
-            unmatched_cloud_functions = unmatched_cloud_functions.saturating_add(1);
-            continue;
-        };
-        if matches!(function.tracking_state, CloudTrackingState::Called) {
-            if let Some(invocations) = function.hit_count
-                && invocations >= min_invocations_hot
-            {
-                hot_paths.push(cloud_hot_path(&local, invocations));
-            }
-            if let Some(invocations) = function.hit_count {
-                synthesized_blast_radius.push(cloud_blast_radius(&local, invocations, function));
-                synthesized_importance.push(cloud_importance(&local, invocations));
-            }
-            continue;
-        }
-        findings.push(cloud_finding(function, &local, snapshot.window.period_days));
-    }
+    let CloudMergeEntries {
+        mut findings,
+        mut hot_paths,
+        synthesized_blast_radius,
+        synthesized_importance,
+        unmatched_cloud_functions,
+    } = collect_cloud_merge_entries(snapshot, static_index, min_invocations_hot);
 
     findings.sort_by(|left, right| {
         runtime_verdict_rank(left.verdict)
@@ -504,49 +487,8 @@ fn merge_cloud_snapshot(
             .then_with(|| left.path.cmp(&right.path))
             .then_with(|| left.function.cmp(&right.function))
     });
-    let blast_radius = if snapshot.blast_radius.is_empty() {
-        synthesized_blast_radius
-    } else {
-        snapshot
-            .blast_radius
-            .iter()
-            .map(
-                |entry| crate::health_types::RuntimeCoverageBlastRadiusEntry {
-                    id: entry.id.clone(),
-                    stable_id: entry.stable_id.clone(),
-                    file: PathBuf::from(&entry.file),
-                    function: entry.function.clone(),
-                    line: entry.line,
-                    caller_count: entry.caller_count,
-                    caller_count_weighted_by_traffic: entry.caller_count_weighted_by_traffic,
-                    deploys_touched: entry.deploys_touched,
-                    risk_band: map_cloud_risk_band(entry.risk_band),
-                },
-            )
-            .collect::<Vec<_>>()
-    };
-    let importance = if snapshot.importance.is_empty() {
-        rank_importance(synthesized_importance)
-    } else {
-        snapshot
-            .importance
-            .iter()
-            .map(
-                |entry| crate::health_types::RuntimeCoverageImportanceEntry {
-                    id: entry.id.clone(),
-                    stable_id: entry.stable_id.clone(),
-                    file: PathBuf::from(&entry.file),
-                    function: entry.function.clone(),
-                    line: entry.line,
-                    invocations: entry.invocations,
-                    cyclomatic: entry.cyclomatic,
-                    owner_count: entry.owner_count,
-                    importance_score: entry.importance_score,
-                    reason: entry.reason.clone(),
-                },
-            )
-            .collect::<Vec<_>>()
-    };
+    let blast_radius = cloud_blast_radius_entries(snapshot, synthesized_blast_radius);
+    let importance = cloud_importance_entries(snapshot, synthesized_importance);
 
     let warnings = cloud_warnings(snapshot, unmatched_cloud_functions);
 
@@ -578,6 +520,122 @@ fn merge_cloud_snapshot(
         watermark: None,
         warnings,
     }
+}
+
+struct CloudMergeEntries {
+    findings: Vec<RuntimeCoverageFinding>,
+    hot_paths: Vec<RuntimeCoverageHotPath>,
+    synthesized_blast_radius: Vec<crate::health_types::RuntimeCoverageBlastRadiusEntry>,
+    synthesized_importance: Vec<(
+        crate::health_types::RuntimeCoverageImportanceEntry,
+        Option<u32>,
+    )>,
+    unmatched_cloud_functions: usize,
+}
+
+fn collect_cloud_merge_entries(
+    snapshot: &CloudRuntimeContext,
+    static_index: &StaticIndex,
+    min_invocations_hot: u64,
+) -> CloudMergeEntries {
+    let mut entries = CloudMergeEntries {
+        findings: Vec::new(),
+        hot_paths: Vec::new(),
+        synthesized_blast_radius: Vec::new(),
+        synthesized_importance: Vec::new(),
+        unmatched_cloud_functions: 0,
+    };
+    for function in &snapshot.functions {
+        let Some(local) = match_cloud_function(function, static_index) else {
+            entries.unmatched_cloud_functions = entries.unmatched_cloud_functions.saturating_add(1);
+            continue;
+        };
+        if matches!(function.tracking_state, CloudTrackingState::Called) {
+            collect_called_cloud_function(&mut entries, function, &local, min_invocations_hot);
+        } else {
+            entries
+                .findings
+                .push(cloud_finding(function, &local, snapshot.window.period_days));
+        }
+    }
+    entries
+}
+
+fn collect_called_cloud_function(
+    entries: &mut CloudMergeEntries,
+    function: &CloudRuntimeFunction,
+    local: &StaticFunctionInfo,
+    min_invocations_hot: u64,
+) {
+    if let Some(invocations) = function.hit_count
+        && invocations >= min_invocations_hot
+    {
+        entries.hot_paths.push(cloud_hot_path(local, invocations));
+    }
+    if let Some(invocations) = function.hit_count {
+        entries
+            .synthesized_blast_radius
+            .push(cloud_blast_radius(local, invocations, function));
+        entries
+            .synthesized_importance
+            .push(cloud_importance(local, invocations));
+    }
+}
+
+fn cloud_blast_radius_entries(
+    snapshot: &CloudRuntimeContext,
+    synthesized: Vec<crate::health_types::RuntimeCoverageBlastRadiusEntry>,
+) -> Vec<crate::health_types::RuntimeCoverageBlastRadiusEntry> {
+    if snapshot.blast_radius.is_empty() {
+        return synthesized;
+    }
+    snapshot
+        .blast_radius
+        .iter()
+        .map(
+            |entry| crate::health_types::RuntimeCoverageBlastRadiusEntry {
+                id: entry.id.clone(),
+                stable_id: entry.stable_id.clone(),
+                file: PathBuf::from(&entry.file),
+                function: entry.function.clone(),
+                line: entry.line,
+                caller_count: entry.caller_count,
+                caller_count_weighted_by_traffic: entry.caller_count_weighted_by_traffic,
+                deploys_touched: entry.deploys_touched,
+                risk_band: map_cloud_risk_band(entry.risk_band),
+            },
+        )
+        .collect()
+}
+
+fn cloud_importance_entries(
+    snapshot: &CloudRuntimeContext,
+    synthesized: Vec<(
+        crate::health_types::RuntimeCoverageImportanceEntry,
+        Option<u32>,
+    )>,
+) -> Vec<crate::health_types::RuntimeCoverageImportanceEntry> {
+    if snapshot.importance.is_empty() {
+        return rank_importance(synthesized);
+    }
+    snapshot
+        .importance
+        .iter()
+        .map(
+            |entry| crate::health_types::RuntimeCoverageImportanceEntry {
+                id: entry.id.clone(),
+                stable_id: entry.stable_id.clone(),
+                file: PathBuf::from(&entry.file),
+                function: entry.function.clone(),
+                line: entry.line,
+                invocations: entry.invocations,
+                cyclomatic: entry.cyclomatic,
+                owner_count: entry.owner_count,
+                importance_score: entry.importance_score,
+                reason: entry.reason.clone(),
+            },
+        )
+        .collect()
 }
 
 fn cloud_hot_path(local: &StaticFunctionInfo, invocations: u64) -> RuntimeCoverageHotPath {

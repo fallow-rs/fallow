@@ -310,79 +310,8 @@ fn execute_dupes_inner(
         ));
     }
 
-    if let Some(path) = opts.save_baseline_path {
-        let baseline_data = DuplicationBaselineData::from_report(&report, &config.root);
-        match serde_json::to_string_pretty(&baseline_data) {
-            Ok(json) => {
-                if let Some(parent) = path.parent()
-                    && !parent.as_os_str().is_empty()
-                    && let Err(e) = std::fs::create_dir_all(parent)
-                {
-                    return Err(emit_error(
-                        &format!("failed to create duplication baseline directory: {e}"),
-                        2,
-                        opts.output,
-                    ));
-                }
-                if let Err(e) = std::fs::write(path, json) {
-                    return Err(emit_error(
-                        &format!("failed to write duplication baseline: {e}"),
-                        2,
-                        opts.output,
-                    ));
-                }
-                if !opts.quiet {
-                    eprintln!("Saved duplication baseline to {}", path.display());
-                }
-            }
-            Err(e) => {
-                return Err(emit_error(
-                    &format!("failed to serialize duplication baseline: {e}"),
-                    2,
-                    opts.output,
-                ));
-            }
-        }
-    }
-
-    if let Some(path) = opts.baseline_path {
-        match std::fs::read_to_string(path) {
-            Ok(json) => match serde_json::from_str::<DuplicationBaselineData>(&json) {
-                Ok(baseline_data) => {
-                    let baseline_entries = baseline_data.clone_groups.len();
-                    let before = report.clone_groups.len();
-                    report = filter_new_clone_groups(report, &baseline_data, &config.root);
-                    let matched = before.saturating_sub(report.clone_groups.len());
-                    if !opts.quiet {
-                        eprintln!("Comparing against duplication baseline: {}", path.display());
-                    }
-                    if baseline_entries > 0 && matched == 0 && !opts.quiet {
-                        eprintln!(
-                            "Warning: duplication baseline has {baseline_entries} entries but \
-                             matched 0 current clone groups. Your paths may have changed, or \
-                             the baseline was saved on a different machine. Re-save with: \
-                             --save-baseline {}",
-                            path.display(),
-                        );
-                    }
-                }
-                Err(e) => {
-                    return Err(emit_error(
-                        &format!("failed to parse duplication baseline: {e}"),
-                        2,
-                        opts.output,
-                    ));
-                }
-            },
-            Err(e) => {
-                return Err(emit_error(
-                    &format!("failed to read duplication baseline: {e}"),
-                    2,
-                    opts.output,
-                ));
-            }
-        }
-    }
+    save_duplication_baseline(&report, &config, opts)?;
+    apply_duplication_baseline(&mut report, &config, opts)?;
 
     if let Some(changed) = effective_changed_files {
         filter_by_changed_files(&mut report, changed, &config.root);
@@ -428,6 +357,124 @@ fn execute_dupes_inner(
         min_occurrences: dupes_config.min_occurrences,
         explain_skipped: opts.explain_skipped,
     })
+}
+
+fn save_duplication_baseline(
+    report: &DuplicationReport,
+    config: &ResolvedConfig,
+    opts: &DupesOptions<'_>,
+) -> Result<(), ExitCode> {
+    let Some(path) = opts.save_baseline_path else {
+        return Ok(());
+    };
+
+    let json = serialize_duplication_baseline(report, config, opts.output)?;
+    ensure_duplication_baseline_parent(path, opts.output)?;
+    if let Err(e) = std::fs::write(path, json) {
+        return Err(emit_error(
+            &format!("failed to write duplication baseline: {e}"),
+            2,
+            opts.output,
+        ));
+    }
+    if !opts.quiet {
+        eprintln!("Saved duplication baseline to {}", path.display());
+    }
+
+    Ok(())
+}
+
+fn serialize_duplication_baseline(
+    report: &DuplicationReport,
+    config: &ResolvedConfig,
+    output: OutputFormat,
+) -> Result<String, ExitCode> {
+    let baseline_data = DuplicationBaselineData::from_report(report, &config.root);
+    serde_json::to_string_pretty(&baseline_data).map_err(|e| {
+        emit_error(
+            &format!("failed to serialize duplication baseline: {e}"),
+            2,
+            output,
+        )
+    })
+}
+
+fn ensure_duplication_baseline_parent(
+    path: &std::path::Path,
+    output: OutputFormat,
+) -> Result<(), ExitCode> {
+    let Some(parent) = path.parent() else {
+        return Ok(());
+    };
+    if parent.as_os_str().is_empty() {
+        return Ok(());
+    }
+    std::fs::create_dir_all(parent).map_err(|e| {
+        emit_error(
+            &format!("failed to create duplication baseline directory: {e}"),
+            2,
+            output,
+        )
+    })
+}
+
+fn apply_duplication_baseline(
+    report: &mut DuplicationReport,
+    config: &ResolvedConfig,
+    opts: &DupesOptions<'_>,
+) -> Result<(), ExitCode> {
+    let Some(path) = opts.baseline_path else {
+        return Ok(());
+    };
+
+    let baseline_data = read_duplication_baseline(path, opts.output)?;
+    let baseline_entries = baseline_data.clone_groups.len();
+    let before = report.clone_groups.len();
+    *report = filter_new_clone_groups(std::mem::take(report), &baseline_data, &config.root);
+    let matched = before.saturating_sub(report.clone_groups.len());
+    if !opts.quiet {
+        eprintln!("Comparing against duplication baseline: {}", path.display());
+    }
+    warn_unmatched_duplication_baseline(path, baseline_entries, matched, opts.quiet);
+
+    Ok(())
+}
+
+fn read_duplication_baseline(
+    path: &std::path::Path,
+    output: OutputFormat,
+) -> Result<DuplicationBaselineData, ExitCode> {
+    let json = std::fs::read_to_string(path).map_err(|e| {
+        emit_error(
+            &format!("failed to read duplication baseline: {e}"),
+            2,
+            output,
+        )
+    })?;
+    serde_json::from_str::<DuplicationBaselineData>(&json).map_err(|e| {
+        emit_error(
+            &format!("failed to parse duplication baseline: {e}"),
+            2,
+            output,
+        )
+    })
+}
+
+fn warn_unmatched_duplication_baseline(
+    path: &std::path::Path,
+    baseline_entries: usize,
+    matched: usize,
+    quiet: bool,
+) {
+    if baseline_entries > 0 && matched == 0 && !quiet {
+        eprintln!(
+            "Warning: duplication baseline has {baseline_entries} entries but \
+             matched 0 current clone groups. Your paths may have changed, or \
+             the baseline was saved on a different machine. Re-save with: \
+             --save-baseline {}",
+            path.display(),
+        );
+    }
 }
 
 /// Resolve `--changed-since` to a concrete file set up front so the focused

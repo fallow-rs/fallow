@@ -790,6 +790,16 @@ pub fn collect_dead_code_findings(results: &AnalysisResults) -> Vec<FindingInput
             symbol,
         });
     };
+    collect_unused_symbol_findings(results, &mut push);
+    collect_dependency_findings(results, &mut push);
+    collect_catalog_findings(results, &mut push);
+    out
+}
+
+fn collect_unused_symbol_findings(
+    results: &AnalysisResults,
+    push: &mut impl FnMut(&Path, &'static str, Option<String>),
+) {
     for f in &results.unused_files {
         push(&f.file.path, "unused-file", None);
     }
@@ -852,6 +862,12 @@ pub fn collect_dead_code_findings(results: &AnalysisResults) -> Vec<FindingInput
             Some(format!("{to_path}{ID_SEP}{}", f.violation.import_specifier)),
         );
     }
+}
+
+fn collect_dependency_findings(
+    results: &AnalysisResults,
+    push: &mut impl FnMut(&Path, &'static str, Option<String>),
+) {
     for f in &results.unused_dependencies {
         push(
             &f.dep.path,
@@ -887,6 +903,12 @@ pub fn collect_dead_code_findings(results: &AnalysisResults) -> Vec<FindingInput
             Some(f.dep.package_name.clone()),
         );
     }
+}
+
+fn collect_catalog_findings(
+    results: &AnalysisResults,
+    push: &mut impl FnMut(&Path, &'static str, Option<String>),
+) {
     for f in &results.unused_catalog_entries {
         push(
             &f.entry.path,
@@ -928,7 +950,6 @@ pub fn collect_dead_code_findings(results: &AnalysisResults) -> Vec<FindingInput
             Some(f.entry.raw_key.clone()),
         );
     }
-    out
 }
 
 /// Collect line-independent complexity finding identities `(path, function name)`

@@ -181,9 +181,41 @@ fn apply_tag(
         return;
     }
 
+    if apply_svelte_block_tag(tag, imported_bindings, bound_targets, scopes, usage) {
+        return;
+    }
+
+    if apply_svelte_expression_directive(
+        tag,
+        tag_start,
+        tag_end,
+        imported_bindings,
+        bound_targets,
+        scopes,
+        usage,
+    ) {
+        return;
+    }
+
+    merge_expression_usage_allow_dollar_refs_with_bound_targets(
+        usage,
+        tag,
+        imported_bindings,
+        bound_targets,
+        &current_locals(scopes),
+    );
+}
+
+fn apply_svelte_block_tag(
+    tag: &str,
+    imported_bindings: &FxHashSet<String>,
+    bound_targets: &FxHashMap<String, String>,
+    scopes: &mut Vec<SvelteScopeFrame>,
+    usage: &mut TemplateUsage,
+) -> bool {
     if let Some(rest) = tag.strip_prefix('/') {
         pop_scope(scopes, rest.trim());
-        return;
+        return true;
     }
 
     if let Some(expr) = tag.strip_prefix("#if") {
@@ -198,27 +230,27 @@ fn apply_tag(
             kind: SvelteBlockKind::If,
             locals: Vec::new(),
         });
-        return;
+        return true;
     }
 
     if let Some(captures) = SVELTE_EACH_RE.captures(tag) {
         apply_each_tag(&captures, imported_bindings, bound_targets, scopes, usage);
-        return;
+        return true;
     }
 
     if let Some(captures) = SVELTE_AWAIT_RE.captures(tag) {
         apply_await_tag(&captures, imported_bindings, bound_targets, scopes, usage);
-        return;
+        return true;
     }
 
     if let Some(captures) = SVELTE_THEN_RE.captures(tag) {
         update_await_branch_locals(&captures, scopes);
-        return;
+        return true;
     }
 
     if let Some(captures) = SVELTE_CATCH_RE.captures(tag) {
         update_await_branch_locals(&captures, scopes);
-        return;
+        return true;
     }
 
     if let Some(expr) = tag.strip_prefix("#key") {
@@ -233,7 +265,7 @@ fn apply_tag(
             kind: SvelteBlockKind::Key,
             locals: Vec::new(),
         });
-        return;
+        return true;
     }
 
     if let Some(captures) = SVELTE_SNIPPET_RE.captures(tag) {
@@ -242,12 +274,24 @@ fn apply_tag(
             kind: SvelteBlockKind::Snippet,
             locals: extract_pattern_binding_names(params),
         });
-        return;
+        return true;
     }
 
+    false
+}
+
+fn apply_svelte_expression_directive(
+    tag: &str,
+    tag_start: usize,
+    tag_end: usize,
+    imported_bindings: &FxHashSet<String>,
+    bound_targets: &FxHashMap<String, String>,
+    scopes: &mut [SvelteScopeFrame],
+    usage: &mut TemplateUsage,
+) -> bool {
     if let Some(expr) = tag.strip_prefix("@attach") {
         apply_expression_tag(expr, imported_bindings, bound_targets, scopes, usage);
-        return;
+        return true;
     }
 
     if let Some(expr) = tag.strip_prefix("@html") {
@@ -261,40 +305,34 @@ fn apply_tag(
             bound_targets,
             &current_locals(scopes),
         );
-        return;
+        return true;
     }
 
     if let Some(expr) = tag.strip_prefix("@render") {
         apply_expression_tag(expr, imported_bindings, bound_targets, scopes, usage);
-        return;
+        return true;
     }
 
     if let Some(stmt) = tag.strip_prefix("@const") {
         apply_const_tag(stmt, imported_bindings, bound_targets, scopes, usage);
-        return;
+        return true;
     }
 
     if let Some(expr) = tag.strip_prefix("@debug") {
         apply_expression_tag(expr, imported_bindings, bound_targets, scopes, usage);
-        return;
+        return true;
     }
 
     if let Some(expr) = tag.strip_prefix(":else if") {
         apply_expression_tag(expr, imported_bindings, bound_targets, scopes, usage);
-        return;
+        return true;
     }
 
     if tag.starts_with(":else") {
-        return;
+        return true;
     }
 
-    merge_expression_usage_allow_dollar_refs_with_bound_targets(
-        usage,
-        tag,
-        imported_bindings,
-        bound_targets,
-        &current_locals(scopes),
-    );
+    false
 }
 
 fn apply_each_tag(

@@ -470,75 +470,19 @@ pub fn find_unused_dependencies(
     )> = workspaces
         .par_iter()
         .map(|ws| {
-            let ws_pkg_path = ws.root.join("package.json");
-            if is_package_json_ignored(&ws_pkg_path, config) {
-                return (Vec::new(), Vec::new(), Vec::new());
-            }
-            let Some(ws_pkg_content) = std::fs::read_to_string(&ws_pkg_path).ok() else {
-                return (Vec::new(), Vec::new(), Vec::new());
+            let inputs = WorkspaceUnusedDependencyInputs {
+                config,
+                package_referenced: &package_referenced,
+                empty_package_referenced: &empty_package_referenced,
+                plugin_referenced: &plugin_referenced,
+                plugin_tooling: &plugin_tooling,
+                script_used: &script_used,
+                ignore_deps: &ignore_deps,
+                workspace_used_packages: &workspace_used_packages,
+                package_workspace_usage: &package_workspace_usage,
+                root_flagged: &root_flagged,
             };
-            let Ok(ws_pkg) = serde_json::from_str::<PackageJson>(&ws_pkg_content) else {
-                return (Vec::new(), Vec::new(), Vec::new());
-            };
-            let ws_package_referenced = package_referenced
-                .get(&ws_pkg_path)
-                .unwrap_or(&empty_package_referenced);
-            let ws_shared = shared_dep_sets(
-                &plugin_referenced,
-                ws_package_referenced,
-                &plugin_tooling,
-                &script_used,
-                &ignore_deps,
-            );
-
-            let ws_root = ws.root.as_path();
-            let ws_used_packages: FxHashSet<&str> = workspace_used_packages
-                .get(&ws_root)
-                .cloned()
-                .unwrap_or_default();
-            let ws_peer_used = PeerDependencyResolver::new()
-                .peer_dependency_closure(ws_root, ws_used_packages.iter().copied());
-            let is_used_in_workspace = |dep: &str| -> bool {
-                root_flagged.contains(dep)
-                    || ws_peer_used.contains(dep)
-                    || package_workspace_usage
-                        .get(dep)
-                        .is_some_and(|roots| roots.iter().any(|root| root == ws_root))
-            };
-            let used_in_workspaces =
-                |dep: &str| used_in_other_workspaces(&package_workspace_usage, dep, ws_root);
-
-            let prod = collect_unused_for_category(
-                ws_pkg.production_dependency_names(),
-                &prod_category(),
-                &ws_shared,
-                is_used_in_workspace,
-                used_in_workspaces,
-                &ws_pkg_path,
-                Some(&ws_pkg_content),
-            );
-
-            let dev = collect_unused_for_category(
-                ws_pkg.dev_dependency_names(),
-                &dev_category(),
-                &ws_shared,
-                is_used_in_workspace,
-                used_in_workspaces,
-                &ws_pkg_path,
-                Some(&ws_pkg_content),
-            );
-
-            let optional = collect_unused_for_category(
-                ws_pkg.optional_dependency_names(),
-                &optional_category(),
-                &ws_shared,
-                is_used_in_workspace,
-                used_in_workspaces,
-                &ws_pkg_path,
-                Some(&ws_pkg_content),
-            );
-
-            (prod, dev, optional)
+            collect_workspace_unused_dependencies(ws, &inputs)
         })
         .collect();
 
@@ -549,6 +493,155 @@ pub fn find_unused_dependencies(
     }
 
     (unused_deps, unused_dev_deps, unused_optional_deps)
+}
+
+struct WorkspaceUnusedDependencyInputs<'a> {
+    config: &'a ResolvedConfig,
+    package_referenced: &'a FxHashMap<PathBuf, FxHashSet<&'a str>>,
+    empty_package_referenced: &'a FxHashSet<&'a str>,
+    plugin_referenced: &'a FxHashSet<&'a str>,
+    plugin_tooling: &'a FxHashSet<&'a str>,
+    script_used: &'a FxHashSet<&'a str>,
+    ignore_deps: &'a FxHashSet<&'a str>,
+    workspace_used_packages: &'a FxHashMap<&'a Path, FxHashSet<&'a str>>,
+    package_workspace_usage: &'a FxHashMap<String, Vec<PathBuf>>,
+    root_flagged: &'a FxHashSet<String>,
+}
+
+fn collect_workspace_unused_dependencies<'a>(
+    ws: &'a fallow_config::WorkspaceInfo,
+    inputs: &WorkspaceUnusedDependencyInputs<'a>,
+) -> (
+    Vec<UnusedDependency>,
+    Vec<UnusedDependency>,
+    Vec<UnusedDependency>,
+) {
+    let Some((ws_pkg_path, ws_pkg_content, ws_pkg)) = read_workspace_package(ws, inputs.config)
+    else {
+        return (Vec::new(), Vec::new(), Vec::new());
+    };
+    let ws_package_referenced = inputs
+        .package_referenced
+        .get(&ws_pkg_path)
+        .unwrap_or(inputs.empty_package_referenced);
+    let ws_shared = shared_dep_sets(
+        inputs.plugin_referenced,
+        ws_package_referenced,
+        inputs.plugin_tooling,
+        inputs.script_used,
+        inputs.ignore_deps,
+    );
+
+    let ws_root = ws.root.as_path();
+    let ws_used_packages: FxHashSet<&str> = inputs
+        .workspace_used_packages
+        .get(&ws_root)
+        .cloned()
+        .unwrap_or_default();
+    let usage = workspace_dependency_usage(
+        ws_root,
+        &ws_used_packages,
+        inputs.package_workspace_usage,
+        inputs.root_flagged,
+    );
+
+    collect_workspace_unused_categories(&ws_pkg, &ws_shared, &usage, &ws_pkg_path, &ws_pkg_content)
+}
+
+fn read_workspace_package(
+    ws: &fallow_config::WorkspaceInfo,
+    config: &ResolvedConfig,
+) -> Option<(PathBuf, String, PackageJson)> {
+    let ws_pkg_path = ws.root.join("package.json");
+    if is_package_json_ignored(&ws_pkg_path, config) {
+        return None;
+    }
+    let ws_pkg_content = std::fs::read_to_string(&ws_pkg_path).ok()?;
+    let ws_pkg = serde_json::from_str::<PackageJson>(&ws_pkg_content).ok()?;
+    Some((ws_pkg_path, ws_pkg_content, ws_pkg))
+}
+
+struct WorkspaceDependencyUsage<'a> {
+    ws_root: &'a Path,
+    ws_peer_used: FxHashSet<String>,
+    package_workspace_usage: &'a FxHashMap<String, Vec<PathBuf>>,
+    root_flagged: &'a FxHashSet<String>,
+}
+
+impl WorkspaceDependencyUsage<'_> {
+    fn is_used_in_workspace(&self, dep: &str) -> bool {
+        self.root_flagged.contains(dep)
+            || self.ws_peer_used.contains(dep)
+            || self
+                .package_workspace_usage
+                .get(dep)
+                .is_some_and(|roots| roots.iter().any(|root| root == self.ws_root))
+    }
+
+    fn used_in_other_workspaces(&self, dep: &str) -> Vec<PathBuf> {
+        used_in_other_workspaces(self.package_workspace_usage, dep, self.ws_root)
+    }
+}
+
+fn workspace_dependency_usage<'a>(
+    ws_root: &'a Path,
+    ws_used_packages: &FxHashSet<&str>,
+    package_workspace_usage: &'a FxHashMap<String, Vec<PathBuf>>,
+    root_flagged: &'a FxHashSet<String>,
+) -> WorkspaceDependencyUsage<'a> {
+    let ws_peer_used = PeerDependencyResolver::new()
+        .peer_dependency_closure(ws_root, ws_used_packages.iter().copied());
+    WorkspaceDependencyUsage {
+        ws_root,
+        ws_peer_used,
+        package_workspace_usage,
+        root_flagged,
+    }
+}
+
+fn collect_workspace_unused_categories(
+    ws_pkg: &PackageJson,
+    ws_shared: &SharedDepSets<'_>,
+    usage: &WorkspaceDependencyUsage<'_>,
+    ws_pkg_path: &Path,
+    ws_pkg_content: &str,
+) -> (
+    Vec<UnusedDependency>,
+    Vec<UnusedDependency>,
+    Vec<UnusedDependency>,
+) {
+    let is_used_in_workspace = |dep: &str| usage.is_used_in_workspace(dep);
+    let used_in_workspaces = |dep: &str| usage.used_in_other_workspaces(dep);
+
+    let prod = collect_unused_for_category(
+        ws_pkg.production_dependency_names(),
+        &prod_category(),
+        ws_shared,
+        is_used_in_workspace,
+        used_in_workspaces,
+        ws_pkg_path,
+        Some(ws_pkg_content),
+    );
+    let dev = collect_unused_for_category(
+        ws_pkg.dev_dependency_names(),
+        &dev_category(),
+        ws_shared,
+        is_used_in_workspace,
+        used_in_workspaces,
+        ws_pkg_path,
+        Some(ws_pkg_content),
+    );
+    let optional = collect_unused_for_category(
+        ws_pkg.optional_dependency_names(),
+        &optional_category(),
+        ws_shared,
+        is_used_in_workspace,
+        used_in_workspaces,
+        ws_pkg_path,
+        Some(ws_pkg_content),
+    );
+
+    (prod, dev, optional)
 }
 
 /// Check if a dependency should be skipped during unused dependency analysis.
@@ -909,6 +1002,44 @@ fn package_imports_are_all_npm_scheme(
     saw_package
 }
 
+fn workspace_dependency_map(
+    workspaces: &[fallow_config::WorkspaceInfo],
+    config: &ResolvedConfig,
+) -> Vec<(PathBuf, FxHashSet<String>)> {
+    let mut ws_dep_map = Vec::new();
+    for ws in workspaces {
+        let ws_pkg_path = ws.root.join("package.json");
+        if is_package_json_ignored(&ws_pkg_path, config) {
+            continue;
+        }
+        if let Ok(ws_pkg) = PackageJson::load(&ws_pkg_path) {
+            let mut ws_deps: FxHashSet<String> =
+                ws_pkg.all_dependency_names().into_iter().collect();
+            ws_deps.insert(ws.name.clone());
+            ws_dep_map.push((ws.root.clone(), ws_deps));
+        }
+    }
+    ws_dep_map
+}
+
+fn import_spans_by_file(
+    resolved_modules: &[ResolvedModule],
+) -> FxHashMap<FileId, Vec<(&str, &str, u32)>> {
+    let mut import_spans_by_file: FxHashMap<FileId, Vec<(&str, &str, u32)>> = FxHashMap::default();
+    for rm in resolved_modules {
+        for edge in rm.all_resolved_source_edges() {
+            if let Some(name) = edge.target().package_usage_name() {
+                import_spans_by_file.entry(rm.file_id).or_default().push((
+                    name,
+                    edge.source_specifier(),
+                    edge.span().start,
+                ));
+            }
+        }
+    }
+    import_spans_by_file
+}
+
 /// Find dependencies used in imports but not listed in package.json.
 pub fn find_unlisted_dependencies(
     graph: &ModuleGraph,
@@ -924,20 +1055,7 @@ pub fn find_unlisted_dependencies(
         all_deps.insert(root_name.clone());
     }
 
-    let mut ws_dep_map: Vec<(PathBuf, FxHashSet<String>)> = Vec::new();
-
-    for ws in workspaces {
-        let ws_pkg_path = ws.root.join("package.json");
-        if is_package_json_ignored(&ws_pkg_path, config) {
-            continue;
-        }
-        if let Ok(ws_pkg) = PackageJson::load(&ws_pkg_path) {
-            let mut ws_deps: FxHashSet<String> =
-                ws_pkg.all_dependency_names().into_iter().collect();
-            ws_deps.insert(ws.name.clone());
-            ws_dep_map.push((ws.root.clone(), ws_deps));
-        }
-    }
+    let ws_dep_map = workspace_dependency_map(workspaces, config);
 
     let virtual_prefixes: Vec<&str> = plugin_result
         .map(|pr| {
@@ -965,18 +1083,7 @@ pub fn find_unlisted_dependencies(
     let compiled_provided_dependency_rules =
         compile_provided_dependency_rules(provided_dependency_rules);
 
-    let mut import_spans_by_file: FxHashMap<FileId, Vec<(&str, &str, u32)>> = FxHashMap::default();
-    for rm in resolved_modules {
-        for edge in rm.all_resolved_source_edges() {
-            if let Some(name) = edge.target().package_usage_name() {
-                import_spans_by_file.entry(rm.file_id).or_default().push((
-                    name,
-                    edge.source_specifier(),
-                    edge.span().start,
-                ));
-            }
-        }
-    }
+    let import_spans_by_file = import_spans_by_file(resolved_modules);
 
     let ignore_deps: FxHashSet<&str> = config
         .ignore_dependencies
@@ -985,72 +1092,26 @@ pub fn find_unlisted_dependencies(
         .collect();
 
     let mut unlisted: FxHashMap<String, Vec<ImportSite>> = FxHashMap::default();
+    let ctx = UnlistedDependencyContext {
+        graph,
+        config,
+        all_deps: &all_deps,
+        ws_dep_map: &ws_dep_map,
+        virtual_prefixes: &virtual_prefixes,
+        virtual_suffixes: &virtual_suffixes,
+        plugin_tooling: &plugin_tooling,
+        provided_dependency_rules,
+        compiled_provided_dependency_rules: &compiled_provided_dependency_rules,
+        import_spans_by_file: &import_spans_by_file,
+        ignore_deps: &ignore_deps,
+        line_offsets_by_file,
+    };
 
     for (package_name, file_ids) in &graph.package_usage {
-        if (package_name != "bun" && is_builtin_module(package_name)) || is_path_alias(package_name)
-        {
+        if should_skip_unlisted_package(package_name, &ctx) {
             continue;
         }
-        if is_virtual_module(package_name) {
-            continue;
-        }
-        if ignore_deps.contains(package_name.as_str()) {
-            continue;
-        }
-        if plugin_tooling.contains(package_name.as_str())
-            && !package_has_file_scoped_provider(provided_dependency_rules, package_name)
-        {
-            continue;
-        }
-        if virtual_prefixes
-            .iter()
-            .any(|prefix| matches_virtual_prefix(prefix, package_name))
-        {
-            continue;
-        }
-        if virtual_suffixes
-            .iter()
-            .any(|suffix| package_name.ends_with(suffix))
-        {
-            continue;
-        }
-        let mut unlisted_sites: Vec<ImportSite> = Vec::new();
-        for id in file_ids {
-            let Some(module) = graph.modules.get(id.0 as usize) else {
-                continue;
-            };
-            if package_name == "bun"
-                && package_imports_are_all_builtin(&import_spans_by_file, *id, package_name)
-            {
-                continue;
-            }
-            if package_imports_are_all_npm_scheme(&import_spans_by_file, *id, package_name) {
-                continue;
-            }
-            if is_package_listed_for_file(&module.path, package_name, &all_deps, &ws_dep_map) {
-                continue;
-            }
-            if has_types_package_for_file(&module.path, package_name, &all_deps, &ws_dep_map) {
-                continue;
-            }
-            let relative_path = relative_module_path(&module.path, &config.root);
-            let Some((line, col)) = find_unprovided_import_location(
-                &import_spans_by_file,
-                line_offsets_by_file,
-                &compiled_provided_dependency_rules,
-                &relative_path,
-                *id,
-                package_name,
-            ) else {
-                continue;
-            };
-            unlisted_sites.push(ImportSite {
-                path: module.path.clone(),
-                line,
-                col,
-            });
-        }
-
+        let mut unlisted_sites = collect_unlisted_import_sites(package_name, file_ids, &ctx);
         if !unlisted_sites.is_empty() {
             unlisted_sites.sort_by(|a, b| a.path.cmp(&b.path).then(a.line.cmp(&b.line)));
             unlisted_sites.dedup_by(|a, b| a.path == b.path);
@@ -1065,6 +1126,81 @@ pub fn find_unlisted_dependencies(
             imported_from: sites,
         })
         .collect()
+}
+
+struct UnlistedDependencyContext<'a> {
+    graph: &'a ModuleGraph,
+    config: &'a ResolvedConfig,
+    all_deps: &'a FxHashSet<String>,
+    ws_dep_map: &'a [(std::path::PathBuf, FxHashSet<String>)],
+    virtual_prefixes: &'a [&'a str],
+    virtual_suffixes: &'a [&'a str],
+    plugin_tooling: &'a FxHashSet<&'a str>,
+    provided_dependency_rules: &'a [ProvidedDependencyRule],
+    compiled_provided_dependency_rules: &'a [CompiledProvidedDependencyRule<'a>],
+    import_spans_by_file: &'a FxHashMap<FileId, Vec<(&'a str, &'a str, u32)>>,
+    ignore_deps: &'a FxHashSet<&'a str>,
+    line_offsets_by_file: &'a LineOffsetsMap<'a>,
+}
+
+fn should_skip_unlisted_package(package_name: &str, ctx: &UnlistedDependencyContext<'_>) -> bool {
+    ((package_name != "bun" && is_builtin_module(package_name)) || is_path_alias(package_name))
+        || is_virtual_module(package_name)
+        || ctx.ignore_deps.contains(package_name)
+        || (ctx.plugin_tooling.contains(package_name)
+            && !package_has_file_scoped_provider(ctx.provided_dependency_rules, package_name))
+        || ctx
+            .virtual_prefixes
+            .iter()
+            .any(|prefix| matches_virtual_prefix(prefix, package_name))
+        || ctx
+            .virtual_suffixes
+            .iter()
+            .any(|suffix| package_name.ends_with(suffix))
+}
+
+fn collect_unlisted_import_sites(
+    package_name: &str,
+    file_ids: &[FileId],
+    ctx: &UnlistedDependencyContext<'_>,
+) -> Vec<ImportSite> {
+    let mut unlisted_sites = Vec::new();
+    for id in file_ids {
+        let Some(module) = ctx.graph.modules.get(id.0 as usize) else {
+            continue;
+        };
+        if package_name == "bun"
+            && package_imports_are_all_builtin(ctx.import_spans_by_file, *id, package_name)
+        {
+            continue;
+        }
+        if package_imports_are_all_npm_scheme(ctx.import_spans_by_file, *id, package_name) {
+            continue;
+        }
+        if is_package_listed_for_file(&module.path, package_name, ctx.all_deps, ctx.ws_dep_map) {
+            continue;
+        }
+        if has_types_package_for_file(&module.path, package_name, ctx.all_deps, ctx.ws_dep_map) {
+            continue;
+        }
+        let relative_path = relative_module_path(&module.path, &ctx.config.root);
+        let Some((line, col)) = find_unprovided_import_location(
+            ctx.import_spans_by_file,
+            ctx.line_offsets_by_file,
+            ctx.compiled_provided_dependency_rules,
+            &relative_path,
+            *id,
+            package_name,
+        ) else {
+            continue;
+        };
+        unlisted_sites.push(ImportSite {
+            path: module.path.clone(),
+            line,
+            col,
+        });
+    }
+    unlisted_sites
 }
 
 /// Find imports that could not be resolved.

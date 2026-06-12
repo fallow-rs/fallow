@@ -306,12 +306,45 @@ fn print_audit_status_line(result: &AuditResult) {
     }
 }
 
+fn print_audit_json(result: &AuditResult) -> ExitCode {
+    let mut obj = serde_json::Map::new();
+    insert_audit_json_header(&mut obj, result);
+
+    if let Some(ref check) = result.check
+        && let Err(code) = insert_audit_dead_code_json(&mut obj, result, check)
+    {
+        return code;
+    }
+
+    if let Some(ref dupes) = result.dupes
+        && let Err(code) = insert_audit_duplication_json(&mut obj, result, dupes)
+    {
+        return code;
+    }
+
+    if let Some(ref health) = result.health
+        && let Err(code) = insert_audit_health_json(&mut obj, result, health)
+    {
+        return code;
+    }
+
+    insert_audit_next_steps_json(&mut obj, result);
+
+    let mut output = serde_json::Value::Object(obj);
+    crate::output_envelope::apply_root_kind(&mut output, "audit");
+    report::harmonize_multi_kind_suppress_line_actions(&mut output);
+    crate::output_envelope::attach_telemetry_meta(&mut output);
+    report::emit_json(&output, "audit")
+}
+
 #[expect(
     clippy::cast_possible_truncation,
     reason = "elapsed milliseconds won't exceed u64::MAX"
 )]
-fn print_audit_json(result: &AuditResult) -> ExitCode {
-    let mut obj = serde_json::Map::new();
+fn insert_audit_json_header(
+    obj: &mut serde_json::Map<String, serde_json::Value>,
+    result: &AuditResult,
+) {
     obj.insert(
         "schema_version".into(),
         serde_json::Value::Number(crate::report::SCHEMA_VERSION.into()),
@@ -362,81 +395,90 @@ fn print_audit_json(result: &AuditResult) -> ExitCode {
     if let Ok(attribution_val) = serde_json::to_value(&result.attribution) {
         obj.insert("attribution".into(), attribution_val);
     }
+}
 
-    if let Some(ref check) = result.check {
-        match report::build_check_json_payload_with_config_fixable(
-            &check.results,
-            &check.config.root,
-            check.elapsed,
-            check.config_fixable,
-        ) {
-            Ok(mut json) => {
-                if let Some(ref base) = result.base_snapshot {
-                    annotate_dead_code_json(
-                        &mut json,
-                        &check.results,
-                        &check.config.root,
-                        &base.dead_code,
-                    );
-                }
-                obj.insert("dead_code".into(), json);
-            }
-            Err(e) => {
-                return emit_error(
-                    &format!("JSON serialization error: {e}"),
-                    2,
-                    OutputFormat::Json,
+fn insert_audit_dead_code_json(
+    obj: &mut serde_json::Map<String, serde_json::Value>,
+    result: &AuditResult,
+    check: &crate::check::CheckResult,
+) -> Result<(), ExitCode> {
+    match report::build_check_json_payload_with_config_fixable(
+        &check.results,
+        &check.config.root,
+        check.elapsed,
+        check.config_fixable,
+    ) {
+        Ok(mut json) => {
+            if let Some(ref base) = result.base_snapshot {
+                annotate_dead_code_json(
+                    &mut json,
+                    &check.results,
+                    &check.config.root,
+                    &base.dead_code,
                 );
             }
+            obj.insert("dead_code".into(), json);
+            Ok(())
         }
+        Err(e) => Err(emit_error(
+            &format!("JSON serialization error: {e}"),
+            2,
+            OutputFormat::Json,
+        )),
     }
+}
 
-    if let Some(ref dupes) = result.dupes {
-        let payload = crate::output_dupes::DupesReportPayload::from_report(&dupes.report);
-        match serde_json::to_value(&payload) {
-            Ok(mut json) => {
-                let root_prefix = format!("{}/", dupes.config.root.display());
-                report::strip_root_prefix(&mut json, &root_prefix);
-                if let Some(ref base) = result.base_snapshot {
-                    annotate_dupes_json(&mut json, &dupes.report, &dupes.config.root, &base.dupes);
-                }
-                obj.insert("duplication".into(), json);
+fn insert_audit_duplication_json(
+    obj: &mut serde_json::Map<String, serde_json::Value>,
+    result: &AuditResult,
+    dupes: &crate::dupes::DupesResult,
+) -> Result<(), ExitCode> {
+    let payload = crate::output_dupes::DupesReportPayload::from_report(&dupes.report);
+    match serde_json::to_value(&payload) {
+        Ok(mut json) => {
+            let root_prefix = format!("{}/", dupes.config.root.display());
+            report::strip_root_prefix(&mut json, &root_prefix);
+            if let Some(ref base) = result.base_snapshot {
+                annotate_dupes_json(&mut json, &dupes.report, &dupes.config.root, &base.dupes);
             }
-            Err(e) => {
-                return emit_error(
-                    &format!("JSON serialization error: {e}"),
-                    2,
-                    OutputFormat::Json,
-                );
-            }
+            obj.insert("duplication".into(), json);
+            Ok(())
         }
+        Err(e) => Err(emit_error(
+            &format!("JSON serialization error: {e}"),
+            2,
+            OutputFormat::Json,
+        )),
     }
+}
 
-    if let Some(ref health) = result.health {
-        match serde_json::to_value(&health.report) {
-            Ok(mut json) => {
-                let root_prefix = format!("{}/", health.config.root.display());
-                report::strip_root_prefix(&mut json, &root_prefix);
-                if let Some(ref base) = result.base_snapshot {
-                    annotate_health_json(
-                        &mut json,
-                        &health.report,
-                        &health.config.root,
-                        &base.health,
-                    );
-                }
-                obj.insert("complexity".into(), json);
+fn insert_audit_health_json(
+    obj: &mut serde_json::Map<String, serde_json::Value>,
+    result: &AuditResult,
+    health: &crate::health::HealthResult,
+) -> Result<(), ExitCode> {
+    match serde_json::to_value(&health.report) {
+        Ok(mut json) => {
+            let root_prefix = format!("{}/", health.config.root.display());
+            report::strip_root_prefix(&mut json, &root_prefix);
+            if let Some(ref base) = result.base_snapshot {
+                annotate_health_json(&mut json, &health.report, &health.config.root, &base.health);
             }
-            Err(e) => {
-                return emit_error(
-                    &format!("JSON serialization error: {e}"),
-                    2,
-                    OutputFormat::Json,
-                );
-            }
+            obj.insert("complexity".into(), json);
+            Ok(())
         }
+        Err(e) => Err(emit_error(
+            &format!("JSON serialization error: {e}"),
+            2,
+            OutputFormat::Json,
+        )),
     }
+}
 
+fn insert_audit_next_steps_json(
+    obj: &mut serde_json::Map<String, serde_json::Value>,
+    result: &AuditResult,
+) {
     let next_steps = crate::report::suggestions::build_audit_next_steps(
         result
             .check
@@ -449,12 +491,6 @@ fn print_audit_json(result: &AuditResult) -> ExitCode {
     {
         obj.insert("next_steps".into(), value);
     }
-
-    let mut output = serde_json::Value::Object(obj);
-    crate::output_envelope::apply_root_kind(&mut output, "audit");
-    report::harmonize_multi_kind_suppress_line_actions(&mut output);
-    crate::output_envelope::attach_telemetry_meta(&mut output);
-    report::emit_json(&output, "audit")
 }
 
 fn print_audit_sarif(result: &AuditResult) -> ExitCode {

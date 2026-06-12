@@ -821,8 +821,14 @@ fn parse_catalogue(src: &str) -> Result<Catalogue, String> {
         return Err("security_matchers.toml has no [[matcher]] entries".to_string());
     }
 
-    let mut sources = Vec::with_capacity(raw.source.len());
-    for entry in raw.source {
+    let sources = parse_source_catalogue(raw.source)?;
+
+    Ok(Catalogue { matchers, sources })
+}
+
+fn parse_source_catalogue(raw_sources: Vec<RawSource>) -> Result<Vec<SourceMatcher>, String> {
+    let mut sources = Vec::with_capacity(raw_sources.len());
+    for entry in raw_sources {
         if entry.id.trim().is_empty() {
             return Err("source id must be non-empty / non-whitespace".to_string());
         }
@@ -832,16 +838,8 @@ fn parse_catalogue(src: &str) -> Result<Catalogue, String> {
                 entry.id
             ));
         }
-        let mut path_patterns = Vec::with_capacity(entry.path_patterns.len());
-        for pat in &entry.path_patterns {
-            let parsed = parse_callee_pattern(pat).ok_or_else(|| {
-                format!(
-                    "source {:?} has an empty / whitespace path_pattern {pat:?}",
-                    entry.id
-                )
-            })?;
-            path_patterns.push(parsed);
-        }
+        let path_patterns = parse_source_path_patterns(&entry)?;
+        let receiver_allowlist = parse_source_receiver_allowlist(&entry)?;
         let enabler = match entry.enabler {
             Some(e) if e.trim().is_empty() => {
                 return Err(format!(
@@ -851,16 +849,6 @@ fn parse_catalogue(src: &str) -> Result<Catalogue, String> {
             }
             other => other,
         };
-        let mut receiver_allowlist = Vec::with_capacity(entry.receiver_allowlist.len());
-        for receiver in entry.receiver_allowlist {
-            if receiver.trim().is_empty() {
-                return Err(format!(
-                    "source {:?} has an empty / whitespace receiver_allowlist entry; omit the key for an ungated row",
-                    entry.id
-                ));
-            }
-            receiver_allowlist.push(receiver.to_ascii_lowercase());
-        }
         sources.push(SourceMatcher {
             id: entry.id,
             title: entry.title,
@@ -869,8 +857,35 @@ fn parse_catalogue(src: &str) -> Result<Catalogue, String> {
             receiver_allowlist,
         });
     }
+    Ok(sources)
+}
 
-    Ok(Catalogue { matchers, sources })
+fn parse_source_path_patterns(entry: &RawSource) -> Result<Vec<CalleePattern>, String> {
+    let mut path_patterns = Vec::with_capacity(entry.path_patterns.len());
+    for pattern in &entry.path_patterns {
+        let parsed = parse_callee_pattern(pattern).ok_or_else(|| {
+            format!(
+                "source {:?} has an empty / whitespace path_pattern {pattern:?}",
+                entry.id
+            )
+        })?;
+        path_patterns.push(parsed);
+    }
+    Ok(path_patterns)
+}
+
+fn parse_source_receiver_allowlist(entry: &RawSource) -> Result<Vec<String>, String> {
+    let mut receiver_allowlist = Vec::with_capacity(entry.receiver_allowlist.len());
+    for receiver in &entry.receiver_allowlist {
+        if receiver.trim().is_empty() {
+            return Err(format!(
+                "source {:?} has an empty / whitespace receiver_allowlist entry; omit the key for an ungated row",
+                entry.id
+            ));
+        }
+        receiver_allowlist.push(receiver.to_ascii_lowercase());
+    }
+    Ok(receiver_allowlist)
 }
 
 /// Parse and cache the embedded catalogue once. Unwraps the parse `Result`; in

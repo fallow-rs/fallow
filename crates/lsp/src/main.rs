@@ -78,6 +78,40 @@ struct AnalysisCompleteParams {
     clone_groups: usize,
 }
 
+fn analysis_complete_params(
+    results: &AnalysisResults,
+    duplication: &DuplicationReport,
+) -> AnalysisCompleteParams {
+    AnalysisCompleteParams {
+        total_issues: results.total_issues(),
+        unused_files: results.unused_files.len(),
+        unused_exports: results.unused_exports.len(),
+        unused_types: results.unused_types.len(),
+        private_type_leaks: results.private_type_leaks.len(),
+        unused_dependencies: results.unused_dependencies.len(),
+        unused_dev_dependencies: results.unused_dev_dependencies.len(),
+        unused_optional_dependencies: results.unused_optional_dependencies.len(),
+        unused_enum_members: results.unused_enum_members.len(),
+        unused_class_members: results.unused_class_members.len(),
+        unresolved_imports: results.unresolved_imports.len(),
+        unlisted_dependencies: results.unlisted_dependencies.len(),
+        duplicate_exports: results.duplicate_exports.len(),
+        type_only_dependencies: results.type_only_dependencies.len(),
+        test_only_dependencies: results.test_only_dependencies.len(),
+        circular_dependencies: results.circular_dependencies.len(),
+        re_export_cycles: results.re_export_cycles.len(),
+        boundary_violations: results.boundary_violations.len(),
+        stale_suppressions: results.stale_suppressions.len(),
+        unused_catalog_entries: results.unused_catalog_entries.len(),
+        empty_catalog_groups: results.empty_catalog_groups.len(),
+        unresolved_catalog_references: results.unresolved_catalog_references.len(),
+        unused_dependency_overrides: results.unused_dependency_overrides.len(),
+        misconfigured_dependency_overrides: results.misconfigured_dependency_overrides.len(),
+        duplication_percentage: duplication.stats.duplication_percentage,
+        clone_groups: duplication.stats.clone_groups,
+    }
+}
+
 /// Diagnostic codes that the LSP client can disable via initializationOptions.
 /// The same table also backs the `fallow/issueTypes` custom request used by
 /// editor clients that need user-facing labels for all emitted diagnostic codes.
@@ -1028,10 +1062,6 @@ impl FallowLspServer {
         }
     }
 
-    #[expect(
-        clippy::too_many_lines,
-        reason = "LSP analysis orchestration keeps snapshot, blocking work, diagnostics, and notifications in one auditable flow"
-    )]
     async fn run_analysis(&self) {
         if self.cancellation.load(Ordering::SeqCst) {
             return;
@@ -1161,36 +1191,10 @@ impl FallowLspServer {
                     .await;
 
                 self.client
-                    .send_notification::<AnalysisComplete>(AnalysisCompleteParams {
-                        total_issues: results.total_issues(),
-                        unused_files: results.unused_files.len(),
-                        unused_exports: results.unused_exports.len(),
-                        unused_types: results.unused_types.len(),
-                        private_type_leaks: results.private_type_leaks.len(),
-                        unused_dependencies: results.unused_dependencies.len(),
-                        unused_dev_dependencies: results.unused_dev_dependencies.len(),
-                        unused_optional_dependencies: results.unused_optional_dependencies.len(),
-                        unused_enum_members: results.unused_enum_members.len(),
-                        unused_class_members: results.unused_class_members.len(),
-                        unresolved_imports: results.unresolved_imports.len(),
-                        unlisted_dependencies: results.unlisted_dependencies.len(),
-                        duplicate_exports: results.duplicate_exports.len(),
-                        type_only_dependencies: results.type_only_dependencies.len(),
-                        test_only_dependencies: results.test_only_dependencies.len(),
-                        circular_dependencies: results.circular_dependencies.len(),
-                        re_export_cycles: results.re_export_cycles.len(),
-                        boundary_violations: results.boundary_violations.len(),
-                        stale_suppressions: results.stale_suppressions.len(),
-                        unused_catalog_entries: results.unused_catalog_entries.len(),
-                        empty_catalog_groups: results.empty_catalog_groups.len(),
-                        unresolved_catalog_references: results.unresolved_catalog_references.len(),
-                        unused_dependency_overrides: results.unused_dependency_overrides.len(),
-                        misconfigured_dependency_overrides: results
-                            .misconfigured_dependency_overrides
-                            .len(),
-                        duplication_percentage: duplication.stats.duplication_percentage,
-                        clone_groups: duplication.stats.clone_groups,
-                    })
+                    .send_notification::<AnalysisComplete>(analysis_complete_params(
+                        &results,
+                        &duplication,
+                    ))
                     .await;
 
                 *self.results.write().await = Some(results);

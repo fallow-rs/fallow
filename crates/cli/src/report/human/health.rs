@@ -308,9 +308,39 @@ pub fn render_health_score(lines: &mut Vec<String>, report: &crate::health_types
         return;
     };
 
+    lines.push(format!(
+        "{} {} {}",
+        "\u{25cf}".cyan(),
+        "Health score:".cyan().bold(),
+        health_score_colored(hs),
+    ));
+
+    let p = &hs.penalties;
+    let penalties = health_score_penalties(p);
+    if !penalties.is_empty() {
+        lines.push(format!(
+            "  {} {}",
+            "Deductions:".dimmed(),
+            render_health_score_penalties(&penalties)
+        ));
+    }
+    if let Some(na_line) = health_score_na_line(p) {
+        lines.push(format!("  {}", na_line.dimmed()));
+    }
+    if p.duplication.is_some_and(|dp| dp >= 5.0) {
+        lines.push(format!(
+            "  {}",
+            "Tip: add \"dist\" or \"__generated__\" to health.ignore in your config to exclude from duplication analysis"
+                .dimmed()
+        ));
+    }
+    lines.push(String::new());
+}
+
+fn health_score_colored(hs: &crate::health_types::HealthScore) -> String {
     let score_str = format!("{:.0}", hs.score);
     let grade_str = hs.grade;
-    let score_colored = if hs.score >= 85.0 {
+    if hs.score >= 85.0 {
         format!("{score_str} {grade_str}")
             .green()
             .bold()
@@ -324,67 +354,56 @@ pub fn render_health_score(lines: &mut Vec<String>, report: &crate::health_types
         format!("{score_str} {grade_str}").yellow().to_string()
     } else {
         format!("{score_str} {grade_str}").red().bold().to_string()
-    };
-    lines.push(format!(
-        "{} {} {}",
-        "\u{25cf}".cyan(),
-        "Health score:".cyan().bold(),
-        score_colored,
-    ));
+    }
+}
 
-    let p = &hs.penalties;
-    let mut penalties: Vec<(&str, f64)> = Vec::new();
-    if let Some(df) = p.dead_files {
-        penalties.push(("dead files", df));
-    }
-    if let Some(de) = p.dead_exports {
-        penalties.push(("dead exports", de));
-    }
+fn health_score_penalties(
+    p: &crate::health_types::HealthScorePenalties,
+) -> Vec<(&'static str, f64)> {
+    let mut penalties = Vec::new();
+    push_optional_penalty(&mut penalties, "dead files", p.dead_files);
+    push_optional_penalty(&mut penalties, "dead exports", p.dead_exports);
     penalties.push(("complexity", p.complexity));
     penalties.push(("p90", p.p90_complexity));
-    if let Some(mi) = p.maintainability {
-        penalties.push(("maintainability", mi));
-    }
-    if let Some(hp) = p.hotspots {
-        penalties.push(("hotspots", hp));
-    }
-    if let Some(ud) = p.unused_deps {
-        penalties.push(("unused deps", ud));
-    }
-    if let Some(cd) = p.circular_deps {
-        penalties.push(("circular deps", cd));
-    }
-    if let Some(us) = p.unit_size {
-        penalties.push(("unit size", us));
-    }
-    if let Some(cp) = p.coupling {
-        penalties.push(("coupling", cp));
-    }
-    if let Some(dp) = p.duplication {
-        penalties.push(("duplication", dp));
-    }
+    push_optional_penalty(&mut penalties, "maintainability", p.maintainability);
+    push_optional_penalty(&mut penalties, "hotspots", p.hotspots);
+    push_optional_penalty(&mut penalties, "unused deps", p.unused_deps);
+    push_optional_penalty(&mut penalties, "circular deps", p.circular_deps);
+    push_optional_penalty(&mut penalties, "unit size", p.unit_size);
+    push_optional_penalty(&mut penalties, "coupling", p.coupling);
+    push_optional_penalty(&mut penalties, "duplication", p.duplication);
     penalties.retain(|&(_, v)| v > 0.0);
     penalties.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    penalties
+}
 
-    if !penalties.is_empty() {
-        let parts: Vec<String> = penalties
-            .iter()
-            .enumerate()
-            .map(|(i, &(label, val))| {
-                let text = format!("{label} -{val:.1}");
-                if i == 0 {
-                    text.yellow().to_string()
-                } else {
-                    text.dimmed().to_string()
-                }
-            })
-            .collect();
-        lines.push(format!(
-            "  {} {}",
-            "Deductions:".dimmed(),
-            parts.join(&format!(" {} ", "\u{00b7}".dimmed()))
-        ));
+fn push_optional_penalty(
+    penalties: &mut Vec<(&'static str, f64)>,
+    label: &'static str,
+    value: Option<f64>,
+) {
+    if let Some(value) = value {
+        penalties.push((label, value));
     }
+}
+
+fn render_health_score_penalties(penalties: &[(&str, f64)]) -> String {
+    let parts: Vec<String> = penalties
+        .iter()
+        .enumerate()
+        .map(|(i, &(label, val))| {
+            let text = format!("{label} -{val:.1}");
+            if i == 0 {
+                text.yellow().to_string()
+            } else {
+                text.dimmed().to_string()
+            }
+        })
+        .collect();
+    parts.join(&format!(" {} ", "\u{00b7}".dimmed()))
+}
+
+fn health_score_na_line(p: &crate::health_types::HealthScorePenalties) -> Option<String> {
     let mut na_parts = Vec::new();
     if p.dead_files.is_none() {
         na_parts.push("dead code");
@@ -395,24 +414,12 @@ pub fn render_health_score(lines: &mut Vec<String>, report: &crate::health_types
     if p.hotspots.is_none() {
         na_parts.push("hotspots");
     }
-    if !na_parts.is_empty() {
-        lines.push(format!(
-            "  {}",
-            format!(
-                "N/A: {} (enable the corresponding analysis flags)",
-                na_parts.join(", ")
-            )
-            .dimmed()
-        ));
-    }
-    if p.duplication.is_some_and(|dp| dp >= 5.0) {
-        lines.push(format!(
-            "  {}",
-            "Tip: add \"dist\" or \"__generated__\" to health.ignore in your config to exclude from duplication analysis"
-                .dimmed()
-        ));
-    }
-    lines.push(String::new());
+    (!na_parts.is_empty()).then(|| {
+        format!(
+            "N/A: {} (enable the corresponding analysis flags)",
+            na_parts.join(", ")
+        )
+    })
 }
 
 /// Format a float for trend display: show as integer if it is one, otherwise 1dp.
@@ -809,99 +816,15 @@ fn render_findings(
         return;
     }
 
-    lines.push(format!(
-        "{} {}",
-        "\u{25cf}".red(),
-        if report.findings.len() < report.summary.functions_above_threshold {
-            format!(
-                "High complexity functions ({} shown, {} total)",
-                report.findings.len(),
-                report.summary.functions_above_threshold
-            )
-        } else {
-            format!(
-                "High complexity functions ({})",
-                report.summary.functions_above_threshold
-            )
-        }
-        .red()
-        .bold()
-    ));
+    push_findings_header(lines, report);
     if let Some(note) = crap_coverage_note(report) {
         lines.push(format!("  {}", note.dimmed()));
     }
 
     let mut last_file = String::new();
     for finding in &report.findings {
-        let file_str = crate::report::format_display_path(&finding.path, root);
-        if file_str != last_file {
-            lines.push(format!("  {}", format_path(&file_str)));
-            last_file = file_str;
-        }
-
-        let cyc_val = format!("{:>3}", finding.cyclomatic);
-        let cog_val = format!("{:>3}", finding.cognitive);
-
-        let cyc_colored = if finding.cyclomatic > report.summary.max_cyclomatic_threshold {
-            cyc_val.red().bold().to_string()
-        } else {
-            cyc_val.dimmed().to_string()
-        };
-        let cog_colored = if finding.cognitive > report.summary.max_cognitive_threshold {
-            cog_val.red().bold().to_string()
-        } else {
-            cog_val.dimmed().to_string()
-        };
-
-        let severity_tag = match finding.severity {
-            crate::health_types::FindingSeverity::Critical => {
-                format!(" {}", "CRITICAL".red().bold())
-            }
-            crate::health_types::FindingSeverity::High => {
-                format!(" {}", "HIGH".yellow().bold())
-            }
-            crate::health_types::FindingSeverity::Moderate => String::new(),
-        };
-        let generated_tag = if is_likely_generated(&finding.name, finding.cyclomatic) {
-            format!(" {}", "(generated)".dimmed())
-        } else {
-            String::new()
-        };
-        lines.push(format!(
-            "    {} {}{}{}",
-            format!(":{}", finding.line).dimmed(),
-            finding.name.bold(),
-            severity_tag,
-            generated_tag,
-        ));
-        lines.push(format!(
-            "         {} cyclomatic  {} cognitive  {} lines",
-            cyc_colored,
-            cog_colored,
-            format!("{:>3}", finding.line_count).dimmed(),
-        ));
-        if let Some(line) = render_component_rollup_breakdown(finding, root) {
-            lines.push(line);
-        }
-        if let Some(crap) = finding.crap {
-            let crap_colored = format!("{crap:>5.1}").red().bold().to_string();
-            let coverage_suffix = if let Some(pct) = finding.coverage_pct {
-                format!("  ({pct:.0}% tested)")
-            } else if matches!(
-                finding.coverage_source,
-                Some(crate::health_types::CoverageSource::EstimatedComponentInherited)
-            ) && let Some(ref owner) = finding.inherited_from
-            {
-                let owner_display = crate::report::format_display_path(owner, root);
-                format!("  (inherited from {owner_display})")
-            } else {
-                String::new()
-            };
-            lines.push(format!(
-                "         {crap_colored} CRAP{}",
-                coverage_suffix.dimmed(),
-            ));
-        }
+        push_finding_file_header(lines, finding, root, &mut last_file);
+        push_finding_metric_rows(lines, finding, report, root);
     }
     lines.push(format!(
         "  {}",
@@ -919,6 +842,111 @@ fn render_findings(
         ));
     }
     lines.push(String::new());
+}
+
+fn push_findings_header(lines: &mut Vec<String>, report: &crate::health_types::HealthReport) {
+    let title = if report.findings.len() < report.summary.functions_above_threshold {
+        format!(
+            "High complexity functions ({} shown, {} total)",
+            report.findings.len(),
+            report.summary.functions_above_threshold
+        )
+    } else {
+        format!(
+            "High complexity functions ({})",
+            report.summary.functions_above_threshold
+        )
+    };
+    lines.push(format!("{} {}", "\u{25cf}".red(), title.red().bold()));
+}
+
+fn push_finding_file_header(
+    lines: &mut Vec<String>,
+    finding: &crate::health_types::ComplexityViolation,
+    root: &Path,
+    last_file: &mut String,
+) {
+    let file_str = crate::report::format_display_path(&finding.path, root);
+    if file_str != *last_file {
+        lines.push(format!("  {}", format_path(&file_str)));
+        *last_file = file_str;
+    }
+}
+
+fn push_finding_metric_rows(
+    lines: &mut Vec<String>,
+    finding: &crate::health_types::ComplexityViolation,
+    report: &crate::health_types::HealthReport,
+    root: &Path,
+) {
+    lines.push(format!(
+        "    {} {}{}{}",
+        format!(":{}", finding.line).dimmed(),
+        finding.name.bold(),
+        finding_severity_tag(finding),
+        finding_generated_tag(finding),
+    ));
+    lines.push(format!(
+        "         {} cyclomatic  {} cognitive  {} lines",
+        threshold_colored(finding.cyclomatic, report.summary.max_cyclomatic_threshold,),
+        threshold_colored(finding.cognitive, report.summary.max_cognitive_threshold),
+        format!("{:>3}", finding.line_count).dimmed(),
+    ));
+    if let Some(line) = render_component_rollup_breakdown(finding, root) {
+        lines.push(line);
+    }
+    if let Some(line) = finding_crap_line(finding, root) {
+        lines.push(line);
+    }
+}
+
+fn threshold_colored(value: u16, threshold: u16) -> String {
+    let formatted = format!("{value:>3}");
+    if value > threshold {
+        formatted.red().bold().to_string()
+    } else {
+        formatted.dimmed().to_string()
+    }
+}
+
+fn finding_severity_tag(finding: &crate::health_types::ComplexityViolation) -> String {
+    match finding.severity {
+        crate::health_types::FindingSeverity::Critical => format!(" {}", "CRITICAL".red().bold()),
+        crate::health_types::FindingSeverity::High => format!(" {}", "HIGH".yellow().bold()),
+        crate::health_types::FindingSeverity::Moderate => String::new(),
+    }
+}
+
+fn finding_generated_tag(finding: &crate::health_types::ComplexityViolation) -> String {
+    if is_likely_generated(&finding.name, finding.cyclomatic) {
+        format!(" {}", "(generated)".dimmed())
+    } else {
+        String::new()
+    }
+}
+
+fn finding_crap_line(
+    finding: &crate::health_types::ComplexityViolation,
+    root: &Path,
+) -> Option<String> {
+    let crap = finding.crap?;
+    let crap_colored = format!("{crap:>5.1}").red().bold().to_string();
+    let coverage_suffix = if let Some(pct) = finding.coverage_pct {
+        format!("  ({pct:.0}% tested)")
+    } else if matches!(
+        finding.coverage_source,
+        Some(crate::health_types::CoverageSource::EstimatedComponentInherited)
+    ) && let Some(ref owner) = finding.inherited_from
+    {
+        let owner_display = crate::report::format_display_path(owner, root);
+        format!("  (inherited from {owner_display})")
+    } else {
+        String::new()
+    };
+    Some(format!(
+        "         {crap_colored} CRAP{}",
+        coverage_suffix.dimmed(),
+    ))
 }
 
 fn crap_coverage_note(report: &crate::health_types::HealthReport) -> Option<String> {
@@ -986,109 +1014,135 @@ fn render_file_scores(
         return;
     }
 
+    push_file_scores_header(lines, report.file_scores.len());
+
+    let shown_scores = report.file_scores.len().min(MAX_FLAT_ITEMS);
+    for score in &report.file_scores[..shown_scores] {
+        render_file_score_row(lines, score, root);
+    }
+    push_file_scores_overflow(lines, report.file_scores.len());
+    let crap_note = file_scores_crap_note(report);
+    lines.push(format!(
+        "  {}",
+        format!("Sorted by triage concern: the larger of low-MI concern and CRAP risk. The risk / structure tag marks which one placed each file. MI reflects complexity, coupling, and dead code; risk reflects untested complexity (CRAP) and can diverge from MI. Risk: low <15, moderate 15-30, high >=30. {crap_note} {DOCS_HEALTH}#file-health-scores").dimmed()
+    ));
+    lines.push(String::new());
+}
+
+fn push_file_scores_header(lines: &mut Vec<String>, score_count: usize) {
     lines.push(format!(
         "{} {} {}",
         "\u{25cf}".cyan(),
-        format!("File health scores ({} files)", report.file_scores.len())
+        format!("File health scores ({score_count} files)")
             .cyan()
             .bold(),
         "\u{b7} sorted by triage concern".dimmed(),
     ));
     lines.push(String::new());
+}
 
-    let shown_scores = report.file_scores.len().min(MAX_FLAT_ITEMS);
-    for score in &report.file_scores[..shown_scores] {
-        let file_str = relative_path(&score.path, root).display().to_string();
-        let mi = score.maintainability_index;
+fn render_file_score_row(
+    lines: &mut Vec<String>,
+    score: &crate::health_types::FileHealthScore,
+    root: &Path,
+) {
+    let file_str = relative_path(&score.path, root).display().to_string();
+    let (dir, filename) = split_dir_filename(&file_str);
+    const CONCERN_TAG_COLUMN: usize = 48;
+    let pad = CONCERN_TAG_COLUMN
+        .saturating_sub(file_str.chars().count())
+        .max(2);
+    lines.push(format!(
+        "  {}    {}{}{}{}",
+        maintainability_colored(score.maintainability_index),
+        dir.dimmed(),
+        filename,
+        " ".repeat(pad),
+        file_score_concern_colored(score),
+    ));
+    lines.push(format!(
+        "         {} LOC  {} fan-in  {} fan-out  {} dead  {} density{}",
+        format!("{:>6}", score.lines).dimmed(),
+        format!("{:>3}", score.fan_in).dimmed(),
+        format!("{:>3}", score.fan_out).dimmed(),
+        format!("{:>3.0}%", score.dead_code_ratio * 100.0).dimmed(),
+        format!("{:.2}", score.complexity_density).dimmed(),
+        file_score_risk_suffix(score),
+    ));
+    lines.push(String::new());
+}
 
-        let mi_str = format!("{mi:>5.1}");
-        let mi_colored = if mi >= 80.0 {
-            mi_str.green().to_string()
-        } else if mi >= 50.0 {
-            mi_str.yellow().to_string()
-        } else {
-            mi_str.red().bold().to_string()
-        };
+fn maintainability_colored(mi: f64) -> String {
+    let mi_str = format!("{mi:>5.1}");
+    if mi >= 80.0 {
+        mi_str.green().to_string()
+    } else if mi >= 50.0 {
+        mi_str.yellow().to_string()
+    } else {
+        mi_str.red().bold().to_string()
+    }
+}
 
-        let (dir, filename) = split_dir_filename(&file_str);
-
-        let concern = file_score_concern_axis(score);
-        let label = concern.label();
-        let concern_colored = match concern {
-            FileScoreConcern::Risk => {
-                if score.crap_max >= 30.0 {
-                    label.red().bold().to_string()
-                } else if score.crap_max >= 15.0 {
-                    label.yellow().to_string()
-                } else {
-                    label.dimmed().to_string()
-                }
-            }
-            FileScoreConcern::Structural => {
-                if mi < 50.0 {
-                    label.red().bold().to_string()
-                } else if mi < 80.0 {
-                    label.yellow().to_string()
-                } else {
-                    label.dimmed().to_string()
-                }
-            }
-        };
-
-        const CONCERN_TAG_COLUMN: usize = 48;
-        let pad = CONCERN_TAG_COLUMN
-            .saturating_sub(file_str.chars().count())
-            .max(2);
-        lines.push(format!(
-            "  {}    {}{}{}{}",
-            mi_colored,
-            dir.dimmed(),
-            filename,
-            " ".repeat(pad),
-            concern_colored,
-        ));
-
-        let risk_suffix = if score.crap_max > 0.0 {
-            let risk_str = if score.crap_max > 999.0 {
-                ">999".to_string()
-            } else {
-                format!("{:.1}", score.crap_max)
-            };
-            let risk_colored = if score.crap_max >= 30.0 {
-                risk_str.red().bold().to_string()
+fn file_score_concern_colored(score: &crate::health_types::FileHealthScore) -> String {
+    let label = file_score_concern_axis(score).label();
+    match file_score_concern_axis(score) {
+        FileScoreConcern::Risk => {
+            if score.crap_max >= 30.0 {
+                label.red().bold().to_string()
             } else if score.crap_max >= 15.0 {
-                risk_str.yellow().to_string()
+                label.yellow().to_string()
             } else {
-                risk_str.dimmed().to_string()
-            };
-            format!("  {risk_colored} risk")
-        } else {
-            String::new()
-        };
-        lines.push(format!(
-            "         {} LOC  {} fan-in  {} fan-out  {} dead  {} density{}",
-            format!("{:>6}", score.lines).dimmed(),
-            format!("{:>3}", score.fan_in).dimmed(),
-            format!("{:>3}", score.fan_out).dimmed(),
-            format!("{:>3.0}%", score.dead_code_ratio * 100.0).dimmed(),
-            format!("{:.2}", score.complexity_density).dimmed(),
-            risk_suffix,
-        ));
+                label.dimmed().to_string()
+            }
+        }
+        FileScoreConcern::Structural => {
+            if score.maintainability_index < 50.0 {
+                label.red().bold().to_string()
+            } else if score.maintainability_index < 80.0 {
+                label.yellow().to_string()
+            } else {
+                label.dimmed().to_string()
+            }
+        }
+    }
+}
 
-        lines.push(String::new());
+fn file_score_risk_suffix(score: &crate::health_types::FileHealthScore) -> String {
+    if score.crap_max <= 0.0 {
+        return String::new();
     }
-    if report.file_scores.len() > MAX_FLAT_ITEMS {
-        lines.push(format!(
-            "  {}",
-            format!(
-                "... and {} more files (--format json for full list)",
-                report.file_scores.len() - MAX_FLAT_ITEMS
-            )
-            .dimmed()
-        ));
-        lines.push(String::new());
+    let risk_str = if score.crap_max > 999.0 {
+        ">999".to_string()
+    } else {
+        format!("{:.1}", score.crap_max)
+    };
+    let risk_colored = if score.crap_max >= 30.0 {
+        risk_str.red().bold().to_string()
+    } else if score.crap_max >= 15.0 {
+        risk_str.yellow().to_string()
+    } else {
+        risk_str.dimmed().to_string()
+    };
+    format!("  {risk_colored} risk")
+}
+
+fn push_file_scores_overflow(lines: &mut Vec<String>, score_count: usize) {
+    if score_count <= MAX_FLAT_ITEMS {
+        return;
     }
-    let crap_note = if matches!(
+    lines.push(format!(
+        "  {}",
+        format!(
+            "... and {} more files (--format json for full list)",
+            score_count - MAX_FLAT_ITEMS
+        )
+        .dimmed()
+    ));
+    lines.push(String::new());
+}
+
+fn file_scores_crap_note(report: &crate::health_types::HealthReport) -> String {
+    if matches!(
         report.summary.coverage_model,
         Some(crate::health_types::CoverageModel::Istanbul)
     ) {
@@ -1102,12 +1156,7 @@ fn render_file_scores(
         format!("CRAP from Istanbul coverage data{match_info}.")
     } else {
         "CRAP estimated from export references (85% direct, 40% indirect, 0% untested). Run `fallow health --coverage <coverage-final.json>` for exact scores.".to_string()
-    };
-    lines.push(format!(
-        "  {}",
-        format!("Sorted by triage concern: the larger of low-MI concern and CRAP risk. The risk / structure tag marks which one placed each file. MI reflects complexity, coupling, and dead code; risk reflects untested complexity (CRAP) and can diverge from MI. Risk: low <15, moderate 15-30, high >=30. {crap_note} {DOCS_HEALTH}#file-health-scores").dimmed()
-    ));
-    lines.push(String::new());
+    }
 }
 
 fn render_coverage_gaps(
@@ -1119,6 +1168,20 @@ fn render_coverage_gaps(
         return;
     };
 
+    push_coverage_gaps_header(lines, gaps);
+    push_coverage_gap_files(lines, gaps, root);
+    push_coverage_gap_exports(lines, gaps, root);
+    lines.push(format!(
+        "  {}",
+        format!(
+            "Static test dependency gaps (not line-level coverage): {DOCS_HEALTH}#coverage-gaps"
+        )
+        .dimmed()
+    ));
+    lines.push(String::new());
+}
+
+fn push_coverage_gaps_header(lines: &mut Vec<String>, gaps: &crate::health_types::CoverageGaps) {
     lines.push(format!(
         "{} {}",
         "\u{25cf}".yellow(),
@@ -1142,96 +1205,129 @@ fn render_coverage_gaps(
         .bold()
     ));
     lines.push(String::new());
+}
 
-    if !gaps.files.is_empty() {
-        let shown_files = gaps.files.len().min(MAX_FLAT_ITEMS);
-        lines.push(format!("  {}", "Files".dimmed()));
-        for item in &gaps.files[..shown_files] {
-            let file_str = relative_path(&item.file.path, root).display().to_string();
-            let (dir, filename) = split_dir_filename(&file_str);
-            lines.push(format!("  {}{}", dir.dimmed(), filename));
-        }
-        if gaps.files.len() > MAX_FLAT_ITEMS {
-            lines.push(format!(
-                "  {}",
-                format!(
-                    "... and {} more files (--format json for full list)",
-                    gaps.files.len() - MAX_FLAT_ITEMS
-                )
-                .dimmed()
-            ));
-        }
-        lines.push(String::new());
+fn push_coverage_gap_files(
+    lines: &mut Vec<String>,
+    gaps: &crate::health_types::CoverageGaps,
+    root: &Path,
+) {
+    if gaps.files.is_empty() {
+        return;
     }
-
-    if !gaps.exports.is_empty() {
-        lines.push(format!("  {}", "Exports".dimmed()));
-
-        let mut by_file: Vec<(
-            &std::path::Path,
-            Vec<&crate::health_types::UntestedExportFinding>,
-        )> = Vec::new();
-        for item in &gaps.exports {
-            if let Some(entry) = by_file
-                .last_mut()
-                .filter(|(p, _)| *p == item.export.path.as_path())
-            {
-                entry.1.push(item);
-            } else {
-                by_file.push((item.export.path.as_path(), vec![item]));
-            }
-        }
-
-        let mut shown = 0;
-        for (file_path, exports) in &by_file {
-            if shown >= MAX_FLAT_ITEMS {
-                break;
-            }
-            let file_str = relative_path(file_path, root).display().to_string();
-            if exports.len() > 10 {
-                lines.push(format!(
-                    "  {} ({} untested re-exports)",
-                    file_str.dimmed(),
-                    exports.len(),
-                ));
-                shown += 1;
-            } else {
-                for item in exports {
-                    if shown >= MAX_FLAT_ITEMS {
-                        break;
-                    }
-                    lines.push(format!(
-                        "  {}:{} `{}`",
-                        file_str.dimmed(),
-                        item.export.line,
-                        item.export.export_name,
-                    ));
-                    shown += 1;
-                }
-            }
-        }
-        let total_exports = gaps.exports.len();
-        if total_exports > shown {
-            lines.push(format!(
-                "  {}",
-                format!(
-                    "... and {} more exports (--format json for full list)",
-                    total_exports - shown
-                )
-                .dimmed()
-            ));
-        }
-        lines.push(String::new());
+    let shown_files = gaps.files.len().min(MAX_FLAT_ITEMS);
+    lines.push(format!("  {}", "Files".dimmed()));
+    for item in &gaps.files[..shown_files] {
+        let file_str = relative_path(&item.file.path, root).display().to_string();
+        let (dir, filename) = split_dir_filename(&file_str);
+        lines.push(format!("  {}{}", dir.dimmed(), filename));
     }
-
-    lines.push(format!(
-        "  {}",
-        format!(
-            "Static test dependency gaps (not line-level coverage): {DOCS_HEALTH}#coverage-gaps"
-        )
-        .dimmed()
-    ));
+    if gaps.files.len() > MAX_FLAT_ITEMS {
+        lines.push(format!(
+            "  {}",
+            format!(
+                "... and {} more files (--format json for full list)",
+                gaps.files.len() - MAX_FLAT_ITEMS
+            )
+            .dimmed()
+        ));
+    }
     lines.push(String::new());
+}
+
+fn push_coverage_gap_exports(
+    lines: &mut Vec<String>,
+    gaps: &crate::health_types::CoverageGaps,
+    root: &Path,
+) {
+    if gaps.exports.is_empty() {
+        return;
+    }
+    lines.push(format!("  {}", "Exports".dimmed()));
+
+    let by_file = group_coverage_gap_exports_by_file(&gaps.exports);
+    let shown = push_coverage_gap_export_rows(lines, &by_file, root);
+    let total_exports = gaps.exports.len();
+    if total_exports > shown {
+        lines.push(format!(
+            "  {}",
+            format!(
+                "... and {} more exports (--format json for full list)",
+                total_exports - shown
+            )
+            .dimmed()
+        ));
+    }
+    lines.push(String::new());
+}
+
+fn group_coverage_gap_exports_by_file(
+    exports: &[crate::health_types::UntestedExportFinding],
+) -> Vec<(
+    &std::path::Path,
+    Vec<&crate::health_types::UntestedExportFinding>,
+)> {
+    let mut by_file: Vec<(
+        &std::path::Path,
+        Vec<&crate::health_types::UntestedExportFinding>,
+    )> = Vec::new();
+    for item in exports {
+        match by_file.last_mut() {
+            Some((path, items)) if *path == item.export.path.as_path() => items.push(item),
+            _ => by_file.push((item.export.path.as_path(), vec![item])),
+        }
+    }
+    by_file
+}
+
+fn push_coverage_gap_export_rows(
+    lines: &mut Vec<String>,
+    by_file: &[(
+        &std::path::Path,
+        Vec<&crate::health_types::UntestedExportFinding>,
+    )],
+    root: &Path,
+) -> usize {
+    let mut shown = 0;
+    for (file_path, exports) in by_file {
+        if shown >= MAX_FLAT_ITEMS {
+            break;
+        }
+        let file_str = relative_path(file_path, root).display().to_string();
+        if exports.len() > 10 {
+            lines.push(format!(
+                "  {} ({} untested re-exports)",
+                file_str.dimmed(),
+                exports.len(),
+            ));
+            shown += 1;
+        } else {
+            shown += push_coverage_gap_export_names(lines, exports, &file_str, shown);
+        }
+    }
+    shown
+}
+
+fn push_coverage_gap_export_names(
+    lines: &mut Vec<String>,
+    exports: &[&crate::health_types::UntestedExportFinding],
+    file_str: &str,
+    mut shown: usize,
+) -> usize {
+    let before = shown;
+    for item in exports {
+        if shown >= MAX_FLAT_ITEMS {
+            break;
+        }
+        lines.push(format!(
+            "  {}:{} `{}`",
+            file_str.dimmed(),
+            item.export.line,
+            item.export.export_name,
+        ));
+        shown += 1;
+    }
+    shown - before
 }
 
 /// Print a concise health summary showing only aggregate statistics.

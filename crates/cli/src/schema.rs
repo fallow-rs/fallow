@@ -176,6 +176,17 @@ fn issue_type_meta(bare_id: &str, command: &str) -> IssueTypeMeta {
 
 fn dead_code_issue_meta(bare_id: &str) -> IssueTypeMeta {
     let mut m = IssueTypeMeta::default();
+    if apply_source_issue_meta(bare_id, &mut m)
+        || apply_dependency_issue_meta(bare_id, &mut m)
+        || apply_architecture_issue_meta(bare_id, &mut m)
+        || apply_catalog_issue_meta(bare_id, &mut m)
+    {
+        return m;
+    }
+    m
+}
+
+fn apply_source_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
     match bare_id {
         "unused-file" => {
             m.filter_flag = Some("--unused-files");
@@ -195,6 +206,37 @@ fn dead_code_issue_meta(bare_id: &str) -> IssueTypeMeta {
             m.suppress = Some(("private-type-leak", false));
             m.note = Some("Opt-in API hygiene check; the rule defaults to off");
         }
+        "unused-enum-member" => {
+            m.filter_flag = Some("--unused-enum-members");
+            m.fixable = true;
+            m.suppress = Some(("unused-enum-member", false));
+        }
+        "unused-class-member" => {
+            m.filter_flag = Some("--unused-class-members");
+            m.suppress = Some(("unused-class-member", false));
+        }
+        "unresolved-import" => {
+            m.filter_flag = Some("--unresolved-imports");
+            m.suppress = Some(("unresolved-import", false));
+        }
+        "duplicate-export" => {
+            m.filter_flag = Some("--duplicate-exports");
+            m.suppress = Some(("duplicate-export", true));
+            m.note = Some(
+                "fallow fix can add an ignoreExports rule to the fallow config instead of editing source",
+            );
+        }
+        "stale-suppression" => {
+            m.filter_flag = Some("--stale-suppressions");
+            m.note = Some("Fix by removing the stale suppression marker itself");
+        }
+        _ => return false,
+    }
+    true
+}
+
+fn apply_dependency_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
+    match bare_id {
         "unused-dependency" | "unused-dev-dependency" | "unused-optional-dependency" => {
             m.filter_flag = Some("--unused-deps");
             m.fixable = true;
@@ -214,29 +256,16 @@ fn dead_code_issue_meta(bare_id: &str) -> IssueTypeMeta {
                 "Not reported in --production mode (test files are excluded there); --unused-deps scopes it together with the other dependency kinds",
             );
         }
-        "unused-enum-member" => {
-            m.filter_flag = Some("--unused-enum-members");
-            m.fixable = true;
-            m.suppress = Some(("unused-enum-member", false));
-        }
-        "unused-class-member" => {
-            m.filter_flag = Some("--unused-class-members");
-            m.suppress = Some(("unused-class-member", false));
-        }
-        "unresolved-import" => {
-            m.filter_flag = Some("--unresolved-imports");
-            m.suppress = Some(("unresolved-import", false));
-        }
         "unlisted-dependency" => {
             m.filter_flag = Some("--unlisted-deps");
         }
-        "duplicate-export" => {
-            m.filter_flag = Some("--duplicate-exports");
-            m.suppress = Some(("duplicate-export", true));
-            m.note = Some(
-                "fallow fix can add an ignoreExports rule to the fallow config instead of editing source",
-            );
-        }
+        _ => return false,
+    }
+    true
+}
+
+fn apply_architecture_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
+    match bare_id {
         "circular-dependency" => {
             m.filter_flag = Some("--circular-deps");
             m.suppress = Some(("circular-dependency", false));
@@ -263,10 +292,13 @@ fn dead_code_issue_meta(bare_id: &str) -> IssueTypeMeta {
             m.suppress = Some(("policy-violation", false));
             m.note = Some("Requires a configured rule pack (rulePacks config)");
         }
-        "stale-suppression" => {
-            m.filter_flag = Some("--stale-suppressions");
-            m.note = Some("Fix by removing the stale suppression marker itself");
-        }
+        _ => return false,
+    }
+    true
+}
+
+fn apply_catalog_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
+    match bare_id {
         "unused-catalog-entry" => {
             m.filter_flag = Some("--unused-catalog-entries");
             m.fixable = true;
@@ -283,9 +315,9 @@ fn dead_code_issue_meta(bare_id: &str) -> IssueTypeMeta {
         "misconfigured-dependency-override" => {
             m.filter_flag = Some("--misconfigured-dependency-overrides");
         }
-        _ => {}
+        _ => return false,
     }
-    m
+    true
 }
 
 fn health_issue_meta(bare_id: &str) -> IssueTypeMeta {

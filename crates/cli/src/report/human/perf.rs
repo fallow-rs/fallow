@@ -37,90 +37,100 @@ pub(in crate::report) fn print_performance_human(t: &PipelineTimings) {
 pub(in crate::report) fn build_performance_human_lines(t: &PipelineTimings) -> Vec<String> {
     let mut lines = Vec::new();
 
-    lines.push(String::new());
-    lines.push(
-        "┌─ Pipeline Performance ─────────────────────────────"
-            .dimmed()
-            .to_string(),
-    );
-    lines.push(
-        format!(
-            "│  discover files:   {:>8.1}ms  ({} files)",
-            t.discover_files_ms, t.file_count
-        )
-        .dimmed()
-        .to_string(),
-    );
-    lines.push(
-        format!(
-            "│  workspaces:       {:>8.1}ms  ({} workspaces)",
-            t.workspaces_ms, t.workspace_count
-        )
-        .dimmed()
-        .to_string(),
-    );
-    lines.push(
-        format!("│  plugins:          {:>8.1}ms", t.plugins_ms)
-            .dimmed()
-            .to_string(),
-    );
-    lines.push(
-        format!("│  script analysis:  {:>8.1}ms", t.script_analysis_ms)
-            .dimmed()
-            .to_string(),
-    );
+    push_performance_header(&mut lines);
+    push_discovery_stage_lines(&mut lines, t);
     let cache_detail = if t.cache_hits > 0 {
         format!(", {} cached, {} parsed", t.cache_hits, t.cache_misses)
     } else {
         String::new()
     };
-    lines.push(
-        format!(
+    push_dimmed(
+        &mut lines,
+        &format!(
             "│  parse/extract:    {:>8.1}ms  ({} modules{}){}",
             t.parse_extract_ms,
             t.module_count,
             cache_detail,
             parallel_annotation(t.parse_extract_ms, t.parse_cpu_ms)
-        )
-        .dimmed()
-        .to_string(),
+        ),
     );
-    lines.push(
-        format!("│  cache update:     {:>8.1}ms", t.cache_update_ms)
-            .dimmed()
-            .to_string(),
-    );
-    lines.push(
-        format!(
-            "│  entry points:     {:>8.1}ms  ({} entries)",
-            t.entry_points_ms, t.entry_point_count
-        )
-        .dimmed()
-        .to_string(),
-    );
-    lines.push(
-        format!("│  resolve imports:  {:>8.1}ms", t.resolve_imports_ms)
-            .dimmed()
-            .to_string(),
-    );
-    lines.push(
-        format!("│  build graph:      {:>8.1}ms", t.build_graph_ms)
-            .dimmed()
-            .to_string(),
-    );
-    lines.push(
-        format!("│  analyze:          {:>8.1}ms", t.analyze_ms)
-            .dimmed()
-            .to_string(),
-    );
+    push_analysis_stage_lines(&mut lines, t);
     if let Some(duplication_ms) = t.duplication_ms {
-        lines.push(
-            format!("│  duplication:      {duplication_ms:>8.1}ms  (concurrent)")
-                .dimmed()
-                .to_string(),
+        push_dimmed(
+            &mut lines,
+            &format!("│  duplication:      {duplication_ms:>8.1}ms  (concurrent)"),
         );
     }
-    let stages_sum = t.discover_files_ms
+    push_performance_total_lines(&mut lines, t);
+
+    lines
+}
+
+fn push_dimmed(lines: &mut Vec<String>, line: &str) {
+    lines.push(line.dimmed().to_string());
+}
+
+fn push_performance_header(lines: &mut Vec<String>) {
+    lines.push(String::new());
+    push_dimmed(
+        lines,
+        "┌─ Pipeline Performance ─────────────────────────────",
+    );
+}
+
+fn push_discovery_stage_lines(lines: &mut Vec<String>, t: &PipelineTimings) {
+    push_dimmed(
+        lines,
+        &format!(
+            "│  discover files:   {:>8.1}ms  ({} files)",
+            t.discover_files_ms, t.file_count
+        ),
+    );
+    push_dimmed(
+        lines,
+        &format!(
+            "│  workspaces:       {:>8.1}ms  ({} workspaces)",
+            t.workspaces_ms, t.workspace_count
+        ),
+    );
+    push_dimmed(
+        lines,
+        &format!("│  plugins:          {:>8.1}ms", t.plugins_ms),
+    );
+    push_dimmed(
+        lines,
+        &format!("│  script analysis:  {:>8.1}ms", t.script_analysis_ms),
+    );
+}
+
+fn push_analysis_stage_lines(lines: &mut Vec<String>, t: &PipelineTimings) {
+    push_dimmed(
+        lines,
+        &format!("│  cache update:     {:>8.1}ms", t.cache_update_ms),
+    );
+    push_dimmed(
+        lines,
+        &format!(
+            "│  entry points:     {:>8.1}ms  ({} entries)",
+            t.entry_points_ms, t.entry_point_count
+        ),
+    );
+    push_dimmed(
+        lines,
+        &format!("│  resolve imports:  {:>8.1}ms", t.resolve_imports_ms),
+    );
+    push_dimmed(
+        lines,
+        &format!("│  build graph:      {:>8.1}ms", t.build_graph_ms),
+    );
+    push_dimmed(
+        lines,
+        &format!("│  analyze:          {:>8.1}ms", t.analyze_ms),
+    );
+}
+
+fn displayed_stage_sum(t: &PipelineTimings) -> f64 {
+    t.discover_files_ms
         + t.workspaces_ms
         + t.plugins_ms
         + t.script_analysis_ms
@@ -129,34 +139,29 @@ pub(in crate::report) fn build_performance_human_lines(t: &PipelineTimings) -> V
         + t.entry_points_ms
         + t.resolve_imports_ms
         + t.build_graph_ms
-        + t.analyze_ms;
-    lines.push(
-        format!(
+        + t.analyze_ms
+}
+
+fn push_performance_total_lines(lines: &mut Vec<String>, t: &PipelineTimings) {
+    push_dimmed(
+        lines,
+        &format!(
             "│  (other):          {:>8.1}ms",
-            other_ms(t.total_ms, stages_sum)
-        )
-        .dimmed()
-        .to_string(),
+            other_ms(t.total_ms, displayed_stage_sum(t))
+        ),
     );
-    lines.push(
-        "│  ────────────────────────────────────────────────"
-            .dimmed()
-            .to_string(),
-    );
+    push_dimmed(lines, "│  ────────────────────────────────────────────────");
     lines.push(
         format!("│  TOTAL:            {:>8.1}ms", t.total_ms)
             .bold()
             .dimmed()
             .to_string(),
     );
-    lines.push(
-        "└───────────────────────────────────────────────────"
-            .dimmed()
-            .to_string(),
+    push_dimmed(
+        lines,
+        "└───────────────────────────────────────────────────",
     );
     lines.push(String::new());
-
-    lines
 }
 
 pub(in crate::report) fn print_health_performance_human(t: &crate::health_types::HealthTimings) {
@@ -168,23 +173,35 @@ pub(in crate::report) fn print_health_performance_human(t: &crate::health_types:
 fn build_health_performance_lines(t: &crate::health_types::HealthTimings) -> Vec<String> {
     let mut lines = Vec::new();
 
+    push_health_performance_header(&mut lines);
+    push_health_performance_stage_lines(&mut lines, t);
+    push_health_performance_total_lines(&mut lines, t);
+
+    lines
+}
+
+fn push_health_performance_header(lines: &mut Vec<String>) {
     lines.push(String::new());
-    lines.push(
-        "┌─ Health Pipeline Performance ─────────────────────"
-            .dimmed()
-            .to_string(),
+    push_dimmed(
+        lines,
+        "┌─ Health Pipeline Performance ─────────────────────",
     );
-    lines.push(
-        format!("│  config:           {:>8.1}ms", t.config_ms)
-            .dimmed()
-            .to_string(),
+}
+
+fn push_health_performance_stage_lines(
+    lines: &mut Vec<String>,
+    t: &crate::health_types::HealthTimings,
+) {
+    push_dimmed(
+        lines,
+        &format!("│  config:           {:>8.1}ms", t.config_ms),
     );
     let discover_line = if t.shared_parse {
         "│  discover files:   (measured above)".to_string()
     } else {
         format!("│  discover files:   {:>8.1}ms", t.discover_ms)
     };
-    lines.push(discover_line.dimmed().to_string());
+    push_dimmed(lines, &discover_line);
     let parse_line = if t.shared_parse {
         "│  parse/extract:    (measured above)".to_string()
     } else {
@@ -194,46 +211,43 @@ fn build_health_performance_lines(t: &crate::health_types::HealthTimings) -> Vec
             parallel_annotation(t.parse_ms, t.parse_cpu_ms)
         )
     };
-    lines.push(parse_line.dimmed().to_string());
-    lines.push(
-        format!("│  complexity:       {:>8.1}ms", t.complexity_ms)
-            .dimmed()
-            .to_string(),
+    push_dimmed(lines, &parse_line);
+    push_dimmed(
+        lines,
+        &format!("│  complexity:       {:>8.1}ms", t.complexity_ms),
     );
-    lines.push(
-        format!("│  file scores:      {:>8.1}ms", t.file_scores_ms)
-            .dimmed()
-            .to_string(),
+    push_dimmed(
+        lines,
+        &format!("│  file scores:      {:>8.1}ms", t.file_scores_ms),
     );
     let cache_note = if t.git_churn_cache_hit {
         " (cached)"
     } else {
         " (cold)"
     };
-    lines.push(
-        format!(
+    push_dimmed(
+        lines,
+        &format!(
             "│  git churn:        {:>8.1}ms{}",
             t.git_churn_ms, cache_note
-        )
-        .dimmed()
-        .to_string(),
+        ),
     );
-    lines.push(
-        format!("│  hotspots:         {:>8.1}ms", t.hotspots_ms)
-            .dimmed()
-            .to_string(),
+    push_dimmed(
+        lines,
+        &format!("│  hotspots:         {:>8.1}ms", t.hotspots_ms),
     );
-    lines.push(
-        format!("│  duplication:      {:>8.1}ms", t.duplication_ms)
-            .dimmed()
-            .to_string(),
+    push_dimmed(
+        lines,
+        &format!("│  duplication:      {:>8.1}ms", t.duplication_ms),
     );
-    lines.push(
-        format!("│  targets:          {:>8.1}ms", t.targets_ms)
-            .dimmed()
-            .to_string(),
+    push_dimmed(
+        lines,
+        &format!("│  targets:          {:>8.1}ms", t.targets_ms),
     );
-    let stages_sum = t.config_ms
+}
+
+fn health_performance_stage_sum(t: &crate::health_types::HealthTimings) -> f64 {
+    t.config_ms
         + t.discover_ms
         + t.parse_ms
         + t.complexity_ms
@@ -241,34 +255,32 @@ fn build_health_performance_lines(t: &crate::health_types::HealthTimings) -> Vec
         + t.git_churn_ms
         + t.hotspots_ms
         + t.duplication_ms
-        + t.targets_ms;
-    lines.push(
-        format!(
+        + t.targets_ms
+}
+
+fn push_health_performance_total_lines(
+    lines: &mut Vec<String>,
+    t: &crate::health_types::HealthTimings,
+) {
+    push_dimmed(
+        lines,
+        &format!(
             "│  (other):          {:>8.1}ms",
-            other_ms(t.total_ms, stages_sum)
-        )
-        .dimmed()
-        .to_string(),
+            other_ms(t.total_ms, health_performance_stage_sum(t))
+        ),
     );
-    lines.push(
-        "│  ────────────────────────────────────────────────"
-            .dimmed()
-            .to_string(),
-    );
+    push_dimmed(lines, "│  ────────────────────────────────────────────────");
     lines.push(
         format!("│  TOTAL:            {:>8.1}ms", t.total_ms)
             .bold()
             .dimmed()
             .to_string(),
     );
-    lines.push(
-        "└───────────────────────────────────────────────────"
-            .dimmed()
-            .to_string(),
+    push_dimmed(
+        lines,
+        "└───────────────────────────────────────────────────",
     );
     lines.push(String::new());
-
-    lines
 }
 
 #[cfg(test)]

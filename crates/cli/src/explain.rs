@@ -1,7 +1,7 @@
 //! Metric and rule definitions for explainable CLI output.
 //!
 //! Provides structured metadata that describes what each metric, threshold,
-//! and rule means — consumed by the `_meta` object in JSON output and by
+//! and rule means, consumed by the `_meta` object in JSON output and by
 //! SARIF `fullDescription` / `helpUri` fields.
 
 use std::collections::BTreeMap;
@@ -317,72 +317,10 @@ pub fn rule_by_token(token: &str) -> Option<&'static RuleDef> {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join("-");
-    let alias = match normalized.as_str() {
-        "unused-files" => Some("fallow/unused-file"),
-        "unused-exports" => Some("fallow/unused-export"),
-        "unused-types" => Some("fallow/unused-type"),
-        "private-type-leaks" => Some("fallow/private-type-leak"),
-        "unused-deps" | "unused-dependencies" => Some("fallow/unused-dependency"),
-        "unused-dev-deps" | "unused-dev-dependencies" => Some("fallow/unused-dev-dependency"),
-        "unused-optional-deps" | "unused-optional-dependencies" => {
-            Some("fallow/unused-optional-dependency")
-        }
-        "type-only-deps" | "type-only-dependencies" => Some("fallow/type-only-dependency"),
-        "test-only-deps" | "test-only-dependencies" => Some("fallow/test-only-dependency"),
-        "unused-enum-members" => Some("fallow/unused-enum-member"),
-        "unused-class-members" => Some("fallow/unused-class-member"),
-        "unresolved-imports" => Some("fallow/unresolved-import"),
-        "unlisted-deps" | "unlisted-dependencies" => Some("fallow/unlisted-dependency"),
-        "duplicate-exports" => Some("fallow/duplicate-export"),
-        "circular-deps" | "circular-dependencies" => Some("fallow/circular-dependency"),
-        "boundary-violations" => Some("fallow/boundary-violation"),
-        "boundary-coverage" | "boundary-coverage-violations" => Some("fallow/boundary-coverage"),
-        "boundary-calls" | "boundary-call-violations" => Some("fallow/boundary-call-violation"),
-        "policy-violation" | "policy-violations" => Some("fallow/policy-violation"),
-        "stale-suppressions" => Some("fallow/stale-suppression"),
-        "unused-catalog-entries" | "unused-catalog-entry" | "catalog" => {
-            Some("fallow/unused-catalog-entry")
-        }
-        "empty-catalog-groups" | "empty-catalog-group" | "empty-catalog" => {
-            Some("fallow/empty-catalog-group")
-        }
-        "unresolved-catalog-references" | "unresolved-catalog-reference" | "unresolved-catalog" => {
-            Some("fallow/unresolved-catalog-reference")
-        }
-        "unused-dependency-overrides"
-        | "unused-dependency-override"
-        | "unused-override"
-        | "unused-overrides" => Some("fallow/unused-dependency-override"),
-        "misconfigured-dependency-overrides"
-        | "misconfigured-dependency-override"
-        | "misconfigured-override"
-        | "misconfigured-overrides" => Some("fallow/misconfigured-dependency-override"),
-        "complexity" | "high-complexity" => Some("fallow/high-complexity"),
-        "cyclomatic" | "high-cyclomatic" | "high-cyclomatic-complexity" => {
-            Some("fallow/high-cyclomatic-complexity")
-        }
-        "cognitive" | "high-cognitive" | "high-cognitive-complexity" => {
-            Some("fallow/high-cognitive-complexity")
-        }
-        "crap" | "high-crap" | "high-crap-score" => Some("fallow/high-crap-score"),
-        "duplication" | "dupes" | "code-duplication" => Some("fallow/code-duplication"),
-        "feature-flag" | "feature-flags" | "flags" => Some("fallow/feature-flag"),
-        "security"
-        | "security-candidate"
-        | "security-candidates"
-        | "tainted-sink"
-        | "tainted-sinks"
-        | "security-sink"
-        | "security-sinks" => Some("security/tainted-sink"),
-        "client-server-leak"
-        | "client-server-leaks"
-        | "security-client-server-leak"
-        | "security-client-server-leaks" => Some("security/client-server-leak"),
-        "hardcoded-secret" | "hardcoded-secrets" | "hard-coded-secret" | "hard-coded-secrets" => {
-            Some("security/hardcoded-secret")
-        }
-        _ => None,
-    };
+    let alias = dead_code_alias_id(&normalized)
+        .or_else(|| catalog_alias_id(&normalized))
+        .or_else(|| health_alias_id(&normalized))
+        .or_else(|| security_alias_id(&normalized));
     if let Some(id) = alias
         && let Some(rule) = rule_by_id(id)
     {
@@ -416,6 +354,93 @@ pub fn rule_by_token(token: &str) -> Option<&'static RuleDef> {
                     || rule.name.eq_ignore_ascii_case(trimmed)
             })
     })
+}
+
+fn dead_code_alias_id(normalized: &str) -> Option<&'static str> {
+    match normalized {
+        "unused-files" => Some("fallow/unused-file"),
+        "unused-exports" => Some("fallow/unused-export"),
+        "unused-types" => Some("fallow/unused-type"),
+        "private-type-leaks" => Some("fallow/private-type-leak"),
+        "unused-deps" | "unused-dependencies" => Some("fallow/unused-dependency"),
+        "unused-dev-deps" | "unused-dev-dependencies" => Some("fallow/unused-dev-dependency"),
+        "unused-optional-deps" | "unused-optional-dependencies" => {
+            Some("fallow/unused-optional-dependency")
+        }
+        "type-only-deps" | "type-only-dependencies" => Some("fallow/type-only-dependency"),
+        "test-only-deps" | "test-only-dependencies" => Some("fallow/test-only-dependency"),
+        "unused-enum-members" => Some("fallow/unused-enum-member"),
+        "unused-class-members" => Some("fallow/unused-class-member"),
+        "unresolved-imports" => Some("fallow/unresolved-import"),
+        "unlisted-deps" | "unlisted-dependencies" => Some("fallow/unlisted-dependency"),
+        "duplicate-exports" => Some("fallow/duplicate-export"),
+        "circular-deps" | "circular-dependencies" => Some("fallow/circular-dependency"),
+        "boundary-violations" => Some("fallow/boundary-violation"),
+        "boundary-coverage" | "boundary-coverage-violations" => Some("fallow/boundary-coverage"),
+        "boundary-calls" | "boundary-call-violations" => Some("fallow/boundary-call-violation"),
+        "policy-violation" | "policy-violations" => Some("fallow/policy-violation"),
+        "stale-suppressions" => Some("fallow/stale-suppression"),
+        _ => None,
+    }
+}
+
+fn catalog_alias_id(normalized: &str) -> Option<&'static str> {
+    match normalized {
+        "unused-catalog-entries" | "unused-catalog-entry" | "catalog" => {
+            Some("fallow/unused-catalog-entry")
+        }
+        "empty-catalog-groups" | "empty-catalog-group" | "empty-catalog" => {
+            Some("fallow/empty-catalog-group")
+        }
+        "unresolved-catalog-references" | "unresolved-catalog-reference" | "unresolved-catalog" => {
+            Some("fallow/unresolved-catalog-reference")
+        }
+        "unused-dependency-overrides"
+        | "unused-dependency-override"
+        | "unused-override"
+        | "unused-overrides" => Some("fallow/unused-dependency-override"),
+        "misconfigured-dependency-overrides"
+        | "misconfigured-dependency-override"
+        | "misconfigured-override"
+        | "misconfigured-overrides" => Some("fallow/misconfigured-dependency-override"),
+        _ => None,
+    }
+}
+
+fn health_alias_id(normalized: &str) -> Option<&'static str> {
+    match normalized {
+        "complexity" | "high-complexity" => Some("fallow/high-complexity"),
+        "cyclomatic" | "high-cyclomatic" | "high-cyclomatic-complexity" => {
+            Some("fallow/high-cyclomatic-complexity")
+        }
+        "cognitive" | "high-cognitive" | "high-cognitive-complexity" => {
+            Some("fallow/high-cognitive-complexity")
+        }
+        "crap" | "high-crap" | "high-crap-score" => Some("fallow/high-crap-score"),
+        "duplication" | "dupes" | "code-duplication" => Some("fallow/code-duplication"),
+        "feature-flag" | "feature-flags" | "flags" => Some("fallow/feature-flag"),
+        _ => None,
+    }
+}
+
+fn security_alias_id(normalized: &str) -> Option<&'static str> {
+    match normalized {
+        "security"
+        | "security-candidate"
+        | "security-candidates"
+        | "tainted-sink"
+        | "tainted-sinks"
+        | "security-sink"
+        | "security-sinks" => Some("security/tainted-sink"),
+        "client-server-leak"
+        | "client-server-leaks"
+        | "security-client-server-leak"
+        | "security-client-server-leaks" => Some("security/client-server-leak"),
+        "hardcoded-secret" | "hardcoded-secrets" | "hard-coded-secret" | "hard-coded-secrets" => {
+            Some("security/hardcoded-secret")
+        }
+        _ => None,
+    }
 }
 
 /// Return worked-example and fix guidance for a rule.

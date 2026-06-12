@@ -394,15 +394,8 @@ pub struct SecurityOptions<'a> {
 /// advisory). Unsupported output formats exit 2.
 pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
     let started = Instant::now();
-    if !matches!(
-        opts.output,
-        OutputFormat::Human | OutputFormat::Json | OutputFormat::Sarif
-    ) {
-        return emit_error(
-            "fallow security supports --format human, json, or sarif only.",
-            2,
-            opts.output,
-        );
+    if let Err(code) = validate_security_output(opts.output) {
+        return code;
     }
 
     let mut config = match load_config_for_analysis(
@@ -419,35 +412,18 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
         Err(code) => return code,
     };
 
-    let configured_severity = config.rules.security_client_server_leak;
-    let configured_sink_severity = config.rules.security_sink;
+    let configured_severities = security_rule_severities(&config);
     force_security_rules(&mut config);
-    let effective_severity = config.rules.security_client_server_leak;
-    let effective_sink_severity = config.rules.security_sink;
+    let effective_severities = security_rule_severities(&config);
 
     let mut analysis = match analyze_security_candidates(opts, &config) {
         Ok(analysis) => analysis,
         Err(code) => return code,
     };
 
-    // Workspace scope (mutually exclusive flags resolved by the shared helper).
-    let ws_roots = match crate::check::filtering::resolve_workspace_scope(
-        opts.root,
-        opts.workspace,
-        opts.changed_workspaces,
-        opts.output,
-    ) {
-        Ok(roots) => roots,
-        Err(code) => return code,
-    };
-    if let Some(ref roots) = ws_roots {
-        crate::check::filtering::filter_to_workspaces(&mut analysis.results, roots);
+    if let Err(code) = apply_security_scopes(opts, &mut analysis) {
+        return code;
     }
-
-    if !matches!(opts.gate, Some(SecurityGateMode::NewlyReachable)) {
-        apply_changed_scope(opts, &mut analysis.results);
-    }
-    filter_to_files(&mut analysis.results, opts.root, opts.file, opts.quiet);
 
     let gate_mode = match apply_security_gate(opts, &config, &mut analysis.results) {
         Ok(mode) => mode,
@@ -464,100 +440,203 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
         Ok(report) => report,
         Err(code) => return code,
     };
-    let mut findings: Vec<SecurityFinding> =
-        std::mem::take(&mut analysis.results.security_findings)
-            .into_iter()
-            .map(|f| relativize_finding(f, &config.root))
-            .collect();
-    if let (Some(report), Some(modules), Some(files)) = (
+    let PreparedSecurityFindings {
+        findings,
+        attack_surface,
+    } = prepare_security_findings(
+        &mut analysis,
         runtime_report.as_ref(),
-        analysis.modules.as_ref(),
-        analysis.files.as_ref(),
-    ) {
-        apply_runtime_context(&mut findings, modules, files, &config.root, report);
-    }
-    apply_security_severity(&mut findings);
-    sort_by_security_severity(&mut findings);
-    for finding in &mut findings {
-        // Stamp the correlation id on the project-relative path so it matches
-        // the SARIF fingerprint.
-        finding.finding_id = security_finding_id(finding);
-    }
-    let (findings, attack_surface) = prepare_findings(findings, &config.root, opts.surface);
+        &config.root,
+        opts.surface,
+    );
 
-    // In gate mode the displayed set IS the strict "new" set, so its length is
-    // the new-candidate count. The gate block is emitted unconditionally when a
-    // gate ran (present on pass with verdict Pass / new_count 0) so consumers
-    // distinguish "gate ran and passed" from "gate did not run".
-    let gate = gate_mode.map(|mode| {
-        let new_count = findings.len();
-        SecurityGate {
-            mode,
-            verdict: if new_count > 0 {
-                SecurityGateVerdict::Fail
-            } else {
-                SecurityGateVerdict::Pass
-            },
-            new_count,
-        }
-    });
-
-    let advisory_fail = (opts.fail_on_issues
-        || effective_severity == Severity::Error
-        || effective_sink_severity == Severity::Error)
-        && !findings.is_empty();
-
-    let output = SecurityOutput {
-        schema_version: SecuritySchemaVersion::V6,
-        version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
-        elapsed_ms: ElapsedMs(started.elapsed().as_millis() as u64),
-        config: security_output_config(
-            &config,
-            configured_severity,
-            effective_severity,
-            configured_sink_severity,
-            effective_sink_severity,
-        ),
-        meta: opts.explain.then(crate::explain::security_meta),
-        gate,
-        security_findings: findings,
+    let output = build_security_output(SecurityOutputInput {
+        opts,
+        started,
+        config: &config,
+        configured_severities,
+        effective_severities,
+        gate_mode,
+        findings,
         attack_surface,
         unresolved_edge_files,
         unresolved_callee_sites,
         unresolved_callee_diagnostics,
-    };
+    });
     crate::telemetry::note_result_count(output.security_findings.len());
 
-    if let Some(path) = opts.sarif_file
-        && let Err(message) = write_sarif_file(&output, path)
-    {
-        return emit_error(&message, 2, opts.output);
+    if let Err(code) = maybe_write_security_sarif(opts, &output) {
+        return code;
     }
 
-    let rendered = match opts.output {
-        OutputFormat::Json if opts.summary => render_json_summary(&output),
-        OutputFormat::Json => render_json(&output),
-        OutputFormat::Sarif => render_sarif(&output),
-        _ if opts.summary => render_human_summary(&output),
-        _ => render_human(&output),
-    };
-    outln!("{rendered}");
+    outln!("{}", render_security_output(opts, &output));
+    security_exit_code(opts, &output, effective_severities)
+}
 
-    // Exit-code contract (#886): in gate mode the gate is authoritative (8 when a
-    // new candidate exists, else 0) and SUPERSEDES the advisory --fail-on-issues
-    // path, because composing the two would re-gate on the pre-existing backlog
-    // this gate exists to avoid. Code 8 is PURE: it means ONLY "new candidate
-    // found", never "the gate could not run" (those are the exit-2 paths above).
+#[derive(Clone, Copy)]
+struct SecurityRuleSeverities {
+    leak: Severity,
+    sink: Severity,
+}
+
+struct SecurityOutputInput<'a, 'b> {
+    opts: &'a SecurityOptions<'b>,
+    started: Instant,
+    config: &'a fallow_config::ResolvedConfig,
+    configured_severities: SecurityRuleSeverities,
+    effective_severities: SecurityRuleSeverities,
+    gate_mode: Option<SecurityGateMode>,
+    findings: Vec<SecurityFinding>,
+    attack_surface: Option<Vec<SecurityAttackSurfaceEntry>>,
+    unresolved_edge_files: usize,
+    unresolved_callee_sites: usize,
+    unresolved_callee_diagnostics: Option<SecurityUnresolvedCalleeDiagnostics>,
+}
+
+fn validate_security_output(output: OutputFormat) -> Result<(), ExitCode> {
+    if matches!(
+        output,
+        OutputFormat::Human | OutputFormat::Json | OutputFormat::Sarif
+    ) {
+        Ok(())
+    } else {
+        Err(emit_error(
+            "fallow security supports --format human, json, or sarif only.",
+            2,
+            output,
+        ))
+    }
+}
+
+fn security_rule_severities(config: &fallow_config::ResolvedConfig) -> SecurityRuleSeverities {
+    SecurityRuleSeverities {
+        leak: config.rules.security_client_server_leak,
+        sink: config.rules.security_sink,
+    }
+}
+
+fn build_security_output(input: SecurityOutputInput<'_, '_>) -> SecurityOutput {
+    SecurityOutput {
+        schema_version: SecuritySchemaVersion::V6,
+        version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
+        elapsed_ms: ElapsedMs(input.started.elapsed().as_millis() as u64),
+        config: security_output_config(
+            input.config,
+            input.configured_severities.leak,
+            input.effective_severities.leak,
+            input.configured_severities.sink,
+            input.effective_severities.sink,
+        ),
+        meta: input.opts.explain.then(crate::explain::security_meta),
+        gate: input
+            .gate_mode
+            .map(|mode| security_gate_output(mode, input.findings.len())),
+        security_findings: input.findings,
+        attack_surface: input.attack_surface,
+        unresolved_edge_files: input.unresolved_edge_files,
+        unresolved_callee_sites: input.unresolved_callee_sites,
+        unresolved_callee_diagnostics: input.unresolved_callee_diagnostics,
+    }
+}
+
+fn security_gate_output(mode: SecurityGateMode, finding_count: usize) -> SecurityGate {
+    // In gate mode the displayed set is the strict "new" set, so its length is
+    // the new-candidate count. The gate block is emitted unconditionally when a
+    // gate ran so consumers can distinguish pass from "gate did not run".
+    SecurityGate {
+        mode,
+        verdict: if finding_count > 0 {
+            SecurityGateVerdict::Fail
+        } else {
+            SecurityGateVerdict::Pass
+        },
+        new_count: finding_count,
+    }
+}
+
+fn maybe_write_security_sarif(
+    opts: &SecurityOptions<'_>,
+    output: &SecurityOutput,
+) -> Result<(), ExitCode> {
+    if let Some(path) = opts.sarif_file
+        && let Err(message) = write_sarif_file(output, path)
+    {
+        return Err(emit_error(&message, 2, opts.output));
+    }
+    Ok(())
+}
+
+fn render_security_output(opts: &SecurityOptions<'_>, output: &SecurityOutput) -> String {
+    match opts.output {
+        OutputFormat::Json if opts.summary => render_json_summary(output),
+        OutputFormat::Json => render_json(output),
+        OutputFormat::Sarif => render_sarif(output),
+        _ if opts.summary => render_human_summary(output),
+        _ => render_human(output),
+    }
+}
+
+fn security_exit_code(
+    opts: &SecurityOptions<'_>,
+    output: &SecurityOutput,
+    effective_severities: SecurityRuleSeverities,
+) -> ExitCode {
     if let Some(gate) = &output.gate {
         if gate.verdict == SecurityGateVerdict::Fail {
             ExitCode::from(8)
         } else {
             ExitCode::SUCCESS
         }
-    } else if advisory_fail {
+    } else if security_advisory_failed(opts, output, effective_severities) {
         ExitCode::from(1)
     } else {
         ExitCode::SUCCESS
+    }
+}
+
+fn security_advisory_failed(
+    opts: &SecurityOptions<'_>,
+    output: &SecurityOutput,
+    effective_severities: SecurityRuleSeverities,
+) -> bool {
+    (opts.fail_on_issues
+        || effective_severities.leak == Severity::Error
+        || effective_severities.sink == Severity::Error)
+        && !output.security_findings.is_empty()
+}
+
+struct PreparedSecurityFindings {
+    findings: Vec<SecurityFinding>,
+    attack_surface: Option<Vec<SecurityAttackSurfaceEntry>>,
+}
+
+fn prepare_security_findings(
+    analysis: &mut SecurityAnalysisState,
+    runtime_report: Option<&RuntimeCoverageReport>,
+    root: &Path,
+    include_surface: bool,
+) -> PreparedSecurityFindings {
+    let mut findings: Vec<SecurityFinding> =
+        std::mem::take(&mut analysis.results.security_findings)
+            .into_iter()
+            .map(|f| relativize_finding(f, root))
+            .collect();
+    if let (Some(report), Some(modules), Some(files)) = (
+        runtime_report,
+        analysis.modules.as_ref(),
+        analysis.files.as_ref(),
+    ) {
+        apply_runtime_context(&mut findings, modules, files, root, report);
+    }
+    apply_security_severity(&mut findings);
+    sort_by_security_severity(&mut findings);
+    for finding in &mut findings {
+        finding.finding_id = security_finding_id(finding);
+    }
+    let (findings, attack_surface) = prepare_findings(findings, root, include_surface);
+    PreparedSecurityFindings {
+        findings,
+        attack_surface,
     }
 }
 
@@ -607,6 +686,28 @@ fn apply_changed_scope(opts: &SecurityOptions<'_>, results: &mut AnalysisResults
     {
         crate::check::filtering::filter_results_by_diff(results, diff_index, opts.root);
     }
+}
+
+fn apply_security_scopes(
+    opts: &SecurityOptions<'_>,
+    analysis: &mut SecurityAnalysisState,
+) -> Result<(), ExitCode> {
+    let ws_roots = crate::check::filtering::resolve_workspace_scope(
+        opts.root,
+        opts.workspace,
+        opts.changed_workspaces,
+        opts.output,
+    )?;
+    if let Some(ref roots) = ws_roots {
+        crate::check::filtering::filter_to_workspaces(&mut analysis.results, roots);
+    }
+
+    if !matches!(opts.gate, Some(SecurityGateMode::NewlyReachable)) {
+        apply_changed_scope(opts, &mut analysis.results);
+    }
+    filter_to_files(&mut analysis.results, opts.root, opts.file, opts.quiet);
+
+    Ok(())
 }
 
 fn apply_security_gate(

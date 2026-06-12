@@ -16,8 +16,9 @@ use super::{
     compute_vital_signs_and_counts,
 };
 use crate::health_types::{
-    ComplexityViolation, FileHealthScore, HealthGroup, HealthGrouping, HotspotEntry,
-    LargeFunctionEntry, RefactoringTarget, summarize_coverage_source_consistency,
+    ComplexityViolation, FileHealthScore, HealthActionsMeta, HealthFinding, HealthGroup,
+    HealthGrouping, HotspotEntry, HotspotFinding, LargeFunctionEntry, RefactoringTarget,
+    RefactoringTargetFinding, VitalSigns, VitalSignsCounts, summarize_coverage_source_consistency,
 };
 use crate::report::OwnershipResolver;
 use crate::vital_signs;
@@ -119,54 +120,20 @@ fn build_group(
     let GroupBucket { key, owners, paths } = bucket;
     let subset = SubsetFilter::Paths(&paths);
 
-    let group_findings: Vec<ComplexityViolation> = input
-        .findings
-        .iter()
-        .filter(|f| paths.contains(&f.path))
-        .cloned()
-        .collect();
-    let group_file_scores: Vec<FileHealthScore> = input
-        .file_scores
-        .iter()
-        .filter(|s| paths.contains(&s.path))
-        .cloned()
-        .collect();
-    let group_hotspots: Vec<HotspotEntry> = input
-        .hotspots
-        .iter()
-        .filter(|h| paths.contains(&h.path))
-        .cloned()
-        .collect();
-    let group_large_functions: Vec<LargeFunctionEntry> = input
-        .large_functions
-        .iter()
-        .filter(|l| paths.contains(&l.path))
-        .cloned()
-        .collect();
+    let group_findings = filter_group_items(input.findings, &paths, |finding| &finding.path);
+    let group_file_scores = filter_group_items(input.file_scores, &paths, |score| &score.path);
+    let group_hotspots = filter_group_items(input.hotspots, &paths, |hotspot| &hotspot.path);
+    let group_large_functions =
+        filter_group_items(input.large_functions, &paths, |function| &function.path);
     let total_files = paths.len();
-    let vital_signs_input = VitalSignsAndCountsInput {
-        score_output: input.score_output,
-        modules: input.modules,
-        file_paths: input.file_paths,
-        needs_file_scores: input.needs_file_scores,
-        file_scores_slice: &group_file_scores,
-        needs_hotspots: input.needs_hotspots,
-        hotspots: &group_hotspots,
-        total_files,
-        subset: &subset,
-    };
-    let (mut vital_signs, mut counts) = compute_vital_signs_and_counts(&vital_signs_input);
-    if let Some(config) = input.duplicates_config {
-        let group_files: Vec<fallow_types::discover::DiscoveredFile> = input
-            .files
-            .iter()
-            .filter(|file| paths.contains(&file.path))
-            .cloned()
-            .collect();
-        let dupes_report =
-            fallow_core::duplicates::find_duplicates(project_root, &group_files, config);
-        apply_duplication_metrics(&mut vital_signs, &mut counts, &dupes_report);
-    }
+    let (vital_signs, _) = compute_group_vital_signs(
+        project_root,
+        input,
+        &paths,
+        &subset,
+        &group_file_scores,
+        &group_hotspots,
+    );
     let health_score = input
         .score_requested
         .then(|| vital_signs::compute_health_score(&vital_signs, total_files));
@@ -177,21 +144,6 @@ fn build_group(
             .iter()
             .filter_map(|finding| finding.coverage_source),
     );
-    let wrapped_findings: Vec<crate::health_types::HealthFinding> = group_findings
-        .into_iter()
-        .map(|v| crate::health_types::HealthFinding::with_actions(v, input.action_ctx))
-        .collect();
-    let wrapped_hotspots: Vec<crate::health_types::HotspotFinding> = group_hotspots
-        .into_iter()
-        .map(|h| crate::health_types::HotspotFinding::with_actions(h, project_root))
-        .collect();
-    let wrapped_targets: Vec<crate::health_types::RefactoringTargetFinding> = input
-        .targets
-        .iter()
-        .filter(|t| paths.contains(&t.path))
-        .cloned()
-        .map(crate::health_types::RefactoringTargetFinding::with_actions)
-        .collect();
 
     HealthGroup {
         key,
@@ -201,24 +153,106 @@ fn build_group(
         coverage_source_consistency,
         vital_signs: input.show_vital_signs.then_some(vital_signs),
         health_score,
-        findings: wrapped_findings,
+        findings: wrap_group_findings(group_findings, input),
         file_scores: group_file_scores,
-        hotspots: wrapped_hotspots,
+        hotspots: wrap_group_hotspots(group_hotspots, project_root),
         large_functions: group_large_functions,
-        targets: wrapped_targets,
-        actions_meta: if input.action_ctx.opts.omit_suppress_line {
-            Some(crate::health_types::HealthActionsMeta {
-                suppression_hints_omitted: true,
-                reason: input
-                    .action_ctx
-                    .opts
-                    .omit_reason
-                    .unwrap_or("unspecified")
-                    .to_string(),
-                scope: "health-findings".to_string(),
-            })
-        } else {
-            None
-        },
+        targets: wrap_group_targets(input.targets, &paths),
+        actions_meta: group_actions_meta(input),
     }
+}
+
+fn filter_group_items<T: Clone>(
+    items: &[T],
+    paths: &FxHashSet<PathBuf>,
+    path: impl Fn(&T) -> &PathBuf,
+) -> Vec<T> {
+    items
+        .iter()
+        .filter(|item| paths.contains(path(item)))
+        .cloned()
+        .collect()
+}
+
+fn compute_group_vital_signs(
+    project_root: &Path,
+    input: &HealthGroupingInput<'_>,
+    paths: &FxHashSet<PathBuf>,
+    subset: &SubsetFilter<'_>,
+    group_file_scores: &[FileHealthScore],
+    group_hotspots: &[HotspotEntry],
+) -> (VitalSigns, VitalSignsCounts) {
+    let vital_signs_input = VitalSignsAndCountsInput {
+        score_output: input.score_output,
+        modules: input.modules,
+        file_paths: input.file_paths,
+        needs_file_scores: input.needs_file_scores,
+        file_scores_slice: group_file_scores,
+        needs_hotspots: input.needs_hotspots,
+        hotspots: group_hotspots,
+        total_files: paths.len(),
+        subset,
+    };
+    let (mut vital_signs, mut counts) = compute_vital_signs_and_counts(&vital_signs_input);
+    apply_group_duplication_metrics(project_root, input, paths, &mut vital_signs, &mut counts);
+    (vital_signs, counts)
+}
+
+fn apply_group_duplication_metrics(
+    project_root: &Path,
+    input: &HealthGroupingInput<'_>,
+    paths: &FxHashSet<PathBuf>,
+    vital_signs: &mut VitalSigns,
+    counts: &mut VitalSignsCounts,
+) {
+    let Some(config) = input.duplicates_config else {
+        return;
+    };
+    let group_files = filter_group_items(input.files, paths, |file| &file.path);
+    let dupes_report = fallow_core::duplicates::find_duplicates(project_root, &group_files, config);
+    apply_duplication_metrics(vital_signs, counts, &dupes_report);
+}
+
+fn wrap_group_findings(
+    findings: Vec<ComplexityViolation>,
+    input: &HealthGroupingInput<'_>,
+) -> Vec<HealthFinding> {
+    findings
+        .into_iter()
+        .map(|finding| HealthFinding::with_actions(finding, input.action_ctx))
+        .collect()
+}
+
+fn wrap_group_hotspots(hotspots: Vec<HotspotEntry>, project_root: &Path) -> Vec<HotspotFinding> {
+    hotspots
+        .into_iter()
+        .map(|hotspot| HotspotFinding::with_actions(hotspot, project_root))
+        .collect()
+}
+
+fn wrap_group_targets(
+    targets: &[RefactoringTarget],
+    paths: &FxHashSet<PathBuf>,
+) -> Vec<RefactoringTargetFinding> {
+    filter_group_items(targets, paths, |target| &target.path)
+        .into_iter()
+        .map(RefactoringTargetFinding::with_actions)
+        .collect()
+}
+
+fn group_actions_meta(input: &HealthGroupingInput<'_>) -> Option<HealthActionsMeta> {
+    input
+        .action_ctx
+        .opts
+        .omit_suppress_line
+        .then(|| HealthActionsMeta {
+            suppression_hints_omitted: true,
+            reason: input
+                .action_ctx
+                .opts
+                .omit_reason
+                .unwrap_or("unspecified")
+                .to_string(),
+            scope: "health-findings".to_string(),
+        })
 }

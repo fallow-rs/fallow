@@ -560,55 +560,29 @@ pub fn analyze_with_parse_result(
 
     let total_ms = pipeline_start.elapsed().as_secs_f64() * 1000.0;
 
-    tracing::debug!(
-        "\n┌─ Pipeline Profile (reuse) ─────────────────────\n\
-         │  discover files:   {:>8.1}ms  ({} files)\n\
-         │  workspaces:       {:>8.1}ms\n\
-         │  plugins:          {:>8.1}ms\n\
-         │  script analysis:  {:>8.1}ms\n\
-         │  parse/extract:    SKIPPED (reused {} modules)\n\
-         │  entry points:     {:>8.1}ms  ({} entries)\n\
-         │  resolve imports:  {:>8.1}ms\n\
-         │  build graph:      {:>8.1}ms\n\
-         │  analyze:          {:>8.1}ms\n\
-         │  ────────────────────────────────────────────\n\
-         │  TOTAL:            {:>8.1}ms\n\
-         └─────────────────────────────────────────────────",
+    let profile = PipelineProfile {
         discover_ms,
-        files.len(),
         workspaces_ms,
         plugins_ms,
         scripts_ms,
-        modules.len(),
+        parse_ms: 0.0,
+        cache_ms: 0.0,
         entry_points_ms,
-        entry_points.all.len(),
         resolve_ms,
         graph_ms,
         analyze_ms,
         total_ms,
-    );
-
-    let timings = Some(PipelineTimings {
-        discover_files_ms: discover_ms,
         file_count: files.len(),
-        workspaces_ms,
         workspace_count: workspaces.len(),
-        plugins_ms,
-        script_analysis_ms: scripts_ms,
-        parse_extract_ms: 0.0, // Skipped: modules were reused
-        parse_cpu_ms: 0.0,     // Skipped: modules were reused
         module_count: modules.len(),
+        entry_point_count: entry_points.all.len(),
         cache_hits: 0,
         cache_misses: 0,
-        cache_update_ms: 0.0,
-        entry_points_ms,
-        entry_point_count: entry_points.all.len(),
-        resolve_imports_ms: resolve_ms,
-        build_graph_ms: graph_ms,
-        analyze_ms,
-        duplication_ms: None,
-        total_ms,
-    });
+        parse_cpu_ms: 0.0,
+    };
+    trace_reused_pipeline_profile(&profile);
+
+    let timings = retained_pipeline_timings(true, &profile);
 
     let file_hashes = collect_file_hashes(modules, files);
 
@@ -623,10 +597,6 @@ pub fn analyze_with_parse_result(
     })
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "main pipeline function; sequential phases are held together for clarity"
-)]
 fn analyze_full(
     config: &ResolvedConfig,
     retain: bool,
@@ -679,31 +649,14 @@ fn analyze_full(
 
     let t = Instant::now();
     progress.set_stage(&format!("parsing {} files...", files.len()));
-    let cache_max_size_bytes = resolve_cache_max_size_bytes(config);
-    let mut cache_store = if config.no_cache {
-        None
-    } else {
-        cache::CacheStore::load(
-            &config.cache_dir,
-            config.cache_config_hash,
-            cache_max_size_bytes,
-        )
-    };
-
-    let parse_result = extract::parse_all_files(files, cache_store.as_ref(), need_complexity);
-    let mut modules = parse_result.modules;
-    let cache_hits = parse_result.cache_hits;
-    let cache_misses = parse_result.cache_misses;
-    let parse_cpu_ms = parse_result.parse_cpu_ms;
-    let parse_ms = t.elapsed().as_secs_f64() * 1000.0;
-
-    let cache_ms = update_parse_cache_if_enabled(
-        config,
-        &mut cache_store,
-        &modules,
-        files,
-        cache_max_size_bytes,
-    );
+    let AnalysisParseOutput {
+        mut modules,
+        parse_ms,
+        cache_ms,
+        cache_hits,
+        cache_misses,
+        parse_cpu_ms,
+    } = parse_analysis_modules(config, files, need_complexity, t);
 
     let t = Instant::now();
     let entry_points = discover_all_entry_points(
@@ -753,7 +706,7 @@ fn analyze_full(
 
     let total_ms = pipeline_start.elapsed().as_secs_f64() * 1000.0;
 
-    trace_pipeline_profile(&PipelineProfile {
+    let profile = PipelineProfile {
         discover_ms,
         workspaces_ms,
         plugins_ms,
@@ -766,37 +719,16 @@ fn analyze_full(
         analyze_ms,
         total_ms,
         file_count: files.len(),
+        workspace_count: workspaces.len(),
         module_count: modules.len(),
         entry_point_count: entry_points.all.len(),
         cache_hits,
         cache_misses,
-    });
-
-    let timings = if retain {
-        Some(PipelineTimings {
-            discover_files_ms: discover_ms,
-            file_count: files.len(),
-            workspaces_ms,
-            workspace_count: workspaces.len(),
-            plugins_ms,
-            script_analysis_ms: scripts_ms,
-            parse_extract_ms: parse_ms,
-            parse_cpu_ms,
-            module_count: modules.len(),
-            cache_hits,
-            cache_misses,
-            cache_update_ms: cache_ms,
-            entry_points_ms,
-            entry_point_count: entry_points.all.len(),
-            resolve_imports_ms: resolve_ms,
-            build_graph_ms: graph_ms,
-            analyze_ms,
-            duplication_ms: None,
-            total_ms,
-        })
-    } else {
-        None
+        parse_cpu_ms,
     };
+    trace_pipeline_profile(&profile);
+
+    let timings = retained_pipeline_timings(retain, &profile);
 
     let file_hashes = collect_file_hashes(&modules, files);
 
@@ -829,10 +761,113 @@ struct PipelineProfile {
     analyze_ms: f64,
     total_ms: f64,
     file_count: usize,
+    workspace_count: usize,
     module_count: usize,
     entry_point_count: usize,
     cache_hits: usize,
     cache_misses: usize,
+    parse_cpu_ms: f64,
+}
+
+struct AnalysisParseOutput {
+    modules: Vec<extract::ModuleInfo>,
+    parse_ms: f64,
+    cache_ms: f64,
+    cache_hits: usize,
+    cache_misses: usize,
+    parse_cpu_ms: f64,
+}
+
+fn parse_analysis_modules(
+    config: &ResolvedConfig,
+    files: &[discover::DiscoveredFile],
+    need_complexity: bool,
+    start: Instant,
+) -> AnalysisParseOutput {
+    let cache_max_size_bytes = resolve_cache_max_size_bytes(config);
+    let mut cache_store = if config.no_cache {
+        None
+    } else {
+        cache::CacheStore::load(
+            &config.cache_dir,
+            config.cache_config_hash,
+            cache_max_size_bytes,
+        )
+    };
+
+    let parse_result = extract::parse_all_files(files, cache_store.as_ref(), need_complexity);
+    let modules = parse_result.modules;
+    let parse_ms = start.elapsed().as_secs_f64() * 1000.0;
+    let cache_ms = update_parse_cache_if_enabled(
+        config,
+        &mut cache_store,
+        &modules,
+        files,
+        cache_max_size_bytes,
+    );
+
+    AnalysisParseOutput {
+        modules,
+        parse_ms,
+        cache_ms,
+        cache_hits: parse_result.cache_hits,
+        cache_misses: parse_result.cache_misses,
+        parse_cpu_ms: parse_result.parse_cpu_ms,
+    }
+}
+
+fn retained_pipeline_timings(retain: bool, profile: &PipelineProfile) -> Option<PipelineTimings> {
+    retain.then_some(PipelineTimings {
+        discover_files_ms: profile.discover_ms,
+        file_count: profile.file_count,
+        workspaces_ms: profile.workspaces_ms,
+        workspace_count: profile.workspace_count,
+        plugins_ms: profile.plugins_ms,
+        script_analysis_ms: profile.scripts_ms,
+        parse_extract_ms: profile.parse_ms,
+        parse_cpu_ms: profile.parse_cpu_ms,
+        module_count: profile.module_count,
+        cache_hits: profile.cache_hits,
+        cache_misses: profile.cache_misses,
+        cache_update_ms: profile.cache_ms,
+        entry_points_ms: profile.entry_points_ms,
+        entry_point_count: profile.entry_point_count,
+        resolve_imports_ms: profile.resolve_ms,
+        build_graph_ms: profile.graph_ms,
+        analyze_ms: profile.analyze_ms,
+        duplication_ms: None,
+        total_ms: profile.total_ms,
+    })
+}
+
+fn trace_reused_pipeline_profile(profile: &PipelineProfile) {
+    tracing::debug!(
+        "\n┌─ Pipeline Profile (reuse) ─────────────────────\n\
+         │  discover files:   {:>8.1}ms  ({} files)\n\
+         │  workspaces:       {:>8.1}ms\n\
+         │  plugins:          {:>8.1}ms\n\
+         │  script analysis:  {:>8.1}ms\n\
+         │  parse/extract:    SKIPPED (reused {} modules)\n\
+         │  entry points:     {:>8.1}ms  ({} entries)\n\
+         │  resolve imports:  {:>8.1}ms\n\
+         │  build graph:      {:>8.1}ms\n\
+         │  analyze:          {:>8.1}ms\n\
+         │  ────────────────────────────────────────────\n\
+         │  TOTAL:            {:>8.1}ms\n\
+         └─────────────────────────────────────────────────",
+        profile.discover_ms,
+        profile.file_count,
+        profile.workspaces_ms,
+        profile.plugins_ms,
+        profile.scripts_ms,
+        profile.module_count,
+        profile.entry_points_ms,
+        profile.entry_point_count,
+        profile.resolve_ms,
+        profile.graph_ms,
+        profile.analyze_ms,
+        profile.total_ms,
+    );
 }
 
 fn update_parse_cache_if_enabled(
@@ -936,6 +971,7 @@ fn trace_pipeline_profile(profile: &PipelineProfile) {
         entry_point_count,
         cache_hits,
         cache_misses,
+        ..
     } = *profile;
     let cache_summary = if cache_hits > 0 {
         format!(" ({cache_hits} cached, {cache_misses} parsed)")

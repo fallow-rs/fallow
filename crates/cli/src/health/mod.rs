@@ -382,34 +382,20 @@ fn execute_health_inner(
         analysis_data.score_output.as_ref(),
     )?;
 
-    let (candidate_paths, dupes_report, duplication_ms) = prepare_health_duplication_data(
+    let derived_sections = prepare_health_derived_sections(
         opts,
-        &config,
-        &files,
-        changed_files.as_ref(),
-        ws_roots.as_deref(),
-        &ignore_set,
-    );
-
-    let (hotspots, hotspot_summary, hotspots_ms) = compute_filtered_hotspots(
-        opts,
-        &config,
-        file_scores_slice,
-        &ignore_set,
-        ws_roots.as_deref(),
-        analysis_data.churn_fetch,
-        diff_index,
-    );
-
-    let (targets, target_thresholds, targets_ms) = compute_filtered_targets(
-        opts,
-        analysis_data.score_output.as_ref(),
-        file_scores_slice,
-        &hotspots,
-        loaded_baseline.as_ref(),
-        &config,
-        diff_index,
-        dupes_report.as_ref(),
+        HealthDerivedSectionInput {
+            config: &config,
+            files: &files,
+            ignore_set: &ignore_set,
+            changed_files: changed_files.as_ref(),
+            ws_roots: ws_roots.as_deref(),
+            file_scores: file_scores_slice,
+            churn_fetch: analysis_data.churn_fetch.take(),
+            diff_index,
+            score_output: analysis_data.score_output.as_ref(),
+            loaded_baseline: loaded_baseline.as_ref(),
+        },
     );
 
     finalize_health_runtime_outputs(
@@ -418,7 +404,7 @@ fn execute_health_inner(
             config: &config,
             runtime_coverage: &mut analysis_data.runtime_coverage,
             findings: &findings,
-            targets: &targets,
+            targets: &derived_sections.targets,
             loaded_baseline: loaded_baseline.as_ref(),
             changed_files: changed_files.as_ref(),
             diff_index,
@@ -431,91 +417,60 @@ fn execute_health_inner(
         &file_paths,
         analysis_data.score_output.as_ref(),
         file_scores_slice,
-        &hotspots,
-        dupes_report.as_ref(),
-        &candidate_paths,
+        &derived_sections.hotspots,
+        derived_sections.dupes_report.as_ref(),
+        &derived_sections.candidate_paths,
         files.len(),
         &config,
         &ignore_set,
         changed_files.as_ref(),
         ws_roots.as_deref(),
         diff_index,
-        hotspot_summary.as_ref(),
+        derived_sections.hotspot_summary.as_ref(),
         istanbul_coverage.is_some(),
         needs_file_scores,
     )?;
 
-    let coverage_gaps_has_findings =
-        health_coverage_gaps_has_findings(analysis_data.score_output.as_ref());
-
-    let action_ctx =
-        build_health_action_context(opts, &config, max_cyclomatic, max_cognitive, max_crap);
-
-    let grouping = build_health_grouping_from_context(
+    let HealthOutputParts {
+        report,
+        grouping,
+        timings,
+        coverage_gaps_has_findings,
+    } = build_health_output_parts(
         opts,
-        &config,
-        group_resolver.as_ref(),
-        &candidate_paths,
-        &files,
-        &modules,
-        &file_paths,
-        analysis_data.score_output.as_ref(),
-        file_scores_slice,
-        &findings,
-        &hotspots,
-        &vital_data,
-        &targets,
-        needs_file_scores,
-        &action_ctx,
-    );
-
-    let report = assemble_health_report(
-        opts,
-        &action_ctx,
-        HealthReportAssembly {
+        &HealthOutputBuildInput {
+            config: &config,
+            files: &files,
+            modules: &modules,
+            file_paths: &file_paths,
+            group_resolver: group_resolver.as_ref(),
+            needs_file_scores,
             report_coverage_gaps,
-            findings,
-            files_analyzed,
-            total_functions,
-            total_above_threshold,
+            has_istanbul_coverage: istanbul_coverage.is_some(),
             max_cyclomatic,
             max_cognitive,
             max_crap,
-            files_scored: analysis_data.files_scored,
-            average_maintainability: analysis_data.average_maintainability,
-            vital_signs: vital_data.vital_signs,
-            health_score: vital_data.health_score,
-            score_output: analysis_data.score_output,
-            hotspots,
-            hotspot_summary,
-            targets,
-            target_thresholds,
-            health_trend: vital_data.health_trend,
-            has_istanbul_coverage: istanbul_coverage.is_some(),
-            runtime_coverage: analysis_data.runtime_coverage,
-            large_functions: vital_data.large_functions,
+            files_analyzed,
+            total_functions,
+            total_above_threshold,
             sev_critical,
             sev_high,
             sev_moderate,
+            timing_base: HealthTimingBaseInput {
+                config_ms,
+                discover_ms,
+                parse_ms,
+                parse_cpu_ms,
+                complexity_ms,
+                shared_parse,
+            },
+            start: &start,
         },
-    );
-
-    let timings = build_health_timings(
-        opts,
-        &start,
-        &HealthTimingInput {
-            config_ms,
-            discover_ms,
-            parse_ms,
-            parse_cpu_ms,
-            complexity_ms,
-            file_scores_ms: analysis_data.file_scores_ms,
-            git_churn_ms: analysis_data.git_churn_ms,
-            git_churn_cache_hit: analysis_data.git_churn_cache_hit,
-            hotspots_ms,
-            duplication_ms,
-            targets_ms,
-            shared_parse,
+        HealthOutputSectionInput {
+            analysis_data,
+            derived_sections,
+            vital_data,
+            findings,
         },
     );
 
@@ -549,6 +504,252 @@ struct HealthFindingsData {
     sev_high: usize,
     sev_moderate: usize,
     loaded_baseline: Option<HealthBaselineData>,
+}
+
+struct HealthOutputBuildInput<'a> {
+    config: &'a ResolvedConfig,
+    files: &'a [fallow_types::discover::DiscoveredFile],
+    modules: &'a [fallow_core::extract::ModuleInfo],
+    file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
+    group_resolver: Option<&'a crate::report::OwnershipResolver>,
+    needs_file_scores: bool,
+    report_coverage_gaps: bool,
+    has_istanbul_coverage: bool,
+    max_cyclomatic: u16,
+    max_cognitive: u16,
+    max_crap: f64,
+    files_analyzed: usize,
+    total_functions: usize,
+    total_above_threshold: usize,
+    sev_critical: usize,
+    sev_high: usize,
+    sev_moderate: usize,
+    timing_base: HealthTimingBaseInput,
+    start: &'a Instant,
+}
+
+struct HealthOutputSectionInput {
+    analysis_data: HealthAnalysisData,
+    derived_sections: HealthDerivedSections,
+    vital_data: HealthVitalData,
+    findings: Vec<ComplexityViolation>,
+}
+
+struct HealthOutputParts {
+    report: crate::health_types::HealthReport,
+    grouping: Option<crate::health_types::HealthGrouping>,
+    timings: Option<crate::health_types::HealthTimings>,
+    coverage_gaps_has_findings: bool,
+}
+
+struct HealthOutputSupportingParts {
+    grouping: Option<crate::health_types::HealthGrouping>,
+    timings: Option<crate::health_types::HealthTimings>,
+}
+
+fn build_health_output_parts(
+    opts: &HealthOptions<'_>,
+    build: &HealthOutputBuildInput<'_>,
+    sections: HealthOutputSectionInput,
+) -> HealthOutputParts {
+    let HealthOutputSectionInput {
+        analysis_data,
+        derived_sections,
+        vital_data,
+        findings,
+    } = sections;
+    let coverage_gaps_has_findings =
+        health_coverage_gaps_has_findings(analysis_data.score_output.as_ref());
+    let action_ctx = build_health_action_context(
+        opts,
+        build.config,
+        build.max_cyclomatic,
+        build.max_cognitive,
+        build.max_crap,
+    );
+
+    let HealthOutputSupportingParts { grouping, timings } = build_health_supporting_parts(
+        opts,
+        build,
+        &analysis_data,
+        &derived_sections,
+        &vital_data,
+        &findings,
+        &action_ctx,
+    );
+
+    let report = build_health_report_from_pipeline(
+        opts,
+        &action_ctx,
+        HealthReportPipelineInput {
+            report_coverage_gaps: build.report_coverage_gaps,
+            findings,
+            files_analyzed: build.files_analyzed,
+            total_functions: build.total_functions,
+            total_above_threshold: build.total_above_threshold,
+            max_cyclomatic: build.max_cyclomatic,
+            max_cognitive: build.max_cognitive,
+            max_crap: build.max_crap,
+            analysis_data,
+            vital_data,
+            hotspots: derived_sections.hotspots,
+            hotspot_summary: derived_sections.hotspot_summary,
+            targets: derived_sections.targets,
+            target_thresholds: derived_sections.target_thresholds,
+            has_istanbul_coverage: build.has_istanbul_coverage,
+            sev_critical: build.sev_critical,
+            sev_high: build.sev_high,
+            sev_moderate: build.sev_moderate,
+        },
+    );
+
+    HealthOutputParts {
+        report,
+        grouping,
+        timings,
+        coverage_gaps_has_findings,
+    }
+}
+
+fn build_health_supporting_parts(
+    opts: &HealthOptions<'_>,
+    build: &HealthOutputBuildInput<'_>,
+    analysis_data: &HealthAnalysisData,
+    derived_sections: &HealthDerivedSections,
+    vital_data: &HealthVitalData,
+    findings: &[ComplexityViolation],
+    action_ctx: &crate::health_types::HealthActionContext,
+) -> HealthOutputSupportingParts {
+    let grouping = build_health_output_grouping(
+        opts,
+        build,
+        analysis_data,
+        derived_sections,
+        vital_data,
+        findings,
+        action_ctx,
+    );
+    let timings = build_health_timings_from_pipeline(
+        opts,
+        build.start,
+        analysis_data,
+        derived_sections,
+        &build.timing_base,
+    );
+
+    HealthOutputSupportingParts { grouping, timings }
+}
+
+fn build_health_output_grouping(
+    opts: &HealthOptions<'_>,
+    build: &HealthOutputBuildInput<'_>,
+    analysis_data: &HealthAnalysisData,
+    derived_sections: &HealthDerivedSections,
+    vital_data: &HealthVitalData,
+    findings: &[ComplexityViolation],
+    action_ctx: &crate::health_types::HealthActionContext,
+) -> Option<crate::health_types::HealthGrouping> {
+    let file_scores = health_file_scores_slice(analysis_data.score_output.as_ref());
+    build_health_grouping_from_context(
+        opts,
+        build.config,
+        build.group_resolver,
+        &derived_sections.candidate_paths,
+        build.files,
+        build.modules,
+        build.file_paths,
+        analysis_data.score_output.as_ref(),
+        file_scores,
+        findings,
+        &derived_sections.hotspots,
+        vital_data,
+        &derived_sections.targets,
+        build.needs_file_scores,
+        action_ctx,
+    )
+}
+
+struct HealthDerivedSectionInput<'a> {
+    config: &'a ResolvedConfig,
+    files: &'a [fallow_types::discover::DiscoveredFile],
+    ignore_set: &'a globset::GlobSet,
+    changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
+    ws_roots: Option<&'a [std::path::PathBuf]>,
+    file_scores: &'a [FileHealthScore],
+    churn_fetch: Option<hotspots::ChurnFetchResult>,
+    diff_index: Option<&'a crate::report::ci::diff_filter::DiffIndex>,
+    score_output: Option<&'a scoring::FileScoreOutput>,
+    loaded_baseline: Option<&'a HealthBaselineData>,
+}
+
+struct HealthDerivedSections {
+    candidate_paths: rustc_hash::FxHashSet<std::path::PathBuf>,
+    dupes_report: Option<fallow_core::duplicates::DuplicationReport>,
+    duplication_ms: f64,
+    hotspots: Vec<HotspotEntry>,
+    hotspot_summary: Option<HotspotSummary>,
+    hotspots_ms: f64,
+    targets: Vec<RefactoringTarget>,
+    target_thresholds: Option<crate::health_types::TargetThresholds>,
+    targets_ms: f64,
+}
+
+struct HealthReportPipelineInput {
+    report_coverage_gaps: bool,
+    findings: Vec<ComplexityViolation>,
+    files_analyzed: usize,
+    total_functions: usize,
+    total_above_threshold: usize,
+    max_cyclomatic: u16,
+    max_cognitive: u16,
+    max_crap: f64,
+    analysis_data: HealthAnalysisData,
+    vital_data: HealthVitalData,
+    hotspots: Vec<HotspotEntry>,
+    hotspot_summary: Option<HotspotSummary>,
+    targets: Vec<RefactoringTarget>,
+    target_thresholds: Option<crate::health_types::TargetThresholds>,
+    has_istanbul_coverage: bool,
+    sev_critical: usize,
+    sev_high: usize,
+    sev_moderate: usize,
+}
+
+fn build_health_report_from_pipeline(
+    opts: &HealthOptions<'_>,
+    action_ctx: &crate::health_types::HealthActionContext,
+    input: HealthReportPipelineInput,
+) -> crate::health_types::HealthReport {
+    assemble_health_report(
+        opts,
+        action_ctx,
+        HealthReportAssembly {
+            report_coverage_gaps: input.report_coverage_gaps,
+            findings: input.findings,
+            files_analyzed: input.files_analyzed,
+            total_functions: input.total_functions,
+            total_above_threshold: input.total_above_threshold,
+            max_cyclomatic: input.max_cyclomatic,
+            max_cognitive: input.max_cognitive,
+            max_crap: input.max_crap,
+            files_scored: input.analysis_data.files_scored,
+            average_maintainability: input.analysis_data.average_maintainability,
+            vital_signs: input.vital_data.vital_signs,
+            health_score: input.vital_data.health_score,
+            score_output: input.analysis_data.score_output,
+            hotspots: input.hotspots,
+            hotspot_summary: input.hotspot_summary,
+            targets: input.targets,
+            target_thresholds: input.target_thresholds,
+            health_trend: input.vital_data.health_trend,
+            has_istanbul_coverage: input.has_istanbul_coverage,
+            runtime_coverage: input.analysis_data.runtime_coverage,
+            large_functions: input.vital_data.large_functions,
+            sev_critical: input.sev_critical,
+            sev_high: input.sev_high,
+            sev_moderate: input.sev_moderate,
+        },
+    )
 }
 
 #[expect(
@@ -619,6 +820,117 @@ fn health_file_scores_slice(score_output: Option<&scoring::FileScoreOutput>) -> 
     score_output.map_or(&[] as &[_], |output| output.scores.as_slice())
 }
 
+fn prepare_health_derived_sections(
+    opts: &HealthOptions<'_>,
+    input: HealthDerivedSectionInput<'_>,
+) -> HealthDerivedSections {
+    let (candidate_paths, dupes_report, duplication_ms) =
+        prepare_health_section_dupes(opts, &input);
+    let (hotspots, hotspot_summary, hotspots_ms) = prepare_health_section_hotspots(
+        opts,
+        HealthHotspotSectionInput {
+            config: input.config,
+            file_scores: input.file_scores,
+            ignore_set: input.ignore_set,
+            ws_roots: input.ws_roots,
+            churn_fetch: input.churn_fetch,
+            diff_index: input.diff_index,
+        },
+    );
+    let (targets, target_thresholds, targets_ms) = prepare_health_section_targets(
+        opts,
+        &HealthTargetSectionInput {
+            score_output: input.score_output,
+            file_scores: input.file_scores,
+            hotspots: &hotspots,
+            loaded_baseline: input.loaded_baseline,
+            config: input.config,
+            diff_index: input.diff_index,
+            dupes_report: dupes_report.as_ref(),
+        },
+    );
+
+    HealthDerivedSections {
+        candidate_paths,
+        dupes_report,
+        duplication_ms,
+        hotspots,
+        hotspot_summary,
+        hotspots_ms,
+        targets,
+        target_thresholds,
+        targets_ms,
+    }
+}
+
+fn prepare_health_section_dupes(
+    opts: &HealthOptions<'_>,
+    input: &HealthDerivedSectionInput<'_>,
+) -> (
+    rustc_hash::FxHashSet<std::path::PathBuf>,
+    Option<fallow_core::duplicates::DuplicationReport>,
+    f64,
+) {
+    prepare_health_duplication_data(
+        opts,
+        input.config,
+        input.files,
+        input.changed_files,
+        input.ws_roots,
+        input.ignore_set,
+    )
+}
+
+struct HealthHotspotSectionInput<'a> {
+    config: &'a ResolvedConfig,
+    file_scores: &'a [FileHealthScore],
+    ignore_set: &'a globset::GlobSet,
+    ws_roots: Option<&'a [std::path::PathBuf]>,
+    churn_fetch: Option<hotspots::ChurnFetchResult>,
+    diff_index: Option<&'a crate::report::ci::diff_filter::DiffIndex>,
+}
+
+fn prepare_health_section_hotspots(
+    opts: &HealthOptions<'_>,
+    input: HealthHotspotSectionInput<'_>,
+) -> (Vec<HotspotEntry>, Option<HotspotSummary>, f64) {
+    compute_filtered_hotspots(
+        opts,
+        input.config,
+        input.file_scores,
+        input.ignore_set,
+        input.ws_roots,
+        input.churn_fetch,
+        input.diff_index,
+    )
+}
+
+struct HealthTargetSectionInput<'a> {
+    score_output: Option<&'a scoring::FileScoreOutput>,
+    file_scores: &'a [FileHealthScore],
+    hotspots: &'a [HotspotEntry],
+    loaded_baseline: Option<&'a HealthBaselineData>,
+    config: &'a ResolvedConfig,
+    diff_index: Option<&'a crate::report::ci::diff_filter::DiffIndex>,
+    dupes_report: Option<&'a fallow_core::duplicates::DuplicationReport>,
+}
+
+fn prepare_health_section_targets(
+    opts: &HealthOptions<'_>,
+    input: &HealthTargetSectionInput<'_>,
+) -> (Vec<RefactoringTarget>, Option<TargetThresholds>, f64) {
+    compute_filtered_targets(
+        opts,
+        input.score_output,
+        input.file_scores,
+        input.hotspots,
+        input.loaded_baseline,
+        input.config,
+        input.diff_index,
+        input.dupes_report,
+    )
+}
+
 struct HealthTimingInput {
     config_ms: f64,
     discover_ms: f64,
@@ -631,6 +943,15 @@ struct HealthTimingInput {
     hotspots_ms: f64,
     duplication_ms: f64,
     targets_ms: f64,
+    shared_parse: bool,
+}
+
+struct HealthTimingBaseInput {
+    config_ms: f64,
+    discover_ms: f64,
+    parse_ms: f64,
+    parse_cpu_ms: f64,
+    complexity_ms: f64,
     shared_parse: bool,
 }
 
@@ -806,6 +1127,33 @@ fn finalize_health_findings(
         sev_moderate,
         loaded_baseline,
     ))
+}
+
+fn build_health_timings_from_pipeline(
+    opts: &HealthOptions<'_>,
+    start: &Instant,
+    analysis_data: &HealthAnalysisData,
+    sections: &HealthDerivedSections,
+    input: &HealthTimingBaseInput,
+) -> Option<HealthTimings> {
+    build_health_timings(
+        opts,
+        start,
+        &HealthTimingInput {
+            config_ms: input.config_ms,
+            discover_ms: input.discover_ms,
+            parse_ms: input.parse_ms,
+            parse_cpu_ms: input.parse_cpu_ms,
+            complexity_ms: input.complexity_ms,
+            file_scores_ms: analysis_data.file_scores_ms,
+            git_churn_ms: analysis_data.git_churn_ms,
+            git_churn_cache_hit: analysis_data.git_churn_cache_hit,
+            hotspots_ms: sections.hotspots_ms,
+            duplication_ms: sections.duplication_ms,
+            targets_ms: sections.targets_ms,
+            shared_parse: input.shared_parse,
+        },
+    )
 }
 
 fn build_health_timings(
@@ -2336,16 +2684,50 @@ struct CrapFindingMergeInput<'a> {
     complexity_breakdown: bool,
 }
 
+type ComplexityByPosition<'a> = rustc_hash::FxHashMap<
+    &'a std::path::Path,
+    rustc_hash::FxHashMap<(u32, u32), &'a fallow_types::extract::FunctionComplexity>,
+>;
+
 fn merge_crap_findings(findings: &mut Vec<ComplexityViolation>, input: &CrapFindingMergeInput<'_>) {
-    let finding_index: rustc_hash::FxHashMap<(std::path::PathBuf, u32, u32), usize> = findings
+    let finding_index = build_complexity_finding_index(findings);
+    let complexity_by_pos = build_complexity_by_position(input);
+    let suppressions_by_path = build_complexity_suppressions_by_path(input);
+
+    let mut new_findings: Vec<ComplexityViolation> = Vec::new();
+    for (path, per_fn) in input.per_function_crap {
+        if !crap_path_in_scope(path, input) {
+            continue;
+        }
+        for pf in per_fn {
+            if pf.crap < input.max_crap || crap_is_suppressed(path, pf, &suppressions_by_path) {
+                continue;
+            }
+
+            if let Some(&idx) = finding_index.get(&(path.clone(), pf.line, pf.col)) {
+                merge_existing_crap_finding(&mut findings[idx], path, pf, input);
+            } else if let Some(finding) = new_crap_finding(path, pf, &complexity_by_pos, input) {
+                new_findings.push(finding);
+            }
+        }
+    }
+    findings.extend(new_findings);
+}
+
+fn build_complexity_finding_index(
+    findings: &[ComplexityViolation],
+) -> rustc_hash::FxHashMap<(std::path::PathBuf, u32, u32), usize> {
+    findings
         .iter()
         .enumerate()
         .map(|(idx, f)| ((f.path.clone(), f.line, f.col), idx))
-        .collect();
-    let mut complexity_by_pos: rustc_hash::FxHashMap<
-        &std::path::Path,
-        rustc_hash::FxHashMap<(u32, u32), &fallow_types::extract::FunctionComplexity>,
-    > = rustc_hash::FxHashMap::default();
+        .collect()
+}
+
+fn build_complexity_by_position<'a>(
+    input: &'a CrapFindingMergeInput<'a>,
+) -> ComplexityByPosition<'a> {
+    let mut complexity_by_pos: ComplexityByPosition<'a> = rustc_hash::FxHashMap::default();
     for module in input.modules {
         let Some(&path) = input.file_paths.get(&module.file_id) else {
             continue;
@@ -2355,7 +2737,13 @@ fn merge_crap_findings(findings: &mut Vec<ComplexityViolation>, input: &CrapFind
             entry.insert((fc.line, fc.col), fc);
         }
     }
-    let suppressions_by_path: rustc_hash::FxHashMap<&std::path::Path, _> = input
+    complexity_by_pos
+}
+
+fn build_complexity_suppressions_by_path<'a>(
+    input: &'a CrapFindingMergeInput<'a>,
+) -> rustc_hash::FxHashMap<&'a std::path::Path, &'a Vec<fallow_core::suppress::Suppression>> {
+    input
         .modules
         .iter()
         .filter_map(|m| {
@@ -2364,111 +2752,112 @@ fn merge_crap_findings(findings: &mut Vec<ComplexityViolation>, input: &CrapFind
                 .get(&m.file_id)
                 .map(|p| (p.as_path(), &m.suppressions))
         })
-        .collect();
+        .collect()
+}
 
-    let mut new_findings: Vec<ComplexityViolation> = Vec::new();
-    for (path, per_fn) in input.per_function_crap {
-        let relative = path.strip_prefix(input.config_root).unwrap_or(path);
-        if input.ignore_set.is_match(relative) {
-            continue;
-        }
-        if let Some(changed) = input.changed_files
-            && !changed.contains(path)
-        {
-            continue;
-        }
-        if let Some(ws) = input.ws_roots
-            && !ws.iter().any(|r| path.starts_with(r))
-        {
-            continue;
-        }
-
-        for pf in per_fn {
-            if pf.crap < input.max_crap {
-                continue;
-            }
-            if let Some(sups) = suppressions_by_path.get(path.as_path())
-                && fallow_core::suppress::is_suppressed(
-                    sups,
-                    pf.line,
-                    fallow_core::suppress::IssueKind::Complexity,
-                )
-            {
-                continue;
-            }
-
-            if let Some(&idx) = finding_index.get(&(path.clone(), pf.line, pf.col)) {
-                let finding = &mut findings[idx];
-                finding.crap = Some(pf.crap);
-                finding.coverage_pct = pf.coverage_pct;
-                finding.coverage_tier = Some(pf.coverage_tier);
-                finding.coverage_source = Some(pf.coverage_source);
-                finding.inherited_from = inherited_from_for(
-                    pf.coverage_source,
-                    path.as_path(),
-                    input.template_inherit_provenance,
-                );
-                let exceeds_cyclomatic = finding.exceeded.includes_cyclomatic();
-                let exceeds_cognitive = finding.exceeded.includes_cognitive();
-                finding.exceeded =
-                    ExceededThreshold::from_bools(exceeds_cyclomatic, exceeds_cognitive, true);
-                finding.severity = compute_finding_severity(
-                    finding.cognitive,
-                    finding.cyclomatic,
-                    Some(pf.crap),
-                    DEFAULT_COGNITIVE_HIGH,
-                    DEFAULT_COGNITIVE_CRITICAL,
-                    DEFAULT_CYCLOMATIC_HIGH,
-                    DEFAULT_CYCLOMATIC_CRITICAL,
-                );
-            } else {
-                let Some(fc) = complexity_by_pos
-                    .get(path.as_path())
-                    .and_then(|m| m.get(&(pf.line, pf.col)).copied())
-                else {
-                    continue;
-                };
-                let exceeds_cyclomatic = fc.cyclomatic > input.max_cyclomatic;
-                let exceeds_cognitive = fc.cognitive > input.max_cognitive;
-                new_findings.push(ComplexityViolation {
-                    path: path.clone(),
-                    name: fc.name.clone(),
-                    line: fc.line,
-                    col: fc.col,
-                    cyclomatic: fc.cyclomatic,
-                    cognitive: fc.cognitive,
-                    line_count: fc.line_count,
-                    param_count: fc.param_count,
-                    exceeded: ExceededThreshold::from_bools(
-                        exceeds_cyclomatic,
-                        exceeds_cognitive,
-                        true,
-                    ),
-                    severity: compute_finding_severity(
-                        fc.cognitive,
-                        fc.cyclomatic,
-                        Some(pf.crap),
-                        DEFAULT_COGNITIVE_HIGH,
-                        DEFAULT_COGNITIVE_CRITICAL,
-                        DEFAULT_CYCLOMATIC_HIGH,
-                        DEFAULT_CYCLOMATIC_CRITICAL,
-                    ),
-                    crap: Some(pf.crap),
-                    coverage_pct: pf.coverage_pct,
-                    coverage_tier: Some(pf.coverage_tier),
-                    coverage_source: Some(pf.coverage_source),
-                    inherited_from: inherited_from_for(
-                        pf.coverage_source,
-                        path.as_path(),
-                        input.template_inherit_provenance,
-                    ),
-                    component_rollup: None,
-                    contributions: contributions_for(input.complexity_breakdown, fc),
-                });
-            }
-        }
+fn crap_path_in_scope(path: &std::path::Path, input: &CrapFindingMergeInput<'_>) -> bool {
+    let relative = path.strip_prefix(input.config_root).unwrap_or(path);
+    if input.ignore_set.is_match(relative) {
+        return false;
     }
-    findings.extend(new_findings);
+    if let Some(changed) = input.changed_files
+        && !changed.contains(path)
+    {
+        return false;
+    }
+    if let Some(ws) = input.ws_roots
+        && !ws.iter().any(|r| path.starts_with(r))
+    {
+        return false;
+    }
+    true
+}
+
+fn crap_is_suppressed(
+    path: &std::path::Path,
+    pf: &scoring::PerFunctionCrap,
+    suppressions_by_path: &rustc_hash::FxHashMap<
+        &std::path::Path,
+        &Vec<fallow_core::suppress::Suppression>,
+    >,
+) -> bool {
+    suppressions_by_path.get(path).is_some_and(|sups| {
+        fallow_core::suppress::is_suppressed(
+            sups,
+            pf.line,
+            fallow_core::suppress::IssueKind::Complexity,
+        )
+    })
+}
+
+fn merge_existing_crap_finding(
+    finding: &mut ComplexityViolation,
+    path: &std::path::Path,
+    pf: &scoring::PerFunctionCrap,
+    input: &CrapFindingMergeInput<'_>,
+) {
+    finding.crap = Some(pf.crap);
+    finding.coverage_pct = pf.coverage_pct;
+    finding.coverage_tier = Some(pf.coverage_tier);
+    finding.coverage_source = Some(pf.coverage_source);
+    finding.inherited_from =
+        inherited_from_for(pf.coverage_source, path, input.template_inherit_provenance);
+    let exceeds_cyclomatic = finding.exceeded.includes_cyclomatic();
+    let exceeds_cognitive = finding.exceeded.includes_cognitive();
+    finding.exceeded = ExceededThreshold::from_bools(exceeds_cyclomatic, exceeds_cognitive, true);
+    finding.severity = compute_finding_severity(
+        finding.cognitive,
+        finding.cyclomatic,
+        Some(pf.crap),
+        DEFAULT_COGNITIVE_HIGH,
+        DEFAULT_COGNITIVE_CRITICAL,
+        DEFAULT_CYCLOMATIC_HIGH,
+        DEFAULT_CYCLOMATIC_CRITICAL,
+    );
+}
+
+fn new_crap_finding(
+    path: &std::path::Path,
+    pf: &scoring::PerFunctionCrap,
+    complexity_by_pos: &ComplexityByPosition<'_>,
+    input: &CrapFindingMergeInput<'_>,
+) -> Option<ComplexityViolation> {
+    let fc = complexity_by_pos
+        .get(path)
+        .and_then(|m| m.get(&(pf.line, pf.col)).copied())?;
+    let exceeds_cyclomatic = fc.cyclomatic > input.max_cyclomatic;
+    let exceeds_cognitive = fc.cognitive > input.max_cognitive;
+    Some(ComplexityViolation {
+        path: path.to_path_buf(),
+        name: fc.name.clone(),
+        line: fc.line,
+        col: fc.col,
+        cyclomatic: fc.cyclomatic,
+        cognitive: fc.cognitive,
+        line_count: fc.line_count,
+        param_count: fc.param_count,
+        exceeded: ExceededThreshold::from_bools(exceeds_cyclomatic, exceeds_cognitive, true),
+        severity: compute_finding_severity(
+            fc.cognitive,
+            fc.cyclomatic,
+            Some(pf.crap),
+            DEFAULT_COGNITIVE_HIGH,
+            DEFAULT_COGNITIVE_CRITICAL,
+            DEFAULT_CYCLOMATIC_HIGH,
+            DEFAULT_CYCLOMATIC_CRITICAL,
+        ),
+        crap: Some(pf.crap),
+        coverage_pct: pf.coverage_pct,
+        coverage_tier: Some(pf.coverage_tier),
+        coverage_source: Some(pf.coverage_source),
+        inherited_from: inherited_from_for(
+            pf.coverage_source,
+            path,
+            input.template_inherit_provenance,
+        ),
+        component_rollup: None,
+        contributions: contributions_for(input.complexity_breakdown, fc),
+    })
 }
 
 /// Synthesise per-Angular-component rollup findings.
@@ -3782,7 +4171,7 @@ mod tests {
     ) -> crate::health_types::RuntimeCoverageSummary {
         #[expect(
             clippy::cast_precision_loss,
-            reason = "test fixture totals are tiny — f64 precision is fine"
+            reason = "test fixture totals are tiny, f64 precision is fine"
         )]
         let coverage_percent = if tracked == 0 {
             0.0

@@ -99,111 +99,122 @@ pub fn run_combined(opts: &CombinedOptions<'_>) -> ExitCode {
         trace_dependency: None,
         performance: opts.performance,
     };
-    let check_opts = if opts.run_check {
-        Some(CheckOptions {
-            root: opts.root,
-            config_path: opts.config_path,
-            output: opts.output,
-            no_cache: opts.no_cache,
-            threads: opts.threads,
-            quiet: opts.quiet,
-            fail_on_issues: opts.fail_on_issues,
-            filters: &filters,
-            changed_since: opts.changed_since,
-            diff_index: None,
-            use_shared_diff_index: true,
-            baseline: opts.baseline,
-            save_baseline: opts.save_baseline,
-            sarif_file: opts.sarif_file,
-            production: opts.production_dead_code.unwrap_or(opts.production),
-            production_override: opts.production_dead_code,
-            workspace: opts.workspace,
-            changed_workspaces: opts.changed_workspaces,
-            group_by: opts.group_by,
-            include_dupes: false,
-            trace_opts: &trace_opts,
-            explain: opts.explain,
-            top: None,
-            file: &[],
-            include_entry_exports: opts.include_entry_exports,
-            summary: opts.summary,
-            regression_opts: opts.regression_opts,
-            retain_modules_for_health: opts.run_health,
-            defer_performance: true,
-        })
-    } else {
-        None
-    };
-
-    if let (Some(check_opts), true) = (check_opts.as_ref(), opts.run_dupes) {
-        let (check_res, dupes_res) = rayon::join(
-            || crate::check::execute_check(check_opts),
-            || run_combined_dupes(opts, None),
-        );
-        match check_res {
-            Ok(result) => check_result = Some(result),
-            Err(code) => return code,
-        }
-        match dupes_res {
-            Ok(result) => dupes_result = result,
-            Err(code) => return code,
-        }
-    } else {
-        if let Some(check_opts) = check_opts.as_ref() {
-            match crate::check::execute_check(check_opts) {
-                Ok(result) => check_result = Some(result),
-                Err(code) => return code,
-            }
-        }
-        if opts.run_dupes {
-            match run_combined_dupes(opts, check_result.as_ref()) {
-                Ok(result) => dupes_result = result,
-                Err(code) => return code,
-            }
-        }
+    let check_opts = build_combined_check_options(opts, &filters, &trace_opts);
+    if let Err(code) = run_combined_check_and_dupes(
+        opts,
+        check_opts.as_ref(),
+        &mut check_result,
+        &mut dupes_result,
+    ) {
+        return code;
     }
 
     record_combined_cache_state(opts, check_result.as_ref());
+    print_combined_deferred_performance(opts, &mut check_result, dupes_result.as_ref());
 
-    if opts.performance
-        && let Some(ref mut check) = check_result
-        && let Some(ref mut timings) = check.timings
-    {
-        timings.duplication_ms = dupes_result
-            .as_ref()
-            .map(|dupes| dupes.elapsed.as_secs_f64() * 1000.0);
-        report::print_performance(timings, opts.output);
-    }
-
-    if opts.run_health {
-        let health_opts = build_health_opts(opts);
-        let check_production = opts.production_dead_code.unwrap_or(opts.production);
-        let health_production = opts.production_health.unwrap_or(opts.production);
-        let shared = if check_production == health_production {
-            check_result.as_mut().and_then(|r| r.shared_parse.take())
-        } else {
-            None
-        };
-        let health_run = if let Some(shared_data) = shared {
-            crate::health::execute_health_with_shared_parse(&health_opts, shared_data)
-        } else {
-            crate::health::execute_health(&health_opts)
-        };
-        match health_run {
-            Ok(result) => {
-                health_result = Some(result);
-            }
-            Err(code) => return code,
-        }
+    if let Err(code) = run_combined_health(opts, &mut check_result, &mut health_result) {
+        return code;
     }
 
     let total_elapsed = start.elapsed();
-
-    let mut max_exit = match print_combined_report(
+    finish_combined_run(
         opts,
         check_result.as_ref(),
         dupes_result.as_ref(),
         health_result.as_ref(),
+        total_elapsed,
+    )
+}
+
+fn build_combined_check_options<'a>(
+    opts: &'a CombinedOptions<'a>,
+    filters: &'a IssueFilters,
+    trace_opts: &'a TraceOptions,
+) -> Option<CheckOptions<'a>> {
+    opts.run_check.then_some(CheckOptions {
+        root: opts.root,
+        config_path: opts.config_path,
+        output: opts.output,
+        no_cache: opts.no_cache,
+        threads: opts.threads,
+        quiet: opts.quiet,
+        fail_on_issues: opts.fail_on_issues,
+        filters,
+        changed_since: opts.changed_since,
+        diff_index: None,
+        use_shared_diff_index: true,
+        baseline: opts.baseline,
+        save_baseline: opts.save_baseline,
+        sarif_file: opts.sarif_file,
+        production: opts.production_dead_code.unwrap_or(opts.production),
+        production_override: opts.production_dead_code,
+        workspace: opts.workspace,
+        changed_workspaces: opts.changed_workspaces,
+        group_by: opts.group_by,
+        include_dupes: false,
+        trace_opts,
+        explain: opts.explain,
+        top: None,
+        file: &[],
+        include_entry_exports: opts.include_entry_exports,
+        summary: opts.summary,
+        regression_opts: opts.regression_opts,
+        retain_modules_for_health: opts.run_health,
+        defer_performance: true,
+    })
+}
+
+fn run_combined_check_and_dupes(
+    opts: &CombinedOptions<'_>,
+    check_opts: Option<&CheckOptions<'_>>,
+    check_result: &mut Option<CheckResult>,
+    dupes_result: &mut Option<DupesResult>,
+) -> Result<(), ExitCode> {
+    if let (Some(check_opts), true) = (check_opts, opts.run_dupes) {
+        let (check_res, dupes_res) = rayon::join(
+            || crate::check::execute_check(check_opts),
+            || run_combined_dupes(opts, None),
+        );
+        *check_result = Some(check_res?);
+        *dupes_result = dupes_res?;
+        return Ok(());
+    }
+
+    if let Some(check_opts) = check_opts {
+        *check_result = Some(crate::check::execute_check(check_opts)?);
+    }
+    if opts.run_dupes {
+        *dupes_result = run_combined_dupes(opts, check_result.as_ref())?;
+    }
+    Ok(())
+}
+
+fn print_combined_deferred_performance(
+    opts: &CombinedOptions<'_>,
+    check_result: &mut Option<CheckResult>,
+    dupes_result: Option<&DupesResult>,
+) {
+    if opts.performance
+        && let Some(check) = check_result
+        && let Some(ref mut timings) = check.timings
+    {
+        timings.duplication_ms = dupes_result.map(|dupes| dupes.elapsed.as_secs_f64() * 1000.0);
+        report::print_performance(timings, opts.output);
+    }
+}
+
+fn finish_combined_run(
+    opts: &CombinedOptions<'_>,
+    check_result: Option<&CheckResult>,
+    dupes_result: Option<&DupesResult>,
+    health_result: Option<&HealthResult>,
+    total_elapsed: std::time::Duration,
+) -> ExitCode {
+    let mut max_exit = match print_combined_report(
+        opts,
+        check_result,
+        dupes_result,
+        health_result,
         total_elapsed,
     ) {
         Ok(exit) => exit,
@@ -214,19 +225,41 @@ pub fn run_combined(opts: &CombinedOptions<'_>) -> ExitCode {
         &mut max_exit,
         opts.quiet,
         opts.root,
-        check_result.as_ref(),
-        dupes_result.as_ref(),
-        health_result.as_ref(),
+        check_result,
+        dupes_result,
+        health_result,
     );
 
-    record_combined_impact(
-        opts,
-        check_result.as_ref(),
-        dupes_result.as_ref(),
-        health_result.as_ref(),
-    );
+    record_combined_impact(opts, check_result, dupes_result, health_result);
 
     ExitCode::from(max_exit)
+}
+
+fn run_combined_health(
+    opts: &CombinedOptions<'_>,
+    check_result: &mut Option<CheckResult>,
+    health_result: &mut Option<HealthResult>,
+) -> Result<(), ExitCode> {
+    if !opts.run_health {
+        return Ok(());
+    }
+
+    let health_opts = build_health_opts(opts);
+    let check_production = opts.production_dead_code.unwrap_or(opts.production);
+    let health_production = opts.production_health.unwrap_or(opts.production);
+    let shared = if check_production == health_production {
+        check_result.as_mut().and_then(|r| r.shared_parse.take())
+    } else {
+        None
+    };
+    let result = if let Some(shared_data) = shared {
+        crate::health::execute_health_with_shared_parse(&health_opts, shared_data)?
+    } else {
+        crate::health::execute_health(&health_opts)?
+    };
+    *health_result = Some(result);
+
+    Ok(())
 }
 
 /// Build the dupes options and dispatch to either `execute_dupes` or

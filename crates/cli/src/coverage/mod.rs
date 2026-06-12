@@ -550,6 +550,32 @@ fn run_setup(args: SetupArgs, root: &Path) -> ExitCode {
     };
     let mut setup_state = load_setup_state(root);
 
+    print_setup_intro(root);
+
+    if let Err(exit) = run_setup_license_step(root, args, &mut setup_state) {
+        return exit;
+    }
+
+    let context = detect_setup_context(root);
+    if let Err(exit) = run_setup_sidecar_step(root, args, &context, &mut setup_state) {
+        return exit;
+    }
+
+    let recipe_path = match run_setup_recipe_step(root, &context, &mut setup_state) {
+        Ok(path) => path,
+        Err(exit) => return exit,
+    };
+
+    mark_setup_completed(&mut setup_state);
+    if let Err(message) = save_setup_state(root, &setup_state) {
+        eprintln!("fallow coverage setup: {message}");
+        return ExitCode::from(2);
+    }
+
+    run_setup_final_step(root, &context, &recipe_path)
+}
+
+fn print_setup_intro(root: &Path) {
     println!("fallow coverage setup");
     println!();
     println!("What \"runtime coverage\" means: fallow looks at which functions actually");
@@ -560,97 +586,96 @@ fn run_setup(args: SetupArgs, root: &Path) -> ExitCode {
         display_relative(root, &setup_state_path(root))
     );
     println!();
+}
 
-    let key = match license::verifying_key() {
-        Ok(key) => key,
-        Err(message) => {
-            eprintln!("fallow coverage setup: {message}");
-            return ExitCode::from(2);
-        }
-    };
-
+fn run_setup_license_step(
+    root: &Path,
+    args: SetupArgs,
+    setup_state: &mut CoverageSetupState,
+) -> Result<(), ExitCode> {
+    let key = license::verifying_key().map_err(|message| setup_error_exit(&message, 2))?;
     let license_state = fallow_license::load_and_verify(&key, DEFAULT_HARD_FAIL_DAYS);
-    if license_state_is_current(&setup_state, &license_state) {
+    if license_state_is_current(setup_state, &license_state) {
         println!("Step 1/4: License check... ok (resumed).");
-    } else {
-        if let Some(exit) = handle_license_step(root, args, &license_state) {
-            return exit;
-        }
-        let license_state = fallow_license::load_and_verify(&key, DEFAULT_HARD_FAIL_DAYS);
-        if license_status_is_setup_acceptable(&license_state) {
-            record_current_license_state(&mut setup_state);
-            if let Err(message) = save_setup_state(root, &setup_state) {
-                eprintln!("fallow coverage setup: {message}");
-                return ExitCode::from(2);
-            }
-        } else {
-            setup_state.license = None;
-        }
+        return Ok(());
     }
 
-    let context = detect_setup_context(root);
-
-    if sidecar_state_is_current(&setup_state, root) {
-        if let Some(sidecar) = setup_state.sidecar.as_ref() {
-            println!(
-                "Step 2/4: Sidecar check... ok ({}) (resumed).",
-                sidecar.path.to_string_lossy()
-            );
-        }
+    if let Some(exit) = handle_license_step(root, args, &license_state) {
+        return Err(exit);
+    }
+    let license_state = fallow_license::load_and_verify(&key, DEFAULT_HARD_FAIL_DAYS);
+    if license_status_is_setup_acceptable(&license_state) {
+        record_current_license_state(setup_state);
+        save_setup_state(root, setup_state).map_err(|message| setup_error_exit(&message, 2))?;
     } else {
-        if let Some(exit) = handle_sidecar_step(root, args, context.package_manager) {
-            return exit;
-        }
-        match runtime_coverage::discover_sidecar(Some(root)) {
-            Ok(path) => {
-                if let Err(message) = record_sidecar_state(&mut setup_state, path)
-                    .and_then(|()| save_setup_state(root, &setup_state))
-                {
-                    eprintln!("fallow coverage setup: {message}");
-                    return ExitCode::from(2);
-                }
-            }
-            Err(message) => {
-                eprintln!("fallow coverage setup: {message}");
-                return ExitCode::from(4);
-            }
-        }
+        setup_state.license = None;
+    }
+    Ok(())
+}
+
+fn run_setup_sidecar_step(
+    root: &Path,
+    args: SetupArgs,
+    context: &CoverageSetupContext,
+    setup_state: &mut CoverageSetupState,
+) -> Result<(), ExitCode> {
+    if sidecar_state_is_current(setup_state, root) {
+        print_resumed_sidecar_step(setup_state);
+        return Ok(());
     }
 
-    let recipe = recipe_contents(&context);
-    let recipe_path = if recipe_state_is_current(&setup_state, root, &context, &recipe) {
-        let path = setup_state
-            .recipe
-            .as_ref()
-            .map_or_else(|| recipe_path(root), |recipe| recipe.path.clone());
+    if let Some(exit) = handle_sidecar_step(root, args, context.package_manager) {
+        return Err(exit);
+    }
+    let path = runtime_coverage::discover_sidecar(Some(root))
+        .map_err(|message| setup_error_exit(&message, 4))?;
+    record_sidecar_state(setup_state, path)
+        .and_then(|()| save_setup_state(root, setup_state))
+        .map_err(|message| setup_error_exit(&message, 2))
+}
+
+fn print_resumed_sidecar_step(setup_state: &CoverageSetupState) {
+    if let Some(sidecar) = setup_state.sidecar.as_ref() {
         println!(
-            "Step 3/4: Coverage recipe... ok ({}) (resumed).",
-            display_relative(root, &path)
+            "Step 2/4: Sidecar check... ok ({}) (resumed).",
+            sidecar.path.to_string_lossy()
         );
-        path
-    } else {
-        match write_recipe(root, &recipe) {
-            Ok(path) => {
-                record_recipe_state(&mut setup_state, path.clone(), &context, &recipe);
-                if let Err(message) = save_setup_state(root, &setup_state) {
-                    eprintln!("fallow coverage setup: {message}");
-                    return ExitCode::from(2);
-                }
-                path
-            }
-            Err(message) => {
-                eprintln!("fallow coverage setup: {message}");
-                return ExitCode::from(2);
-            }
-        }
-    };
+    }
+}
 
-    mark_setup_completed(&mut setup_state);
-    if let Err(message) = save_setup_state(root, &setup_state) {
-        eprintln!("fallow coverage setup: {message}");
-        return ExitCode::from(2);
+fn run_setup_recipe_step(
+    root: &Path,
+    context: &CoverageSetupContext,
+    setup_state: &mut CoverageSetupState,
+) -> Result<PathBuf, ExitCode> {
+    let recipe = recipe_contents(context);
+    if recipe_state_is_current(setup_state, root, context, &recipe) {
+        return Ok(resumed_recipe_path(root, setup_state));
     }
 
+    let path = write_recipe(root, &recipe).map_err(|message| setup_error_exit(&message, 2))?;
+    record_recipe_state(setup_state, path.clone(), context, &recipe);
+    save_setup_state(root, setup_state).map_err(|message| setup_error_exit(&message, 2))?;
+    Ok(path)
+}
+
+fn resumed_recipe_path(root: &Path, setup_state: &CoverageSetupState) -> PathBuf {
+    let path = setup_state
+        .recipe
+        .as_ref()
+        .map_or_else(|| recipe_path(root), |recipe| recipe.path.clone());
+    println!(
+        "Step 3/4: Coverage recipe... ok ({}) (resumed).",
+        display_relative(root, &path)
+    );
+    path
+}
+
+fn run_setup_final_step(
+    root: &Path,
+    context: &CoverageSetupContext,
+    recipe_path: &Path,
+) -> ExitCode {
     if let Some(coverage_path) = detect_coverage_artifact(root) {
         println!(
             "Step 4/4: Coverage found at {}",
@@ -669,12 +694,17 @@ fn run_setup(args: SetupArgs, root: &Path) -> ExitCode {
     println!("  -> Detected: {}.", context.framework.label());
     println!(
         "  -> Wrote {} with the {} recipe.",
-        display_relative(root, &recipe_path),
+        display_relative(root, recipe_path),
         context.framework.label()
     );
     println!("  -> Run your app with the instrumentation on, then re-run this command.");
     print_upload_inventory_hint();
     ExitCode::SUCCESS
+}
+
+fn setup_error_exit(message: &str, code: u8) -> ExitCode {
+    eprintln!("fallow coverage setup: {message}");
+    ExitCode::from(code)
 }
 
 fn run_setup_json(root: &Path, explain: bool) -> ExitCode {

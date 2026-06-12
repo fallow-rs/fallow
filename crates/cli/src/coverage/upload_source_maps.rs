@@ -452,17 +452,28 @@ fn upload_maps(
     api_key: &str,
     maps: &[SourceMapCandidate],
 ) -> Result<(), UploadSourceMapsError> {
+    let (mut outcomes, ready) = prepare_source_maps_for_upload(args, maps)?;
+    if ready.is_empty() {
+        return Err(UploadSourceMapsError::Partial(outcomes));
+    }
+
+    print_upload_source_maps_summary(args, repo, git_sha, maps);
+
+    let agent = try_api_agent_with_timeout(CONNECT_TIMEOUT_SECS, TOTAL_TIMEOUT_SECS)
+        .map_err(|err| UploadSourceMapsError::Network(err.to_string()))?;
+    let mut uploaded = upload_ready_source_maps(args, repo, git_sha, api_key, &agent, &ready)?;
+    outcomes.append(&mut uploaded);
+    finish_source_map_upload(outcomes)
+}
+
+fn prepare_source_maps_for_upload(
+    args: &UploadSourceMapsArgs,
+    maps: &[SourceMapCandidate],
+) -> Result<(Vec<MapOutcome>, Vec<PreparedSourceMap>), UploadSourceMapsError> {
     let mut outcomes = Vec::with_capacity(maps.len());
     let mut ready = Vec::new();
     for candidate in maps {
-        if candidate.bytes > WARN_MAP_BYTES && candidate.bytes <= MAX_MAP_BYTES {
-            eprintln!(
-                "{LOG_PREFIX}: {}: {} is large ({})",
-                "warning".yellow().bold(),
-                candidate.rel_path.display(),
-                format_bytes(candidate.bytes),
-            );
-        }
+        warn_large_source_map(candidate);
         match prepare_source_map(candidate) {
             MapOutcome::Ready(prepared) => ready.push(prepared),
             failed => {
@@ -473,11 +484,26 @@ fn upload_maps(
             }
         }
     }
+    Ok((outcomes, ready))
+}
 
-    if ready.is_empty() {
-        return Err(UploadSourceMapsError::Partial(outcomes));
+fn warn_large_source_map(candidate: &SourceMapCandidate) {
+    if candidate.bytes > WARN_MAP_BYTES && candidate.bytes <= MAX_MAP_BYTES {
+        eprintln!(
+            "{LOG_PREFIX}: {}: {} is large ({})",
+            "warning".yellow().bold(),
+            candidate.rel_path.display(),
+            format_bytes(candidate.bytes),
+        );
     }
+}
 
+fn print_upload_source_maps_summary(
+    args: &UploadSourceMapsArgs,
+    repo: &str,
+    git_sha: &str,
+    maps: &[SourceMapCandidate],
+) {
     println!("{LOG_PREFIX}: repo={repo} sha={git_sha}");
     println!(
         "{LOG_PREFIX}: found {} maps ({})",
@@ -488,53 +514,57 @@ fn upload_maps(
         "{LOG_PREFIX}: uploading to {}",
         display_endpoint_url(args.endpoint.as_deref(), repo)
     );
+}
 
-    let agent = try_api_agent_with_timeout(CONNECT_TIMEOUT_SECS, TOTAL_TIMEOUT_SECS)
-        .map_err(|err| UploadSourceMapsError::Network(err.to_string()))?;
-    let concurrency = args.concurrency.max(1);
+fn upload_ready_source_maps(
+    args: &UploadSourceMapsArgs,
+    repo: &str,
+    git_sha: &str,
+    api_key: &str,
+    agent: &ureq::Agent,
+    ready: &[PreparedSourceMap],
+) -> Result<Vec<MapOutcome>, UploadSourceMapsError> {
+    if args.fail_fast {
+        return Ok(upload_ready_source_maps_fail_fast(
+            args, repo, git_sha, api_key, agent, ready,
+        ));
+    }
+
     let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(concurrency)
+        .num_threads(args.concurrency.max(1))
         .build()
         .map_err(|err| {
             UploadSourceMapsError::Validation(format!("invalid --concurrency: {err}"))
         })?;
-    let mut uploaded = if args.fail_fast {
-        let mut uploaded = Vec::new();
-        for map in &ready {
-            let outcome = upload_one(
-                &agent,
-                args.endpoint.as_deref(),
-                repo,
-                git_sha,
-                api_key,
-                map,
-            );
-            let failed = matches!(outcome, MapOutcome::Failed { .. });
-            uploaded.push(outcome);
-            if failed {
-                break;
-            }
-        }
-        uploaded
-    } else {
-        pool.install(|| {
-            ready
-                .par_iter()
-                .map(|map| {
-                    upload_one(
-                        &agent,
-                        args.endpoint.as_deref(),
-                        repo,
-                        git_sha,
-                        api_key,
-                        map,
-                    )
-                })
-                .collect::<Vec<_>>()
-        })
-    };
-    outcomes.append(&mut uploaded);
+    Ok(pool.install(|| {
+        ready
+            .par_iter()
+            .map(|map| upload_one(agent, args.endpoint.as_deref(), repo, git_sha, api_key, map))
+            .collect()
+    }))
+}
 
+fn upload_ready_source_maps_fail_fast(
+    args: &UploadSourceMapsArgs,
+    repo: &str,
+    git_sha: &str,
+    api_key: &str,
+    agent: &ureq::Agent,
+    ready: &[PreparedSourceMap],
+) -> Vec<MapOutcome> {
+    let mut uploaded = Vec::new();
+    for map in ready {
+        let outcome = upload_one(agent, args.endpoint.as_deref(), repo, git_sha, api_key, map);
+        let failed = matches!(outcome, MapOutcome::Failed { .. });
+        uploaded.push(outcome);
+        if failed {
+            break;
+        }
+    }
+    uploaded
+}
+
+fn finish_source_map_upload(outcomes: Vec<MapOutcome>) -> Result<(), UploadSourceMapsError> {
     let success_count = outcomes
         .iter()
         .filter(|outcome| outcome.is_success())

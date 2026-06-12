@@ -3776,111 +3776,150 @@ fn map_coverage_subcommand(sub: &CoverageCli, explain: bool) -> coverage::Covera
             yes,
             non_interactive,
             json,
-        } => coverage::CoverageSubcommand::Setup(coverage::SetupArgs {
-            yes: *yes,
-            non_interactive: *non_interactive || *json,
-            json: *json,
-            explain,
-        }),
-        CoverageCli::Analyze {
-            runtime_coverage,
-            cloud,
-            api_key,
-            api_endpoint,
-            repo,
-            project_id,
-            coverage_period,
-            environment,
-            commit_sha,
-            production,
-            min_invocations_hot,
-            min_observation_volume,
-            low_traffic_threshold,
-            top,
-            blast_radius,
-            importance,
-        } => coverage::CoverageSubcommand::Analyze(coverage::AnalyzeArgs {
-            runtime_coverage: runtime_coverage.clone(),
-            cloud: *cloud,
-            api_key: api_key.clone(),
-            api_endpoint: api_endpoint.clone(),
-            repo: repo.clone(),
-            project_id: project_id.clone(),
-            coverage_period: *coverage_period,
-            environment: environment.clone(),
-            commit_sha: commit_sha.clone(),
-            production: *production,
-            min_invocations_hot: *min_invocations_hot,
-            min_observation_volume: *min_observation_volume,
-            low_traffic_threshold: *low_traffic_threshold,
-            top: *top,
-            blast_radius: *blast_radius,
-            importance: *importance,
-        }),
-        CoverageCli::UploadInventory {
-            api_key,
-            api_endpoint,
-            project_id,
-            git_sha,
-            allow_dirty,
-            exclude_paths,
-            path_prefix,
-            dry_run,
-            ignore_upload_errors,
-        } => coverage::CoverageSubcommand::UploadInventory(coverage::UploadInventoryArgs {
-            api_key: api_key.clone(),
-            api_endpoint: api_endpoint.clone(),
-            project_id: project_id.clone(),
-            git_sha: git_sha.clone(),
-            allow_dirty: *allow_dirty,
-            exclude_paths: exclude_paths.clone(),
-            path_prefix: path_prefix.clone(),
-            dry_run: *dry_run,
-            ignore_upload_errors: *ignore_upload_errors,
-        }),
-        CoverageCli::UploadSourceMaps {
-            dir,
-            include,
-            exclude,
-            repo,
-            git_sha,
-            endpoint,
-            strip_path,
-            dry_run,
-            concurrency,
-            fail_fast,
-        } => coverage::CoverageSubcommand::UploadSourceMaps(coverage::UploadSourceMapsArgs {
-            dir: dir.clone(),
-            include: include.clone(),
-            exclude: exclude.clone(),
-            repo: repo.clone(),
-            git_sha: git_sha.clone(),
-            endpoint: endpoint.clone(),
-            strip_path: *strip_path,
-            dry_run: *dry_run,
-            concurrency: *concurrency,
-            fail_fast: *fail_fast,
-        }),
-        CoverageCli::UploadStaticFindings {
-            api_key,
-            api_endpoint,
-            project_id,
-            git_sha,
-            allow_dirty,
-            dry_run,
-            ignore_upload_errors,
-        } => {
-            coverage::CoverageSubcommand::UploadStaticFindings(coverage::UploadStaticFindingsArgs {
-                api_key: api_key.clone(),
-                api_endpoint: api_endpoint.clone(),
-                project_id: project_id.clone(),
-                git_sha: git_sha.clone(),
-                allow_dirty: *allow_dirty,
-                dry_run: *dry_run,
-                ignore_upload_errors: *ignore_upload_errors,
-            })
-        }
+        } => map_coverage_setup(*yes, *non_interactive, *json, explain),
+        CoverageCli::Analyze { .. } => map_coverage_analyze(sub),
+        CoverageCli::UploadInventory { .. } => map_coverage_upload_inventory(sub),
+        CoverageCli::UploadSourceMaps { .. } => map_coverage_upload_source_maps(sub),
+        CoverageCli::UploadStaticFindings { .. } => map_coverage_upload_static_findings(sub),
     }
+}
+
+fn map_coverage_setup(
+    yes: bool,
+    non_interactive: bool,
+    json: bool,
+    explain: bool,
+) -> coverage::CoverageSubcommand {
+    coverage::CoverageSubcommand::Setup(coverage::SetupArgs {
+        yes,
+        non_interactive: non_interactive || json,
+        json,
+        explain,
+    })
+}
+
+fn map_coverage_analyze(sub: &CoverageCli) -> coverage::CoverageSubcommand {
+    let CoverageCli::Analyze {
+        runtime_coverage,
+        cloud,
+        api_key,
+        api_endpoint,
+        repo,
+        project_id,
+        coverage_period,
+        environment,
+        commit_sha,
+        production,
+        min_invocations_hot,
+        min_observation_volume,
+        low_traffic_threshold,
+        top,
+        blast_radius,
+        importance,
+    } = sub
+    else {
+        unreachable!("coverage analyze mapper called with non-analyze variant");
+    };
+    coverage::CoverageSubcommand::Analyze(coverage::AnalyzeArgs {
+        runtime_coverage: runtime_coverage.clone(),
+        cloud: *cloud,
+        api_key: api_key.clone(),
+        api_endpoint: api_endpoint.clone(),
+        repo: repo.clone(),
+        project_id: project_id.clone(),
+        coverage_period: *coverage_period,
+        environment: environment.clone(),
+        commit_sha: commit_sha.clone(),
+        production: *production,
+        min_invocations_hot: *min_invocations_hot,
+        min_observation_volume: *min_observation_volume,
+        low_traffic_threshold: *low_traffic_threshold,
+        top: *top,
+        blast_radius: *blast_radius,
+        importance: *importance,
+    })
+}
+
+fn map_coverage_upload_inventory(sub: &CoverageCli) -> coverage::CoverageSubcommand {
+    let CoverageCli::UploadInventory {
+        api_key,
+        api_endpoint,
+        project_id,
+        git_sha,
+        allow_dirty,
+        exclude_paths,
+        path_prefix,
+        dry_run,
+        ignore_upload_errors,
+    } = sub
+    else {
+        unreachable!("coverage inventory mapper called with non-inventory variant");
+    };
+    coverage::CoverageSubcommand::UploadInventory(coverage::UploadInventoryArgs {
+        api_key: api_key.clone(),
+        api_endpoint: api_endpoint.clone(),
+        project_id: project_id.clone(),
+        git_sha: git_sha.clone(),
+        allow_dirty: *allow_dirty,
+        exclude_paths: exclude_paths.clone(),
+        path_prefix: path_prefix.clone(),
+        dry_run: *dry_run,
+        ignore_upload_errors: *ignore_upload_errors,
+    })
+}
+
+fn map_coverage_upload_source_maps(sub: &CoverageCli) -> coverage::CoverageSubcommand {
+    let CoverageCli::UploadSourceMaps {
+        dir,
+        include,
+        exclude,
+        repo,
+        git_sha,
+        endpoint,
+        strip_path,
+        dry_run,
+        concurrency,
+        fail_fast,
+    } = sub
+    else {
+        unreachable!("coverage source-map mapper called with non-source-map variant");
+    };
+    coverage::CoverageSubcommand::UploadSourceMaps(coverage::UploadSourceMapsArgs {
+        dir: dir.clone(),
+        include: include.clone(),
+        exclude: exclude.clone(),
+        repo: repo.clone(),
+        git_sha: git_sha.clone(),
+        endpoint: endpoint.clone(),
+        strip_path: *strip_path,
+        dry_run: *dry_run,
+        concurrency: *concurrency,
+        fail_fast: *fail_fast,
+    })
+}
+
+fn map_coverage_upload_static_findings(sub: &CoverageCli) -> coverage::CoverageSubcommand {
+    let CoverageCli::UploadStaticFindings {
+        api_key,
+        api_endpoint,
+        project_id,
+        git_sha,
+        allow_dirty,
+        dry_run,
+        ignore_upload_errors,
+    } = sub
+    else {
+        unreachable!("coverage static-findings mapper called with non-static variant");
+    };
+    coverage::CoverageSubcommand::UploadStaticFindings(coverage::UploadStaticFindingsArgs {
+        api_key: api_key.clone(),
+        api_endpoint: api_endpoint.clone(),
+        project_id: project_id.clone(),
+        git_sha: git_sha.clone(),
+        allow_dirty: *allow_dirty,
+        dry_run: *dry_run,
+        ignore_upload_errors: *ignore_upload_errors,
+    })
 }
 
 struct CheckDispatchArgs {

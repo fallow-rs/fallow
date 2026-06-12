@@ -1094,10 +1094,6 @@ fn compare_file_score_triage(a: &FileHealthScore, b: &FileHealthScore) -> std::c
 /// The caller provides an `AnalysisOutput` (with graph and dead code results)
 /// so this function does not need to re-run the analysis pipeline. Complexity
 /// density is derived from the already-parsed modules.
-#[expect(
-    clippy::too_many_lines,
-    reason = "file scoring still coordinates per-module score assembly after setup extraction"
-)]
 pub(super) fn compute_file_scores(
     modules: &[fallow_core::extract::ModuleInfo],
     file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
@@ -1146,9 +1142,7 @@ pub(super) fn compute_file_scores(
             continue;
         };
 
-        if node.is_entry_point() {
-            entry_points.insert((*path).clone());
-        }
+        record_entry_point(&mut entry_points, node, path);
 
         let fan_in = graph
             .reverse_deps
@@ -1164,20 +1158,12 @@ pub(super) fn compute_file_scores(
         let value_exports = node.exports.iter().filter(|e| !e.is_type_only).count();
         let path_owned = (*path).clone();
         value_export_counts.insert(path_owned.clone(), value_exports);
-
-        if unused_files.contains(path_owned.as_path())
-            && !unused_export_names.contains_key(&path_owned)
-        {
-            let names: Vec<String> = node
-                .exports
-                .iter()
-                .filter(|e| !e.is_type_only)
-                .map(|e| e.name.to_string())
-                .collect();
-            if !names.is_empty() {
-                unused_export_names.insert(path_owned.clone(), names);
-            }
-        }
+        record_unused_file_export_names(
+            path_owned.as_path(),
+            &node.exports,
+            &unused_files,
+            &mut unused_export_names,
+        );
 
         let dead_code_ratio = compute_dead_code_ratio(
             path_owned.as_path(),
@@ -1197,67 +1183,32 @@ pub(super) fn compute_file_scores(
             lines,
         );
 
-        let module = module_by_id.get(&node.file_id);
-        let is_coverage_suppressed = module.is_some_and(|m| {
-            fallow_core::suppress::is_file_suppressed(
-                &m.suppressions,
-                fallow_types::suppress::IssueKind::CoverageGaps,
-            )
-        });
-        let is_test_reachable = node.is_test_reachable() || is_coverage_suppressed;
-        let crap_resolution = resolve_crap_coverage(
+        let crap = compute_file_score_crap(
+            node,
+            module_by_id.get(&node.file_id).copied(),
+            &graph,
             template_inherit.get(&node.file_id),
             istanbul_coverage,
             &path_owned,
         );
-        let (crap_max, crap_above_threshold, per_function) = match (module, crap_resolution) {
-            (None, _) => (0.0, 0, Vec::new()),
-            (Some(m), CrapCoverageResolution::TemplateInherited(inherit_ctx)) => {
-                let result = compute_crap_scores_estimated(
-                    &m.complexity,
-                    &inherit_ctx.test_referenced_exports,
-                    inherit_ctx.is_test_reachable,
-                    crate::health_types::CoverageSource::EstimatedComponentInherited,
-                );
-                (result.max_crap, result.above_threshold, result.per_function)
-            }
-            (Some(m), CrapCoverageResolution::Istanbul { file_coverage }) => {
-                let result =
-                    compute_crap_scores_istanbul(&m.complexity, file_coverage, is_test_reachable);
-                istanbul_matched += result.matched;
-                istanbul_total += result.total;
-                (result.max_crap, result.above_threshold, result.per_function)
-            }
-            (Some(m), CrapCoverageResolution::StaticEstimated) => {
-                let test_refs = build_test_referenced_exports(&node.exports, &graph.modules);
-                let result = compute_crap_scores_estimated(
-                    &m.complexity,
-                    &test_refs,
-                    is_test_reachable,
-                    crate::health_types::CoverageSource::Estimated,
-                );
-                (result.max_crap, result.above_threshold, result.per_function)
-            }
-        };
+        istanbul_matched += crap.istanbul_matched;
+        istanbul_total += crap.istanbul_total;
+        record_per_function_crap(&mut per_function_crap, &path_owned, crap.per_function);
 
-        if !per_function.is_empty() {
-            per_function_crap.insert(path_owned.clone(), per_function);
-        }
-
-        scores.push(FileHealthScore {
-            path: path_owned,
+        scores.push(build_file_health_score(
+            path_owned,
             fan_in,
             fan_out,
-            dead_code_ratio: dead_code_ratio_rounded,
-            complexity_density: complexity_density_rounded,
-            maintainability_index: (maintainability_index * 10.0).round() / 10.0,
+            dead_code_ratio_rounded,
+            complexity_density_rounded,
+            maintainability_index,
             total_cyclomatic,
             total_cognitive,
             function_count,
             lines,
-            crap_max,
-            crap_above_threshold,
-        });
+            crap.max,
+            crap.above_threshold,
+        ));
     }
 
     if let Some(changed) = changed_files {
@@ -1309,6 +1260,190 @@ pub(super) fn compute_file_scores(
             })
             .collect(),
     })
+}
+
+fn record_entry_point(
+    entry_points: &mut rustc_hash::FxHashSet<std::path::PathBuf>,
+    node: &fallow_core::graph::ModuleNode,
+    path: &std::path::Path,
+) {
+    if node.is_entry_point() {
+        entry_points.insert(path.to_path_buf());
+    }
+}
+
+fn record_unused_file_export_names(
+    path: &std::path::Path,
+    exports: &[fallow_core::graph::ExportSymbol],
+    unused_files: &rustc_hash::FxHashSet<&std::path::Path>,
+    unused_export_names: &mut rustc_hash::FxHashMap<std::path::PathBuf, Vec<String>>,
+) {
+    if !unused_files.contains(path) || unused_export_names.contains_key(path) {
+        return;
+    }
+
+    let names: Vec<String> = exports
+        .iter()
+        .filter(|export| !export.is_type_only)
+        .map(|export| export.name.to_string())
+        .collect();
+    if !names.is_empty() {
+        unused_export_names.insert(path.to_path_buf(), names);
+    }
+}
+
+struct FileScoreCrap {
+    max: f64,
+    above_threshold: usize,
+    per_function: Vec<PerFunctionCrap>,
+    istanbul_matched: usize,
+    istanbul_total: usize,
+}
+
+impl FileScoreCrap {
+    fn empty() -> Self {
+        Self {
+            max: 0.0,
+            above_threshold: 0,
+            per_function: Vec::new(),
+            istanbul_matched: 0,
+            istanbul_total: 0,
+        }
+    }
+
+    fn estimated(result: EstimatedCrapResult) -> Self {
+        Self {
+            max: result.max_crap,
+            above_threshold: result.above_threshold,
+            per_function: result.per_function,
+            istanbul_matched: 0,
+            istanbul_total: 0,
+        }
+    }
+
+    fn istanbul(result: IstanbulCrapResult) -> Self {
+        Self {
+            max: result.max_crap,
+            above_threshold: result.above_threshold,
+            per_function: result.per_function,
+            istanbul_matched: result.matched,
+            istanbul_total: result.total,
+        }
+    }
+}
+
+fn compute_file_score_crap(
+    node: &fallow_core::graph::ModuleNode,
+    module: Option<&fallow_core::extract::ModuleInfo>,
+    graph: &fallow_core::graph::ModuleGraph,
+    template_inherit: Option<&TemplateInheritContext>,
+    istanbul_coverage: Option<&IstanbulCoverage>,
+    path: &std::path::Path,
+) -> FileScoreCrap {
+    let Some(module) = module else {
+        return FileScoreCrap::empty();
+    };
+
+    let is_coverage_suppressed = fallow_core::suppress::is_file_suppressed(
+        &module.suppressions,
+        fallow_types::suppress::IssueKind::CoverageGaps,
+    );
+    let is_test_reachable = node.is_test_reachable() || is_coverage_suppressed;
+    let resolution = resolve_crap_coverage(template_inherit, istanbul_coverage, path);
+    match resolution {
+        CrapCoverageResolution::TemplateInherited(inherit_ctx) => {
+            compute_template_inherited_crap(module, inherit_ctx)
+        }
+        CrapCoverageResolution::Istanbul { file_coverage } => {
+            compute_istanbul_file_crap(module, file_coverage, is_test_reachable)
+        }
+        CrapCoverageResolution::StaticEstimated => {
+            compute_static_file_crap(module, &node.exports, &graph.modules, is_test_reachable)
+        }
+    }
+}
+
+fn compute_template_inherited_crap(
+    module: &fallow_core::extract::ModuleInfo,
+    inherit_ctx: &TemplateInheritContext,
+) -> FileScoreCrap {
+    FileScoreCrap::estimated(compute_crap_scores_estimated(
+        &module.complexity,
+        &inherit_ctx.test_referenced_exports,
+        inherit_ctx.is_test_reachable,
+        crate::health_types::CoverageSource::EstimatedComponentInherited,
+    ))
+}
+
+fn compute_istanbul_file_crap(
+    module: &fallow_core::extract::ModuleInfo,
+    file_coverage: Option<&IstanbulFileCoverage>,
+    is_test_reachable: bool,
+) -> FileScoreCrap {
+    FileScoreCrap::istanbul(compute_crap_scores_istanbul(
+        &module.complexity,
+        file_coverage,
+        is_test_reachable,
+    ))
+}
+
+fn compute_static_file_crap(
+    module: &fallow_core::extract::ModuleInfo,
+    exports: &[fallow_core::graph::ExportSymbol],
+    graph_modules: &[fallow_core::graph::ModuleNode],
+    is_test_reachable: bool,
+) -> FileScoreCrap {
+    let test_refs = build_test_referenced_exports(exports, graph_modules);
+    FileScoreCrap::estimated(compute_crap_scores_estimated(
+        &module.complexity,
+        &test_refs,
+        is_test_reachable,
+        crate::health_types::CoverageSource::Estimated,
+    ))
+}
+
+fn record_per_function_crap(
+    per_function_crap: &mut rustc_hash::FxHashMap<std::path::PathBuf, Vec<PerFunctionCrap>>,
+    path: &std::path::Path,
+    per_function: Vec<PerFunctionCrap>,
+) {
+    if !per_function.is_empty() {
+        per_function_crap.insert(path.to_path_buf(), per_function);
+    }
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "constructs a typed score row from already named per-file metrics"
+)]
+fn build_file_health_score(
+    path: std::path::PathBuf,
+    fan_in: usize,
+    fan_out: usize,
+    dead_code_ratio: f64,
+    complexity_density: f64,
+    maintainability_index: f64,
+    total_cyclomatic: u32,
+    total_cognitive: u32,
+    function_count: usize,
+    lines: u32,
+    crap_max: f64,
+    crap_above_threshold: usize,
+) -> FileHealthScore {
+    FileHealthScore {
+        path,
+        fan_in,
+        fan_out,
+        dead_code_ratio,
+        complexity_density,
+        maintainability_index: (maintainability_index * 10.0).round() / 10.0,
+        total_cyclomatic,
+        total_cognitive,
+        function_count,
+        lines,
+        crap_max,
+        crap_above_threshold,
+    }
 }
 
 struct FileScoreCoverageSetup<'a> {

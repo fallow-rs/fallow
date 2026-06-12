@@ -90,6 +90,18 @@ struct DuplicationRun {
     default_ignore_skips: DefaultIgnoreSkips,
 }
 
+struct DuplicationTokenizeContext<'a> {
+    root: &'a Path,
+    config: &'a DuplicatesConfig,
+    extra_ignores: Option<&'a IgnoreSet>,
+    default_skip_counts: &'a [AtomicUsize],
+    token_cache: Option<&'a TokenCache>,
+    token_cache_mode: TokenCacheMode,
+    normalization: fallow_config::ResolvedNormalization,
+    strip_types: bool,
+    skip_imports: bool,
+}
+
 /// Run duplication detection on the given files.
 ///
 /// This is the main entry point for the duplication analysis. It:
@@ -239,102 +251,23 @@ fn find_duplicates_inner(
     let cache_root = cache_root.filter(|_| files.len() >= config.min_corpus_size_for_token_cache);
     let token_cache = cache_root.map(TokenCache::load);
 
-    let mut file_data: Vec<TokenizedFile> = files
-        .par_iter()
-        .filter_map(|file| {
-            let relative = file.path.strip_prefix(root).unwrap_or(&file.path);
-            if let Some(ref ignores) = extra_ignores {
-                if let Some(index) = ignores.default_match_index(relative) {
-                    default_skip_counts[index].fetch_add(1, Ordering::Relaxed);
-                    return None;
-                }
-                if ignores.is_match(relative) {
-                    return None;
-                }
-            }
+    let mut file_data = tokenize_duplication_files(
+        files,
+        &DuplicationTokenizeContext {
+            root,
+            config,
+            extra_ignores: extra_ignores.as_ref(),
+            default_skip_counts: &default_skip_counts,
+            token_cache: token_cache.as_ref(),
+            token_cache_mode,
+            normalization,
+            strip_types,
+            skip_imports,
+        },
+    );
 
-            let metadata = std::fs::metadata(&file.path).ok()?;
-
-            let cached_entry = token_cache
-                .as_ref()
-                .and_then(|cache| cache.get(&file.path, &metadata, token_cache_mode));
-            let cache_hit = cached_entry.is_some();
-
-            let (mut entry, suppressions) = if let Some(entry) = cached_entry {
-                let suppressions = entry.suppressions.clone();
-                if suppress::is_file_suppressed(&suppressions, IssueKind::CodeDuplication) {
-                    return None;
-                }
-                (entry, suppressions)
-            } else {
-                let source = std::fs::read_to_string(&file.path).ok()?;
-                let suppressions = suppress::parse_suppressions_from_source(&source).suppressions;
-                if suppress::is_file_suppressed(&suppressions, IssueKind::CodeDuplication) {
-                    return None;
-                }
-
-                let file_tokens = if strip_types {
-                    tokenize_file_cross_language(&file.path, &source, true, skip_imports)
-                } else {
-                    tokenize_file(&file.path, &source, skip_imports)
-                };
-                if file_tokens.tokens.is_empty() {
-                    return None;
-                }
-
-                let hashed = normalize_and_hash_resolved(&file_tokens.tokens, normalization);
-                let entry = TokenCacheEntry {
-                    hashed_tokens: hashed,
-                    file_tokens,
-                    suppressions: suppressions.clone(),
-                };
-                (entry, suppressions)
-            };
-            if entry.file_tokens.tokens.is_empty() {
-                return None;
-            }
-            if entry.hashed_tokens.len() < config.min_tokens {
-                return None;
-            }
-
-            Some(TokenizedFile {
-                path: file.path.clone(),
-                hashed_tokens: std::mem::take(&mut entry.hashed_tokens),
-                file_tokens: entry.file_tokens,
-                metadata: Some(metadata),
-                cache_hit,
-                suppressions,
-            })
-        })
-        .collect();
-
-    if let (Some(cache_root), Some(mut cache)) = (cache_root, token_cache) {
-        for file in &file_data {
-            if !file.cache_hit
-                && let Some(metadata) = &file.metadata
-            {
-                cache.insert(
-                    &file.path,
-                    metadata,
-                    token_cache_mode,
-                    &file.hashed_tokens,
-                    &file.file_tokens,
-                    &file.suppressions,
-                );
-            }
-        }
-        cache.retain_paths(files);
-        match cache.save_if_dirty() {
-            Ok(true) => {
-                tracing::debug!(cache_root = %cache_root.display(), "saved duplication token cache");
-            }
-            Ok(false) => {
-                tracing::debug!(cache_root = %cache_root.display(), "duplication token cache unchanged");
-            }
-            Err(err) => {
-                tracing::warn!("Failed to save duplication token cache: {err}");
-            }
-        }
+    if let (Some(cache_root), Some(cache)) = (cache_root, token_cache) {
+        save_duplication_token_cache(cache_root, cache, files, &file_data, token_cache_mode);
     }
 
     tracing::info!(
@@ -386,6 +319,134 @@ fn find_duplicates_inner(
     DuplicationRun {
         report,
         default_ignore_skips,
+    }
+}
+
+fn tokenize_duplication_files(
+    files: &[DiscoveredFile],
+    ctx: &DuplicationTokenizeContext<'_>,
+) -> Vec<TokenizedFile> {
+    files
+        .par_iter()
+        .filter_map(|file| tokenize_duplication_file(file, ctx))
+        .collect()
+}
+
+fn tokenize_duplication_file(
+    file: &DiscoveredFile,
+    ctx: &DuplicationTokenizeContext<'_>,
+) -> Option<TokenizedFile> {
+    if should_skip_duplicate_file(file, ctx) {
+        return None;
+    }
+
+    let metadata = std::fs::metadata(&file.path).ok()?;
+    let cached_entry = ctx
+        .token_cache
+        .and_then(|cache| cache.get(&file.path, &metadata, ctx.token_cache_mode));
+    let cache_hit = cached_entry.is_some();
+    let (mut entry, suppressions) = duplication_token_cache_entry(file, ctx, cached_entry)?;
+    if entry.file_tokens.tokens.is_empty() || entry.hashed_tokens.len() < ctx.config.min_tokens {
+        return None;
+    }
+
+    Some(TokenizedFile {
+        path: file.path.clone(),
+        hashed_tokens: std::mem::take(&mut entry.hashed_tokens),
+        file_tokens: entry.file_tokens,
+        metadata: Some(metadata),
+        cache_hit,
+        suppressions,
+    })
+}
+
+fn should_skip_duplicate_file(file: &DiscoveredFile, ctx: &DuplicationTokenizeContext<'_>) -> bool {
+    let relative = file.path.strip_prefix(ctx.root).unwrap_or(&file.path);
+    let Some(ignores) = ctx.extra_ignores else {
+        return false;
+    };
+    if let Some(index) = ignores.default_match_index(relative) {
+        ctx.default_skip_counts[index].fetch_add(1, Ordering::Relaxed);
+        return true;
+    }
+    ignores.is_match(relative)
+}
+
+fn duplication_token_cache_entry(
+    file: &DiscoveredFile,
+    ctx: &DuplicationTokenizeContext<'_>,
+    cached_entry: Option<TokenCacheEntry>,
+) -> Option<(TokenCacheEntry, Vec<Suppression>)> {
+    if let Some(entry) = cached_entry {
+        let suppressions = entry.suppressions.clone();
+        if suppress::is_file_suppressed(&suppressions, IssueKind::CodeDuplication) {
+            return None;
+        }
+        return Some((entry, suppressions));
+    }
+
+    let source = std::fs::read_to_string(&file.path).ok()?;
+    let suppressions = suppress::parse_suppressions_from_source(&source).suppressions;
+    if suppress::is_file_suppressed(&suppressions, IssueKind::CodeDuplication) {
+        return None;
+    }
+    let file_tokens = tokenize_duplication_source(file, ctx, &source);
+    if file_tokens.tokens.is_empty() {
+        return None;
+    }
+    let hashed_tokens = normalize_and_hash_resolved(&file_tokens.tokens, ctx.normalization);
+    Some((
+        TokenCacheEntry {
+            hashed_tokens,
+            file_tokens,
+            suppressions: suppressions.clone(),
+        },
+        suppressions,
+    ))
+}
+
+fn tokenize_duplication_source(
+    file: &DiscoveredFile,
+    ctx: &DuplicationTokenizeContext<'_>,
+    source: &str,
+) -> tokenize::FileTokens {
+    if ctx.strip_types {
+        tokenize_file_cross_language(&file.path, source, true, ctx.skip_imports)
+    } else {
+        tokenize_file(&file.path, source, ctx.skip_imports)
+    }
+}
+
+fn save_duplication_token_cache(
+    cache_root: &Path,
+    mut cache: TokenCache,
+    files: &[DiscoveredFile],
+    file_data: &[TokenizedFile],
+    mode: TokenCacheMode,
+) {
+    for file in file_data {
+        if !file.cache_hit
+            && let Some(metadata) = &file.metadata
+        {
+            cache.insert(
+                &file.path,
+                metadata,
+                mode,
+                &file.hashed_tokens,
+                &file.file_tokens,
+                &file.suppressions,
+            );
+        }
+    }
+    cache.retain_paths(files);
+    match cache.save_if_dirty() {
+        Ok(true) => {
+            tracing::debug!(cache_root = %cache_root.display(), "saved duplication token cache");
+        }
+        Ok(false) => {
+            tracing::debug!(cache_root = %cache_root.display(), "duplication token cache unchanged");
+        }
+        Err(err) => tracing::warn!("Failed to save duplication token cache: {err}"),
     }
 }
 

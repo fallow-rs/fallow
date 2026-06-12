@@ -107,25 +107,12 @@ impl CloneDetector {
         let total_files = files.len();
         let total_lines: usize = files.iter().map(|f| f.file_tokens.line_count).sum();
         let total_tokens: usize = files.iter().map(|f| f.hashed_tokens.len()).sum();
-        let focus_file_ids = focus_files.map(|focus| {
-            let normalized: rustc_hash::FxHashSet<std::path::PathBuf> = focus
-                .iter()
-                .map(|p| dunce::simplified(p).to_path_buf())
-                .collect();
-            files
-                .iter()
-                .map(|file| normalized.contains(dunce::simplified(&file.path)))
-                .collect::<Vec<_>>()
-        });
-
-        tracing::debug!(
+        let focus_file_ids = focus_files.map(|focus| build_focus_file_ids(&files, focus));
+        trace_clone_detection_input(
             total_files,
             total_tokens,
             total_lines,
-            focused_files = focus_file_ids
-                .as_ref()
-                .map_or(0, |ids| ids.iter().filter(|&&is_focus| is_focus).count()),
-            "clone detection input"
+            focus_file_ids.as_deref(),
         );
 
         let t0 = std::time::Instant::now();
@@ -204,24 +191,18 @@ impl CloneDetector {
         let stats_time = t0.elapsed();
         tracing::debug!(elapsed_us = stats_time.as_micros(), "step7_compute_stats");
 
-        tracing::info!(
-            total_us = (rank_time
-                + concat_time
-                + sa_time
-                + lcp_time
-                + extract_time
-                + build_time
-                + stats_time)
-                .as_micros(),
-            rank_us = rank_time.as_micros(),
-            sa_us = sa_time.as_micros(),
-            lcp_us = lcp_time.as_micros(),
-            extract_us = extract_time.as_micros(),
-            build_us = build_time.as_micros(),
-            stats_us = stats_time.as_micros(),
+        trace_clone_detection_complete(
+            &CloneDetectionTimings {
+                rank: rank_time,
+                concat: concat_time,
+                suffix_array: sa_time,
+                lcp: lcp_time,
+                extract: extract_time,
+                build: build_time,
+                stats: stats_time,
+            },
             total_tokens,
-            clone_groups = clone_groups.len(),
-            "clone detection complete"
+            clone_groups.len(),
         );
 
         DuplicationReport {
@@ -231,6 +212,69 @@ impl CloneDetector {
             stats,
         }
     }
+}
+
+struct CloneDetectionTimings {
+    rank: std::time::Duration,
+    concat: std::time::Duration,
+    suffix_array: std::time::Duration,
+    lcp: std::time::Duration,
+    extract: std::time::Duration,
+    build: std::time::Duration,
+    stats: std::time::Duration,
+}
+
+fn build_focus_file_ids(files: &[FileData], focus_files: &FxHashSet<PathBuf>) -> Vec<bool> {
+    let normalized: rustc_hash::FxHashSet<std::path::PathBuf> = focus_files
+        .iter()
+        .map(|p| dunce::simplified(p).to_path_buf())
+        .collect();
+    files
+        .iter()
+        .map(|file| normalized.contains(dunce::simplified(&file.path)))
+        .collect()
+}
+
+fn trace_clone_detection_input(
+    total_files: usize,
+    total_tokens: usize,
+    total_lines: usize,
+    focus_file_ids: Option<&[bool]>,
+) {
+    tracing::debug!(
+        total_files,
+        total_tokens,
+        total_lines,
+        focused_files =
+            focus_file_ids.map_or(0, |ids| ids.iter().filter(|&&is_focus| is_focus).count()),
+        "clone detection input"
+    );
+}
+
+fn trace_clone_detection_complete(
+    timings: &CloneDetectionTimings,
+    total_tokens: usize,
+    clone_groups: usize,
+) {
+    tracing::info!(
+        total_us = (timings.rank
+            + timings.concat
+            + timings.suffix_array
+            + timings.lcp
+            + timings.extract
+            + timings.build
+            + timings.stats)
+            .as_micros(),
+        rank_us = timings.rank.as_micros(),
+        sa_us = timings.suffix_array.as_micros(),
+        lcp_us = timings.lcp.as_micros(),
+        extract_us = timings.extract.as_micros(),
+        build_us = timings.build.as_micros(),
+        stats_us = timings.stats.as_micros(),
+        total_tokens,
+        clone_groups,
+        "clone detection complete"
+    );
 }
 
 /// Create an empty report when there are no files to analyze.

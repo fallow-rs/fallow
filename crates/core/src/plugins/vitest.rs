@@ -135,136 +135,155 @@ impl Plugin for VitestPlugin {
         let mut result = PluginResult::default();
 
         let imports = config_parser::extract_imports(source, config_path);
-        for imp in &imports {
-            let dep = crate::resolve::extract_package_name(imp);
-            result.referenced_dependencies.push(dep);
-        }
+        add_import_dependencies(&mut result, &imports);
         result.referenced_dependencies.extend(
             config_parser::extract_vite_react_babel_dependencies(source, config_path),
         );
 
-        test_alias::apply_test_block_aliases(&mut result, source, config_path, root);
-        for (find, replacement, is_bare) in
-            config_parser::extract_config_aliases_kinded(source, config_path, &["resolve", "alias"])
-        {
-            test_alias::process_test_alias(
-                &mut result,
-                &find,
-                &replacement,
-                is_bare,
-                config_path,
-                root,
-            );
-        }
-        test_alias::apply_workspace_array_aliases(&mut result, source, config_path, root);
-        test_alias::debug_unreachable_config(source, config_path);
+        apply_vitest_aliases(&mut result, source, config_path, root);
+        apply_vitest_includes(&mut result, source, config_path);
+        add_vitest_setup_files(&mut result, source, config_path, root);
 
-        let root_includes =
-            config_parser::extract_config_string_array(source, config_path, &["test", "include"]);
-        if !root_includes.is_empty() {
-            result.replace_entry_patterns = true;
-        }
-        result.extend_entry_patterns(root_includes);
-
-        let project_includes = config_parser::extract_config_array_nested_string_or_array(
-            source,
-            config_path,
-            &["test", "projects"],
-            &["test", "include"],
-        );
-        result.extend_entry_patterns(project_includes);
-
-        let mut setup_files = config_parser::extract_config_string_or_array(
-            source,
-            config_path,
-            &["test", "setupFiles"],
-        );
-        setup_files.extend(config_parser::extract_config_array_nested_string_or_array(
-            source,
-            config_path,
-            &["test", "projects"],
-            &["test", "setupFiles"],
-        ));
-        for f in &setup_files {
-            result
-                .setup_files
-                .push(root.join(f.trim_start_matches("./")));
-        }
-
-        let mut global_setup = config_parser::extract_config_string_or_array(
-            source,
-            config_path,
-            &["test", "globalSetup"],
-        );
-        global_setup.extend(config_parser::extract_config_array_nested_string_or_array(
-            source,
-            config_path,
-            &["test", "projects"],
-            &["test", "globalSetup"],
-        ));
-        for f in &global_setup {
-            result
-                .setup_files
-                .push(root.join(f.trim_start_matches("./")));
-        }
-
-        if let Some(env) =
-            config_parser::extract_config_string(source, config_path, &["test", "environment"])
-            && !matches!(env.as_str(), "node" | "jsdom" | "happy-dom")
-        {
-            result
-                .referenced_dependencies
-                .push(format!("vitest-environment-{env}"));
-            result.referenced_dependencies.push(env);
-        }
-
-        let reporters = config_parser::extract_config_nested_shallow_strings(
-            source,
-            config_path,
-            &["test"],
-            "reporters",
-        );
-        for reporter in &reporters {
-            if !BUILTIN_REPORTERS.contains(&reporter.as_str()) {
-                let dep = crate::resolve::extract_package_name(reporter);
-                result.referenced_dependencies.push(dep);
-            }
-        }
-
-        if let Some(provider) = config_parser::extract_config_string(
-            source,
-            config_path,
-            &["test", "coverage", "provider"],
-        ) && !matches!(provider.as_str(), "v8" | "istanbul")
-        {
-            result
-                .referenced_dependencies
-                .push(format!("@vitest/coverage-{provider}"));
-            result.referenced_dependencies.push(provider);
-        }
-
-        if let Some(checker) = config_parser::extract_config_string(
-            source,
-            config_path,
-            &["test", "typecheck", "checker"],
-        ) && !matches!(checker.as_str(), "tsc")
-        {
-            result.referenced_dependencies.push(checker);
-        }
-
-        if let Some(provider) = config_parser::extract_config_string(
-            source,
-            config_path,
-            &["test", "browser", "provider"],
-        ) && !matches!(provider.as_str(), "preview")
-        {
-            result
-                .referenced_dependencies
-                .push("@vitest/browser".to_string());
-            result.referenced_dependencies.push(provider);
-        }
+        add_vitest_environment_dependency(&mut result, source, config_path);
+        add_vitest_reporter_dependencies(&mut result, source, config_path);
+        add_vitest_coverage_dependency(&mut result, source, config_path);
+        add_vitest_typecheck_dependency(&mut result, source, config_path);
+        add_vitest_browser_dependency(&mut result, source, config_path);
 
         result
+    }
+}
+
+fn add_import_dependencies(result: &mut PluginResult, imports: &[String]) {
+    for imp in imports {
+        let dep = crate::resolve::extract_package_name(imp);
+        result.referenced_dependencies.push(dep);
+    }
+}
+
+fn apply_vitest_aliases(result: &mut PluginResult, source: &str, config_path: &Path, root: &Path) {
+    test_alias::apply_test_block_aliases(result, source, config_path, root);
+    for (find, replacement, is_bare) in
+        config_parser::extract_config_aliases_kinded(source, config_path, &["resolve", "alias"])
+    {
+        test_alias::process_test_alias(result, &find, &replacement, is_bare, config_path, root);
+    }
+    test_alias::apply_workspace_array_aliases(result, source, config_path, root);
+    test_alias::debug_unreachable_config(source, config_path);
+}
+
+fn apply_vitest_includes(result: &mut PluginResult, source: &str, config_path: &Path) {
+    let root_includes =
+        config_parser::extract_config_string_array(source, config_path, &["test", "include"]);
+    if !root_includes.is_empty() {
+        result.replace_entry_patterns = true;
+    }
+    result.extend_entry_patterns(root_includes);
+
+    let project_includes = config_parser::extract_config_array_nested_string_or_array(
+        source,
+        config_path,
+        &["test", "projects"],
+        &["test", "include"],
+    );
+    result.extend_entry_patterns(project_includes);
+}
+
+fn add_vitest_setup_files(
+    result: &mut PluginResult,
+    source: &str,
+    config_path: &Path,
+    root: &Path,
+) {
+    let mut setup_files =
+        config_parser::extract_config_string_or_array(source, config_path, &["test", "setupFiles"]);
+    setup_files.extend(config_parser::extract_config_array_nested_string_or_array(
+        source,
+        config_path,
+        &["test", "projects"],
+        &["test", "setupFiles"],
+    ));
+    for f in &setup_files {
+        result
+            .setup_files
+            .push(root.join(f.trim_start_matches("./")));
+    }
+
+    let mut global_setup = config_parser::extract_config_string_or_array(
+        source,
+        config_path,
+        &["test", "globalSetup"],
+    );
+    global_setup.extend(config_parser::extract_config_array_nested_string_or_array(
+        source,
+        config_path,
+        &["test", "projects"],
+        &["test", "globalSetup"],
+    ));
+    for f in &global_setup {
+        result
+            .setup_files
+            .push(root.join(f.trim_start_matches("./")));
+    }
+}
+
+fn add_vitest_environment_dependency(result: &mut PluginResult, source: &str, config_path: &Path) {
+    if let Some(env) =
+        config_parser::extract_config_string(source, config_path, &["test", "environment"])
+        && !matches!(env.as_str(), "node" | "jsdom" | "happy-dom")
+    {
+        result
+            .referenced_dependencies
+            .push(format!("vitest-environment-{env}"));
+        result.referenced_dependencies.push(env);
+    }
+}
+
+fn add_vitest_reporter_dependencies(result: &mut PluginResult, source: &str, config_path: &Path) {
+    let reporters = config_parser::extract_config_nested_shallow_strings(
+        source,
+        config_path,
+        &["test"],
+        "reporters",
+    );
+    for reporter in &reporters {
+        if !BUILTIN_REPORTERS.contains(&reporter.as_str()) {
+            let dep = crate::resolve::extract_package_name(reporter);
+            result.referenced_dependencies.push(dep);
+        }
+    }
+}
+
+fn add_vitest_coverage_dependency(result: &mut PluginResult, source: &str, config_path: &Path) {
+    if let Some(provider) =
+        config_parser::extract_config_string(source, config_path, &["test", "coverage", "provider"])
+        && !matches!(provider.as_str(), "v8" | "istanbul")
+    {
+        result
+            .referenced_dependencies
+            .push(format!("@vitest/coverage-{provider}"));
+        result.referenced_dependencies.push(provider);
+    }
+}
+
+fn add_vitest_typecheck_dependency(result: &mut PluginResult, source: &str, config_path: &Path) {
+    if let Some(checker) =
+        config_parser::extract_config_string(source, config_path, &["test", "typecheck", "checker"])
+        && !matches!(checker.as_str(), "tsc")
+    {
+        result.referenced_dependencies.push(checker);
+    }
+}
+
+fn add_vitest_browser_dependency(result: &mut PluginResult, source: &str, config_path: &Path) {
+    if let Some(provider) =
+        config_parser::extract_config_string(source, config_path, &["test", "browser", "provider"])
+        && !matches!(provider.as_str(), "preview")
+    {
+        result
+            .referenced_dependencies
+            .push("@vitest/browser".to_string());
+        result.referenced_dependencies.push(provider);
     }
 }
 

@@ -755,128 +755,132 @@ fn merge_with_committed(derived: &Map<String, Value>) -> Result<Value, String> {
 
 /// Hand-maintained root envelopes that still need top-level `oneOf` entries.
 const HAND_MAINTAINED_ROOT_ENVELOPES: &[&str] = &[];
+const FALLOW_OUTPUT_VARIANTS: &[(&str, &[&str], &str)] = &[
+    (
+        "audit",
+        &["AuditOutput"],
+        "`fallow audit --format json`. Required `command: \"audit\"` singleton\nplus `verdict` and `summary`.",
+    ),
+    (
+        "explain",
+        &["ExplainOutput"],
+        "`fallow explain <issue-type> --format json`. Required `id`, `name`,\n`rationale`, `example`, `how_to_fix`, `docs`; no `schema_version`.",
+    ),
+    (
+        "review-envelope",
+        &["ReviewEnvelopeOutput"],
+        "`fallow --format review-github` / `--format review-gitlab`. Required\n`body`, `comments`, `meta`; no `schema_version`.",
+    ),
+    (
+        "review-reconcile",
+        &["ReviewReconcileOutput"],
+        "`fallow ci reconcile-review --format json`. Required `schema`\nsingleton plus `provider`, `comments`, and the various\n`*_fingerprints` arrays.",
+    ),
+    (
+        "coverage-setup",
+        &["CoverageSetupOutput"],
+        "`fallow coverage setup --json`. Required `schema_version` singleton\nplus `framework_detected`, `members`, `commands`, `snippets`.",
+    ),
+    (
+        "coverage-analyze",
+        &["CoverageAnalyzeOutput"],
+        "`fallow coverage analyze --format json`. Required\n`schema_version: \"1\"` singleton plus `version`, `elapsed_ms`,\n`runtime_coverage`.",
+    ),
+    (
+        "list-boundaries",
+        &["ListBoundariesOutput"],
+        "`fallow list --boundaries --format json`. Required `boundaries`\nsub-object; no `schema_version`.",
+    ),
+    (
+        "list-workspaces",
+        &["WorkspacesOutput"],
+        "`fallow workspaces --format json`. Required `workspace_count`,\n`workspaces`, and `workspace_diagnostics`; no `schema_version`.",
+    ),
+    (
+        "health",
+        &["HealthOutput"],
+        "`fallow health --format json`.",
+    ),
+    ("dupes", &["DupesOutput"], "`fallow dupes --format json`."),
+    (
+        "dead-code-grouped",
+        &["CheckGroupedOutput"],
+        "`fallow dead-code --format json --group-by <mode>`. Required `grouped_by`\nplus a `groups` array.",
+    ),
+    (
+        "impact",
+        &["ImpactReport"],
+        "`fallow impact --format json`. Required `enabled`, `record_count`,\n`containment_count`, `recent_containment`; no global `schema_version`,\n`command`, `total_issues`, or `report`.",
+    ),
+    (
+        "security",
+        &["SecurityOutput", "SecuritySummaryOutput"],
+        "`fallow security --format json`. Full mode requires `security_findings`,\n`unresolved_edge_files`, and `unresolved_callee_sites`; summary mode requires\n`summary` and omits per-finding arrays.",
+    ),
+    (
+        "dead-code",
+        &["CheckOutput"],
+        "`fallow dead-code --format json`.\nRequired `total_issues` plus `summary: CheckSummary`.",
+    ),
+    (
+        "combined",
+        &["CombinedOutput"],
+        "Bare `fallow --format json` (combined dead-code + dupes + health).\nRequired `schema_version`, `version`, and `elapsed_ms`, with optional\n`check`, `dupes`, and `health` subreports.",
+    ),
+];
 
 /// Schemars emits internally tagged newtype variants as `$ref` plus sibling
 /// constraints. The schema declares draft-07, where `$ref` siblings are ignored
 /// by many validators and code generators. Rewrite the root union into explicit
 /// intersections so the `kind` discriminator is part of the public contract.
 fn rewrite_fallow_output_definition(definitions: &mut Map<String, Value>) -> Result<(), String> {
-    const VARIANTS: &[(&str, &[&str], &str)] = &[
-        (
-            "audit",
-            &["AuditOutput"],
-            "`fallow audit --format json`. Required `command: \"audit\"` singleton\nplus `verdict` and `summary`.",
-        ),
-        (
-            "explain",
-            &["ExplainOutput"],
-            "`fallow explain <issue-type> --format json`. Required `id`, `name`,\n`rationale`, `example`, `how_to_fix`, `docs`; no `schema_version`.",
-        ),
-        (
-            "review-envelope",
-            &["ReviewEnvelopeOutput"],
-            "`fallow --format review-github` / `--format review-gitlab`. Required\n`body`, `comments`, `meta`; no `schema_version`.",
-        ),
-        (
-            "review-reconcile",
-            &["ReviewReconcileOutput"],
-            "`fallow ci reconcile-review --format json`. Required `schema`\nsingleton plus `provider`, `comments`, and the various\n`*_fingerprints` arrays.",
-        ),
-        (
-            "coverage-setup",
-            &["CoverageSetupOutput"],
-            "`fallow coverage setup --json`. Required `schema_version` singleton\nplus `framework_detected`, `members`, `commands`, `snippets`.",
-        ),
-        (
-            "coverage-analyze",
-            &["CoverageAnalyzeOutput"],
-            "`fallow coverage analyze --format json`. Required\n`schema_version: \"1\"` singleton plus `version`, `elapsed_ms`,\n`runtime_coverage`.",
-        ),
-        (
-            "list-boundaries",
-            &["ListBoundariesOutput"],
-            "`fallow list --boundaries --format json`. Required `boundaries`\nsub-object; no `schema_version`.",
-        ),
-        (
-            "list-workspaces",
-            &["WorkspacesOutput"],
-            "`fallow workspaces --format json`. Required `workspace_count`,\n`workspaces`, and `workspace_diagnostics`; no `schema_version`.",
-        ),
-        (
-            "health",
-            &["HealthOutput"],
-            "`fallow health --format json`.",
-        ),
-        ("dupes", &["DupesOutput"], "`fallow dupes --format json`."),
-        (
-            "dead-code-grouped",
-            &["CheckGroupedOutput"],
-            "`fallow dead-code --format json --group-by <mode>`. Required `grouped_by`\nplus a `groups` array.",
-        ),
-        (
-            "impact",
-            &["ImpactReport"],
-            "`fallow impact --format json`. Required `enabled`, `record_count`,\n`containment_count`, `recent_containment`; no global `schema_version`,\n`command`, `total_issues`, or `report`.",
-        ),
-        (
-            "security",
-            &["SecurityOutput", "SecuritySummaryOutput"],
-            "`fallow security --format json`. Full mode requires `security_findings`,\n`unresolved_edge_files`, and `unresolved_callee_sites`; summary mode requires\n`summary` and omits per-finding arrays.",
-        ),
-        (
-            "dead-code",
-            &["CheckOutput"],
-            "`fallow dead-code --format json`.\nRequired `total_issues` plus `summary: CheckSummary`.",
-        ),
-        (
-            "combined",
-            &["CombinedOutput"],
-            "Bare `fallow --format json` (combined dead-code + dupes + health).\nRequired `schema_version`, `version`, and `elapsed_ms`, with optional\n`check`, `dupes`, and `health` subreports.",
-        ),
-    ];
-
     let output = definitions
         .get_mut("FallowOutput")
         .and_then(Value::as_object_mut)
         .ok_or_else(|| "derived schema has no object definition for `FallowOutput`".to_string())?;
 
-    let one_of = VARIANTS
+    let one_of = FALLOW_OUTPUT_VARIANTS
         .iter()
         .map(|(kind, definitions, description)| {
-            let payload_schema = if definitions.len() == 1 {
-                serde_json::json!({ "$ref": format!("#/definitions/{}", definitions[0]) })
-            } else {
-                serde_json::json!({
-                    "oneOf": definitions
-                        .iter()
-                        .map(|definition| {
-                            serde_json::json!({ "$ref": format!("#/definitions/{definition}") })
-                        })
-                        .collect::<Vec<_>>()
-                })
-            };
-            serde_json::json!({
-                "description": description,
-                "allOf": [
-                    payload_schema,
-                    {
-                        "type": "object",
-                        "properties": {
-                            "kind": {
-                                "type": "string",
-                                "const": kind
-                            }
-                        },
-                        "required": ["kind"]
-                    }
-                ]
-            })
+            fallow_output_variant_schema(kind, definitions, description)
         })
         .collect();
 
     output.remove("anyOf");
     output.insert("oneOf".to_string(), Value::Array(one_of));
     Ok(())
+}
+
+fn fallow_output_variant_schema(kind: &str, definitions: &[&str], description: &str) -> Value {
+    serde_json::json!({
+        "description": description,
+        "allOf": [
+            fallow_output_payload_schema(definitions),
+            {
+                "type": "object",
+                "properties": {
+                    "kind": {
+                        "type": "string",
+                        "const": kind
+                    }
+                },
+                "required": ["kind"]
+            }
+        ]
+    })
+}
+
+fn fallow_output_payload_schema(definitions: &[&str]) -> Value {
+    if definitions.len() == 1 {
+        serde_json::json!({ "$ref": format!("#/definitions/{}", definitions[0]) })
+    } else {
+        serde_json::json!({
+            "oneOf": definitions
+                .iter()
+                .map(|definition| serde_json::json!({ "$ref": format!("#/definitions/{definition}") }))
+                .collect::<Vec<_>>()
+        })
+    }
 }
 
 /// Drive the document-root `oneOf` from the typed `FallowOutput` enum.

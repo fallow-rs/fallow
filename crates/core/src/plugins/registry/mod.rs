@@ -10,7 +10,7 @@ use fallow_config::{
 
 use crate::scripts;
 
-use super::{PathRule, Plugin, PluginUsedExportRule, ProvidedDependencyRule};
+use super::{PathRule, Plugin, PluginResult, PluginUsedExportRule, ProvidedDependencyRule};
 
 pub(crate) mod builtin;
 mod helpers;
@@ -38,6 +38,28 @@ fn must_parse_workspace_config_when_root_active(plugin_name: &str) -> bool {
         plugin_name,
         "eslint" | "docusaurus" | "jest" | "tanstack-router" | "vitest"
     )
+}
+
+fn compile_config_matchers<'a>(
+    active: &[&'a dyn Plugin],
+) -> Vec<(&'a dyn Plugin, Vec<globset::GlobMatcher>)> {
+    active
+        .iter()
+        .filter(|plugin| !plugin.config_patterns().is_empty())
+        .map(|plugin| {
+            let matchers = plugin
+                .config_patterns()
+                .iter()
+                .filter_map(|pattern| {
+                    let prepared = prepare_config_pattern(pattern);
+                    globset::Glob::new(&prepared)
+                        .ok()
+                        .map(|glob| glob.compile_matcher())
+                })
+                .collect();
+            (*plugin, matchers)
+        })
+        .collect()
 }
 
 /// Registry of all available plugins (built-in + external).
@@ -373,10 +395,6 @@ impl PluginRegistry {
 
     /// Run all plugins against a project with explicit config-file search roots,
     /// returning invalid plugin regexes as hard errors.
-    #[expect(
-        clippy::too_many_lines,
-        reason = "Plugin discovery phases stay together to preserve the existing registry flow."
-    )]
     pub fn try_run_with_search_roots(
         &self,
         pkg: &PackageJson,
@@ -428,23 +446,7 @@ impl PluginRegistry {
             &mut result,
         );
 
-        let config_matchers: Vec<(&dyn Plugin, Vec<globset::GlobMatcher>)> = active
-            .iter()
-            .filter(|p| !p.config_patterns().is_empty())
-            .map(|p| {
-                let matchers: Vec<globset::GlobMatcher> = p
-                    .config_patterns()
-                    .iter()
-                    .filter_map(|pat| {
-                        let prepared = prepare_config_pattern(pat);
-                        globset::Glob::new(&prepared)
-                            .ok()
-                            .map(|g| g.compile_matcher())
-                    })
-                    .collect();
-                (*p, matchers)
-            })
-            .collect();
+        let config_matchers = compile_config_matchers(&active);
 
         use rayon::prelude::*;
         let needs_relative_files = !config_matchers.is_empty()
@@ -465,79 +467,15 @@ impl PluginRegistry {
             Vec::new()
         };
 
-        if !config_matchers.is_empty() {
-            let mut resolved_plugins: FxHashSet<&str> = FxHashSet::default();
-
-            for (plugin, matchers) in &config_matchers {
-                let plugin_hits: Vec<&PathBuf> = relative_files
-                    .par_iter()
-                    .filter_map(|(abs_path, rel_path)| {
-                        matchers
-                            .iter()
-                            .any(|m| m.is_match(rel_path.as_str()))
-                            .then_some(abs_path)
-                    })
-                    .collect();
-                for abs_path in plugin_hits {
-                    let Ok(source) = std::fs::read_to_string(abs_path) else {
-                        continue;
-                    };
-                    let plugin_result = plugin.resolve_config(abs_path, &source, root);
-                    if plugin_result.is_empty() {
-                        continue;
-                    }
-                    resolved_plugins.insert(plugin.name());
-                    tracing::debug!(
-                        plugin = plugin.name(),
-                        config = %abs_path.display(),
-                        entries = plugin_result.entry_patterns.len(),
-                        deps = plugin_result.referenced_dependencies.len(),
-                        "resolved config"
-                    );
-                    if let Err(mut errors) = process_config_result(
-                        plugin.name(),
-                        plugin_result,
-                        &mut result,
-                        Some(abs_path),
-                    ) {
-                        regex_errors.append(&mut errors);
-                    }
-                }
-            }
-
-            let json_configs = discover_config_files(
-                &config_matchers,
-                &resolved_plugins,
-                config_search_roots,
-                production_mode,
-            );
-            for (abs_path, plugin) in &json_configs {
-                if let Ok(source) = std::fs::read_to_string(abs_path) {
-                    let plugin_result = plugin.resolve_config(abs_path, &source, root);
-                    if !plugin_result.is_empty() {
-                        let rel = abs_path
-                            .strip_prefix(root)
-                            .map(|p| p.to_string_lossy())
-                            .unwrap_or_default();
-                        tracing::debug!(
-                            plugin = plugin.name(),
-                            config = %rel,
-                            entries = plugin_result.entry_patterns.len(),
-                            deps = plugin_result.referenced_dependencies.len(),
-                            "resolved config (filesystem fallback)"
-                        );
-                        if let Err(mut errors) = process_config_result(
-                            plugin.name(),
-                            plugin_result,
-                            &mut result,
-                            Some(abs_path),
-                        ) {
-                            regex_errors.append(&mut errors);
-                        }
-                    }
-                }
-            }
-        }
+        resolve_plugin_config_files(
+            &config_matchers,
+            &relative_files,
+            config_search_roots,
+            production_mode,
+            root,
+            &mut result,
+            &mut regex_errors,
+        );
 
         process_package_json_inline_configs(
             &active,
@@ -670,44 +608,16 @@ impl PluginRegistry {
             .collect();
 
         let mut resolved_ws_plugins: FxHashSet<&str> = FxHashSet::default();
-        if !workspace_matchers.is_empty() {
-            use rayon::prelude::*;
-            for (plugin, matchers) in &workspace_matchers {
-                let plugin_hits: Vec<&PathBuf> = relative_files
-                    .par_iter()
-                    .filter_map(|(abs_path, rel_path)| {
-                        matchers
-                            .iter()
-                            .any(|m| m.is_match(rel_path.as_str()))
-                            .then_some(abs_path)
-                    })
-                    .collect();
-                for abs_path in plugin_hits {
-                    let Ok(source) = std::fs::read_to_string(abs_path) else {
-                        continue;
-                    };
-                    let plugin_result = plugin.resolve_config(abs_path, &source, root);
-                    if plugin_result.is_empty() {
-                        continue;
-                    }
-                    resolved_ws_plugins.insert(plugin.name());
-                    tracing::debug!(
-                        plugin = plugin.name(),
-                        config = %abs_path.display(),
-                        entries = plugin_result.entry_patterns.len(),
-                        deps = plugin_result.referenced_dependencies.len(),
-                        "resolved config"
-                    );
-                    if let Err(mut errors) = process_config_result(
-                        plugin.name(),
-                        plugin_result,
-                        &mut result,
-                        Some(abs_path),
-                    ) {
-                        regex_errors.append(&mut errors);
-                    }
-                }
-            }
+        for (plugin, matchers) in &workspace_matchers {
+            resolve_plugin_matching_files(
+                *plugin,
+                matchers,
+                relative_files,
+                root,
+                &mut result,
+                &mut regex_errors,
+                &mut resolved_ws_plugins,
+            );
         }
 
         let ws_json_configs = if root == project_root {
@@ -826,6 +736,136 @@ fn plugin_warn_dedupe() -> &'static std::sync::Mutex<FxHashSet<String>> {
     static WARNED: std::sync::OnceLock<std::sync::Mutex<FxHashSet<String>>> =
         std::sync::OnceLock::new();
     WARNED.get_or_init(|| std::sync::Mutex::new(FxHashSet::default()))
+}
+
+fn resolve_plugin_config_files(
+    config_matchers: &[(&dyn Plugin, Vec<globset::GlobMatcher>)],
+    relative_files: &[(PathBuf, String)],
+    config_search_roots: &[&Path],
+    production_mode: bool,
+    root: &Path,
+    result: &mut AggregatedPluginResult,
+    regex_errors: &mut Vec<PluginRegexValidationError>,
+) {
+    if config_matchers.is_empty() {
+        return;
+    }
+
+    let mut resolved_plugins: FxHashSet<&str> = FxHashSet::default();
+    for (plugin, matchers) in config_matchers {
+        resolve_plugin_matching_files(
+            *plugin,
+            matchers,
+            relative_files,
+            root,
+            result,
+            regex_errors,
+            &mut resolved_plugins,
+        );
+    }
+
+    let json_configs = discover_config_files(
+        config_matchers,
+        &resolved_plugins,
+        config_search_roots,
+        production_mode,
+    );
+    for (abs_path, plugin) in &json_configs {
+        resolve_plugin_filesystem_config(*plugin, abs_path, root, result, regex_errors);
+    }
+}
+
+fn resolve_plugin_matching_files<'a>(
+    plugin: &'a dyn Plugin,
+    matchers: &[globset::GlobMatcher],
+    relative_files: &'a [(PathBuf, String)],
+    root: &Path,
+    result: &mut AggregatedPluginResult,
+    regex_errors: &mut Vec<PluginRegexValidationError>,
+    resolved_plugins: &mut FxHashSet<&'a str>,
+) {
+    use rayon::prelude::*;
+
+    let plugin_hits: Vec<&PathBuf> = relative_files
+        .par_iter()
+        .filter_map(|(abs_path, rel_path)| {
+            matchers
+                .iter()
+                .any(|m| m.is_match(rel_path.as_str()))
+                .then_some(abs_path)
+        })
+        .collect();
+    for abs_path in plugin_hits {
+        let Ok(source) = std::fs::read_to_string(abs_path) else {
+            continue;
+        };
+        let plugin_result = plugin.resolve_config(abs_path, &source, root);
+        if plugin_result.is_empty() {
+            continue;
+        }
+        resolved_plugins.insert(plugin.name());
+        process_resolved_plugin_config(
+            plugin,
+            abs_path,
+            plugin_result,
+            result,
+            regex_errors,
+            "resolved config",
+            abs_path.display(),
+        );
+    }
+}
+
+fn resolve_plugin_filesystem_config(
+    plugin: &dyn Plugin,
+    abs_path: &Path,
+    root: &Path,
+    result: &mut AggregatedPluginResult,
+    regex_errors: &mut Vec<PluginRegexValidationError>,
+) {
+    let Ok(source) = std::fs::read_to_string(abs_path) else {
+        return;
+    };
+    let plugin_result = plugin.resolve_config(abs_path, &source, root);
+    if plugin_result.is_empty() {
+        return;
+    }
+    let rel = abs_path
+        .strip_prefix(root)
+        .map(|p| p.to_string_lossy())
+        .unwrap_or_default();
+    process_resolved_plugin_config(
+        plugin,
+        abs_path,
+        plugin_result,
+        result,
+        regex_errors,
+        "resolved config (filesystem fallback)",
+        rel,
+    );
+}
+
+fn process_resolved_plugin_config(
+    plugin: &dyn Plugin,
+    abs_path: &Path,
+    plugin_result: PluginResult,
+    result: &mut AggregatedPluginResult,
+    regex_errors: &mut Vec<PluginRegexValidationError>,
+    message: &'static str,
+    config_display: impl std::fmt::Display,
+) {
+    tracing::debug!(
+        plugin = plugin.name(),
+        config = %config_display,
+        entries = plugin_result.entry_patterns.len(),
+        deps = plugin_result.referenced_dependencies.len(),
+        message
+    );
+    if let Err(mut errors) =
+        process_config_result(plugin.name(), plugin_result, result, Some(abs_path))
+    {
+        regex_errors.append(&mut errors);
+    }
 }
 
 /// Insert `key` into the dedupe set and return `true` when it was newly

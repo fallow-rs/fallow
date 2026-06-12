@@ -430,6 +430,30 @@ fn record_unresolved_callee_diagnostics(
         }));
 }
 
+fn sink_is_sanitized_for_matcher(matcher: &Matcher, module: &ModuleInfo, sink: &SinkSite) -> bool {
+    (is_html_sanitizable_category(&matcher.id) && sink_has_html_sanitizer(module, sink))
+        || (is_url_sanitizable_category(&matcher.id)
+            && sink_has_sanitizer(module, sink, SanitizerScope::Url))
+        || (is_path_sanitizable_category(&matcher.id)
+            && sink_has_sanitizer(module, sink, SanitizerScope::Path))
+        || (is_sql_identifier_sanitizable_category(&matcher.id)
+            && sink_has_sanitizer(module, sink, SanitizerScope::SqlIdentifier))
+}
+
+fn source_read_location(
+    span: Option<u32>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+    file_id: FileId,
+    sink_line_col: (u32, u32),
+) -> (u32, u32) {
+    match span {
+        Some(offset) if offset != 0 => {
+            byte_offset_to_line_col(line_offsets_by_file, file_id, offset)
+        }
+        _ => sink_line_col,
+    }
+}
+
 /// Run the catalogue-driven tainted-sink detector. Returns the findings plus the
 /// in-band blind-spot stats. Callers gate this on the `security_sink` rule
 /// severity; it never runs under bare `fallow` or the `audit` gate.
@@ -511,22 +535,7 @@ pub fn find_tainted_sinks(
                 continue;
             };
 
-            if is_html_sanitizable_category(&matcher.id) && sink_has_html_sanitizer(module, sink) {
-                continue;
-            }
-            if is_url_sanitizable_category(&matcher.id)
-                && sink_has_sanitizer(module, sink, SanitizerScope::Url)
-            {
-                continue;
-            }
-            if is_path_sanitizable_category(&matcher.id)
-                && sink_has_sanitizer(module, sink, SanitizerScope::Path)
-            {
-                continue;
-            }
-            if is_sql_identifier_sanitizable_category(&matcher.id)
-                && sink_has_sanitizer(module, sink, SanitizerScope::SqlIdentifier)
-            {
+            if sink_is_sanitized_for_matcher(matcher, module, sink) {
                 continue;
             }
 
@@ -549,11 +558,8 @@ pub fn find_tainted_sinks(
             // fall back to the sink line/col rather than a spurious line. `None`
             // for module-level findings keeps the trace honest (role
             // `ModuleSource`, set by the ranking pass).
-            let source_read = source.map(|(_, _, span)| match span {
-                Some(offset) if offset != 0 => {
-                    byte_offset_to_line_col(line_offsets_by_file, file_id, offset)
-                }
-                _ => (line, col),
+            let source_read = source.map(|(_, _, span)| {
+                source_read_location(span, line_offsets_by_file, file_id, (line, col))
             });
 
             // The destination-host signal for the secret-to-network category

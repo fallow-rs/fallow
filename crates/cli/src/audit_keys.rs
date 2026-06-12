@@ -622,10 +622,7 @@ pub(super) fn retain_introduced_dead_code(
     // retains keep exactly the items whose key is NOT in `base`, and the
     // `!base.contains(key)` filter below removes the same base-member keys
     // from the full key set, so `introduced` is identical either way.
-    let introduced = dead_code_keys(results, root)
-        .into_iter()
-        .filter(|key| !base.contains(key))
-        .collect::<FxHashSet<_>>();
+    let introduced = introduced_dead_code_keys(results, root, base);
     let keep = |key: String| introduced.contains(&key);
 
     let fallow_core::results::AnalysisResults {
@@ -677,26 +674,7 @@ pub(super) fn retain_introduced_dead_code(
     // introduced set; both predicates are equivalent for these collections
     // (see the `introduced` comment above), so this preserves the original
     // behavior.
-    unused_files.retain(|item| {
-        !base.contains(&format!(
-            "unused-file:{}",
-            relative_key_path(&item.file.path, root)
-        ))
-    });
-    unused_exports.retain(|item| {
-        !base.contains(&format!(
-            "unused-export:{}:{}",
-            relative_key_path(&item.export.path, root),
-            item.export.export_name
-        ))
-    });
-    unused_types.retain(|item| {
-        !base.contains(&format!(
-            "unused-type:{}:{}",
-            relative_key_path(&item.export.path, root),
-            item.export.export_name
-        ))
-    });
+    retain_introduced_fast_paths(unused_files, unused_exports, unused_types, root, base);
     private_type_leaks.retain(|item| {
         keep(format!(
             "private-type-leak:{}:{}:{}",
@@ -748,6 +726,46 @@ pub(super) fn retain_introduced_dead_code(
     unused_dependency_overrides.retain(|item| keep(unused_dependency_override_key(item, root)));
     misconfigured_dependency_overrides
         .retain(|item| keep(misconfigured_dependency_override_key(item, root)));
+}
+
+fn introduced_dead_code_keys(
+    results: &fallow_core::results::AnalysisResults,
+    root: &Path,
+    base: &FxHashSet<String>,
+) -> FxHashSet<String> {
+    dead_code_keys(results, root)
+        .into_iter()
+        .filter(|key| !base.contains(key))
+        .collect()
+}
+
+fn retain_introduced_fast_paths(
+    unused_files: &mut Vec<fallow_core::results::UnusedFileFinding>,
+    unused_exports: &mut Vec<fallow_core::results::UnusedExportFinding>,
+    unused_types: &mut Vec<fallow_core::results::UnusedTypeFinding>,
+    root: &Path,
+    base: &FxHashSet<String>,
+) {
+    unused_files.retain(|item| {
+        !base.contains(&format!(
+            "unused-file:{}",
+            relative_key_path(&item.file.path, root)
+        ))
+    });
+    unused_exports.retain(|item| {
+        !base.contains(&format!(
+            "unused-export:{}:{}",
+            relative_key_path(&item.export.path, root),
+            item.export.export_name
+        ))
+    });
+    unused_types.retain(|item| {
+        !base.contains(&format!(
+            "unused-type:{}:{}",
+            relative_key_path(&item.export.path, root),
+            item.export.export_name
+        ))
+    });
 }
 
 fn issue_was_introduced(key: &str, base: &FxHashSet<String>) -> bool {

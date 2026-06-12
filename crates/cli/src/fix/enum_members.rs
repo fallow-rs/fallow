@@ -171,107 +171,178 @@ pub(super) fn apply_enum_member_fixes(
             folded.iter().map(|f| f.parent_name.as_str()).collect();
 
         if dry_run {
-            for fix in &member_fixes {
-                if folded_parents.contains(fix.parent_name.as_str()) {
-                    continue;
-                }
-                if !matches!(output, OutputFormat::Json) {
-                    eprintln!(
-                        "Would remove enum member from {}:{} `{}.{}`",
-                        relative.display(),
-                        fix.line_idx + 1,
-                        fix.parent_name,
-                        fix.member_name,
-                    );
-                }
-                fixes.push(serde_json::json!({
-                    "type": "remove_enum_member",
-                    "path": relative.display().to_string(),
-                    "line": fix.line_idx + 1,
-                    "parent": fix.parent_name,
-                    "name": fix.member_name,
-                }));
-            }
-            for fold in &folded {
-                if !matches!(output, OutputFormat::Json) {
-                    eprintln!(
-                        "Would remove enum declaration from {}:{} `{}` (every member is unused; \
-                         importers in other files will need cleanup, run your TypeScript build to find them)",
-                        relative.display(),
-                        fold.decl_line + 1,
-                        fold.parent_name,
-                    );
-                }
-                fixes.push(serde_json::json!({
-                    "type": "remove_export",
-                    "path": relative.display().to_string(),
-                    "line": fold.decl_line + 1,
-                    "name": fold.parent_name,
-                }));
-            }
+            record_enum_member_dry_run(
+                &member_fixes,
+                &folded,
+                &folded_parents,
+                relative,
+                output,
+                fixes,
+            );
         } else {
             let mut new_lines: Vec<String> = lines.iter().map(ToString::to_string).collect();
-            let mut lines_to_delete: Vec<usize> = Vec::new();
-
-            for fix in &member_fixes {
-                if folded_parents.contains(fix.parent_name.as_str()) {
-                    continue;
-                }
-                let line = &new_lines[fix.line_idx];
-                if line.contains('{') && line.contains('}') {
-                    let new_line = remove_member_from_single_line(line, &fix.member_name);
-                    new_lines[fix.line_idx] = new_line;
-                } else {
-                    new_lines[fix.line_idx] = String::new();
-                    lines_to_delete.push(fix.line_idx);
-                }
-            }
-
-            for fold in &folded {
-                lines_to_delete.extend(fold.range.start_line..=fold.range.end_line);
-            }
-
-            lines_to_delete.sort_unstable();
-            lines_to_delete.dedup();
-            for &idx in lines_to_delete.iter().rev() {
-                new_lines.remove(idx);
-            }
-
+            let mut apply_ctx = EnumMemberApplyContext {
+                path,
+                relative,
+                output,
+                fixes,
+            };
+            apply_enum_member_file_fixes(
+                &mut new_lines,
+                &member_fixes,
+                &folded,
+                &folded_parents,
+                &mut apply_ctx,
+            );
             stage_fixed_content(plan, path, &new_lines, &meta, &content);
-
-            let target = path.display().to_string();
-            for fix in &member_fixes {
-                if folded_parents.contains(fix.parent_name.as_str()) {
-                    continue;
-                }
-                fixes.push(serde_json::json!({
-                    "type": "remove_enum_member",
-                    "path": relative.display().to_string(),
-                    "line": fix.line_idx + 1,
-                    "parent": fix.parent_name,
-                    "name": fix.member_name,
-                    "applied": true,
-                    "__target": target,
-                }));
-            }
-            for fold in &folded {
-                if !matches!(output, OutputFormat::Json) {
-                    eprintln!(
-                        "Removed unused enum `{}` from {}; importers in other files will need cleanup, run your TypeScript build to find them.",
-                        fold.parent_name,
-                        relative.display(),
-                    );
-                }
-                fixes.push(serde_json::json!({
-                    "type": "remove_export",
-                    "path": relative.display().to_string(),
-                    "line": fold.decl_line + 1,
-                    "name": fold.parent_name,
-                    "applied": true,
-                    "__target": target,
-                }));
-            }
         }
+    }
+}
+
+fn record_enum_member_dry_run(
+    member_fixes: &[EnumMemberFix],
+    folded: &[FoldedEnum],
+    folded_parents: &rustc_hash::FxHashSet<&str>,
+    relative: &Path,
+    output: OutputFormat,
+    fixes: &mut Vec<serde_json::Value>,
+) {
+    for fix in member_fixes {
+        if folded_parents.contains(fix.parent_name.as_str()) {
+            continue;
+        }
+        if !matches!(output, OutputFormat::Json) {
+            eprintln!(
+                "Would remove enum member from {}:{} `{}.{}`",
+                relative.display(),
+                fix.line_idx + 1,
+                fix.parent_name,
+                fix.member_name,
+            );
+        }
+        fixes.push(serde_json::json!({
+            "type": "remove_enum_member",
+            "path": relative.display().to_string(),
+            "line": fix.line_idx + 1,
+            "parent": fix.parent_name,
+            "name": fix.member_name,
+        }));
+    }
+    for fold in folded {
+        if !matches!(output, OutputFormat::Json) {
+            eprintln!(
+                "Would remove enum declaration from {}:{} `{}` (every member is unused; \
+                 importers in other files will need cleanup, run your TypeScript build to find them)",
+                relative.display(),
+                fold.decl_line + 1,
+                fold.parent_name,
+            );
+        }
+        fixes.push(serde_json::json!({
+            "type": "remove_export",
+            "path": relative.display().to_string(),
+            "line": fold.decl_line + 1,
+            "name": fold.parent_name,
+        }));
+    }
+}
+
+struct EnumMemberApplyContext<'a> {
+    path: &'a Path,
+    relative: &'a Path,
+    output: OutputFormat,
+    fixes: &'a mut Vec<serde_json::Value>,
+}
+
+fn apply_enum_member_file_fixes(
+    new_lines: &mut Vec<String>,
+    member_fixes: &[EnumMemberFix],
+    folded: &[FoldedEnum],
+    folded_parents: &rustc_hash::FxHashSet<&str>,
+    ctx: &mut EnumMemberApplyContext<'_>,
+) {
+    let mut lines_to_delete = enum_member_lines_to_delete(new_lines, member_fixes, folded_parents);
+    for fold in folded {
+        lines_to_delete.extend(fold.range.start_line..=fold.range.end_line);
+    }
+    lines_to_delete.sort_unstable();
+    lines_to_delete.dedup();
+    for &idx in lines_to_delete.iter().rev() {
+        new_lines.remove(idx);
+    }
+
+    record_applied_enum_member_fixes(
+        member_fixes,
+        folded,
+        folded_parents,
+        ctx.path,
+        ctx.relative,
+        ctx.output,
+        ctx.fixes,
+    );
+}
+
+fn enum_member_lines_to_delete(
+    new_lines: &mut [String],
+    member_fixes: &[EnumMemberFix],
+    folded_parents: &rustc_hash::FxHashSet<&str>,
+) -> Vec<usize> {
+    let mut lines_to_delete = Vec::new();
+    for fix in member_fixes {
+        if folded_parents.contains(fix.parent_name.as_str()) {
+            continue;
+        }
+        let line = &new_lines[fix.line_idx];
+        if line.contains('{') && line.contains('}') {
+            new_lines[fix.line_idx] = remove_member_from_single_line(line, &fix.member_name);
+        } else {
+            new_lines[fix.line_idx] = String::new();
+            lines_to_delete.push(fix.line_idx);
+        }
+    }
+    lines_to_delete
+}
+
+fn record_applied_enum_member_fixes(
+    member_fixes: &[EnumMemberFix],
+    folded: &[FoldedEnum],
+    folded_parents: &rustc_hash::FxHashSet<&str>,
+    path: &Path,
+    relative: &Path,
+    output: OutputFormat,
+    fixes: &mut Vec<serde_json::Value>,
+) {
+    let target = path.display().to_string();
+    for fix in member_fixes {
+        if folded_parents.contains(fix.parent_name.as_str()) {
+            continue;
+        }
+        fixes.push(serde_json::json!({
+            "type": "remove_enum_member",
+            "path": relative.display().to_string(),
+            "line": fix.line_idx + 1,
+            "parent": fix.parent_name,
+            "name": fix.member_name,
+            "applied": true,
+            "__target": target,
+        }));
+    }
+    for fold in folded {
+        if !matches!(output, OutputFormat::Json) {
+            eprintln!(
+                "Removed unused enum `{}` from {}; importers in other files will need cleanup, run your TypeScript build to find them.",
+                fold.parent_name,
+                relative.display(),
+            );
+        }
+        fixes.push(serde_json::json!({
+            "type": "remove_export",
+            "path": relative.display().to_string(),
+            "line": fold.decl_line + 1,
+            "name": fold.parent_name,
+            "applied": true,
+            "__target": target,
+        }));
     }
 }
 

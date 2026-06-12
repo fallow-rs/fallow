@@ -61,13 +61,13 @@ pub(super) fn create_resolver(active_plugins: &[String], extra_conditions: &[Str
 
 /// Return `true` for errors raised while loading a tsconfig file (as opposed to
 /// errors about the specifier itself). When `resolve_file` fails with one of these,
-/// a broken sibling tsconfig is poisoning resolution for the current file — retrying
+/// a broken sibling tsconfig is poisoning resolution for the current file, retrying
 /// via `resolve(dir, specifier)` bypasses `TsconfigDiscovery::Auto` and restores
 /// resolution for everything that does not need path aliases (relative, absolute,
 /// bare package specifiers).
 ///
 /// `IOError` and `Json` are included because a malformed or unreadable tsconfig
-/// surfaces as one of these — the variants are shared with package.json parsing,
+/// surfaces as one of these. The variants are shared with package.json parsing,
 /// but a retry is still safe: if the error really came from the specifier's own
 /// resolution, `resolve()` will fail the same way and we fall through to the
 /// existing error handling.
@@ -1350,78 +1350,172 @@ pub(super) fn resolve_specifier(
         }
         ResolveFileAttempt::Failed {
             used_tsconfig_fallback,
-        } => {
-            if let Some(result) = try_scss_fallbacks(ctx, from_file, specifier, from_style) {
-                return result;
-            }
+        } => resolve_failed_specifier(
+            ctx,
+            from_file,
+            specifier,
+            from_style,
+            FailedSpecifierFlags {
+                used_tsconfig_fallback,
+                is_bare,
+                is_alias,
+                matches_plugin_alias,
+            },
+        ),
+    }
+}
 
-            if used_tsconfig_fallback
-                && let Some(result) = try_tsconfig_root_dirs(ctx, from_file, specifier)
-            {
-                return result;
-            }
+#[derive(Clone, Copy)]
+struct FailedSpecifierFlags {
+    used_tsconfig_fallback: bool,
+    is_bare: bool,
+    is_alias: bool,
+    matches_plugin_alias: bool,
+}
 
-            if (used_tsconfig_fallback || is_bare || is_alias || matches_plugin_alias)
-                && let Some(result) = try_nearest_tsconfig_path_alias(ctx, from_file, specifier)
-            {
-                return result;
-            }
+fn resolve_failed_specifier(
+    ctx: &ResolveContext<'_>,
+    from_file: &Path,
+    specifier: &str,
+    from_style: bool,
+    flags: FailedSpecifierFlags,
+) -> ResolveResult {
+    if let Some(result) = try_failed_primary_fallbacks(
+        ctx,
+        from_file,
+        specifier,
+        from_style,
+        flags.used_tsconfig_fallback,
+        flags.is_bare || flags.is_alias || flags.matches_plugin_alias,
+    ) {
+        return result;
+    }
 
-            let matches_tsconfig_path_alias =
-                matches_nearest_tsconfig_path_alias(ctx.root, from_file, specifier);
+    let matches_tsconfig_path_alias =
+        matches_nearest_tsconfig_path_alias(ctx.root, from_file, specifier);
 
-            if let Some(result) = try_package_imports_fallback(ctx, from_file, specifier) {
-                return result;
-            }
+    if let Some(result) = try_failed_package_fallbacks(ctx, from_file, specifier) {
+        return result;
+    }
 
-            if let Some(result) =
-                try_relative_package_root_source_fallback(ctx, from_file, specifier)
-            {
-                return result;
-            }
+    if flags.is_alias || flags.matches_plugin_alias {
+        return resolve_failed_alias_specifier(
+            ctx,
+            specifier,
+            flags.is_bare,
+            matches_tsconfig_path_alias,
+        );
+    }
+    resolve_failed_regular_specifier(
+        ctx,
+        from_file,
+        specifier,
+        from_style,
+        flags.is_bare,
+        matches_tsconfig_path_alias,
+    )
+}
 
-            if is_alias || matches_plugin_alias {
-                if let Some(result) = try_path_alias_fallback(ctx, specifier) {
-                    return result;
-                }
-                if is_bare
-                    && is_valid_package_name(specifier)
-                    && let Some(result) = try_workspace_package_fallback(ctx, specifier)
-                {
-                    return result;
-                }
-                if matches_tsconfig_path_alias {
-                    return ResolveResult::Unresolvable(specifier.to_string());
-                }
-                ResolveResult::Unresolvable(specifier.to_string())
-            } else if let Some(result) =
-                try_css_relative_subpath_fallback(ctx, from_file, specifier, from_style)
-            {
-                result
-            } else if is_plain_css_file(from_file) && is_bare_style_subpath(specifier) {
-                ResolveResult::Unresolvable(specifier.to_string())
-            } else if is_bare && is_valid_package_name(specifier) {
-                if let Some(result) = try_workspace_package_fallback(ctx, specifier) {
-                    return result;
-                }
-                if matches_tsconfig_path_alias {
-                    return ResolveResult::Unresolvable(specifier.to_string());
-                }
-                let pkg_name = extract_package_name(specifier);
-                if ctx.workspace_roots.contains_key(pkg_name.as_str())
-                    || ctx
-                        .package_manifests
-                        .iter()
-                        .any(|manifest| manifest.name.as_deref() == Some(pkg_name.as_str()))
-                {
-                    ResolveResult::Unresolvable(specifier.to_string())
-                } else {
-                    ResolveResult::NpmPackage(pkg_name)
-                }
-            } else {
-                ResolveResult::Unresolvable(specifier.to_string())
-            }
-        }
+fn resolve_failed_regular_specifier(
+    ctx: &ResolveContext<'_>,
+    from_file: &Path,
+    specifier: &str,
+    from_style: bool,
+    is_bare: bool,
+    matches_tsconfig_path_alias: bool,
+) -> ResolveResult {
+    if let Some(result) = try_css_relative_subpath_fallback(ctx, from_file, specifier, from_style) {
+        return result;
+    }
+    if is_plain_css_file(from_file) && is_bare_style_subpath(specifier) {
+        return ResolveResult::Unresolvable(specifier.to_string());
+    }
+    if is_bare && is_valid_package_name(specifier) {
+        return resolve_failed_bare_package_specifier(ctx, specifier, matches_tsconfig_path_alias);
+    }
+    ResolveResult::Unresolvable(specifier.to_string())
+}
+
+fn try_failed_primary_fallbacks(
+    ctx: &ResolveContext<'_>,
+    from_file: &Path,
+    specifier: &str,
+    from_style: bool,
+    used_tsconfig_fallback: bool,
+    can_try_nearest_alias: bool,
+) -> Option<ResolveResult> {
+    if let Some(result) = try_scss_fallbacks(ctx, from_file, specifier, from_style) {
+        return Some(result);
+    }
+
+    if used_tsconfig_fallback
+        && let Some(result) = try_tsconfig_root_dirs(ctx, from_file, specifier)
+    {
+        return Some(result);
+    }
+
+    if (used_tsconfig_fallback || can_try_nearest_alias)
+        && let Some(result) = try_nearest_tsconfig_path_alias(ctx, from_file, specifier)
+    {
+        return Some(result);
+    }
+
+    None
+}
+
+fn try_failed_package_fallbacks(
+    ctx: &ResolveContext<'_>,
+    from_file: &Path,
+    specifier: &str,
+) -> Option<ResolveResult> {
+    if let Some(result) = try_package_imports_fallback(ctx, from_file, specifier) {
+        return Some(result);
+    }
+    try_relative_package_root_source_fallback(ctx, from_file, specifier)
+}
+
+fn resolve_failed_alias_specifier(
+    ctx: &ResolveContext<'_>,
+    specifier: &str,
+    is_bare: bool,
+    matches_tsconfig_path_alias: bool,
+) -> ResolveResult {
+    if let Some(result) = try_path_alias_fallback(ctx, specifier) {
+        return result;
+    }
+    if is_bare
+        && is_valid_package_name(specifier)
+        && let Some(result) = try_workspace_package_fallback(ctx, specifier)
+    {
+        return result;
+    }
+    if matches_tsconfig_path_alias {
+        return ResolveResult::Unresolvable(specifier.to_string());
+    }
+    ResolveResult::Unresolvable(specifier.to_string())
+}
+
+fn resolve_failed_bare_package_specifier(
+    ctx: &ResolveContext<'_>,
+    specifier: &str,
+    matches_tsconfig_path_alias: bool,
+) -> ResolveResult {
+    if let Some(result) = try_workspace_package_fallback(ctx, specifier) {
+        return result;
+    }
+    if matches_tsconfig_path_alias {
+        return ResolveResult::Unresolvable(specifier.to_string());
+    }
+    let pkg_name = extract_package_name(specifier);
+    if ctx.workspace_roots.contains_key(pkg_name.as_str())
+        || ctx
+            .package_manifests
+            .iter()
+            .any(|manifest| manifest.name.as_deref() == Some(pkg_name.as_str()))
+    {
+        ResolveResult::Unresolvable(specifier.to_string())
+    } else {
+        ResolveResult::NpmPackage(pkg_name)
     }
 }
 

@@ -44,6 +44,8 @@ pub(super) struct CatalogFixContext<'a> {
     pub(super) fixes: &'a mut Vec<serde_json::Value>,
 }
 
+type CatalogRemoval<'a> = (std::ops::Range<usize>, &'a UnusedCatalogEntry);
+
 pub(super) fn apply_catalog_entry_fixes(
     root: &Path,
     entries: &[UnusedCatalogEntryFinding],
@@ -63,12 +65,7 @@ pub(super) fn apply_catalog_entry_fixes(
         return summary;
     }
 
-    let mut by_path: rustc_hash::FxHashMap<&Path, Vec<&UnusedCatalogEntry>> =
-        rustc_hash::FxHashMap::default();
-    for entry in entries {
-        let entry = &entry.entry;
-        by_path.entry(entry.path.as_path()).or_default().push(entry);
-    }
+    let by_path = group_unused_catalog_entries_by_path(entries);
 
     for (relative_path, file_entries) in by_path {
         let absolute = root.join(relative_path);
@@ -78,98 +75,36 @@ pub(super) fn apply_catalog_entry_fixes(
         };
 
         if is_multi_document_yaml(&content) {
-            for entry in &file_entries {
-                summary.skipped += 1;
-                fixes.push(skip_record(
-                    entry,
-                    "multi_document_yaml",
-                    "Skipped: pnpm-workspace.yaml contains a `---` document separator; fallow fix does not support multi-document YAML",
-                    output,
-                    relative_path,
-                ));
-            }
+            skip_multi_document_catalog_entries(
+                &file_entries,
+                &mut summary,
+                fixes,
+                output,
+                relative_path,
+            );
             continue;
         }
 
         let lines: Vec<&str> = content.split(meta.line_ending).collect();
 
-        let mut to_remove: Vec<(std::ops::Range<usize>, &UnusedCatalogEntry)> = Vec::new();
-        for entry in &file_entries {
-            if !entry.hardcoded_consumers.is_empty() {
-                summary.skipped += 1;
-                let consumer_summary = format_consumer_summary(&entry.hardcoded_consumers);
-                let description = format!(
-                    "Skipped: {consumer_summary} still pin `{}` with a hardcoded version. Switch the consumer(s) to \"{}\": \"catalog:{}\" first, then rerun fallow fix.",
-                    entry.entry_name,
-                    entry.entry_name,
-                    if entry.catalog_name == "default" {
-                        String::new()
-                    } else {
-                        entry.catalog_name.clone()
-                    },
-                );
-                fixes.push(skip_record(
-                    entry,
-                    "hardcoded_consumers",
-                    &description,
-                    output,
-                    relative_path,
-                ));
-                continue;
-            }
-
-            let line_idx = entry.line.saturating_sub(1) as usize;
-            if line_idx >= lines.len() {
-                summary.skipped += 1;
-                fixes.push(skip_record(
-                    entry,
-                    "line_out_of_range",
-                    "Skipped: the reported line is past the end of pnpm-workspace.yaml; the file may have been edited since fallow dead-code ran",
-                    output,
-                    relative_path,
-                ));
-                continue;
-            }
-
-            let range = compute_deletion_range(&lines, line_idx, entry, preceding_comment_policy);
-            to_remove.push((range, entry));
-        }
+        let to_remove = collect_catalog_entry_removals(
+            &file_entries,
+            &lines,
+            preceding_comment_policy,
+            &mut summary,
+            fixes,
+            output,
+            relative_path,
+        );
 
         if to_remove.is_empty() {
             continue;
         }
 
-        to_remove.sort_by(|a, b| {
-            b.0.start
-                .cmp(&a.0.start)
-                .then_with(|| b.0.end.cmp(&a.0.end))
-        });
-
-        let mut deduped: Vec<(std::ops::Range<usize>, &UnusedCatalogEntry)> = Vec::new();
-        for (range, entry) in to_remove {
-            if let Some((last_range, _)) = deduped.last()
-                && last_range.start < range.end
-                && range.start < last_range.end
-            {
-                continue;
-            }
-            deduped.push((range, entry));
-        }
+        let deduped = dedupe_catalog_removals(to_remove);
 
         if dry_run {
-            for (range, entry) in &deduped {
-                if !matches!(output, OutputFormat::Json) {
-                    eprintln!(
-                        "Would remove catalog entry from {}:{} `{}` (catalog: {})",
-                        relative_path.display(),
-                        range.start + 1,
-                        entry.entry_name,
-                        entry.catalog_name,
-                    );
-                }
-                fixes.push(remove_record(entry, range, false, relative_path));
-            }
-            summary.applied += deduped.len();
+            record_catalog_removal_dry_run(&deduped, &mut summary, fixes, output, relative_path);
             continue;
         }
 
@@ -214,6 +149,152 @@ pub(super) fn apply_catalog_entry_fixes(
     }
 
     summary
+}
+
+fn collect_catalog_entry_removals<'a>(
+    file_entries: &[&'a UnusedCatalogEntry],
+    lines: &[&str],
+    preceding_comment_policy: CatalogPrecedingCommentPolicy,
+    summary: &mut CatalogFixSummary,
+    fixes: &mut Vec<serde_json::Value>,
+    output: OutputFormat,
+    relative_path: &Path,
+) -> Vec<CatalogRemoval<'a>> {
+    let mut to_remove = Vec::new();
+    for entry in file_entries {
+        if !entry.hardcoded_consumers.is_empty() {
+            skip_hardcoded_catalog_consumers(entry, summary, fixes, output, relative_path);
+            continue;
+        }
+
+        let line_idx = entry.line.saturating_sub(1) as usize;
+        if line_idx >= lines.len() {
+            skip_out_of_range_catalog_entry(entry, summary, fixes, output, relative_path);
+            continue;
+        }
+
+        let range = compute_deletion_range(lines, line_idx, entry, preceding_comment_policy);
+        to_remove.push((range, *entry));
+    }
+    to_remove
+}
+
+fn dedupe_catalog_removals(mut to_remove: Vec<CatalogRemoval<'_>>) -> Vec<CatalogRemoval<'_>> {
+    to_remove.sort_by(|a, b| {
+        b.0.start
+            .cmp(&a.0.start)
+            .then_with(|| b.0.end.cmp(&a.0.end))
+    });
+
+    let mut deduped: Vec<CatalogRemoval<'_>> = Vec::new();
+    for (range, entry) in to_remove {
+        if let Some((last_range, _)) = deduped.last()
+            && last_range.start < range.end
+            && range.start < last_range.end
+        {
+            continue;
+        }
+        deduped.push((range, entry));
+    }
+    deduped
+}
+
+fn record_catalog_removal_dry_run(
+    deduped: &[CatalogRemoval<'_>],
+    summary: &mut CatalogFixSummary,
+    fixes: &mut Vec<serde_json::Value>,
+    output: OutputFormat,
+    relative_path: &Path,
+) {
+    for (range, entry) in deduped {
+        if !matches!(output, OutputFormat::Json) {
+            eprintln!(
+                "Would remove catalog entry from {}:{} `{}` (catalog: {})",
+                relative_path.display(),
+                range.start + 1,
+                entry.entry_name,
+                entry.catalog_name,
+            );
+        }
+        fixes.push(remove_record(entry, range, false, relative_path));
+    }
+    summary.applied += deduped.len();
+}
+
+fn group_unused_catalog_entries_by_path(
+    entries: &[UnusedCatalogEntryFinding],
+) -> rustc_hash::FxHashMap<&Path, Vec<&UnusedCatalogEntry>> {
+    let mut by_path: rustc_hash::FxHashMap<&Path, Vec<&UnusedCatalogEntry>> =
+        rustc_hash::FxHashMap::default();
+    for entry in entries {
+        let entry = &entry.entry;
+        by_path.entry(entry.path.as_path()).or_default().push(entry);
+    }
+    by_path
+}
+
+fn skip_out_of_range_catalog_entry(
+    entry: &UnusedCatalogEntry,
+    summary: &mut CatalogFixSummary,
+    fixes: &mut Vec<serde_json::Value>,
+    output: OutputFormat,
+    relative_path: &Path,
+) {
+    summary.skipped += 1;
+    fixes.push(skip_record(
+        entry,
+        "line_out_of_range",
+        "Skipped: the reported line is past the end of pnpm-workspace.yaml; the file may have been edited since fallow dead-code ran",
+        output,
+        relative_path,
+    ));
+}
+
+fn skip_multi_document_catalog_entries(
+    entries: &[&UnusedCatalogEntry],
+    summary: &mut CatalogFixSummary,
+    fixes: &mut Vec<serde_json::Value>,
+    output: OutputFormat,
+    relative_path: &Path,
+) {
+    for entry in entries {
+        summary.skipped += 1;
+        fixes.push(skip_record(
+            entry,
+            "multi_document_yaml",
+            "Skipped: pnpm-workspace.yaml contains a `---` document separator; fallow fix does not support multi-document YAML",
+            output,
+            relative_path,
+        ));
+    }
+}
+
+fn skip_hardcoded_catalog_consumers(
+    entry: &UnusedCatalogEntry,
+    summary: &mut CatalogFixSummary,
+    fixes: &mut Vec<serde_json::Value>,
+    output: OutputFormat,
+    relative_path: &Path,
+) {
+    summary.skipped += 1;
+    let consumer_summary = format_consumer_summary(&entry.hardcoded_consumers);
+    let description = format!(
+        "Skipped: {consumer_summary} still pin `{}` with a hardcoded version. Switch the consumer(s) to \"{}\": \"catalog:{}\" first, then rerun fallow fix.",
+        entry.entry_name,
+        entry.entry_name,
+        if entry.catalog_name == "default" {
+            String::new()
+        } else {
+            entry.catalog_name.clone()
+        },
+    );
+    fixes.push(skip_record(
+        entry,
+        "hardcoded_consumers",
+        &description,
+        output,
+        relative_path,
+    ));
 }
 
 /// Apply empty-catalog-group fixes to `pnpm-workspace.yaml`.

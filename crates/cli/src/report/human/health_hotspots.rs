@@ -146,6 +146,21 @@ pub(super) fn render_hotspots(
         return;
     }
 
+    push_hotspots_header(lines, report);
+
+    if let Some(summary_line) = render_ownership_summary(report) {
+        lines.push(format!("  {summary_line}"));
+        lines.push(String::new());
+    }
+
+    for entry in &report.hotspots {
+        push_hotspot_row(lines, entry, root);
+    }
+
+    push_hotspots_footer(lines, report);
+}
+
+fn push_hotspots_header(lines: &mut Vec<String>, report: &crate::health_types::HealthReport) {
     let header = report.hotspot_summary.as_ref().map_or_else(
         || format!("Hotspots ({} files)", report.hotspots.len()),
         |summary| {
@@ -158,97 +173,78 @@ pub(super) fn render_hotspots(
     );
     lines.push(format!("{} {}", "\u{25cf}".red(), header.red().bold()));
     lines.push(String::new());
+}
 
-    if let Some(summary_line) = render_ownership_summary(report) {
-        lines.push(format!("  {summary_line}"));
-        lines.push(String::new());
-    }
-
-    for entry in &report.hotspots {
-        let file_str = relative_path(&entry.path, root).display().to_string();
-
-        let score_str = format!("{:>5.1}", entry.score);
-        let score_colored = if entry.score >= 70.0 {
-            score_str.red().bold().to_string()
-        } else if entry.score >= 30.0 {
-            score_str.yellow().to_string()
-        } else {
-            score_str.green().to_string()
-        };
-
-        let (trend_symbol, trend_colored) = match entry.trend {
-            fallow_core::churn::ChurnTrend::Accelerating => {
-                ("\u{25b2}", "\u{25b2} accelerating".red().to_string())
-            }
-            fallow_core::churn::ChurnTrend::Cooling => {
-                ("\u{25bc}", "\u{25bc} cooling".green().to_string())
-            }
-            fallow_core::churn::ChurnTrend::Stable => {
-                ("\u{2500}", "\u{2500} stable".dimmed().to_string())
-            }
-        };
-
-        let (dir, filename) = split_dir_filename(&file_str);
-
-        let test_tag = if entry.is_test_path {
-            format!(" {}", "[test]".dimmed())
-        } else {
-            String::new()
-        };
+fn push_hotspot_row(
+    lines: &mut Vec<String>,
+    entry: &crate::health_types::HotspotEntry,
+    root: &Path,
+) {
+    let file_str = relative_path(&entry.path, root).display().to_string();
+    let (dir, filename) = split_dir_filename(&file_str);
+    lines.push(format!(
+        "  {} {}  {}{}{}",
+        hotspot_score_colored(entry.score),
+        hotspot_trend_symbol(entry.trend),
+        dir.dimmed(),
+        filename,
+        hotspot_test_tag(entry.is_test_path),
+    ));
+    lines.push(format!(
+        "         {} commits  {} churn  {} density  {} fan-in  {}",
+        format!("{:>3}", entry.commits).dimmed(),
+        format!("{:>5}", entry.lines_added + entry.lines_deleted).dimmed(),
+        format!("{:.2}", entry.complexity_density).dimmed(),
+        format!("{:>2}", entry.fan_in).dimmed(),
+        hotspot_trend_label(entry.trend),
+    ));
+    if let Some(ownership) = &entry.ownership {
         lines.push(format!(
-            "  {} {}  {}{}{}",
-            score_colored,
-            match entry.trend {
-                fallow_core::churn::ChurnTrend::Accelerating => trend_symbol.red().to_string(),
-                fallow_core::churn::ChurnTrend::Cooling => trend_symbol.green().to_string(),
-                fallow_core::churn::ChurnTrend::Stable => trend_symbol.dimmed().to_string(),
-            },
-            dir.dimmed(),
-            filename,
-            test_tag,
+            "         {}",
+            render_ownership_line(ownership, entry.trend)
         ));
-
-        lines.push(format!(
-            "         {} commits  {} churn  {} density  {} fan-in  {}",
-            format!("{:>3}", entry.commits).dimmed(),
-            format!("{:>5}", entry.lines_added + entry.lines_deleted).dimmed(),
-            format!("{:.2}", entry.complexity_density).dimmed(),
-            format!("{:>2}", entry.fan_in).dimmed(),
-            trend_colored,
-        ));
-
-        if let Some(ownership) = &entry.ownership {
-            lines.push(format!(
-                "         {}",
-                render_ownership_line(ownership, entry.trend)
-            ));
-        }
-
-        lines.push(String::new());
     }
+    lines.push(String::new());
+}
 
-    if let Some(ref summary) = report.hotspot_summary
-        && summary.files_excluded > 0
-    {
-        lines.push(format!(
-            "  {}",
-            format!(
-                "{} file{} excluded (< {} commits)",
-                summary.files_excluded,
-                plural(summary.files_excluded),
-                summary.min_commits,
-            )
-            .dimmed()
-        ));
-        lines.push(String::new());
+fn hotspot_score_colored(score: f64) -> String {
+    let score_str = format!("{score:>5.1}");
+    if score >= 70.0 {
+        score_str.red().bold().to_string()
+    } else if score >= 30.0 {
+        score_str.yellow().to_string()
+    } else {
+        score_str.green().to_string()
     }
-    let any_ownership = report.hotspots.iter().any(|h| h.ownership.is_some());
-    let no_codeowners_anywhere = report
-        .hotspots
-        .iter()
-        .filter_map(|h| h.ownership.as_ref())
-        .all(|o| o.unowned.is_none());
-    if any_ownership && no_codeowners_anywhere {
+}
+
+fn hotspot_trend_symbol(trend: fallow_core::churn::ChurnTrend) -> String {
+    match trend {
+        fallow_core::churn::ChurnTrend::Accelerating => "\u{25b2}".red().to_string(),
+        fallow_core::churn::ChurnTrend::Cooling => "\u{25bc}".green().to_string(),
+        fallow_core::churn::ChurnTrend::Stable => "\u{2500}".dimmed().to_string(),
+    }
+}
+
+fn hotspot_trend_label(trend: fallow_core::churn::ChurnTrend) -> String {
+    match trend {
+        fallow_core::churn::ChurnTrend::Accelerating => "\u{25b2} accelerating".red().to_string(),
+        fallow_core::churn::ChurnTrend::Cooling => "\u{25bc} cooling".green().to_string(),
+        fallow_core::churn::ChurnTrend::Stable => "\u{2500} stable".dimmed().to_string(),
+    }
+}
+
+fn hotspot_test_tag(is_test_path: bool) -> String {
+    if is_test_path {
+        format!(" {}", "[test]".dimmed())
+    } else {
+        String::new()
+    }
+}
+
+fn push_hotspots_footer(lines: &mut Vec<String>, report: &crate::health_types::HealthReport) {
+    push_hotspots_excluded_line(lines, report);
+    if hotspots_have_history_only_ownership(report) {
         lines.push(format!(
             "  {}",
             "No CODEOWNERS file discovered, ownership signals limited to change history.".dimmed()
@@ -260,6 +256,39 @@ pub(super) fn render_hotspots(
             .dimmed()
     ));
     lines.push(String::new());
+}
+
+fn push_hotspots_excluded_line(
+    lines: &mut Vec<String>,
+    report: &crate::health_types::HealthReport,
+) {
+    let Some(summary) = report.hotspot_summary.as_ref() else {
+        return;
+    };
+    if summary.files_excluded == 0 {
+        return;
+    }
+    lines.push(format!(
+        "  {}",
+        format!(
+            "{} file{} excluded (< {} commits)",
+            summary.files_excluded,
+            plural(summary.files_excluded),
+            summary.min_commits,
+        )
+        .dimmed()
+    ));
+    lines.push(String::new());
+}
+
+fn hotspots_have_history_only_ownership(report: &crate::health_types::HealthReport) -> bool {
+    let any_ownership = report.hotspots.iter().any(|h| h.ownership.is_some());
+    let no_codeowners_anywhere = report
+        .hotspots
+        .iter()
+        .filter_map(|h| h.ownership.as_ref())
+        .all(|o| o.unowned.is_none());
+    any_ownership && no_codeowners_anywhere
 }
 
 #[cfg(test)]

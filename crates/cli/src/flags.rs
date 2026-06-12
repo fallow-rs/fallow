@@ -5,7 +5,7 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use fallow_config::{OutputFormat, ResolvedConfig};
-use fallow_types::extract::{FlagUse, FlagUseKind, ModuleInfo};
+use fallow_types::extract::{FlagUse, FlagUseKind, ModuleInfo, ParseResult};
 use fallow_types::results::{FeatureFlag, FlagConfidence, FlagKind};
 
 use crate::error::emit_error;
@@ -98,71 +98,7 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
     };
     let parse_result = fallow_core::extract::parse_all_files(&files, cache_store.as_ref(), false);
 
-    let file_paths: rustc_hash::FxHashMap<_, _> = files.iter().map(|f| (f.id, &f.path)).collect();
-
-    let extra_sdk: Vec<(String, usize, String)> = config
-        .flags
-        .sdk_patterns
-        .iter()
-        .map(|p| {
-            (
-                p.function.clone(),
-                p.name_arg,
-                p.provider.clone().unwrap_or_default(),
-            )
-        })
-        .collect();
-    let has_custom_config = !extra_sdk.is_empty()
-        || !config.flags.env_prefixes.is_empty()
-        || config.flags.config_object_heuristics;
-
-    let mut flags: Vec<FeatureFlag> = Vec::new();
-    for module in &parse_result.modules {
-        let Some(path) = file_paths.get(&module.file_id) else {
-            continue;
-        };
-
-        let file_suppressed = fallow_core::suppress::is_file_suppressed(
-            &module.suppressions,
-            fallow_core::suppress::IssueKind::FeatureFlag,
-        );
-        for flag_use in &module.flag_uses {
-            if file_suppressed
-                || fallow_core::suppress::is_suppressed(
-                    &module.suppressions,
-                    flag_use.line,
-                    fallow_core::suppress::IssueKind::FeatureFlag,
-                )
-            {
-                continue;
-            }
-            flags.push(flag_use_to_feature_flag(flag_use, module, path));
-        }
-
-        if has_custom_config && let Ok(source) = std::fs::read_to_string(path) {
-            let custom_flags = fallow_core::extract::flags::extract_flags_from_source(
-                &source,
-                path,
-                &extra_sdk,
-                &config.flags.env_prefixes,
-                config.flags.config_object_heuristics,
-            );
-            for flag_use in &custom_flags {
-                let already_found = module.flag_uses.iter().any(|existing| {
-                    existing.line == flag_use.line && existing.flag_name == flag_use.flag_name
-                });
-                if !already_found
-                    && !fallow_core::suppress::is_suppressed(
-                        &module.suppressions,
-                        flag_use.line,
-                        fallow_core::suppress::IssueKind::FeatureFlag,
-                    )
-                {
-                    flags.push(flag_use_to_feature_flag(flag_use, module, path));
-                }
-            }
-        }
-    }
+    let mut flags = collect_flags_from_parse_result(&config, &files, &parse_result);
 
     #[expect(
         deprecated,
@@ -228,6 +164,96 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
     print_flags_result(&flags, &config, opts, elapsed, files_scanned);
 
     ExitCode::SUCCESS
+}
+
+fn collect_flags_from_parse_result(
+    config: &ResolvedConfig,
+    files: &[fallow_core::discover::DiscoveredFile],
+    parse_result: &ParseResult,
+) -> Vec<FeatureFlag> {
+    let file_paths: rustc_hash::FxHashMap<_, _> = files.iter().map(|f| (f.id, &f.path)).collect();
+
+    let extra_sdk: Vec<(String, usize, String)> = config
+        .flags
+        .sdk_patterns
+        .iter()
+        .map(|p| {
+            (
+                p.function.clone(),
+                p.name_arg,
+                p.provider.clone().unwrap_or_default(),
+            )
+        })
+        .collect();
+    let has_custom_config = !extra_sdk.is_empty()
+        || !config.flags.env_prefixes.is_empty()
+        || config.flags.config_object_heuristics;
+
+    let mut flags = Vec::new();
+    for module in &parse_result.modules {
+        let Some(path) = file_paths.get(&module.file_id) else {
+            continue;
+        };
+
+        collect_builtin_flags(&mut flags, module, path);
+        if has_custom_config {
+            collect_custom_flags(&mut flags, config, module, path, &extra_sdk);
+        }
+    }
+    flags
+}
+
+fn collect_builtin_flags(flags: &mut Vec<FeatureFlag>, module: &ModuleInfo, path: &Path) {
+    let file_suppressed = fallow_core::suppress::is_file_suppressed(
+        &module.suppressions,
+        fallow_core::suppress::IssueKind::FeatureFlag,
+    );
+    for flag_use in &module.flag_uses {
+        if file_suppressed
+            || fallow_core::suppress::is_suppressed(
+                &module.suppressions,
+                flag_use.line,
+                fallow_core::suppress::IssueKind::FeatureFlag,
+            )
+        {
+            continue;
+        }
+        flags.push(flag_use_to_feature_flag(flag_use, module, path));
+    }
+}
+
+fn collect_custom_flags(
+    flags: &mut Vec<FeatureFlag>,
+    config: &ResolvedConfig,
+    module: &ModuleInfo,
+    path: &Path,
+    extra_sdk: &[(String, usize, String)],
+) {
+    let Ok(source) = std::fs::read_to_string(path) else {
+        return;
+    };
+
+    let custom_flags = fallow_core::extract::flags::extract_flags_from_source(
+        &source,
+        path,
+        extra_sdk,
+        &config.flags.env_prefixes,
+        config.flags.config_object_heuristics,
+    );
+    for flag_use in &custom_flags {
+        let already_found = module.flag_uses.iter().any(|existing| {
+            existing.line == flag_use.line && existing.flag_name == flag_use.flag_name
+        });
+        if !already_found
+            && !fallow_core::suppress::is_suppressed(
+                &module.suppressions,
+                flag_use.line,
+                fallow_core::suppress::IssueKind::FeatureFlag,
+            )
+        {
+            flags.push(flag_use_to_feature_flag(flag_use, module, path));
+        }
+    }
 }
 
 /// Print feature flag results in the requested format.

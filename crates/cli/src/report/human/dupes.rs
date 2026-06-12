@@ -8,7 +8,8 @@ use fallow_core::duplicates::{CloneFamily, CloneFingerprintSet, CloneGroup, Dupl
 use super::{
     MAX_FLAT_ITEMS, format_path, plural, print_explain_tip_if_tty, split_dir_filename, thousands,
 };
-use crate::report::dupes_grouping::DuplicationGrouping;
+use crate::output_dupes::AttributedCloneGroupFinding;
+use crate::report::dupes_grouping::{AttributedInstance, DuplicationGroup, DuplicationGrouping};
 
 /// Docs base URL for duplication explanations.
 pub(super) const DOCS_DUPLICATION: &str = "https://docs.fallow.tools/explanations/duplication";
@@ -494,105 +495,153 @@ pub(in crate::report) fn print_grouped_duplication_human(
         eprintln!();
     }
 
-    if grouping.groups.is_empty() {
-        if !quiet {
-            eprintln!(
-                "{}",
-                format!(
-                    "\u{2713} No code duplication found ({:.2}s)",
-                    elapsed.as_secs_f64()
-                )
-                .green()
-                .bold()
-            );
-        }
+    if print_empty_grouped_duplication(grouping, elapsed, quiet) {
         return;
     }
 
+    print_grouped_duplication_header(grouping);
+    for bucket in &grouping.groups {
+        print_grouped_duplication_bucket(bucket, root);
+    }
+    print_grouped_duplication_footer(report, grouping, elapsed, quiet);
+}
+
+fn print_empty_grouped_duplication(
+    grouping: &DuplicationGrouping,
+    elapsed: Duration,
+    quiet: bool,
+) -> bool {
+    if !grouping.groups.is_empty() {
+        return false;
+    }
+    if !quiet {
+        eprintln!(
+            "{}",
+            format!(
+                "\u{2713} No code duplication found ({:.2}s)",
+                elapsed.as_secs_f64()
+            )
+            .green()
+            .bold()
+        );
+    }
+    true
+}
+
+fn print_grouped_duplication_header(grouping: &DuplicationGrouping) {
     outln!(
         "{} {}",
         "\u{25cf}".cyan(),
         format!("Per-{} duplication", grouping.mode).cyan().bold()
     );
     outln!();
+}
 
-    for bucket in &grouping.groups {
-        let total_groups = bucket.clone_groups.len();
-        let dup_lines = bucket.stats.duplicated_lines;
+fn print_grouped_duplication_bucket(bucket: &DuplicationGroup, root: &Path) {
+    let total_groups = bucket.clone_groups.len();
+    let dup_lines = bucket.stats.duplicated_lines;
+    outln!(
+        "{} {} ({} clone group{}, {} LOC duplicated)",
+        "\u{25cf}".cyan(),
+        bucket.key.clone().cyan().bold(),
+        total_groups,
+        plural(total_groups),
+        thousands(dup_lines),
+    );
+    outln!();
+
+    let shown = total_groups.min(MAX_CLONE_GROUPS);
+    let mut sorted: Vec<_> = bucket.clone_groups.iter().collect();
+    sorted.sort_by_key(|cg| std::cmp::Reverse(cg.group.line_count));
+
+    for finding in &sorted[..shown] {
+        print_grouped_duplication_finding(bucket, root, finding);
+    }
+    print_grouped_duplication_bucket_overflow(total_groups);
+    print_grouped_duplication_bucket_stats(bucket, dup_lines);
+    outln!();
+}
+
+fn print_grouped_duplication_finding(
+    bucket: &DuplicationGroup,
+    root: &Path,
+    finding: &AttributedCloneGroupFinding,
+) {
+    let cg = &finding.group;
+    outln!(
+        "  {} lines  {} instance{}",
+        colored_clone_line_count(cg.line_count),
+        cg.instances.len(),
+        plural(cg.instances.len()),
+    );
+    for inst in &cg.instances {
+        let path_str = crate::report::format_display_path(&inst.instance.file, root);
+        let (dir, filename) = split_dir_filename(&path_str);
+        let owner_tag = grouped_duplication_owner_tag(bucket, inst);
         outln!(
-            "{} {} ({} clone group{}, {} LOC duplicated)",
-            "\u{25cf}".cyan(),
-            bucket.key.clone().cyan().bold(),
-            total_groups,
-            plural(total_groups),
-            thousands(dup_lines),
+            "    {}{}:{}-{}{}",
+            dir.dimmed(),
+            format_path(filename),
+            inst.instance.start_line,
+            inst.instance.end_line,
+            owner_tag,
         );
-        outln!();
+    }
+    outln!();
+}
 
-        let shown = total_groups.min(MAX_CLONE_GROUPS);
-        let mut sorted: Vec<_> = bucket.clone_groups.iter().collect();
-        sorted.sort_by_key(|cg| std::cmp::Reverse(cg.group.line_count));
+fn colored_clone_line_count(line_count: usize) -> String {
+    let line_count_label = format!("{:>5}", thousands(line_count));
+    if line_count > 1000 {
+        line_count_label.red().bold().to_string()
+    } else if line_count > 100 {
+        line_count_label.yellow().to_string()
+    } else {
+        line_count_label.dimmed().to_string()
+    }
+}
 
-        for finding in &sorted[..shown] {
-            let cg = &finding.group;
-            let lc = cg.line_count;
-            let lc_str = format!("{:>5}", thousands(lc));
-            let lc_colored = if lc > 1000 {
-                lc_str.red().bold().to_string()
-            } else if lc > 100 {
-                lc_str.yellow().to_string()
-            } else {
-                lc_str.dimmed().to_string()
-            };
-            outln!(
-                "  {} lines  {} instance{}",
-                lc_colored,
-                cg.instances.len(),
-                plural(cg.instances.len()),
-            );
-            for inst in &cg.instances {
-                let path_str = crate::report::format_display_path(&inst.instance.file, root);
-                let (dir, filename) = split_dir_filename(&path_str);
-                let owner_tag = if inst.owner == bucket.key {
-                    String::new()
-                } else {
-                    format!("  [{}]", inst.owner).dimmed().to_string()
-                };
-                outln!(
-                    "    {}{}:{}-{}{}",
-                    dir.dimmed(),
-                    format_path(filename),
-                    inst.instance.start_line,
-                    inst.instance.end_line,
-                    owner_tag,
-                );
-            }
-            outln!();
-        }
-        if total_groups > MAX_CLONE_GROUPS {
-            outln!(
-                "  {}",
-                format!(
-                    "... and {} more clone groups",
-                    total_groups - MAX_CLONE_GROUPS
-                )
-                .dimmed()
-            );
-        }
+fn grouped_duplication_owner_tag(bucket: &DuplicationGroup, inst: &AttributedInstance) -> String {
+    if inst.owner == bucket.key {
+        String::new()
+    } else {
+        format!("  [{}]", inst.owner).dimmed().to_string()
+    }
+}
+
+fn print_grouped_duplication_bucket_overflow(total_groups: usize) {
+    if total_groups > MAX_CLONE_GROUPS {
         outln!(
             "  {}",
             format!(
-                "{} duplicated lines ({:.1}%) across {} file{}",
-                thousands(dup_lines),
-                bucket.stats.duplication_percentage,
-                bucket.stats.files_with_clones,
-                plural(bucket.stats.files_with_clones),
+                "... and {} more clone groups",
+                total_groups - MAX_CLONE_GROUPS
             )
             .dimmed()
         );
-        outln!();
     }
+}
 
+fn print_grouped_duplication_bucket_stats(bucket: &DuplicationGroup, dup_lines: usize) {
+    outln!(
+        "  {}",
+        format!(
+            "{} duplicated lines ({:.1}%) across {} file{}",
+            thousands(dup_lines),
+            bucket.stats.duplication_percentage,
+            bucket.stats.files_with_clones,
+            plural(bucket.stats.files_with_clones),
+        )
+        .dimmed()
+    );
+}
+
+fn print_grouped_duplication_footer(
+    report: &DuplicationReport,
+    grouping: &DuplicationGrouping,
+    elapsed: Duration,
+    quiet: bool,
+) {
     let stats = &report.stats;
     if !quiet {
         eprintln!(

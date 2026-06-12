@@ -6,8 +6,9 @@ use crate::template_usage::TemplateUsage;
 
 use super::scanners::{scan_bracket_section, scan_curly_section, scan_html_tag};
 use super::shared::{
-    HTML_COMMENT_RE, merge_component_tag_usage, merge_expression_usage_with_bound_targets,
-    merge_pattern_binding_usage, merge_statement_usage_with_bound_targets, parse_tag_attrs,
+    HTML_COMMENT_RE, ParsedAttr, ParsedTag, merge_component_tag_usage,
+    merge_expression_usage_with_bound_targets, merge_pattern_binding_usage,
+    merge_statement_usage_with_bound_targets, parse_tag_attrs,
 };
 
 static TEMPLATE_BLOCK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
@@ -145,59 +146,11 @@ fn apply_tag(
     let current = current_locals(scopes);
     let parsed = parse_tag_attrs(trimmed, false);
     mark_tag_usage(&parsed.name, imported_bindings, &current, usage);
-    if let Some(value) = parsed
-        .attrs
-        .iter()
-        .find(|attr| attr.name == "v-html")
-        .and_then(|attr| attr.value.as_deref())
-        && let Some(sink) = crate::template_usage::template_html_sink(value, tag_start, tag_end)
-    {
-        usage.security_sinks.push(sink);
-    }
+    collect_v_html_sink(&parsed, tag_start, tag_end, usage);
 
-    let mut v_for_locals = Vec::new();
-    let mut slot_locals = Vec::new();
-    if let Some(value) = parsed
-        .attrs
-        .iter()
-        .find(|attr| attr.name == "v-for")
-        .and_then(|attr| attr.value.as_deref())
-        && let Some(captures) = VUE_FOR_RE.captures(value)
-    {
-        let binding = captures.name("binding").map_or("", |m| m.as_str()).trim();
-        let source_expr = captures.name("source").map_or("", |m| m.as_str()).trim();
-        merge_expression_usage_with_bound_targets(
-            usage,
-            source_expr,
-            imported_bindings,
-            bound_targets,
-            &current,
-        );
-        v_for_locals.extend(merge_pattern_binding_usage(
-            usage,
-            binding,
-            imported_bindings,
-            &current,
-        ));
-    }
-
-    if let Some(value) = parsed
-        .attrs
-        .iter()
-        .find(|attr| {
-            attr.name == "slot-scope"
-                || attr.name.starts_with("v-slot")
-                || attr.name.starts_with('#')
-        })
-        .and_then(|attr| attr.value.as_deref())
-    {
-        slot_locals.extend(merge_pattern_binding_usage(
-            usage,
-            value,
-            imported_bindings,
-            &current,
-        ));
-    }
+    let v_for_locals =
+        collect_v_for_locals(&parsed, imported_bindings, bound_targets, &current, usage);
+    let slot_locals = collect_slot_locals(&parsed, imported_bindings, &current, usage);
 
     let mut element_locals = v_for_locals.clone();
     element_locals.extend(slot_locals);
@@ -207,6 +160,86 @@ fn apply_tag(
     let mut arg_locals = current;
     arg_locals.extend(v_for_locals);
 
+    scan_vue_attrs(
+        &parsed,
+        imported_bindings,
+        bound_targets,
+        &arg_locals,
+        &attr_locals,
+        usage,
+    );
+
+    if !parsed.self_closing {
+        scopes.push(element_locals);
+    }
+}
+
+fn collect_v_html_sink(
+    parsed: &ParsedTag,
+    tag_start: usize,
+    tag_end: usize,
+    usage: &mut TemplateUsage,
+) {
+    if let Some(value) = attr_value(parsed, "v-html")
+        && let Some(sink) = crate::template_usage::template_html_sink(value, tag_start, tag_end)
+    {
+        usage.security_sinks.push(sink);
+    }
+}
+
+fn collect_v_for_locals(
+    parsed: &ParsedTag,
+    imported_bindings: &FxHashSet<String>,
+    bound_targets: &FxHashMap<String, String>,
+    current: &[String],
+    usage: &mut TemplateUsage,
+) -> Vec<String> {
+    let Some(value) = attr_value(parsed, "v-for") else {
+        return Vec::new();
+    };
+    let Some(captures) = VUE_FOR_RE.captures(value) else {
+        return Vec::new();
+    };
+    let binding = captures.name("binding").map_or("", |m| m.as_str()).trim();
+    let source_expr = captures.name("source").map_or("", |m| m.as_str()).trim();
+    merge_expression_usage_with_bound_targets(
+        usage,
+        source_expr,
+        imported_bindings,
+        bound_targets,
+        current,
+    );
+    merge_pattern_binding_usage(usage, binding, imported_bindings, current)
+}
+
+fn collect_slot_locals(
+    parsed: &ParsedTag,
+    imported_bindings: &FxHashSet<String>,
+    current: &[String],
+    usage: &mut TemplateUsage,
+) -> Vec<String> {
+    parsed
+        .attrs
+        .iter()
+        .find(|attr| {
+            attr.name == "slot-scope"
+                || attr.name.starts_with("v-slot")
+                || attr.name.starts_with('#')
+        })
+        .and_then(|attr| attr.value.as_deref())
+        .map_or_else(Vec::new, |value| {
+            merge_pattern_binding_usage(usage, value, imported_bindings, current)
+        })
+}
+
+fn scan_vue_attrs(
+    parsed: &ParsedTag,
+    imported_bindings: &FxHashSet<String>,
+    bound_targets: &FxHashMap<String, String>,
+    arg_locals: &[String],
+    attr_locals: &[String],
+    usage: &mut TemplateUsage,
+) {
     for attr in &parsed.attrs {
         mark_custom_directive_usage(&attr.name, imported_bindings, usage);
         if let Some(expr) = dynamic_argument_expression(&attr.name) {
@@ -215,41 +248,56 @@ fn apply_tag(
                 expr,
                 imported_bindings,
                 bound_targets,
-                &arg_locals,
+                arg_locals,
             );
         }
-        if let Some(expr) = attr.value.as_deref() {
-            if attr.name == "v-for"
-                || attr.name == "slot-scope"
-                || attr.name.starts_with("v-slot")
-                || attr.name.starts_with('#')
-            {
-                continue;
-            }
+        scan_vue_attr_value(attr, imported_bindings, bound_targets, attr_locals, usage);
+    }
+}
 
-            if is_statement_attr(&attr.name) {
-                merge_statement_usage_with_bound_targets(
-                    usage,
-                    expr,
-                    imported_bindings,
-                    bound_targets,
-                    &attr_locals,
-                );
-            } else if is_expression_attr(&attr.name) || is_custom_directive_attr(&attr.name) {
-                merge_expression_usage_with_bound_targets(
-                    usage,
-                    expr,
-                    imported_bindings,
-                    bound_targets,
-                    &attr_locals,
-                );
-            }
-        }
+fn scan_vue_attr_value(
+    attr: &ParsedAttr,
+    imported_bindings: &FxHashSet<String>,
+    bound_targets: &FxHashMap<String, String>,
+    attr_locals: &[String],
+    usage: &mut TemplateUsage,
+) {
+    let Some(expr) = attr.value.as_deref() else {
+        return;
+    };
+    if attr.name == "v-for"
+        || attr.name == "slot-scope"
+        || attr.name.starts_with("v-slot")
+        || attr.name.starts_with('#')
+    {
+        return;
     }
 
-    if !parsed.self_closing {
-        scopes.push(element_locals);
+    if is_statement_attr(&attr.name) {
+        merge_statement_usage_with_bound_targets(
+            usage,
+            expr,
+            imported_bindings,
+            bound_targets,
+            attr_locals,
+        );
+    } else if is_expression_attr(&attr.name) || is_custom_directive_attr(&attr.name) {
+        merge_expression_usage_with_bound_targets(
+            usage,
+            expr,
+            imported_bindings,
+            bound_targets,
+            attr_locals,
+        );
     }
+}
+
+fn attr_value<'a>(parsed: &'a ParsedTag, name: &str) -> Option<&'a str> {
+    parsed
+        .attrs
+        .iter()
+        .find(|attr| attr.name == name)
+        .and_then(|attr| attr.value.as_deref())
 }
 
 fn dynamic_argument_expression(attr_name: &str) -> Option<&str> {

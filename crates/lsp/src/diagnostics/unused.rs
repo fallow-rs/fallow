@@ -205,17 +205,25 @@ pub fn push_dep_diagnostics(
         }
     }
 
+    push_type_only_dependency_diagnostics(map, results);
+    push_test_only_dependency_diagnostics(map, results);
+    push_unused_catalog_entry_diagnostics(map, results, root);
+
+    push_empty_catalog_group_diagnostics(map, results, root);
+
+    push_unresolved_catalog_reference_diagnostics(map, results);
+    push_dependency_override_diagnostics(map, results);
+}
+
+fn push_type_only_dependency_diagnostics(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+) {
     for dep in &results.type_only_dependencies {
         if let Some(dep_uri) = Uri::from_file_path(&dep.dep.path) {
             let line = dep.dep.line.saturating_sub(1);
             map.entry(dep_uri).or_default().push(Diagnostic {
-                range: Range {
-                    start: Position { line, character: 0 },
-                    end: Position {
-                        line,
-                        character: u32::MAX,
-                    },
-                },
+                range: full_line_range(line),
                 severity: Some(DiagnosticSeverity::INFORMATION),
                 source: Some("fallow".to_string()),
                 code: Some(NumberOrString::String("type-only-dependency".to_string())),
@@ -228,18 +236,17 @@ pub fn push_dep_diagnostics(
             });
         }
     }
+}
 
+fn push_test_only_dependency_diagnostics(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+) {
     for dep in &results.test_only_dependencies {
         if let Some(dep_uri) = Uri::from_file_path(&dep.dep.path) {
             let line = dep.dep.line.saturating_sub(1);
             map.entry(dep_uri).or_default().push(Diagnostic {
-                range: Range {
-                    start: Position { line, character: 0 },
-                    end: Position {
-                        line,
-                        character: u32::MAX,
-                    },
-                },
+                range: full_line_range(line),
                 severity: Some(DiagnosticSeverity::INFORMATION),
                 source: Some("fallow".to_string()),
                 code: Some(NumberOrString::String("test-only-dependency".to_string())),
@@ -252,44 +259,52 @@ pub fn push_dep_diagnostics(
             });
         }
     }
+}
 
+fn push_unused_catalog_entry_diagnostics(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+    root: &std::path::Path,
+) {
     for entry in &results.unused_catalog_entries {
         let entry = &entry.entry;
         if let Some(entry_uri) = Uri::from_file_path(root.join(&entry.path)) {
             let line = entry.line.saturating_sub(1);
-            let message = if entry.catalog_name == "default" {
-                format!(
-                    "Unused catalog entry: '{}' is not referenced by any workspace package",
-                    entry.entry_name
-                )
-            } else {
-                format!(
-                    "Unused catalog entry: '{}' in catalog '{}' is not referenced by any workspace package",
-                    entry.entry_name, entry.catalog_name
-                )
-            };
             map.entry(entry_uri).or_default().push(Diagnostic {
-                range: Range {
-                    start: Position { line, character: 0 },
-                    end: Position {
-                        line,
-                        character: u32::MAX,
-                    },
-                },
+                range: full_line_range(line),
                 severity: Some(DiagnosticSeverity::WARNING),
                 source: Some("fallow".to_string()),
                 code: Some(NumberOrString::String("unused-catalog-entry".to_string())),
                 code_description: doc_link("unused-catalog-entries"),
-                message,
+                message: unused_catalog_entry_message(entry),
                 ..Default::default()
             });
         }
     }
+}
 
-    push_empty_catalog_group_diagnostics(map, results, root);
+fn unused_catalog_entry_message(entry: &fallow_core::results::UnusedCatalogEntry) -> String {
+    if entry.catalog_name == "default" {
+        format!(
+            "Unused catalog entry: '{}' is not referenced by any workspace package",
+            entry.entry_name
+        )
+    } else {
+        format!(
+            "Unused catalog entry: '{}' in catalog '{}' is not referenced by any workspace package",
+            entry.entry_name, entry.catalog_name
+        )
+    }
+}
 
-    push_unresolved_catalog_reference_diagnostics(map, results);
-    push_dependency_override_diagnostics(map, results);
+fn full_line_range(line: u32) -> Range {
+    Range {
+        start: Position { line, character: 0 },
+        end: Position {
+            line,
+            character: u32::MAX,
+        },
+    }
 }
 
 fn push_empty_catalog_group_diagnostics(

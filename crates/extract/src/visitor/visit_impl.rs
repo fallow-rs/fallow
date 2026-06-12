@@ -2374,6 +2374,403 @@ impl ModuleInfoExtractor {
                 .push((test_name.to_string(), ident.name.to_string()));
         }
     }
+
+    fn record_vitest_mock_dynamic_imports(&mut self, expr: &CallExpression<'_>) {
+        let Some(target_source) = vitest_mock_source(expr) else {
+            return;
+        };
+
+        self.dynamic_imports.push(DynamicImportInfo {
+            source: target_source.clone(),
+            span: expr.span,
+            destructured_names: Vec::new(),
+            local_name: None,
+            is_speculative: false,
+        });
+
+        if !vi_mock_has_factory(expr)
+            && let Some(mock_source) = vitest_auto_mock_source(&target_source)
+        {
+            self.dynamic_imports.push(DynamicImportInfo {
+                source: mock_source,
+                span: expr.span,
+                destructured_names: Vec::new(),
+                local_name: Some(String::new()),
+                is_speculative: true,
+            });
+        }
+    }
+
+    fn record_bare_require_call(&mut self, expr: &CallExpression<'_>) {
+        if let Expression::Identifier(ident) = &expr.callee
+            && ident.name == "require"
+            && let Some(Argument::StringLiteral(lit)) = expr.arguments.first()
+            && !self.handled_require_spans.contains(&expr.span)
+        {
+            self.require_calls.push(RequireCallInfo {
+                source: lit.value.to_string(),
+                span: expr.span,
+                source_span: lit.span,
+                destructured_names: Vec::new(),
+                local_name: None,
+            });
+        }
+    }
+
+    fn record_whole_object_call_use(&mut self, expr: &CallExpression<'_>) {
+        if let Expression::StaticMemberExpression(member) = &expr.callee
+            && let Expression::Identifier(obj) = &member.object
+            && obj.name == "Object"
+            && matches!(
+                member.property.name.as_str(),
+                "values" | "keys" | "entries" | "getOwnPropertyNames"
+            )
+            && let Some(arg_name) = expr.arguments.first().and_then(static_argument_object_name)
+        {
+            self.whole_object_uses.push(arg_name);
+        }
+    }
+
+    fn push_relative_dynamic_import_pattern(&mut self, prefix: String, span: Span) {
+        if prefix.starts_with("./") || prefix.starts_with("../") {
+            self.dynamic_import_patterns.push(DynamicImportPattern {
+                prefix,
+                suffix: None,
+                span,
+            });
+        }
+    }
+
+    fn record_import_meta_glob_patterns(&mut self, expr: &CallExpression<'_>) {
+        if let Expression::StaticMemberExpression(member) = &expr.callee
+            && member.property.name == "glob"
+            && matches!(member.object, Expression::MetaProperty(_))
+            && let Some(first_arg) = expr.arguments.first()
+        {
+            match first_arg {
+                Argument::StringLiteral(lit) => {
+                    self.push_relative_dynamic_import_pattern(lit.value.to_string(), expr.span);
+                }
+                Argument::ArrayExpression(arr) => {
+                    for elem in &arr.elements {
+                        if let ArrayExpressionElement::StringLiteral(lit) = elem {
+                            self.push_relative_dynamic_import_pattern(
+                                lit.value.to_string(),
+                                expr.span,
+                            );
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn record_require_context_pattern(&mut self, expr: &CallExpression<'_>) {
+        if let Expression::StaticMemberExpression(member) = &expr.callee
+            && member.property.name == "context"
+            && let Expression::Identifier(obj) = &member.object
+            && obj.name == "require"
+            && let Some(Argument::StringLiteral(dir_lit)) = expr.arguments.first()
+        {
+            let dir = dir_lit.value.to_string();
+            if dir.starts_with("./") || dir.starts_with("../") {
+                let recursive = expr
+                    .arguments
+                    .get(1)
+                    .is_some_and(|arg| matches!(arg, Argument::BooleanLiteral(b) if b.value));
+                let prefix = if recursive {
+                    format!("{dir}/**/")
+                } else {
+                    format!("{dir}/")
+                };
+                let suffix = expr.arguments.get(2).and_then(|arg| match arg {
+                    Argument::RegExpLiteral(re) => regex_pattern_to_suffix(&re.regex.pattern.text),
+                    _ => None,
+                });
+                self.dynamic_import_patterns.push(DynamicImportPattern {
+                    prefix,
+                    suffix,
+                    span: expr.span,
+                });
+            }
+        }
+    }
+
+    fn record_import_callback_dynamic_imports(&mut self, expr: &CallExpression<'_>) {
+        if let Some(then_cb) = try_extract_import_then_callback(expr) {
+            if let Some(local) = &then_cb.local_name {
+                self.namespace_binding_names.push(local.clone());
+            }
+            self.handled_import_spans.insert(then_cb.import_span);
+            self.dynamic_imports.push(DynamicImportInfo {
+                source: then_cb.source,
+                span: then_cb.import_span,
+                destructured_names: then_cb.destructured_names,
+                local_name: then_cb.local_name,
+                is_speculative: false,
+            });
+        }
+    }
+
+    fn record_arrow_wrapped_dynamic_import(&mut self, expr: &CallExpression<'_>) {
+        if let Some((import_expr, source)) = try_extract_arrow_wrapped_import(&expr.arguments) {
+            self.dynamic_imports.push(DynamicImportInfo {
+                source: source.to_string(),
+                span: import_expr.span,
+                destructured_names: vec!["default".to_string()],
+                local_name: None,
+                is_speculative: false,
+            });
+            self.handled_import_spans.insert(import_expr.span);
+        }
+    }
+}
+
+impl ModuleInfoExtractor {
+    fn record_top_level_declaration(&mut self, decl: &Declaration<'_>) {
+        match decl {
+            Declaration::VariableDeclaration(var) => {
+                for declarator in &var.declarations {
+                    for id in declarator.id.get_binding_identifiers() {
+                        self.record_local_declaration_name(&id.name);
+                    }
+                }
+            }
+            Declaration::ClassDeclaration(class) => self.record_top_level_class_declaration(class),
+            Declaration::FunctionDeclaration(function) => {
+                self.record_top_level_function_declaration(function);
+            }
+            Declaration::TSTypeAliasDeclaration(alias) => {
+                self.record_top_level_type_alias_declaration(alias);
+            }
+            Declaration::TSInterfaceDeclaration(iface) => {
+                self.record_top_level_interface_declaration(iface);
+            }
+            Declaration::TSEnumDeclaration(enumd) => {
+                self.record_local_declaration_name(&enumd.id.name);
+                self.record_local_type_declaration(&enumd.id.name, enumd.id.span);
+            }
+            Declaration::TSModuleDeclaration(module) => {
+                if let TSModuleDeclarationName::Identifier(id) = &module.id {
+                    self.record_local_declaration_name(&id.name);
+                    self.record_local_type_declaration(&id.name, id.span);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn record_top_level_class_declaration(&mut self, class: &Class<'_>) {
+        if let Some(id) = class.id.as_ref() {
+            self.record_local_declaration_name(&id.name);
+            self.record_sanitizer_binding(id.name.as_str(), None);
+            self.record_literal_allowlist_binding(id.name.as_str(), false);
+            self.record_risky_regex_binding(id.name.as_str(), None);
+            self.record_path_sink_binding(id.name.as_str(), None);
+            self.record_path_relative_binding(id.name.as_str(), None);
+            self.record_local_type_declaration(&id.name, id.span);
+            let is_angular = has_angular_class_decorator(class);
+            let instance_bindings = super::helpers::extract_class_instance_bindings(
+                class,
+                |local_name, source, imported_name| {
+                    self.is_named_import_from(local_name, source, imported_name)
+                },
+            );
+            self.record_local_class_export(
+                id.name.to_string(),
+                extract_class_members(class, is_angular),
+                extract_super_class_name(class),
+                extract_implemented_interface_names(class),
+                instance_bindings,
+            );
+            let refs = Self::collect_class_signature_refs(class);
+            self.record_local_signature_refs(&id.name, refs);
+        }
+    }
+
+    fn record_top_level_function_declaration(&mut self, function: &Function<'_>) {
+        if let Some(id) = function.id.as_ref() {
+            self.record_local_declaration_name(&id.name);
+            self.record_sanitizer_binding(id.name.as_str(), None);
+            self.record_literal_allowlist_binding(id.name.as_str(), false);
+            self.record_risky_regex_binding(id.name.as_str(), None);
+            self.record_path_sink_binding(id.name.as_str(), None);
+            self.record_path_relative_binding(id.name.as_str(), None);
+            let refs = Self::collect_function_signature_refs(function);
+            self.record_local_signature_refs(&id.name, refs);
+            self.record_local_structural_function(
+                id.name.as_str(),
+                &function.params,
+                function.body.as_deref(),
+            );
+            self.record_source_returning_function_declaration(function);
+            self.record_package_resolution_function_arg(function, id.name.as_str());
+            self.record_playwright_factory_helper(function, id.name.as_str());
+        }
+    }
+
+    fn record_package_resolution_function_arg(&mut self, function: &Function<'_>, name: &str) {
+        if let Some(body) = function.body.as_deref()
+            && let Some(arg_index) = package_resolution_arg_index(
+                &function.params,
+                body,
+                &self.package_resolution_function_args,
+            )
+        {
+            self.package_resolution_function_args
+                .insert(name.to_string(), arg_index);
+        }
+    }
+
+    fn record_playwright_factory_helper(&mut self, function: &Function<'_>, name: &str) {
+        if let Some(body) = function.body.as_deref()
+            && let Some(call) = extract_function_body_final_return_call(body)
+        {
+            self.try_capture_playwright_factory_helper(name, call);
+        }
+    }
+
+    fn record_top_level_type_alias_declaration(&mut self, alias: &TSTypeAliasDeclaration<'_>) {
+        self.record_local_declaration_name(&alias.id.name);
+        self.record_local_type_declaration(&alias.id.name, alias.id.span);
+        self.record_playwright_fixture_type_alias(alias);
+        let refs = Self::collect_type_alias_signature_refs(alias);
+        self.record_local_signature_refs(&alias.id.name, refs);
+        if let TSType::TSTypeLiteral(type_lit) = &alias.type_annotation {
+            let properties = collect_object_type_property_types(&type_lit.members);
+            if !properties.is_empty() {
+                self.interface_property_types
+                    .insert(alias.id.name.to_string(), properties);
+            }
+        }
+    }
+
+    fn record_top_level_interface_declaration(&mut self, iface: &TSInterfaceDeclaration<'_>) {
+        self.record_local_declaration_name(&iface.id.name);
+        self.record_local_type_declaration(&iface.id.name, iface.id.span);
+        let refs = Self::collect_interface_signature_refs(iface);
+        self.record_local_signature_refs(&iface.id.name, refs);
+        let properties = collect_object_type_property_types(&iface.body.body);
+        if !properties.is_empty() {
+            self.interface_property_types
+                .insert(iface.id.name.to_string(), properties);
+        }
+    }
+
+    fn record_nested_declaration(&mut self, decl: &Declaration<'_>) {
+        match decl {
+            Declaration::VariableDeclaration(var) => {
+                for declarator in &var.declarations {
+                    self.record_nested_declaration_names(declarator.id.get_binding_identifiers());
+                }
+            }
+            Declaration::ClassDeclaration(class) => {
+                if let Some(id) = class.id.as_ref() {
+                    self.record_nested_named_declaration(id);
+                }
+            }
+            Declaration::FunctionDeclaration(function) => {
+                if let Some(id) = function.id.as_ref() {
+                    self.record_nested_named_declaration(id);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn record_nested_named_declaration(&mut self, id: &BindingIdentifier<'_>) {
+        self.record_nested_declaration_names(std::iter::once(id));
+        self.record_sanitizer_binding(id.name.as_str(), None);
+        self.record_literal_allowlist_binding(id.name.as_str(), false);
+        self.record_risky_regex_binding(id.name.as_str(), None);
+        self.record_path_sink_binding(id.name.as_str(), None);
+        self.record_path_relative_binding(id.name.as_str(), None);
+    }
+
+    fn record_variable_declarator_metadata(&mut self, declarator: &VariableDeclarator<'_>) {
+        if self.is_module_scope() {
+            let refs = Self::collect_variable_signature_refs(declarator);
+            for id in declarator.id.get_binding_identifiers() {
+                self.record_local_signature_refs(&id.name, refs.clone());
+            }
+        }
+
+        if let BindingPattern::BindingIdentifier(id) = &declarator.id
+            && let Some(type_annotation) = declarator.type_annotation.as_deref()
+        {
+            self.record_typed_binding(id.name.as_str(), type_annotation);
+        }
+
+        if let BindingPattern::ObjectPattern(obj_pat) = &declarator.id
+            && let Some(type_annotation) = declarator.type_annotation.as_deref()
+        {
+            self.record_typed_destructure_binding(obj_pat, type_annotation);
+        }
+    }
+
+    fn record_uninitialized_variable_bindings(&mut self, declarator: &VariableDeclarator<'_>) {
+        for id in declarator.id.get_binding_identifiers() {
+            self.record_sanitizer_binding(id.name.as_str(), None);
+            self.record_literal_allowlist_binding(id.name.as_str(), false);
+            self.record_risky_regex_binding(id.name.as_str(), None);
+            self.record_path_sink_binding(id.name.as_str(), None);
+            self.record_path_relative_binding(id.name.as_str(), None);
+        }
+    }
+
+    fn record_initialized_variable_bindings(
+        &mut self,
+        decl: &VariableDeclaration<'_>,
+        declarator: &VariableDeclarator<'_>,
+        init: &Expression<'_>,
+    ) {
+        self.record_local_structural_function_from_variable_declarator(declarator, init);
+        self.record_source_returning_helper_from_variable_declarator(decl, declarator, init);
+        self.record_sanitizer_helper_from_variable_declarator(decl, declarator, init);
+        self.record_initialized_declarator_bindings(decl, declarator, init);
+        if let BindingPattern::BindingIdentifier(id) = &declarator.id {
+            self.capture_math_random_context_sink(id.name.as_str(), init, declarator.span);
+            self.capture_hardcoded_secret_literal_sink(id.name.as_str(), init, declarator.span);
+            let risky_pattern = if decl.kind == VariableDeclarationKind::Const {
+                self.risky_regex_fragment_for_expr(init)
+            } else {
+                None
+            };
+            self.record_risky_regex_binding(id.name.as_str(), risky_pattern);
+        }
+
+        if let BindingPattern::ObjectPattern(obj_pat) = &declarator.id {
+            self.record_tainted_destructure_bindings(obj_pat, init);
+            self.record_chained_tainted_destructure_bindings(obj_pat, init);
+        }
+    }
+
+    fn record_playwright_variable_helpers(
+        &mut self,
+        declarator: &VariableDeclarator<'_>,
+        init: &Expression<'_>,
+    ) {
+        if let BindingPattern::BindingIdentifier(id) = &declarator.id
+            && let Expression::CallExpression(call) = init
+        {
+            self.record_playwright_fixture_definitions(id.name.as_str(), call);
+        }
+
+        if let BindingPattern::BindingIdentifier(id) = &declarator.id {
+            let helper_call = match init {
+                Expression::ArrowFunctionExpression(arrow) => extract_arrow_return_call(arrow),
+                Expression::FunctionExpression(func) => func
+                    .body
+                    .as_deref()
+                    .and_then(extract_function_body_final_return_call),
+                _ => None,
+            };
+            if let Some(call) = helper_call {
+                self.try_capture_playwright_factory_helper(id.name.as_str(), call);
+            }
+        }
+    }
 }
 
 impl<'a> Visit<'a> for ModuleInfoExtractor {
@@ -2524,143 +2921,9 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
     fn visit_declaration(&mut self, decl: &Declaration<'a>) {
         if self.block_depth == 0 && self.function_depth == 0 && self.namespace_depth == 0 {
-            match decl {
-                Declaration::VariableDeclaration(var) => {
-                    for declarator in &var.declarations {
-                        for id in declarator.id.get_binding_identifiers() {
-                            self.record_local_declaration_name(&id.name);
-                        }
-                    }
-                }
-                Declaration::ClassDeclaration(class) => {
-                    if let Some(id) = class.id.as_ref() {
-                        self.record_local_declaration_name(&id.name);
-                        self.record_sanitizer_binding(id.name.as_str(), None);
-                        self.record_literal_allowlist_binding(id.name.as_str(), false);
-                        self.record_risky_regex_binding(id.name.as_str(), None);
-                        self.record_path_sink_binding(id.name.as_str(), None);
-                        self.record_path_relative_binding(id.name.as_str(), None);
-                        self.record_local_type_declaration(&id.name, id.span);
-                        let is_angular = has_angular_class_decorator(class);
-                        let instance_bindings = super::helpers::extract_class_instance_bindings(
-                            class,
-                            |local_name, source, imported_name| {
-                                self.is_named_import_from(local_name, source, imported_name)
-                            },
-                        );
-                        self.record_local_class_export(
-                            id.name.to_string(),
-                            extract_class_members(class, is_angular),
-                            extract_super_class_name(class),
-                            extract_implemented_interface_names(class),
-                            instance_bindings,
-                        );
-                        let refs = Self::collect_class_signature_refs(class);
-                        self.record_local_signature_refs(&id.name, refs);
-                    }
-                }
-                Declaration::FunctionDeclaration(function) => {
-                    if let Some(id) = function.id.as_ref() {
-                        self.record_local_declaration_name(&id.name);
-                        self.record_sanitizer_binding(id.name.as_str(), None);
-                        self.record_literal_allowlist_binding(id.name.as_str(), false);
-                        self.record_risky_regex_binding(id.name.as_str(), None);
-                        self.record_path_sink_binding(id.name.as_str(), None);
-                        self.record_path_relative_binding(id.name.as_str(), None);
-                        let refs = Self::collect_function_signature_refs(function);
-                        self.record_local_signature_refs(&id.name, refs);
-                        self.record_local_structural_function(
-                            id.name.as_str(),
-                            &function.params,
-                            function.body.as_deref(),
-                        );
-                        self.record_source_returning_function_declaration(function);
-                        if let Some(body) = function.body.as_deref()
-                            && let Some(arg_index) = package_resolution_arg_index(
-                                &function.params,
-                                body,
-                                &self.package_resolution_function_args,
-                            )
-                        {
-                            self.package_resolution_function_args
-                                .insert(id.name.to_string(), arg_index);
-                        }
-
-                        if let Some(body) = function.body.as_deref()
-                            && let Some(call) = extract_function_body_final_return_call(body)
-                        {
-                            self.try_capture_playwright_factory_helper(id.name.as_str(), call);
-                        }
-                    }
-                }
-                Declaration::TSTypeAliasDeclaration(alias) => {
-                    self.record_local_declaration_name(&alias.id.name);
-                    self.record_local_type_declaration(&alias.id.name, alias.id.span);
-                    self.record_playwright_fixture_type_alias(alias);
-                    let refs = Self::collect_type_alias_signature_refs(alias);
-                    self.record_local_signature_refs(&alias.id.name, refs);
-                    if let TSType::TSTypeLiteral(type_lit) = &alias.type_annotation {
-                        let properties = collect_object_type_property_types(&type_lit.members);
-                        if !properties.is_empty() {
-                            self.interface_property_types
-                                .insert(alias.id.name.to_string(), properties);
-                        }
-                    }
-                }
-                Declaration::TSInterfaceDeclaration(iface) => {
-                    self.record_local_declaration_name(&iface.id.name);
-                    self.record_local_type_declaration(&iface.id.name, iface.id.span);
-                    let refs = Self::collect_interface_signature_refs(iface);
-                    self.record_local_signature_refs(&iface.id.name, refs);
-                    let properties = collect_object_type_property_types(&iface.body.body);
-                    if !properties.is_empty() {
-                        self.interface_property_types
-                            .insert(iface.id.name.to_string(), properties);
-                    }
-                }
-                Declaration::TSEnumDeclaration(enumd) => {
-                    self.record_local_declaration_name(&enumd.id.name);
-                    self.record_local_type_declaration(&enumd.id.name, enumd.id.span);
-                }
-                Declaration::TSModuleDeclaration(module) => {
-                    if let TSModuleDeclarationName::Identifier(id) = &module.id {
-                        self.record_local_declaration_name(&id.name);
-                        self.record_local_type_declaration(&id.name, id.span);
-                    }
-                }
-                _ => {}
-            }
+            self.record_top_level_declaration(decl);
         } else if self.namespace_depth == 0 {
-            match decl {
-                Declaration::VariableDeclaration(var) => {
-                    for declarator in &var.declarations {
-                        self.record_nested_declaration_names(
-                            declarator.id.get_binding_identifiers(),
-                        );
-                    }
-                }
-                Declaration::ClassDeclaration(class) => {
-                    if let Some(id) = class.id.as_ref() {
-                        self.record_nested_declaration_names(std::iter::once(id));
-                        self.record_sanitizer_binding(id.name.as_str(), None);
-                        self.record_literal_allowlist_binding(id.name.as_str(), false);
-                        self.record_risky_regex_binding(id.name.as_str(), None);
-                        self.record_path_sink_binding(id.name.as_str(), None);
-                        self.record_path_relative_binding(id.name.as_str(), None);
-                    }
-                }
-                Declaration::FunctionDeclaration(function) => {
-                    if let Some(id) = function.id.as_ref() {
-                        self.record_nested_declaration_names(std::iter::once(id));
-                        self.record_sanitizer_binding(id.name.as_str(), None);
-                        self.record_literal_allowlist_binding(id.name.as_str(), false);
-                        self.record_risky_regex_binding(id.name.as_str(), None);
-                        self.record_path_sink_binding(id.name.as_str(), None);
-                        self.record_path_relative_binding(id.name.as_str(), None);
-                    }
-                }
-                _ => {}
-            }
+            self.record_nested_declaration(decl);
         }
 
         walk::walk_declaration(self, decl);
@@ -3019,75 +3282,15 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
     fn visit_variable_declaration(&mut self, decl: &VariableDeclaration<'a>) {
         for declarator in &decl.declarations {
-            if self.is_module_scope() {
-                let refs = Self::collect_variable_signature_refs(declarator);
-                for id in declarator.id.get_binding_identifiers() {
-                    self.record_local_signature_refs(&id.name, refs.clone());
-                }
-            }
-
-            if let BindingPattern::BindingIdentifier(id) = &declarator.id
-                && let Some(type_annotation) = declarator.type_annotation.as_deref()
-            {
-                self.record_typed_binding(id.name.as_str(), type_annotation);
-            }
-
-            if let BindingPattern::ObjectPattern(obj_pat) = &declarator.id
-                && let Some(type_annotation) = declarator.type_annotation.as_deref()
-            {
-                self.record_typed_destructure_binding(obj_pat, type_annotation);
-            }
+            self.record_variable_declarator_metadata(declarator);
 
             let Some(init) = &declarator.init else {
-                for id in declarator.id.get_binding_identifiers() {
-                    self.record_sanitizer_binding(id.name.as_str(), None);
-                    self.record_literal_allowlist_binding(id.name.as_str(), false);
-                    self.record_risky_regex_binding(id.name.as_str(), None);
-                    self.record_path_sink_binding(id.name.as_str(), None);
-                    self.record_path_relative_binding(id.name.as_str(), None);
-                }
+                self.record_uninitialized_variable_bindings(declarator);
                 continue;
             };
 
-            self.record_local_structural_function_from_variable_declarator(declarator, init);
-            self.record_source_returning_helper_from_variable_declarator(decl, declarator, init);
-            self.record_sanitizer_helper_from_variable_declarator(decl, declarator, init);
-            self.record_initialized_declarator_bindings(decl, declarator, init);
-            if let BindingPattern::BindingIdentifier(id) = &declarator.id {
-                self.capture_math_random_context_sink(id.name.as_str(), init, declarator.span);
-                self.capture_hardcoded_secret_literal_sink(id.name.as_str(), init, declarator.span);
-                let risky_pattern = if decl.kind == VariableDeclarationKind::Const {
-                    self.risky_regex_fragment_for_expr(init)
-                } else {
-                    None
-                };
-                self.record_risky_regex_binding(id.name.as_str(), risky_pattern);
-            }
-
-            if let BindingPattern::ObjectPattern(obj_pat) = &declarator.id {
-                self.record_tainted_destructure_bindings(obj_pat, init);
-                self.record_chained_tainted_destructure_bindings(obj_pat, init);
-            }
-
-            if let BindingPattern::BindingIdentifier(id) = &declarator.id
-                && let Expression::CallExpression(call) = init
-            {
-                self.record_playwright_fixture_definitions(id.name.as_str(), call);
-            }
-
-            if let BindingPattern::BindingIdentifier(id) = &declarator.id {
-                let helper_call = match init {
-                    Expression::ArrowFunctionExpression(arrow) => extract_arrow_return_call(arrow),
-                    Expression::FunctionExpression(func) => func
-                        .body
-                        .as_deref()
-                        .and_then(extract_function_body_final_return_call),
-                    _ => None,
-                };
-                if let Some(call) = helper_call {
-                    self.try_capture_playwright_factory_helper(id.name.as_str(), call);
-                }
-            }
+            self.record_initialized_variable_bindings(decl, declarator, init);
+            self.record_playwright_variable_helpers(declarator, init);
 
             if let BindingPattern::BindingIdentifier(id) = &declarator.id
                 && let Expression::ObjectExpression(obj) = init
@@ -3215,147 +3418,18 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         }
 
         self.bind_iterable_callback_parameter(expr);
-
-        if let Some(target_source) = vitest_mock_source(expr) {
-            self.dynamic_imports.push(DynamicImportInfo {
-                source: target_source.clone(),
-                span: expr.span,
-                destructured_names: Vec::new(),
-                local_name: None,
-                is_speculative: false,
-            });
-
-            if !vi_mock_has_factory(expr)
-                && let Some(mock_source) = vitest_auto_mock_source(&target_source)
-            {
-                self.dynamic_imports.push(DynamicImportInfo {
-                    source: mock_source,
-                    span: expr.span,
-                    destructured_names: Vec::new(),
-                    local_name: Some(String::new()),
-                    is_speculative: true,
-                });
-            }
-        }
+        self.record_vitest_mock_dynamic_imports(expr);
 
         self.try_record_pino_transport_targets(expr);
         self.try_record_node_module_register(expr);
         self.try_record_child_process_fork(expr);
         self.try_record_package_path_reference(expr);
-
-        if let Expression::Identifier(ident) = &expr.callee
-            && ident.name == "require"
-            && let Some(Argument::StringLiteral(lit)) = expr.arguments.first()
-            && !self.handled_require_spans.contains(&expr.span)
-        {
-            self.require_calls.push(RequireCallInfo {
-                source: lit.value.to_string(),
-                span: expr.span,
-                source_span: lit.span,
-                destructured_names: Vec::new(),
-                local_name: None,
-            });
-        }
-
-        if let Expression::StaticMemberExpression(member) = &expr.callee
-            && let Expression::Identifier(obj) = &member.object
-            && obj.name == "Object"
-            && matches!(
-                member.property.name.as_str(),
-                "values" | "keys" | "entries" | "getOwnPropertyNames"
-            )
-            && let Some(arg_name) = expr.arguments.first().and_then(static_argument_object_name)
-        {
-            self.whole_object_uses.push(arg_name);
-        }
-
-        if let Expression::StaticMemberExpression(member) = &expr.callee
-            && member.property.name == "glob"
-            && matches!(member.object, Expression::MetaProperty(_))
-            && let Some(first_arg) = expr.arguments.first()
-        {
-            match first_arg {
-                Argument::StringLiteral(lit) => {
-                    let s = lit.value.to_string();
-                    if s.starts_with("./") || s.starts_with("../") {
-                        self.dynamic_import_patterns.push(DynamicImportPattern {
-                            prefix: s,
-                            suffix: None,
-                            span: expr.span,
-                        });
-                    }
-                }
-                Argument::ArrayExpression(arr) => {
-                    for elem in &arr.elements {
-                        if let ArrayExpressionElement::StringLiteral(lit) = elem {
-                            let s = lit.value.to_string();
-                            if s.starts_with("./") || s.starts_with("../") {
-                                self.dynamic_import_patterns.push(DynamicImportPattern {
-                                    prefix: s,
-                                    suffix: None,
-                                    span: expr.span,
-                                });
-                            }
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        if let Expression::StaticMemberExpression(member) = &expr.callee
-            && member.property.name == "context"
-            && let Expression::Identifier(obj) = &member.object
-            && obj.name == "require"
-            && let Some(Argument::StringLiteral(dir_lit)) = expr.arguments.first()
-        {
-            let dir = dir_lit.value.to_string();
-            if dir.starts_with("./") || dir.starts_with("../") {
-                let recursive = expr
-                    .arguments
-                    .get(1)
-                    .is_some_and(|arg| matches!(arg, Argument::BooleanLiteral(b) if b.value));
-                let prefix = if recursive {
-                    format!("{dir}/**/")
-                } else {
-                    format!("{dir}/")
-                };
-                let suffix = expr.arguments.get(2).and_then(|arg| match arg {
-                    Argument::RegExpLiteral(re) => regex_pattern_to_suffix(&re.regex.pattern.text),
-                    _ => None,
-                });
-                self.dynamic_import_patterns.push(DynamicImportPattern {
-                    prefix,
-                    suffix,
-                    span: expr.span,
-                });
-            }
-        }
-
-        if let Some(then_cb) = try_extract_import_then_callback(expr) {
-            if let Some(local) = &then_cb.local_name {
-                self.namespace_binding_names.push(local.clone());
-            }
-            self.handled_import_spans.insert(then_cb.import_span);
-            self.dynamic_imports.push(DynamicImportInfo {
-                source: then_cb.source,
-                span: then_cb.import_span,
-                destructured_names: then_cb.destructured_names,
-                local_name: then_cb.local_name,
-                is_speculative: false,
-            });
-        }
-
-        if let Some((import_expr, source)) = try_extract_arrow_wrapped_import(&expr.arguments) {
-            self.dynamic_imports.push(DynamicImportInfo {
-                source: source.to_string(),
-                span: import_expr.span,
-                destructured_names: vec!["default".to_string()],
-                local_name: None,
-                is_speculative: false,
-            });
-            self.handled_import_spans.insert(import_expr.span);
-        }
+        self.record_bare_require_call(expr);
+        self.record_whole_object_call_use(expr);
+        self.record_import_meta_glob_patterns(expr);
+        self.record_require_context_pattern(expr);
+        self.record_import_callback_dynamic_imports(expr);
+        self.record_arrow_wrapped_dynamic_import(expr);
 
         self.try_record_fluent_chain_access(expr);
 
@@ -3757,7 +3831,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     /// handles the same markup in `.html` files. See issue #105 (till's
     /// follow-up comment).
     ///
-    /// Only the `Expression::Identifier` tag named `html` is matched — member
+    /// Only the `Expression::Identifier` tag named `html` is matched. Member
     /// expressions (`lit.html`), call expressions, and other identifiers are
     /// deliberately skipped to avoid conflating unrelated tagged templates
     /// (`css`, `sql`, `gql`, `styled.div`) with HTML. Each quasi is scanned

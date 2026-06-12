@@ -215,136 +215,218 @@ pub(super) fn apply_export_fixes(
         };
         let lines: Vec<&str> = content.split(meta.line_ending).collect();
 
-        let mut line_fixes: Vec<ExportFix> = Vec::new();
-        for export in file_exports {
-            let line_idx = export.line.saturating_sub(1) as usize;
-
-            if line_idx >= lines.len() {
-                continue;
-            }
-
-            let line = lines[line_idx];
-            let trimmed = line.trim_start();
-
-            if !trimmed.starts_with("export ") {
-                continue;
-            }
-
-            let after_export = trimmed.strip_prefix("export ").unwrap_or(trimmed);
-
-            if after_export.starts_with("default ") {
-                let after_default = after_export
-                    .strip_prefix("default ")
-                    .unwrap_or(after_export);
-                if after_default.starts_with("function ")
-                    || after_default.starts_with("async function ")
-                    || after_default.starts_with("class ")
-                    || after_default.starts_with("abstract class ")
-                {
-                } else {
-                    continue;
-                }
-            }
-
-            line_fixes.push(ExportFix {
-                line_idx,
-                export_name: export.export_name.clone(),
-                enum_declaration: removable_exported_enum_range(
-                    &lines,
-                    line_idx,
-                    &export.export_name,
-                ),
-            });
-        }
-
+        let mut line_fixes = collect_export_line_fixes(&lines, file_exports);
         if line_fixes.is_empty() {
             continue;
         }
 
         line_fixes.sort_by_key(|f| std::cmp::Reverse(f.line_idx));
-
-        let mut grouped: Vec<(usize, Vec<String>)> = Vec::new();
-        for fix in &line_fixes {
-            if let Some(last) = grouped.last_mut()
-                && last.0 == fix.line_idx
-            {
-                last.1.push(fix.export_name.clone());
-                continue;
-            }
-            grouped.push((fix.line_idx, vec![fix.export_name.clone()]));
-        }
+        let grouped = group_export_fixes_by_line(&line_fixes);
 
         if dry_run {
-            for fix in &line_fixes {
-                if !matches!(output, OutputFormat::Json) {
-                    emit_dry_run_export_fix(relative, fix);
-                }
-                push_export_fix_json(fixes, relative, path, fix, None);
-            }
+            push_dry_run_export_fixes(output, fixes, relative, path, &line_fixes);
         } else {
-            let mut new_lines: Vec<String> = lines.iter().map(ToString::to_string).collect();
-            let mut lines_to_delete: Vec<usize> = Vec::new();
-            let mut ranges_to_delete: Vec<EnumDeclarationRange> = Vec::new();
-
-            for (line_idx, names) in &grouped {
-                if let Some(range) = line_fixes
-                    .iter()
-                    .find(|fix| fix.line_idx == *line_idx && fix.enum_declaration.is_some())
-                    .and_then(|fix| fix.enum_declaration)
-                {
-                    ranges_to_delete.push(range);
-                    continue;
-                }
-
-                let line = &new_lines[*line_idx];
-                let trimmed = line.trim_start();
-                let after_export = trimmed.strip_prefix("export ").unwrap_or(trimmed);
-
-                if is_export_list(after_export) {
-                    let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
-                    match remove_specifiers_from_export_list(line, &name_refs) {
-                        None => {
-                            lines_to_delete.push(*line_idx);
-                        }
-                        Some(new_line) => {
-                            new_lines[*line_idx] = new_line;
-                        }
-                    }
-                } else {
-                    let indent = line.len() - trimmed.len();
-                    let replacement = if after_export.starts_with("default function ")
-                        || after_export.starts_with("default async function ")
-                        || after_export.starts_with("default class ")
-                        || after_export.starts_with("default abstract class ")
-                    {
-                        after_export
-                            .strip_prefix("default ")
-                            .unwrap_or(after_export)
-                    } else {
-                        after_export
-                    };
-
-                    let prefix = &line[..indent];
-                    new_lines[*line_idx] = format!("{prefix}{replacement}");
-                }
-            }
-
-            let mut delete_indices = lines_to_delete;
-            for range in ranges_to_delete {
-                delete_indices.extend(range.start_line..=range.end_line);
-            }
-            delete_indices.sort_unstable();
-            delete_indices.dedup();
-            for &idx in delete_indices.iter().rev() {
-                new_lines.remove(idx);
-            }
-
-            stage_fixed_content(plan, path, &new_lines, &meta, &content);
-
-            for fix in &line_fixes {
-                push_export_fix_json(fixes, relative, path, fix, Some(true));
-            }
+            apply_grouped_export_fixes(
+                plan,
+                path,
+                fixes,
+                relative,
+                &content,
+                &meta,
+                &lines,
+                &line_fixes,
+                &grouped,
+            );
         }
+    }
+}
+
+fn collect_export_line_fixes(
+    lines: &[&str],
+    file_exports: &[&fallow_core::results::UnusedExport],
+) -> Vec<ExportFix> {
+    file_exports
+        .iter()
+        .filter_map(|export| export_line_fix(lines, export))
+        .collect()
+}
+
+fn export_line_fix(
+    lines: &[&str],
+    export: &fallow_core::results::UnusedExport,
+) -> Option<ExportFix> {
+    let line_idx = export.line.saturating_sub(1) as usize;
+    let line = *lines.get(line_idx)?;
+    let trimmed = line.trim_start();
+    if !trimmed.starts_with("export ") {
+        return None;
+    }
+
+    let after_export = trimmed.strip_prefix("export ").unwrap_or(trimmed);
+    if !is_removable_default_export(after_export) {
+        return None;
+    }
+
+    Some(ExportFix {
+        line_idx,
+        export_name: export.export_name.clone(),
+        enum_declaration: removable_exported_enum_range(lines, line_idx, &export.export_name),
+    })
+}
+
+fn is_removable_default_export(after_export: &str) -> bool {
+    if !after_export.starts_with("default ") {
+        return true;
+    }
+    let after_default = after_export
+        .strip_prefix("default ")
+        .unwrap_or(after_export);
+    after_default.starts_with("function ")
+        || after_default.starts_with("async function ")
+        || after_default.starts_with("class ")
+        || after_default.starts_with("abstract class ")
+}
+
+fn group_export_fixes_by_line(line_fixes: &[ExportFix]) -> Vec<(usize, Vec<String>)> {
+    let mut grouped: Vec<(usize, Vec<String>)> = Vec::new();
+    for fix in line_fixes {
+        if let Some(last) = grouped.last_mut()
+            && last.0 == fix.line_idx
+        {
+            last.1.push(fix.export_name.clone());
+            continue;
+        }
+        grouped.push((fix.line_idx, vec![fix.export_name.clone()]));
+    }
+    grouped
+}
+
+fn push_dry_run_export_fixes(
+    output: OutputFormat,
+    fixes: &mut Vec<serde_json::Value>,
+    relative: &Path,
+    path: &Path,
+    line_fixes: &[ExportFix],
+) {
+    for fix in line_fixes {
+        if !matches!(output, OutputFormat::Json) {
+            emit_dry_run_export_fix(relative, fix);
+        }
+        push_export_fix_json(fixes, relative, path, fix, None);
+    }
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "applies one prepared file rewrite using the already-read source, metadata, grouped edits, and JSON sink"
+)]
+fn apply_grouped_export_fixes(
+    plan: &mut FixPlan,
+    path: &Path,
+    fixes: &mut Vec<serde_json::Value>,
+    relative: &Path,
+    content: &str,
+    meta: &super::io::EncodingMetadata,
+    lines: &[&str],
+    line_fixes: &[ExportFix],
+    grouped: &[(usize, Vec<String>)],
+) {
+    let mut new_lines: Vec<String> = lines.iter().map(ToString::to_string).collect();
+    let mut lines_to_delete = Vec::new();
+    let mut ranges_to_delete = Vec::new();
+
+    for (line_idx, names) in grouped {
+        apply_export_line_group(
+            &mut new_lines,
+            &mut lines_to_delete,
+            &mut ranges_to_delete,
+            line_fixes,
+            *line_idx,
+            names,
+        );
+    }
+
+    delete_export_lines(&mut new_lines, lines_to_delete, ranges_to_delete);
+    stage_fixed_content(plan, path, &new_lines, meta, content);
+    for fix in line_fixes {
+        push_export_fix_json(fixes, relative, path, fix, Some(true));
+    }
+}
+
+fn apply_export_line_group(
+    new_lines: &mut [String],
+    lines_to_delete: &mut Vec<usize>,
+    ranges_to_delete: &mut Vec<EnumDeclarationRange>,
+    line_fixes: &[ExportFix],
+    line_idx: usize,
+    names: &[String],
+) {
+    if let Some(range) = line_fixes
+        .iter()
+        .find(|fix| fix.line_idx == line_idx && fix.enum_declaration.is_some())
+        .and_then(|fix| fix.enum_declaration)
+    {
+        ranges_to_delete.push(range);
+        return;
+    }
+
+    let line = new_lines[line_idx].clone();
+    let trimmed = line.trim_start();
+    let after_export = trimmed.strip_prefix("export ").unwrap_or(trimmed);
+    if is_export_list(after_export) {
+        apply_export_list_line(new_lines, lines_to_delete, line_idx, &line, names);
+    } else {
+        new_lines[line_idx] = remove_direct_export_keyword(&line, trimmed, after_export);
+    }
+}
+
+fn apply_export_list_line(
+    new_lines: &mut [String],
+    lines_to_delete: &mut Vec<usize>,
+    line_idx: usize,
+    line: &str,
+    names: &[String],
+) {
+    let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
+    match remove_specifiers_from_export_list(line, &name_refs) {
+        None => lines_to_delete.push(line_idx),
+        Some(new_line) => {
+            new_lines[line_idx] = new_line;
+        }
+    }
+}
+
+fn remove_direct_export_keyword(line: &str, trimmed: &str, after_export: &str) -> String {
+    let indent = line.len() - trimmed.len();
+    let replacement = if after_export.starts_with("default function ")
+        || after_export.starts_with("default async function ")
+        || after_export.starts_with("default class ")
+        || after_export.starts_with("default abstract class ")
+    {
+        after_export
+            .strip_prefix("default ")
+            .unwrap_or(after_export)
+    } else {
+        after_export
+    };
+
+    let prefix = &line[..indent];
+    format!("{prefix}{replacement}")
+}
+
+fn delete_export_lines(
+    new_lines: &mut Vec<String>,
+    lines_to_delete: Vec<usize>,
+    ranges_to_delete: Vec<EnumDeclarationRange>,
+) {
+    let mut delete_indices = lines_to_delete;
+    for range in ranges_to_delete {
+        delete_indices.extend(range.start_line..=range.end_line);
+    }
+    delete_indices.sort_unstable();
+    delete_indices.dedup();
+    for &idx in delete_indices.iter().rev() {
+        new_lines.remove(idx);
     }
 }
 

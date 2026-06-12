@@ -2,6 +2,7 @@ use fallow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
 use globset::GlobMatcher;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::discover::FileId;
@@ -1786,14 +1787,7 @@ pub(super) fn find_unused_members_with_public_api_entry_points(
             }
 
             for export in &module.exports {
-                if export.members.is_empty() {
-                    continue;
-                }
-
-                if export.references.is_empty()
-                    && !export.is_side_effect_used
-                    && !graph.has_namespace_import(module.file_id)
-                {
+                if should_skip_export_member_scan(graph, module, export) {
                     continue;
                 }
 
@@ -1838,30 +1832,15 @@ pub(super) fn find_unused_members_with_public_api_entry_points(
                         continue;
                     }
 
-                    let (line, col) = byte_offset_to_line_col(
-                        line_offsets_by_file,
+                    let Some(unused) = build_unsuppressed_unused_member(
                         module.file_id,
-                        member.span.start,
-                    );
-
-                    let issue_kind = match member.kind {
-                        MemberKind::EnumMember => IssueKind::UnusedEnumMember,
-                        MemberKind::ClassMethod | MemberKind::ClassProperty => {
-                            IssueKind::UnusedClassMember
-                        }
-                        MemberKind::NamespaceMember => unreachable!(),
-                    };
-                    if suppressions.is_suppressed(module.file_id, line, issue_kind) {
+                        &module.path,
+                        &export_name,
+                        member,
+                        suppressions,
+                        line_offsets_by_file,
+                    ) else {
                         continue;
-                    }
-
-                    let unused = UnusedMember {
-                        path: module.path.clone(),
-                        parent_name: export_name.clone(),
-                        member_name: member.name.clone(),
-                        kind: member.kind,
-                        line,
-                        col,
                     };
 
                     match member.kind {
@@ -1887,6 +1866,45 @@ pub(super) fn find_unused_members_with_public_api_entry_points(
     ignore_decorators.warn_unmatched();
 
     (unused_enum_members, unused_class_members)
+}
+
+fn should_skip_export_member_scan(
+    graph: &ModuleGraph,
+    module: &crate::graph::ModuleNode,
+    export: &crate::graph::ExportSymbol,
+) -> bool {
+    export.members.is_empty()
+        || (export.references.is_empty()
+            && !export.is_side_effect_used
+            && !graph.has_namespace_import(module.file_id))
+}
+
+fn build_unsuppressed_unused_member(
+    file_id: FileId,
+    path: &Path,
+    export_name: &str,
+    member: &MemberInfo,
+    suppressions: &SuppressionContext<'_>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+) -> Option<UnusedMember> {
+    let (line, col) = byte_offset_to_line_col(line_offsets_by_file, file_id, member.span.start);
+    let issue_kind = match member.kind {
+        MemberKind::EnumMember => IssueKind::UnusedEnumMember,
+        MemberKind::ClassMethod | MemberKind::ClassProperty => IssueKind::UnusedClassMember,
+        MemberKind::NamespaceMember => unreachable!(),
+    };
+    if suppressions.is_suppressed(file_id, line, issue_kind) {
+        return None;
+    }
+
+    Some(UnusedMember {
+        path: path.to_path_buf(),
+        parent_name: export_name.to_string(),
+        member_name: member.name.clone(),
+        kind: member.kind,
+        line,
+        col,
+    })
 }
 
 fn should_skip_member_for_unused_report(member: &MemberInfo, ctx: &MemberSkipContext<'_>) -> bool {

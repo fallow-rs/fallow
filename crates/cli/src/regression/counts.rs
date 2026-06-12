@@ -163,106 +163,45 @@ impl CheckCounts {
 
     /// Per-type deltas (current - baseline) for display. Only includes types with changes.
     pub fn deltas(&self, current: &Self) -> Vec<(&'static str, isize)> {
-        let pairs: Vec<(&str, usize, usize)> = vec![
-            ("unused_files", self.unused_files, current.unused_files),
-            (
-                "unused_exports",
-                self.unused_exports,
-                current.unused_exports,
-            ),
-            ("unused_types", self.unused_types, current.unused_types),
-            (
-                "unused_dependencies",
-                self.unused_dependencies,
-                current.unused_dependencies,
-            ),
-            (
-                "unused_dev_dependencies",
-                self.unused_dev_dependencies,
-                current.unused_dev_dependencies,
-            ),
-            (
-                "unused_optional_dependencies",
-                self.unused_optional_dependencies,
-                current.unused_optional_dependencies,
-            ),
-            (
-                "unused_enum_members",
-                self.unused_enum_members,
-                current.unused_enum_members,
-            ),
-            (
-                "unused_class_members",
-                self.unused_class_members,
-                current.unused_class_members,
-            ),
-            (
-                "unresolved_imports",
-                self.unresolved_imports,
-                current.unresolved_imports,
-            ),
-            (
-                "unlisted_dependencies",
-                self.unlisted_dependencies,
-                current.unlisted_dependencies,
-            ),
-            (
-                "duplicate_exports",
-                self.duplicate_exports,
-                current.duplicate_exports,
-            ),
-            (
-                "circular_dependencies",
-                self.circular_dependencies,
-                current.circular_dependencies,
-            ),
-            (
-                "re_export_cycles",
-                self.re_export_cycles,
-                current.re_export_cycles,
-            ),
-            (
-                "type_only_dependencies",
-                self.type_only_dependencies,
-                current.type_only_dependencies,
-            ),
-            (
-                "test_only_dependencies",
-                self.test_only_dependencies,
-                current.test_only_dependencies,
-            ),
-            (
-                "boundary_violations",
-                self.boundary_violations,
-                current.boundary_violations,
-            ),
-            (
-                "boundary_coverage_violations",
-                self.boundary_coverage_violations,
-                current.boundary_coverage_violations,
-            ),
-            (
-                "boundary_call_violations",
-                self.boundary_call_violations,
-                current.boundary_call_violations,
-            ),
-            (
-                "policy_violations",
-                self.policy_violations,
-                current.policy_violations,
-            ),
-        ];
-        pairs
-            .into_iter()
-            .filter_map(|(name, baseline, current)| {
-                let delta = current as isize - baseline as isize;
-                if delta != 0 {
-                    Some((name, delta))
-                } else {
-                    None
-                }
-            })
-            .collect()
+        let mut deltas = Vec::new();
+        macro_rules! push_delta {
+            ($field:ident) => {
+                push_count_delta(&mut deltas, stringify!($field), self.$field, current.$field);
+            };
+        }
+
+        push_delta!(unused_files);
+        push_delta!(unused_exports);
+        push_delta!(unused_types);
+        push_delta!(unused_dependencies);
+        push_delta!(unused_dev_dependencies);
+        push_delta!(unused_optional_dependencies);
+        push_delta!(unused_enum_members);
+        push_delta!(unused_class_members);
+        push_delta!(unresolved_imports);
+        push_delta!(unlisted_dependencies);
+        push_delta!(duplicate_exports);
+        push_delta!(circular_dependencies);
+        push_delta!(re_export_cycles);
+        push_delta!(type_only_dependencies);
+        push_delta!(test_only_dependencies);
+        push_delta!(boundary_violations);
+        push_delta!(boundary_coverage_violations);
+        push_delta!(boundary_call_violations);
+        push_delta!(policy_violations);
+        deltas
+    }
+}
+
+fn push_count_delta(
+    deltas: &mut Vec<(&'static str, isize)>,
+    name: &'static str,
+    baseline: usize,
+    current: usize,
+) {
+    let delta = current as isize - baseline as isize;
+    if delta != 0 {
+        deltas.push((name, delta));
     }
 }
 

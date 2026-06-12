@@ -1422,24 +1422,32 @@ pub fn build_health_sarif(
     let mut sarif_results = Vec::new();
     let mut snippets = SourceSnippetCache::default();
 
-    append_complexity_sarif_results(&mut sarif_results, report, root, &mut snippets);
+    append_health_sarif_results(report, root, &mut sarif_results, &mut snippets);
+    let health_rules = health_sarif_rules();
+    health_sarif_document(&sarif_results, &health_rules)
+}
+
+fn append_health_sarif_results(
+    report: &crate::health_types::HealthReport,
+    root: &Path,
+    sarif_results: &mut Vec<serde_json::Value>,
+    snippets: &mut SourceSnippetCache,
+) {
+    append_complexity_sarif_results(sarif_results, report, root, snippets);
 
     if let Some(ref production) = report.runtime_coverage {
-        append_runtime_coverage_sarif_results(&mut sarif_results, production, root, &mut snippets);
+        append_runtime_coverage_sarif_results(sarif_results, production, root, snippets);
     }
     if let Some(ref intelligence) = report.coverage_intelligence {
-        append_coverage_intelligence_sarif_results(
-            &mut sarif_results,
-            intelligence,
-            root,
-            &mut snippets,
-        );
+        append_coverage_intelligence_sarif_results(sarif_results, intelligence, root, snippets);
     }
 
-    append_refactoring_target_sarif_results(&mut sarif_results, report, root);
-    append_coverage_gap_sarif_results(&mut sarif_results, report, root, &mut snippets);
+    append_refactoring_target_sarif_results(sarif_results, report, root);
+    append_coverage_gap_sarif_results(sarif_results, report, root, snippets);
+}
 
-    let health_rules = vec![
+fn health_sarif_rules() -> Vec<serde_json::Value> {
+    vec![
         sarif_rule(
             "fallow/high-cyclomatic-complexity",
             "Function has high cyclomatic complexity",
@@ -1520,8 +1528,13 @@ pub fn build_health_sarif(
             "Hot covered code has high CRAP and should be refactored carefully",
             "warning",
         ),
-    ];
+    ]
+}
 
+fn health_sarif_document(
+    sarif_results: &[serde_json::Value],
+    health_rules: &[serde_json::Value],
+) -> serde_json::Value {
     serde_json::json!({
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
         "version": "2.1.0",

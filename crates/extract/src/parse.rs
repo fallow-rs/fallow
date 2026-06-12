@@ -17,7 +17,15 @@ use crate::mdx::{is_mdx_file, parse_mdx_to_module};
 use crate::sfc::{is_sfc_file, parse_sfc_to_module};
 use crate::visitor::ModuleInfoExtractor;
 use fallow_types::discover::FileId;
-use fallow_types::extract::{ImportInfo, VisibilityTag};
+use fallow_types::extract::{FlagUse, FunctionComplexity, ImportInfo, VisibilityTag};
+
+struct JsxRetryParse {
+    extractor: ModuleInfoExtractor,
+    semantic_usage: SemanticUsage,
+    complexity: Vec<FunctionComplexity>,
+    flag_uses: Vec<FlagUse>,
+    parsed_suppressions: crate::suppress::ParsedSuppressions,
+}
 
 fn source_type_for_path(path: &Path) -> SourceType {
     match path.extension().and_then(|ext| ext.to_str()) {
@@ -55,28 +63,10 @@ fn parse_source_to_module_inner(
     need_complexity: bool,
 ) -> ModuleInfo {
     let source = crate::strip_bom(source);
-    if is_sfc_file(path) {
-        return parse_sfc_to_module(file_id, path, source, content_hash, need_complexity);
-    }
-    if is_astro_file(path) {
-        return parse_astro_to_module(file_id, source, content_hash);
-    }
-    if is_mdx_file(path) {
-        return parse_mdx_to_module(file_id, source, content_hash);
-    }
-    if is_css_file(path) {
-        return parse_css_to_module(file_id, path, source, content_hash);
-    }
-    if is_graphql_file(path) {
-        return parse_graphql_to_module(file_id, source, content_hash);
-    }
-    if is_html_file(path) {
-        return parse_html_to_module_with_complexity(
-            file_id,
-            source,
-            content_hash,
-            need_complexity,
-        );
+    if let Some(module) =
+        parse_non_js_source_to_module(file_id, path, source, content_hash, need_complexity)
+    {
+        return module;
     }
 
     let stripped_glimmer_source = is_glimmer_file(path)
@@ -94,7 +84,7 @@ fn parse_source_to_module_inner(
     extractor.visit_program(&parser_return.program);
     extractor.resolve_pending_local_export_specifiers();
 
-    let mut template_used_imports =
+    let template_used_imports =
         collect_glimmer_template_into_extractor(&mut extractor, path, source);
 
     let mut semantic_usage = compute_semantic_usage(
@@ -128,59 +118,25 @@ fn parse_source_to_module_inner(
 
     let total_extracted =
         extractor.exports.len() + extractor.imports.len() + extractor.re_exports.len();
-    let mut used_retry = false;
-    if total_extracted == 0 && source.len() > 100 && !source_type.is_jsx() {
-        let jsx_type = if source_type.is_typescript() {
-            SourceType::tsx()
-        } else {
-            SourceType::jsx()
-        };
-        let allocator2 = Allocator::default();
-        let retry_return = Parser::new(&allocator2, parser_source, jsx_type).parse();
-        let mut retry_extractor = ModuleInfoExtractor::new();
-        retry_extractor.visit_program(&retry_return.program);
-        retry_extractor.resolve_pending_local_export_specifiers();
-        let retry_total = retry_extractor.exports.len()
-            + retry_extractor.imports.len()
-            + retry_extractor.re_exports.len();
-        if retry_total > total_extracted {
-            template_used_imports =
-                collect_glimmer_template_into_extractor(&mut retry_extractor, path, source);
-            semantic_usage = compute_semantic_usage(
-                &retry_return.program,
-                &retry_extractor.imports,
-                &template_used_imports,
-            );
-            if need_complexity {
-                complexity = crate::complexity::compute_complexity(
-                    &retry_return.program,
-                    parser_source,
-                    &line_offsets,
-                );
-                append_inline_template_complexity(
-                    &mut complexity,
-                    &retry_extractor.inline_template_findings,
-                    &line_offsets,
-                );
-            }
-            flag_uses =
-                crate::flags::extract_flags(&retry_return.program, &line_offsets, &[], &[], false);
-            parsed_suppressions =
-                crate::suppress::parse_suppressions(&retry_return.program.comments, source);
-            apply_jsdoc_visibility_tags(
-                &mut retry_extractor.exports,
-                &retry_return.program.comments,
-                source,
-            );
-            extract_jsdoc_import_types(
-                &mut retry_extractor.imports,
-                &retry_return.program.comments,
-                source,
-            );
-            extractor = retry_extractor;
-            used_retry = true;
-        }
-    }
+    let retry_input = JsxRetryInput {
+        path,
+        source,
+        parser_source,
+        source_type,
+        total_extracted,
+        need_complexity,
+        line_offsets: &line_offsets,
+    };
+    let used_retry = if let Some(retry) = parse_with_jsx_retry(&retry_input) {
+        extractor = retry.extractor;
+        semantic_usage = retry.semantic_usage;
+        complexity = retry.complexity;
+        flag_uses = retry.flag_uses;
+        parsed_suppressions = retry.parsed_suppressions;
+        true
+    } else {
+        false
+    };
 
     if !used_retry {
         apply_jsdoc_visibility_tags(
@@ -205,6 +161,133 @@ fn parse_source_to_module_inner(
     info.flag_uses = flag_uses;
 
     info
+}
+
+struct JsxRetryInput<'a> {
+    path: &'a Path,
+    source: &'a str,
+    parser_source: &'a str,
+    source_type: SourceType,
+    total_extracted: usize,
+    need_complexity: bool,
+    line_offsets: &'a [u32],
+}
+
+fn parse_with_jsx_retry(input: &JsxRetryInput<'_>) -> Option<JsxRetryParse> {
+    if input.total_extracted != 0 || input.source.len() <= 100 || input.source_type.is_jsx() {
+        return None;
+    }
+
+    let jsx_type = if input.source_type.is_typescript() {
+        SourceType::tsx()
+    } else {
+        SourceType::jsx()
+    };
+    let allocator = Allocator::default();
+    let retry_return = Parser::new(&allocator, input.parser_source, jsx_type).parse();
+    let mut extractor = ModuleInfoExtractor::new();
+    extractor.visit_program(&retry_return.program);
+    extractor.resolve_pending_local_export_specifiers();
+    let retry_total =
+        extractor.exports.len() + extractor.imports.len() + extractor.re_exports.len();
+    if retry_total <= input.total_extracted {
+        return None;
+    }
+
+    let template_used_imports =
+        collect_glimmer_template_into_extractor(&mut extractor, input.path, input.source);
+    let semantic_usage = compute_semantic_usage(
+        &retry_return.program,
+        &extractor.imports,
+        &template_used_imports,
+    );
+    let complexity = retry_complexity(
+        input.need_complexity,
+        &retry_return.program,
+        input.parser_source,
+        input.line_offsets,
+        &extractor,
+    );
+    let flag_uses =
+        crate::flags::extract_flags(&retry_return.program, input.line_offsets, &[], &[], false);
+    let parsed_suppressions =
+        crate::suppress::parse_suppressions(&retry_return.program.comments, input.source);
+    apply_jsdoc_visibility_tags(
+        &mut extractor.exports,
+        &retry_return.program.comments,
+        input.source,
+    );
+    extract_jsdoc_import_types(
+        &mut extractor.imports,
+        &retry_return.program.comments,
+        input.source,
+    );
+    Some(JsxRetryParse {
+        extractor,
+        semantic_usage,
+        complexity,
+        flag_uses,
+        parsed_suppressions,
+    })
+}
+
+fn retry_complexity(
+    need_complexity: bool,
+    program: &Program<'_>,
+    parser_source: &str,
+    line_offsets: &[u32],
+    extractor: &ModuleInfoExtractor,
+) -> Vec<FunctionComplexity> {
+    if !need_complexity {
+        return Vec::new();
+    }
+    let mut complexity =
+        crate::complexity::compute_complexity(program, parser_source, line_offsets);
+    append_inline_template_complexity(
+        &mut complexity,
+        &extractor.inline_template_findings,
+        line_offsets,
+    );
+    complexity
+}
+
+fn parse_non_js_source_to_module(
+    file_id: FileId,
+    path: &Path,
+    source: &str,
+    content_hash: u64,
+    need_complexity: bool,
+) -> Option<ModuleInfo> {
+    if is_sfc_file(path) {
+        return Some(parse_sfc_to_module(
+            file_id,
+            path,
+            source,
+            content_hash,
+            need_complexity,
+        ));
+    }
+    if is_astro_file(path) {
+        return Some(parse_astro_to_module(file_id, source, content_hash));
+    }
+    if is_mdx_file(path) {
+        return Some(parse_mdx_to_module(file_id, source, content_hash));
+    }
+    if is_css_file(path) {
+        return Some(parse_css_to_module(file_id, path, source, content_hash));
+    }
+    if is_graphql_file(path) {
+        return Some(parse_graphql_to_module(file_id, source, content_hash));
+    }
+    if is_html_file(path) {
+        return Some(parse_html_to_module_with_complexity(
+            file_id,
+            source,
+            content_hash,
+            need_complexity,
+        ));
+    }
+    None
 }
 
 /// Scan Glimmer `<template>...</template>` blocks in a `.gts` / `.gjs` file

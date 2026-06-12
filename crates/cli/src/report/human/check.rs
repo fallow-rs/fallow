@@ -725,7 +725,27 @@ fn build_dependencies_section(
     max_grouped_files: usize,
     total_issues: usize,
 ) {
-    let has_dependencies = !results.unused_dependencies.is_empty()
+    if !has_dependency_findings(results) {
+        return;
+    }
+    push_category_header(lines, "Dependencies");
+
+    push_package_dependency_sections(lines, results, root, rules, max_items, total_issues);
+    push_import_dependency_sections(
+        lines,
+        results,
+        root,
+        rules,
+        max_items,
+        max_grouped_files,
+        total_issues,
+    );
+    push_catalog_dependency_sections(lines, results, root, rules, max_items, total_issues);
+    push_dependency_override_sections(lines, results, root, rules, max_items, total_issues);
+}
+
+fn has_dependency_findings(results: &AnalysisResults) -> bool {
+    !results.unused_dependencies.is_empty()
         || !results.unused_dev_dependencies.is_empty()
         || !results.unused_optional_dependencies.is_empty()
         || !results.unresolved_imports.is_empty()
@@ -736,12 +756,17 @@ fn build_dependencies_section(
         || !results.empty_catalog_groups.is_empty()
         || !results.unresolved_catalog_references.is_empty()
         || !results.unused_dependency_overrides.is_empty()
-        || !results.misconfigured_dependency_overrides.is_empty();
-    if !has_dependencies {
-        return;
-    }
-    push_category_header(lines, "Dependencies");
+        || !results.misconfigured_dependency_overrides.is_empty()
+}
 
+fn push_package_dependency_sections(
+    lines: &mut Vec<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+    max_items: usize,
+    total_issues: usize,
+) {
     push_human_pkg_dep_section(
         lines,
         &results.unused_dependencies,
@@ -769,6 +794,17 @@ fn build_dependencies_section(
         total_issues,
         root,
     );
+}
+
+fn push_import_dependency_sections(
+    lines: &mut Vec<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+    max_items: usize,
+    max_grouped_files: usize,
+    total_issues: usize,
+) {
     build_human_grouped_section(GroupedSectionInput {
         lines,
         items: &results.unresolved_imports,
@@ -812,6 +848,16 @@ fn build_dependencies_section(
         total_issues,
         root,
     );
+}
+
+fn push_catalog_dependency_sections(
+    lines: &mut Vec<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+    max_items: usize,
+    total_issues: usize,
+) {
     push_unused_catalog_entries_section(
         lines,
         &results.unused_catalog_entries,
@@ -836,6 +882,16 @@ fn build_dependencies_section(
         total_issues,
         root,
     );
+}
+
+fn push_dependency_override_sections(
+    lines: &mut Vec<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+    max_items: usize,
+    total_issues: usize,
+) {
     push_unused_dependency_overrides_section(
         lines,
         &results.unused_dependency_overrides,
@@ -2235,11 +2291,27 @@ pub(in crate::report) fn print_check_summary(
     }
 
     if heading {
-        outln!("{}", "Dead Code Summary".bold());
-        outln!();
+        print_check_summary_heading();
     }
 
-    let categories: &[(&str, usize, Level)] = &[
+    print_check_summary_rows(&check_summary_categories(results, rules));
+    print_check_summary_total(total);
+
+    if !quiet {
+        print_check_summary_failure(total, elapsed);
+    }
+}
+
+fn print_check_summary_heading() {
+    outln!("{}", "Dead Code Summary".bold());
+    outln!();
+}
+
+fn check_summary_categories(
+    results: &AnalysisResults,
+    rules: &RulesConfig,
+) -> Vec<(&'static str, usize, Level)> {
+    vec![
         (
             "Unused files",
             results.unused_files.len(),
@@ -2330,33 +2402,39 @@ pub(in crate::report) fn print_check_summary(
             results.stale_suppressions.len(),
             severity_to_level(rules.stale_suppressions),
         ),
-    ];
+    ]
+}
 
+fn print_check_summary_rows(categories: &[(&str, usize, Level)]) {
     for (name, count, level) in categories {
-        if *count == 0 {
-            continue;
+        if *count > 0 {
+            outln!("  {}  {name}", colored_summary_count(*count, *level));
         }
-        let count_str = format!("{count:>6}");
-        let colored = match level {
-            Level::Error => count_str.red().bold().to_string(),
-            Level::Warn => count_str.yellow().to_string(),
-            Level::Info => count_str.dimmed().to_string(),
-        };
-        outln!("  {colored}  {name}");
     }
+}
 
+fn colored_summary_count(count: usize, level: Level) -> String {
+    let count_str = format!("{count:>6}");
+    match level {
+        Level::Error => count_str.red().bold().to_string(),
+        Level::Warn => count_str.yellow().to_string(),
+        Level::Info => count_str.dimmed().to_string(),
+    }
+}
+
+fn print_check_summary_total(total: usize) {
     outln!();
     let total_str = format!("{total:>6}");
     outln!("  {}  {}", total_str.bold(), "Total".bold());
+}
 
-    if !quiet {
-        eprintln!(
-            "{}",
-            format!("\u{2717} {total} issues ({:.2}s)", elapsed.as_secs_f64())
-                .red()
-                .bold()
-        );
-    }
+fn print_check_summary_failure(total: usize, elapsed: Duration) {
+    eprintln!(
+        "{}",
+        format!("\u{2717} {total} issues ({:.2}s)", elapsed.as_secs_f64())
+            .red()
+            .bold()
+    );
 }
 
 #[cfg(test)]

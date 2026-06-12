@@ -135,6 +135,37 @@ pub fn build_health_finding_actions(
         actions.push(action);
     }
 
+    let is_template = name == "<template>";
+    let is_component = name == "<component>";
+    if should_add_refactor_action(
+        crap_only,
+        full_coverage_can_clear_crap,
+        cyclomatic,
+        cognitive,
+        ctx,
+    ) {
+        actions.push(build_refactor_action(
+            violation,
+            name,
+            is_template,
+            is_component,
+        ));
+    }
+
+    if !ctx.opts.omit_suppress_line {
+        actions.push(build_suppress_action(violation, is_template, is_component));
+    }
+
+    actions
+}
+
+fn should_add_refactor_action(
+    crap_only: bool,
+    full_coverage_can_clear_crap: bool,
+    cyclomatic: u16,
+    cognitive: u16,
+    ctx: &HealthActionContext,
+) -> bool {
     let crap_only_needs_complexity_reduction = crap_only && !full_coverage_can_clear_crap;
     let cognitive_floor = ctx.max_cognitive_threshold / 2;
     let near_cyclomatic_threshold = crap_only
@@ -144,101 +175,117 @@ pub fn build_health_finding_actions(
                 .max_cyclomatic_threshold
                 .saturating_sub(ctx.crap_refactor_band)
         && cognitive >= cognitive_floor;
-    let is_template = name == "<template>";
-    let is_component = name == "<component>";
-    if !crap_only || crap_only_needs_complexity_reduction || near_cyclomatic_threshold {
-        let (description, note): (String, &str) = if is_component {
-            let rollup = violation.component_rollup.as_ref();
-            let class_name = rollup.map_or("the component", |r| r.component.as_str());
-            let worst_method = rollup.map_or("the worst class method", |r| {
-                r.class_worst_function.as_str()
-            });
-            let class_cyc = rollup.map_or(0_u16, |r| r.class_cyclomatic);
-            let template_cyc = rollup.map_or(0_u16, |r| r.template_cyclomatic);
-            (
-                format!(
-                    "Refactor `{class_name}` to reduce component complexity (rolled-up cyclomatic {cyclomatic} = {class_cyc} on `{worst_method}` + {template_cyc} on the template)"
-                ),
-                "Consider splitting the template into smaller components OR extracting helpers from the worst class method; the rollup reflects the component as one complexity unit",
-            )
-        } else if is_template {
-            (
-                format!(
-                    "Refactor `{name}` to reduce template complexity (simplify control flow and bindings)"
-                ),
-                "Consider splitting complex template branches into smaller components or simpler bindings",
-            )
-        } else {
-            (
-                format!(
-                    "Refactor `{name}` to reduce complexity (extract helper functions, simplify branching)"
-                ),
-                "Consider splitting into smaller functions with single responsibilities",
-            )
-        };
-        actions.push(HealthFindingAction {
-            kind: HealthFindingActionType::RefactorFunction,
-            auto_fixable: false,
-            description,
-            note: Some(note.to_string()),
-            comment: None,
-            placement: None,
-            target_path: None,
-        });
-    }
+    !crap_only || crap_only_needs_complexity_reduction || near_cyclomatic_threshold
+}
 
-    if !ctx.opts.omit_suppress_line {
-        if is_template
-            && violation
-                .path
-                .extension()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("html"))
-        {
-            actions.push(HealthFindingAction {
-                kind: HealthFindingActionType::SuppressFile,
-                auto_fixable: false,
-                description: "Suppress with an HTML comment at the top of the template".to_string(),
-                note: None,
-                comment: Some("<!-- fallow-ignore-file complexity -->".to_string()),
-                placement: Some("top-of-template".to_string()),
-                target_path: None,
-            });
-        } else if is_template {
-            actions.push(HealthFindingAction {
-                kind: HealthFindingActionType::SuppressLine,
-                auto_fixable: false,
-                description: "Suppress with an inline comment above the Angular decorator"
-                    .to_string(),
-                note: None,
-                comment: Some("// fallow-ignore-next-line complexity".to_string()),
-                placement: Some("above-angular-decorator".to_string()),
-                target_path: None,
-            });
-        } else if is_component {
-            actions.push(HealthFindingAction {
-                kind: HealthFindingActionType::SuppressLine,
-                auto_fixable: false,
-                description: "Suppress with an inline comment above the worst class method (the rollup is anchored at that method's line, so a comment above it hides both the function finding and the rollup)".to_string(),
-                note: None,
-                comment: Some("// fallow-ignore-next-line complexity".to_string()),
-                placement: Some("above-component-worst-method".to_string()),
-                target_path: None,
-            });
-        } else {
-            actions.push(HealthFindingAction {
-                kind: HealthFindingActionType::SuppressLine,
-                auto_fixable: false,
-                description: "Suppress with an inline comment above the function declaration"
-                    .to_string(),
-                note: None,
-                comment: Some("// fallow-ignore-next-line complexity".to_string()),
-                placement: Some("above-function-declaration".to_string()),
-                target_path: None,
-            });
-        }
+fn build_refactor_action(
+    violation: &ComplexityViolation,
+    name: &str,
+    is_template: bool,
+    is_component: bool,
+) -> HealthFindingAction {
+    let (description, note): (String, &str) = if is_component {
+        component_refactor_copy(violation)
+    } else if is_template {
+        (
+            format!(
+                "Refactor `{name}` to reduce template complexity (simplify control flow and bindings)"
+            ),
+            "Consider splitting complex template branches into smaller components or simpler bindings",
+        )
+    } else {
+        (
+            format!(
+                "Refactor `{name}` to reduce complexity (extract helper functions, simplify branching)"
+            ),
+            "Consider splitting into smaller functions with single responsibilities",
+        )
+    };
+    HealthFindingAction {
+        kind: HealthFindingActionType::RefactorFunction,
+        auto_fixable: false,
+        description,
+        note: Some(note.to_string()),
+        comment: None,
+        placement: None,
+        target_path: None,
     }
+}
 
-    actions
+fn component_refactor_copy(violation: &ComplexityViolation) -> (String, &'static str) {
+    let rollup = violation.component_rollup.as_ref();
+    let class_name = rollup.map_or("the component", |r| r.component.as_str());
+    let worst_method = rollup.map_or("the worst class method", |r| {
+        r.class_worst_function.as_str()
+    });
+    let class_cyc = rollup.map_or(0_u16, |r| r.class_cyclomatic);
+    let template_cyc = rollup.map_or(0_u16, |r| r.template_cyclomatic);
+    (
+        format!(
+            "Refactor `{class_name}` to reduce component complexity (rolled-up cyclomatic {} = {class_cyc} on `{worst_method}` + {template_cyc} on the template)",
+            violation.cyclomatic
+        ),
+        "Consider splitting the template into smaller components OR extracting helpers from the worst class method; the rollup reflects the component as one complexity unit",
+    )
+}
+
+fn build_suppress_action(
+    violation: &ComplexityViolation,
+    is_template: bool,
+    is_component: bool,
+) -> HealthFindingAction {
+    if is_template
+        && violation
+            .path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("html"))
+    {
+        return suppress_file_action(
+            "Suppress with an HTML comment at the top of the template",
+            "<!-- fallow-ignore-file complexity -->",
+            "top-of-template",
+        );
+    }
+    if is_template {
+        return suppress_line_action(
+            "Suppress with an inline comment above the Angular decorator",
+            "above-angular-decorator",
+        );
+    }
+    if is_component {
+        return suppress_line_action(
+            "Suppress with an inline comment above the worst class method (the rollup is anchored at that method's line, so a comment above it hides both the function finding and the rollup)",
+            "above-component-worst-method",
+        );
+    }
+    suppress_line_action(
+        "Suppress with an inline comment above the function declaration",
+        "above-function-declaration",
+    )
+}
+
+fn suppress_file_action(description: &str, comment: &str, placement: &str) -> HealthFindingAction {
+    HealthFindingAction {
+        kind: HealthFindingActionType::SuppressFile,
+        auto_fixable: false,
+        description: description.to_string(),
+        note: None,
+        comment: Some(comment.to_string()),
+        placement: Some(placement.to_string()),
+        target_path: None,
+    }
+}
+
+fn suppress_line_action(description: &str, placement: &str) -> HealthFindingAction {
+    HealthFindingAction {
+        kind: HealthFindingActionType::SuppressLine,
+        auto_fixable: false,
+        description: description.to_string(),
+        note: None,
+        comment: Some("// fallow-ignore-next-line complexity".to_string()),
+        placement: Some(placement.to_string()),
+        target_path: None,
+    }
 }
 
 /// Build the coverage-leaning action for a CRAP-contributing finding.

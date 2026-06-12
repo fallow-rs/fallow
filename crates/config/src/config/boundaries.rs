@@ -546,137 +546,31 @@ impl BoundaryConfig {
             rustc_hash::FxHashMap::default();
         let mut group_drafts: Vec<LogicalGroupDraft> = Vec::new();
 
-        for (source_zone_index, mut zone) in original_zones.into_iter().enumerate() {
+        for (source_zone_index, zone) in original_zones.into_iter().enumerate() {
             if zone.auto_discover.is_empty() {
                 expanded_zones.push(zone);
                 continue;
             }
 
-            let group_name = zone.name.clone();
-            let raw_auto_discover = zone.auto_discover.clone();
-            let original_zone_root = zone.root.clone();
-            let DiscoveryOutcome {
-                zones: discovered_zones,
-                source_indices: discovered_source_indices,
-                had_invalid_path,
-            } = discover_child_zones(project_root, &zone);
-            let discovered_count = discovered_zones.len();
-            let mut expanded_names: Vec<String> = discovered_zones
-                .iter()
-                .map(|child| child.name.clone())
-                .collect();
-            let child_names_only = expanded_names.clone();
-            for child_zone in discovered_zones {
-                merge_zone_by_name(&mut expanded_zones, child_zone);
-            }
-
-            let fallback_zone = if zone.patterns.is_empty() {
-                None
-            } else {
-                expanded_names.push(group_name.clone());
-                zone.auto_discover.clear();
-                merge_zone_by_name(&mut expanded_zones, zone);
-                Some(group_name.clone())
-            };
-
-            if !expanded_names.is_empty() {
+            let expansion = expand_auto_discover_zone(
+                project_root,
+                zone,
+                source_zone_index,
+                &mut expanded_zones,
+            );
+            if !expansion.expanded_names.is_empty() {
                 group_expansions
-                    .entry(group_name.clone())
+                    .entry(expansion.group_name.clone())
                     .or_default()
-                    .extend(expanded_names);
+                    .extend(expansion.expanded_names);
             }
-
-            let status = if discovered_count > 0 {
-                LogicalGroupStatus::Ok
-            } else if had_invalid_path {
-                LogicalGroupStatus::InvalidPath
-            } else {
-                LogicalGroupStatus::Empty
-            };
-
-            if let Some(existing) = group_drafts.iter_mut().find(|d| d.name == group_name) {
-                tracing::warn!(
-                    "boundary zone '{}' is declared multiple times with autoDiscover; merging discovered children",
-                    group_name
-                );
-                let auto_discover_offset = existing.auto_discover.len();
-                existing.auto_discover.extend(raw_auto_discover);
-                let existing_children: rustc_hash::FxHashSet<String> =
-                    existing.children.iter().cloned().collect();
-                for (idx, name) in child_names_only.iter().enumerate() {
-                    if existing_children.contains(name) {
-                        continue;
-                    }
-                    existing.children.push(name.clone());
-                    existing
-                        .child_source_indices
-                        .push(discovered_source_indices[idx] + auto_discover_offset);
-                }
-                if existing.fallback_zone.is_none() {
-                    existing.fallback_zone = fallback_zone;
-                }
-                existing.status = merge_status(existing.status, status);
-                let chain = existing
-                    .merged_from
-                    .get_or_insert_with(|| vec![existing.source_zone_index]);
-                chain.push(source_zone_index);
-            } else {
-                group_drafts.push(LogicalGroupDraft {
-                    name: group_name,
-                    children: child_names_only,
-                    auto_discover: raw_auto_discover,
-                    fallback_zone,
-                    source_zone_index,
-                    status,
-                    merged_from: None,
-                    original_zone_root,
-                    child_source_indices: discovered_source_indices,
-                });
-            }
+            merge_logical_group_draft(&mut group_drafts, expansion.draft);
         }
 
         self.zones = expanded_zones;
 
-        let draft_names: rustc_hash::FxHashSet<&str> =
-            group_drafts.iter().map(|d| d.name.as_str()).collect();
-
         let original_rules = std::mem::take(&mut self.rules);
-        let authored_rules: rustc_hash::FxHashMap<&str, AuthoredRule> = original_rules
-            .iter()
-            .filter(|rule| draft_names.contains(rule.from.as_str()))
-            .map(|rule| {
-                (
-                    rule.from.as_str(),
-                    AuthoredRule {
-                        allow: rule.allow.clone(),
-                        allow_type_only: rule.allow_type_only.clone(),
-                    },
-                )
-            })
-            .collect();
-
-        let logical_groups: Vec<LogicalGroup> = group_drafts
-            .into_iter()
-            .map(|draft| {
-                let child_source_indices = if draft.auto_discover.len() > 1 {
-                    draft.child_source_indices
-                } else {
-                    Vec::new()
-                };
-                LogicalGroup {
-                    authored_rule: authored_rules.get(draft.name.as_str()).cloned(),
-                    name: draft.name,
-                    children: draft.children,
-                    auto_discover: draft.auto_discover,
-                    fallback_zone: draft.fallback_zone,
-                    source_zone_index: draft.source_zone_index,
-                    status: draft.status,
-                    merged_from: draft.merged_from,
-                    original_zone_root: draft.original_zone_root,
-                    child_source_indices,
-                }
-            })
-            .collect();
+        let logical_groups = build_logical_groups_from_drafts(group_drafts, &original_rules);
 
         if group_expansions.is_empty() {
             self.rules = original_rules;
@@ -686,6 +580,174 @@ impl BoundaryConfig {
         self.rules = expand_rules_for_groups(original_rules, &group_expansions);
         logical_groups
     }
+}
+
+struct AutoDiscoverExpansion {
+    group_name: String,
+    expanded_names: Vec<String>,
+    draft: LogicalGroupDraft,
+}
+
+fn expand_auto_discover_zone(
+    project_root: &Path,
+    mut zone: BoundaryZone,
+    source_zone_index: usize,
+    expanded_zones: &mut Vec<BoundaryZone>,
+) -> AutoDiscoverExpansion {
+    let group_name = zone.name.clone();
+    let raw_auto_discover = zone.auto_discover.clone();
+    let original_zone_root = zone.root.clone();
+    let DiscoveryOutcome {
+        zones: discovered_zones,
+        source_indices: discovered_source_indices,
+        had_invalid_path,
+    } = discover_child_zones(project_root, &zone);
+    let status = discovery_status(discovered_zones.len(), had_invalid_path);
+    let mut expanded_names: Vec<String> = discovered_zones
+        .iter()
+        .map(|child| child.name.clone())
+        .collect();
+    let child_names_only = expanded_names.clone();
+
+    for child_zone in discovered_zones {
+        merge_zone_by_name(expanded_zones, child_zone);
+    }
+
+    let fallback_zone = merge_fallback_auto_discover_zone(&mut zone, &group_name, expanded_zones);
+    if fallback_zone.is_some() {
+        expanded_names.push(group_name.clone());
+    }
+
+    AutoDiscoverExpansion {
+        group_name: group_name.clone(),
+        expanded_names,
+        draft: LogicalGroupDraft {
+            name: group_name,
+            children: child_names_only,
+            auto_discover: raw_auto_discover,
+            fallback_zone,
+            source_zone_index,
+            status,
+            merged_from: None,
+            original_zone_root,
+            child_source_indices: discovered_source_indices,
+        },
+    }
+}
+
+const fn discovery_status(discovered_count: usize, had_invalid_path: bool) -> LogicalGroupStatus {
+    if discovered_count > 0 {
+        LogicalGroupStatus::Ok
+    } else if had_invalid_path {
+        LogicalGroupStatus::InvalidPath
+    } else {
+        LogicalGroupStatus::Empty
+    }
+}
+
+fn merge_fallback_auto_discover_zone(
+    zone: &mut BoundaryZone,
+    group_name: &str,
+    expanded_zones: &mut Vec<BoundaryZone>,
+) -> Option<String> {
+    if zone.patterns.is_empty() {
+        return None;
+    }
+    zone.auto_discover.clear();
+    merge_zone_by_name(expanded_zones, zone.clone());
+    Some(group_name.to_owned())
+}
+
+fn merge_logical_group_draft(group_drafts: &mut Vec<LogicalGroupDraft>, draft: LogicalGroupDraft) {
+    let Some(existing) = group_drafts.iter_mut().find(|d| d.name == draft.name) else {
+        group_drafts.push(draft);
+        return;
+    };
+
+    tracing::warn!(
+        "boundary zone '{}' is declared multiple times with autoDiscover; merging discovered children",
+        draft.name
+    );
+    let auto_discover_offset = existing.auto_discover.len();
+    merge_logical_group_children(existing, &draft, auto_discover_offset);
+    existing.auto_discover.extend(draft.auto_discover);
+    if existing.fallback_zone.is_none() {
+        existing.fallback_zone = draft.fallback_zone;
+    }
+    existing.status = merge_status(existing.status, draft.status);
+    let chain = existing
+        .merged_from
+        .get_or_insert_with(|| vec![existing.source_zone_index]);
+    chain.push(draft.source_zone_index);
+}
+
+fn merge_logical_group_children(
+    existing: &mut LogicalGroupDraft,
+    draft: &LogicalGroupDraft,
+    auto_discover_offset: usize,
+) {
+    let existing_children: rustc_hash::FxHashSet<String> =
+        existing.children.iter().cloned().collect();
+    for (idx, name) in draft.children.iter().enumerate() {
+        if existing_children.contains(name) {
+            continue;
+        }
+        existing.children.push(name.clone());
+        existing
+            .child_source_indices
+            .push(draft.child_source_indices[idx] + auto_discover_offset);
+    }
+}
+
+fn build_logical_groups_from_drafts(
+    group_drafts: Vec<LogicalGroupDraft>,
+    original_rules: &[BoundaryRule],
+) -> Vec<LogicalGroup> {
+    let authored_rules = authored_rules_for_logical_groups(&group_drafts, original_rules);
+
+    group_drafts
+        .into_iter()
+        .map(|draft| {
+            let child_source_indices = if draft.auto_discover.len() > 1 {
+                draft.child_source_indices
+            } else {
+                Vec::new()
+            };
+            LogicalGroup {
+                authored_rule: authored_rules.get(draft.name.as_str()).cloned(),
+                name: draft.name,
+                children: draft.children,
+                auto_discover: draft.auto_discover,
+                fallback_zone: draft.fallback_zone,
+                source_zone_index: draft.source_zone_index,
+                status: draft.status,
+                merged_from: draft.merged_from,
+                original_zone_root: draft.original_zone_root,
+                child_source_indices,
+            }
+        })
+        .collect()
+}
+
+fn authored_rules_for_logical_groups<'a>(
+    group_drafts: &[LogicalGroupDraft],
+    original_rules: &'a [BoundaryRule],
+) -> rustc_hash::FxHashMap<&'a str, AuthoredRule> {
+    let draft_names: rustc_hash::FxHashSet<&str> =
+        group_drafts.iter().map(|d| d.name.as_str()).collect();
+    original_rules
+        .iter()
+        .filter(|rule| draft_names.contains(rule.from.as_str()))
+        .map(|rule| {
+            (
+                rule.from.as_str(),
+                AuthoredRule {
+                    allow: rule.allow.clone(),
+                    allow_type_only: rule.allow_type_only.clone(),
+                },
+            )
+        })
+        .collect()
 }
 
 /// Merge a discovered zone into `zones[]` by name.

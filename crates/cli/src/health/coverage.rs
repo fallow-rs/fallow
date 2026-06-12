@@ -8,9 +8,11 @@ use std::{collections::BTreeMap, fs};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use fallow_config::OutputFormat;
 use fallow_cov_protocol::{
-    CaptureQuality, Confidence, CoverageSource, Evidence, FunctionIdentity, IdentityResolution,
-    PROTOCOL_VERSION, ReportVerdict, Request, Response, RiskBand, StaticFile, StaticFindings,
-    StaticFunction, Verdict, Watermark, function_identity_id,
+    BlastRadiusEntry as ProtocolBlastRadiusEntry, CaptureQuality, Confidence, CoverageSource,
+    Evidence, Finding as ProtocolFinding, FunctionIdentity, HotPath as ProtocolHotPath,
+    IdentityResolution, ImportanceEntry as ProtocolImportanceEntry, PROTOCOL_VERSION,
+    ReportVerdict, Request, Response, RiskBand, StaticFile, StaticFindings, StaticFunction,
+    Verdict, Watermark, function_identity_id,
 };
 use fallow_license::{
     DEFAULT_HARD_FAIL_DAYS, Feature, LicenseStatus, load_and_verify, load_raw_jwt,
@@ -1710,136 +1712,15 @@ fn stderr_message(stderr: &[u8], fallback: &str) -> String {
     }
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "flat mapping of four response collections (findings/hot_paths/blast/importance) into output structs plus their sort comparators; splitting would scatter the closely-coupled field mapping"
-)]
 fn convert_response(
     response: Response,
     _locations: &FunctionLocations,
     watermark: Option<RuntimeCoverageWatermark>,
 ) -> RuntimeCoverageReport {
-    let mut findings = response
-        .findings
-        .into_iter()
-        .filter_map(|finding| {
-            let verdict = map_verdict(finding.verdict);
-            if matches!(verdict, RuntimeCoverageVerdict::Active) {
-                return None;
-            }
-            let (stable_id, source_hash) = finding.identity.map_or((None, None), |identity| {
-                (Some(identity.stable_id), identity.source_hash)
-            });
-            Some(RuntimeCoverageFinding {
-                id: finding.id,
-                stable_id,
-                source_hash,
-                path: PathBuf::from(finding.file),
-                function: finding.function,
-                line: finding.line,
-                verdict,
-                invocations: finding.invocations,
-                confidence: map_confidence(finding.confidence),
-                evidence: map_evidence(finding.evidence),
-                actions: finding
-                    .actions
-                    .into_iter()
-                    .map(|action| RuntimeCoverageAction {
-                        kind: action.kind,
-                        description: action.description,
-                        auto_fixable: action.auto_fixable,
-                    })
-                    .collect(),
-            })
-        })
-        .collect::<Vec<_>>();
-
-    findings.sort_by(|left, right| {
-        verdict_rank(left.verdict)
-            .cmp(&verdict_rank(right.verdict))
-            .then_with(|| left.path.cmp(&right.path))
-            .then_with(|| left.function.cmp(&right.function))
-    });
-
-    let mut hot_paths = response
-        .hot_paths
-        .into_iter()
-        .map(|entry| RuntimeCoverageHotPath {
-            id: entry.id,
-            stable_id: entry.identity.map(|identity| identity.stable_id),
-            path: PathBuf::from(entry.file),
-            function: entry.function,
-            line: entry.line,
-            end_line: entry.end_line,
-            invocations: entry.invocations,
-            percentile: entry.percentile,
-            actions: Vec::new(),
-        })
-        .collect::<Vec<_>>();
-    hot_paths.sort_by(|left, right| {
-        right
-            .invocations
-            .cmp(&left.invocations)
-            .then_with(|| left.path.cmp(&right.path))
-            .then_with(|| left.function.cmp(&right.function))
-    });
-
-    let mut blast_radius = response
-        .blast_radius
-        .into_iter()
-        .map(
-            |entry| crate::health_types::RuntimeCoverageBlastRadiusEntry {
-                id: entry.id,
-                stable_id: entry.identity.map(|identity| identity.stable_id),
-                file: PathBuf::from(entry.file),
-                function: entry.function,
-                line: entry.line,
-                caller_count: entry.caller_count,
-                caller_count_weighted_by_traffic: entry.caller_count_weighted_by_traffic,
-                deploys_touched: entry.deploys_touched,
-                risk_band: map_risk_band(entry.risk_band),
-            },
-        )
-        .collect::<Vec<_>>();
-    blast_radius.sort_by(|left, right| {
-        risk_band_rank(right.risk_band)
-            .cmp(&risk_band_rank(left.risk_band))
-            .then_with(|| {
-                right
-                    .caller_count_weighted_by_traffic
-                    .cmp(&left.caller_count_weighted_by_traffic)
-            })
-            .then_with(|| right.caller_count.cmp(&left.caller_count))
-            .then_with(|| left.file.cmp(&right.file))
-            .then_with(|| left.function.cmp(&right.function))
-    });
-
-    let mut importance = response
-        .importance
-        .into_iter()
-        .map(
-            |entry| crate::health_types::RuntimeCoverageImportanceEntry {
-                id: entry.id,
-                stable_id: entry.identity.map(|identity| identity.stable_id),
-                file: PathBuf::from(entry.file),
-                function: entry.function,
-                line: entry.line,
-                invocations: entry.invocations,
-                cyclomatic: entry.cyclomatic,
-                owner_count: entry.owner_count,
-                importance_score: entry.importance_score,
-                reason: entry.reason,
-            },
-        )
-        .collect::<Vec<_>>();
-    importance.sort_by(|left, right| {
-        right
-            .importance_score
-            .total_cmp(&left.importance_score)
-            .then_with(|| right.invocations.cmp(&left.invocations))
-            .then_with(|| left.file.cmp(&right.file))
-            .then_with(|| left.function.cmp(&right.function))
-    });
+    let findings = map_runtime_findings(response.findings);
+    let hot_paths = map_runtime_hot_paths(response.hot_paths);
+    let blast_radius = map_runtime_blast_radius(response.blast_radius);
+    let importance = map_runtime_importance(response.importance);
 
     let coverage_percent = response.summary.coverage_percent;
     let clamped_percent = if coverage_percent.is_finite() {
@@ -1883,6 +1764,139 @@ fn convert_response(
             })
             .collect(),
     }
+}
+
+fn map_runtime_findings(findings: Vec<ProtocolFinding>) -> Vec<RuntimeCoverageFinding> {
+    let mut findings = findings
+        .into_iter()
+        .filter_map(|finding| {
+            let verdict = map_verdict(finding.verdict);
+            if matches!(verdict, RuntimeCoverageVerdict::Active) {
+                return None;
+            }
+            let (stable_id, source_hash) = finding.identity.map_or((None, None), |identity| {
+                (Some(identity.stable_id), identity.source_hash)
+            });
+            Some(RuntimeCoverageFinding {
+                id: finding.id,
+                stable_id,
+                source_hash,
+                path: PathBuf::from(finding.file),
+                function: finding.function,
+                line: finding.line,
+                verdict,
+                invocations: finding.invocations,
+                confidence: map_confidence(finding.confidence),
+                evidence: map_evidence(finding.evidence),
+                actions: finding
+                    .actions
+                    .into_iter()
+                    .map(|action| RuntimeCoverageAction {
+                        kind: action.kind,
+                        description: action.description,
+                        auto_fixable: action.auto_fixable,
+                    })
+                    .collect(),
+            })
+        })
+        .collect::<Vec<_>>();
+    findings.sort_by(|left, right| {
+        verdict_rank(left.verdict)
+            .cmp(&verdict_rank(right.verdict))
+            .then_with(|| left.path.cmp(&right.path))
+            .then_with(|| left.function.cmp(&right.function))
+    });
+    findings
+}
+
+fn map_runtime_hot_paths(entries: Vec<ProtocolHotPath>) -> Vec<RuntimeCoverageHotPath> {
+    let mut hot_paths = entries
+        .into_iter()
+        .map(|entry| RuntimeCoverageHotPath {
+            id: entry.id,
+            stable_id: entry.identity.map(|identity| identity.stable_id),
+            path: PathBuf::from(entry.file),
+            function: entry.function,
+            line: entry.line,
+            end_line: entry.end_line,
+            invocations: entry.invocations,
+            percentile: entry.percentile,
+            actions: Vec::new(),
+        })
+        .collect::<Vec<_>>();
+    hot_paths.sort_by(|left, right| {
+        right
+            .invocations
+            .cmp(&left.invocations)
+            .then_with(|| left.path.cmp(&right.path))
+            .then_with(|| left.function.cmp(&right.function))
+    });
+    hot_paths
+}
+
+fn map_runtime_blast_radius(
+    entries: Vec<ProtocolBlastRadiusEntry>,
+) -> Vec<crate::health_types::RuntimeCoverageBlastRadiusEntry> {
+    let mut blast_radius = entries
+        .into_iter()
+        .map(
+            |entry| crate::health_types::RuntimeCoverageBlastRadiusEntry {
+                id: entry.id,
+                stable_id: entry.identity.map(|identity| identity.stable_id),
+                file: PathBuf::from(entry.file),
+                function: entry.function,
+                line: entry.line,
+                caller_count: entry.caller_count,
+                caller_count_weighted_by_traffic: entry.caller_count_weighted_by_traffic,
+                deploys_touched: entry.deploys_touched,
+                risk_band: map_risk_band(entry.risk_band),
+            },
+        )
+        .collect::<Vec<_>>();
+    blast_radius.sort_by(|left, right| {
+        risk_band_rank(right.risk_band)
+            .cmp(&risk_band_rank(left.risk_band))
+            .then_with(|| {
+                right
+                    .caller_count_weighted_by_traffic
+                    .cmp(&left.caller_count_weighted_by_traffic)
+            })
+            .then_with(|| right.caller_count.cmp(&left.caller_count))
+            .then_with(|| left.file.cmp(&right.file))
+            .then_with(|| left.function.cmp(&right.function))
+    });
+    blast_radius
+}
+
+fn map_runtime_importance(
+    entries: Vec<ProtocolImportanceEntry>,
+) -> Vec<crate::health_types::RuntimeCoverageImportanceEntry> {
+    let mut importance = entries
+        .into_iter()
+        .map(
+            |entry| crate::health_types::RuntimeCoverageImportanceEntry {
+                id: entry.id,
+                stable_id: entry.identity.map(|identity| identity.stable_id),
+                file: PathBuf::from(entry.file),
+                function: entry.function,
+                line: entry.line,
+                invocations: entry.invocations,
+                cyclomatic: entry.cyclomatic,
+                owner_count: entry.owner_count,
+                importance_score: entry.importance_score,
+                reason: entry.reason,
+            },
+        )
+        .collect::<Vec<_>>();
+    importance.sort_by(|left, right| {
+        right
+            .importance_score
+            .total_cmp(&left.importance_score)
+            .then_with(|| right.invocations.cmp(&left.invocations))
+            .then_with(|| left.file.cmp(&right.file))
+            .then_with(|| left.function.cmp(&right.function))
+    });
+    importance
 }
 
 fn apply_top_limit(report: &mut RuntimeCoverageReport, top: Option<usize>) {

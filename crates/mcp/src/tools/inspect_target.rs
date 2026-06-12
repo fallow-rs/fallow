@@ -131,44 +131,15 @@ pub async fn inspect_target(
         Err(message) => return Ok(error_result(message)),
     };
 
-    let trace_file_args = match build_trace_file_args(&TraceFileParams {
-        file: target.file.to_string(),
-        root: params.root.clone(),
-        config: params.config.clone(),
-        production: params.production,
-        workspace: params.workspace.clone(),
-        no_cache: params.no_cache,
-        threads: params.threads,
-    }) {
-        Ok(args) => args,
-        Err(message) => return Ok(error_result(message)),
-    };
-    let trace_file = match run_required_json(binary, trace_file_args).await? {
+    let trace_file = match run_inspect_trace_file(binary, params, target.file).await? {
         RequiredJson::Value(value) => value,
         RequiredJson::ToolError(result) => return Ok(result),
     };
 
     let mut warnings = Vec::new();
-    let trace_export = if let Some(export_name) = target.export_name {
-        let args = match build_trace_export_args(&TraceExportParams {
-            file: target.file.to_string(),
-            export_name: export_name.to_string(),
-            root: params.root.clone(),
-            config: params.config.clone(),
-            production: params.production,
-            workspace: params.workspace.clone(),
-            no_cache: params.no_cache,
-            threads: params.threads,
-        }) {
-            Ok(args) => args,
-            Err(message) => return Ok(error_result(message)),
-        };
-        match run_required_json(binary, args).await? {
-            RequiredJson::Value(value) => Some(value),
-            RequiredJson::ToolError(result) => return Ok(result),
-        }
-    } else {
-        None
+    let trace_export = match run_inspect_trace_export(binary, params, &target).await? {
+        RequiredJson::Value(value) => value,
+        RequiredJson::ToolError(result) => return Ok(result),
     };
 
     if target.export_name.is_some() {
@@ -177,58 +148,6 @@ pub async fn inspect_target(
                 .to_string(),
         );
     }
-
-    let dead_code = match build_dead_code_args(params, target.file) {
-        Ok(args) => optional_section(binary, args, EvidenceScope::File, |value| value).await,
-        Err(message) => EvidenceSection::error(EvidenceScope::File, message),
-    };
-    push_warning(&mut warnings, "dead_code", &dead_code);
-
-    let duplication = match build_dupes_args(params) {
-        Ok(args) => {
-            optional_section(
-                binary,
-                args,
-                EvidenceScope::ProjectFilteredToFile,
-                |value| filter_path_array(&value, target.file, "clone_groups"),
-            )
-            .await
-        }
-        Err(message) => EvidenceSection::error(EvidenceScope::ProjectFilteredToFile, message),
-    };
-    push_warning(&mut warnings, "duplication", &duplication);
-
-    let complexity = optional_section(
-        binary,
-        build_health_args(&HealthParams {
-            root: params.root.clone(),
-            config: params.config.clone(),
-            production: params.production,
-            workspace: params.workspace.clone(),
-            complexity: Some(true),
-            no_cache: params.no_cache,
-            threads: params.threads,
-            ..Default::default()
-        }),
-        EvidenceScope::ProjectFilteredToFile,
-        |value| filter_path_array(&value, target.file, "findings"),
-    )
-    .await;
-    push_warning(&mut warnings, "complexity", &complexity);
-
-    let security = match build_security_candidates_args(&SecurityCandidatesParams {
-        root: params.root.clone(),
-        config: params.config.clone(),
-        workspace: params.workspace.clone(),
-        paths: Some(vec![target.file.to_string()]),
-        no_cache: params.no_cache,
-        threads: params.threads,
-        ..Default::default()
-    }) {
-        Ok(args) => optional_section(binary, args, EvidenceScope::File, |value| value).await,
-        Err(message) => EvidenceSection::error(EvidenceScope::File, message),
-    };
-    push_warning(&mut warnings, "security", &security);
 
     let identity = match trace_export.as_ref() {
         Some(export) => json!({
@@ -249,19 +168,15 @@ pub async fn inspect_target(
         }),
     };
 
+    let evidence =
+        collect_inspect_evidence(binary, params, &target, trace_file, trace_export).await;
+    push_inspect_warnings(&mut warnings, &evidence);
+
     let bundle = InspectBundle {
         kind: TOOL,
         target: target.target_json(),
         identity,
-        evidence: InspectEvidence {
-            trace_file: EvidenceSection::ok(EvidenceScope::File, trace_file),
-            trace_export: trace_export
-                .map(|value| EvidenceSection::ok(EvidenceScope::Symbol, value)),
-            dead_code,
-            duplication,
-            complexity,
-            security,
-        },
+        evidence,
         warnings,
     };
 
@@ -274,9 +189,157 @@ pub async fn inspect_target(
     Ok(CallToolResult::success(vec![Content::text(text)]))
 }
 
-enum RequiredJson {
-    Value(Value),
+async fn run_inspect_trace_file(
+    binary: &str,
+    params: &InspectTargetParams,
+    file: &str,
+) -> Result<RequiredJson, McpError> {
+    let args = match build_trace_file_args(&TraceFileParams {
+        file: file.to_string(),
+        root: params.root.clone(),
+        config: params.config.clone(),
+        production: params.production,
+        workspace: params.workspace.clone(),
+        no_cache: params.no_cache,
+        threads: params.threads,
+    }) {
+        Ok(args) => args,
+        Err(message) => return Ok(RequiredJson::ToolError(error_result(message))),
+    };
+    run_required_json(binary, args).await
+}
+
+async fn run_inspect_trace_export(
+    binary: &str,
+    params: &InspectTargetParams,
+    target: &NormalizedTarget<'_>,
+) -> Result<RequiredJson<Option<Value>>, McpError> {
+    let Some(export_name) = target.export_name else {
+        return Ok(RequiredJson::Value(None));
+    };
+    let args = match build_trace_export_args(&TraceExportParams {
+        file: target.file.to_string(),
+        export_name: export_name.to_string(),
+        root: params.root.clone(),
+        config: params.config.clone(),
+        production: params.production,
+        workspace: params.workspace.clone(),
+        no_cache: params.no_cache,
+        threads: params.threads,
+    }) {
+        Ok(args) => args,
+        Err(message) => return Ok(RequiredJson::ToolError(error_result(message))),
+    };
+    match run_required_json(binary, args).await? {
+        RequiredJson::Value(value) => Ok(RequiredJson::Value(Some(value))),
+        RequiredJson::ToolError(result) => Ok(RequiredJson::ToolError(result)),
+    }
+}
+
+async fn collect_inspect_evidence(
+    binary: &str,
+    params: &InspectTargetParams,
+    target: &NormalizedTarget<'_>,
+    trace_file: Value,
+    trace_export: Option<Value>,
+) -> InspectEvidence {
+    let dead_code = inspect_dead_code_section(binary, params, target.file).await;
+    let duplication = inspect_duplication_section(binary, params, target.file).await;
+    let complexity = inspect_complexity_section(binary, params, target.file).await;
+    let security = inspect_security_section(binary, params, target.file).await;
+
+    InspectEvidence {
+        trace_file: EvidenceSection::ok(EvidenceScope::File, trace_file),
+        trace_export: trace_export.map(|value| EvidenceSection::ok(EvidenceScope::Symbol, value)),
+        dead_code,
+        duplication,
+        complexity,
+        security,
+    }
+}
+
+fn push_inspect_warnings(warnings: &mut Vec<String>, evidence: &InspectEvidence) {
+    push_warning(warnings, "dead_code", &evidence.dead_code);
+    push_warning(warnings, "duplication", &evidence.duplication);
+    push_warning(warnings, "complexity", &evidence.complexity);
+    push_warning(warnings, "security", &evidence.security);
+}
+
+enum RequiredJson<T = Value> {
+    Value(T),
     ToolError(CallToolResult),
+}
+
+async fn inspect_dead_code_section(
+    binary: &str,
+    params: &InspectTargetParams,
+    file: &str,
+) -> EvidenceSection {
+    match build_dead_code_args(params, file) {
+        Ok(args) => optional_section(binary, args, EvidenceScope::File, |value| value).await,
+        Err(message) => EvidenceSection::error(EvidenceScope::File, message),
+    }
+}
+
+async fn inspect_duplication_section(
+    binary: &str,
+    params: &InspectTargetParams,
+    file: &str,
+) -> EvidenceSection {
+    match build_dupes_args(params) {
+        Ok(args) => {
+            optional_section(
+                binary,
+                args,
+                EvidenceScope::ProjectFilteredToFile,
+                |value| filter_path_array(&value, file, "clone_groups"),
+            )
+            .await
+        }
+        Err(message) => EvidenceSection::error(EvidenceScope::ProjectFilteredToFile, message),
+    }
+}
+
+async fn inspect_complexity_section(
+    binary: &str,
+    params: &InspectTargetParams,
+    file: &str,
+) -> EvidenceSection {
+    optional_section(
+        binary,
+        build_health_args(&HealthParams {
+            root: params.root.clone(),
+            config: params.config.clone(),
+            production: params.production,
+            workspace: params.workspace.clone(),
+            complexity: Some(true),
+            no_cache: params.no_cache,
+            threads: params.threads,
+            ..Default::default()
+        }),
+        EvidenceScope::ProjectFilteredToFile,
+        |value| filter_path_array(&value, file, "findings"),
+    )
+    .await
+}
+
+async fn inspect_security_section(
+    binary: &str,
+    params: &InspectTargetParams,
+    file: &str,
+) -> EvidenceSection {
+    match build_security_candidates_args(&SecurityCandidatesParams {
+        root: params.root.clone(),
+        config: params.config.clone(),
+        workspace: params.workspace.clone(),
+        paths: Some(vec![file.to_string()]),
+        no_cache: params.no_cache,
+        threads: params.threads,
+        ..Default::default()
+    }) {
+        Ok(args) => optional_section(binary, args, EvidenceScope::File, |value| value).await,
+        Err(message) => EvidenceSection::error(EvidenceScope::File, message),
+    }
 }
 
 fn build_dead_code_args(params: &InspectTargetParams, file: &str) -> Result<Vec<String>, String> {

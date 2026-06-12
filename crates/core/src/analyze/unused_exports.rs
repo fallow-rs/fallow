@@ -21,6 +21,18 @@ type PluginMatchers<'a> = Vec<CompiledUsedExportRule<'a>>;
 
 const TANSTACK_ROUTER_PLUGIN_NAME: &str = "tanstack-router";
 
+type UnusedExportModuleResult = (Vec<UnusedExport>, Vec<UnusedExport>, Vec<StaleSuppression>);
+
+struct UnusedExportModuleContext<'a> {
+    graph: &'a ModuleGraph,
+    config: &'a ResolvedConfig,
+    ignore_matchers: &'a [CompiledIgnoreExportRule],
+    plugin_matchers: &'a PluginMatchers<'a>,
+    module_info_by_id: Option<&'a FxHashMap<FileId, &'a ModuleInfo>>,
+    suppressions: &'a SuppressionContext<'a>,
+    line_offsets_by_file: &'a LineOffsetsMap<'a>,
+}
+
 /// Compile plugin-discovered used_exports rules (includes framework preset rules).
 fn compile_plugin_matchers(
     plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
@@ -264,6 +276,42 @@ fn ignore_matchers_for_module<'a>(
         .collect()
 }
 
+fn export_has_reachable_reference(
+    graph: &ModuleGraph,
+    module: &ModuleNode,
+    export: &ExportSymbol,
+) -> bool {
+    if module.is_reachable() {
+        return !export.references.is_empty();
+    }
+    export.references.iter().any(|r| {
+        graph.modules.get(r.from_file.0 as usize).is_some_and(|m| {
+            debug_assert_eq!(
+                m.file_id, r.from_file,
+                "ModuleGraph::modules FileId-as-index invariant broken"
+            );
+            m.is_reachable()
+        })
+    })
+}
+
+fn stale_expected_unused_suppression(
+    module: &ModuleNode,
+    export: &ExportSymbol,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+) -> StaleSuppression {
+    let (line, col) =
+        byte_offset_to_line_col(line_offsets_by_file, module.file_id, export.span.start);
+    StaleSuppression {
+        path: module.path.clone(),
+        line,
+        col,
+        origin: SuppressionOrigin::JsdocTag {
+            export_name: export.name.to_string(),
+        },
+    }
+}
+
 /// Find exports that are never imported by other files.
 #[deprecated(
     since = "2.76.0",
@@ -290,141 +338,20 @@ pub fn find_unused_exports(
             None
         };
 
-    let module_results: Vec<(Vec<UnusedExport>, Vec<UnusedExport>, Vec<StaleSuppression>)> = graph
+    let module_context = UnusedExportModuleContext {
+        graph,
+        config,
+        ignore_matchers,
+        plugin_matchers: &plugin_matchers,
+        module_info_by_id: module_info_by_id.as_ref(),
+        suppressions,
+        line_offsets_by_file,
+    };
+
+    let module_results: Vec<UnusedExportModuleResult> = graph
         .modules
         .par_iter()
-        .map(|module| {
-            let mut unused_exports = Vec::new();
-            let mut unused_types = Vec::new();
-            let mut stale_expected_unused = Vec::new();
-
-            if module.exports.is_empty() && !module.has_cjs_exports() {
-                return (unused_exports, unused_types, stale_expected_unused);
-            }
-
-            let (matching_ignore, matching_plugin) = matchers_for_module(
-                &module.path,
-                &config.root,
-                ignore_matchers,
-                &plugin_matchers,
-            );
-
-            if should_skip_module(
-                module,
-                !matching_plugin.is_empty(),
-                config.include_entry_exports,
-            ) {
-                return (unused_exports, unused_types, stale_expected_unused);
-            }
-
-            let same_file_used_exports = if let Some(module_info_by_id) = &module_info_by_id {
-                module_info_by_id
-                    .get(&module.file_id)
-                    .map_or_else(FxHashSet::default, |info| {
-                        collect_exports_used_in_file(info, &module.path)
-                    })
-            } else {
-                FxHashSet::default()
-            };
-
-            let re_export_names: FxHashSet<&str> = module
-                .re_exports
-                .iter()
-                .map(|re| re.exported_name.as_str())
-                .collect();
-
-            for export in &module.exports {
-                let has_cross_file_ref = if module.is_reachable() {
-                    !export.references.is_empty()
-                } else {
-                    export.references.iter().any(|r| {
-                        graph.modules.get(r.from_file.0 as usize).is_some_and(|m| {
-                            debug_assert_eq!(
-                                m.file_id, r.from_file,
-                                "ModuleGraph::modules FileId-as-index invariant broken"
-                            );
-                            m.is_reachable()
-                        })
-                    })
-                };
-                let is_referenced =
-                    has_cross_file_ref || (module.is_reachable() && export.is_side_effect_used);
-                if matches!(
-                    export.visibility,
-                    fallow_types::extract::VisibilityTag::ExpectedUnused
-                ) {
-                    if is_referenced {
-                        let (line, col) = byte_offset_to_line_col(
-                            line_offsets_by_file,
-                            module.file_id,
-                            export.span.start,
-                        );
-                        stale_expected_unused.push(StaleSuppression {
-                            path: module.path.clone(),
-                            line,
-                            col,
-                            origin: SuppressionOrigin::JsdocTag {
-                                export_name: export.name.to_string(),
-                            },
-                        });
-                    }
-                    continue;
-                }
-
-                if export.visibility.suppresses_unused() || is_referenced {
-                    continue;
-                }
-
-                let export_str = export.name.to_string();
-
-                if config
-                    .ignore_exports_used_in_file
-                    .suppresses(export.is_type_only)
-                    && same_file_used_exports.contains(export_str.as_str())
-                {
-                    continue;
-                }
-
-                if is_export_ignored(&export_str, &matching_ignore, &matching_plugin) {
-                    continue;
-                }
-
-                let (line, col) = byte_offset_to_line_col(
-                    line_offsets_by_file,
-                    module.file_id,
-                    export.span.start,
-                );
-
-                let is_re_export = re_export_names.contains(export_str.as_str());
-
-                let issue_kind = if export.is_type_only {
-                    IssueKind::UnusedType
-                } else {
-                    IssueKind::UnusedExport
-                };
-                if suppressions.is_suppressed(module.file_id, line, issue_kind) {
-                    continue;
-                }
-
-                let unused = UnusedExport {
-                    path: module.path.clone(),
-                    export_name: export_str,
-                    is_type_only: export.is_type_only,
-                    line,
-                    col,
-                    span_start: export.span.start,
-                    is_re_export,
-                };
-
-                if export.is_type_only {
-                    unused_types.push(unused);
-                } else {
-                    unused_exports.push(unused);
-                }
-            }
-
-            (unused_exports, unused_types, stale_expected_unused)
-        })
+        .map(|module| find_unused_exports_for_module(module, &module_context))
         .collect();
 
     for (exports, types, stale_expected) in module_results {
@@ -434,6 +361,148 @@ pub fn find_unused_exports(
     }
 
     (unused_exports, unused_types, stale_expected_unused)
+}
+
+fn find_unused_exports_for_module(
+    module: &ModuleNode,
+    ctx: &UnusedExportModuleContext<'_>,
+) -> UnusedExportModuleResult {
+    let mut unused_exports = Vec::new();
+    let mut unused_types = Vec::new();
+    let mut stale_expected_unused = Vec::new();
+
+    if module.exports.is_empty() && !module.has_cjs_exports() {
+        return (unused_exports, unused_types, stale_expected_unused);
+    }
+
+    let (matching_ignore, matching_plugin) = matchers_for_module(
+        &module.path,
+        &ctx.config.root,
+        ctx.ignore_matchers,
+        ctx.plugin_matchers,
+    );
+    if should_skip_module(
+        module,
+        !matching_plugin.is_empty(),
+        ctx.config.include_entry_exports,
+    ) {
+        return (unused_exports, unused_types, stale_expected_unused);
+    }
+
+    let same_file_used_exports = same_file_used_exports(module, ctx);
+    let re_export_names: FxHashSet<&str> = module
+        .re_exports
+        .iter()
+        .map(|re| re.exported_name.as_str())
+        .collect();
+
+    for export in &module.exports {
+        if let Some(unused) = unused_export_for_module(
+            module,
+            export,
+            ctx,
+            &same_file_used_exports,
+            &re_export_names,
+            &matching_ignore,
+            &matching_plugin,
+            &mut stale_expected_unused,
+        ) {
+            if export.is_type_only {
+                unused_types.push(unused);
+            } else {
+                unused_exports.push(unused);
+            }
+        }
+    }
+
+    (unused_exports, unused_types, stale_expected_unused)
+}
+
+fn same_file_used_exports(
+    module: &ModuleNode,
+    ctx: &UnusedExportModuleContext<'_>,
+) -> FxHashSet<String> {
+    ctx.module_info_by_id
+        .map_or_else(FxHashSet::default, |by_id| {
+            by_id
+                .get(&module.file_id)
+                .map_or_else(FxHashSet::default, |info| {
+                    collect_exports_used_in_file(info, &module.path)
+                })
+        })
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "checks one export against module context, same-file usage, matched rules, and stale-suppression output"
+)]
+fn unused_export_for_module(
+    module: &ModuleNode,
+    export: &ExportSymbol,
+    ctx: &UnusedExportModuleContext<'_>,
+    same_file_used_exports: &FxHashSet<String>,
+    re_export_names: &FxHashSet<&str>,
+    matching_ignore: &[&[String]],
+    matching_plugin: &[&[&str]],
+    stale_expected_unused: &mut Vec<StaleSuppression>,
+) -> Option<UnusedExport> {
+    let has_cross_file_ref = export_has_reachable_reference(ctx.graph, module, export);
+    let is_referenced = has_cross_file_ref || (module.is_reachable() && export.is_side_effect_used);
+    if matches!(
+        export.visibility,
+        fallow_types::extract::VisibilityTag::ExpectedUnused
+    ) {
+        if is_referenced {
+            stale_expected_unused.push(stale_expected_unused_suppression(
+                module,
+                export,
+                ctx.line_offsets_by_file,
+            ));
+        }
+        return None;
+    }
+
+    if export.visibility.suppresses_unused() || is_referenced {
+        return None;
+    }
+
+    let export_str = export.name.to_string();
+    if ctx
+        .config
+        .ignore_exports_used_in_file
+        .suppresses(export.is_type_only)
+        && same_file_used_exports.contains(export_str.as_str())
+    {
+        return None;
+    }
+    if is_export_ignored(&export_str, matching_ignore, matching_plugin) {
+        return None;
+    }
+
+    let (line, col) =
+        byte_offset_to_line_col(ctx.line_offsets_by_file, module.file_id, export.span.start);
+    let issue_kind = if export.is_type_only {
+        IssueKind::UnusedType
+    } else {
+        IssueKind::UnusedExport
+    };
+    if ctx
+        .suppressions
+        .is_suppressed(module.file_id, line, issue_kind)
+    {
+        return None;
+    }
+
+    let is_re_export = re_export_names.contains(export_str.as_str());
+    Some(UnusedExport {
+        path: module.path.clone(),
+        export_name: export_str,
+        is_type_only: export.is_type_only,
+        line,
+        col,
+        span_start: export.span.start,
+        is_re_export,
+    })
 }
 
 /// Remove exported type findings when the type is only exported to support
@@ -779,7 +848,7 @@ fn partition_by_common_importer(entries: &[ExportEntry], graph: &ModuleGraph) ->
 /// Find exports that appear with the same name in multiple files (potential duplicates).
 ///
 /// Barrel re-exports (files that only re-export from other modules via `export { X } from './source'`)
-/// are excluded — having an index.ts re-export the same name as the source module is the normal
+/// are excluded. Having an index.ts re-export the same name as the source module is the normal
 /// barrel file pattern, not a true duplicate.
 ///
 /// `resolved_modules` is the set of modules with their resolved dynamic imports.

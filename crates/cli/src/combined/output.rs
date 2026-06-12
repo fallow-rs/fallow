@@ -302,7 +302,7 @@ fn print_failure_summary(
             .map(|r| {
                 if let Some(top) = r.report.targets.iter().find(|t| !is_test_path(&t.path)) {
                     let name = report::format_display_path(&top.path, root);
-                    format!(" \u{2014} start with {name}")
+                    format!(": start with {name}")
                 } else {
                     String::new()
                 }
@@ -337,10 +337,6 @@ fn print_failure_summary(
 }
 
 /// Print combined JSON output wrapping check, dupes, and health results.
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "elapsed milliseconds won't exceed u64::MAX"
-)]
 fn print_combined_json(
     check: Option<&CheckResult>,
     dupes: Option<&DupesResult>,
@@ -350,6 +346,42 @@ fn print_combined_json(
     explain: bool,
     config_fixable: bool,
 ) -> ExitCode {
+    let mut combined = match combined_json_root(elapsed) {
+        Ok(combined) => combined,
+        Err(code) => return code,
+    };
+    let root_prefix = format!("{}/", root.display());
+
+    if let Some(result) = check
+        && let Err(code) = insert_combined_check_json(&mut combined, result, config_fixable)
+    {
+        return code;
+    }
+
+    let dupes_payload =
+        dupes.map(|result| crate::output_dupes::DupesReportPayload::from_report(&result.report));
+    if let Err(code) = insert_combined_dupes_json(&mut combined, dupes_payload.as_ref(), root) {
+        return code;
+    }
+    if let Err(code) = insert_combined_health_json(&mut combined, health, &root_prefix) {
+        return code;
+    }
+    if let Err(code) =
+        insert_combined_next_steps(&mut combined, check, dupes_payload.as_ref(), health, root)
+    {
+        return code;
+    }
+
+    emit_combined_json_output(combined, check, dupes, health, explain)
+}
+
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "elapsed milliseconds won't exceed u64::MAX"
+)]
+fn combined_json_root(
+    elapsed: std::time::Duration,
+) -> Result<serde_json::Map<String, serde_json::Value>, ExitCode> {
     let envelope = crate::output_envelope::CombinedOutput {
         schema_version: fallow_types::envelope::SchemaVersion(crate::report::SCHEMA_VERSION),
         version: fallow_types::envelope::ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
@@ -361,112 +393,76 @@ fn print_combined_json(
         // Aggregated and injected into the map below, after the sub-blocks.
         next_steps: Vec::new(),
     };
-    let mut combined = match crate::output_envelope::serialize_root_output(
+    match crate::output_envelope::serialize_root_output(
         crate::output_envelope::FallowOutput::Combined(envelope),
     ) {
-        Ok(serde_json::Value::Object(map)) => map,
+        Ok(serde_json::Value::Object(map)) => Ok(map),
         Ok(_) => unreachable!("CombinedOutput serializes as a JSON object"),
-        Err(e) => {
-            return emit_error(
-                &format!("JSON serialization error: {e}"),
-                2,
-                OutputFormat::Json,
-            );
-        }
-    };
-
-    if let Some(result) = check {
-        match report::build_check_json_payload_with_config_fixable(
-            &result.results,
-            &result.config.root,
-            result.elapsed,
-            config_fixable,
-        ) {
-            Ok(mut json) => {
-                if let Some(ref outcome) = result.regression
-                    && let serde_json::Value::Object(ref mut map) = json
-                {
-                    map.insert("regression".to_string(), outcome.to_json());
-                }
-                if let Some(ref deltas) = result.baseline_deltas
-                    && let serde_json::Value::Object(ref mut map) = json
-                {
-                    map.insert(
-                        "baseline_deltas".to_string(),
-                        report::build_baseline_deltas_json(
-                            deltas.total_delta,
-                            deltas
-                                .per_category
-                                .iter()
-                                .map(|(cat, d)| (cat.as_str(), d.current, d.baseline, d.delta)),
-                        ),
-                    );
-                }
-                if let Some((entries, matched)) = result.baseline_matched
-                    && let serde_json::Value::Object(ref mut map) = json
-                {
-                    map.insert(
-                        "baseline".to_string(),
-                        serde_json::json!({
-                            "entries": entries,
-                            "matched": matched,
-                        }),
-                    );
-                }
-                combined.insert("check".into(), json);
-            }
-            Err(e) => {
-                return emit_error(
-                    &format!("JSON serialization error: {e}"),
-                    2,
-                    OutputFormat::Json,
-                );
-            }
-        }
+        Err(e) => Err(emit_error(
+            &format!("JSON serialization error: {e}"),
+            2,
+            OutputFormat::Json,
+        )),
     }
+}
 
+fn insert_combined_dupes_json(
+    combined: &mut serde_json::Map<String, serde_json::Value>,
+    dupes_payload: Option<&crate::output_dupes::DupesReportPayload>,
+    root: &std::path::Path,
+) -> Result<(), ExitCode> {
     let root_prefix = format!("{}/", root.display());
-
-    // Build the dupes payload once: reused for the sub-block AND the aggregated
-    // next-steps below (fingerprints live on the payload, not the raw report).
-    let dupes_payload =
-        dupes.map(|result| crate::output_dupes::DupesReportPayload::from_report(&result.report));
-
-    if let Some(payload) = dupes_payload.as_ref() {
+    if let Some(payload) = dupes_payload {
         match serde_json::to_value(payload) {
             Ok(mut json) => {
                 report::strip_root_prefix(&mut json, &root_prefix);
                 combined.insert("dupes".into(), json);
             }
             Err(e) => {
-                return emit_error(
+                return Err(emit_error(
                     &format!("JSON serialization error: {e}"),
                     2,
                     OutputFormat::Json,
-                );
+                ));
             }
         }
     }
+    Ok(())
+}
 
+fn insert_combined_health_json(
+    combined: &mut serde_json::Map<String, serde_json::Value>,
+    health: Option<&HealthResult>,
+    root_prefix: &str,
+) -> Result<(), ExitCode> {
     if let Some(result) = health {
         match serde_json::to_value(&result.report) {
             Ok(mut json) => {
-                report::strip_root_prefix(&mut json, &root_prefix);
+                report::strip_root_prefix(&mut json, root_prefix);
                 combined.insert("health".into(), json);
             }
             Err(e) => {
-                return emit_error(
+                return Err(emit_error(
                     &format!("JSON serialization error: {e}"),
                     2,
                     OutputFormat::Json,
-                );
+                ));
             }
         }
     }
+    Ok(())
+}
 
+fn insert_combined_next_steps(
+    combined: &mut serde_json::Map<String, serde_json::Value>,
+    check: Option<&CheckResult>,
+    dupes_payload: Option<&crate::output_dupes::DupesReportPayload>,
+    health: Option<&HealthResult>,
+    root: &std::path::Path,
+) -> Result<(), ExitCode> {
     let next_steps = crate::report::suggestions::build_combined_next_steps(
         check.map(|result| &result.results),
-        dupes_payload.as_ref(),
+        dupes_payload,
         health.map(|result| &result.report),
         root,
         crate::report::suggestions::setup_pointer_applicable(root),
@@ -478,15 +474,24 @@ fn print_combined_json(
                 combined.insert("next_steps".into(), value);
             }
             Err(e) => {
-                return emit_error(
+                return Err(emit_error(
                     &format!("JSON serialization error: {e}"),
                     2,
                     OutputFormat::Json,
-                );
+                ));
             }
         }
     }
+    Ok(())
+}
 
+fn emit_combined_json_output(
+    combined: serde_json::Map<String, serde_json::Value>,
+    check: Option<&CheckResult>,
+    dupes: Option<&DupesResult>,
+    health: Option<&HealthResult>,
+    explain: bool,
+) -> ExitCode {
     let mut output = serde_json::Value::Object(combined);
     if explain && let serde_json::Value::Object(ref mut map) = output {
         map.insert(
@@ -508,6 +513,61 @@ fn print_combined_json(
             OutputFormat::Json,
         ),
     }
+}
+
+fn insert_combined_check_json(
+    combined: &mut serde_json::Map<String, serde_json::Value>,
+    result: &CheckResult,
+    config_fixable: bool,
+) -> Result<(), ExitCode> {
+    let mut json = report::build_check_json_payload_with_config_fixable(
+        &result.results,
+        &result.config.root,
+        result.elapsed,
+        config_fixable,
+    )
+    .map_err(|error| json_output_error(&error))?;
+    attach_combined_check_extras(&mut json, result);
+    combined.insert("check".into(), json);
+    Ok(())
+}
+
+fn attach_combined_check_extras(json: &mut serde_json::Value, result: &CheckResult) {
+    let serde_json::Value::Object(map) = json else {
+        return;
+    };
+    if let Some(ref outcome) = result.regression {
+        map.insert("regression".to_string(), outcome.to_json());
+    }
+    if let Some(ref deltas) = result.baseline_deltas {
+        map.insert(
+            "baseline_deltas".to_string(),
+            report::build_baseline_deltas_json(
+                deltas.total_delta,
+                deltas
+                    .per_category
+                    .iter()
+                    .map(|(cat, delta)| (cat.as_str(), delta.current, delta.baseline, delta.delta)),
+            ),
+        );
+    }
+    if let Some((entries, matched)) = result.baseline_matched {
+        map.insert(
+            "baseline".to_string(),
+            serde_json::json!({
+                "entries": entries,
+                "matched": matched,
+            }),
+        );
+    }
+}
+
+fn json_output_error(error: &serde_json::Error) -> ExitCode {
+    emit_error(
+        &format!("JSON serialization error: {error}"),
+        2,
+        OutputFormat::Json,
+    )
 }
 
 /// Print combined SARIF with multiple runs (one per analysis).

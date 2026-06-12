@@ -171,159 +171,229 @@ fn handle_control_flow(
     let keyword = &rest[..keyword_end];
 
     match keyword {
-        "if" => {
-            let after_keyword = &source[start + 1 + keyword_end..];
-            let paren_start = after_keyword.find('(')?;
-            let paren_content_start = start + 1 + keyword_end + paren_start;
-            let (paren_content, after_paren) = scan_parenthesized(source, paren_content_start)?;
-            let (cond_expr, alias_name) = parse_if_condition_and_alias(paren_content);
-            let locals = current_locals(scopes);
-            collect_expression_refs(cond_expr.trim(), &locals, refs);
-            let mut scope_locals = Vec::new();
-            if let Some(alias) = alias_name {
-                scope_locals.push(alias.to_string());
-            }
-            scopes.push(scope_locals);
-            let brace_pos = source[after_paren..].find('{')?;
-            Some(after_paren + brace_pos + 1)
-        }
+        "if" => handle_if_control_flow(source, start, keyword_end, scopes, refs),
         "switch" | "case" => {
-            let after_keyword = &source[start + 1 + keyword_end..];
-            let paren_start = after_keyword.find('(')?;
-            let paren_content_start = start + 1 + keyword_end + paren_start;
-            let (expr, after_paren) = scan_parenthesized(source, paren_content_start)?;
-            let locals = current_locals(scopes);
-            collect_expression_refs(expr.trim(), &locals, refs);
-            scopes.push(Vec::new());
-            let brace_pos = source[after_paren..].find('{')?;
-            Some(after_paren + brace_pos + 1)
+            handle_parenthesized_block_control_flow(source, start, keyword_end, scopes, refs)
         }
-        "for" => {
-            let after_keyword = &source[start + 1 + keyword_end..];
-            let paren_start = after_keyword.find('(')?;
-            let paren_content_start = start + 1 + keyword_end + paren_start;
-            let (paren_content, after_paren) = scan_parenthesized(source, paren_content_start)?;
-
-            let mut locals_for_scope = Vec::new();
-
-            let parts: Vec<&str> = paren_content.split(';').collect();
-            if let Some(first_part) = parts.first()
-                && let Some(caps) = CONTROL_FOR_RE.captures(first_part.trim())
-            {
-                let binding = caps.get(1).map_or("", |m| m.as_str());
-                locals_for_scope.push(binding.to_string());
-                for implicit in &["$index", "$first", "$last", "$even", "$odd", "$count"] {
-                    locals_for_scope.push((*implicit).to_string());
-                }
-                let iterable = caps.get(2).map_or("", |m| m.as_str()).trim();
-                let current = current_locals(scopes);
-                collect_expression_refs(iterable, &current, refs);
-            }
-
-            for part in parts.iter().skip(1) {
-                let part = part.trim();
-                if let Some(track_expr) = part.strip_prefix("track") {
-                    let mut all_locals = current_locals(scopes);
-                    all_locals.extend(locals_for_scope.clone());
-                    collect_expression_refs(track_expr.trim(), &all_locals, refs);
-                }
-            }
-
-            scopes.push(locals_for_scope);
-            let brace_pos = source[after_paren..].find('{')?;
-            Some(after_paren + brace_pos + 1)
-        }
-        "defer" => {
-            let after_keyword = &source[start + 1 + keyword_end..];
-            let trimmed = after_keyword.trim_start();
-            let offset = after_keyword.len() - trimmed.len();
-            let abs_after_keyword = start + 1 + keyword_end + offset;
-
-            if trimmed.starts_with('(') {
-                let paren_content_start = abs_after_keyword;
-                let (paren_content, after_paren) = scan_parenthesized(source, paren_content_start)?;
-                let locals = current_locals(scopes);
-                for part in paren_content.split(';') {
-                    let part = part.trim();
-                    if let Some(pos) = part.find("when") {
-                        let after_when = &part[pos + 4..];
-                        let expr = after_when.trim();
-                        if !expr.is_empty() {
-                            collect_expression_refs(expr, &locals, refs);
-                        }
-                    }
-                }
-                scopes.push(Vec::new());
-                let brace_pos = source[after_paren..].find('{')?;
-                Some(after_paren + brace_pos + 1)
-            } else {
-                scopes.push(Vec::new());
-                let rest_from = start + 1 + keyword_end;
-                let brace_pos = source[rest_from..].find('{')?;
-                Some(rest_from + brace_pos + 1)
-            }
-        }
-        "let" => {
-            let after_keyword = &source[start + 1 + keyword_end..];
-            let trimmed = after_keyword.trim_start();
-            let offset = after_keyword.len() - trimmed.len();
-
-            let name_end = trimmed.find(|c: char| !c.is_ascii_alphanumeric() && c != '_')?;
-            let var_name = &trimmed[..name_end];
-
-            let rest_after_name = &trimmed[name_end..];
-            let eq_pos = rest_after_name.find('=')?;
-            let expr_start = eq_pos + 1;
-            let expr_rest = &rest_after_name[expr_start..];
-
-            let semi_pos = expr_rest.find(';')?;
-            let expr = expr_rest[..semi_pos].trim();
-
-            let locals = current_locals(scopes);
-            collect_expression_refs(expr, &locals, refs);
-
-            if let Some(scope) = scopes.last_mut() {
-                scope.push(var_name.to_string());
-            }
-
-            let abs_semi = start + 1 + keyword_end + offset + name_end + expr_start + semi_pos + 1;
-            Some(abs_semi)
-        }
-        "else" => {
-            let rest_from = start + 1 + keyword_end;
-            let after_else = source[rest_from..].trim_start();
-            let trimmed_offset = source[rest_from..].len() - after_else.len();
-
-            if after_else.starts_with("if")
-                && !after_else
-                    .as_bytes()
-                    .get(2)
-                    .is_some_and(|b| b.is_ascii_alphanumeric())
-            {
-                let if_keyword_end = rest_from + trimmed_offset + 2;
-                let after_if = &source[if_keyword_end..];
-                let paren_start = after_if.find('(')?;
-                let paren_content_start = if_keyword_end + paren_start;
-                let (expr, after_paren) = scan_parenthesized(source, paren_content_start)?;
-                let locals = current_locals(scopes);
-                collect_expression_refs(expr.trim(), &locals, refs);
-                scopes.push(Vec::new());
-                let brace_pos = source[after_paren..].find('{')?;
-                Some(after_paren + brace_pos + 1)
-            } else {
-                scopes.push(Vec::new());
-                let brace_pos = source[rest_from..].find('{')?;
-                Some(rest_from + brace_pos + 1)
-            }
-        }
+        "for" => handle_for_control_flow(source, start, keyword_end, scopes, refs),
+        "defer" => handle_defer_control_flow(source, start, keyword_end, scopes, refs),
+        "let" => handle_let_control_flow(source, start, keyword_end, scopes, refs),
+        "else" => handle_else_control_flow(source, start, keyword_end, scopes, refs),
         "empty" | "default" | "placeholder" | "loading" | "error" => {
-            scopes.push(Vec::new());
-            let rest_from = start + 1 + keyword_end;
-            let brace_pos = source[rest_from..].find('{')?;
-            Some(rest_from + brace_pos + 1)
+            push_empty_control_flow_scope(source, start, keyword_end, scopes)
         }
         _ => None,
     }
+}
+
+fn handle_parenthesized_block_control_flow(
+    source: &str,
+    start: usize,
+    keyword_end: usize,
+    scopes: &mut Vec<Vec<String>>,
+    refs: &mut AngularTemplateRefs,
+) -> Option<usize> {
+    let after_keyword = &source[start + 1 + keyword_end..];
+    let paren_start = after_keyword.find('(')?;
+    let paren_content_start = start + 1 + keyword_end + paren_start;
+    let (expr, after_paren) = scan_parenthesized(source, paren_content_start)?;
+    let locals = current_locals(scopes);
+    collect_expression_refs(expr.trim(), &locals, refs);
+    scopes.push(Vec::new());
+    let brace_pos = source[after_paren..].find('{')?;
+    Some(after_paren + brace_pos + 1)
+}
+
+fn handle_defer_control_flow(
+    source: &str,
+    start: usize,
+    keyword_end: usize,
+    scopes: &mut Vec<Vec<String>>,
+    refs: &mut AngularTemplateRefs,
+) -> Option<usize> {
+    let after_keyword = &source[start + 1 + keyword_end..];
+    let trimmed = after_keyword.trim_start();
+    let offset = after_keyword.len() - trimmed.len();
+    let abs_after_keyword = start + 1 + keyword_end + offset;
+
+    if !trimmed.starts_with('(') {
+        return push_empty_control_flow_scope(source, start, keyword_end, scopes);
+    }
+
+    let (paren_content, after_paren) = scan_parenthesized(source, abs_after_keyword)?;
+    let locals = current_locals(scopes);
+    collect_defer_when_refs(paren_content, &locals, refs);
+    scopes.push(Vec::new());
+    let brace_pos = source[after_paren..].find('{')?;
+    Some(after_paren + brace_pos + 1)
+}
+
+fn collect_defer_when_refs(paren_content: &str, locals: &[String], refs: &mut AngularTemplateRefs) {
+    for part in paren_content.split(';') {
+        let part = part.trim();
+        if let Some(pos) = part.find("when") {
+            let expr = part[pos + 4..].trim();
+            if !expr.is_empty() {
+                collect_expression_refs(expr, locals, refs);
+            }
+        }
+    }
+}
+
+fn handle_let_control_flow(
+    source: &str,
+    start: usize,
+    keyword_end: usize,
+    scopes: &mut [Vec<String>],
+    refs: &mut AngularTemplateRefs,
+) -> Option<usize> {
+    let after_keyword = &source[start + 1 + keyword_end..];
+    let trimmed = after_keyword.trim_start();
+    let offset = after_keyword.len() - trimmed.len();
+
+    let name_end = trimmed.find(|c: char| !c.is_ascii_alphanumeric() && c != '_')?;
+    let var_name = &trimmed[..name_end];
+
+    let rest_after_name = &trimmed[name_end..];
+    let eq_pos = rest_after_name.find('=')?;
+    let expr_start = eq_pos + 1;
+    let expr_rest = &rest_after_name[expr_start..];
+
+    let semi_pos = expr_rest.find(';')?;
+    let expr = expr_rest[..semi_pos].trim();
+
+    let locals = current_locals(scopes);
+    collect_expression_refs(expr, &locals, refs);
+
+    if let Some(scope) = scopes.last_mut() {
+        scope.push(var_name.to_string());
+    }
+
+    let abs_semi = start + 1 + keyword_end + offset + name_end + expr_start + semi_pos + 1;
+    Some(abs_semi)
+}
+
+fn handle_else_control_flow(
+    source: &str,
+    start: usize,
+    keyword_end: usize,
+    scopes: &mut Vec<Vec<String>>,
+    refs: &mut AngularTemplateRefs,
+) -> Option<usize> {
+    let rest_from = start + 1 + keyword_end;
+    let after_else = source[rest_from..].trim_start();
+    let trimmed_offset = source[rest_from..].len() - after_else.len();
+
+    if is_else_if(after_else) {
+        let if_keyword_end = rest_from + trimmed_offset + 2;
+        return handle_else_if_control_flow(source, if_keyword_end, scopes, refs);
+    }
+
+    scopes.push(Vec::new());
+    let brace_pos = source[rest_from..].find('{')?;
+    Some(rest_from + brace_pos + 1)
+}
+
+fn is_else_if(after_else: &str) -> bool {
+    after_else.starts_with("if")
+        && !after_else
+            .as_bytes()
+            .get(2)
+            .is_some_and(|b| b.is_ascii_alphanumeric())
+}
+
+fn handle_else_if_control_flow(
+    source: &str,
+    if_keyword_end: usize,
+    scopes: &mut Vec<Vec<String>>,
+    refs: &mut AngularTemplateRefs,
+) -> Option<usize> {
+    let after_if = &source[if_keyword_end..];
+    let paren_start = after_if.find('(')?;
+    let paren_content_start = if_keyword_end + paren_start;
+    let (expr, after_paren) = scan_parenthesized(source, paren_content_start)?;
+    let locals = current_locals(scopes);
+    collect_expression_refs(expr.trim(), &locals, refs);
+    scopes.push(Vec::new());
+    let brace_pos = source[after_paren..].find('{')?;
+    Some(after_paren + brace_pos + 1)
+}
+
+fn push_empty_control_flow_scope(
+    source: &str,
+    start: usize,
+    keyword_end: usize,
+    scopes: &mut Vec<Vec<String>>,
+) -> Option<usize> {
+    scopes.push(Vec::new());
+    let rest_from = start + 1 + keyword_end;
+    let brace_pos = source[rest_from..].find('{')?;
+    Some(rest_from + brace_pos + 1)
+}
+
+fn handle_if_control_flow(
+    source: &str,
+    start: usize,
+    keyword_end: usize,
+    scopes: &mut Vec<Vec<String>>,
+    refs: &mut AngularTemplateRefs,
+) -> Option<usize> {
+    let after_keyword = &source[start + 1 + keyword_end..];
+    let paren_start = after_keyword.find('(')?;
+    let paren_content_start = start + 1 + keyword_end + paren_start;
+    let (paren_content, after_paren) = scan_parenthesized(source, paren_content_start)?;
+    let (cond_expr, alias_name) = parse_if_condition_and_alias(paren_content);
+    let locals = current_locals(scopes);
+    collect_expression_refs(cond_expr.trim(), &locals, refs);
+    let mut scope_locals = Vec::new();
+    if let Some(alias) = alias_name {
+        scope_locals.push(alias.to_string());
+    }
+    scopes.push(scope_locals);
+    let brace_pos = source[after_paren..].find('{')?;
+    Some(after_paren + brace_pos + 1)
+}
+
+fn handle_for_control_flow(
+    source: &str,
+    start: usize,
+    keyword_end: usize,
+    scopes: &mut Vec<Vec<String>>,
+    refs: &mut AngularTemplateRefs,
+) -> Option<usize> {
+    let after_keyword = &source[start + 1 + keyword_end..];
+    let paren_start = after_keyword.find('(')?;
+    let paren_content_start = start + 1 + keyword_end + paren_start;
+    let (paren_content, after_paren) = scan_parenthesized(source, paren_content_start)?;
+
+    let mut locals_for_scope = Vec::new();
+
+    let parts: Vec<&str> = paren_content.split(';').collect();
+    if let Some(first_part) = parts.first()
+        && let Some(caps) = CONTROL_FOR_RE.captures(first_part.trim())
+    {
+        let binding = caps.get(1).map_or("", |m| m.as_str());
+        locals_for_scope.push(binding.to_string());
+        for implicit in &["$index", "$first", "$last", "$even", "$odd", "$count"] {
+            locals_for_scope.push((*implicit).to_string());
+        }
+        let iterable = caps.get(2).map_or("", |m| m.as_str()).trim();
+        let current = current_locals(scopes);
+        collect_expression_refs(iterable, &current, refs);
+    }
+
+    for part in parts.iter().skip(1) {
+        let part = part.trim();
+        if let Some(track_expr) = part.strip_prefix("track") {
+            let mut all_locals = current_locals(scopes);
+            all_locals.extend(locals_for_scope.clone());
+            collect_expression_refs(track_expr.trim(), &all_locals, refs);
+        }
+    }
+
+    scopes.push(locals_for_scope);
+    let brace_pos = source[after_paren..].find('{')?;
+    Some(after_paren + brace_pos + 1)
 }
 
 /// Parse the parenthesized content of an `@if (...)` block, splitting off the

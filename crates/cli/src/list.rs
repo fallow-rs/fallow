@@ -50,25 +50,13 @@ pub fn run_list(opts: &ListOptions<'_>) -> ExitCode {
         None
     };
 
-    let all_entry_points = if (opts.entry_points || show_all)
-        && let Some(ref disc) = discovered
-    {
-        let mut entries = fallow_core::discover::discover_entry_points(&config, disc);
-        let workspaces = fallow_config::discover_workspaces(opts.root);
-        for ws in &workspaces {
-            let ws_entries =
-                fallow_core::discover::discover_workspace_entry_points(&ws.root, &config, disc);
-            entries.extend(ws_entries);
-        }
-        if let Some(ref pr) = plugin_result {
-            let plugin_entries =
-                fallow_core::discover::discover_plugin_entry_points(pr, &config, disc);
-            entries.extend(plugin_entries);
-        }
-        Some(entries)
-    } else {
-        None
-    };
+    let all_entry_points = collect_list_entry_points(
+        opts,
+        &config,
+        show_all,
+        discovered.as_deref(),
+        plugin_result.as_ref(),
+    );
 
     let boundary_data = if opts.boundaries {
         Some(compute_boundary_data(&config, discovered.as_deref()))
@@ -76,39 +64,9 @@ pub fn run_list(opts: &ListOptions<'_>) -> ExitCode {
         None
     };
 
-    let workspace_data = if opts.workspaces || show_all {
-        match fallow_config::discover_workspaces_with_diagnostics(
-            opts.root,
-            &config.ignore_patterns,
-        ) {
-            Ok((workspaces, mut diagnostics)) => {
-                let undeclared = fallow_config::find_undeclared_workspaces_with_ignores(
-                    opts.root,
-                    &workspaces,
-                    &config.ignore_patterns,
-                );
-                let already_flagged: rustc_hash::FxHashSet<std::path::PathBuf> = diagnostics
-                    .iter()
-                    .map(|d| dunce::canonicalize(&d.path).unwrap_or_else(|_| d.path.clone()))
-                    .collect();
-                for diag in undeclared {
-                    let canonical =
-                        dunce::canonicalize(&diag.path).unwrap_or_else(|_| diag.path.clone());
-                    if !already_flagged.contains(&canonical) {
-                        diagnostics.push(diag);
-                    }
-                }
-                Some(WorkspaceData {
-                    workspaces,
-                    diagnostics,
-                })
-            }
-            Err(err) => {
-                return crate::error::emit_error(&err.to_string(), 2, opts.output);
-            }
-        }
-    } else {
-        None
+    let workspace_data = match collect_list_workspace_data(opts, &config, show_all) {
+        Ok(data) => data,
+        Err(code) => return code,
     };
 
     match opts.output {
@@ -132,6 +90,79 @@ pub fn run_list(opts: &ListOptions<'_>) -> ExitCode {
                 workspace_data: workspace_data.as_ref(),
             });
             ExitCode::SUCCESS
+        }
+    }
+}
+
+fn collect_list_entry_points(
+    opts: &ListOptions<'_>,
+    config: &fallow_config::ResolvedConfig,
+    show_all: bool,
+    discovered: Option<&[fallow_types::discover::DiscoveredFile]>,
+    plugin_result: Option<&fallow_core::plugins::AggregatedPluginResult>,
+) -> Option<Vec<fallow_core::discover::EntryPoint>> {
+    if !(opts.entry_points || show_all) {
+        return None;
+    }
+    let disc = discovered?;
+    let mut entries = fallow_core::discover::discover_entry_points(config, disc);
+    let workspaces = fallow_config::discover_workspaces(opts.root);
+    for ws in &workspaces {
+        let ws_entries =
+            fallow_core::discover::discover_workspace_entry_points(&ws.root, config, disc);
+        entries.extend(ws_entries);
+    }
+    if let Some(pr) = plugin_result {
+        let plugin_entries = fallow_core::discover::discover_plugin_entry_points(pr, config, disc);
+        entries.extend(plugin_entries);
+    }
+    Some(entries)
+}
+
+fn collect_list_workspace_data(
+    opts: &ListOptions<'_>,
+    config: &fallow_config::ResolvedConfig,
+    show_all: bool,
+) -> Result<Option<WorkspaceData>, ExitCode> {
+    if !(opts.workspaces || show_all) {
+        return Ok(None);
+    }
+    match fallow_config::discover_workspaces_with_diagnostics(opts.root, &config.ignore_patterns) {
+        Ok((workspaces, mut diagnostics)) => {
+            append_undeclared_workspace_diagnostics(
+                opts.root,
+                config,
+                &workspaces,
+                &mut diagnostics,
+            );
+            Ok(Some(WorkspaceData {
+                workspaces,
+                diagnostics,
+            }))
+        }
+        Err(err) => Err(crate::error::emit_error(&err.to_string(), 2, opts.output)),
+    }
+}
+
+fn append_undeclared_workspace_diagnostics(
+    root: &std::path::Path,
+    config: &fallow_config::ResolvedConfig,
+    workspaces: &[fallow_config::WorkspaceInfo],
+    diagnostics: &mut Vec<fallow_config::WorkspaceDiagnostic>,
+) {
+    let undeclared = fallow_config::find_undeclared_workspaces_with_ignores(
+        root,
+        workspaces,
+        &config.ignore_patterns,
+    );
+    let already_flagged: rustc_hash::FxHashSet<std::path::PathBuf> = diagnostics
+        .iter()
+        .map(|d| dunce::canonicalize(&d.path).unwrap_or_else(|_| d.path.clone()))
+        .collect();
+    for diag in undeclared {
+        let canonical = dunce::canonicalize(&diag.path).unwrap_or_else(|_| diag.path.clone());
+        if !already_flagged.contains(&canonical) {
+            diagnostics.push(diag);
         }
     }
 }

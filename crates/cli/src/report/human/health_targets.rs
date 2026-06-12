@@ -29,6 +29,29 @@ pub(super) fn render_refactoring_targets(
         return;
     }
 
+    push_refactoring_targets_header(lines, report);
+
+    let shown_targets = report.targets.len().min(MAX_FLAT_ITEMS);
+    for target in &report.targets[..shown_targets] {
+        push_refactoring_target_row(lines, target, root);
+        render_target_evidence(lines, target, root);
+        lines.push(String::new());
+    }
+    push_refactoring_targets_overflow(lines, report.targets.len());
+    lines.push(format!(
+        "  {}",
+        format!(
+            "Prioritized refactoring recommendations based on complexity, churn, and coupling signals: {DOCS_HEALTH}#refactoring-targets"
+        )
+        .dimmed()
+    ));
+    lines.push(String::new());
+}
+
+fn push_refactoring_targets_header(
+    lines: &mut Vec<String>,
+    report: &crate::health_types::HealthReport,
+) {
     lines.push(format!(
         "{} {}",
         "\u{25cf}".cyan(),
@@ -36,19 +59,27 @@ pub(super) fn render_refactoring_targets(
             .cyan()
             .bold()
     ));
+    lines.push(format!(
+        "  {}",
+        refactoring_effort_summary(&report.targets).dimmed()
+    ));
+    lines.push(format!(
+        "  {}",
+        "  score = quick-win ROI (higher = better) \u{00b7} pri = absolute priority".dimmed()
+    ));
+    lines.push(String::new());
+}
 
-    let low = report
-        .targets
+fn refactoring_effort_summary(targets: &[crate::health_types::RefactoringTargetFinding]) -> String {
+    let low = targets
         .iter()
         .filter(|t| matches!(t.effort, crate::health_types::EffortEstimate::Low))
         .count();
-    let medium = report
-        .targets
+    let medium = targets
         .iter()
         .filter(|t| matches!(t.effort, crate::health_types::EffortEstimate::Medium))
         .count();
-    let high = report
-        .targets
+    let high = targets
         .iter()
         .filter(|t| matches!(t.effort, crate::health_types::EffortEstimate::High))
         .count();
@@ -62,82 +93,79 @@ pub(super) fn render_refactoring_targets(
     if high > 0 {
         effort_parts.push(format!("{high} high"));
     }
-    lines.push(format!("  {}", effort_parts.join(" \u{00b7} ").dimmed()));
+    effort_parts.join(" \u{00b7} ")
+}
+
+fn push_refactoring_target_row(
+    lines: &mut Vec<String>,
+    target: &crate::health_types::RefactoringTarget,
+    root: &Path,
+) {
+    let file_str = relative_path(&target.path, root).display().to_string();
+    let (dir, filename) = split_dir_filename(&file_str);
     lines.push(format!(
-        "  {}",
-        "  score = quick-win ROI (higher = better) \u{00b7} pri = absolute priority".dimmed()
+        "  {}  {}    {}{}",
+        target_efficiency_colored(target.efficiency),
+        format!("pri:{:.1}", target.priority).dimmed(),
+        dir.dimmed(),
+        filename,
     ));
-    lines.push(String::new());
+    lines.push(format!(
+        "         {} \u{00b7} effort:{} \u{00b7} confidence:{}  {}{}",
+        target.category.label().yellow(),
+        target_effort_colored(&target.effort),
+        target_confidence_colored(&target.confidence),
+        target.recommendation.dimmed(),
+        generated_recommendation_tag(&target.recommendation),
+    ));
+}
 
-    let shown_targets = report.targets.len().min(MAX_FLAT_ITEMS);
-    for target in &report.targets[..shown_targets] {
-        let file_str = relative_path(&target.path, root).display().to_string();
-
-        let eff_str = format!("{:>5.1}", target.efficiency);
-        let eff_colored = if target.efficiency >= 40.0 {
-            eff_str.green().to_string()
-        } else if target.efficiency >= 20.0 {
-            eff_str.yellow().to_string()
-        } else {
-            eff_str.dimmed().to_string()
-        };
-
-        let (dir, filename) = split_dir_filename(&file_str);
-
-        lines.push(format!(
-            "  {}  {}    {}{}",
-            eff_colored,
-            format!("pri:{:.1}", target.priority).dimmed(),
-            dir.dimmed(),
-            filename,
-        ));
-
-        let label = target.category.label();
-        let effort = target.effort.label();
-        let effort_colored = match target.effort {
-            crate::health_types::EffortEstimate::Low => effort.green().to_string(),
-            crate::health_types::EffortEstimate::Medium => effort.yellow().to_string(),
-            crate::health_types::EffortEstimate::High => effort.red().to_string(),
-        };
-        let confidence = target.confidence.label();
-        let confidence_colored = match target.confidence {
-            crate::health_types::Confidence::High => confidence.green().to_string(),
-            crate::health_types::Confidence::Medium => confidence.yellow().to_string(),
-            crate::health_types::Confidence::Low => confidence.dimmed().to_string(),
-        };
-        let generated_tag = if recommendation_mentions_generated(&target.recommendation) {
-            format!(" {}", "(generated)".dimmed())
-        } else {
-            String::new()
-        };
-        lines.push(format!(
-            "         {} \u{00b7} effort:{} \u{00b7} confidence:{}  {}{}",
-            label.yellow(),
-            effort_colored,
-            confidence_colored,
-            target.recommendation.dimmed(),
-            generated_tag,
-        ));
-
-        render_target_evidence(lines, target, root);
-
-        lines.push(String::new());
+fn target_efficiency_colored(efficiency: f64) -> String {
+    let eff_str = format!("{efficiency:>5.1}");
+    if efficiency >= 40.0 {
+        eff_str.green().to_string()
+    } else if efficiency >= 20.0 {
+        eff_str.yellow().to_string()
+    } else {
+        eff_str.dimmed().to_string()
     }
-    if report.targets.len() > MAX_FLAT_ITEMS {
-        lines.push(format!(
-            "  {}",
-            format!(
-                "... and {} more targets (--format json for full list)",
-                report.targets.len() - MAX_FLAT_ITEMS
-            )
-            .dimmed()
-        ));
-        lines.push(String::new());
+}
+
+fn target_effort_colored(effort: &crate::health_types::EffortEstimate) -> String {
+    let label = effort.label();
+    match effort {
+        crate::health_types::EffortEstimate::Low => label.green().to_string(),
+        crate::health_types::EffortEstimate::Medium => label.yellow().to_string(),
+        crate::health_types::EffortEstimate::High => label.red().to_string(),
+    }
+}
+
+fn target_confidence_colored(confidence: &crate::health_types::Confidence) -> String {
+    let label = confidence.label();
+    match confidence {
+        crate::health_types::Confidence::High => label.green().to_string(),
+        crate::health_types::Confidence::Medium => label.yellow().to_string(),
+        crate::health_types::Confidence::Low => label.dimmed().to_string(),
+    }
+}
+
+fn generated_recommendation_tag(recommendation: &str) -> String {
+    if recommendation_mentions_generated(recommendation) {
+        format!(" {}", "(generated)".dimmed())
+    } else {
+        String::new()
+    }
+}
+
+fn push_refactoring_targets_overflow(lines: &mut Vec<String>, target_count: usize) {
+    if target_count <= MAX_FLAT_ITEMS {
+        return;
     }
     lines.push(format!(
         "  {}",
         format!(
-            "Prioritized refactoring recommendations based on complexity, churn, and coupling signals: {DOCS_HEALTH}#refactoring-targets"
+            "... and {} more targets (--format json for full list)",
+            target_count - MAX_FLAT_ITEMS
         )
         .dimmed()
     ));

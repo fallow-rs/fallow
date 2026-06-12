@@ -210,105 +210,34 @@ fn push_markdown_graph_sections(
         out,
         &results.circular_dependencies,
         "Circular dependencies",
-        |cycle| {
-            let chain: Vec<String> = cycle.cycle.files.iter().map(|p| rel(p)).collect();
-            let mut display_chain = chain.clone();
-            if let Some(first) = chain.first() {
-                display_chain.push(first.clone());
-            }
-            let cross_pkg_tag = if cycle.cycle.is_cross_package {
-                " *(cross-package)*"
-            } else {
-                ""
-            };
-            vec![format!(
-                "- {}{}",
-                display_chain
-                    .iter()
-                    .map(|s| format!("`{s}`"))
-                    .collect::<Vec<_>>()
-                    .join(" \u{2192} "),
-                cross_pkg_tag
-            )]
-        },
+        |cycle| format_markdown_circular_dependency(cycle, rel),
     );
     markdown_section(
         out,
         &results.re_export_cycles,
         "Re-export cycles",
-        |cycle| {
-            let chain: Vec<String> = cycle.cycle.files.iter().map(|p| rel(p)).collect();
-            let kind_tag = match cycle.cycle.kind {
-                fallow_core::results::ReExportCycleKind::SelfLoop => " *(self-loop)*",
-                fallow_core::results::ReExportCycleKind::MultiNode => "",
-            };
-            vec![format!(
-                "- {}{}",
-                chain
-                    .iter()
-                    .map(|s| format!("`{s}`"))
-                    .collect::<Vec<_>>()
-                    .join(" <-> "),
-                kind_tag
-            )]
-        },
+        |cycle| format_markdown_re_export_cycle(cycle, rel),
     );
     markdown_section(
         out,
         &results.boundary_violations,
         "Boundary violations",
-        |v| {
-            vec![format!(
-                "- `{}`:{}  \u{2192} `{}` ({} \u{2192} {})",
-                rel(&v.violation.from_path),
-                v.violation.line,
-                rel(&v.violation.to_path),
-                v.violation.from_zone,
-                v.violation.to_zone,
-            )]
-        },
+        |v| format_markdown_boundary_violation(v, rel),
     );
     markdown_section(
         out,
         &results.boundary_coverage_violations,
         "Boundary coverage",
-        |v| {
-            vec![format!(
-                "- `{}`:{} no matching boundary zone",
-                rel(&v.violation.path),
-                v.violation.line,
-            )]
-        },
+        |v| format_markdown_boundary_coverage(v, rel),
     );
     markdown_section(
         out,
         &results.boundary_call_violations,
         "Boundary calls",
-        |v| {
-            vec![format!(
-                "- `{}`:{} `{}` forbidden in zone `{}` (pattern `{}`)",
-                rel(&v.violation.path),
-                v.violation.line,
-                v.violation.callee,
-                v.violation.zone,
-                v.violation.pattern,
-            )]
-        },
+        |v| format_markdown_boundary_call(v, rel),
     );
     markdown_section(out, &results.policy_violations, "Policy violations", |v| {
-        vec![format!(
-            "- `{}`:{} `{}` banned by `{}/{}`{}",
-            rel(&v.violation.path),
-            v.violation.line,
-            v.violation.matched,
-            v.violation.pack,
-            v.violation.rule_id,
-            v.violation
-                .message
-                .as_deref()
-                .map(|m| format!(" ({m})"))
-                .unwrap_or_default(),
-        )]
+        format_markdown_policy_violation(v, rel)
     });
     markdown_section(
         out,
@@ -324,6 +253,109 @@ fn push_markdown_graph_sections(
             )]
         },
     );
+}
+
+fn format_markdown_circular_dependency(
+    cycle: &fallow_core::results::CircularDependencyFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    let chain: Vec<String> = cycle.cycle.files.iter().map(|p| rel(p)).collect();
+    let mut display_chain = chain.clone();
+    if let Some(first) = chain.first() {
+        display_chain.push(first.clone());
+    }
+    let cross_pkg_tag = if cycle.cycle.is_cross_package {
+        " *(cross-package)*"
+    } else {
+        ""
+    };
+    vec![format!(
+        "- {}{}",
+        display_chain
+            .iter()
+            .map(|s| format!("`{s}`"))
+            .collect::<Vec<_>>()
+            .join(" \u{2192} "),
+        cross_pkg_tag
+    )]
+}
+
+fn format_markdown_re_export_cycle(
+    cycle: &fallow_core::results::ReExportCycleFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    let chain: Vec<String> = cycle.cycle.files.iter().map(|p| rel(p)).collect();
+    let kind_tag = match cycle.cycle.kind {
+        fallow_core::results::ReExportCycleKind::SelfLoop => " *(self-loop)*",
+        fallow_core::results::ReExportCycleKind::MultiNode => "",
+    };
+    vec![format!(
+        "- {}{}",
+        chain
+            .iter()
+            .map(|s| format!("`{s}`"))
+            .collect::<Vec<_>>()
+            .join(" <-> "),
+        kind_tag
+    )]
+}
+
+fn format_markdown_boundary_violation(
+    v: &fallow_core::results::BoundaryViolationFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    vec![format!(
+        "- `{}`:{}  \u{2192} `{}` ({} \u{2192} {})",
+        rel(&v.violation.from_path),
+        v.violation.line,
+        rel(&v.violation.to_path),
+        v.violation.from_zone,
+        v.violation.to_zone,
+    )]
+}
+
+fn format_markdown_boundary_coverage(
+    v: &fallow_core::results::BoundaryCoverageViolationFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    vec![format!(
+        "- `{}`:{} no matching boundary zone",
+        rel(&v.violation.path),
+        v.violation.line,
+    )]
+}
+
+fn format_markdown_boundary_call(
+    v: &fallow_core::results::BoundaryCallViolationFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    vec![format!(
+        "- `{}`:{} `{}` forbidden in zone `{}` (pattern `{}`)",
+        rel(&v.violation.path),
+        v.violation.line,
+        v.violation.callee,
+        v.violation.zone,
+        v.violation.pattern,
+    )]
+}
+
+fn format_markdown_policy_violation(
+    v: &fallow_core::results::PolicyViolationFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    vec![format!(
+        "- `{}`:{} `{}` banned by `{}/{}`{}",
+        rel(&v.violation.path),
+        v.violation.line,
+        v.violation.matched,
+        v.violation.pack,
+        v.violation.rule_id,
+        v.violation
+            .message
+            .as_deref()
+            .map(|m| format!(" ({m})"))
+            .unwrap_or_default(),
+    )]
 }
 
 fn push_markdown_catalog_sections(
