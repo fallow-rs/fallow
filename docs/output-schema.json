@@ -997,6 +997,13 @@
           "description": "Summary statistics.",
           "$ref": "#/definitions/HealthSummary"
         },
+        "threshold_overrides": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ThresholdOverrideState"
+          },
+          "description": "Configured threshold override states. Entries are emitted for active\nexceptions, stale exceptions, and full-run no-match cleanup hints."
+        },
         "vital_signs": {
           "anyOf": [
             {
@@ -1927,6 +1934,13 @@
           "description": "Summary statistics.",
           "$ref": "#/definitions/HealthSummary"
         },
+        "threshold_overrides": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ThresholdOverrideState"
+          },
+          "description": "Configured threshold override states. Entries are emitted for active\nexceptions, stale exceptions, and full-run no-match cleanup hints."
+        },
         "vital_signs": {
           "anyOf": [
             {
@@ -2409,6 +2423,28 @@
             "$ref": "#/definitions/ComplexityContribution"
           },
           "description": "Per-decision-point complexity breakdown explaining WHICH constructs drove\nthe cyclomatic and cognitive scores. Populated only when the caller opts\nin via `health --complexity-breakdown`; empty (and omitted from JSON)\notherwise so default and CI output stay lean."
+        },
+        "effective_thresholds": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HealthEffectiveThresholds"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Resolved thresholds used for this finding when a config override changed\nat least one ceiling. Omitted for findings using global thresholds."
+        },
+        "threshold_source": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThresholdSource"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Source of the effective thresholds. Omitted when thresholds are global."
         },
         "actions": {
           "type": "array",
@@ -8880,6 +8916,28 @@
             "$ref": "#/definitions/ComplexityContribution"
           },
           "description": "Per-decision-point complexity breakdown explaining WHICH constructs drove\nthe cyclomatic and cognitive scores. Populated only when the caller opts\nin via `health --complexity-breakdown`; empty (and omitted from JSON)\notherwise so default and CI output stay lean."
+        },
+        "effective_thresholds": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HealthEffectiveThresholds"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Resolved thresholds used for this finding when a config override changed\nat least one ceiling. Omitted for findings using global thresholds."
+        },
+        "threshold_source": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThresholdSource"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Source of the effective thresholds. Omitted when thresholds are global."
         }
       },
       "required": [
@@ -11984,6 +12042,140 @@
         "reason"
       ],
       "description": "A read-only follow-up command fallow surfaces from the current findings,\nemitted as the top-level `next_steps` array on each command's JSON envelope.\n\n`next_steps` exists to point agents and humans sideways to fallow's adjacent\nverification capabilities (trace, complexity breakdown, audit, workspace\nscoping) that telemetry shows agents rarely discover, because they act on the\noutput in front of them rather than on reference docs.\n\n## Two hard contracts\n\n1. **Read-only.** A `next_step` NEVER suggests `fallow fix` or any mutating\n   command. Fallow surfaces evidence and verification paths; deciding and\n   applying the remediation is the agent's job.\n2. **Runnable, placeholder-free.** `command` is always runnable as-is. It\n   never contains an angle-bracket placeholder (`<...>`); finding-derived\n   values are filled in from a real, deterministically-selected finding, and\n   any environment- or user-specific value that cannot be made concrete lives\n   in `reason` instead. An agent can copy `command` and run it without edits.\n\nBoth contracts are enforced by unit tests in\n`crates/cli/src/report/suggestions.rs`.\n\nNote: a SEPARATE, unrelated `next_steps` field exists on the\n`coverage setup` envelope (`CoverageSetupOutput.next_steps`) as a plain\n`Vec<String>` of human onboarding steps. Consumers that read multiple\nenvelope kinds must route on the envelope's `kind` before interpreting a\n`next_steps` field: on analysis envelopes it is `Vec<NextStep>` objects, on\n`coverage setup` it is `Vec<String>`."
+    },
+    "HealthEffectiveThresholds": {
+      "type": "object",
+      "properties": {
+        "max_cyclomatic": {
+          "type": "integer"
+        },
+        "max_cognitive": {
+          "type": "integer"
+        },
+        "max_crap": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "max_cyclomatic",
+        "max_cognitive",
+        "max_crap"
+      ],
+      "description": "Resolved thresholds used to evaluate a health finding."
+    },
+    "ThresholdSource": {
+      "type": "string",
+      "enum": [
+        "override"
+      ],
+      "description": "Source for a finding's effective thresholds."
+    },
+    "ThresholdOverrideState": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "$ref": "#/definitions/ThresholdOverrideStatus"
+        },
+        "override_index": {
+          "type": "integer"
+        },
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "function": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "configured_thresholds": {
+          "$ref": "#/definitions/HealthConfiguredThresholds"
+        },
+        "effective_thresholds": {
+          "$ref": "#/definitions/HealthEffectiveThresholds"
+        },
+        "metrics": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThresholdOverrideMetrics"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "status",
+        "override_index",
+        "configured_thresholds",
+        "effective_thresholds"
+      ],
+      "description": "Report entry describing whether a threshold override is active, stale, or\nno longer matching any analyzed file or function."
+    },
+    "ThresholdOverrideStatus": {
+      "type": "string",
+      "enum": [
+        "active",
+        "stale",
+        "no_match"
+      ],
+      "description": "Lifecycle state for a configured threshold override."
+    },
+    "HealthConfiguredThresholds": {
+      "type": "object",
+      "properties": {
+        "max_cyclomatic": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_cognitive": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_crap": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "description": "Threshold values configured by a single override entry."
+    },
+    "ThresholdOverrideMetrics": {
+      "type": "object",
+      "properties": {
+        "cyclomatic": {
+          "type": "integer"
+        },
+        "cognitive": {
+          "type": "integer"
+        },
+        "crap": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "cyclomatic",
+        "cognitive"
+      ],
+      "description": "Current complexity metrics for a matched threshold override entry."
     }
   }
 }

@@ -118,8 +118,20 @@ pub fn build_health_finding_actions(
     let crap_only = matches!(exceeded, crate::health_types::ExceededThreshold::Crap);
     let cyclomatic = violation.cyclomatic;
     let cognitive = violation.cognitive;
-    let full_coverage_can_clear_crap =
-        !includes_crap || f64::from(cyclomatic) < ctx.max_crap_threshold;
+    let max_cyclomatic_threshold = violation
+        .effective_thresholds
+        .map_or(ctx.max_cyclomatic_threshold, |thresholds| {
+            thresholds.max_cyclomatic
+        });
+    let max_cognitive_threshold = violation
+        .effective_thresholds
+        .map_or(ctx.max_cognitive_threshold, |thresholds| {
+            thresholds.max_cognitive
+        });
+    let max_crap_threshold = violation
+        .effective_thresholds
+        .map_or(ctx.max_crap_threshold, |thresholds| thresholds.max_crap);
+    let full_coverage_can_clear_crap = !includes_crap || f64::from(cyclomatic) < max_crap_threshold;
 
     let mut actions: Vec<HealthFindingAction> = Vec::new();
 
@@ -142,6 +154,8 @@ pub fn build_health_finding_actions(
         full_coverage_can_clear_crap,
         cyclomatic,
         cognitive,
+        max_cyclomatic_threshold,
+        max_cognitive_threshold,
         ctx,
     ) {
         actions.push(build_refactor_action(
@@ -164,16 +178,15 @@ fn should_add_refactor_action(
     full_coverage_can_clear_crap: bool,
     cyclomatic: u16,
     cognitive: u16,
+    max_cyclomatic_threshold: u16,
+    max_cognitive_threshold: u16,
     ctx: &HealthActionContext,
 ) -> bool {
     let crap_only_needs_complexity_reduction = crap_only && !full_coverage_can_clear_crap;
-    let cognitive_floor = ctx.max_cognitive_threshold / 2;
+    let cognitive_floor = max_cognitive_threshold / 2;
     let near_cyclomatic_threshold = crap_only
         && cyclomatic > 0
-        && cyclomatic
-            >= ctx
-                .max_cyclomatic_threshold
-                .saturating_sub(ctx.crap_refactor_band)
+        && cyclomatic >= max_cyclomatic_threshold.saturating_sub(ctx.crap_refactor_band)
         && cognitive >= cognitive_floor;
     !crap_only || crap_only_needs_complexity_reduction || near_cyclomatic_threshold
 }

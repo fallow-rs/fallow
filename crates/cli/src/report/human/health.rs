@@ -47,6 +47,7 @@ pub(in crate::report) fn print_health_human(input: &PrintHealthHumanInput<'_>) {
         && report.targets.is_empty()
         && report.runtime_coverage.is_none()
         && report.coverage_intelligence.is_none()
+        && report.threshold_overrides.is_empty()
         && !has_score
     {
         if !quiet {
@@ -157,6 +158,7 @@ fn build_health_human_lines_with_explain(
     render_risk_profiles(&mut lines, report);
     render_large_functions(&mut lines, report, root);
     render_findings(&mut lines, report, root);
+    render_threshold_overrides(&mut lines, report, root);
     render_coverage_gaps(&mut lines, report, root);
     render_file_scores(&mut lines, report, root);
     render_hotspots(&mut lines, report, root);
@@ -879,6 +881,7 @@ fn push_finding_metric_rows(
     report: &crate::health_types::HealthReport,
     root: &Path,
 ) {
+    let thresholds = finding_thresholds(finding, report);
     lines.push(format!(
         "    {} {}{}{}",
         format!(":{}", finding.line).dimmed(),
@@ -888,8 +891,8 @@ fn push_finding_metric_rows(
     ));
     lines.push(format!(
         "         {} cyclomatic  {} cognitive  {} lines",
-        threshold_colored(finding.cyclomatic, report.summary.max_cyclomatic_threshold,),
-        threshold_colored(finding.cognitive, report.summary.max_cognitive_threshold),
+        threshold_colored(finding.cyclomatic, thresholds.max_cyclomatic),
+        threshold_colored(finding.cognitive, thresholds.max_cognitive),
         format!("{:>3}", finding.line_count).dimmed(),
     ));
     if let Some(line) = render_component_rollup_breakdown(finding, root) {
@@ -898,6 +901,19 @@ fn push_finding_metric_rows(
     if let Some(line) = finding_crap_line(finding, root) {
         lines.push(line);
     }
+}
+
+fn finding_thresholds(
+    finding: &crate::health_types::ComplexityViolation,
+    report: &crate::health_types::HealthReport,
+) -> crate::health_types::HealthEffectiveThresholds {
+    finding
+        .effective_thresholds
+        .unwrap_or(crate::health_types::HealthEffectiveThresholds {
+            max_cyclomatic: report.summary.max_cyclomatic_threshold,
+            max_cognitive: report.summary.max_cognitive_threshold,
+            max_crap: report.summary.max_crap_threshold,
+        })
 }
 
 fn threshold_colored(value: u16, threshold: u16) -> String {
@@ -947,6 +963,58 @@ fn finding_crap_line(
         "         {crap_colored} CRAP{}",
         coverage_suffix.dimmed(),
     ))
+}
+
+fn render_threshold_overrides(
+    lines: &mut Vec<String>,
+    report: &crate::health_types::HealthReport,
+    root: &Path,
+) {
+    if report.threshold_overrides.is_empty() {
+        return;
+    }
+
+    lines.push(format!(
+        "{} {}",
+        "\u{25cf}".yellow(),
+        format!(
+            "Health threshold overrides ({})",
+            report.threshold_overrides.len()
+        )
+        .yellow()
+        .bold()
+    ));
+    for entry in &report.threshold_overrides {
+        let status = match entry.status {
+            crate::health_types::ThresholdOverrideStatus::Active => "active",
+            crate::health_types::ThresholdOverrideStatus::Stale => "stale",
+            crate::health_types::ThresholdOverrideStatus::NoMatch => "no_match",
+        };
+        let target = entry.path.as_ref().map_or_else(
+            || "<no matching file or function>".to_string(),
+            |path| {
+                let display = crate::report::format_display_path(path, root);
+                entry
+                    .function
+                    .as_ref()
+                    .map_or_else(|| display.clone(), |name| format!("{display}:{name}"))
+            },
+        );
+        let metrics = entry.metrics.map_or(String::new(), |metrics| {
+            let crap = metrics
+                .crap
+                .map_or(String::new(), |value| format!(" crap={value:.1}"));
+            format!(
+                " cyclomatic={} cognitive={}{}",
+                metrics.cyclomatic, metrics.cognitive, crap
+            )
+        });
+        lines.push(format!(
+            "    #{idx} {status} {target}{metrics}",
+            idx = entry.override_index
+        ));
+    }
+    lines.push(String::new());
 }
 
 fn crap_coverage_note(report: &crate::health_types::HealthReport) -> Option<String> {
@@ -1566,6 +1634,8 @@ mod tests {
                     inherited_from: None,
                     component_rollup: None,
                     contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
                 }
                 .into(),
             ],
@@ -1611,6 +1681,8 @@ mod tests {
                     inherited_from: None,
                     component_rollup: None,
                     contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
                 }
                 .into(),
             ],
@@ -1650,6 +1722,8 @@ mod tests {
                     inherited_from: None,
                     component_rollup: None,
                     contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
                 }
                 .into(),
             ],
@@ -1691,6 +1765,8 @@ mod tests {
                     inherited_from: None,
                     component_rollup: None,
                     contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
                 }
                 .into(),
             ],
@@ -1738,6 +1814,8 @@ mod tests {
                     inherited_from: None,
                     component_rollup: None,
                     contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
                 }
                 .into(),
             ],
@@ -1785,6 +1863,8 @@ mod tests {
                     inherited_from: None,
                     component_rollup: None,
                     contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
                 }
                 .into(),
                 crate::health_types::ComplexityViolation {
@@ -1805,6 +1885,8 @@ mod tests {
                     inherited_from: None,
                     component_rollup: None,
                     contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
                 }
                 .into(),
             ],
@@ -3405,6 +3487,8 @@ mod tests {
                 inherited_from: None,
                 component_rollup: None,
                 contributions: Vec::new(),
+                effective_thresholds: None,
+                threshold_source: None,
             }
             .into(),
         ];
@@ -3511,6 +3595,8 @@ mod tests {
                 inherited_from: None,
                 component_rollup: None,
                 contributions: Vec::new(),
+                effective_thresholds: None,
+                threshold_source: None,
             }
             .into(),
         ];
@@ -3544,6 +3630,8 @@ mod tests {
                 inherited_from: None,
                 component_rollup: None,
                 contributions: Vec::new(),
+                effective_thresholds: None,
+                threshold_source: None,
             }
             .into(),
         ];
@@ -3577,6 +3665,8 @@ mod tests {
                 inherited_from: None,
                 component_rollup: None,
                 contributions: Vec::new(),
+                effective_thresholds: None,
+                threshold_source: None,
             }
             .into(),
             crate::health_types::ComplexityViolation {
@@ -3597,6 +3687,8 @@ mod tests {
                 inherited_from: None,
                 component_rollup: None,
                 contributions: Vec::new(),
+                effective_thresholds: None,
+                threshold_source: None,
             }
             .into(),
         ];
@@ -3630,6 +3722,8 @@ mod tests {
                 inherited_from: None,
                 component_rollup: None,
                 contributions: Vec::new(),
+                effective_thresholds: None,
+                threshold_source: None,
             }
             .into(),
         ];
@@ -3725,6 +3819,8 @@ mod tests {
                 template_cognitive: 12,
             }),
             contributions: Vec::new(),
+            effective_thresholds: None,
+            threshold_source: None,
         };
         let line = render_component_rollup_breakdown(&finding, &root)
             .expect("rollup payload should render a breakdown line");
@@ -3766,6 +3862,8 @@ mod tests {
                     inherited_from: Some(owner),
                     component_rollup: None,
                     contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
                 }
                 .into(),
             ],

@@ -1039,6 +1039,50 @@ fn audit_max_crap_flag_fails_when_threshold_crossed() {
     );
 }
 
+#[test]
+fn audit_respects_health_threshold_override() {
+    let dir = create_audit_fixture("health-threshold-override");
+    fs::write(
+        dir.path().join(".fallowrc.json"),
+        r#"{
+  "health": {
+    "thresholdOverrides": [
+      {
+        "files": ["src/index.ts"],
+        "functions": ["branchy"],
+        "maxCyclomatic": 20,
+        "maxCognitive": 20,
+        "maxCrap": 100
+      }
+    ]
+  }
+}
+"#,
+    )
+    .unwrap();
+    write_branchy_change(dir.path());
+
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.path().to_str().unwrap(),
+        "--base",
+        "HEAD~1",
+        "--max-crap",
+        "1",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(
+        output.code, 0,
+        "audit should pass when health override raises local thresholds. stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["verdict"].as_str(), Some("pass"));
+}
+
 fn audit_with_env(root: &Path, env: &[(&str, &str)]) -> common::CommandOutput {
     let bin = fallow_bin();
     let mut cmd = Command::new(&bin);

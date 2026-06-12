@@ -396,12 +396,52 @@ pub(super) fn print_health_compact(report: &crate::health_types::HealthReport, r
     print_health_score_compact(report);
     print_vital_signs_compact(report);
     print_health_findings_compact(&report.findings, root);
+    print_threshold_overrides_compact(&report.threshold_overrides, root);
     print_file_scores_compact(&report.file_scores, root);
     print_coverage_gaps_compact(report, root);
     print_runtime_sections_compact(report, root);
     print_hotspots_compact(&report.hotspots, root);
     print_health_trend_compact(report);
     print_refactoring_targets_compact(&report.targets, root);
+}
+
+fn print_threshold_overrides_compact(
+    entries: &[crate::health_types::ThresholdOverrideState],
+    root: &Path,
+) {
+    for entry in entries {
+        let status = match entry.status {
+            crate::health_types::ThresholdOverrideStatus::Active => "active",
+            crate::health_types::ThresholdOverrideStatus::Stale => "stale",
+            crate::health_types::ThresholdOverrideStatus::NoMatch => "no_match",
+        };
+        let target = entry.path.as_ref().map_or_else(
+            || "no-match".to_string(),
+            |path| {
+                let display = health_compact_path(path, root);
+                entry
+                    .function
+                    .as_ref()
+                    .map_or_else(|| display.clone(), |name| format!("{display}:{name}"))
+            },
+        );
+        let metrics = entry.metrics.map_or(String::new(), |metrics| {
+            let crap = metrics
+                .crap
+                .map_or(String::new(), |value| format!(",crap={value:.1}"));
+            format!(
+                ",cyclomatic={},cognitive={}{}",
+                metrics.cyclomatic, metrics.cognitive, crap
+            )
+        });
+        outln!(
+            "threshold-override:{}:{}:{}{}",
+            entry.override_index,
+            status,
+            target,
+            metrics
+        );
+    }
 }
 
 fn print_health_score_compact(report: &crate::health_types::HealthReport) {

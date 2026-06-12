@@ -391,6 +391,10 @@ export type ComplexityMetric = ("cyclomatic" | "cognitive")
  */
 export type ComplexityContributionKind = ("if" | "else" | "else-if" | "ternary" | "logical-and" | "logical-or" | "nullish-coalescing" | "logical-assignment" | "optional-chain" | "for" | "for-in" | "for-of" | "while" | "do-while" | "switch" | "case" | "catch" | "labeled-break" | "labeled-continue")
 /**
+ * Source for a finding's effective thresholds.
+ */
+export type ThresholdSource = "override"
+/**
  * Discriminant for [`HealthFindingAction::kind`]. Mirrors the action types
  * emitted by `build_health_finding_actions`. A single finding's `actions`
  * array may carry multiple entries of different types: a finding that
@@ -407,6 +411,10 @@ export type CoverageModel = ("static_binary" | "static_estimated" | "istanbul")
  * Whether CRAP findings in the report used one coverage-source kind or a mix.
  */
 export type CoverageSourceConsistency = ("uniform" | "mixed")
+/**
+ * Lifecycle state for a configured threshold override.
+ */
+export type ThresholdOverrideStatus = ("active" | "stale" | "no_match")
 /**
  * Discriminant for [`UntestedFileAction::kind`]. Mirrors the action types
  * emitted by `build_untested_file_actions`.
@@ -2817,6 +2825,11 @@ export interface HealthReport {
 findings: HealthFinding[]
 summary: HealthSummary
 /**
+ * Configured threshold override states. Entries are emitted for active
+ * exceptions, stale exceptions, and full-run no-match cleanup hints.
+ */
+threshold_overrides?: ThresholdOverrideState[]
+/**
  * Project-wide vital signs (always computed from available data).
  */
 vital_signs?: (VitalSigns | null)
@@ -2916,6 +2929,15 @@ component_rollup?: (ComponentRollup | null)
  */
 contributions?: ComplexityContribution[]
 /**
+ * Resolved thresholds used for this finding when a config override changed
+ * at least one ceiling. Omitted for findings using global thresholds.
+ */
+effective_thresholds?: (HealthEffectiveThresholds | null)
+/**
+ * Source of the effective thresholds. Omitted when thresholds are global.
+ */
+threshold_source?: (ThresholdSource | null)
+/**
  * Machine-actionable fix and suppress hints.
  */
 actions: HealthFindingAction[]
@@ -2963,6 +2985,14 @@ weight: number
  * consumer explain a cognitive `+3` as "+1 base, +2 nesting".
  */
 nesting: number
+}
+/**
+ * Resolved thresholds used to evaluate a health finding.
+ */
+export interface HealthEffectiveThresholds {
+max_cyclomatic: number
+max_cognitive: number
+max_crap: number
 }
 /**
  * Suggested action attached to a [`ComplexityViolation`].
@@ -3045,6 +3075,36 @@ istanbul_total?: (number | null)
 severity_critical_count: number
 severity_high_count: number
 severity_moderate_count: number
+}
+/**
+ * Report entry describing whether a threshold override is active, stale, or
+ * no longer matching any analyzed file or function.
+ */
+export interface ThresholdOverrideState {
+status: ThresholdOverrideStatus
+override_index: number
+path?: (string | null)
+function?: (string | null)
+configured_thresholds: HealthConfiguredThresholds
+effective_thresholds: HealthEffectiveThresholds
+metrics?: (ThresholdOverrideMetrics | null)
+reason?: (string | null)
+}
+/**
+ * Threshold values configured by a single override entry.
+ */
+export interface HealthConfiguredThresholds {
+max_cyclomatic?: (number | null)
+max_cognitive?: (number | null)
+max_crap?: (number | null)
+}
+/**
+ * Current complexity metrics for a matched threshold override entry.
+ */
+export interface ThresholdOverrideMetrics {
+cyclomatic: number
+cognitive: number
+crap?: (number | null)
 }
 /**
  * Project-wide vital signs , a fixed set of metrics for trend tracking.
@@ -4609,6 +4669,11 @@ elapsed_ms: ElapsedMs
  */
 findings: HealthFinding[]
 summary: HealthSummary
+/**
+ * Configured threshold override states. Entries are emitted for active
+ * exceptions, stale exceptions, and full-run no-match cleanup hints.
+ */
+threshold_overrides?: ThresholdOverrideState[]
 /**
  * Project-wide vital signs (always computed from available data).
  */

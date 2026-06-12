@@ -358,6 +358,7 @@ fn execute_health_inner(
 
     let HealthFindingsData {
         findings,
+        threshold_overrides,
         files_analyzed,
         total_functions,
         complexity_ms,
@@ -447,6 +448,7 @@ fn execute_health_inner(
             needs_file_scores,
             report_coverage_gaps,
             has_istanbul_coverage: istanbul_coverage.is_some(),
+            threshold_overrides,
             max_cyclomatic,
             max_cognitive,
             max_crap,
@@ -496,6 +498,7 @@ struct HealthCoverageSettings {
 
 struct HealthFindingsData {
     findings: Vec<ComplexityViolation>,
+    threshold_overrides: Vec<crate::health_types::ThresholdOverrideState>,
     files_analyzed: usize,
     total_functions: usize,
     complexity_ms: f64,
@@ -515,6 +518,7 @@ struct HealthOutputBuildInput<'a> {
     needs_file_scores: bool,
     report_coverage_gaps: bool,
     has_istanbul_coverage: bool,
+    threshold_overrides: Vec<crate::health_types::ThresholdOverrideState>,
     max_cyclomatic: u16,
     max_cognitive: u16,
     max_crap: f64,
@@ -584,6 +588,7 @@ fn build_health_output_parts(
         HealthReportPipelineInput {
             report_coverage_gaps: build.report_coverage_gaps,
             findings,
+            threshold_overrides: build.threshold_overrides.clone(),
             files_analyzed: build.files_analyzed,
             total_functions: build.total_functions,
             total_above_threshold: build.total_above_threshold,
@@ -697,6 +702,7 @@ struct HealthDerivedSections {
 struct HealthReportPipelineInput {
     report_coverage_gaps: bool,
     findings: Vec<ComplexityViolation>,
+    threshold_overrides: Vec<crate::health_types::ThresholdOverrideState>,
     files_analyzed: usize,
     total_functions: usize,
     total_above_threshold: usize,
@@ -726,6 +732,7 @@ fn build_health_report_from_pipeline(
         HealthReportAssembly {
             report_coverage_gaps: input.report_coverage_gaps,
             findings: input.findings,
+            threshold_overrides: input.threshold_overrides,
             files_analyzed: input.files_analyzed,
             total_functions: input.total_functions,
             total_above_threshold: input.total_above_threshold,
@@ -750,6 +757,327 @@ fn build_health_report_from_pipeline(
             sev_moderate: input.sev_moderate,
         },
     )
+}
+
+#[derive(Debug, Clone, Copy)]
+struct GlobalHealthThresholds {
+    cyclomatic: u16,
+    cognitive: u16,
+    crap: f64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct AppliedHealthThresholds {
+    effective: crate::health_types::HealthEffectiveThresholds,
+    override_index: Option<usize>,
+}
+
+struct CompiledThresholdOverride {
+    index: usize,
+    matchers: globset::GlobSet,
+    functions: Vec<String>,
+    configured: crate::health_types::HealthConfiguredThresholds,
+    reason: Option<String>,
+}
+
+struct ThresholdOverrideMatch<'a> {
+    entry: &'a CompiledThresholdOverride,
+    effective: crate::health_types::HealthEffectiveThresholds,
+}
+
+struct ThresholdOverrideResolver {
+    entries: Vec<CompiledThresholdOverride>,
+    global: GlobalHealthThresholds,
+}
+
+impl ThresholdOverrideResolver {
+    #[must_use]
+    fn new(
+        overrides: &[fallow_config::HealthThresholdOverride],
+        global: GlobalHealthThresholds,
+    ) -> Self {
+        let entries = overrides
+            .iter()
+            .enumerate()
+            .map(|(index, override_entry)| {
+                let mut builder = globset::GlobSetBuilder::new();
+                for pattern in &override_entry.files {
+                    if let Ok(glob) = globset::Glob::new(pattern) {
+                        builder.add(glob);
+                    }
+                }
+                CompiledThresholdOverride {
+                    index,
+                    matchers: builder
+                        .build()
+                        .unwrap_or_else(|_| globset::GlobSet::empty()),
+                    functions: override_entry.functions.clone(),
+                    configured: crate::health_types::HealthConfiguredThresholds {
+                        max_cyclomatic: override_entry.max_cyclomatic,
+                        max_cognitive: override_entry.max_cognitive,
+                        max_crap: override_entry.max_crap,
+                    },
+                    reason: override_entry.reason.clone(),
+                }
+            })
+            .collect();
+        Self { entries, global }
+    }
+
+    #[must_use]
+    fn resolve(
+        &self,
+        relative: &std::path::Path,
+        function: &str,
+    ) -> (AppliedHealthThresholds, Vec<ThresholdOverrideMatch<'_>>) {
+        let mut effective = crate::health_types::HealthEffectiveThresholds {
+            max_cyclomatic: self.global.cyclomatic,
+            max_cognitive: self.global.cognitive,
+            max_crap: self.global.crap,
+        };
+        let mut override_index = None;
+        let mut matches = Vec::new();
+
+        for entry in &self.entries {
+            if !entry.matchers.is_match(relative) {
+                continue;
+            }
+            if !entry.functions.is_empty() && !entry.functions.iter().any(|f| f == function) {
+                continue;
+            }
+            if let Some(max_cyclomatic) = entry.configured.max_cyclomatic {
+                effective.max_cyclomatic = max_cyclomatic;
+                override_index = Some(entry.index);
+            }
+            if let Some(max_cognitive) = entry.configured.max_cognitive {
+                effective.max_cognitive = max_cognitive;
+                override_index = Some(entry.index);
+            }
+            if let Some(max_crap) = entry.configured.max_crap {
+                effective.max_crap = max_crap;
+                override_index = Some(entry.index);
+            }
+            matches.push(ThresholdOverrideMatch { entry, effective });
+        }
+
+        (
+            AppliedHealthThresholds {
+                effective,
+                override_index,
+            },
+            matches,
+        )
+    }
+
+    fn entries(&self) -> &[CompiledThresholdOverride] {
+        &self.entries
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum ThresholdOverrideDimension {
+    Complexity,
+    Crap,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct ThresholdOverrideStateKey {
+    status: &'static str,
+    override_index: usize,
+    path: Option<std::path::PathBuf>,
+    function: Option<String>,
+    dimension: ThresholdOverrideDimension,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct MeasuredThresholdMetrics {
+    cyclomatic: u16,
+    cognitive: u16,
+    crap: f64,
+}
+
+#[derive(Default)]
+struct ThresholdOverrideStateTracker {
+    matched_indexes: rustc_hash::FxHashSet<usize>,
+    seen: rustc_hash::FxHashSet<ThresholdOverrideStateKey>,
+    states: Vec<crate::health_types::ThresholdOverrideState>,
+}
+
+impl ThresholdOverrideStateTracker {
+    fn record_complexity(
+        &mut self,
+        path: &std::path::Path,
+        function: &str,
+        cyclomatic: u16,
+        cognitive: u16,
+        matches: &[ThresholdOverrideMatch<'_>],
+        global: GlobalHealthThresholds,
+    ) {
+        for matched in matches {
+            self.matched_indexes.insert(matched.entry.index);
+            let configured = matched.entry.configured;
+            let has_complexity_threshold =
+                configured.max_cyclomatic.is_some() || configured.max_cognitive.is_some();
+            if !has_complexity_threshold {
+                continue;
+            }
+            let global_exceeded = configured
+                .max_cyclomatic
+                .is_some_and(|_| cyclomatic > global.cyclomatic)
+                || configured
+                    .max_cognitive
+                    .is_some_and(|_| cognitive > global.cognitive);
+            let local_exceeded = configured
+                .max_cyclomatic
+                .is_some_and(|threshold| cyclomatic > threshold)
+                || configured
+                    .max_cognitive
+                    .is_some_and(|threshold| cognitive > threshold);
+            let status = if global_exceeded && !local_exceeded {
+                crate::health_types::ThresholdOverrideStatus::Active
+            } else if !global_exceeded {
+                crate::health_types::ThresholdOverrideStatus::Stale
+            } else {
+                continue;
+            };
+            self.push_state(ThresholdOverrideStateInput {
+                status,
+                override_index: matched.entry.index,
+                path: Some(path.to_path_buf()),
+                function: Some(function.to_string()),
+                configured_thresholds: configured,
+                effective_thresholds: matched.effective,
+                metrics: Some(crate::health_types::ThresholdOverrideMetrics {
+                    cyclomatic,
+                    cognitive,
+                    crap: None,
+                }),
+                reason: matched.entry.reason.clone(),
+                dimension: ThresholdOverrideDimension::Complexity,
+            });
+        }
+    }
+
+    fn record_crap(
+        &mut self,
+        path: &std::path::Path,
+        function: &str,
+        metrics: MeasuredThresholdMetrics,
+        matches: &[ThresholdOverrideMatch<'_>],
+        global: GlobalHealthThresholds,
+    ) {
+        for matched in matches {
+            self.matched_indexes.insert(matched.entry.index);
+            let Some(max_crap) = matched.entry.configured.max_crap else {
+                continue;
+            };
+            let status = if metrics.crap >= global.crap && metrics.crap < max_crap {
+                crate::health_types::ThresholdOverrideStatus::Active
+            } else if metrics.crap < global.crap {
+                crate::health_types::ThresholdOverrideStatus::Stale
+            } else {
+                continue;
+            };
+            self.push_state(ThresholdOverrideStateInput {
+                status,
+                override_index: matched.entry.index,
+                path: Some(path.to_path_buf()),
+                function: Some(function.to_string()),
+                configured_thresholds: matched.entry.configured,
+                effective_thresholds: matched.effective,
+                metrics: Some(crate::health_types::ThresholdOverrideMetrics {
+                    cyclomatic: metrics.cyclomatic,
+                    cognitive: metrics.cognitive,
+                    crap: Some(metrics.crap),
+                }),
+                reason: matched.entry.reason.clone(),
+                dimension: ThresholdOverrideDimension::Crap,
+            });
+        }
+    }
+
+    fn record_no_match_entries(&mut self, resolver: &ThresholdOverrideResolver, should_emit: bool) {
+        if !should_emit {
+            return;
+        }
+        for entry in resolver.entries() {
+            if self.matched_indexes.contains(&entry.index) {
+                continue;
+            }
+            self.push_state(ThresholdOverrideStateInput {
+                status: crate::health_types::ThresholdOverrideStatus::NoMatch,
+                override_index: entry.index,
+                path: None,
+                function: None,
+                configured_thresholds: entry.configured,
+                effective_thresholds: crate::health_types::HealthEffectiveThresholds {
+                    max_cyclomatic: entry
+                        .configured
+                        .max_cyclomatic
+                        .unwrap_or(resolver.global.cyclomatic),
+                    max_cognitive: entry
+                        .configured
+                        .max_cognitive
+                        .unwrap_or(resolver.global.cognitive),
+                    max_crap: entry.configured.max_crap.unwrap_or(resolver.global.crap),
+                },
+                metrics: None,
+                reason: entry.reason.clone(),
+                dimension: ThresholdOverrideDimension::Complexity,
+            });
+        }
+    }
+
+    fn into_states(mut self) -> Vec<crate::health_types::ThresholdOverrideState> {
+        self.states.sort_by(|a, b| {
+            a.override_index
+                .cmp(&b.override_index)
+                .then(a.path.cmp(&b.path))
+                .then(a.function.cmp(&b.function))
+        });
+        self.states
+    }
+
+    fn push_state(&mut self, input: ThresholdOverrideStateInput) {
+        let status_key = match input.status {
+            crate::health_types::ThresholdOverrideStatus::Active => "active",
+            crate::health_types::ThresholdOverrideStatus::Stale => "stale",
+            crate::health_types::ThresholdOverrideStatus::NoMatch => "no_match",
+        };
+        let key = ThresholdOverrideStateKey {
+            status: status_key,
+            override_index: input.override_index,
+            path: input.path.clone(),
+            function: input.function.clone(),
+            dimension: input.dimension,
+        };
+        if !self.seen.insert(key) {
+            return;
+        }
+        self.states
+            .push(crate::health_types::ThresholdOverrideState {
+                status: input.status,
+                override_index: input.override_index,
+                path: input.path,
+                function: input.function,
+                configured_thresholds: input.configured_thresholds,
+                effective_thresholds: input.effective_thresholds,
+                metrics: input.metrics,
+                reason: input.reason,
+            });
+    }
+}
+
+struct ThresholdOverrideStateInput {
+    status: crate::health_types::ThresholdOverrideStatus,
+    override_index: usize,
+    path: Option<std::path::PathBuf>,
+    function: Option<String>,
+    configured_thresholds: crate::health_types::HealthConfiguredThresholds,
+    effective_thresholds: crate::health_types::HealthEffectiveThresholds,
+    metrics: Option<crate::health_types::ThresholdOverrideMetrics>,
+    reason: Option<String>,
+    dimension: ThresholdOverrideDimension,
 }
 
 #[expect(
@@ -1010,41 +1338,54 @@ fn prepare_health_findings(
     score_output: Option<&scoring::FileScoreOutput>,
 ) -> Result<HealthFindingsData, ExitCode> {
     let t = Instant::now();
-    let (mut findings, files_analyzed, total_functions) = collect_findings(
+    let global_thresholds = GlobalHealthThresholds {
+        cyclomatic: max_cyclomatic,
+        cognitive: max_cognitive,
+        crap: max_crap,
+    };
+    let threshold_resolver =
+        ThresholdOverrideResolver::new(&config.health.threshold_overrides, global_thresholds);
+    let mut threshold_state_tracker = ThresholdOverrideStateTracker::default();
+    let mut collect_input = CollectFindingsInput {
         modules,
         file_paths,
-        &config.root,
+        config_root: &config.root,
+        ignore_set,
+        changed_files,
+        ws_roots,
+        threshold_resolver: &threshold_resolver,
+        threshold_state_tracker: &mut threshold_state_tracker,
+        complexity_breakdown: opts.complexity_breakdown,
+    };
+    let (mut findings, files_analyzed, total_functions) =
+        collect_findings_with_resolver(&mut collect_input);
+    let complexity_ms = t.elapsed().as_secs_f64() * 1000.0;
+
+    let mut crap_ctx = HealthCrapMergeContext {
+        modules,
+        file_paths,
         ignore_set,
         changed_files,
         ws_roots,
         max_cyclomatic,
         max_cognitive,
-        opts.complexity_breakdown,
-    );
-    let complexity_ms = t.elapsed().as_secs_f64() * 1000.0;
-
-    apply_optional_crap_findings(
-        opts,
-        &mut findings,
-        &HealthCrapMergeContext {
-            modules,
-            file_paths,
-            ignore_set,
-            changed_files,
-            ws_roots,
-            max_cyclomatic,
-            max_cognitive,
-            max_crap,
-            enforce_crap,
-            score_output,
-            config_root: &config.root,
-        },
-    );
+        enforce_crap,
+        score_output,
+        config_root: &config.root,
+        threshold_resolver: &threshold_resolver,
+        threshold_state_tracker: &mut threshold_state_tracker,
+    };
+    apply_optional_crap_findings(opts, &mut findings, &mut crap_ctx);
     let (total_above_threshold, sev_critical, sev_high, sev_moderate, loaded_baseline) =
         finalize_health_findings(opts, config, &mut findings, diff_index)?;
+    threshold_state_tracker.record_no_match_entries(
+        &threshold_resolver,
+        should_emit_no_match_threshold_overrides(opts, changed_files, ws_roots, diff_index),
+    );
 
     Ok(HealthFindingsData {
         findings,
+        threshold_overrides: threshold_state_tracker.into_states(),
         files_analyzed,
         total_functions,
         complexity_ms,
@@ -1064,37 +1405,35 @@ struct HealthCrapMergeContext<'a> {
     ws_roots: Option<&'a [std::path::PathBuf]>,
     max_cyclomatic: u16,
     max_cognitive: u16,
-    max_crap: f64,
     enforce_crap: bool,
     score_output: Option<&'a scoring::FileScoreOutput>,
     config_root: &'a std::path::Path,
+    threshold_resolver: &'a ThresholdOverrideResolver,
+    threshold_state_tracker: &'a mut ThresholdOverrideStateTracker,
 }
 
 fn apply_optional_crap_findings(
     opts: &HealthOptions<'_>,
     findings: &mut Vec<ComplexityViolation>,
-    ctx: &HealthCrapMergeContext<'_>,
+    ctx: &mut HealthCrapMergeContext<'_>,
 ) {
     if ctx.enforce_crap
         && let Some(score_out) = ctx.score_output
     {
-        merge_crap_findings(
-            findings,
-            &CrapFindingMergeInput {
-                modules: ctx.modules,
-                file_paths: ctx.file_paths,
-                config_root: ctx.config_root,
-                ignore_set: ctx.ignore_set,
-                changed_files: ctx.changed_files,
-                ws_roots: ctx.ws_roots,
-                per_function_crap: &score_out.per_function_crap,
-                template_inherit_provenance: &score_out.template_inherit_provenance,
-                max_crap: ctx.max_crap,
-                max_cyclomatic: ctx.max_cyclomatic,
-                max_cognitive: ctx.max_cognitive,
-                complexity_breakdown: opts.complexity_breakdown,
-            },
-        );
+        let mut input = CrapFindingMergeInput {
+            modules: ctx.modules,
+            file_paths: ctx.file_paths,
+            config_root: ctx.config_root,
+            ignore_set: ctx.ignore_set,
+            changed_files: ctx.changed_files,
+            ws_roots: ctx.ws_roots,
+            per_function_crap: &score_out.per_function_crap,
+            template_inherit_provenance: &score_out.template_inherit_provenance,
+            complexity_breakdown: opts.complexity_breakdown,
+            threshold_resolver: ctx.threshold_resolver,
+            threshold_state_tracker: ctx.threshold_state_tracker,
+        };
+        merge_crap_findings(findings, &mut input);
     }
     append_component_rollup_findings(
         findings,
@@ -1103,6 +1442,22 @@ fn apply_optional_crap_findings(
         ctx.max_cyclomatic,
         ctx.max_cognitive,
     );
+}
+
+fn should_emit_no_match_threshold_overrides(
+    opts: &HealthOptions<'_>,
+    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
+    ws_roots: Option<&[std::path::PathBuf]>,
+    diff_index: Option<&crate::report::ci::diff_filter::DiffIndex>,
+) -> bool {
+    opts.changed_since.is_none()
+        && opts.diff_index.is_none()
+        && !opts.use_shared_diff_index
+        && opts.workspace.is_none()
+        && opts.changed_workspaces.is_none()
+        && changed_files.is_none()
+        && ws_roots.is_none()
+        && diff_index.is_none()
 }
 
 type HealthFindingFinalizeResult = (usize, usize, usize, usize, Option<HealthBaselineData>);
@@ -2449,6 +2804,7 @@ fn compute_health_trend(
 struct HealthReportAssembly {
     report_coverage_gaps: bool,
     findings: Vec<ComplexityViolation>,
+    threshold_overrides: Vec<crate::health_types::ThresholdOverrideState>,
     files_analyzed: usize,
     total_functions: usize,
     total_above_threshold: usize,
@@ -2560,6 +2916,7 @@ fn build_ignore_set(patterns: &[String]) -> globset::GlobSet {
     clippy::too_many_arguments,
     reason = "filter pipeline mirrors compute_filtered_file_scores"
 )]
+#[cfg(test)]
 fn collect_findings(
     modules: &[fallow_core::extract::ModuleInfo],
     file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
@@ -2571,27 +2928,63 @@ fn collect_findings(
     max_cognitive: u16,
     complexity_breakdown: bool,
 ) -> (Vec<ComplexityViolation>, usize, usize) {
+    let global = GlobalHealthThresholds {
+        cyclomatic: max_cyclomatic,
+        cognitive: max_cognitive,
+        crap: 30.0,
+    };
+    let resolver = ThresholdOverrideResolver::new(&[], global);
+    let mut tracker = ThresholdOverrideStateTracker::default();
+    let mut input = CollectFindingsInput {
+        modules,
+        file_paths,
+        config_root,
+        ignore_set,
+        changed_files,
+        ws_roots,
+        threshold_resolver: &resolver,
+        threshold_state_tracker: &mut tracker,
+        complexity_breakdown,
+    };
+    collect_findings_with_resolver(&mut input)
+}
+
+struct CollectFindingsInput<'a> {
+    modules: &'a [fallow_core::extract::ModuleInfo],
+    file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
+    config_root: &'a std::path::Path,
+    ignore_set: &'a globset::GlobSet,
+    changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
+    ws_roots: Option<&'a [std::path::PathBuf]>,
+    threshold_resolver: &'a ThresholdOverrideResolver,
+    threshold_state_tracker: &'a mut ThresholdOverrideStateTracker,
+    complexity_breakdown: bool,
+}
+
+fn collect_findings_with_resolver(
+    input: &mut CollectFindingsInput<'_>,
+) -> (Vec<ComplexityViolation>, usize, usize) {
     let mut files_analyzed = 0usize;
     let mut total_functions = 0usize;
     let mut findings: Vec<ComplexityViolation> = Vec::new();
 
-    for module in modules {
-        let Some(&path) = file_paths.get(&module.file_id) else {
+    for module in input.modules {
+        let Some(&path) = input.file_paths.get(&module.file_id) else {
             continue;
         };
 
-        let relative = path.strip_prefix(config_root).unwrap_or(path);
-        if ignore_set.is_match(relative) {
+        let relative = path.strip_prefix(input.config_root).unwrap_or(path);
+        if input.ignore_set.is_match(relative) {
             continue;
         }
 
-        if let Some(changed) = changed_files
+        if let Some(changed) = input.changed_files
             && !changed.contains(path)
         {
             continue;
         }
 
-        if let Some(ws) = ws_roots
+        if let Some(ws) = input.ws_roots
             && !ws.iter().any(|r| path.starts_with(r))
         {
             continue;
@@ -2607,8 +3000,18 @@ fn collect_findings(
             ) {
                 continue;
             }
-            let exceeds_cyclomatic = fc.cyclomatic > max_cyclomatic;
-            let exceeds_cognitive = fc.cognitive > max_cognitive;
+            let (applied_thresholds, matched_overrides) =
+                input.threshold_resolver.resolve(relative, &fc.name);
+            input.threshold_state_tracker.record_complexity(
+                path,
+                &fc.name,
+                fc.cyclomatic,
+                fc.cognitive,
+                &matched_overrides,
+                input.threshold_resolver.global,
+            );
+            let exceeds_cyclomatic = fc.cyclomatic > applied_thresholds.effective.max_cyclomatic;
+            let exceeds_cognitive = fc.cognitive > applied_thresholds.effective.max_cognitive;
             if exceeds_cyclomatic || exceeds_cognitive {
                 findings.push(ComplexityViolation {
                     path: path.clone(),
@@ -2639,7 +3042,13 @@ fn collect_findings(
                     coverage_source: None,
                     inherited_from: None,
                     component_rollup: None,
-                    contributions: contributions_for(complexity_breakdown, fc),
+                    contributions: contributions_for(input.complexity_breakdown, fc),
+                    effective_thresholds: applied_thresholds
+                        .override_index
+                        .map(|_| applied_thresholds.effective),
+                    threshold_source: applied_thresholds
+                        .override_index
+                        .map(|_| crate::health_types::ThresholdSource::Override),
                 });
             }
         }
@@ -2678,10 +3087,9 @@ struct CrapFindingMergeInput<'a> {
     ws_roots: Option<&'a [std::path::PathBuf]>,
     per_function_crap: &'a rustc_hash::FxHashMap<std::path::PathBuf, Vec<scoring::PerFunctionCrap>>,
     template_inherit_provenance: &'a rustc_hash::FxHashMap<std::path::PathBuf, std::path::PathBuf>,
-    max_crap: f64,
-    max_cyclomatic: u16,
-    max_cognitive: u16,
     complexity_breakdown: bool,
+    threshold_resolver: &'a ThresholdOverrideResolver,
+    threshold_state_tracker: &'a mut ThresholdOverrideStateTracker,
 }
 
 type ComplexityByPosition<'a> = rustc_hash::FxHashMap<
@@ -2689,10 +3097,14 @@ type ComplexityByPosition<'a> = rustc_hash::FxHashMap<
     rustc_hash::FxHashMap<(u32, u32), &'a fallow_types::extract::FunctionComplexity>,
 >;
 
-fn merge_crap_findings(findings: &mut Vec<ComplexityViolation>, input: &CrapFindingMergeInput<'_>) {
+fn merge_crap_findings(
+    findings: &mut Vec<ComplexityViolation>,
+    input: &mut CrapFindingMergeInput<'_>,
+) {
     let finding_index = build_complexity_finding_index(findings);
-    let complexity_by_pos = build_complexity_by_position(input);
-    let suppressions_by_path = build_complexity_suppressions_by_path(input);
+    let complexity_by_pos = build_complexity_by_position(input.modules, input.file_paths);
+    let suppressions_by_path =
+        build_complexity_suppressions_by_path(input.modules, input.file_paths);
 
     let mut new_findings: Vec<ComplexityViolation> = Vec::new();
     for (path, per_fn) in input.per_function_crap {
@@ -2700,14 +3112,42 @@ fn merge_crap_findings(findings: &mut Vec<ComplexityViolation>, input: &CrapFind
             continue;
         }
         for pf in per_fn {
-            if pf.crap < input.max_crap || crap_is_suppressed(path, pf, &suppressions_by_path) {
+            let Some(fc) = complexity_by_pos
+                .get(path.as_path())
+                .and_then(|m| m.get(&(pf.line, pf.col)).copied())
+            else {
+                continue;
+            };
+            let relative = path.strip_prefix(input.config_root).unwrap_or(path);
+            let (applied_thresholds, matched_overrides) =
+                input.threshold_resolver.resolve(relative, &fc.name);
+            input.threshold_state_tracker.record_crap(
+                path,
+                &fc.name,
+                MeasuredThresholdMetrics {
+                    cyclomatic: fc.cyclomatic,
+                    cognitive: fc.cognitive,
+                    crap: pf.crap,
+                },
+                &matched_overrides,
+                input.threshold_resolver.global,
+            );
+            if pf.crap < applied_thresholds.effective.max_crap
+                || crap_is_suppressed(path, pf, &suppressions_by_path)
+            {
                 continue;
             }
 
             if let Some(&idx) = finding_index.get(&(path.clone(), pf.line, pf.col)) {
-                merge_existing_crap_finding(&mut findings[idx], path, pf, input);
-            } else if let Some(finding) = new_crap_finding(path, pf, &complexity_by_pos, input) {
-                new_findings.push(finding);
+                merge_existing_crap_finding(
+                    &mut findings[idx],
+                    path,
+                    pf,
+                    input,
+                    applied_thresholds,
+                );
+            } else {
+                new_findings.push(new_crap_finding(path, pf, fc, input, applied_thresholds));
             }
         }
     }
@@ -2725,11 +3165,12 @@ fn build_complexity_finding_index(
 }
 
 fn build_complexity_by_position<'a>(
-    input: &'a CrapFindingMergeInput<'a>,
+    modules: &'a [fallow_core::extract::ModuleInfo],
+    file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
 ) -> ComplexityByPosition<'a> {
     let mut complexity_by_pos: ComplexityByPosition<'a> = rustc_hash::FxHashMap::default();
-    for module in input.modules {
-        let Some(&path) = input.file_paths.get(&module.file_id) else {
+    for module in modules {
+        let Some(&path) = file_paths.get(&module.file_id) else {
             continue;
         };
         let entry = complexity_by_pos.entry(path.as_path()).or_default();
@@ -2741,16 +3182,15 @@ fn build_complexity_by_position<'a>(
 }
 
 fn build_complexity_suppressions_by_path<'a>(
-    input: &'a CrapFindingMergeInput<'a>,
+    modules: &'a [fallow_core::extract::ModuleInfo],
+    file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
 ) -> rustc_hash::FxHashMap<&'a std::path::Path, &'a Vec<fallow_core::suppress::Suppression>> {
-    input
-        .modules
+    modules
         .iter()
-        .filter_map(|m| {
-            input
-                .file_paths
-                .get(&m.file_id)
-                .map(|p| (p.as_path(), &m.suppressions))
+        .filter_map(|module| {
+            file_paths
+                .get(&module.file_id)
+                .map(|path| (path.as_path(), &module.suppressions))
         })
         .collect()
 }
@@ -2795,6 +3235,7 @@ fn merge_existing_crap_finding(
     path: &std::path::Path,
     pf: &scoring::PerFunctionCrap,
     input: &CrapFindingMergeInput<'_>,
+    applied_thresholds: AppliedHealthThresholds,
 ) {
     finding.crap = Some(pf.crap);
     finding.coverage_pct = pf.coverage_pct;
@@ -2805,6 +3246,10 @@ fn merge_existing_crap_finding(
     let exceeds_cyclomatic = finding.exceeded.includes_cyclomatic();
     let exceeds_cognitive = finding.exceeded.includes_cognitive();
     finding.exceeded = ExceededThreshold::from_bools(exceeds_cyclomatic, exceeds_cognitive, true);
+    if applied_thresholds.override_index.is_some() {
+        finding.effective_thresholds = Some(applied_thresholds.effective);
+        finding.threshold_source = Some(crate::health_types::ThresholdSource::Override);
+    }
     finding.severity = compute_finding_severity(
         finding.cognitive,
         finding.cyclomatic,
@@ -2819,15 +3264,13 @@ fn merge_existing_crap_finding(
 fn new_crap_finding(
     path: &std::path::Path,
     pf: &scoring::PerFunctionCrap,
-    complexity_by_pos: &ComplexityByPosition<'_>,
+    fc: &fallow_types::extract::FunctionComplexity,
     input: &CrapFindingMergeInput<'_>,
-) -> Option<ComplexityViolation> {
-    let fc = complexity_by_pos
-        .get(path)
-        .and_then(|m| m.get(&(pf.line, pf.col)).copied())?;
-    let exceeds_cyclomatic = fc.cyclomatic > input.max_cyclomatic;
-    let exceeds_cognitive = fc.cognitive > input.max_cognitive;
-    Some(ComplexityViolation {
+    applied_thresholds: AppliedHealthThresholds,
+) -> ComplexityViolation {
+    let exceeds_cyclomatic = fc.cyclomatic > applied_thresholds.effective.max_cyclomatic;
+    let exceeds_cognitive = fc.cognitive > applied_thresholds.effective.max_cognitive;
+    ComplexityViolation {
         path: path.to_path_buf(),
         name: fc.name.clone(),
         line: fc.line,
@@ -2857,7 +3300,13 @@ fn new_crap_finding(
         ),
         component_rollup: None,
         contributions: contributions_for(input.complexity_breakdown, fc),
-    })
+        effective_thresholds: applied_thresholds
+            .override_index
+            .map(|_| applied_thresholds.effective),
+        threshold_source: applied_thresholds
+            .override_index
+            .map(|_| crate::health_types::ThresholdSource::Override),
+    }
 }
 
 /// Synthesise per-Angular-component rollup findings.
@@ -3001,6 +3450,8 @@ fn append_component_rollup_findings(
                 template_cognitive: template.cognitive,
             }),
             contributions: Vec::new(),
+            effective_thresholds: None,
+            threshold_source: None,
         });
     }
     findings.extend(to_push);
@@ -3424,6 +3875,165 @@ mod tests {
         );
     }
 
+    fn threshold_resolver(
+        overrides: &[fallow_config::HealthThresholdOverride],
+    ) -> ThresholdOverrideResolver {
+        ThresholdOverrideResolver::new(
+            overrides,
+            GlobalHealthThresholds {
+                cyclomatic: 20,
+                cognitive: 15,
+                crap: 30.0,
+            },
+        )
+    }
+
+    #[test]
+    fn collect_findings_uses_threshold_override_as_local_ceiling() {
+        let path = PathBuf::from("/project/src/a.ts");
+        let modules = vec![make_module(
+            FileId(0),
+            vec![make_fc("complexFn", 25, 20, 50)],
+        )];
+        let mut file_paths = FxHashMap::default();
+        file_paths.insert(FileId(0), &path);
+        let resolver = threshold_resolver(&[fallow_config::HealthThresholdOverride {
+            files: vec!["src/a.ts".to_string()],
+            functions: vec!["complexFn".to_string()],
+            max_cyclomatic: Some(30),
+            max_cognitive: Some(25),
+            max_crap: None,
+            reason: Some("approved assembly".to_string()),
+        }]);
+        let mut tracker = ThresholdOverrideStateTracker::default();
+
+        let mut input = CollectFindingsInput {
+            modules: &modules,
+            file_paths: &file_paths,
+            config_root: Path::new("/project"),
+            ignore_set: &globset::GlobSet::empty(),
+            changed_files: None,
+            ws_roots: None,
+            threshold_resolver: &resolver,
+            threshold_state_tracker: &mut tracker,
+            complexity_breakdown: false,
+        };
+        let (findings, _, _) = collect_findings_with_resolver(&mut input);
+
+        assert!(findings.is_empty());
+        let states = tracker.into_states();
+        assert_eq!(states.len(), 1);
+        assert!(matches!(
+            states[0].status,
+            crate::health_types::ThresholdOverrideStatus::Active
+        ));
+    }
+
+    #[test]
+    fn collect_findings_reports_when_local_ceiling_is_exceeded() {
+        let path = PathBuf::from("/project/src/a.ts");
+        let modules = vec![make_module(
+            FileId(0),
+            vec![make_fc("complexFn", 31, 20, 50)],
+        )];
+        let mut file_paths = FxHashMap::default();
+        file_paths.insert(FileId(0), &path);
+        let resolver = threshold_resolver(&[fallow_config::HealthThresholdOverride {
+            files: vec!["src/a.ts".to_string()],
+            functions: vec!["complexFn".to_string()],
+            max_cyclomatic: Some(30),
+            max_cognitive: Some(25),
+            max_crap: None,
+            reason: None,
+        }]);
+        let mut tracker = ThresholdOverrideStateTracker::default();
+
+        let mut input = CollectFindingsInput {
+            modules: &modules,
+            file_paths: &file_paths,
+            config_root: Path::new("/project"),
+            ignore_set: &globset::GlobSet::empty(),
+            changed_files: None,
+            ws_roots: None,
+            threshold_resolver: &resolver,
+            threshold_state_tracker: &mut tracker,
+            complexity_breakdown: false,
+        };
+        let (findings, _, _) = collect_findings_with_resolver(&mut input);
+
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].effective_thresholds.unwrap().max_cyclomatic, 30);
+        assert!(matches!(
+            findings[0].threshold_source,
+            Some(crate::health_types::ThresholdSource::Override)
+        ));
+    }
+
+    #[test]
+    fn collect_findings_reports_stale_override_when_under_global_thresholds() {
+        let path = PathBuf::from("/project/src/a.ts");
+        let modules = vec![make_module(
+            FileId(0),
+            vec![make_fc("complexFn", 10, 8, 20)],
+        )];
+        let mut file_paths = FxHashMap::default();
+        file_paths.insert(FileId(0), &path);
+        let resolver = threshold_resolver(&[fallow_config::HealthThresholdOverride {
+            files: vec!["src/a.ts".to_string()],
+            functions: vec!["complexFn".to_string()],
+            max_cyclomatic: Some(30),
+            max_cognitive: None,
+            max_crap: None,
+            reason: None,
+        }]);
+        let mut tracker = ThresholdOverrideStateTracker::default();
+
+        let mut input = CollectFindingsInput {
+            modules: &modules,
+            file_paths: &file_paths,
+            config_root: Path::new("/project"),
+            ignore_set: &globset::GlobSet::empty(),
+            changed_files: None,
+            ws_roots: None,
+            threshold_resolver: &resolver,
+            threshold_state_tracker: &mut tracker,
+            complexity_breakdown: false,
+        };
+        let (findings, _, _) = collect_findings_with_resolver(&mut input);
+
+        assert!(findings.is_empty());
+        let states = tracker.into_states();
+        assert_eq!(states.len(), 1);
+        assert!(matches!(
+            states[0].status,
+            crate::health_types::ThresholdOverrideStatus::Stale
+        ));
+    }
+
+    #[test]
+    fn threshold_override_tracker_reports_no_match_only_when_requested() {
+        let resolver = threshold_resolver(&[fallow_config::HealthThresholdOverride {
+            files: vec!["src/missing.ts".to_string()],
+            functions: vec!["missingFn".to_string()],
+            max_cyclomatic: Some(30),
+            max_cognitive: None,
+            max_crap: None,
+            reason: None,
+        }]);
+        let mut tracker = ThresholdOverrideStateTracker::default();
+        tracker.record_no_match_entries(&resolver, false);
+        assert!(tracker.into_states().is_empty());
+
+        let mut tracker = ThresholdOverrideStateTracker::default();
+        tracker.record_no_match_entries(&resolver, true);
+        let states = tracker.into_states();
+        assert_eq!(states.len(), 1);
+        assert!(matches!(
+            states[0].status,
+            crate::health_types::ThresholdOverrideStatus::NoMatch
+        ));
+    }
+
     #[test]
     fn build_ignore_set_empty_patterns() {
         let set = build_ignore_set(&[]);
@@ -3485,6 +4095,8 @@ mod tests {
             inherited_from: None,
             component_rollup: None,
             contributions: Vec::new(),
+            effective_thresholds: None,
+            threshold_source: None,
         }
     }
 
@@ -3743,6 +4355,8 @@ mod tests {
             inherited_from: None,
             component_rollup: None,
             contributions: Vec::new(),
+            effective_thresholds: None,
+            threshold_source: None,
         }];
         let diff = build_diff(
             "diff --git a/src/big.ts b/src/big.ts\n\
@@ -3776,6 +4390,8 @@ mod tests {
             inherited_from: None,
             component_rollup: None,
             contributions: Vec::new(),
+            effective_thresholds: None,
+            threshold_source: None,
         }];
         let diff = build_diff(
             "diff --git a/src/big.ts b/src/big.ts\n\
@@ -3809,6 +4425,8 @@ mod tests {
             inherited_from: None,
             component_rollup: None,
             contributions: Vec::new(),
+            effective_thresholds: None,
+            threshold_source: None,
         }];
         let diff = build_diff(
             "diff --git a/src/a.ts b/src/a.ts\n\
@@ -4036,23 +4654,22 @@ mod tests {
             ],
         );
 
-        merge_crap_findings(
-            &mut findings,
-            &CrapFindingMergeInput {
-                modules: &modules,
-                file_paths: &file_paths,
-                config_root: Path::new("/project"),
-                ignore_set: &globset::GlobSet::empty(),
-                changed_files: None,
-                ws_roots: None,
-                per_function_crap: &per_function_crap,
-                template_inherit_provenance: &FxHashMap::default(),
-                max_crap: 30.0,
-                max_cyclomatic: 20,
-                max_cognitive: 15,
-                complexity_breakdown: false,
-            },
-        );
+        let resolver = threshold_resolver(&[]);
+        let mut tracker = ThresholdOverrideStateTracker::default();
+        let mut input = CrapFindingMergeInput {
+            modules: &modules,
+            file_paths: &file_paths,
+            config_root: Path::new("/project"),
+            ignore_set: &globset::GlobSet::empty(),
+            changed_files: None,
+            ws_roots: None,
+            per_function_crap: &per_function_crap,
+            template_inherit_provenance: &FxHashMap::default(),
+            complexity_breakdown: false,
+            threshold_resolver: &resolver,
+            threshold_state_tracker: &mut tracker,
+        };
+        merge_crap_findings(&mut findings, &mut input);
 
         assert_eq!(
             findings.len(),
@@ -4137,23 +4754,22 @@ mod tests {
             ],
         );
 
-        merge_crap_findings(
-            &mut findings,
-            &CrapFindingMergeInput {
-                modules: &modules,
-                file_paths: &file_paths,
-                config_root: Path::new("/project"),
-                ignore_set: &globset::GlobSet::empty(),
-                changed_files: None,
-                ws_roots: None,
-                per_function_crap: &per_function_crap,
-                template_inherit_provenance: &FxHashMap::default(),
-                max_crap: 30.0,
-                max_cyclomatic: 20,
-                max_cognitive: 15,
-                complexity_breakdown: false,
-            },
-        );
+        let resolver = threshold_resolver(&[]);
+        let mut tracker = ThresholdOverrideStateTracker::default();
+        let mut input = CrapFindingMergeInput {
+            modules: &modules,
+            file_paths: &file_paths,
+            config_root: Path::new("/project"),
+            ignore_set: &globset::GlobSet::empty(),
+            changed_files: None,
+            ws_roots: None,
+            per_function_crap: &per_function_crap,
+            template_inherit_provenance: &FxHashMap::default(),
+            complexity_breakdown: false,
+            threshold_resolver: &resolver,
+            threshold_state_tracker: &mut tracker,
+        };
+        merge_crap_findings(&mut findings, &mut input);
 
         assert_eq!(findings.len(), 1);
         let f = &findings[0];
@@ -5124,6 +5740,8 @@ mod tests {
             inherited_from: None,
             component_rollup: None,
             contributions: Vec::new(),
+            effective_thresholds: None,
+            threshold_source: None,
         }
     }
 
@@ -5151,6 +5769,8 @@ mod tests {
             inherited_from: None,
             component_rollup: None,
             contributions: Vec::new(),
+            effective_thresholds: None,
+            threshold_source: None,
         }
     }
 

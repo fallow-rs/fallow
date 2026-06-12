@@ -2228,6 +2228,8 @@ mod tests {
                     inherited_from: None,
                     component_rollup: None,
                     contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
                 }
                 .into(),
             ],

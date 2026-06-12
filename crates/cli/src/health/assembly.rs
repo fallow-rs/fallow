@@ -29,6 +29,7 @@ pub(super) fn assemble_health_report(
     let HealthReportAssembly {
         report_coverage_gaps,
         findings,
+        threshold_overrides,
         files_analyzed,
         total_functions,
         total_above_threshold,
@@ -81,6 +82,7 @@ pub(super) fn assemble_health_report(
 
     let mut report = HealthReport {
         summary,
+        threshold_overrides: build_report_threshold_overrides(opts, threshold_overrides),
         vital_signs: if opts.score_only_output {
             None
         } else {
@@ -259,6 +261,17 @@ fn summary_istanbul_counts(
         (None, None)
     } else {
         (Some(matched), Some(total))
+    }
+}
+
+fn build_report_threshold_overrides(
+    opts: &HealthOptions<'_>,
+    threshold_overrides: Vec<crate::health_types::ThresholdOverrideState>,
+) -> Vec<crate::health_types::ThresholdOverrideState> {
+    if opts.score_only_output {
+        Vec::new()
+    } else {
+        threshold_overrides
     }
 }
 

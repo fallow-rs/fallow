@@ -376,6 +376,13 @@ fallow health --trend                     # Compare against saved snapshot
 fallow health --changed-since main        # Only changed files
 ```
 
+Use `health.thresholdOverrides` for intentional local ceilings on legacy files
+or generated adapters while keeping global thresholds strict. Each override
+matches `files` globs, optionally narrows to exact `functions`, and can set any
+of `maxCyclomatic`, `maxCognitive`, or `maxCrap`. JSON, compact, markdown, and
+human output report active, stale, and full-run no-match override state so
+temporary exceptions stay visible.
+
 ## Runtime intelligence (optional)
 
 Static analysis answers: **what is connected to what?**
@@ -739,7 +746,16 @@ Works out of the box. When you need to customize, create `.fallowrc.json` or run
     "maxCyclomatic": 20,
     "maxCognitive": 15,
     "maxCrap": 30,
-    "crapRefactorBand": 5
+    "crapRefactorBand": 5,
+    "thresholdOverrides": [
+      {
+        "files": ["src/legacy/**"],
+        "functions": ["legacyFlow"],
+        "maxCyclomatic": 30,
+        "maxCognitive": 25,
+        "reason": "legacy migration"
+      }
+    ]
   },
   "cache": {
     "dir": ".cache/fallow"

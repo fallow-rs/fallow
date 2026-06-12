@@ -109,7 +109,7 @@ impl Default for OwnershipConfig {
 
 /// Configuration for complexity health metrics (`fallow health`).
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct HealthConfig {
     /// Maximum allowed cyclomatic complexity per function (default: 20).
     /// Functions exceeding this threshold are reported.
@@ -155,6 +155,12 @@ pub struct HealthConfig {
     #[serde(default)]
     pub ignore: Vec<String>,
 
+    /// Per-file or per-function threshold overrides. These keep exceptional
+    /// functions visible as configured numeric ceilings instead of hiding them
+    /// behind binary suppressions.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub threshold_overrides: Vec<HealthThresholdOverride>,
+
     /// Ownership analysis configuration. Controls bot filtering and email
     /// privacy mode for `--ownership` output.
     #[serde(default)]
@@ -182,9 +188,63 @@ impl Default for HealthConfig {
             coverage: None,
             coverage_root: None,
             ignore: vec![],
+            threshold_overrides: vec![],
             ownership: OwnershipConfig::default(),
             suggest_inline_suppression: default_suggest_inline_suppression(),
         }
+    }
+}
+
+/// Per-file or per-function health threshold override.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct HealthThresholdOverride {
+    /// Project-root-relative file globs this override applies to.
+    pub files: Vec<String>,
+    /// Exact emitted function names this override applies to. Empty means every
+    /// function in matching files.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub functions: Vec<String>,
+    /// Local cyclomatic complexity ceiling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_cyclomatic: Option<u16>,
+    /// Local cognitive complexity ceiling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_cognitive: Option<u16>,
+    /// Local CRAP ceiling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_crap: Option<f64>,
+    /// Human-readable rationale for the exception.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+impl HealthThresholdOverride {
+    /// Return true when the override configures at least one local ceiling.
+    #[must_use]
+    pub const fn has_any_threshold(&self) -> bool {
+        self.max_cyclomatic.is_some() || self.max_cognitive.is_some() || self.max_crap.is_some()
+    }
+}
+
+impl HealthConfig {
+    /// Validate semantic constraints that serde cannot express.
+    #[must_use]
+    pub fn threshold_override_errors(&self) -> Vec<String> {
+        let mut errors = Vec::new();
+        for (index, override_entry) in self.threshold_overrides.iter().enumerate() {
+            if override_entry.files.is_empty() {
+                errors.push(format!(
+                    "health.thresholdOverrides[{index}].files must contain at least one pattern"
+                ));
+            }
+            if !override_entry.has_any_threshold() {
+                errors.push(format!(
+                    "health.thresholdOverrides[{index}] must set at least one of maxCyclomatic, maxCognitive, or maxCrap"
+                ));
+            }
+        }
+        errors
     }
 }
 
@@ -202,6 +262,7 @@ mod tests {
         assert!(config.coverage.is_none());
         assert!(config.coverage_root.is_none());
         assert!(config.ignore.is_empty());
+        assert!(config.threshold_overrides.is_empty());
     }
 
     #[test]
@@ -213,7 +274,13 @@ mod tests {
             "crapRefactorBand": 3,
             "coverage": "coverage/coverage-final.json",
             "coverageRoot": "/ci/workspace",
-            "ignore": ["**/generated/**", "vendor/**"]
+            "ignore": ["**/generated/**", "vendor/**"],
+            "thresholdOverrides": [{
+                "files": ["components/auth/src/index.ts"],
+                "functions": ["createAuthModule"],
+                "maxCognitive": 25,
+                "reason": "linear module assembly; agreed 2026-06"
+            }]
         }"#;
         let config: HealthConfig = serde_json::from_str(json).unwrap();
         assert_eq!(config.max_cyclomatic, 30);
@@ -226,6 +293,16 @@ mod tests {
         );
         assert_eq!(config.coverage_root, Some(PathBuf::from("/ci/workspace")));
         assert_eq!(config.ignore, vec!["**/generated/**", "vendor/**"]);
+        assert_eq!(config.threshold_overrides.len(), 1);
+        assert_eq!(
+            config.threshold_overrides[0].files,
+            vec!["components/auth/src/index.ts"]
+        );
+        assert_eq!(
+            config.threshold_overrides[0].functions,
+            vec!["createAuthModule"]
+        );
+        assert_eq!(config.threshold_overrides[0].max_cognitive, Some(25));
     }
 
     #[test]
@@ -237,6 +314,7 @@ mod tests {
         assert!((config.max_crap - 30.0).abs() < f64::EPSILON); // default
         assert_eq!(config.crap_refactor_band, 5); // default
         assert!(config.ignore.is_empty()); // default
+        assert!(config.threshold_overrides.is_empty()); // default
     }
 
     #[test]
@@ -256,6 +334,7 @@ mod tests {
         assert_eq!(config.max_cognitive, 15);
         assert_eq!(config.crap_refactor_band, 5);
         assert!(config.ignore.is_empty());
+        assert!(config.threshold_overrides.is_empty());
     }
 
     #[test]
@@ -265,6 +344,7 @@ mod tests {
         assert_eq!(config.max_cyclomatic, 20); // default
         assert_eq!(config.max_cognitive, 15); // default
         assert_eq!(config.ignore, vec!["test/**"]);
+        assert!(config.threshold_overrides.is_empty());
     }
 
     #[test]
@@ -273,11 +353,17 @@ mod tests {
 maxCyclomatic = 25
 maxCognitive = 20
 ignore = ["generated/**", "vendor/**"]
+
+[[thresholdOverrides]]
+files = ["src/auth.ts"]
+maxCognitive = 25
 "#;
         let config: HealthConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(config.max_cyclomatic, 25);
         assert_eq!(config.max_cognitive, 20);
         assert_eq!(config.ignore, vec!["generated/**", "vendor/**"]);
+        assert_eq!(config.threshold_overrides.len(), 1);
+        assert_eq!(config.threshold_overrides[0].max_cognitive, Some(25));
     }
 
     #[test]
@@ -286,6 +372,7 @@ ignore = ["generated/**", "vendor/**"]
         assert_eq!(config.max_cyclomatic, 20);
         assert_eq!(config.max_cognitive, 15);
         assert!(config.ignore.is_empty());
+        assert!(config.threshold_overrides.is_empty());
     }
 
     #[test]
@@ -296,6 +383,14 @@ ignore = ["generated/**", "vendor/**"]
             max_crap: 75.0,
             crap_refactor_band: 4,
             ignore: vec!["test/**".to_string()],
+            threshold_overrides: vec![HealthThresholdOverride {
+                files: vec!["src/auth.ts".to_string()],
+                functions: Vec::new(),
+                max_cyclomatic: Some(30),
+                max_cognitive: None,
+                max_crap: Some(45.0),
+                reason: Some("framework assembly".to_string()),
+            }],
             coverage: None,
             coverage_root: None,
             ownership: OwnershipConfig::default(),
@@ -308,7 +403,66 @@ ignore = ["generated/**", "vendor/**"]
         assert!((restored.max_crap - 75.0).abs() < f64::EPSILON);
         assert_eq!(restored.crap_refactor_band, 4);
         assert_eq!(restored.ignore, vec!["test/**"]);
+        assert_eq!(restored.threshold_overrides.len(), 1);
+        assert_eq!(restored.threshold_overrides[0].max_cyclomatic, Some(30));
+        assert_eq!(restored.threshold_overrides[0].max_crap, Some(45.0));
         assert!(!restored.suggest_inline_suppression);
+    }
+
+    #[test]
+    fn health_config_threshold_override_omitted_functions_matches_all() {
+        let json = r#"{
+            "thresholdOverrides": [{
+                "files": ["src/auth.ts"],
+                "maxCognitive": 25
+            }]
+        }"#;
+        let config: HealthConfig = serde_json::from_str(json).unwrap();
+        let override_entry = &config.threshold_overrides[0];
+        assert!(override_entry.functions.is_empty());
+        assert_eq!(override_entry.max_cognitive, Some(25));
+        assert!(config.threshold_override_errors().is_empty());
+    }
+
+    #[test]
+    fn health_config_threshold_override_validation_requires_files() {
+        let json = r#"{
+            "thresholdOverrides": [{
+                "files": [],
+                "maxCognitive": 25
+            }]
+        }"#;
+        let config: HealthConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            config.threshold_override_errors(),
+            vec!["health.thresholdOverrides[0].files must contain at least one pattern"]
+        );
+    }
+
+    #[test]
+    fn health_config_threshold_override_validation_requires_threshold() {
+        let json = r#"{
+            "thresholdOverrides": [{
+                "files": ["src/auth.ts"],
+                "reason": "temporary"
+            }]
+        }"#;
+        let config: HealthConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            config.threshold_override_errors(),
+            vec![
+                "health.thresholdOverrides[0] must set at least one of maxCyclomatic, maxCognitive, or maxCrap"
+            ]
+        );
+    }
+
+    #[test]
+    fn health_config_threshold_override_rejects_unknown_keys() {
+        let err = serde_json::from_str::<HealthConfig>(
+            r#"{"thresholdOverrides":[{"files":["src/auth.ts"],"maxCogntive":25}]}"#,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("maxCogntive"));
     }
 
     #[test]

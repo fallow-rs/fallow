@@ -877,7 +877,7 @@ impl FallowConfig {
     ///
     /// User-supplied glob patterns (`entry`, `ignorePatterns`,
     /// `dynamicallyLoaded`, `duplicates.ignore`, `health.ignore`,
-    /// `boundaries.zones[].patterns`, `overrides[].files`,
+    /// `health.thresholdOverrides[].files`, `boundaries.zones[].patterns`, `overrides[].files`,
     /// `ignoreExports[].file`, `ignoreCatalogReferences[].consumer`) are
     /// validated against absolute paths, `..` traversal segments, and invalid
     /// glob syntax. Loading fails loud on any rejection so silent no-match
@@ -914,6 +914,13 @@ impl FallowConfig {
                 "invalid config:\n  - security.requestReceivers entries must be non-empty strings"
             ));
         }
+        let threshold_override_errors = config.health.threshold_override_errors();
+        if !threshold_override_errors.is_empty() {
+            return Err(miette::miette!(
+                "invalid config:\n  - {}",
+                threshold_override_errors.join("\n  - ")
+            ));
+        }
 
         Ok(config)
     }
@@ -926,7 +933,7 @@ impl FallowConfig {
     ///
     /// Covered filesystem glob fields: `entry`, `ignorePatterns`,
     /// `dynamicallyLoaded`, `duplicates.ignore`, `health.ignore`,
-    /// `overrides[].files`, `ignoreExports[].file`,
+    /// `health.thresholdOverrides[].files`, `overrides[].files`, `ignoreExports[].file`,
     /// `ignoreCatalogReferences[].consumer`, `boundaries.zones[].patterns`,
     /// `boundaries.coverage.allowUnmatched`,
     /// plus every glob-bearing field on inline `framework[]` plugin
@@ -967,6 +974,13 @@ impl FallowConfig {
         );
         validate_user_globs(&self.duplicates.ignore, "duplicates.ignore", &mut errors);
         validate_user_globs(&self.health.ignore, "health.ignore", &mut errors);
+        for override_entry in &self.health.threshold_overrides {
+            validate_user_globs(
+                &override_entry.files,
+                "health.thresholdOverrides[].files",
+                &mut errors,
+            );
+        }
 
         for override_entry in &self.overrides {
             validate_user_globs(&override_entry.files, "overrides[].files", &mut errors);
@@ -1468,6 +1482,39 @@ unknown_field = true
     }
 
     #[test]
+    fn load_json_config_file_with_health_threshold_override() {
+        let dir = test_dir("json-health-threshold-override");
+        let config_path = dir.path().join(".fallowrc.json");
+        std::fs::write(
+            &config_path,
+            r#"{
+                "health": {
+                    "thresholdOverrides": [
+                        {
+                            "files": ["src/legacy.ts"],
+                            "functions": ["legacyFlow"],
+                            "maxCyclomatic": 30,
+                            "maxCognitive": 25,
+                            "maxCrap": 80.5,
+                            "reason": "legacy migration"
+                        }
+                    ]
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let config = FallowConfig::load(&config_path).unwrap();
+        let override_config = &config.health.threshold_overrides[0];
+        assert_eq!(override_config.files, vec!["src/legacy.ts"]);
+        assert_eq!(override_config.functions, vec!["legacyFlow"]);
+        assert_eq!(override_config.max_cyclomatic, Some(30));
+        assert_eq!(override_config.max_cognitive, Some(25));
+        assert_eq!(override_config.max_crap, Some(80.5));
+        assert_eq!(override_config.reason.as_deref(), Some("legacy migration"));
+    }
+
+    #[test]
     fn load_jsonc_config_file() {
         let dir = test_dir("jsonc-config");
         let config_path = dir.path().join(".fallowrc.json");
@@ -1486,6 +1533,30 @@ unknown_field = true
         let config = FallowConfig::load(&config_path).unwrap();
         assert_eq!(config.entry, vec!["src/index.ts"]);
         assert_eq!(config.rules.unused_exports, Severity::Warn);
+    }
+
+    #[test]
+    fn load_jsonc_config_file_with_health_threshold_override() {
+        let dir = test_dir("jsonc-health-threshold-override");
+        let config_path = dir.path().join(".fallowrc.jsonc");
+        std::fs::write(
+            &config_path,
+            r#"{
+                "health": {
+                    // Empty functions means every function in matching files.
+                    "thresholdOverrides": [
+                        { "files": ["src/legacy.ts"], "maxCognitive": 25 }
+                    ]
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let config = FallowConfig::load(&config_path).unwrap();
+        let override_config = &config.health.threshold_overrides[0];
+        assert_eq!(override_config.files, vec!["src/legacy.ts"]);
+        assert!(override_config.functions.is_empty());
+        assert_eq!(override_config.max_cognitive, Some(25));
     }
 
     #[test]
@@ -2820,6 +2891,31 @@ minTokens = 100
         assert_eq!(config.ignore_patterns, vec!["dist/**"]);
         assert_eq!(config.rules.unused_files, Severity::Warn);
         assert_eq!(config.duplicates.min_tokens, 100);
+    }
+
+    #[test]
+    fn load_toml_config_file_with_health_threshold_override() {
+        let dir = test_dir("toml-health-threshold-override");
+        let config_path = dir.path().join("fallow.toml");
+        std::fs::write(
+            &config_path,
+            r#"
+[health]
+thresholdOverrides = [
+  { files = ["src/legacy.ts"], functions = ["legacyFlow"], maxCyclomatic = 30, maxCognitive = 25, maxCrap = 80.5, reason = "legacy migration" }
+]
+"#,
+        )
+        .unwrap();
+
+        let config = FallowConfig::load(&config_path).unwrap();
+        let override_config = &config.health.threshold_overrides[0];
+        assert_eq!(override_config.files, vec!["src/legacy.ts"]);
+        assert_eq!(override_config.functions, vec!["legacyFlow"]);
+        assert_eq!(override_config.max_cyclomatic, Some(30));
+        assert_eq!(override_config.max_cognitive, Some(25));
+        assert_eq!(override_config.max_crap, Some(80.5));
+        assert_eq!(override_config.reason.as_deref(), Some("legacy migration"));
     }
 
     #[test]

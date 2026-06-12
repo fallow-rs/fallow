@@ -738,6 +738,7 @@ pub fn build_health_markdown(report: &crate::health_types::HealthReport, root: &
         && report.targets.is_empty()
         && report.runtime_coverage.is_none()
         && report.coverage_intelligence.is_none()
+        && report.threshold_overrides.is_empty()
     {
         if report.vital_signs.is_none() {
             let _ = write!(
@@ -754,6 +755,7 @@ pub fn build_health_markdown(report: &crate::health_types::HealthReport, root: &
     }
 
     write_findings_section(&mut out, report, root);
+    write_threshold_overrides_section(&mut out, report, root);
     write_runtime_coverage_section(&mut out, report, root);
     write_coverage_intelligence_section(&mut out, report, root);
     write_coverage_gaps_section(&mut out, report, root);
@@ -1062,12 +1064,19 @@ fn write_findings_section(
 
     for finding in &report.findings {
         let file_str = rel(&finding.path);
-        let cyc_marker = if finding.cyclomatic > report.summary.max_cyclomatic_threshold {
+        let thresholds = finding.effective_thresholds.unwrap_or(
+            crate::health_types::HealthEffectiveThresholds {
+                max_cyclomatic: report.summary.max_cyclomatic_threshold,
+                max_cognitive: report.summary.max_cognitive_threshold,
+                max_crap: report.summary.max_crap_threshold,
+            },
+        );
+        let cyc_marker = if finding.cyclomatic > thresholds.max_cyclomatic {
             " **!**"
         } else {
             ""
         };
-        let cog_marker = if finding.cognitive > report.summary.max_cognitive_threshold {
+        let cog_marker = if finding.cognitive > thresholds.max_cognitive {
             " **!**"
         } else {
             ""
@@ -1079,7 +1088,7 @@ fn write_findings_section(
         };
         let crap_cell = match finding.crap {
             Some(crap) => {
-                let marker = if crap >= report.summary.max_crap_threshold {
+                let marker = if crap >= thresholds.max_crap {
                     " **!**"
                 } else {
                     ""
@@ -1110,6 +1119,59 @@ fn write_findings_section(
         cog = s.max_cognitive_threshold,
         crap = s.max_crap_threshold,
     );
+}
+
+fn write_threshold_overrides_section(
+    out: &mut String,
+    report: &crate::health_types::HealthReport,
+    root: &Path,
+) {
+    if report.threshold_overrides.is_empty() {
+        return;
+    }
+    if !out.is_empty() && !out.ends_with("\n\n") {
+        out.push('\n');
+    }
+    out.push_str("## Health Threshold Overrides\n\n");
+    out.push_str("| Override | Status | Target | Metrics |\n");
+    out.push_str("|---------:|:-------|:-------|:--------|\n");
+    for entry in &report.threshold_overrides {
+        let status = match entry.status {
+            crate::health_types::ThresholdOverrideStatus::Active => "active",
+            crate::health_types::ThresholdOverrideStatus::Stale => "stale",
+            crate::health_types::ThresholdOverrideStatus::NoMatch => "no_match",
+        };
+        let target = entry.path.as_ref().map_or_else(
+            || "<no matching file or function>".to_string(),
+            |path| {
+                let display = escape_backticks(&normalize_uri(
+                    &relative_path(path, root).display().to_string(),
+                ));
+                entry.function.as_ref().map_or_else(
+                    || display.clone(),
+                    |name| format!("{display}:{}", escape_backticks(name)),
+                )
+            },
+        );
+        let metrics = entry.metrics.map_or_else(
+            || "-".to_string(),
+            |metrics| {
+                let crap = metrics
+                    .crap
+                    .map_or(String::new(), |value| format!(", CRAP {value:.1}"));
+                format!(
+                    "cyclomatic {}, cognitive {}{}",
+                    metrics.cyclomatic, metrics.cognitive, crap
+                )
+            },
+        );
+        let _ = writeln!(
+            out,
+            "| {} | {} | `{}` | {} |",
+            entry.override_index, status, target, metrics
+        );
+    }
+    out.push('\n');
 }
 
 /// Write the file health scores table to the output.
@@ -1769,6 +1831,8 @@ mod tests {
                     inherited_from: None,
                     component_rollup: None,
                     contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
                 }
                 .into(),
             ],
@@ -1884,6 +1948,8 @@ mod tests {
                     inherited_from: None,
                     component_rollup: None,
                     contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
                 }
                 .into(),
             ],
@@ -1933,6 +1999,8 @@ mod tests {
                     inherited_from: None,
                     component_rollup: None,
                     contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
                 }
                 .into(),
             ],
@@ -2304,6 +2372,8 @@ mod tests {
                     inherited_from: None,
                     component_rollup: None,
                     contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
                 }
                 .into(),
             ],
@@ -2361,6 +2431,8 @@ mod tests {
                     inherited_from: None,
                     component_rollup: None,
                     contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
                 }
                 .into(),
             ],
@@ -2424,6 +2496,8 @@ mod tests {
                     inherited_from: None,
                     component_rollup: None,
                     contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
                 }
                 .into(),
             ],
@@ -2481,6 +2555,8 @@ mod tests {
                     inherited_from: None,
                     component_rollup: None,
                     contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
                 }
                 .into(),
             ],
@@ -2568,6 +2644,8 @@ mod tests {
                     inherited_from: None,
                     component_rollup: None,
                     contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
                 }
                 .into(),
             ],

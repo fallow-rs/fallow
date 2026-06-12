@@ -27,7 +27,7 @@ pub use duplicates_config::{
 };
 pub use flags::{FlagsConfig, SdkPattern};
 pub use format::OutputFormat;
-pub use health::{EmailMode, HealthConfig, OwnershipConfig};
+pub use health::{EmailMode, HealthConfig, HealthThresholdOverride, OwnershipConfig};
 pub use resolution::{
     CompiledIgnoreCatalogReferenceRule, CompiledIgnoreDependencyOverrideRule,
     CompiledIgnoreExportRule, ConfigOverride, DEFAULT_MAX_FILE_SIZE_BYTES,

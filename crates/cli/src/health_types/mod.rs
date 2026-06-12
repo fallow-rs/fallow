@@ -91,6 +91,10 @@ pub struct HealthReport {
     pub findings: Vec<HealthFinding>,
     /// Summary statistics.
     pub summary: HealthSummary,
+    /// Configured threshold override states. Entries are emitted for active
+    /// exceptions, stale exceptions, and full-run no-match cleanup hints.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub threshold_overrides: Vec<ThresholdOverrideState>,
     /// Project-wide vital signs (always computed from available data).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vital_signs: Option<VitalSigns>,
@@ -161,6 +165,7 @@ impl Default for HealthReport {
         Self {
             findings: vec![],
             summary: HealthSummary::default(),
+            threshold_overrides: vec![],
             vital_signs: None,
             health_score: None,
             file_scores: vec![],
@@ -193,6 +198,7 @@ mod tests {
         assert!(!json.contains("coverage_intelligence"));
         assert!(!json.contains("large_functions"));
         assert!(!json.contains("targets"));
+        assert!(!json.contains("threshold_overrides"));
         assert!(!json.contains("vital_signs"));
         assert!(!json.contains("health_score"));
     }

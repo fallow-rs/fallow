@@ -2370,6 +2370,8 @@ mod tests {
                 })
             }),
             contributions: Vec::new(),
+            effective_thresholds: None,
+            threshold_source: None,
         }
     }
 
@@ -2593,6 +2595,8 @@ mod tests {
             inherited_from: None,
             component_rollup: None,
             contributions: Vec::new(),
+            effective_thresholds: None,
+            threshold_source: None,
         };
         let ctx = crate::health_types::HealthActionContext {
             opts: action_opts,
@@ -2763,6 +2767,8 @@ mod tests {
             inherited_from: None,
             component_rollup: None,
             contributions: Vec::new(),
+            effective_thresholds: None,
+            threshold_source: None,
         };
         let narrow_ctx = crate::health_types::HealthActionContext {
             opts: crate::health_types::HealthActionOptions::default(),

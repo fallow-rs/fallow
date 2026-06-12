@@ -283,6 +283,175 @@ fn health_json_has_findings() {
     );
 }
 
+fn write_threshold_override_fixture(root: &Path, config: &str, source: &str) {
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"threshold-override-fixture","type":"module","main":"src/legacy.ts"}"#,
+    );
+    write_file(&root.join(".fallowrc.json"), config);
+    write_file(&root.join("src/legacy.ts"), source);
+}
+
+fn complex_threshold_override_source() -> &'static str {
+    r"export function legacyFlow(input: number): number {
+  let score = 0;
+  if (input > 0) score += 1;
+  if (input > 1) score += 1;
+  if (input > 2) score += 1;
+  if (input > 3) score += 1;
+  if (input > 4) score += 1;
+  if (input > 5) score += 1;
+  return score;
+}
+"
+}
+
+#[test]
+fn health_threshold_override_uses_local_ceiling() {
+    let dir = tempdir().expect("create temp dir");
+    write_threshold_override_fixture(
+        dir.path(),
+        r#"{
+  "health": {
+    "thresholdOverrides": [
+      {
+        "files": ["src/legacy.ts"],
+        "functions": ["legacyFlow"],
+        "maxCyclomatic": 20,
+        "maxCognitive": 20,
+        "reason": "legacy migration"
+      }
+    ]
+  }
+}
+"#,
+        complex_threshold_override_source(),
+    );
+
+    let output = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &[
+            "--complexity",
+            "--max-cyclomatic",
+            "3",
+            "--max-cognitive",
+            "3",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = parse_json(&output);
+    assert!(
+        json["findings"].as_array().is_none_or(Vec::is_empty),
+        "override should suppress local finding: {}",
+        output.stdout
+    );
+    let states = json["threshold_overrides"]
+        .as_array()
+        .expect("threshold_overrides array");
+    let state = states.first().expect("active override state");
+    assert_eq!(state["status"].as_str(), Some("active"));
+    assert_eq!(state["function"].as_str(), Some("legacyFlow"));
+    assert_eq!(state["reason"].as_str(), Some("legacy migration"));
+}
+
+#[test]
+fn health_threshold_override_reports_stale_when_under_global_threshold() {
+    let dir = tempdir().expect("create temp dir");
+    write_threshold_override_fixture(
+        dir.path(),
+        r#"{
+  "health": {
+    "thresholdOverrides": [
+      { "files": ["src/legacy.ts"], "functions": ["legacyFlow"], "maxCyclomatic": 20 }
+    ]
+  }
+}
+"#,
+        "export function legacyFlow(input: number): number {\n  return input + 1;\n}\n",
+    );
+
+    let output = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &[
+            "--complexity",
+            "--max-cyclomatic",
+            "3",
+            "--max-cognitive",
+            "3",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = parse_json(&output);
+    let states = json["threshold_overrides"]
+        .as_array()
+        .expect("threshold_overrides array");
+    let state = states.first().expect("stale override state");
+    assert_eq!(state["status"].as_str(), Some("stale"));
+    assert_eq!(state["function"].as_str(), Some("legacyFlow"));
+}
+
+#[test]
+fn health_threshold_override_omits_no_match_state_for_scoped_run() {
+    let dir = tempdir().expect("create temp dir");
+    write_threshold_override_fixture(
+        dir.path(),
+        r#"{
+  "health": {
+    "thresholdOverrides": [
+      { "files": ["src/missing.ts"], "maxCyclomatic": 20 }
+    ]
+  }
+}
+"#,
+        complex_threshold_override_source(),
+    );
+    git(dir.path(), &["init"]);
+    git(dir.path(), &["config", "user.name", "Test User"]);
+    git(dir.path(), &["config", "user.email", "test@example.com"]);
+    git(dir.path(), &["add", "."]);
+    git(dir.path(), &["commit", "-m", "initial"]);
+
+    let output = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &[
+            "--complexity",
+            "--changed-since",
+            "HEAD",
+            "--max-cyclomatic",
+            "50",
+            "--max-cognitive",
+            "50",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = parse_json(&output);
+    assert!(
+        json["threshold_overrides"]
+            .as_array()
+            .is_none_or(Vec::is_empty),
+        "scoped run should not report no-match override state: {}",
+        output.stdout
+    );
+}
+
 #[test]
 fn health_complexity_breakdown_gates_and_reconstructs_contributions() {
     // Without the flag, no `contributions` key is emitted on any finding.

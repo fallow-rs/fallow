@@ -174,6 +174,93 @@ pub struct ComplexityViolation {
     /// otherwise so default and CI output stay lean.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub contributions: Vec<fallow_types::extract::ComplexityContribution>,
+    /// Resolved thresholds used for this finding when a config override changed
+    /// at least one ceiling. Omitted for findings using global thresholds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_thresholds: Option<HealthEffectiveThresholds>,
+    /// Source of the effective thresholds. Omitted when thresholds are global.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub threshold_source: Option<ThresholdSource>,
+}
+
+/// Resolved thresholds used to evaluate a health finding.
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[allow(
+    clippy::struct_field_names,
+    reason = "target-dependent clippy lint; wire fields mirror max_* config keys"
+)]
+pub struct HealthEffectiveThresholds {
+    pub max_cyclomatic: u16,
+    pub max_cognitive: u16,
+    pub max_crap: f64,
+}
+
+/// Threshold values configured by a single override entry.
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[allow(
+    clippy::struct_field_names,
+    reason = "target-dependent clippy lint; wire fields mirror max_* config keys"
+)]
+pub struct HealthConfiguredThresholds {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_cyclomatic: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_cognitive: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_crap: Option<f64>,
+}
+
+/// Source for a finding's effective thresholds.
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum ThresholdSource {
+    Override,
+}
+
+/// Lifecycle state for a configured threshold override.
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum ThresholdOverrideStatus {
+    Active,
+    Stale,
+    NoMatch,
+}
+
+/// Current complexity metrics for a matched threshold override entry.
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ThresholdOverrideMetrics {
+    pub cyclomatic: u16,
+    pub cognitive: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crap: Option<f64>,
+}
+
+/// Report entry describing whether a threshold override is active, stale, or
+/// no longer matching any analyzed file or function.
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ThresholdOverrideState {
+    pub status: ThresholdOverrideStatus,
+    pub override_index: usize,
+    #[serde(
+        default,
+        serialize_with = "fallow_types::serde_path::serialize_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub path: Option<std::path::PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub function: Option<String>,
+    pub configured_thresholds: HealthConfiguredThresholds,
+    pub effective_thresholds: HealthEffectiveThresholds,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metrics: Option<ThresholdOverrideMetrics>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

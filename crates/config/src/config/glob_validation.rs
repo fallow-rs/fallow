@@ -2,8 +2,9 @@
 //!
 //! Fallow accepts filesystem glob patterns in several config fields (`entry`,
 //! `ignorePatterns`, `dynamicallyLoaded`, `duplicates.ignore`, `health.ignore`,
-//! `boundaries.zones[].patterns`, `overrides[].files`, `ignoreExports[].file`,
-//! `ignoreCatalogReferences[].consumer`). All of these are matched against
+//! `health.thresholdOverrides[].files`, `boundaries.zones[].patterns`,
+//! `overrides[].files`, `ignoreExports[].file`, `ignoreCatalogReferences[].consumer`).
+//! All of these are matched against
 //! project-root-relative file paths. The matcher cannot reach outside the
 //! project root by construction, but a malicious config can still slip in
 //! absolute paths or `..` traversal segments that silently no-op today and

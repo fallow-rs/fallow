@@ -832,6 +832,13 @@
           },
           "default": []
         },
+        "thresholdOverrides": {
+          "description": "Per-file or per-function threshold overrides. These keep exceptional\nfunctions visible as configured numeric ceilings instead of hiding them\nbehind binary suppressions.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HealthThresholdOverride"
+          }
+        },
         "ownership": {
           "description": "Ownership analysis configuration. Controls bot filtering and email\nprivacy mode for `--ownership` output.",
           "$ref": "#/$defs/OwnershipConfig",
@@ -852,7 +859,67 @@
           "type": "boolean",
           "default": true
         }
-      }
+      },
+      "additionalProperties": false
+    },
+    "HealthThresholdOverride": {
+      "description": "Per-file or per-function health threshold override.",
+      "type": "object",
+      "properties": {
+        "files": {
+          "description": "Project-root-relative file globs this override applies to.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "functions": {
+          "description": "Exact emitted function names this override applies to. Empty means every\nfunction in matching files.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "maxCyclomatic": {
+          "description": "Local cyclomatic complexity ceiling.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "maxCognitive": {
+          "description": "Local cognitive complexity ceiling.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "maxCrap": {
+          "description": "Local CRAP ceiling.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "reason": {
+          "description": "Human-readable rationale for the exception.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "files"
+      ]
     },
     "OwnershipConfig": {
       "description": "Configuration for ownership analysis (`fallow health --hotspots --ownership`).",
