@@ -2344,6 +2344,43 @@ impl ModuleInfoExtractor {
             );
     }
 
+    fn record_playwright_fixture_alias(&mut self, test_name: &str, base_name: &str) {
+        self.member_accesses.push(MemberAccess {
+            object: format!("{}{}:", crate::PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL, test_name),
+            member: base_name.to_string(),
+        });
+    }
+
+    fn record_playwright_wrapper_aliases(&mut self, test_name: &str, call: &CallExpression<'_>) {
+        if let Some(base_name) = playwright_extend_base_name(call) {
+            if !self.is_named_import_from(base_name.as_str(), "@playwright/test", "test") {
+                self.record_playwright_fixture_alias(test_name, &base_name);
+            }
+            return;
+        }
+
+        let Expression::Identifier(callee) = &call.callee else {
+            return;
+        };
+        if !self.is_named_import_from(callee.name.as_str(), "@playwright/test", "mergeTests") {
+            return;
+        }
+
+        let mut base_names: Vec<String> = call
+            .arguments
+            .iter()
+            .filter_map(|argument| match argument {
+                Argument::Identifier(ident) => Some(ident.name.to_string()),
+                _ => None,
+            })
+            .collect();
+        base_names.sort();
+        base_names.dedup();
+        for base_name in base_names {
+            self.record_playwright_fixture_alias(test_name, &base_name);
+        }
+    }
+
     /// Capture helper-function Playwright fixtures or aliases from returns.
     pub(super) fn try_capture_playwright_factory_helper(
         &mut self,
@@ -2755,6 +2792,7 @@ impl ModuleInfoExtractor {
             && let Expression::CallExpression(call) = init
         {
             self.record_playwright_fixture_definitions(id.name.as_str(), call);
+            self.record_playwright_wrapper_aliases(id.name.as_str(), call);
         }
 
         if let BindingPattern::BindingIdentifier(id) = &declarator.id {

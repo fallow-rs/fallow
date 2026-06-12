@@ -2372,6 +2372,100 @@ fn non_playwright_extend_does_not_record_fixture_definitions() {
 }
 
 #[test]
+fn playwright_merge_tests_records_fixture_aliases() {
+    let info = parse(
+        r"
+            import { mergeTests } from '@playwright/test';
+            import { testPrimary } from './primary-fixture';
+            import { testSecondary } from './secondary-fixture';
+
+            export const mergedTest = mergeTests(testPrimary, testSecondary);
+        ",
+    );
+
+    assert!(
+        info.member_accesses.iter().any(|a| {
+            a.object == format!("{}mergedTest:", crate::PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL)
+                && a.member == "testPrimary"
+        }),
+        "Playwright mergeTests should record the first inherited fixture test, found: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        info.member_accesses.iter().any(|a| {
+            a.object == format!("{}mergedTest:", crate::PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL)
+                && a.member == "testSecondary"
+        }),
+        "Playwright mergeTests should record the second inherited fixture test, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn playwright_aliased_merge_tests_records_fixture_aliases() {
+    let info = parse(
+        r"
+            import { mergeTests as merge } from '@playwright/test';
+            import { testPrimary } from './primary-fixture';
+
+            export const mergedTest = merge(testPrimary);
+        ",
+    );
+
+    assert!(
+        info.member_accesses.iter().any(|a| {
+            a.object == format!("{}mergedTest:", crate::PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL)
+                && a.member == "testPrimary"
+        }),
+        "aliased Playwright mergeTests should record an inherited fixture test, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn playwright_wrapper_extend_records_fixture_alias() {
+    let info = parse(
+        r"
+            import { testPrimary } from './primary-fixture';
+
+            export const extendedTest = testPrimary.extend<{ extra: string }>({});
+        ",
+    );
+
+    assert!(
+        info.member_accesses.iter().any(|a| {
+            a.object == format!("{}extendedTest:", crate::PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL)
+                && a.member == "testPrimary"
+        }),
+        "chained Playwright wrapper .extend should record an inherited fixture test, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn non_playwright_merge_tests_does_not_record_fixture_aliases() {
+    let info = parse(
+        r"
+            import { testPrimary } from './primary-fixture';
+
+            function mergeTests<T>(test: T): T {
+                return test;
+            }
+
+            export const mergedTest = mergeTests(testPrimary);
+        ",
+    );
+
+    assert!(
+        !info.member_accesses.iter().any(|a| a
+            .object
+            .starts_with(crate::PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL)),
+        "local mergeTests should not emit Playwright fixture aliases, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
 fn playwright_test_callback_records_fixture_member_uses() {
     let info = parse(
         r"

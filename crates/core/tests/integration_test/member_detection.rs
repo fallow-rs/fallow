@@ -422,6 +422,56 @@ fn playwright_fixture_getter_chain_credits_nested_fixture_methods() {
 }
 
 #[test]
+fn playwright_wrapper_fixtures_credit_nested_fixture_methods() {
+    let root = fixture_path("issue-1210-playwright-wrapper-fixtures");
+    let config = create_config_with_ignore_decorators(root, vec!["@step".to_string()]);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<String> = results
+        .unused_class_members
+        .iter()
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&"MessageChecks.hasExpectedRecord".to_string()),
+        "MessageChecks.hasExpectedRecord should remain credited through the direct fixture, found: {unused_class_members:?}"
+    );
+    assert!(
+        !unused_class_members.contains(&"MessageChecks.hasMessageForRecordId".to_string()),
+        "MessageChecks.hasMessageForRecordId should remain credited through the direct fixture, found: {unused_class_members:?}"
+    );
+    assert!(
+        !unused_class_members.contains(&"MessageChecks.hasMergedRecord".to_string()),
+        "MessageChecks.hasMergedRecord should be credited through mergeTests, found: {unused_class_members:?}"
+    );
+    assert!(
+        !unused_class_members.contains(&"MessageChecks.hasMergedMessageForRecordId".to_string()),
+        "MessageChecks.hasMergedMessageForRecordId should be credited through aliased mergeTests, found: {unused_class_members:?}"
+    );
+    assert!(
+        !unused_class_members.contains(&"MessageChecks.hasExtendedRecord".to_string()),
+        "MessageChecks.hasExtendedRecord should be credited through wrapper .extend, found: {unused_class_members:?}"
+    );
+    assert!(
+        !unused_class_members.contains(&"MessageChecks.hasExtendedMessageForRecordId".to_string()),
+        "MessageChecks.hasExtendedMessageForRecordId should be credited through wrapper .extend, found: {unused_class_members:?}"
+    );
+    assert!(
+        !unused_class_members.contains(&"MessageChecks.hasExtendedMergedRecord".to_string()),
+        "MessageChecks.hasExtendedMergedRecord should be credited through transitive wrapper aliases, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&"MessageChecks.isActuallyUnused".to_string()),
+        "the first genuinely unused decorated control should still be reported, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&"MessageChecks.isActuallyUnusedExtended".to_string()),
+        "the second genuinely unused decorated control should still be reported, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
 fn fluent_builder_chain_credits_intermediate_setters() {
     let root = fixture_path("issue-387-fluent-builder");
     let config = create_config(root);

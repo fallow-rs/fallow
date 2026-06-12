@@ -333,7 +333,12 @@ use crate::MemberKind;
 /// scoped rule-pack policy tokens (`policy-violation:<pack>/<rule-id>`).
 /// Pre-149 entries only store a broad `IssueKind` discriminant and cannot
 /// round-trip scoped policy suppressions.
-pub(super) const CACHE_VERSION: u32 = 149;
+///
+/// Bumped to 150 for issue #1210: JS/TS extraction now records Playwright
+/// fixture wrapper aliases in `member_accesses`, so warm caches written before
+/// the bump can miss fixture members reached through `mergeTests` or chained
+/// wrapper `.extend(...)` calls.
+pub(super) const CACHE_VERSION: u32 = 150;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

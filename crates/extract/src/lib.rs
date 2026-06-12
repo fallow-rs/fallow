@@ -80,6 +80,13 @@ pub const INSTANCE_EXPORT_SENTINEL: &str = "__fallow_instance_export__:";
 /// named `fixture` whose declared type is `type_name`.
 pub const PLAYWRIGHT_FIXTURE_DEF_SENTINEL: &str = "__fallow_playwright_fixture_def__:";
 
+/// Synthetic member-access object prefix for Playwright fixture wrapper aliases.
+///
+/// `MemberAccess { object: format!("{PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL}{alias}:"), member: base }`
+/// means the exported Playwright test object named `alias` inherits fixture
+/// definitions from the exported test object named `base`.
+pub const PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL: &str = "__fallow_playwright_fixture_alias__:";
+
 /// Synthetic member-access object prefix for Playwright fixture member uses.
 ///
 /// `MemberAccess { object: format!("{PLAYWRIGHT_FIXTURE_USE_SENTINEL}{test}:{fixture}"), member }`

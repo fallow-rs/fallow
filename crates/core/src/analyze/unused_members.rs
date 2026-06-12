@@ -9,8 +9,8 @@ use crate::discover::FileId;
 use crate::extract::{
     ANGULAR_TPL_SENTINEL, ExportName, FACTORY_CALL_SENTINEL, FLUENT_CHAIN_NEW_SENTINEL,
     FLUENT_CHAIN_SENTINEL, INSTANCE_EXPORT_SENTINEL, MemberInfo, MemberKind, ModuleInfo,
-    PLAYWRIGHT_FIXTURE_DEF_SENTINEL, PLAYWRIGHT_FIXTURE_TYPE_SENTINEL,
-    PLAYWRIGHT_FIXTURE_USE_SENTINEL,
+    PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL, PLAYWRIGHT_FIXTURE_DEF_SENTINEL,
+    PLAYWRIGHT_FIXTURE_TYPE_SENTINEL, PLAYWRIGHT_FIXTURE_USE_SENTINEL,
 };
 use crate::graph::{ModuleGraph, ReferenceKind};
 use crate::resolve::ResolvedModule;
@@ -934,6 +934,7 @@ fn build_playwright_fixture_targets(
     let type_targets = build_playwright_fixture_type_targets(graph, resolved_modules);
     let mut targets_by_test: FxHashMap<ExportKey, FxHashMap<String, Vec<ExportKey>>> =
         FxHashMap::default();
+    let mut aliases_by_test: FxHashMap<ExportKey, Vec<ExportKey>> = FxHashMap::default();
 
     for resolved in resolved_modules {
         let local_to_export_keys = build_local_to_export_keys(resolved);
@@ -964,9 +965,68 @@ fn build_playwright_fixture_targets(
                 }
             }
         }
+
+        for access in &resolved.member_accesses {
+            let Some((test_local_name, _)) = parse_playwright_fixture_sentinel(
+                access.object.as_str(),
+                PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL,
+            ) else {
+                continue;
+            };
+            let Some(test_keys) = local_to_export_keys.get(test_local_name) else {
+                continue;
+            };
+            let Some(base_keys) = local_to_export_keys.get(access.member.as_str()) else {
+                continue;
+            };
+
+            for test_key in test_keys {
+                let aliases = aliases_by_test.entry(test_key.clone()).or_default();
+                for base_key in base_keys {
+                    for key in export_key_with_origins(graph, base_key) {
+                        push_export_key(aliases, key);
+                    }
+                }
+            }
+        }
     }
 
+    expand_playwright_fixture_aliases(&mut targets_by_test, &aliases_by_test);
     targets_by_test
+}
+
+fn expand_playwright_fixture_aliases(
+    targets_by_test: &mut FxHashMap<ExportKey, FxHashMap<String, Vec<ExportKey>>>,
+    aliases_by_test: &FxHashMap<ExportKey, Vec<ExportKey>>,
+) {
+    if aliases_by_test.is_empty() {
+        return;
+    }
+
+    let max_iters = aliases_by_test.len() + 1;
+    for _ in 0..max_iters {
+        let snapshot = targets_by_test.clone();
+        let mut changed = false;
+        for (alias_key, base_keys) in aliases_by_test {
+            for base_key in base_keys {
+                let Some(base_targets) = snapshot.get(base_key) else {
+                    continue;
+                };
+                let alias_targets = targets_by_test.entry(alias_key.clone()).or_default();
+                for (fixture_name, target_keys) in base_targets {
+                    let fixture_targets = alias_targets.entry(fixture_name.clone()).or_default();
+                    for target_key in target_keys {
+                        let before = fixture_targets.len();
+                        push_export_key(fixture_targets, target_key.clone());
+                        changed |= fixture_targets.len() != before;
+                    }
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
 }
 
 fn push_playwright_fixture_target(
@@ -1274,6 +1334,7 @@ fn propagate_accesses_through_typed_instance_bindings(
                 || access.object.starts_with(FACTORY_CALL_SENTINEL)
                 || access.object.starts_with(FLUENT_CHAIN_SENTINEL)
                 || access.object.starts_with(FLUENT_CHAIN_NEW_SENTINEL)
+                || access.object.starts_with(PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL)
                 || access.object.starts_with(PLAYWRIGHT_FIXTURE_DEF_SENTINEL)
                 || access.object.starts_with(PLAYWRIGHT_FIXTURE_TYPE_SENTINEL)
                 || access.object.starts_with(PLAYWRIGHT_FIXTURE_USE_SENTINEL)
@@ -1298,6 +1359,7 @@ fn propagate_accesses_through_typed_instance_bindings(
         for object_name in &resolved.whole_object_uses {
             if object_name.starts_with(INSTANCE_EXPORT_SENTINEL)
                 || object_name.starts_with(FACTORY_CALL_SENTINEL)
+                || object_name.starts_with(PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL)
                 || object_name.starts_with(PLAYWRIGHT_FIXTURE_DEF_SENTINEL)
                 || object_name.starts_with(PLAYWRIGHT_FIXTURE_TYPE_SENTINEL)
                 || object_name.starts_with(PLAYWRIGHT_FIXTURE_USE_SENTINEL)
