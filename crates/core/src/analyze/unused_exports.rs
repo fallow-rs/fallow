@@ -1396,11 +1396,7 @@ mod tests {
         graph.modules[2].set_reachable(true);
         graph.modules[2].exports = vec![make_export("helper", 10, 20)];
 
-        let supp = vec![Suppression {
-            line: 0,
-            comment_line: 1,
-            kind: Some(IssueKind::DuplicateExport),
-        }];
+        let supp = vec![Suppression::issue(0, 1, IssueKind::DuplicateExport)];
         let mut supp_map: FxHashMap<FileId, &[Suppression]> = FxHashMap::default();
         supp_map.insert(FileId(2), &supp);
         let suppressions = SuppressionContext::from_map(supp_map);

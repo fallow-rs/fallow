@@ -295,11 +295,7 @@ mod tests {
             .collect();
         let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
 
-        let supps = vec![Suppression {
-            line: 0,
-            comment_line: 1,
-            kind: Some(IssueKind::UnusedFile),
-        }];
+        let supps = vec![Suppression::issue(0, 1, IssueKind::UnusedFile)];
         let supps_slice: &[Suppression] = &supps;
         let mut supp_map: FxHashMap<FileId, &[Suppression]> = FxHashMap::default();
         supp_map.insert(FileId(1), supps_slice);

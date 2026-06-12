@@ -6,7 +6,7 @@ use fallow_config::{
     RulePackRule, RulePackRuleKind, RulesConfig, Severity,
 };
 use fallow_types::extract::{CalleeUse, ImportInfo, ImportedName, ModuleInfo, ReExportInfo};
-use fallow_types::results::{PolicyRuleKind, PolicyViolationSeverity};
+use fallow_types::results::{PolicyRuleKind, PolicyViolationSeverity, SuppressionOrigin};
 
 use crate::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
 use crate::graph::ModuleGraph;
@@ -496,22 +496,22 @@ fn line_and_file_suppressions_are_honored_and_consumed() {
     let mut line_module = module(0, vec![callee("console.log", 25)], Vec::new());
     line_module
         .suppressions
-        .push(fallow_types::suppress::Suppression {
-            line: 3,
-            comment_line: 2,
-            kind: Some(crate::suppress::IssueKind::PolicyViolation),
-        });
+        .push(fallow_types::suppress::Suppression::issue(
+            3,
+            2,
+            crate::suppress::IssueKind::PolicyViolation,
+        ));
     line_module.line_offsets = vec![0, 10, 20, 30];
 
     // file.ts: file-wide suppression.
     let mut file_module = module(1, vec![callee("console.log", 0)], Vec::new());
     file_module
         .suppressions
-        .push(fallow_types::suppress::Suppression {
-            line: 0,
-            comment_line: 1,
-            kind: Some(crate::suppress::IssueKind::PolicyViolation),
-        });
+        .push(fallow_types::suppress::Suppression::issue(
+            0,
+            1,
+            crate::suppress::IssueKind::PolicyViolation,
+        ));
 
     let modules = vec![line_module, file_module];
     let suppressions = SuppressionContext::new(&modules);
@@ -528,6 +528,161 @@ fn line_and_file_suppressions_are_honored_and_consumed() {
         stale.is_empty(),
         "consumed policy suppressions must not be stale: {stale:?}"
     );
+}
+
+#[test]
+fn scoped_policy_suppression_only_suppresses_matching_rule() {
+    let root = PathBuf::from("/tmp/policy-test");
+    let config = make_config(
+        root.clone(),
+        vec![pack(vec![
+            banned_import("no-moment", &["moment"]),
+            banned_import("no-moment-alt", &["moment"]),
+        ])],
+        Severity::Warn,
+    );
+    let graph = build_graph(&root, &["src/app.ts"]);
+    let mut module = module(
+        0,
+        Vec::new(),
+        vec![import("moment", ImportedName::Default, "moment", false)],
+    );
+    module
+        .suppressions
+        .push(fallow_types::suppress::Suppression::policy_rule(
+            1,
+            0,
+            "team-policy",
+            "no-moment",
+        ));
+    let modules = vec![module];
+    let suppressions = SuppressionContext::new(&modules);
+    let line_offsets = FxHashMap::default();
+
+    let violations =
+        find_policy_violations(&graph, &modules, &config, &suppressions, &line_offsets);
+    assert_eq!(violations.len(), 1);
+    assert_eq!(violations[0].rule_id, "no-moment-alt");
+    assert!(suppressions.find_stale(&graph, &config).is_empty());
+}
+
+#[test]
+fn file_scoped_policy_suppression_only_suppresses_matching_rule() {
+    let root = PathBuf::from("/tmp/policy-test");
+    let config = make_config(
+        root.clone(),
+        vec![pack(vec![
+            banned_import("no-moment", &["moment"]),
+            banned_import("no-moment-alt", &["moment"]),
+        ])],
+        Severity::Warn,
+    );
+    let graph = build_graph(&root, &["src/app.ts"]);
+    let mut module = module(
+        0,
+        Vec::new(),
+        vec![import("moment", ImportedName::Default, "moment", false)],
+    );
+    module
+        .suppressions
+        .push(fallow_types::suppress::Suppression::policy_rule(
+            0,
+            1,
+            "team-policy",
+            "no-moment",
+        ));
+    let modules = vec![module];
+    let suppressions = SuppressionContext::new(&modules);
+    let line_offsets = FxHashMap::default();
+
+    let violations =
+        find_policy_violations(&graph, &modules, &config, &suppressions, &line_offsets);
+    assert_eq!(violations.len(), 1);
+    assert_eq!(violations[0].rule_id, "no-moment-alt");
+    assert!(suppressions.find_stale(&graph, &config).is_empty());
+}
+
+#[test]
+fn stale_scoped_policy_suppression_preserves_full_token() {
+    let root = PathBuf::from("/tmp/policy-test");
+    let config = make_config(
+        root.clone(),
+        vec![pack(vec![banned_import("no-moment", &["moment"])])],
+        Severity::Warn,
+    );
+    let graph = build_graph(&root, &["src/app.ts"]);
+    let mut module = module(0, Vec::new(), Vec::new());
+    module
+        .suppressions
+        .push(fallow_types::suppress::Suppression::policy_rule(
+            0,
+            1,
+            "team-policy",
+            "removed-rule",
+        ));
+    let modules = vec![module];
+    let suppressions = SuppressionContext::new(&modules);
+
+    let stale = suppressions.find_stale(&graph, &config);
+    assert_eq!(stale.len(), 1);
+    assert!(matches!(
+        &stale[0].origin,
+        SuppressionOrigin::Comment {
+            issue_kind: Some(token),
+            is_file_level: true,
+            kind_known: true,
+        } if token == "policy-violation:team-policy/removed-rule"
+    ));
+}
+
+#[test]
+fn scoped_policy_suppression_is_dormant_when_master_is_off() {
+    let root = PathBuf::from("/tmp/policy-test");
+    let config = make_config(
+        root.clone(),
+        vec![pack(vec![banned_import("no-moment", &["moment"])])],
+        Severity::Off,
+    );
+    let graph = build_graph(&root, &["src/app.ts"]);
+    let mut module = module(0, Vec::new(), Vec::new());
+    module
+        .suppressions
+        .push(fallow_types::suppress::Suppression::policy_rule(
+            0,
+            1,
+            "team-policy",
+            "no-moment",
+        ));
+    let modules = vec![module];
+    let suppressions = SuppressionContext::new(&modules);
+
+    assert!(suppressions.find_stale(&graph, &config).is_empty());
+}
+
+#[test]
+fn scoped_policy_suppression_is_dormant_when_rule_is_off() {
+    let root = PathBuf::from("/tmp/policy-test");
+    let mut disabled_rule = banned_import("no-moment", &["moment"]);
+    disabled_rule.severity = Some(Severity::Off);
+    let config = make_config(
+        root.clone(),
+        vec![pack(vec![disabled_rule])],
+        Severity::Warn,
+    );
+    let graph = build_graph(&root, &["src/app.ts"]);
+    let mut module = module(0, Vec::new(), Vec::new());
+    module
+        .suppressions
+        .push(fallow_types::suppress::Suppression::policy_rule(
+            0,
+            1,
+            "team-policy",
+            "no-moment",
+        ));
+    let modules = vec![module];
+    let suppressions = SuppressionContext::new(&modules);
+
+    assert!(suppressions.find_stale(&graph, &config).is_empty());
 }
 
 #[test]

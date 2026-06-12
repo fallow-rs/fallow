@@ -1305,7 +1305,7 @@ fn build_policy_violations_section(
     }
     lines.push(format!(
         "  {}",
-        "suppress: // fallow-ignore-next-line policy-violation (one token covers every rule-pack rule)"
+        "suppress: // fallow-ignore-next-line policy-violation:<pack>/<rule-id> (or policy-violation for every rule-pack rule)"
             .dimmed()
     ));
     push_section_footer_with_count(lines, title, items.len());
@@ -2580,7 +2580,7 @@ mod tests {
         assert!(text.contains("moment/locale/nl"));
         assert!(text.contains("team-policy/no-moment"));
         assert!(text.contains("Use date-fns."));
-        assert!(text.contains("fallow-ignore-next-line policy-violation"));
+        assert!(text.contains("fallow-ignore-next-line policy-violation:<pack>/<rule-id>"));
     }
 
     #[test]

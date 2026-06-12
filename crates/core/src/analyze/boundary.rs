@@ -428,11 +428,7 @@ mod tests {
             &[(0, 1, false)],
         );
 
-        let supps = vec![Suppression {
-            line: 0,
-            comment_line: 1,
-            kind: Some(IssueKind::BoundaryViolation),
-        }];
+        let supps = vec![Suppression::issue(0, 1, IssueKind::BoundaryViolation)];
         let mut supp_map = FxHashMap::default();
         supp_map.insert(FileId(0), supps.as_slice());
         let suppressions = SuppressionContext::from_map(supp_map);

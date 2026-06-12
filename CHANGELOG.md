@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Docker users now have a first-party CLI image recipe.** The repo ships a checksum-verified Dockerfile for the pinned Linux musl release binary, a source-built contributor Dockerfile, and a copyable Compose example that mounts projects at `/workspace` with host UID/GID mapping so `.fallow/` caches and reports stay host-owned. The runtime includes git for `audit` base detection plus Node.js, npm, and Corepack for project dependency installs, and CI now builds the Docker image on Docker-file changes. Thanks [@nic0michael](https://github.com/nic0michael) for the Docker Compose starting point. (Closes [#1205](https://github.com/fallow-rs/fallow/issues/1205).)
 
+- **Rule-pack policy findings can now be suppressed per rule.** Suppression comments accept `policy-violation:<pack>/<rule-id>` for both `fallow-ignore-next-line` and `fallow-ignore-file`, so a waiver can target one rule-pack finding without hiding every policy violation at the same scope. Bare `policy-violation` remains supported as the family-wide token. Rule-pack names and rule ids now reject ambiguous characters so scoped tokens do not need escaping, stale-suppression output preserves the scoped token, and generated suppress actions prefer the scoped form. (Closes [#1180](https://github.com/fallow-rs/fallow/issues/1180).)
 ## [2.94.0] - 2026-06-12
 
 ### Added

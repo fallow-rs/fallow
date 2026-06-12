@@ -328,11 +328,20 @@ use crate::MemberKind;
 /// Playwright fixture type-alias bindings in `member_accesses`, so warm caches
 /// written before the bump can miss fixture members reached through imported
 /// object type aliases.
-pub(super) const CACHE_VERSION: u32 = 148;
+///
+/// Bumped to 149 for issue #1180: cached inline suppressions now preserve
+/// scoped rule-pack policy tokens (`policy-violation:<pack>/<rule-id>`).
+/// Pre-149 entries only store a broad `IssueKind` discriminant and cannot
+/// round-trip scoped policy suppressions.
+pub(super) const CACHE_VERSION: u32 = 149;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
-pub const DUPES_CACHE_VERSION: u32 = 4;
+///
+/// Bumped to 5 for issue #1180: cached duplicate-analysis suppressions now
+/// preserve scoped rule-pack policy tokens instead of storing only a broad
+/// `IssueKind` discriminant.
+pub const DUPES_CACHE_VERSION: u32 = 5;
 
 /// Default maximum cache size (256 MB). Overridable per-project via
 /// `cache.maxSizeMb` in the config file or `FALLOW_CACHE_MAX_SIZE` env var.
@@ -375,7 +384,7 @@ assert_cached_type_size!(CachedModule, 808);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 56);
-assert_cached_type_size!(CachedSuppression, 12);
+assert_cached_type_size!(CachedSuppression, 64);
 assert_cached_type_size!(CachedUnknownSuppressionKind, 32);
 assert_cached_type_size!(CachedExport, 112);
 assert_cached_type_size!(CachedImport, 96);
@@ -539,8 +548,14 @@ pub struct CachedSuppression {
     pub line: u32,
     /// 1-based line where the comment itself appears.
     pub comment_line: u32,
-    /// 0 = suppress all, 1-20 = `IssueKind` discriminant.
+    /// 0 = suppress all, otherwise `IssueKind` discriminant.
     pub kind: u8,
+    /// Rule-pack name for scoped policy suppressions. Empty for all other
+    /// suppression targets.
+    pub policy_pack: String,
+    /// Rule id for scoped policy suppressions. Empty for all other suppression
+    /// targets.
+    pub policy_rule_id: String,
 }
 
 /// Cached unknown suppression kind token (see #449).

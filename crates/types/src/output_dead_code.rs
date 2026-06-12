@@ -538,8 +538,8 @@ impl BoundaryCallViolationFinding {
 }
 
 /// Wire-shape envelope for a [`PolicyViolation`] finding. Carries actions for
-/// replacing the banned call or import, or suppressing it with the
-/// `policy-violation` token.
+/// replacing the banned call or import, or suppressing it with a scoped
+/// `policy-violation:<pack>/<rule-id>` token.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PolicyViolationFinding {
@@ -566,6 +566,7 @@ impl PolicyViolationFinding {
             Some(message) => format!("Replace the `{}` {what}: {message}", violation.matched),
             None => format!("Replace the `{}` {what}", violation.matched),
         };
+        let suppress_token = format!("policy-violation:{}/{}", violation.pack, violation.rule_id);
         let actions = vec![
             IssueAction::Fix(FixAction {
                 kind: FixActionType::ResolvePolicyViolation,
@@ -581,17 +582,18 @@ impl PolicyViolationFinding {
             IssueAction::SuppressLine(SuppressLineAction {
                 kind: SuppressLineKind::SuppressLine,
                 auto_fixable: false,
-                description: "Suppress with an inline comment above the line. The token covers every rule-pack rule on that line"
+                description: "Suppress this rule-pack rule with an inline comment above the line"
                     .to_string(),
-                comment: "// fallow-ignore-next-line policy-violation".to_string(),
+                comment: format!("// fallow-ignore-next-line {suppress_token}"),
                 scope: None,
             }),
             IssueAction::SuppressFile(SuppressFileAction {
                 kind: SuppressFileKind::SuppressFile,
                 auto_fixable: false,
-                description: "Suppress with a file-level comment at the top of the file. The token covers every rule-pack rule in the file, not just this rule"
-                    .to_string(),
-                comment: "// fallow-ignore-file policy-violation".to_string(),
+                description:
+                    "Suppress this rule-pack rule with a file-level comment at the top of the file"
+                        .to_string(),
+                comment: format!("// fallow-ignore-file {suppress_token}"),
             }),
         ];
         Self {

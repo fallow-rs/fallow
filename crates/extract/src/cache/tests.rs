@@ -1485,21 +1485,10 @@ fn module_to_cached_roundtrip_suppressions_with_kinds() {
         value_referenced_import_bindings: vec![],
         content_hash: 0,
         suppressions: vec![
-            Suppression {
-                line: 0,
-                comment_line: 1,
-                kind: None,
-            },
-            Suppression {
-                line: 5,
-                comment_line: 4,
-                kind: Some(IssueKind::UnusedExport),
-            },
-            Suppression {
-                line: 10,
-                comment_line: 9,
-                kind: Some(IssueKind::UnusedFile),
-            },
+            Suppression::all(0, 1),
+            Suppression::issue(5, 4, IssueKind::UnusedExport),
+            Suppression::issue(10, 9, IssueKind::UnusedFile),
+            Suppression::policy_rule(12, 11, "team-policy", "no-child-process"),
         ],
         unknown_suppression_kinds: vec![],
         line_offsets: vec![],
@@ -1526,13 +1515,25 @@ fn module_to_cached_roundtrip_suppressions_with_kinds() {
     let cached = module_to_cached(&module, 0, 0);
     let restored = cached_to_module(&cached, FileId(0));
 
-    assert_eq!(restored.suppressions.len(), 3);
+    assert_eq!(restored.suppressions.len(), 4);
     assert_eq!(restored.suppressions[0].line, 0);
-    assert!(restored.suppressions[0].kind.is_none());
+    assert!(restored.suppressions[0].issue_kind_target().is_none());
     assert_eq!(restored.suppressions[1].line, 5);
-    assert_eq!(restored.suppressions[1].kind, Some(IssueKind::UnusedExport));
+    assert_eq!(
+        restored.suppressions[1].issue_kind_target(),
+        Some(IssueKind::UnusedExport)
+    );
     assert_eq!(restored.suppressions[2].line, 10);
-    assert_eq!(restored.suppressions[2].kind, Some(IssueKind::UnusedFile));
+    assert_eq!(
+        restored.suppressions[2].issue_kind_target(),
+        Some(IssueKind::UnusedFile)
+    );
+    assert_eq!(restored.suppressions[3].line, 12);
+    let policy = restored.suppressions[3]
+        .policy_rule_target()
+        .expect("scoped policy target should round-trip");
+    assert_eq!(policy.pack, "team-policy");
+    assert_eq!(policy.rule_id, "no-child-process");
 }
 
 #[test]

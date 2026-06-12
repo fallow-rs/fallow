@@ -6,7 +6,7 @@ use fallow_types::results::{PolicyRuleKind, PolicyViolation, PolicyViolationSeve
 
 use crate::discover::FileId;
 use crate::graph::ModuleGraph;
-use crate::suppress::{IssueKind, SuppressionContext};
+use crate::suppress::SuppressionContext;
 
 use super::boundary_calls::canonical_callee_path;
 use super::security::CalleePattern;
@@ -128,9 +128,6 @@ pub fn find_policy_violations(
             scoped_file_counts[*index] += 1;
         }
 
-        if suppressions.is_file_suppressed(node.file_id, IssueKind::PolicyViolation) {
-            continue;
-        }
         let Some(module) = modules_by_id.get(&node.file_id) else {
             continue;
         };
@@ -253,7 +250,7 @@ fn collect_banned_imports(
             }
             let (line, col) =
                 byte_offset_to_line_col(line_offsets_by_file, node.file_id, span_start);
-            if suppressions.is_suppressed(node.file_id, line, IssueKind::PolicyViolation) {
+            if suppressions.is_policy_suppressed(node.file_id, line, rule.pack, &rule.rule.id) {
                 continue;
             }
             violations.push(PolicyViolation {
@@ -297,7 +294,7 @@ fn collect_banned_calls(
         };
         let (line, col) =
             byte_offset_to_line_col(line_offsets_by_file, node.file_id, callee_use.span_start);
-        if suppressions.is_suppressed(node.file_id, line, IssueKind::PolicyViolation) {
+        if suppressions.is_policy_suppressed(node.file_id, line, rule.pack, &rule.rule.id) {
             continue;
         }
         violations.push(PolicyViolation {

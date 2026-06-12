@@ -13,6 +13,7 @@ use oxc_span::Span;
 
 use crate::ExportName;
 use fallow_types::extract::{NamespaceObjectAlias, VisibilityTag};
+use fallow_types::suppress::{PolicyRuleSuppression, SuppressionTarget};
 
 /// Seconds-since-Unix-epoch from the wall clock, saturating to 0 if the
 /// system clock is set before the epoch. Used as the LRU bookkeeping
@@ -163,14 +164,27 @@ fn cached_suppressions_to_module(
 ) -> Vec<crate::suppress::Suppression> {
     suppressions
         .iter()
-        .map(|suppression| crate::suppress::Suppression {
-            line: suppression.line,
-            comment_line: suppression.comment_line,
-            kind: if suppression.kind == 0 {
+        .map(|suppression| {
+            let target = if suppression.kind == 0 {
                 None
+            } else if suppression.kind
+                == crate::suppress::IssueKind::PolicyViolation.to_discriminant()
+                && !suppression.policy_pack.is_empty()
+                && !suppression.policy_rule_id.is_empty()
+            {
+                Some(SuppressionTarget::PolicyRule(PolicyRuleSuppression::new(
+                    suppression.policy_pack.clone(),
+                    suppression.policy_rule_id.clone(),
+                )))
             } else {
                 crate::suppress::IssueKind::from_discriminant(suppression.kind)
-            },
+                    .map(SuppressionTarget::Issue)
+            };
+            crate::suppress::Suppression {
+                line: suppression.line,
+                comment_line: suppression.comment_line,
+                target,
+            }
         })
         .collect()
 }
@@ -352,12 +366,25 @@ fn module_suppressions_to_cached(
 ) -> Vec<CachedSuppression> {
     suppressions
         .iter()
-        .map(|suppression| CachedSuppression {
-            line: suppression.line,
-            comment_line: suppression.comment_line,
-            kind: suppression
-                .kind
-                .map_or(0, crate::suppress::IssueKind::to_discriminant),
+        .map(|suppression| {
+            let (kind, policy_pack, policy_rule_id) = match &suppression.target {
+                None => (0, String::new(), String::new()),
+                Some(SuppressionTarget::Issue(kind)) => {
+                    (kind.to_discriminant(), String::new(), String::new())
+                }
+                Some(SuppressionTarget::PolicyRule(target)) => (
+                    crate::suppress::IssueKind::PolicyViolation.to_discriminant(),
+                    target.pack.clone(),
+                    target.rule_id.clone(),
+                ),
+            };
+            CachedSuppression {
+                line: suppression.line,
+                comment_line: suppression.comment_line,
+                kind,
+                policy_pack,
+                policy_rule_id,
+            }
         })
         .collect()
 }

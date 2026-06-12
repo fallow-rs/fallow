@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use fallow_types::suppress::is_valid_policy_identifier;
 use rustc_hash::FxHashSet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -34,8 +35,9 @@ pub enum RulePackRuleKind {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RulePackRule {
-    /// Rule id, unique within the pack. `"<pack>/<id>"` is the finding's
-    /// policy identity across output formats and baselines.
+    /// Rule id, unique within the pack. Must use only ASCII letters, digits,
+    /// `.`, `_`, and `-` so `"<pack>/<id>"` is unambiguous in output,
+    /// baselines, and scoped suppression comments.
     pub id: String,
     /// Which check this rule performs.
     pub kind: RulePackRuleKind,
@@ -116,8 +118,9 @@ pub struct RulePackDef {
     /// Pack format version. Must be `1`; the field exists so future rule
     /// kinds can be added without breaking older fallow builds silently.
     pub version: u32,
-    /// Pack name, unique across all loaded packs. Part of each finding's
-    /// `"<pack>/<id>"` policy identity.
+    /// Pack name, unique across all loaded packs. Must use only ASCII
+    /// letters, digits, `.`, `_`, and `-` so `"<pack>/<id>"` is unambiguous in
+    /// output, baselines, and scoped suppression comments.
     pub name: String,
     /// Optional human description of the pack's intent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -262,6 +265,11 @@ fn validate_pack(pack: &RulePackDef, path: &Path, errors: &mut Vec<RulePackError
     }
     if pack.name.trim().is_empty() {
         errors.push(err("pack `name` must not be empty".to_owned()));
+    } else if !is_valid_policy_identifier(&pack.name) {
+        errors.push(err(format!(
+            "pack `name` '{}' must use only ASCII letters, digits, '.', '_', and '-'",
+            pack.name
+        )));
     }
     if pack.rules.is_empty() {
         errors.push(err(
@@ -273,6 +281,13 @@ fn validate_pack(pack: &RulePackDef, path: &Path, errors: &mut Vec<RulePackError
     for rule in &pack.rules {
         if rule.id.trim().is_empty() {
             errors.push(err("rule `id` must not be empty".to_owned()));
+            continue;
+        }
+        if !is_valid_policy_identifier(&rule.id) {
+            errors.push(err(format!(
+                "rule `id` '{}' must use only ASCII letters, digits, '.', '_', and '-'",
+                rule.id
+            )));
             continue;
         }
         if !seen_ids.insert(rule.id.as_str()) {
@@ -500,6 +515,36 @@ mod tests {
             .join("\n");
         assert!(joined.contains("declares no rules"));
         assert!(joined.contains("`name` must not be empty"));
+    }
+
+    #[test]
+    fn rejects_pack_names_that_cannot_be_scoped_suppression_tokens() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_pack(
+            dir.path(),
+            "policy.json",
+            r#"{ "version": 1, "name": "team/policy", "rules": [
+                { "id": "no-child-process", "kind": "banned-call", "callees": ["fetch"] }
+            ] }"#,
+        );
+        let errors = load_rule_packs(dir.path(), &[path]).unwrap_err();
+        assert!(errors[0].message.contains("pack `name` 'team/policy'"));
+        assert!(errors[0].message.contains("ASCII letters"));
+    }
+
+    #[test]
+    fn rejects_rule_ids_that_cannot_be_scoped_suppression_tokens() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_pack(
+            dir.path(),
+            "policy.json",
+            r#"{ "version": 1, "name": "team-policy", "rules": [
+                { "id": "no:child-process", "kind": "banned-call", "callees": ["fetch"] }
+            ] }"#,
+        );
+        let errors = load_rule_packs(dir.path(), &[path]).unwrap_err();
+        assert!(errors[0].message.contains("rule `id` 'no:child-process'"));
+        assert!(errors[0].message.contains("ASCII letters"));
     }
 
     #[test]

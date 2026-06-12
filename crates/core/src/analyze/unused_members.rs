@@ -3535,11 +3535,7 @@ mod tests {
             Some(0),
         )];
 
-        let supps = vec![Suppression {
-            line: 1,
-            comment_line: 0,
-            kind: Some(IssueKind::UnusedEnumMember),
-        }];
+        let supps = vec![Suppression::issue(1, 0, IssueKind::UnusedEnumMember)];
         let mut supp_map: FxHashMap<FileId, &[Suppression]> = FxHashMap::default();
         supp_map.insert(FileId(1), &supps);
         let suppressions = SuppressionContext::from_map(supp_map);
@@ -3571,11 +3567,7 @@ mod tests {
             Some(0),
         )];
 
-        let supps = vec![Suppression {
-            line: 1,
-            comment_line: 0,
-            kind: Some(IssueKind::UnusedClassMember),
-        }];
+        let supps = vec![Suppression::issue(1, 0, IssueKind::UnusedClassMember)];
         let mut supp_map: FxHashMap<FileId, &[Suppression]> = FxHashMap::default();
         supp_map.insert(FileId(1), &supps);
         let suppressions = SuppressionContext::from_map(supp_map);

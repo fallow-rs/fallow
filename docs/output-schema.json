@@ -11930,7 +11930,7 @@
         "severity",
         "actions"
       ],
-      "description": "Wire-shape envelope for a [`PolicyViolation`] finding. Carries actions for\nreplacing the banned call or import, or suppressing it with the\n`policy-violation` token."
+      "description": "Wire-shape envelope for a [`PolicyViolation`] finding. Carries actions for\nreplacing the banned call or import, or suppressing it with a scoped\n`policy-violation:<pack>/<rule-id>` token."
     },
     "PolicyRuleKind": {
       "oneOf": [

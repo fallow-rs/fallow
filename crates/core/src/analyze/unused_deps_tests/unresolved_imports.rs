@@ -653,11 +653,11 @@ fn unresolved_import_suppressed_by_inline_comment() {
     }];
 
     let config = test_config(PathBuf::from("/project"));
-    let supps = vec![Suppression {
-        line: 1,
-        comment_line: 0,
-        kind: Some(suppress::IssueKind::UnresolvedImport),
-    }];
+    let supps = vec![Suppression::issue(
+        1,
+        0,
+        suppress::IssueKind::UnresolvedImport,
+    )];
     let mut supp_map: FxHashMap<FileId, &[Suppression]> = FxHashMap::default();
     supp_map.insert(FileId(0), &supps);
     let suppressions = SuppressionContext::from_map(supp_map);
@@ -711,11 +711,11 @@ fn unresolved_dynamic_import_suppressed_by_inline_comment() {
     }];
 
     let config = test_config(PathBuf::from("/project"));
-    let supps = vec![Suppression {
-        line: 2,
-        comment_line: 1,
-        kind: Some(suppress::IssueKind::UnresolvedImport),
-    }];
+    let supps = vec![Suppression::issue(
+        2,
+        1,
+        suppress::IssueKind::UnresolvedImport,
+    )];
     let mut supp_map: FxHashMap<FileId, &[Suppression]> = FxHashMap::default();
     supp_map.insert(FileId(0), &supps);
     let suppressions = SuppressionContext::from_map(supp_map);
@@ -771,11 +771,11 @@ fn unresolved_import_file_level_suppression() {
     }];
 
     let config = test_config(PathBuf::from("/project"));
-    let supps = vec![Suppression {
-        line: 0,
-        comment_line: 1,
-        kind: Some(suppress::IssueKind::UnresolvedImport),
-    }];
+    let supps = vec![Suppression::issue(
+        0,
+        1,
+        suppress::IssueKind::UnresolvedImport,
+    )];
     let mut supp_map: FxHashMap<FileId, &[Suppression]> = FxHashMap::default();
     supp_map.insert(FileId(0), &supps);
     let suppressions = SuppressionContext::from_map(supp_map);
@@ -917,11 +917,7 @@ fn unresolved_import_not_suppressed_by_wrong_kind() {
     }];
 
     let config = test_config(PathBuf::from("/project"));
-    let supps = vec![Suppression {
-        line: 1,
-        comment_line: 0,
-        kind: Some(suppress::IssueKind::UnusedExport),
-    }];
+    let supps = vec![Suppression::issue(1, 0, suppress::IssueKind::UnusedExport)];
     let mut supp_map: FxHashMap<FileId, &[Suppression]> = FxHashMap::default();
     supp_map.insert(FileId(0), &supps);
     let suppressions = SuppressionContext::from_map(supp_map);

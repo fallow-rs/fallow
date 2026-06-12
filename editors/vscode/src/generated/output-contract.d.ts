@@ -2080,8 +2080,8 @@ introduced?: (AuditIntroduced | null)
 }
 /**
  * Wire-shape envelope for a [`PolicyViolation`] finding. Carries actions for
- * replacing the banned call or import, or suppressing it with the
- * `policy-violation` token.
+ * replacing the banned call or import, or suppressing it with a scoped
+ * `policy-violation:<pack>/<rule-id>` token.
  */
 export interface PolicyViolationFinding {
 /**

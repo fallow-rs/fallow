@@ -1,9 +1,11 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use fallow_config::{ResolvedConfig, RulesConfig, Severity};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
-pub use fallow_types::suppress::{IssueKind, Suppression, UnknownSuppressionKind};
+pub use fallow_types::suppress::{
+    IssueKind, PolicyRuleSuppression, Suppression, UnknownSuppressionKind, issue_kind_to_kebab,
+};
 
 pub use fallow_extract::suppress::parse_suppressions_from_source;
 
@@ -18,37 +20,7 @@ use crate::results::{ActiveSuppression, StaleSuppression, SuppressionOrigin};
 /// detection and active-suppression capture so the two never drift.
 #[must_use]
 pub fn kind_to_kebab(kind: IssueKind) -> &'static str {
-    match kind {
-        IssueKind::UnusedFile => "unused-file",
-        IssueKind::UnusedExport => "unused-export",
-        IssueKind::UnusedType => "unused-type",
-        IssueKind::PrivateTypeLeak => "private-type-leak",
-        IssueKind::UnusedDependency => "unused-dependency",
-        IssueKind::UnusedDevDependency => "unused-dev-dependency",
-        IssueKind::UnusedEnumMember => "unused-enum-member",
-        IssueKind::UnusedClassMember => "unused-class-member",
-        IssueKind::UnresolvedImport => "unresolved-import",
-        IssueKind::UnlistedDependency => "unlisted-dependency",
-        IssueKind::DuplicateExport => "duplicate-export",
-        IssueKind::CodeDuplication => "code-duplication",
-        IssueKind::CircularDependency => "circular-dependency",
-        IssueKind::ReExportCycle => "re-export-cycle",
-        IssueKind::TypeOnlyDependency => "type-only-dependency",
-        IssueKind::TestOnlyDependency => "test-only-dependency",
-        IssueKind::BoundaryViolation => "boundary-violation",
-        IssueKind::CoverageGaps => "coverage-gaps",
-        IssueKind::FeatureFlag => "feature-flag",
-        IssueKind::Complexity => "complexity",
-        IssueKind::StaleSuppression => "stale-suppression",
-        IssueKind::PnpmCatalogEntry => "unused-catalog-entry",
-        IssueKind::EmptyCatalogGroup => "empty-catalog-group",
-        IssueKind::UnresolvedCatalogReference => "unresolved-catalog-reference",
-        IssueKind::UnusedDependencyOverride => "unused-dependency-override",
-        IssueKind::MisconfiguredDependencyOverride => "misconfigured-dependency-override",
-        IssueKind::SecurityClientServerLeak => "security-client-server-leak",
-        IssueKind::SecuritySink => "security-sink",
-        IssueKind::PolicyViolation => "policy-violation",
-    }
+    issue_kind_to_kebab(kind)
 }
 
 /// Map an `IssueKind` to its corresponding severity in `RulesConfig`.
@@ -208,12 +180,7 @@ impl<'a> SuppressionContext<'a> {
             return false;
         };
         for (i, s) in supps.iter().enumerate() {
-            let matched = if s.line == 0 {
-                s.kind.is_none() || s.kind == Some(kind)
-            } else {
-                s.line == line && (s.kind.is_none() || s.kind == Some(kind))
-            };
-            if matched {
+            if s.matches_issue_kind(line, kind) {
                 used[i].store(true, Ordering::Relaxed);
                 return true;
             }
@@ -232,7 +199,31 @@ impl<'a> SuppressionContext<'a> {
             return false;
         };
         for (i, s) in supps.iter().enumerate() {
-            if s.line == 0 && (s.kind.is_none() || s.kind == Some(kind)) {
+            if s.line == 0 && s.matches_issue_kind(0, kind) {
+                used[i].store(true, Ordering::Relaxed);
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Check if a policy finding at a given line should be suppressed.
+    #[must_use]
+    pub fn is_policy_suppressed(
+        &self,
+        file_id: FileId,
+        line: u32,
+        pack: &str,
+        rule_id: &str,
+    ) -> bool {
+        let Some(supps) = self.by_file.get(&file_id) else {
+            return false;
+        };
+        let Some(used) = self.used.get(&file_id) else {
+            return false;
+        };
+        for (i, s) in supps.iter().enumerate() {
+            if s.matches_policy_rule(line, pack, rule_id) {
                 used[i].store(true, Ordering::Relaxed);
                 return true;
             }
@@ -271,6 +262,7 @@ impl<'a> SuppressionContext<'a> {
         config: &ResolvedConfig,
     ) -> Vec<StaleSuppression> {
         let mut stale = Vec::new();
+        let mut warned_unknown_policy_targets: FxHashSet<(String, String)> = FxHashSet::default();
 
         for (&file_id, supps) in &self.by_file {
             let used = &self.used[&file_id];
@@ -282,20 +274,41 @@ impl<'a> SuppressionContext<'a> {
                     continue;
                 }
 
-                if let Some(kind) = s.kind
+                if let Some(kind) = s.issue_kind_target()
                     && NON_CORE_KINDS.contains(&kind)
                 {
                     continue;
                 }
 
-                if let Some(kind) = s.kind
+                if let Some(kind) = s.issue_kind_target()
                     && severity_for_kind(&file_rules, kind) == Severity::Off
                 {
                     continue;
                 }
 
+                if let Some(target) = s.policy_rule_target() {
+                    if file_rules.policy_violation == Severity::Off
+                        || policy_rule_is_disabled(config, target)
+                    {
+                        continue;
+                    }
+
+                    if !policy_rule_exists(config, target) {
+                        let token = target.token();
+                        let key = (path.to_string_lossy().to_string(), token.clone());
+                        if warned_unknown_policy_targets.insert(key) {
+                            tracing::warn!(
+                                "{}:{}: suppression '{}' names no loaded rule-pack rule",
+                                path.display(),
+                                s.comment_line,
+                                token
+                            );
+                        }
+                    }
+                }
+
                 let is_file_level = s.line == 0;
-                let issue_kind_str = s.kind.map(|k| kind_to_kebab(k).to_string());
+                let issue_kind_str = s.target_token();
 
                 stale.push(StaleSuppression {
                     path: path.clone(),
@@ -356,7 +369,7 @@ impl<'a> SuppressionContext<'a> {
             for s in *supps {
                 active.push(ActiveSuppression {
                     path: path.clone(),
-                    kind: s.kind.map(|k| kind_to_kebab(k).to_string()),
+                    kind: s.target_token(),
                     is_file_level: s.line == 0,
                 });
             }
@@ -371,12 +384,9 @@ impl<'a> SuppressionContext<'a> {
 /// (e.g., CLI health/flags commands) that don't need tracking.
 #[must_use]
 pub fn is_suppressed(suppressions: &[Suppression], line: u32, kind: IssueKind) -> bool {
-    suppressions.iter().any(|s| {
-        if s.line == 0 {
-            return s.kind.is_none() || s.kind == Some(kind);
-        }
-        s.line == line && (s.kind.is_none() || s.kind == Some(kind))
-    })
+    suppressions
+        .iter()
+        .any(|s| s.matches_issue_kind(line, kind))
 }
 
 /// Check if the entire file is suppressed (for issue types that don't have line numbers).
@@ -386,7 +396,23 @@ pub fn is_suppressed(suppressions: &[Suppression], line: u32, kind: IssueKind) -
 pub fn is_file_suppressed(suppressions: &[Suppression], kind: IssueKind) -> bool {
     suppressions
         .iter()
-        .any(|s| s.line == 0 && (s.kind.is_none() || s.kind == Some(kind)))
+        .any(|s| s.line == 0 && s.matches_issue_kind(0, kind))
+}
+
+fn policy_rule_exists(config: &ResolvedConfig, target: &PolicyRuleSuppression) -> bool {
+    config.rule_packs.iter().any(|pack| {
+        pack.name == target.pack && pack.rules.iter().any(|rule| rule.id == target.rule_id)
+    })
+}
+
+fn policy_rule_is_disabled(config: &ResolvedConfig, target: &PolicyRuleSuppression) -> bool {
+    config.rule_packs.iter().any(|pack| {
+        pack.name == target.pack
+            && pack
+                .rules
+                .iter()
+                .any(|rule| rule.id == target.rule_id && rule.severity == Some(Severity::Off))
+    })
 }
 
 #[cfg(test)]
@@ -516,7 +542,7 @@ mod tests {
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 0);
-        assert!(suppressions[0].kind.is_none());
+        assert!(suppressions[0].issue_kind_target().is_none());
     }
 
     #[test]
@@ -525,7 +551,10 @@ mod tests {
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 0);
-        assert_eq!(suppressions[0].kind, Some(IssueKind::UnusedExport));
+        assert_eq!(
+            suppressions[0].issue_kind_target(),
+            Some(IssueKind::UnusedExport)
+        );
     }
 
     #[test]
@@ -535,7 +564,7 @@ mod tests {
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 3); // suppresses line 3 (the export)
-        assert!(suppressions[0].kind.is_none());
+        assert!(suppressions[0].issue_kind_target().is_none());
     }
 
     #[test]
@@ -544,7 +573,10 @@ mod tests {
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 2);
-        assert_eq!(suppressions[0].kind, Some(IssueKind::UnusedExport));
+        assert_eq!(
+            suppressions[0].issue_kind_target(),
+            Some(IssueKind::UnusedExport)
+        );
     }
 
     #[test]
@@ -558,44 +590,28 @@ mod tests {
 
     #[test]
     fn is_suppressed_file_wide() {
-        let suppressions = vec![Suppression {
-            line: 0,
-            comment_line: 1,
-            kind: None,
-        }];
+        let suppressions = vec![Suppression::all(0, 1)];
         assert!(is_suppressed(&suppressions, 5, IssueKind::UnusedExport));
         assert!(is_suppressed(&suppressions, 10, IssueKind::UnusedFile));
     }
 
     #[test]
     fn is_suppressed_file_wide_specific_kind() {
-        let suppressions = vec![Suppression {
-            line: 0,
-            comment_line: 1,
-            kind: Some(IssueKind::UnusedExport),
-        }];
+        let suppressions = vec![Suppression::issue(0, 1, IssueKind::UnusedExport)];
         assert!(is_suppressed(&suppressions, 5, IssueKind::UnusedExport));
         assert!(!is_suppressed(&suppressions, 5, IssueKind::UnusedType));
     }
 
     #[test]
     fn is_suppressed_line_specific() {
-        let suppressions = vec![Suppression {
-            line: 5,
-            comment_line: 4,
-            kind: None,
-        }];
+        let suppressions = vec![Suppression::all(5, 4)];
         assert!(is_suppressed(&suppressions, 5, IssueKind::UnusedExport));
         assert!(!is_suppressed(&suppressions, 6, IssueKind::UnusedExport));
     }
 
     #[test]
     fn is_suppressed_line_and_kind() {
-        let suppressions = vec![Suppression {
-            line: 5,
-            comment_line: 4,
-            kind: Some(IssueKind::UnusedExport),
-        }];
+        let suppressions = vec![Suppression::issue(5, 4, IssueKind::UnusedExport)];
         assert!(is_suppressed(&suppressions, 5, IssueKind::UnusedExport));
         assert!(!is_suppressed(&suppressions, 5, IssueKind::UnusedType));
         assert!(!is_suppressed(&suppressions, 6, IssueKind::UnusedExport));
@@ -608,26 +624,14 @@ mod tests {
 
     #[test]
     fn is_file_suppressed_works() {
-        let suppressions = vec![Suppression {
-            line: 0,
-            comment_line: 1,
-            kind: None,
-        }];
+        let suppressions = vec![Suppression::all(0, 1)];
         assert!(is_file_suppressed(&suppressions, IssueKind::UnusedFile));
 
-        let suppressions = vec![Suppression {
-            line: 0,
-            comment_line: 1,
-            kind: Some(IssueKind::UnusedFile),
-        }];
+        let suppressions = vec![Suppression::issue(0, 1, IssueKind::UnusedFile)];
         assert!(is_file_suppressed(&suppressions, IssueKind::UnusedFile));
         assert!(!is_file_suppressed(&suppressions, IssueKind::UnusedExport));
 
-        let suppressions = vec![Suppression {
-            line: 5,
-            comment_line: 4,
-            kind: None,
-        }];
+        let suppressions = vec![Suppression::all(5, 4)];
         assert!(!is_file_suppressed(&suppressions, IssueKind::UnusedFile));
     }
 
@@ -646,10 +650,13 @@ mod tests {
         assert_eq!(suppressions.len(), 2);
 
         assert_eq!(suppressions[0].line, 0);
-        assert!(suppressions[0].kind.is_none());
+        assert!(suppressions[0].issue_kind_target().is_none());
 
         assert_eq!(suppressions[1].line, 3); // suppresses line 3 (export const foo)
-        assert_eq!(suppressions[1].kind, Some(IssueKind::UnusedExport));
+        assert_eq!(
+            suppressions[1].issue_kind_target(),
+            Some(IssueKind::UnusedExport)
+        );
     }
 
     #[test]
@@ -658,22 +665,14 @@ mod tests {
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 0);
-        assert!(suppressions[0].kind.is_none());
+        assert!(suppressions[0].issue_kind_target().is_none());
     }
 
     #[test]
     fn is_suppressed_multiple_suppressions_different_kinds() {
         let suppressions = vec![
-            Suppression {
-                line: 5,
-                comment_line: 4,
-                kind: Some(IssueKind::UnusedExport),
-            },
-            Suppression {
-                line: 5,
-                comment_line: 4,
-                kind: Some(IssueKind::UnusedType),
-            },
+            Suppression::issue(5, 4, IssueKind::UnusedExport),
+            Suppression::issue(5, 4, IssueKind::UnusedType),
         ];
         assert!(is_suppressed(&suppressions, 5, IssueKind::UnusedExport));
         assert!(is_suppressed(&suppressions, 5, IssueKind::UnusedType));
@@ -683,16 +682,8 @@ mod tests {
     #[test]
     fn is_suppressed_file_wide_blanket_and_specific_coexist() {
         let suppressions = vec![
-            Suppression {
-                line: 0,
-                comment_line: 1,
-                kind: Some(IssueKind::UnusedExport),
-            },
-            Suppression {
-                line: 5,
-                comment_line: 4,
-                kind: None, // blanket suppress on line 5
-            },
+            Suppression::issue(0, 1, IssueKind::UnusedExport),
+            Suppression::all(5, 4),
         ];
         assert!(is_suppressed(&suppressions, 10, IssueKind::UnusedExport));
         assert!(!is_suppressed(&suppressions, 10, IssueKind::UnusedType));
@@ -703,11 +694,7 @@ mod tests {
 
     #[test]
     fn is_file_suppressed_blanket_suppresses_all_kinds() {
-        let suppressions = vec![Suppression {
-            line: 0,
-            comment_line: 1,
-            kind: None, // blanket file-wide
-        }];
+        let suppressions = vec![Suppression::all(0, 1)];
         assert!(is_file_suppressed(&suppressions, IssueKind::UnusedFile));
         assert!(is_file_suppressed(&suppressions, IssueKind::UnusedExport));
         assert!(is_file_suppressed(&suppressions, IssueKind::UnusedType));
@@ -727,14 +714,26 @@ mod tests {
     }
 
     #[test]
+    fn scoped_policy_suppression_does_not_match_generic_policy_kind() {
+        let suppressions = vec![Suppression::policy_rule(5, 4, "team-policy", "no-fs")];
+        assert!(!is_suppressed(&suppressions, 5, IssueKind::PolicyViolation));
+    }
+
+    #[test]
     fn parse_multiple_next_line_suppressions() {
         let source = "// fallow-ignore-next-line unused-export\nexport const foo = 1;\n// fallow-ignore-next-line unused-type\nexport type Bar = string;\n";
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 2);
         assert_eq!(suppressions[0].line, 2);
-        assert_eq!(suppressions[0].kind, Some(IssueKind::UnusedExport));
+        assert_eq!(
+            suppressions[0].issue_kind_target(),
+            Some(IssueKind::UnusedExport)
+        );
         assert_eq!(suppressions[1].line, 4);
-        assert_eq!(suppressions[1].kind, Some(IssueKind::UnusedType));
+        assert_eq!(
+            suppressions[1].issue_kind_target(),
+            Some(IssueKind::UnusedType)
+        );
     }
 
     #[test]
@@ -743,7 +742,10 @@ mod tests {
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 0);
-        assert_eq!(suppressions[0].kind, Some(IssueKind::CodeDuplication));
+        assert_eq!(
+            suppressions[0].issue_kind_target(),
+            Some(IssueKind::CodeDuplication)
+        );
     }
 
     #[test]
@@ -752,7 +754,10 @@ mod tests {
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 0);
-        assert_eq!(suppressions[0].kind, Some(IssueKind::CircularDependency));
+        assert_eq!(
+            suppressions[0].issue_kind_target(),
+            Some(IssueKind::CircularDependency)
+        );
     }
 
     /// Every `IssueKind` must be explicitly placed in either `NON_CORE_KINDS`

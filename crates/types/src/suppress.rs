@@ -84,8 +84,8 @@ pub enum IssueKind {
     /// token covers all catalogue categories.
     SecuritySink,
     /// A banned call or banned import matched by a declarative rule pack
-    /// (`rulePacks` config). ONE suppression token covers every pack rule;
-    /// per-rule suppression is a tracked follow-up.
+    /// (`rulePacks` config). The bare token covers every pack rule; scoped
+    /// tokens can target one `<pack>/<rule-id>` identity.
     PolicyViolation,
 }
 
@@ -211,6 +211,137 @@ impl IssueKind {
     }
 }
 
+/// One scoped rule-pack policy suppression target.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PolicyRuleSuppression {
+    /// Rule-pack name.
+    pub pack: String,
+    /// Rule id within the pack.
+    pub rule_id: String,
+}
+
+impl PolicyRuleSuppression {
+    /// Build a scoped policy suppression target.
+    #[must_use]
+    pub fn new(pack: impl Into<String>, rule_id: impl Into<String>) -> Self {
+        Self {
+            pack: pack.into(),
+            rule_id: rule_id.into(),
+        }
+    }
+
+    /// Canonical suppression token.
+    #[must_use]
+    pub fn token(&self) -> String {
+        format!("policy-violation:{}/{}", self.pack, self.rule_id)
+    }
+}
+
+/// A specific suppression target parsed from a comment token.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SuppressionTarget {
+    /// A regular issue-kind token such as `unused-export` or bare
+    /// `policy-violation`.
+    Issue(IssueKind),
+    /// A scoped rule-pack policy token such as
+    /// `policy-violation:team-policy/no-child-process`.
+    PolicyRule(PolicyRuleSuppression),
+}
+
+impl SuppressionTarget {
+    /// Return the regular issue kind when this target is a bare issue-kind
+    /// token.
+    #[must_use]
+    pub const fn issue_kind(&self) -> Option<IssueKind> {
+        match self {
+            Self::Issue(kind) => Some(*kind),
+            Self::PolicyRule(_) => None,
+        }
+    }
+
+    /// Canonical suppression token for output and active-suppression capture.
+    #[must_use]
+    pub fn token(&self) -> String {
+        match self {
+            Self::Issue(kind) => issue_kind_to_kebab(*kind).to_owned(),
+            Self::PolicyRule(rule) => rule.token(),
+        }
+    }
+}
+
+/// Convert an [`IssueKind`] to its canonical suppression token.
+#[must_use]
+pub const fn issue_kind_to_kebab(kind: IssueKind) -> &'static str {
+    match kind {
+        IssueKind::UnusedFile => "unused-file",
+        IssueKind::UnusedExport => "unused-export",
+        IssueKind::UnusedType => "unused-type",
+        IssueKind::PrivateTypeLeak => "private-type-leak",
+        IssueKind::UnusedDependency => "unused-dependency",
+        IssueKind::UnusedDevDependency => "unused-dev-dependency",
+        IssueKind::UnusedEnumMember => "unused-enum-member",
+        IssueKind::UnusedClassMember => "unused-class-member",
+        IssueKind::UnresolvedImport => "unresolved-import",
+        IssueKind::UnlistedDependency => "unlisted-dependency",
+        IssueKind::DuplicateExport => "duplicate-export",
+        IssueKind::CodeDuplication => "code-duplication",
+        IssueKind::CircularDependency => "circular-dependency",
+        IssueKind::ReExportCycle => "re-export-cycle",
+        IssueKind::TypeOnlyDependency => "type-only-dependency",
+        IssueKind::TestOnlyDependency => "test-only-dependency",
+        IssueKind::BoundaryViolation => "boundary-violation",
+        IssueKind::CoverageGaps => "coverage-gaps",
+        IssueKind::FeatureFlag => "feature-flag",
+        IssueKind::Complexity => "complexity",
+        IssueKind::StaleSuppression => "stale-suppression",
+        IssueKind::PnpmCatalogEntry => "unused-catalog-entry",
+        IssueKind::EmptyCatalogGroup => "empty-catalog-group",
+        IssueKind::UnresolvedCatalogReference => "unresolved-catalog-reference",
+        IssueKind::UnusedDependencyOverride => "unused-dependency-override",
+        IssueKind::MisconfiguredDependencyOverride => "misconfigured-dependency-override",
+        IssueKind::SecurityClientServerLeak => "security-client-server-leak",
+        IssueKind::SecuritySink => "security-sink",
+        IssueKind::PolicyViolation => "policy-violation",
+    }
+}
+
+/// Parse a suppression token into a structured target.
+#[must_use]
+pub fn parse_suppression_target(token: &str) -> Option<SuppressionTarget> {
+    parse_policy_rule_suppression_token(token)
+        .map(SuppressionTarget::PolicyRule)
+        .or_else(|| IssueKind::parse(token).map(SuppressionTarget::Issue))
+}
+
+/// Parse canonical scoped policy suppression tokens.
+///
+/// The plural prefix is accepted for consistency with the bare legacy alias,
+/// but output always uses singular `policy-violation:`.
+#[must_use]
+pub fn parse_policy_rule_suppression_token(token: &str) -> Option<PolicyRuleSuppression> {
+    let identity = token
+        .strip_prefix("policy-violation:")
+        .or_else(|| token.strip_prefix("policy-violations:"))?;
+    let (pack, rule_id) = identity.split_once('/')?;
+    if rule_id.contains('/') {
+        return None;
+    }
+    if !is_valid_policy_identifier(pack) || !is_valid_policy_identifier(rule_id) {
+        return None;
+    }
+    Some(PolicyRuleSuppression::new(pack, rule_id))
+}
+
+/// Whether a rule-pack name or rule id can be used inside
+/// `policy-violation:<pack>/<rule-id>` without escaping.
+#[must_use]
+pub fn is_valid_policy_identifier(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+}
+
 /// A suppression directive parsed from a source comment.
 ///
 /// # Examples
@@ -219,16 +350,12 @@ impl IssueKind {
 /// use fallow_types::suppress::{Suppression, IssueKind};
 ///
 /// // File-wide suppression (line 0, no specific kind)
-/// let file_wide = Suppression { line: 0, comment_line: 1, kind: None };
+/// let file_wide = Suppression::all(0, 1);
 /// assert_eq!(file_wide.line, 0);
 ///
 /// // Line-specific suppression for unused exports
-/// let line_suppress = Suppression {
-///     line: 42,
-///     comment_line: 41,
-///     kind: Some(IssueKind::UnusedExport),
-/// };
-/// assert_eq!(line_suppress.kind, Some(IssueKind::UnusedExport));
+/// let line_suppress = Suppression::issue(42, 41, IssueKind::UnusedExport);
+/// assert_eq!(line_suppress.issue_kind_target(), Some(IssueKind::UnusedExport));
 /// ```
 #[derive(Debug, Clone)]
 pub struct Suppression {
@@ -238,8 +365,105 @@ pub struct Suppression {
     /// For `fallow-ignore-next-line`, this is `line - 1`.
     /// For `fallow-ignore-file`, this is the actual line of the comment in the source.
     pub comment_line: u32,
-    /// None = suppress all issue kinds on this line.
-    pub kind: Option<IssueKind>,
+    /// None = suppress all issue kinds on this line or file.
+    pub target: Option<SuppressionTarget>,
+}
+
+impl Suppression {
+    /// Build a blanket suppression.
+    #[must_use]
+    pub const fn all(line: u32, comment_line: u32) -> Self {
+        Self {
+            line,
+            comment_line,
+            target: None,
+        }
+    }
+
+    /// Build a regular issue-kind suppression.
+    #[must_use]
+    pub const fn issue(line: u32, comment_line: u32, kind: IssueKind) -> Self {
+        Self {
+            line,
+            comment_line,
+            target: Some(SuppressionTarget::Issue(kind)),
+        }
+    }
+
+    /// Build a scoped rule-pack policy suppression.
+    #[must_use]
+    pub fn policy_rule(
+        line: u32,
+        comment_line: u32,
+        pack: impl Into<String>,
+        rule_id: impl Into<String>,
+    ) -> Self {
+        Self {
+            line,
+            comment_line,
+            target: Some(SuppressionTarget::PolicyRule(PolicyRuleSuppression::new(
+                pack, rule_id,
+            ))),
+        }
+    }
+
+    /// The bare issue kind if this suppression targets one.
+    #[must_use]
+    pub const fn issue_kind_target(&self) -> Option<IssueKind> {
+        match &self.target {
+            Some(SuppressionTarget::Issue(kind)) => Some(*kind),
+            Some(SuppressionTarget::PolicyRule(_)) | None => None,
+        }
+    }
+
+    /// The scoped policy target if this suppression targets one rule-pack rule.
+    #[must_use]
+    pub const fn policy_rule_target(&self) -> Option<&PolicyRuleSuppression> {
+        match &self.target {
+            Some(SuppressionTarget::PolicyRule(rule)) => Some(rule),
+            Some(SuppressionTarget::Issue(_)) | None => None,
+        }
+    }
+
+    /// Canonical token for this suppression, or `None` for blanket comments.
+    #[must_use]
+    pub fn target_token(&self) -> Option<String> {
+        self.target.as_ref().map(SuppressionTarget::token)
+    }
+
+    /// Whether the comment applies to `line`.
+    #[must_use]
+    pub const fn applies_to_line(&self, line: u32) -> bool {
+        self.line == 0 || self.line == line
+    }
+
+    /// Whether this suppression covers a regular issue kind on a line.
+    ///
+    /// Scoped policy-rule targets intentionally do not match this generic
+    /// predicate. Policy detection uses [`Self::matches_policy_rule`] so the
+    /// exact pack and rule id are available.
+    #[must_use]
+    pub fn matches_issue_kind(&self, line: u32, kind: IssueKind) -> bool {
+        self.applies_to_line(line)
+            && match &self.target {
+                None => true,
+                Some(SuppressionTarget::Issue(target_kind)) => *target_kind == kind,
+                Some(SuppressionTarget::PolicyRule(_)) => false,
+            }
+    }
+
+    /// Whether this suppression covers a policy finding on a line.
+    #[must_use]
+    pub fn matches_policy_rule(&self, line: u32, pack: &str, rule_id: &str) -> bool {
+        self.applies_to_line(line)
+            && match &self.target {
+                None | Some(SuppressionTarget::Issue(IssueKind::PolicyViolation)) => true,
+                Some(SuppressionTarget::Issue(_)) => false,
+                Some(SuppressionTarget::PolicyRule(target)) => {
+                    target.pack == pack && target.rule_id == rule_id
+                }
+            }
+    }
 }
 
 /// A suppression token that did not parse to any known `IssueKind`.
@@ -399,7 +623,6 @@ pub fn closest_known_kind_name(input: &str) -> Option<&'static str> {
         .map(|(name, _)| name)
 }
 
-const _: () = assert!(std::mem::size_of::<Suppression>() == 12);
 const _: () = assert!(std::mem::size_of::<IssueKind>() == 1);
 
 #[cfg(test)]
@@ -670,25 +893,57 @@ mod tests {
 
     #[test]
     fn suppression_line_zero_is_file_wide() {
-        let s = Suppression {
-            line: 0,
-            comment_line: 1,
-            kind: None,
-        };
+        let s = Suppression::all(0, 1);
         assert_eq!(s.line, 0);
-        assert!(s.kind.is_none());
+        assert!(s.issue_kind_target().is_none());
     }
 
     #[test]
     fn suppression_with_specific_kind_and_line() {
-        let s = Suppression {
-            line: 42,
-            comment_line: 41,
-            kind: Some(IssueKind::UnusedExport),
-        };
+        let s = Suppression::issue(42, 41, IssueKind::UnusedExport);
         assert_eq!(s.line, 42);
         assert_eq!(s.comment_line, 41);
-        assert_eq!(s.kind, Some(IssueKind::UnusedExport));
+        assert_eq!(s.issue_kind_target(), Some(IssueKind::UnusedExport));
+    }
+
+    #[test]
+    fn parses_scoped_policy_suppression_token() {
+        let target =
+            parse_policy_rule_suppression_token("policy-violation:team-policy/no-child-process")
+                .expect("scoped token should parse");
+        assert_eq!(target.pack, "team-policy");
+        assert_eq!(target.rule_id, "no-child-process");
+        assert_eq!(
+            target.token(),
+            "policy-violation:team-policy/no-child-process"
+        );
+    }
+
+    #[test]
+    fn rejects_malformed_scoped_policy_suppression_tokens() {
+        for token in [
+            "policy-violation:",
+            "policy-violation:team-policy",
+            "policy-violation:/no-child-process",
+            "policy-violation:team-policy/",
+            "policy-violation:team-policy/no/child-process",
+            "policy-violation:team policy/no-child-process",
+            "policy-violation:team-policy/no:child-process",
+        ] {
+            assert!(
+                parse_policy_rule_suppression_token(token).is_none(),
+                "{token} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn scoped_policy_suppression_matches_exact_policy_rule_only() {
+        let suppression = Suppression::policy_rule(7, 6, "team-policy", "no-child-process");
+        assert!(suppression.matches_policy_rule(7, "team-policy", "no-child-process"));
+        assert!(!suppression.matches_policy_rule(7, "team-policy", "no-fs"));
+        assert!(!suppression.matches_policy_rule(8, "team-policy", "no-child-process"));
+        assert!(!suppression.matches_issue_kind(7, IssueKind::PolicyViolation));
     }
 
     #[test]

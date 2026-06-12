@@ -538,7 +538,7 @@ fn architecture_rule_guide(id: &str) -> Option<RuleGuide> {
         },
         "fallow/policy-violation" => RuleGuide {
             example: "src/app.ts imports moment while a rule pack bans the moment specifier with the message 'Use date-fns.'",
-            how_to_fix: "Replace the banned call or import with the alternative named in the rule's message. To waive a single line, use `// fallow-ignore-next-line policy-violation`; note the token covers every rule-pack rule on that line, and the file-level form covers the whole file.",
+            how_to_fix: "Replace the banned call or import with the alternative named in the rule's message. To waive one rule, use `// fallow-ignore-next-line policy-violation:<pack>/<rule-id>` or the file-level form. Use bare `policy-violation` only when you intend to suppress every rule-pack finding at that scope.",
         },
         "fallow/stale-suppression" => RuleGuide {
             example: "// fallow-ignore-next-line unused-export remains above an export that is now used.",

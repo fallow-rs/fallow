@@ -1830,11 +1830,7 @@ mod tests {
                 has_cjs_exports: false,
                 has_angular_component_template_url: false,
                 content_hash: 0,
-                suppressions: vec![Suppression {
-                    line: 0,
-                    comment_line: 1,
-                    kind: Some(IssueKind::UnusedFile),
-                }],
+                suppressions: vec![Suppression::issue(0, 1, IssueKind::UnusedFile)],
                 unknown_suppression_kinds: vec![],
                 unused_import_bindings: vec![],
                 type_referenced_import_bindings: vec![],

@@ -5,7 +5,9 @@
 
 use oxc_ast::ast::Comment;
 
-pub use fallow_types::suppress::{IssueKind, Suppression, UnknownSuppressionKind};
+pub use fallow_types::suppress::{
+    IssueKind, Suppression, SuppressionTarget, UnknownSuppressionKind, parse_suppression_target,
+};
 
 /// Parsed suppressions plus any tokens that did not resolve to a known kind.
 ///
@@ -31,23 +33,23 @@ fn byte_offset_to_line(source: &str, byte_offset: u32) -> u32 {
     prefix.bytes().filter(|&b| b == b'\n').count() as u32 + 1
 }
 
-/// Split a suppression marker's tail into known `IssueKind`s and unknown tokens.
+/// Split a suppression marker's tail into known targets and unknown tokens.
 ///
-/// Returns the de-duplicated list of known kinds in source order, and the
+/// Returns the de-duplicated list of known targets in source order, and the
 /// list of verbatim unknown tokens (also de-duplicated). Unknown tokens are
 /// preserved so the caller can emit a diagnostic per token. Whitespace and
 /// commas both separate tokens.
-fn parse_issue_kind_list(rest: &str) -> (Vec<IssueKind>, Vec<String>) {
-    let mut kinds = Vec::new();
+fn parse_suppression_target_list(rest: &str) -> (Vec<SuppressionTarget>, Vec<String>) {
+    let mut targets = Vec::new();
     let mut unknown = Vec::new();
     for token in rest
         .split(|c: char| c == ',' || c.is_whitespace())
         .filter(|token| !token.is_empty())
     {
-        match IssueKind::parse(token) {
-            Some(kind) => {
-                if !kinds.contains(&kind) {
-                    kinds.push(kind);
+        match parse_suppression_target(token) {
+            Some(target) => {
+                if !targets.contains(&target) {
+                    targets.push(target);
                 }
             }
             None => {
@@ -58,28 +60,26 @@ fn parse_issue_kind_list(rest: &str) -> (Vec<IssueKind>, Vec<String>) {
             }
         }
     }
-    (kinds, unknown)
+    (targets, unknown)
 }
 
 fn push_suppressions(parsed: &mut ParsedSuppressions, line: u32, comment_line: u32, rest: &str) {
     if rest.is_empty() {
-        parsed.suppressions.push(Suppression {
-            line,
-            comment_line,
-            kind: None,
-        });
+        parsed
+            .suppressions
+            .push(Suppression::all(line, comment_line));
         return;
     }
 
     let is_file_level = line == 0;
-    let (kinds, unknown) = parse_issue_kind_list(rest);
+    let (targets, unknown) = parse_suppression_target_list(rest);
 
     parsed
         .suppressions
-        .extend(kinds.into_iter().map(|kind| Suppression {
+        .extend(targets.into_iter().map(|target| Suppression {
             line,
             comment_line,
-            kind: Some(kind),
+            target: Some(target),
         }));
 
     parsed
@@ -176,7 +176,7 @@ mod tests {
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 0);
-        assert!(suppressions[0].kind.is_none());
+        assert!(suppressions[0].issue_kind_target().is_none());
     }
 
     #[test]
@@ -185,7 +185,10 @@ mod tests {
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 0);
-        assert_eq!(suppressions[0].kind, Some(IssueKind::UnusedExport));
+        assert_eq!(
+            suppressions[0].issue_kind_target(),
+            Some(IssueKind::UnusedExport)
+        );
     }
 
     #[test]
@@ -195,7 +198,7 @@ mod tests {
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 3); // suppresses line 3 (the export)
-        assert!(suppressions[0].kind.is_none());
+        assert!(suppressions[0].issue_kind_target().is_none());
     }
 
     #[test]
@@ -204,7 +207,10 @@ mod tests {
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 2);
-        assert_eq!(suppressions[0].kind, Some(IssueKind::UnusedExport));
+        assert_eq!(
+            suppressions[0].issue_kind_target(),
+            Some(IssueKind::UnusedExport)
+        );
     }
 
     #[test]
@@ -214,9 +220,15 @@ mod tests {
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 2);
         assert_eq!(suppressions[0].line, 2);
-        assert_eq!(suppressions[0].kind, Some(IssueKind::UnusedExport));
+        assert_eq!(
+            suppressions[0].issue_kind_target(),
+            Some(IssueKind::UnusedExport)
+        );
         assert_eq!(suppressions[1].line, 2);
-        assert_eq!(suppressions[1].kind, Some(IssueKind::Complexity));
+        assert_eq!(
+            suppressions[1].issue_kind_target(),
+            Some(IssueKind::Complexity)
+        );
     }
 
     #[test]
@@ -225,9 +237,54 @@ mod tests {
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 2);
         assert_eq!(suppressions[0].line, 2);
-        assert_eq!(suppressions[0].kind, Some(IssueKind::UnusedExport));
+        assert_eq!(
+            suppressions[0].issue_kind_target(),
+            Some(IssueKind::UnusedExport)
+        );
         assert_eq!(suppressions[1].line, 2);
-        assert_eq!(suppressions[1].kind, Some(IssueKind::Complexity));
+        assert_eq!(
+            suppressions[1].issue_kind_target(),
+            Some(IssueKind::Complexity)
+        );
+    }
+
+    #[test]
+    fn parse_scoped_policy_suppression() {
+        let source =
+            "// fallow-ignore-next-line policy-violation:team-policy/no-child-process\nexec();\n";
+        let suppressions = parse_suppressions_from_source(source).suppressions;
+        assert_eq!(suppressions.len(), 1);
+        assert_eq!(suppressions[0].line, 2);
+        let target = suppressions[0]
+            .policy_rule_target()
+            .expect("scoped policy target should parse");
+        assert_eq!(target.pack, "team-policy");
+        assert_eq!(target.rule_id, "no-child-process");
+    }
+
+    #[test]
+    fn parse_scoped_policy_suppression_mixed_with_regular_kind() {
+        let source = "// fallow-ignore-next-line policy-violation:team-policy/no-child-process, unused-export\nexec();\n";
+        let suppressions = parse_suppressions_from_source(source).suppressions;
+        assert_eq!(suppressions.len(), 2);
+        assert!(suppressions[0].policy_rule_target().is_some());
+        assert_eq!(
+            suppressions[1].issue_kind_target(),
+            Some(IssueKind::UnusedExport)
+        );
+    }
+
+    #[test]
+    fn parse_malformed_scoped_policy_suppression_as_unknown() {
+        let source =
+            "// fallow-ignore-next-line policy-violation:team-policy/no:child-process\nexec();\n";
+        let parsed = parse_suppressions_from_source(source);
+        assert!(parsed.suppressions.is_empty());
+        assert_eq!(parsed.unknown_kinds.len(), 1);
+        assert_eq!(
+            parsed.unknown_kinds[0].token,
+            "policy-violation:team-policy/no:child-process"
+        );
     }
 
     #[test]
@@ -251,7 +308,10 @@ mod tests {
         let parsed = parse_suppressions_from_source(source);
         assert_eq!(parsed.suppressions.len(), 1);
         assert_eq!(parsed.suppressions[0].line, 2);
-        assert_eq!(parsed.suppressions[0].kind, Some(IssueKind::UnusedExport));
+        assert_eq!(
+            parsed.suppressions[0].issue_kind_target(),
+            Some(IssueKind::UnusedExport)
+        );
         assert_eq!(parsed.unknown_kinds.len(), 1);
         assert_eq!(parsed.unknown_kinds[0].token, "complexity-typo");
         assert_eq!(parsed.unknown_kinds[0].comment_line, 1);
@@ -303,10 +363,13 @@ mod tests {
         assert_eq!(suppressions.len(), 2);
 
         assert_eq!(suppressions[0].line, 0);
-        assert!(suppressions[0].kind.is_none());
+        assert!(suppressions[0].issue_kind_target().is_none());
 
         assert_eq!(suppressions[1].line, 3);
-        assert_eq!(suppressions[1].kind, Some(IssueKind::UnusedExport));
+        assert_eq!(
+            suppressions[1].issue_kind_target(),
+            Some(IssueKind::UnusedExport)
+        );
     }
 
     #[test]
@@ -315,7 +378,7 @@ mod tests {
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 0);
-        assert!(suppressions[0].kind.is_none());
+        assert!(suppressions[0].issue_kind_target().is_none());
     }
 
     #[test]
@@ -324,7 +387,10 @@ mod tests {
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 0);
-        assert_eq!(suppressions[0].kind, Some(IssueKind::Complexity));
+        assert_eq!(
+            suppressions[0].issue_kind_target(),
+            Some(IssueKind::Complexity)
+        );
     }
 
     #[test]
@@ -333,7 +399,10 @@ mod tests {
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 2);
-        assert_eq!(suppressions[0].kind, Some(IssueKind::UnusedExport));
+        assert_eq!(
+            suppressions[0].issue_kind_target(),
+            Some(IssueKind::UnusedExport)
+        );
     }
 
     #[test]
@@ -342,7 +411,10 @@ mod tests {
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 2);
-        assert_eq!(suppressions[0].kind, Some(IssueKind::Complexity));
+        assert_eq!(
+            suppressions[0].issue_kind_target(),
+            Some(IssueKind::Complexity)
+        );
     }
 
     #[test]
@@ -351,9 +423,15 @@ mod tests {
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 2);
         assert_eq!(suppressions[0].line, 2);
-        assert_eq!(suppressions[0].kind, Some(IssueKind::UnusedExport));
+        assert_eq!(
+            suppressions[0].issue_kind_target(),
+            Some(IssueKind::UnusedExport)
+        );
         assert_eq!(suppressions[1].line, 3);
-        assert_eq!(suppressions[1].kind, Some(IssueKind::UnusedType));
+        assert_eq!(
+            suppressions[1].issue_kind_target(),
+            Some(IssueKind::UnusedType)
+        );
     }
 
     #[test]
@@ -362,9 +440,15 @@ mod tests {
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 2);
         assert_eq!(suppressions[0].line, 0);
-        assert_eq!(suppressions[0].kind, Some(IssueKind::UnusedFile));
+        assert_eq!(
+            suppressions[0].issue_kind_target(),
+            Some(IssueKind::UnusedFile)
+        );
         assert_eq!(suppressions[1].line, 3);
-        assert_eq!(suppressions[1].kind, Some(IssueKind::UnusedExport));
+        assert_eq!(
+            suppressions[1].issue_kind_target(),
+            Some(IssueKind::UnusedExport)
+        );
     }
 
     #[test]
@@ -388,7 +472,7 @@ mod tests {
             let source = format!("// fallow-ignore-file {token}\nexport const foo = 1;\n");
             let suppressions = parse_suppressions_from_source(&source).suppressions;
             assert_eq!(suppressions.len(), 1, "Expected 1 suppression for {token}");
-            assert_eq!(suppressions[0].kind, Some(*expected_kind));
+            assert_eq!(suppressions[0].issue_kind_target(), Some(*expected_kind));
         }
     }
 
@@ -398,7 +482,7 @@ mod tests {
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 0);
-        assert!(suppressions[0].kind.is_none());
+        assert!(suppressions[0].issue_kind_target().is_none());
     }
 
     #[test]
@@ -459,7 +543,10 @@ mod tests {
         let suppressions = parse_suppressions(&parser_return.program.comments, source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 0);
-        assert_eq!(suppressions[0].kind, Some(IssueKind::UnusedFile));
+        assert_eq!(
+            suppressions[0].issue_kind_target(),
+            Some(IssueKind::UnusedFile)
+        );
     }
 
     #[test]

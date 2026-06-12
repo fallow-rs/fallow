@@ -5,6 +5,7 @@ use std::time::SystemTime;
 
 use bitcode::{Decode, Encode};
 use fallow_config::ResolvedNormalization;
+use fallow_types::suppress::{PolicyRuleSuppression, SuppressionTarget};
 use oxc_span::Span;
 use rustc_hash::FxHashMap;
 use tempfile::NamedTempFile;
@@ -54,6 +55,8 @@ struct CachedSuppression {
     line: u32,
     comment_line: u32,
     kind: u8,
+    policy_pack: String,
+    policy_rule_id: String,
 }
 
 #[derive(Debug, Clone)]
@@ -255,10 +258,25 @@ impl CachedTokenFile {
             line_count: file_tokens.line_count as u64,
             suppressions: suppressions
                 .iter()
-                .map(|suppression| CachedSuppression {
-                    line: suppression.line,
-                    comment_line: suppression.comment_line,
-                    kind: suppression.kind.map_or(0, IssueKind::to_discriminant),
+                .map(|suppression| {
+                    let (kind, policy_pack, policy_rule_id) = match &suppression.target {
+                        None => (0, String::new(), String::new()),
+                        Some(SuppressionTarget::Issue(kind)) => {
+                            (kind.to_discriminant(), String::new(), String::new())
+                        }
+                        Some(SuppressionTarget::PolicyRule(target)) => (
+                            IssueKind::PolicyViolation.to_discriminant(),
+                            target.pack.clone(),
+                            target.rule_id.clone(),
+                        ),
+                    };
+                    CachedSuppression {
+                        line: suppression.line,
+                        comment_line: suppression.comment_line,
+                        kind,
+                        policy_pack,
+                        policy_rule_id,
+                    }
                 })
                 .collect(),
         }
@@ -294,10 +312,25 @@ impl CachedTokenFile {
         let suppressions = self
             .suppressions
             .iter()
-            .map(|suppression| Suppression {
-                line: suppression.line,
-                comment_line: suppression.comment_line,
-                kind: IssueKind::from_discriminant(suppression.kind),
+            .map(|suppression| {
+                let target = if suppression.kind == 0 {
+                    None
+                } else if suppression.kind == IssueKind::PolicyViolation.to_discriminant()
+                    && !suppression.policy_pack.is_empty()
+                    && !suppression.policy_rule_id.is_empty()
+                {
+                    Some(SuppressionTarget::PolicyRule(PolicyRuleSuppression::new(
+                        suppression.policy_pack.clone(),
+                        suppression.policy_rule_id.clone(),
+                    )))
+                } else {
+                    IssueKind::from_discriminant(suppression.kind).map(SuppressionTarget::Issue)
+                };
+                Suppression {
+                    line: suppression.line,
+                    comment_line: suppression.comment_line,
+                    target,
+                }
             })
             .collect();
         TokenCacheEntry {
@@ -356,11 +389,7 @@ mod tests {
                 source: source.to_owned(),
                 line_count: 1,
             },
-            suppressions: vec![Suppression {
-                line: 2,
-                comment_line: 1,
-                kind: Some(IssueKind::CodeDuplication),
-            }],
+            suppressions: vec![Suppression::issue(2, 1, IssueKind::CodeDuplication)],
         }
     }
 
@@ -407,7 +436,10 @@ mod tests {
         assert_eq!(hit.suppressions.len(), 1);
         assert_eq!(hit.suppressions[0].line, 2);
         assert_eq!(hit.suppressions[0].comment_line, 1);
-        assert_eq!(hit.suppressions[0].kind, Some(IssueKind::CodeDuplication));
+        assert_eq!(
+            hit.suppressions[0].issue_kind_target(),
+            Some(IssueKind::CodeDuplication)
+        );
     }
 
     #[test]

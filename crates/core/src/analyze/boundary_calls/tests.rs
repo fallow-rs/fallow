@@ -378,11 +378,11 @@ fn file_level_suppression_is_consumed() {
     let config = make_config(root.clone(), vec![forbid("domain", "console.*")]);
     let graph = build_graph(&root, &["src/domain/rules.ts"]);
     let mut m = module(0, vec![callee("console.log", 0)], Vec::new());
-    m.suppressions.push(Suppression {
-        line: 0,
-        comment_line: 1,
-        kind: Some(crate::suppress::IssueKind::BoundaryViolation),
-    });
+    m.suppressions.push(Suppression::issue(
+        0,
+        1,
+        crate::suppress::IssueKind::BoundaryViolation,
+    ));
     let modules = vec![m];
     let suppressions = SuppressionContext::new(&modules);
     let line_offsets = FxHashMap::default();
@@ -399,11 +399,11 @@ fn line_level_suppression_is_consumed() {
     let graph = build_graph(&root, &["src/domain/rules.ts"]);
     // Offsets put span 25 on line 3; the suppression targets line 3.
     let mut m = module(0, vec![callee("console.log", 25)], Vec::new());
-    m.suppressions.push(Suppression {
-        line: 3,
-        comment_line: 2,
-        kind: Some(crate::suppress::IssueKind::BoundaryViolation),
-    });
+    m.suppressions.push(Suppression::issue(
+        3,
+        2,
+        crate::suppress::IssueKind::BoundaryViolation,
+    ));
     let modules = vec![m];
     let suppressions = SuppressionContext::new(&modules);
     let offsets: Vec<u32> = vec![0, 10, 20, 30];
