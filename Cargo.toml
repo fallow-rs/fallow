@@ -31,7 +31,7 @@ oxc_semantic = "0.126"
 oxc_span = "0.126"
 oxc_str = "0.126"
 oxc_syntax = "0.126"
-oxc_coverage_instrument = "0.7.8"
+oxc_coverage_instrument = "0.9.0"
 
 # CLI
 clap = { version = "4", features = ["derive"] }
