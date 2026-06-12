@@ -795,7 +795,7 @@
     "@types/vscode": "1.96.0",
     "@types/mocha": "10.0.10",
     "@vscode/test-electron": "2.5.2",
-    "@vscode/vsce": "3.9.1",
+    "@vscode/vsce": "3.9.2",
     "json-schema-to-typescript": "15.0.4",
     "mocha": "11.7.6",
     "rolldown": "1.0.3",
