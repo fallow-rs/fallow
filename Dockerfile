@@ -26,7 +26,7 @@ RUN set -eux; \
   echo "${sha256}  /usr/local/bin/fallow" | sha256sum -c -; \
   chmod +x /usr/local/bin/fallow
 
-FROM node:22-bookworm-slim AS runtime
+FROM node:26-bookworm-slim AS runtime
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates git \
