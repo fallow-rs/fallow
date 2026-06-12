@@ -1,0 +1,10 @@
+# Fallow is a one-shot CLI. Use `docker compose run --rm fallow ...`.
+# Do not deploy it as an always-on service unless you override the command.
+services:
+  fallow:
+    image: fallow:local
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    user: "${UID:-1000}:${GID:-1000}"
+    restart: "no"

@@ -116,6 +116,37 @@ Interactive human runs can show a one-line upgrade hint when a cached latest-ver
 
 Parsing `fallow --format json` in TypeScript? `import type { CheckOutput } from "fallow/types"` gives you the full output contract, version-pinned to your installed CLI.
 
+### Docker
+
+Build the local CLI image from this repository:
+
+```bash
+docker build -t fallow:local .
+```
+
+Run fallow against a project by mounting it at `/workspace`:
+
+```bash
+cd /path/to/project
+docker run --rm -v "$PWD:/workspace" --user "$(id -u):$(id -g)" fallow:local audit --format json --quiet
+```
+
+The `--user` mapping keeps `.fallow/` caches and generated reports owned by your host user. It also lets `fallow audit` use git base detection without Git's dubious-ownership guard blocking the mounted repository. The image includes git, Node.js, npm, and Corepack; fallow does not install your project dependencies automatically.
+
+For Compose, copy `examples/docker/compose.yaml` into the target project after building the image, then run:
+
+```bash
+docker compose run --rm fallow audit --format json --quiet
+```
+
+Fallow is a one-shot CLI, not a long-running service. In Portainer or other stack tools, use a one-shot run command instead of deploying it as an always-on service, or override the command for an interactive shell. Container exit codes are the fallow process exit codes, so CI can gate on the `docker run` or `docker compose run` result directly.
+
+On Linux and WSL, the commands above work as written. On Windows outside WSL, pass an absolute project path accepted by Docker Desktop and keep the mounted working directory at `/workspace`. For containerized runtime coverage inventory, use the container path prefix:
+
+```bash
+docker run --rm -v "$PWD:/workspace" --user "$(id -u):$(id -g)" fallow:local coverage upload-inventory --path-prefix /workspace --format json --quiet
+```
+
 Programmatic Node API:
 
 ```bash

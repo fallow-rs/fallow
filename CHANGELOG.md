@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Docker users now have a first-party CLI image recipe.** The repo ships a checksum-verified Dockerfile for the pinned Linux musl release binary, a source-built contributor Dockerfile, and a copyable Compose example that mounts projects at `/workspace` with host UID/GID mapping so `.fallow/` caches and reports stay host-owned. The runtime includes git for `audit` base detection plus Node.js, npm, and Corepack for project dependency installs, and CI now builds the Docker image on Docker-file changes. Thanks [@nic0michael](https://github.com/nic0michael) for the Docker Compose starting point. (Closes [#1205](https://github.com/fallow-rs/fallow/issues/1205).)
+
 ## [2.94.0] - 2026-06-12
 
 ### Added

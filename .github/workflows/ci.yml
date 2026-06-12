@@ -7,7 +7,7 @@ on:
     branches: [main]
   merge_group:
 
-# Deny all permissions by default — grant per-job as needed
+# Deny all permissions by default, grant per-job as needed
 permissions: {}
 
 concurrency:
@@ -31,6 +31,7 @@ jobs:
       zed: ${{ steps.filter.outputs.zed }}
       npm: ${{ steps.filter.outputs.npm }}
       actions: ${{ steps.filter.outputs.actions }}
+      docker: ${{ steps.filter.outputs.docker }}
       miri: ${{ steps.filter.outputs.miri }}
       ci-scripts: ${{ steps.filter.outputs.ci-scripts }}
       npm-package: ${{ steps.filter.outputs.npm-package }}
@@ -80,6 +81,13 @@ jobs:
               - 'npm/**'
             actions:
               - '.github/**'
+            docker:
+              - 'Dockerfile'
+              - 'Dockerfile.dev'
+              - '.dockerignore'
+              - 'examples/docker/**'
+              - '.github/dependabot.yml'
+              - '.github/workflows/ci.yml'
             miri:
               - 'crates/graph/**'
               - 'crates/extract/**'
@@ -97,6 +105,67 @@ jobs:
               - '.github/workflows/ci.yml'
               - 'editors/vscode/**'
               - 'npm/fallow/**'
+
+  docker:
+    name: Docker
+    needs: changes
+    if: needs.changes.outputs.docker == 'true' || github.event_name == 'push' || github.event_name == 'merge_group'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Build image
+        run: docker build -t fallow:ci .
+      - name: Run version
+        run: docker run --rm fallow:ci --version
+      - name: Check exit code propagation
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          mkdir -p "$tmp/dirty/src" "$tmp/clean/src"
+          printf '%s\n' '{"name":"dirty","type":"module","main":"src/index.ts","dependencies":{},"devDependencies":{}}' > "$tmp/dirty/package.json"
+          printf '%s\n' '{"name":"clean","type":"module","main":"src/index.ts","dependencies":{},"devDependencies":{}}' > "$tmp/clean/package.json"
+          printf '%s\n' 'export const entry = 1;' > "$tmp/dirty/src/index.ts"
+          printf '%s\n' 'export const unused = 1;' > "$tmp/dirty/src/unused.ts"
+          printf '%s\n' 'export const entry = 1;' > "$tmp/clean/src/index.ts"
+
+          set +e
+          docker run --rm -v "$tmp/dirty:/workspace" --user "$(id -u):$(id -g)" fallow:ci dead-code --format json --quiet > "$tmp/dirty.json"
+          dirty_code="$?"
+          docker run --rm -v "$tmp/clean:/workspace" --user "$(id -u):$(id -g)" fallow:ci dead-code --format json --quiet > "$tmp/clean.json"
+          clean_code="$?"
+          set -e
+
+          test "$dirty_code" -eq 1
+          test "$clean_code" -eq 0
+      - name: Check Compose example
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker tag fallow:ci fallow:local
+          tmp="$(mktemp -d)"
+          mkdir -p "$tmp/dirty/src" "$tmp/clean/src"
+          printf '%s\n' '{"name":"dirty","type":"module","main":"src/index.ts","dependencies":{},"devDependencies":{}}' > "$tmp/dirty/package.json"
+          printf '%s\n' '{"name":"clean","type":"module","main":"src/index.ts","dependencies":{},"devDependencies":{}}' > "$tmp/clean/package.json"
+          printf '%s\n' 'export const entry = 1;' > "$tmp/dirty/src/index.ts"
+          printf '%s\n' 'export const unused = 1;' > "$tmp/dirty/src/unused.ts"
+          printf '%s\n' 'export const entry = 1;' > "$tmp/clean/src/index.ts"
+          cp examples/docker/compose.yaml "$tmp/dirty/compose.yaml"
+          cp examples/docker/compose.yaml "$tmp/clean/compose.yaml"
+
+          env "UID=$(id -u)" "GID=$(id -g)" docker compose -f "$tmp/dirty/compose.yaml" run --rm fallow --version
+          set +e
+          env "UID=$(id -u)" "GID=$(id -g)" docker compose -f "$tmp/dirty/compose.yaml" run --rm fallow dead-code --format json --quiet > "$tmp/dirty-compose.json"
+          dirty_code="$?"
+          env "UID=$(id -u)" "GID=$(id -g)" docker compose -f "$tmp/clean/compose.yaml" run --rm fallow dead-code --format json --quiet > "$tmp/clean-compose.json"
+          clean_code="$?"
+          set -e
+
+          test "$dirty_code" -eq 1
+          test "$clean_code" -eq 0
 
   check:
     name: Check (${{ matrix.os }})
