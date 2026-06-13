@@ -704,6 +704,22 @@ pub struct CssRuleMetric {
     pub nesting_depth: u8,
 }
 
+/// A style rule's declaration-block fingerprint and location, for cross-file
+/// duplicate-block detection. Only rules with a meaningful number of
+/// declarations are recorded (small blocks repeat legitimately). Internal
+/// staging only: this is consumed in-process by the health layer to build the
+/// grouped `duplicate_declaration_blocks` output and is never serialized.
+#[derive(Debug, Clone)]
+pub struct CssDeclarationBlock {
+    /// xxh3 fingerprint over the rule's normalized (sorted, `!important`-tagged)
+    /// declaration set.
+    pub fingerprint: u64,
+    /// 1-based line of the rule's first selector.
+    pub line: u32,
+    /// Declaration count in the rule (normal plus `!important`).
+    pub declaration_count: u16,
+}
+
 /// Stylesheet-level structural CSS analytics, computed from the parsed CSS
 /// syntax tree. Feeds `fallow health` penalty weights and located findings,
 /// never a standalone CSS score.
@@ -744,6 +760,13 @@ pub struct CssAnalytics {
     pub defined_keyframes: Vec<String>,
     /// Distinct `@keyframes` names REFERENCED via `animation` / `animation-name`.
     pub referenced_keyframes: Vec<String>,
+    /// Per-rule declaration-block fingerprints for rules at or above the minimum
+    /// block size, used to detect duplicate declaration blocks across the
+    /// project. Internal staging consumed by the health layer; never serialized
+    /// (the public output is the grouped `duplicate_declaration_blocks`).
+    #[serde(skip)]
+    #[cfg_attr(feature = "schema", schemars(skip))]
+    pub declaration_blocks: Vec<CssDeclarationBlock>,
 }
 
 /// Which complexity metric a [`ComplexityContribution`] adds to.

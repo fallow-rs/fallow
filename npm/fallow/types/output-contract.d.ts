@@ -566,7 +566,7 @@ export type TrendDirection = ("improving" | "declining" | "stable")
 /**
  * Discriminant for [`CssCandidateAction::kind`].
  */
-export type CssCandidateActionType = ("verify-unused" | "verify-undefined")
+export type CssCandidateActionType = ("verify-unused" | "verify-undefined" | "consolidate")
 /**
  * Singleton GitHub review-event marker.
  */
@@ -4647,6 +4647,14 @@ unreferenced_keyframes?: UnreferencedKeyframes[]
  * CSS parser never sees). Conservative candidates, never gated findings.
  */
 undefined_keyframes?: UndefinedKeyframes[]
+/**
+ * Groups of style rules across the project that share an identical
+ * declaration block (4+ declarations, sorted and `!important`-aware),
+ * grouped by content: copy-paste consolidation candidates (fallow's
+ * duplication signal applied to CSS). Sorted by estimated savings
+ * descending.
+ */
+duplicate_declaration_blocks?: CssDuplicateBlock[]
 }
 /**
  * Per-stylesheet CSS analytics.
@@ -4861,6 +4869,17 @@ keyframes_undefined: number
  */
 scoped_unused_classes: number
 /**
+ * Number of distinct declaration blocks (4+ declarations) that appear in
+ * two or more rules across the project (copy-paste consolidation
+ * candidates). Located in `duplicate_declaration_blocks`.
+ */
+duplicate_declaration_blocks: number
+/**
+ * Total declarations removable by consolidating every duplicate block:
+ * the sum of `(occurrence_count - 1) * declaration_count` across groups.
+ */
+duplicate_declarations_total: number
+/**
  * Number of analyzed stylesheets whose per-rule `notable_rules` list was
  * truncated at the per-file cap, so a consumer knows the per-rule detail is
  * incomplete without walking every file.
@@ -4958,6 +4977,50 @@ path: string
  * uniformly across every finding type.
  */
 actions: CssCandidateAction[]
+}
+/**
+ * A group of style rules across the project that share an identical declaration
+ * block: a copy-paste consolidation candidate (fallow's duplication signal
+ * applied to CSS). Only blocks of 4+ declarations appearing in 2+ rules are
+ * reported, so the signal stays a strong copy-paste indicator rather than
+ * flagging legitimately-repeated small blocks.
+ */
+export interface CssDuplicateBlock {
+/**
+ * Declarations in the shared block.
+ */
+declaration_count: number
+/**
+ * Number of rules that share the block (always >= 2).
+ */
+occurrence_count: number
+/**
+ * Declarations removable by extracting the block into one shared rule:
+ * `(occurrence_count - 1) * declaration_count`.
+ */
+estimated_savings: number
+/**
+ * The rules sharing the block, sorted by `(path, line)`.
+ */
+occurrences: CssBlockOccurrence[]
+/**
+ * Read-only guidance step(s), so consumers can iterate `actions`
+ * uniformly across every finding type. Always at least one entry.
+ */
+actions: CssCandidateAction[]
+}
+/**
+ * One occurrence of a duplicate declaration block.
+ */
+export interface CssBlockOccurrence {
+/**
+ * Project-root-relative, forward-slash path to the stylesheet.
+ */
+path: string
+/**
+ * 1-based line of the rule's first selector.
+ */
+line: number
 }
 /**
  * Envelope emitted by `fallow explain <issue-type> --format json`.

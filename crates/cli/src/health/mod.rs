@@ -526,9 +526,61 @@ struct CssTokenSets {
     referenced_keyframes: rustc_hash::FxHashSet<String>,
     keyframes_definers: rustc_hash::FxHashMap<String, String>,
     keyframe_referencers: rustc_hash::FxHashMap<String, String>,
+    /// Declaration-block fingerprint -> (declaration count, occurrences as
+    /// `(path, line)`), for cross-file duplicate-block detection.
+    declaration_blocks: rustc_hash::FxHashMap<u64, (u16, Vec<(String, u32)>)>,
 }
 
 impl CssTokenSets {
+    /// Group declaration-block fingerprints seen in 2+ rules into located
+    /// duplicate-block candidates, set the summary counts, and sort by estimated
+    /// savings descending (then first occurrence path).
+    fn group_duplicate_blocks(
+        &self,
+        summary: &mut crate::health_types::CssAnalyticsSummary,
+    ) -> Vec<crate::health_types::CssDuplicateBlock> {
+        use crate::health_types::{CssBlockOccurrence, CssCandidateAction, CssDuplicateBlock};
+
+        let mut groups: Vec<CssDuplicateBlock> = self
+            .declaration_blocks
+            .values()
+            .filter(|(_, occurrences)| occurrences.len() >= 2)
+            .map(|(declaration_count, occurrences)| {
+                let occurrence_count = saturate_len(occurrences.len());
+                let estimated_savings = occurrence_count
+                    .saturating_sub(1)
+                    .saturating_mul(u32::from(*declaration_count));
+                let mut occ: Vec<CssBlockOccurrence> = occurrences
+                    .iter()
+                    .map(|(path, line)| CssBlockOccurrence {
+                        path: path.clone(),
+                        line: *line,
+                    })
+                    .collect();
+                occ.sort_by(|a, b| (&a.path, a.line).cmp(&(&b.path, b.line)));
+                CssDuplicateBlock {
+                    declaration_count: *declaration_count,
+                    occurrence_count,
+                    estimated_savings,
+                    occurrences: occ,
+                    actions: vec![CssCandidateAction::consolidate_block(occurrence_count)],
+                }
+            })
+            .collect();
+        // Highest-savings groups first; tie-break on the first occurrence path for
+        // deterministic output.
+        groups.sort_by(|a, b| {
+            b.estimated_savings
+                .cmp(&a.estimated_savings)
+                .then_with(|| occurrence_sort_key(a).cmp(&occurrence_sort_key(b)))
+        });
+        summary.duplicate_declaration_blocks = saturate_len(groups.len());
+        summary.duplicate_declarations_total = groups
+            .iter()
+            .fold(0u32, |acc, g| acc.saturating_add(g.estimated_savings));
+        groups
+    }
+
     /// Fill the summary token counts and return the two located keyframe
     /// candidate lists: defined-but-unused (`unreferenced`) and used-but-
     /// undefined (`undefined`).
@@ -619,6 +671,15 @@ fn locate_keyframe_diff(
 /// Saturating `usize -> u32` for token counts.
 fn saturate_len(len: usize) -> u32 {
     u32::try_from(len).unwrap_or(u32::MAX)
+}
+
+/// `(first path, first line)` sort key for a duplicate block; occurrences are
+/// pre-sorted, so the first is the lexicographic minimum.
+fn occurrence_sort_key(block: &crate::health_types::CssDuplicateBlock) -> (&str, u32) {
+    block
+        .occurrences
+        .first()
+        .map_or(("", 0), |occ| (occ.path.as_str(), occ.line))
 }
 
 fn compute_css_analytics_report(
@@ -737,6 +798,14 @@ fn compute_css_analytics_report(
                 .entry(keyframes.clone())
                 .or_insert_with(|| rel.clone());
         }
+        for block in &analytics.declaration_blocks {
+            tokens
+                .declaration_blocks
+                .entry(block.fingerprint)
+                .or_insert_with(|| (block.declaration_count, Vec::new()))
+                .1
+                .push((rel.clone(), block.line));
+        }
 
         if !analytics.notable_rules.is_empty() {
             file_reports.push(CssFileAnalytics {
@@ -747,6 +816,7 @@ fn compute_css_analytics_report(
     }
 
     let (unreferenced_keyframes, undefined_keyframes) = tokens.finalize(&mut summary);
+    let duplicate_declaration_blocks = tokens.group_duplicate_blocks(&mut summary);
 
     if summary.files_analyzed == 0 && scoped_unused.is_empty() {
         return None;
@@ -758,6 +828,7 @@ fn compute_css_analytics_report(
         scoped_unused,
         unreferenced_keyframes,
         undefined_keyframes,
+        duplicate_declaration_blocks,
     })
 }
 

@@ -260,6 +260,7 @@ fn render_css_analytics(lines: &mut Vec<String>, report: &crate::health_types::H
             );
         }
     }
+    render_css_duplicate_blocks(lines, css);
 
     let mut notable: Vec<(&str, &fallow_types::extract::CssRuleMetric)> = css
         .files
@@ -344,6 +345,54 @@ fn render_css_keyframe_candidates(
             "  undefined @keyframes: {} referenced but defined nowhere (candidates; likely typo or defined in CSS-in-JS): {listed}",
             summary.keyframes_undefined,
         ));
+    }
+}
+
+/// Render the duplicate-declaration-block candidate section: a summary line plus
+/// the top 5 groups (declaration count, occurrence count, located occurrences).
+fn render_css_duplicate_blocks(
+    lines: &mut Vec<String>,
+    css: &crate::health_types::CssAnalyticsReport,
+) {
+    if css.duplicate_declaration_blocks.is_empty() {
+        return;
+    }
+    let summary = &css.summary;
+    let group_word = if summary.duplicate_declaration_blocks == 1 {
+        "group"
+    } else {
+        "groups"
+    };
+    lines.push(format!(
+        "  duplicate declaration blocks: {} {group_word}, {} declarations removable (candidates; consolidate or confirm intentional overrides)",
+        summary.duplicate_declaration_blocks, summary.duplicate_declarations_total,
+    ));
+    for block in css.duplicate_declaration_blocks.iter().take(5) {
+        let locs = block
+            .occurrences
+            .iter()
+            .take(3)
+            .map(|occ| format!("{}:{}", occ.path, occ.line))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let extra = block.occurrences.len().saturating_sub(3);
+        let more = if extra > 0 {
+            format!(", +{extra} more")
+        } else {
+            String::new()
+        };
+        lines.push(format!(
+            "    {} declarations in {} rules: {locs}{more}",
+            block.declaration_count, block.occurrence_count,
+        ));
+    }
+    if css.duplicate_declaration_blocks.len() > 5 {
+        let more = css.duplicate_declaration_blocks.len() - 5;
+        lines.push(
+            format!("  ... and {more} more (--format json for full list)")
+                .dimmed()
+                .to_string(),
+        );
     }
 }
 

@@ -12368,6 +12368,13 @@
             "$ref": "#/definitions/UndefinedKeyframes"
           },
           "description": "Animation references (`animation` / `animation-name`) to a `@keyframes`\nname that is defined in NO stylesheet anywhere in the project, with the\nfirst stylesheet that references them. The \"used-but-undefined\" direction\n(the inverse of `unreferenced_keyframes`): usually a typo or a removed\nanimation, occasionally a `@keyframes` defined in CSS-in-JS (which the\nCSS parser never sees). Conservative candidates, never gated findings."
+        },
+        "duplicate_declaration_blocks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CssDuplicateBlock"
+          },
+          "description": "Groups of style rules across the project that share an identical\ndeclaration block (4+ declarations, sorted and `!important`-aware),\ngrouped by content: copy-paste consolidation candidates (fallow's\nduplication signal applied to CSS). Sorted by estimated savings\ndescending."
         }
       },
       "required": [
@@ -12616,6 +12623,14 @@
           "type": "integer",
           "description": "Total Vue `<style scoped>` classes used nowhere else in their component\n(cleanup candidates), across all SFCs."
         },
+        "duplicate_declaration_blocks": {
+          "type": "integer",
+          "description": "Number of distinct declaration blocks (4+ declarations) that appear in\ntwo or more rules across the project (copy-paste consolidation\ncandidates). Located in `duplicate_declaration_blocks`."
+        },
+        "duplicate_declarations_total": {
+          "type": "integer",
+          "description": "Total declarations removable by consolidating every duplicate block:\nthe sum of `(occurrence_count - 1) * declaration_count` across groups."
+        },
         "notable_truncated_files": {
           "type": "integer",
           "description": "Number of analyzed stylesheets whose per-rule `notable_rules` list was\ntruncated at the per-file cap, so a consumer knows the per-rule detail is\nincomplete without walking every file."
@@ -12638,6 +12653,8 @@
         "keyframes_unreferenced",
         "keyframes_undefined",
         "scoped_unused_classes",
+        "duplicate_declaration_blocks",
+        "duplicate_declarations_total",
         "notable_truncated_files"
       ],
       "description": "Project-wide CSS analytics aggregates across every analyzed stylesheet\n(including stylesheets with no notable rule, which are not listed\nindividually)."
@@ -12738,6 +12755,11 @@
           "type": "string",
           "const": "verify-undefined",
           "description": "Confirm the referenced name is genuinely undefined (not defined in\nCSS-in-JS the parser cannot see) before treating it as a typo (the\nused-but-undefined candidates)."
+        },
+        {
+          "type": "string",
+          "const": "consolidate",
+          "description": "Extract the shared declaration block into one rule and reference it from\neach occurrence (the duplicate-declaration-block candidates)."
         }
       ],
       "description": "Discriminant for [`CssCandidateAction::kind`]."
@@ -12776,6 +12798,63 @@
         "actions"
       ],
       "description": "An animation reference (`animation` / `animation-name`) to a `@keyframes`\nname that is defined in no stylesheet anywhere in the project (the\n\"used-but-undefined\" direction). Usually a typo or a removed animation;\noccasionally a `@keyframes` defined in CSS-in-JS the CSS parser never sees."
+    },
+    "CssDuplicateBlock": {
+      "type": "object",
+      "properties": {
+        "declaration_count": {
+          "type": "integer",
+          "description": "Declarations in the shared block."
+        },
+        "occurrence_count": {
+          "type": "integer",
+          "description": "Number of rules that share the block (always >= 2)."
+        },
+        "estimated_savings": {
+          "type": "integer",
+          "description": "Declarations removable by extracting the block into one shared rule:\n`(occurrence_count - 1) * declaration_count`."
+        },
+        "occurrences": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CssBlockOccurrence"
+          },
+          "description": "The rules sharing the block, sorted by `(path, line)`."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CssCandidateAction"
+          },
+          "description": "Read-only guidance step(s), so consumers can iterate `actions`\nuniformly across every finding type. Always at least one entry."
+        }
+      },
+      "required": [
+        "declaration_count",
+        "occurrence_count",
+        "estimated_savings",
+        "occurrences",
+        "actions"
+      ],
+      "description": "A group of style rules across the project that share an identical declaration\nblock: a copy-paste consolidation candidate (fallow's duplication signal\napplied to CSS). Only blocks of 4+ declarations appearing in 2+ rules are\nreported, so the signal stays a strong copy-paste indicator rather than\nflagging legitimately-repeated small blocks."
+    },
+    "CssBlockOccurrence": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Project-root-relative, forward-slash path to the stylesheet."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line of the rule's first selector."
+        }
+      },
+      "required": [
+        "path",
+        "line"
+      ],
+      "description": "One occurrence of a duplicate declaration block."
     },
     "CrossRepoImpactReport": {
       "type": "object",

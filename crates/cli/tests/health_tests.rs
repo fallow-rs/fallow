@@ -2957,6 +2957,94 @@ fn health_css_undefined_keyframe_renders_in_human() {
 }
 
 #[test]
+fn health_css_flags_duplicate_declaration_blocks() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"css-dup","version":"1.0.0"}"#,
+    );
+    write_file(&root.join("src/index.ts"), "export const x = 1;\n");
+    // `.card` and `.panel` share an identical 4-declaration block in a different
+    // order (one group). `.small` / `.other` share a 3-declaration block (below
+    // the 4-floor, not reported). `.unique` is a 4-declaration block appearing
+    // once (not reported).
+    write_file(
+        &root.join("src/a.css"),
+        ".card { padding: 8px; margin: 4px; border-radius: 4px; color: red; }\n\
+         .small { gap: 1px; width: 2px; height: 3px; }\n",
+    );
+    write_file(
+        &root.join("src/b.css"),
+        ".panel { color: red; border-radius: 4px; padding: 8px; margin: 4px; }\n\
+         .other { gap: 1px; width: 2px; height: 3px; }\n\
+         .unique { top: 1px; left: 2px; right: 3px; bottom: 4px; }\n",
+    );
+
+    let out = run_fallow_in_root(
+        "health",
+        root,
+        &[
+            "--css",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let json = parse_json(&out);
+    let css = json
+        .get("css_analytics")
+        .expect("css_analytics present with --css");
+    let summary = &css["summary"];
+
+    // Only the 4-declaration `.card`/`.panel` block is a group (order-insensitive).
+    assert_eq!(
+        summary["duplicate_declaration_blocks"], 1,
+        "summary: {summary}"
+    );
+    // savings = (2 occurrences - 1) * 4 declarations = 4.
+    assert_eq!(
+        summary["duplicate_declarations_total"], 4,
+        "summary: {summary}"
+    );
+
+    let groups = css["duplicate_declaration_blocks"]
+        .as_array()
+        .expect("duplicate_declaration_blocks array");
+    assert_eq!(groups.len(), 1);
+    let g = &groups[0];
+    assert_eq!(g["declaration_count"], 4);
+    assert_eq!(g["occurrence_count"], 2);
+    assert_eq!(g["estimated_savings"], 4);
+    let occ = g["occurrences"].as_array().expect("occurrences array");
+    assert_eq!(occ.len(), 2);
+    // Sorted by (path, line): a.css before b.css.
+    assert_eq!(occ[0]["path"], "src/a.css");
+    assert_eq!(occ[1]["path"], "src/b.css");
+
+    // Agent parity: a consolidate action (guidance-only, no command).
+    let actions = g["actions"].as_array().expect("actions array");
+    assert_eq!(actions[0]["type"], "consolidate");
+    assert_eq!(actions[0]["auto_fixable"], false);
+    assert!(
+        actions[0].get("command").is_none(),
+        "consolidate is guidance-only, no command: {actions:#?}"
+    );
+
+    // Human output renders the located group with savings + occurrences.
+    let human = run_fallow_in_root("health", root, &["--css", "--max-crap", "10000", "--quiet"]);
+    assert!(
+        human.stdout.contains("duplicate declaration blocks")
+            && human.stdout.contains("4 declarations in 2 rules")
+            && human.stdout.contains("src/a.css:1"),
+        "human output renders the duplicate-block group: stdout={:?}",
+        human.stdout
+    );
+}
+
+#[test]
 fn health_css_flags_unused_scoped_vue_class() {
     let dir = tempdir().unwrap();
     let root = dir.path();

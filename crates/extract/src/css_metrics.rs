@@ -23,7 +23,7 @@ use lightningcss::values::color::CssColor;
 use lightningcss::visitor::{VisitTypes, Visitor};
 use rustc_hash::FxHashSet;
 
-use fallow_types::extract::{CssAnalytics, CssRuleMetric};
+use fallow_types::extract::{CssAnalytics, CssDeclarationBlock, CssRuleMetric};
 
 /// Selector component count above which a rule is considered over-complex.
 const MAX_PLAIN_COMPLEXITY: u16 = 4;
@@ -35,6 +35,16 @@ const NOTABLE_NESTING_DEPTH: u8 = 3;
 /// thousands of `!important` rules; the scalar aggregates stay accurate while
 /// the per-rule finding list is capped to keep output and storage bounded.
 const MAX_NOTABLE_RULES: usize = 500;
+
+/// Minimum declaration count for a rule to be fingerprinted as a duplicate-block
+/// candidate. Small blocks (e.g. `display: flex; align-items: center`) repeat
+/// legitimately, so the floor keeps the signal a strong copy-paste indicator.
+const MIN_BLOCK_DECLARATIONS: usize = 4;
+
+/// Upper bound on per-file declaration-block fingerprints. The `MIN_BLOCK`
+/// floor already bounds compiled utility CSS (whose rules are tiny), so this
+/// only guards a pathological hand-written stylesheet.
+const MAX_DECLARATION_BLOCKS: usize = 2000;
 
 /// Mask for a single 10-bit CSS specificity component.
 const SPECIFICITY_COMPONENT_MASK: u32 = 0x3FF;
@@ -210,6 +220,19 @@ fn record_style_rule(style: &StyleRule<'_>, depth: u8, acc: &mut Accumulator) {
         }
     }
 
+    // Fingerprint the declaration block (sorted, !important-tagged) for cross-file
+    // duplicate-block detection, gated on the minimum block size and a per-file cap.
+    if declaration_count >= MIN_BLOCK_DECLARATIONS
+        && analytics.declaration_blocks.len() < MAX_DECLARATION_BLOCKS
+        && let Some(fingerprint) = declaration_block_fingerprint(style)
+    {
+        analytics.declaration_blocks.push(CssDeclarationBlock {
+            fingerprint,
+            line: style.loc.line.saturating_add(1),
+            declaration_count: saturate_u16(declaration_count),
+        });
+    }
+
     // Design-token values (font-size / z-index, authored form), custom-property
     // definitions, and animation-name references to @keyframes. Colors and
     // `var()` references are collected separately by the value visitor.
@@ -248,6 +271,28 @@ fn record_style_rule(style: &StyleRule<'_>, depth: u8, acc: &mut Accumulator) {
             _ => {}
         }
     }
+}
+
+/// Fingerprint a rule's declaration block: serialize each declaration (tagging
+/// `!important` ones, which lightningcss stores without the flag, so they do not
+/// collide with their non-important twin), sort for order-insensitivity, join,
+/// and xxh3-hash. Returns `None` if any declaration fails to serialize, so a
+/// partial block is never fingerprinted (a false duplicate match would be worse
+/// than missing one).
+fn declaration_block_fingerprint(style: &StyleRule<'_>) -> Option<u64> {
+    let block = &style.declarations;
+    let mut parts: Vec<String> =
+        Vec::with_capacity(block.declarations.len() + block.important_declarations.len());
+    for decl in &block.declarations {
+        parts.push(decl.to_css_string(false, PrinterOptions::default()).ok()?);
+    }
+    for decl in &block.important_declarations {
+        // `important = true` renders the `!important` suffix, so a block with an
+        // important declaration never collides with its non-important twin.
+        parts.push(decl.to_css_string(true, PrinterOptions::default()).ok()?);
+    }
+    parts.sort_unstable();
+    Some(xxhash_rust::xxh3::xxh3_64(parts.join(";").as_bytes()))
 }
 
 /// Return the rule's `(specificity_a, specificity_b, specificity_c, complexity)`
@@ -502,6 +547,42 @@ mod tests {
             a.referenced_keyframes.contains(&"pulse".to_string()),
             "referenced: {:?}",
             a.referenced_keyframes
+        );
+    }
+
+    #[test]
+    fn fingerprints_blocks_at_floor_order_insensitive() {
+        // Two 4-declaration rules with the same declarations in different order
+        // share a fingerprint; a 3-declaration rule is below the floor and is
+        // not fingerprinted.
+        let a = analytics(
+            ".x { color: red; margin: 1px; padding: 2px; top: 3px; }\n\
+             .y { top: 3px; padding: 2px; margin: 1px; color: red; }\n\
+             .z { color: red; margin: 1px; padding: 2px; }\n",
+        );
+        assert_eq!(
+            a.declaration_blocks.len(),
+            2,
+            "two 4-decl rules fingerprinted, the 3-decl one skipped: {:?}",
+            a.declaration_blocks
+        );
+        assert_eq!(
+            a.declaration_blocks[0].fingerprint, a.declaration_blocks[1].fingerprint,
+            "same declarations in different order share a fingerprint"
+        );
+        assert_eq!(a.declaration_blocks[0].declaration_count, 4);
+    }
+
+    #[test]
+    fn important_distinguishes_block_fingerprint() {
+        let a = analytics(
+            ".x { color: red; margin: 1px; padding: 2px; top: 3px; }\n\
+             .y { color: red !important; margin: 1px; padding: 2px; top: 3px; }\n",
+        );
+        assert_eq!(a.declaration_blocks.len(), 2);
+        assert_ne!(
+            a.declaration_blocks[0].fingerprint, a.declaration_blocks[1].fingerprint,
+            "!important changes the block fingerprint"
         );
     }
 }

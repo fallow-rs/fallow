@@ -105,6 +105,45 @@ pub struct CssAnalyticsReport {
     /// CSS parser never sees). Conservative candidates, never gated findings.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub undefined_keyframes: Vec<UndefinedKeyframes>,
+    /// Groups of style rules across the project that share an identical
+    /// declaration block (4+ declarations, sorted and `!important`-aware),
+    /// grouped by content: copy-paste consolidation candidates (fallow's
+    /// duplication signal applied to CSS). Sorted by estimated savings
+    /// descending.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub duplicate_declaration_blocks: Vec<CssDuplicateBlock>,
+}
+
+/// A group of style rules across the project that share an identical declaration
+/// block: a copy-paste consolidation candidate (fallow's duplication signal
+/// applied to CSS). Only blocks of 4+ declarations appearing in 2+ rules are
+/// reported, so the signal stays a strong copy-paste indicator rather than
+/// flagging legitimately-repeated small blocks.
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CssDuplicateBlock {
+    /// Declarations in the shared block.
+    pub declaration_count: u16,
+    /// Number of rules that share the block (always >= 2).
+    pub occurrence_count: u32,
+    /// Declarations removable by extracting the block into one shared rule:
+    /// `(occurrence_count - 1) * declaration_count`.
+    pub estimated_savings: u32,
+    /// The rules sharing the block, sorted by `(path, line)`.
+    pub occurrences: Vec<CssBlockOccurrence>,
+    /// Read-only guidance step(s), so consumers can iterate `actions`
+    /// uniformly across every finding type. Always at least one entry.
+    pub actions: Vec<CssCandidateAction>,
+}
+
+/// One occurrence of a duplicate declaration block.
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CssBlockOccurrence {
+    /// Project-root-relative, forward-slash path to the stylesheet.
+    pub path: String,
+    /// 1-based line of the rule's first selector.
+    pub line: u32,
 }
 
 /// A `@keyframes` defined in a stylesheet but referenced by no animation in any
@@ -194,6 +233,9 @@ pub enum CssCandidateActionType {
     /// CSS-in-JS the parser cannot see) before treating it as a typo (the
     /// used-but-undefined candidates).
     VerifyUndefined,
+    /// Extract the shared declaration block into one rule and reference it from
+    /// each occurrence (the duplicate-declaration-block candidates).
+    Consolidate,
 }
 
 impl CssCandidateAction {
@@ -225,6 +267,22 @@ impl CssCandidateAction {
                 "Confirm \"{name}\" is not a @keyframes defined in CSS-in-JS (styled-components, Emotion, vanilla-extract) before treating the animation reference as a typo."
             ),
             command: safe_token_search(name),
+        }
+    }
+
+    /// Guidance action for a duplicate declaration block: consolidate the shared
+    /// declarations into one rule. No command (consolidation is a refactor, and
+    /// the occurrences list already names every site); the residual judgment is
+    /// whether the rules are intentionally separate overrides.
+    #[must_use]
+    pub fn consolidate_block(occurrence_count: u32) -> Self {
+        Self {
+            kind: CssCandidateActionType::Consolidate,
+            auto_fixable: false,
+            description: format!(
+                "Extract this declaration block into one rule and reference it from all {occurrence_count} occurrences, unless they are intentionally separate overrides."
+            ),
+            command: None,
         }
     }
 
@@ -324,6 +382,13 @@ pub struct CssAnalyticsSummary {
     /// Total Vue `<style scoped>` classes used nowhere else in their component
     /// (cleanup candidates), across all SFCs.
     pub scoped_unused_classes: u32,
+    /// Number of distinct declaration blocks (4+ declarations) that appear in
+    /// two or more rules across the project (copy-paste consolidation
+    /// candidates). Located in `duplicate_declaration_blocks`.
+    pub duplicate_declaration_blocks: u32,
+    /// Total declarations removable by consolidating every duplicate block:
+    /// the sum of `(occurrence_count - 1) * declaration_count` across groups.
+    pub duplicate_declarations_total: u32,
     /// Number of analyzed stylesheets whose per-rule `notable_rules` list was
     /// truncated at the per-file cap, so a consumer knows the per-rule detail is
     /// incomplete without walking every file.
