@@ -11,7 +11,7 @@ use crate::audit::{AuditSummary, AuditVerdict};
 use crate::report::ci::fingerprint::fingerprint_hash;
 use crate::report::format_display_path;
 
-const STORE_SCHEMA_VERSION: u32 = 4;
+const STORE_SCHEMA_VERSION: u32 = 5;
 
 const MAX_RECORDS: usize = 200;
 
@@ -171,6 +171,13 @@ pub struct ImpactStore {
     /// state, never exposed on the report.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_digest_epoch: Option<u64>,
+    /// Repo display name (the git-toplevel BASENAME only, never a full path),
+    /// captured at record time so the cross-repo `fallow impact --all` view can
+    /// label rows legibly without reversing the opaque project-key hash. Absent
+    /// on pre-v5 stores (rows fall back to the short key) and on stores written
+    /// by older builds. v5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 /// Deserialize-only view of a pre-relocation in-repo store (schema <= 3), whose
@@ -237,6 +244,8 @@ impl LegacyFlatStore {
             onboarding_declined: self.onboarding_declined,
             explicit_decision: self.explicit_decision,
             last_digest_epoch: self.last_digest_epoch,
+            // Legacy stores carry no label; the next recorded run backfills it.
+            label: None,
         }
     }
 }
@@ -245,7 +254,10 @@ impl LegacyFlatStore {
 /// the git subprocesses that derive them run at most once per root per run
 /// (`fallow audit` is the perf-priority path and `load` is called several
 /// times per invocation).
-static IDENTITY_CACHE: std::sync::OnceLock<std::sync::Mutex<FxHashMap<PathBuf, (String, String)>>> =
+/// `(project_key, worktree_key, display_name)` for a root.
+type ProjectIdentity = (String, String, Option<String>);
+
+static IDENTITY_CACHE: std::sync::OnceLock<std::sync::Mutex<FxHashMap<PathBuf, ProjectIdentity>>> =
     std::sync::OnceLock::new();
 
 /// Hash a filesystem-path identity into a stable key. On case-insensitive
@@ -262,40 +274,57 @@ fn hash_path_identity(path: &Path) -> String {
     fingerprint_hash(&[normalized.as_str()])
 }
 
-/// The worktree-collapsed repo identity used to KEY the per-project store file.
-/// Every linked worktree of a repo shares one common dir, so they collapse onto
-/// one history. Falls back to the canonicalized root for non-git projects
-/// (predictable; a container mount path that changes between host and container
-/// produces a different key, documented as a known bound).
-fn impact_project_key(root: &Path) -> String {
-    let identity = fallow_core::changed_files::resolve_git_common_dir(root)
-        .ok()
+/// Resolve `resolved` to an existing absolute path, falling back to the
+/// canonicalized `root` and finally the raw `root`. Shared by the project key
+/// (git common dir) and the worktree key (git toplevel) so both keep identical
+/// non-git fallback behavior.
+fn resolve_or_root(resolved: Option<PathBuf>, root: &Path) -> PathBuf {
+    resolved
         .or_else(|| dunce::canonicalize(root).ok())
-        .unwrap_or_else(|| root.to_path_buf());
-    hash_path_identity(&identity)
+        .unwrap_or_else(|| root.to_path_buf())
 }
 
-/// Per-WORKTREE identity. Used only to namespace the attribution frontier
-/// inside the repo-collapsed store, so two worktrees of one repo do not prune
-/// each other's per-file baseline (the frontier is pruned to on-disk files
-/// every run). Falls back to the canonicalized root for non-git projects.
-fn worktree_key(root: &Path) -> String {
-    let identity = fallow_core::changed_files::resolve_git_toplevel(root)
-        .ok()
-        .or_else(|| dunce::canonicalize(root).ok())
-        .unwrap_or_else(|| root.to_path_buf());
-    hash_path_identity(&identity)
+/// The repo's display name for cross-repo rows: the folder that owns the shared
+/// `.git` (stable across worktrees), else the directory's own basename. This is
+/// a BASENAME only (e.g. `fallow`), never a full path, so persisting it does not
+/// reintroduce the absolute path the store relocation deliberately dropped.
+fn repo_basename(common_or_dir: &Path) -> Option<String> {
+    let dir = if common_or_dir.file_name().is_some_and(|n| n == ".git") {
+        common_or_dir.parent()?
+    } else {
+        common_or_dir
+    };
+    dir.file_name().map(|n| n.to_string_lossy().into_owned())
 }
 
-/// Resolve (and memoize) the `(project_key, worktree_key)` pair for `root`.
-fn project_identity(root: &Path) -> (String, String) {
+/// Resolve (and memoize) the `(project_key, worktree_key, display_name)` for
+/// `root`. `project_key` collapses all worktrees of a repo onto one identity via
+/// the git common dir (falling back to the canonicalized root for non-git);
+/// `worktree_key` is the per-tree toplevel (namespaces the attribution frontier
+/// so concurrent worktrees do not prune each other's baseline); `display_name`
+/// is the repo's basename for legible cross-repo rows. All three derive from a
+/// single common-dir + toplevel resolution so the git subprocesses run at most
+/// once per root per run (`fallow audit` is the perf-priority path).
+fn project_identity(root: &Path) -> ProjectIdentity {
     let cache = IDENTITY_CACHE.get_or_init(|| std::sync::Mutex::new(FxHashMap::default()));
     if let Ok(map) = cache.lock()
         && let Some(found) = map.get(root)
     {
         return found.clone();
     }
-    let identity = (impact_project_key(root), worktree_key(root));
+    let common = resolve_or_root(
+        fallow_core::changed_files::resolve_git_common_dir(root).ok(),
+        root,
+    );
+    let toplevel = resolve_or_root(
+        fallow_core::changed_files::resolve_git_toplevel(root).ok(),
+        root,
+    );
+    let identity = (
+        hash_path_identity(&common),
+        hash_path_identity(&toplevel),
+        repo_basename(&common),
+    );
     if let Ok(mut map) = cache.lock() {
         map.insert(root.to_path_buf(), identity.clone());
     }
@@ -355,7 +384,7 @@ fn record_gate_is_ci() -> bool {
 /// `None` when no config dir is resolvable (e.g. stripped CI env), in which
 /// case Impact is inert (no persistence). NEVER writes into the analyzed repo.
 fn store_path(root: &Path) -> Option<PathBuf> {
-    let (project_key, _) = project_identity(root);
+    let (project_key, _, _) = project_identity(root);
     Some(
         impact_config_dir()?
             .join("impact")
@@ -437,8 +466,11 @@ fn migrate_legacy_store(root: &Path) -> ImpactStore {
     let Ok(legacy) = serde_json::from_str::<LegacyFlatStore>(&content) else {
         return ImpactStore::default();
     };
-    let (_, worktree) = project_identity(root);
-    let store = legacy.into_store(&worktree);
+    let (_, worktree, display) = project_identity(root);
+    let mut store = legacy.into_store(&worktree);
+    // Backfill the cross-repo display label on migration so the imported repo
+    // is legible in `impact --all` without waiting for its next recorded run.
+    store.label = display;
     save(&store, root);
     store
 }
@@ -622,6 +654,13 @@ pub fn resolved_project_key(root: &Path) -> String {
     project_identity(root).0
 }
 
+/// The per-project store directory (`<config-dir>/fallow/impact/`), for the
+/// `impact --all` human discoverability footer. `None` when no config dir.
+#[must_use]
+pub fn store_dir() -> Option<PathBuf> {
+    impact_config_dir().map(|d| d.join("impact"))
+}
+
 /// Delete THIS project's store file. Returns whether a file was removed.
 pub fn reset(root: &Path) -> bool {
     store_path(root).is_some_and(|p| std::fs::remove_file(&p).is_ok())
@@ -669,6 +708,9 @@ pub fn record_audit_run(root: &Path, summary: &AuditSummary, record: &AuditRunRe
         return;
     }
     store.schema_version = STORE_SCHEMA_VERSION;
+    // Capture the repo basename for the cross-repo view (memoized; no extra git
+    // probe). Refreshed each run so a renamed repo folder updates its label.
+    store.label = project_identity(root).2;
 
     let counts = ImpactCounts::from_summary(summary);
     let verdict_str = verdict_label(*verdict);
@@ -690,7 +732,7 @@ pub fn record_audit_run(root: &Path, summary: &AuditSummary, record: &AuditRunRe
     compact(&mut store);
 
     if let Some(attribution) = attribution {
-        let (_, worktree) = project_identity(root);
+        let (_, worktree, _) = project_identity(root);
         apply_attribution(&mut store, attribution, &worktree, *git_sha, timestamp);
     }
 
@@ -714,6 +756,7 @@ pub fn record_combined_run(
         return;
     }
     store.schema_version = STORE_SCHEMA_VERSION;
+    store.label = project_identity(root).2;
 
     if store.first_recorded.is_none() {
         store.first_recorded = Some(timestamp.to_owned());
@@ -738,7 +781,7 @@ pub fn record_combined_run(
     }
 
     if let Some(attribution) = attribution {
-        let (_, worktree) = project_identity(root);
+        let (_, worktree, _) = project_identity(root);
         apply_attribution(&mut store, attribution, &worktree, git_sha, timestamp);
     }
 
@@ -1571,6 +1614,223 @@ pub fn build_report(store: &ImpactStore) -> ImpactReport {
     }
 }
 
+// ----- Cross-repo aggregate view (`fallow impact --all`) -------------------
+
+/// Independent wire-version for the cross-repo report, on its own cadence (it
+/// versions separately from the per-project `ImpactReportSchemaVersion` and the
+/// on-disk `STORE_SCHEMA_VERSION`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum CrossRepoImpactSchemaVersion {
+    /// First release of the `fallow impact --all --format json` shape.
+    #[serde(rename = "1")]
+    V1,
+}
+
+/// Grand totals across every tracked project (including repos whose directory no
+/// longer exists on disk: their past wins still count toward lifetime impact).
+#[derive(Debug, Clone, Default, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CrossRepoTotals {
+    pub resolved_total: usize,
+    pub suppressed_total: usize,
+    pub containment_count: usize,
+    /// Sum of whole-project issue totals across projects that have a full-run
+    /// baseline, as of EACH project's last full `fallow` run (not a simultaneous
+    /// snapshot).
+    pub project_wide_issues: usize,
+    pub projects_with_baseline: usize,
+}
+
+/// One project's row in the cross-repo roll-up.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CrossRepoProjectEntry {
+    /// Stable, non-reversible project key (the store filename stem); the
+    /// cross-tool/cross-run JOIN key. NEVER a path.
+    pub project_key: String,
+    /// Repo basename for display (never a full path). Absent on pre-v5 stores
+    /// (the row falls back to the short key).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// Timestamp of the project's most recent recorded run (changed-file or
+    /// whole-project), for the LAST RUN column and the default `recent` sort.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_recorded: Option<String>,
+    /// The full per-project report (identical shape to `fallow impact --format
+    /// json`), reused verbatim so the per-project wire contract is the sub-shape.
+    pub report: ImpactReport,
+}
+
+/// The cross-repo aggregate report (`fallow impact --all --format json`).
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(
+    feature = "schema",
+    schemars(title = "fallow impact --all --format json")
+)]
+pub struct CrossRepoImpactReport {
+    pub schema_version: CrossRepoImpactSchemaVersion,
+    /// Total per-project stores found in the user config dir.
+    pub project_count: usize,
+    /// Stores with recorded history (the rows in `projects`); excludes
+    /// enabled-but-empty stores, which are still counted in `project_count`.
+    pub tracked_count: usize,
+    /// Stores that failed to parse and were skipped (corrupt or newer-schema).
+    pub unreadable_count: usize,
+    pub totals: CrossRepoTotals,
+    pub projects: Vec<CrossRepoProjectEntry>,
+}
+
+/// Ranking for the cross-repo rows.
+#[derive(Debug, Clone, Copy)]
+pub enum CrossRepoSort {
+    /// Most recently recorded first (the default: active repos float up).
+    Recent,
+    /// Most findings resolved first.
+    Resolved,
+    /// Most commits contained first.
+    Contained,
+    /// Alphabetical by label/key.
+    Name,
+}
+
+/// The newest record timestamp across the changed-file and whole-project series.
+fn latest_activity(store: &ImpactStore) -> Option<String> {
+    let a = store.records.last().map(|r| r.timestamp.clone());
+    let b = store.project_records.last().map(|r| r.timestamp.clone());
+    match (a, b) {
+        (Some(x), Some(y)) => Some(if x >= y { x } else { y }),
+        (x, y) => x.or(y),
+    }
+}
+
+/// Enumerate every per-project store in `<config-dir>/fallow/impact/`, returning
+/// `(project_key, store)` pairs plus the count of files that failed to parse.
+/// Read-only; never writes. The global `impact.json` toggle is a sibling FILE of
+/// this dir (one level up), so it is naturally excluded. Corrupt/newer-schema
+/// files are skipped and counted, never substituted with a default store.
+#[must_use]
+pub fn load_all() -> (Vec<(String, ImpactStore)>, usize) {
+    let Some(dir) = impact_config_dir().map(|d| d.join("impact")) else {
+        return (Vec::new(), 0);
+    };
+    let Ok(read) = std::fs::read_dir(&dir) else {
+        return (Vec::new(), 0);
+    };
+    let mut stores = Vec::new();
+    let mut unreadable = 0usize;
+    for entry in read.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let Some(key) = path.file_stem().and_then(|s| s.to_str()).map(str::to_owned) else {
+            continue;
+        };
+        match std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|c| serde_json::from_str::<ImpactStore>(&c).ok())
+        {
+            Some(store) => stores.push((key, store)),
+            None => unreadable += 1,
+        }
+    }
+    (stores, unreadable)
+}
+
+/// Build the cross-repo aggregate from enumerated stores. Excludes
+/// enabled-but-empty projects from the rows (counted in `project_count`), sums
+/// totals over every tracked project, and sorts the rows by `sort`.
+#[must_use]
+pub fn build_aggregate_report(
+    stores: Vec<(String, ImpactStore)>,
+    unreadable: usize,
+    sort: CrossRepoSort,
+) -> CrossRepoImpactReport {
+    let project_count = stores.len();
+    let mut totals = CrossRepoTotals::default();
+    let mut projects = Vec::new();
+    for (key, store) in stores {
+        let report = build_report(&store);
+        let has_history = report.record_count > 0
+            || report.project_surfacing.is_some()
+            || report.resolved_total > 0
+            || report.containment_count > 0;
+        if !has_history {
+            continue;
+        }
+        totals.resolved_total += report.resolved_total;
+        totals.suppressed_total += report.suppressed_total;
+        totals.containment_count += report.containment_count;
+        if let Some(ps) = &report.project_surfacing {
+            totals.project_wide_issues += ps.total_issues;
+            totals.projects_with_baseline += 1;
+        }
+        projects.push(CrossRepoProjectEntry {
+            project_key: key,
+            label: store.label.clone(),
+            last_recorded: latest_activity(&store),
+            report,
+        });
+    }
+    sort_cross_repo(&mut projects, sort);
+    CrossRepoImpactReport {
+        schema_version: CrossRepoImpactSchemaVersion::V1,
+        project_count,
+        tracked_count: projects.len(),
+        unreadable_count: unreadable,
+        totals,
+        projects,
+    }
+}
+
+fn sort_cross_repo(projects: &mut [CrossRepoProjectEntry], sort: CrossRepoSort) {
+    match sort {
+        // Newest activity first; missing timestamps sort last. project_key
+        // tiebreak keeps the order deterministic.
+        CrossRepoSort::Recent => projects.sort_by(|a, b| {
+            b.last_recorded
+                .cmp(&a.last_recorded)
+                .then_with(|| a.project_key.cmp(&b.project_key))
+        }),
+        CrossRepoSort::Resolved => projects.sort_by(|a, b| {
+            b.report
+                .resolved_total
+                .cmp(&a.report.resolved_total)
+                .then_with(|| a.project_key.cmp(&b.project_key))
+        }),
+        CrossRepoSort::Contained => projects.sort_by(|a, b| {
+            b.report
+                .containment_count
+                .cmp(&a.report.containment_count)
+                .then_with(|| a.project_key.cmp(&b.project_key))
+        }),
+        CrossRepoSort::Name => projects.sort_by_cached_key(cross_repo_label),
+    }
+}
+
+/// The display label for a row: the basename when present, else the short key.
+/// Pure (no path access), so JSON/markdown using it can never leak a path.
+fn cross_repo_label(entry: &CrossRepoProjectEntry) -> String {
+    entry
+        .label
+        .clone()
+        .unwrap_or_else(|| short_key(&entry.project_key))
+}
+
+/// First 12 hex of a project key, for opaque-but-stable row labels.
+fn short_key(key: &str) -> String {
+    key.chars().take(12).collect()
+}
+
+/// Build the cross-repo report by enumerating the config dir.
+#[must_use]
+pub fn aggregate(sort: CrossRepoSort) -> CrossRepoImpactReport {
+    let (stores, unreadable) = load_all();
+    build_aggregate_report(stores, unreadable, sort)
+}
+
 /// Render the whole-project view for the human report. Deliberately understated
 /// (one count line, one trend line, one caveat) rather than a co-equal header:
 /// the project track advances only on local full `fallow` runs, not CI, so it is
@@ -1831,6 +2091,189 @@ pub fn render_markdown(report: &ImpactReport) -> String {
             "\n_Tracking since {since}. Local-only; resolution is a local-developer signal._\n",
         ));
     }
+    out
+}
+
+/// Render the cross-repo report as JSON via the typed `ImpactCrossRepo` envelope.
+#[must_use]
+pub fn render_cross_repo_json(report: &CrossRepoImpactReport) -> String {
+    let value = crate::output_envelope::serialize_root_output(
+        crate::output_envelope::FallowOutput::ImpactCrossRepo(report.clone()),
+    )
+    .unwrap_or_else(
+        |_| serde_json::json!({"error":"failed to serialize cross-repo impact report"}),
+    );
+    serde_json::to_string_pretty(&value).unwrap_or_else(|_| {
+        "{\"error\":\"failed to serialize cross-repo impact report\"}".to_owned()
+    })
+}
+
+/// A single row's display label (basename when present, else short key). Pure:
+/// never touches the filesystem, so it can never leak a path.
+fn row_label(entry: &CrossRepoProjectEntry) -> String {
+    cross_repo_label(entry)
+}
+
+fn opt_count(c: Option<&ImpactCounts>) -> String {
+    c.map_or_else(|| "-".to_owned(), |c| c.total_issues.to_string())
+}
+
+fn row_trend(report: &ImpactReport) -> &'static str {
+    report
+        .project_trend
+        .as_ref()
+        .or(report.trend.as_ref())
+        .map_or("-", |t| trend_arrow(t.direction))
+}
+
+/// Render the cross-repo roll-up as human-readable text. `limit` caps the
+/// printed rows (grand totals always reflect every tracked project). Path-free:
+/// the CLI adds the single store-dir discoverability line, gated on `!quiet`.
+#[expect(
+    clippy::format_push_string,
+    reason = "small report renderer; readability over avoiding the extra allocation"
+)]
+#[must_use]
+pub fn render_cross_repo_human(report: &CrossRepoImpactReport, limit: Option<usize>) -> String {
+    let mut out = String::new();
+    out.push_str("FALLOW IMPACT (ALL PROJECTS)\n\n");
+
+    if report.project_count == 0 {
+        out.push_str(
+            "No projects tracked yet. Enable in a repo with `fallow impact enable`, or for \
+             every project with `fallow impact default on`.\n",
+        );
+        return out;
+    }
+
+    out.push_str(&format!(
+        "{} project{} tracked, {} with history\n\n",
+        report.project_count,
+        plural(report.project_count),
+        report.tracked_count,
+    ));
+
+    if !report.projects.is_empty() {
+        out.push_str(&format!(
+            "{:<24}{:>8}{:>10}{:>11}{:>10}{:>7}  {}\n",
+            "PROJECT", "LATEST", "PROJECT", "CONTAINED", "RESOLVED", "TREND", "LAST RUN",
+        ));
+        let rows = limit.map_or(report.projects.len(), |n| n.min(report.projects.len()));
+        for entry in report.projects.iter().take(rows) {
+            let mut label = row_label(entry);
+            if label.chars().count() > 22 {
+                label = format!("{}...", label.chars().take(19).collect::<String>());
+            }
+            let last = entry
+                .last_recorded
+                .as_deref()
+                .map_or("-", date_only)
+                .to_owned();
+            out.push_str(&format!(
+                "{:<24}{:>8}{:>10}{:>11}{:>10}{:>7}  {}\n",
+                label,
+                opt_count(entry.report.surfacing.as_ref()),
+                opt_count(entry.report.project_surfacing.as_ref()),
+                entry.report.containment_count,
+                entry.report.resolved_total,
+                row_trend(&entry.report),
+                last,
+            ));
+        }
+        if let Some(n) = limit
+            && report.projects.len() > n
+        {
+            out.push_str(&format!(
+                "  ... and {} more (raise --limit to show)\n",
+                report.projects.len() - n,
+            ));
+        }
+    }
+
+    let no_history = report.project_count.saturating_sub(report.tracked_count);
+    if no_history > 0 {
+        out.push_str(&format!(
+            "\n{no_history} tracked project{} have no history yet\n",
+            plural(no_history),
+        ));
+    }
+    if report.unreadable_count > 0 {
+        out.push_str(&format!(
+            "skipped {} unreadable store{}\n",
+            report.unreadable_count,
+            plural(report.unreadable_count),
+        ));
+    }
+
+    let t = &report.totals;
+    out.push_str("\nGRAND TOTALS\n");
+    out.push_str(&format!(
+        "  Across {} tracked project{}: {} finding{} resolved, {} commit{} contained, {} marked intentional\n",
+        report.tracked_count,
+        plural(report.tracked_count),
+        t.resolved_total,
+        plural(t.resolved_total),
+        t.containment_count,
+        plural(t.containment_count),
+        t.suppressed_total,
+    ));
+    if t.projects_with_baseline > 0 {
+        out.push_str(&format!(
+            "  {} issue{} project-wide across {} project{} with a full-run baseline (as of each project's last full run)\n",
+            t.project_wide_issues,
+            plural(t.project_wide_issues),
+            t.projects_with_baseline,
+            plural(t.projects_with_baseline),
+        ));
+    }
+    out.push_str("\nLocal-only; never uploaded; accrues on this machine, not CI.\n");
+    out
+}
+
+/// Render the cross-repo roll-up as Markdown (paste-ready, path-free).
+#[expect(
+    clippy::format_push_string,
+    reason = "small report renderer; readability over avoiding the extra allocation"
+)]
+#[must_use]
+pub fn render_cross_repo_markdown(report: &CrossRepoImpactReport) -> String {
+    let mut out = String::new();
+    out.push_str("## Fallow impact (all projects)\n\n");
+    if report.project_count == 0 {
+        out.push_str("No projects tracked yet.\n");
+        return out;
+    }
+    out.push_str(&format!(
+        "{} projects tracked, {} with history.\n\n",
+        report.project_count, report.tracked_count,
+    ));
+    if !report.projects.is_empty() {
+        out.push_str("| Project | Latest | Project-wide | Contained | Resolved | Last run |\n");
+        out.push_str("|:--------|-------:|-------------:|----------:|---------:|:---------|\n");
+        for entry in &report.projects {
+            out.push_str(&format!(
+                "| {} | {} | {} | {} | {} | {} |\n",
+                row_label(entry),
+                opt_count(entry.report.surfacing.as_ref()),
+                opt_count(entry.report.project_surfacing.as_ref()),
+                entry.report.containment_count,
+                entry.report.resolved_total,
+                entry.last_recorded.as_deref().map_or("-", date_only),
+            ));
+        }
+    }
+    let t = &report.totals;
+    out.push_str(&format!(
+        "\n**Grand totals:** {} resolved, {} contained, {} marked intentional across {} tracked projects",
+        t.resolved_total, t.containment_count, t.suppressed_total, report.tracked_count,
+    ));
+    if t.projects_with_baseline > 0 {
+        out.push_str(&format!(
+            "; {} issues project-wide across {} with a full-run baseline (as of each project's last full run)",
+            t.project_wide_issues, t.projects_with_baseline,
+        ));
+    }
+    out.push_str(".\n\n_Local-only; never uploaded; accrues on this machine, not CI._\n");
     out
 }
 
@@ -3195,5 +3638,176 @@ mod tests {
         assert!(reset_all());
         // The global default toggle survives a data wipe.
         assert!(load_global_default());
+    }
+
+    // ----- cross-repo aggregate (`impact --all`) tests --------------------
+
+    /// Set an isolated config dir (no project root needed) and return its guard.
+    fn aggregate_env() -> tempfile::TempDir {
+        let config = tempfile::tempdir().unwrap();
+        TEST_CONFIG_DIR.with(|c| *c.borrow_mut() = Some(config.path().to_path_buf()));
+        config
+    }
+
+    /// Write a store file directly under `<config>/impact/<key>.json`.
+    fn seed_store(key: &str, store: &ImpactStore) {
+        let dir = impact_config_dir().unwrap().join("impact");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join(format!("{key}.json")),
+            serde_json::to_string_pretty(store).unwrap(),
+        )
+        .unwrap();
+    }
+
+    fn store_with(
+        label: &str,
+        resolved: usize,
+        contained: usize,
+        latest_ts: &str,
+        latest_issues: usize,
+    ) -> ImpactStore {
+        let mut s = ImpactStore {
+            enabled: true,
+            explicit_decision: true,
+            resolved_total: resolved,
+            label: Some(label.to_owned()),
+            ..Default::default()
+        };
+        s.records.push(ImpactRecord {
+            timestamp: latest_ts.to_owned(),
+            version: "2.0.0".to_owned(),
+            git_sha: None,
+            verdict: "warn".to_owned(),
+            gate: false,
+            counts: ImpactCounts::from_combined(latest_issues, 0, 0),
+        });
+        for _ in 0..contained {
+            s.containment.push(ContainmentEvent {
+                blocked_at: "t0".to_owned(),
+                cleared_at: "t1".to_owned(),
+                git_sha: None,
+                blocked_counts: ImpactCounts::default(),
+            });
+        }
+        s
+    }
+
+    #[test]
+    fn repo_basename_returns_last_component_only() {
+        assert_eq!(
+            repo_basename(Path::new("/a/b/myrepo/.git")).as_deref(),
+            Some("myrepo")
+        );
+        assert_eq!(
+            repo_basename(Path::new("/a/b/proj")).as_deref(),
+            Some("proj")
+        );
+        // Never a separator in the result.
+        let name = repo_basename(Path::new("/x/y/z/.git")).unwrap();
+        assert!(!name.contains('/') && !name.contains('\\'));
+    }
+
+    #[test]
+    fn aggregate_rolls_up_totals_and_excludes_empty() {
+        let _cfg = aggregate_env();
+        seed_store(
+            "aaa",
+            &store_with("alpha", 10, 2, "2026-06-10T00:00:00Z", 3),
+        );
+        seed_store("bbb", &store_with("beta", 5, 1, "2026-06-11T00:00:00Z", 0));
+        // enabled-but-empty: no records, no resolved, no containment.
+        seed_store(
+            "ccc",
+            &ImpactStore {
+                enabled: true,
+                explicit_decision: true,
+                label: Some("gamma".into()),
+                ..Default::default()
+            },
+        );
+        let report = aggregate(CrossRepoSort::Recent);
+        assert_eq!(report.project_count, 3, "all three stores enumerated");
+        assert_eq!(report.tracked_count, 2, "empty store excluded from rows");
+        assert_eq!(report.totals.resolved_total, 15);
+        assert_eq!(report.totals.containment_count, 3);
+        assert_eq!(report.unreadable_count, 0);
+    }
+
+    #[test]
+    fn aggregate_sort_recent_orders_by_last_activity() {
+        let _cfg = aggregate_env();
+        seed_store("old", &store_with("older", 1, 0, "2026-06-01T00:00:00Z", 1));
+        seed_store("new", &store_with("newer", 1, 0, "2026-06-12T00:00:00Z", 1));
+        let report = aggregate(CrossRepoSort::Recent);
+        assert_eq!(report.projects[0].label.as_deref(), Some("newer"));
+        assert_eq!(report.projects[1].label.as_deref(), Some("older"));
+    }
+
+    #[test]
+    fn cross_repo_json_carries_kind_and_leaks_no_path() {
+        let _cfg = aggregate_env();
+        seed_store("aaa", &store_with("alpha", 4, 1, "2026-06-10T00:00:00Z", 2));
+        let report = aggregate(CrossRepoSort::Recent);
+        let json = render_cross_repo_json(&report);
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(value["kind"], "impact-cross-repo");
+        // No label (or any string) may contain a path separator.
+        for entry in value["projects"].as_array().unwrap() {
+            if let Some(label) = entry["label"].as_str() {
+                assert!(
+                    !label.contains('/') && !label.contains('\\'),
+                    "label must be a basename, got {label}"
+                );
+            }
+        }
+        assert!(
+            !json.contains('/') || !json.contains("Users"),
+            "json must not leak an absolute home path"
+        );
+    }
+
+    #[test]
+    fn cross_repo_corrupt_file_is_skipped_and_counted() {
+        let _cfg = aggregate_env();
+        seed_store("good", &store_with("good", 3, 0, "2026-06-10T00:00:00Z", 1));
+        let dir = impact_config_dir().unwrap().join("impact");
+        std::fs::write(dir.join("bad.json"), b"{ not valid json ][").unwrap();
+        let report = aggregate(CrossRepoSort::Recent);
+        assert_eq!(report.tracked_count, 1, "good store still aggregated");
+        assert_eq!(
+            report.unreadable_count, 1,
+            "corrupt file counted, not crashed"
+        );
+    }
+
+    #[test]
+    fn cross_repo_empty_dir_is_first_run() {
+        let _cfg = aggregate_env();
+        let report = aggregate(CrossRepoSort::Recent);
+        assert_eq!(report.project_count, 0);
+        let human = render_cross_repo_human(&report, None);
+        assert!(human.contains("No projects tracked yet"));
+    }
+
+    #[test]
+    fn record_audit_run_captures_basename_label() {
+        let (_config, dir) = test_env();
+        let root = dir.path();
+        enable(root);
+        record_v1(
+            root,
+            &summary(1, 0, 0),
+            AuditVerdict::Warn,
+            false,
+            None,
+            "2.0.0",
+            "t0",
+        );
+        let label = load(root).label.expect("label captured on record");
+        assert!(
+            !label.contains('/') && !label.contains('\\'),
+            "label must be a basename, got {label}"
+        );
     }
 }

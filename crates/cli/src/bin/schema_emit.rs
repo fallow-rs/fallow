@@ -35,7 +35,8 @@ use fallow_cli::health_types::{
     UntestedFileFinding, VitalSigns, VitalSignsCounts,
 };
 use fallow_cli::impact::{
-    ContainmentEvent, EnabledSource, ImpactCounts, ImpactReport, ImpactReportSchemaVersion,
+    ContainmentEvent, CrossRepoImpactReport, CrossRepoImpactSchemaVersion, CrossRepoProjectEntry,
+    CrossRepoTotals, EnabledSource, ImpactCounts, ImpactReport, ImpactReportSchemaVersion,
     ImpactTrendDirection, ResolutionEvent, TrendSummary,
 };
 use fallow_cli::output_dupes::{
@@ -332,6 +333,10 @@ const DERIVED_DEFINITION_NAMES: &[&str] = &[
     "CoverageAnalyzeOutput",
     "CoverageAnalyzeSchemaVersion",
     "ContainmentEvent",
+    "CrossRepoImpactReport",
+    "CrossRepoImpactSchemaVersion",
+    "CrossRepoProjectEntry",
+    "CrossRepoTotals",
     "EnabledSource",
     "ImpactCounts",
     "ImpactReport",
@@ -590,6 +595,10 @@ fn register_impact_definitions(generator: &mut schemars::SchemaGenerator) {
     let _ = generator.subschema_for::<TrendSummary>();
     let _ = generator.subschema_for::<ContainmentEvent>();
     let _ = generator.subschema_for::<ImpactReport>();
+    let _ = generator.subschema_for::<CrossRepoImpactSchemaVersion>();
+    let _ = generator.subschema_for::<CrossRepoTotals>();
+    let _ = generator.subschema_for::<CrossRepoProjectEntry>();
+    let _ = generator.subschema_for::<CrossRepoImpactReport>();
 }
 
 fn register_security_definitions(generator: &mut schemars::SchemaGenerator) {
@@ -813,6 +822,11 @@ const FALLOW_OUTPUT_VARIANTS: &[(&str, &[&str], &str)] = &[
         "impact",
         &["ImpactReport"],
         "`fallow impact --format json`. Required `enabled`, `record_count`,\n`containment_count`, `recent_containment`; no global `schema_version`,\n`command`, `total_issues`, or `report`.",
+    ),
+    (
+        "impact-cross-repo",
+        &["CrossRepoImpactReport"],
+        "`fallow impact --all --format json`. Required `project_count`,\n`tracked_count`, `unreadable_count`, `totals`, `projects`; each `projects[]`\nentry embeds a per-project `report`. Independently versioned via\n`CrossRepoImpactSchemaVersion`.",
     ),
     (
         "security",
@@ -1155,6 +1169,7 @@ mod drift_tests {
             ("Dupes", "DupesOutput"),
             ("CheckGrouped", "CheckGroupedOutput"),
             ("Impact", "ImpactReport"),
+            ("ImpactCrossRepo", "CrossRepoImpactReport"),
             ("Security", "SecurityOutput"),
             ("SecuritySummary", "SecuritySummaryOutput"),
             ("Check", "CheckOutput"),
@@ -1179,6 +1194,7 @@ mod drift_tests {
                 FallowOutput::Dupes(_) => "Dupes",
                 FallowOutput::CheckGrouped(_) => "CheckGrouped",
                 FallowOutput::Impact(_) => "Impact",
+                FallowOutput::ImpactCrossRepo(_) => "ImpactCrossRepo",
                 FallowOutput::SecuritySummary(_) => "SecuritySummary",
                 FallowOutput::Security(_) => "Security",
                 FallowOutput::Check(_) => "Check",

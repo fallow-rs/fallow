@@ -71,6 +71,8 @@ kind: "dupes"
 kind: "dead-code-grouped"
 }) | (ImpactReport & {
 kind: "impact"
+}) | (CrossRepoImpactReport & {
+kind: "impact-cross-repo"
 }) | ((SecurityOutput | SecuritySummaryOutput) & {
 kind: "security"
 }) | (CheckOutput & {
@@ -633,6 +635,12 @@ export type EnabledSource = ("project" | "user" | "default")
  * Direction of a count trend between two recorded runs.
  */
 export type ImpactTrendDirection = ("improving" | "declining" | "stable")
+/**
+ * Independent wire-version for the cross-repo report, on its own cadence (it
+ * versions separately from the per-project `ImpactReportSchemaVersion` and the
+ * on-disk `STORE_SCHEMA_VERSION`).
+ */
+export type CrossRepoImpactSchemaVersion = "1"
 /**
  * The `fallow security --format json` schema version. Independently versioned
  * from the main contract, mirroring `ImpactReportSchemaVersion`.
@@ -5444,6 +5452,64 @@ path: string
 symbol?: (string | null)
 git_sha?: (string | null)
 timestamp: string
+}
+/**
+ * The cross-repo aggregate report (`fallow impact --all --format json`).
+ */
+export interface CrossRepoImpactReport {
+schema_version: CrossRepoImpactSchemaVersion
+/**
+ * Total per-project stores found in the user config dir.
+ */
+project_count: number
+/**
+ * Stores with recorded history (the rows in `projects`); excludes
+ * enabled-but-empty stores, which are still counted in `project_count`.
+ */
+tracked_count: number
+/**
+ * Stores that failed to parse and were skipped (corrupt or newer-schema).
+ */
+unreadable_count: number
+totals: CrossRepoTotals
+projects: CrossRepoProjectEntry[]
+}
+/**
+ * Grand totals across every tracked project (including repos whose directory no
+ * longer exists on disk: their past wins still count toward lifetime impact).
+ */
+export interface CrossRepoTotals {
+resolved_total: number
+suppressed_total: number
+containment_count: number
+/**
+ * Sum of whole-project issue totals across projects that have a full-run
+ * baseline, as of EACH project's last full `fallow` run (not a simultaneous
+ * snapshot).
+ */
+project_wide_issues: number
+projects_with_baseline: number
+}
+/**
+ * One project's row in the cross-repo roll-up.
+ */
+export interface CrossRepoProjectEntry {
+/**
+ * Stable, non-reversible project key (the store filename stem); the
+ * cross-tool/cross-run JOIN key. NEVER a path.
+ */
+project_key: string
+/**
+ * Repo basename for display (never a full path). Absent on pre-v5 stores
+ * (the row falls back to the short key).
+ */
+label?: (string | null)
+/**
+ * Timestamp of the project's most recent recorded run (changed-file or
+ * whole-project), for the LAST RUN column and the default `recent` sort.
+ */
+last_recorded?: (string | null)
+report: ImpactReport
 }
 /**
  * The `fallow security --format json` envelope. `FallowOutput` discriminates it

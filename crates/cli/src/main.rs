@@ -1066,6 +1066,18 @@ enum Command {
     Impact {
         #[command(subcommand)]
         subcommand: Option<ImpactCli>,
+        /// Aggregate every tracked project into one cross-repo roll-up
+        /// ("what has fallow done for me across all my repos"). Reads the
+        /// user config dir; ignores `--root`. Cannot combine with a subcommand.
+        #[arg(long)]
+        all: bool,
+        /// Row ordering for `--all` (default: most recently recorded first).
+        #[arg(long, value_enum, default_value_t = ImpactSortCli::Recent)]
+        sort: ImpactSortCli,
+        /// Cap the number of `--all` rows printed (grand totals still reflect
+        /// every tracked project).
+        #[arg(long)]
+        limit: Option<usize>,
     },
 
     /// Surface local security candidates for downstream agent verification (opt-in).
@@ -1394,6 +1406,30 @@ enum ImpactCli {
 enum ToggleState {
     On,
     Off,
+}
+
+/// Row ordering for `fallow impact --all`.
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum ImpactSortCli {
+    /// Most recently recorded project first (default).
+    Recent,
+    /// Most findings resolved first.
+    Resolved,
+    /// Most commits contained first.
+    Contained,
+    /// Alphabetical by project label.
+    Name,
+}
+
+impl ImpactSortCli {
+    const fn to_impact(self) -> impact::CrossRepoSort {
+        match self {
+            Self::Recent => impact::CrossRepoSort::Recent,
+            Self::Resolved => impact::CrossRepoSort::Resolved,
+            Self::Contained => impact::CrossRepoSort::Contained,
+            Self::Name => impact::CrossRepoSort::Name,
+        }
+    }
 }
 
 #[derive(clap::Subcommand)]
@@ -3191,7 +3227,12 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
         Command::Flags { top } => dispatch_flags_command(dispatch, top),
         Command::Explain { issue_type } => explain::run_explain(&issue_type.join(" "), output),
         audit @ Command::Audit { .. } => dispatch_audit_command(audit, dispatch),
-        Command::Impact { subcommand } => dispatch_impact(root, quiet, output, subcommand),
+        Command::Impact {
+            subcommand,
+            all,
+            sort,
+            limit,
+        } => dispatch_impact(root, quiet, output, subcommand, all, sort, limit),
         security @ Command::Security { .. } => dispatch_security_command(security, dispatch),
         Command::Schema => unreachable!("handled above"),
         migrate @ Command::Migrate { .. } => dispatch_migrate_command(migrate, root),
@@ -3560,7 +3601,22 @@ fn dispatch_impact(
     quiet: bool,
     output: fallow_config::OutputFormat,
     subcommand: Option<ImpactCli>,
+    all: bool,
+    sort: ImpactSortCli,
+    limit: Option<usize>,
 ) -> ExitCode {
+    if all {
+        if subcommand.is_some() {
+            return emit_known_failure(
+                "`fallow impact --all` is a read-only cross-repo view and cannot be combined \
+                 with a subcommand (enable/disable/default/reset)",
+                2,
+                output,
+                telemetry::FailureReason::Validation,
+            );
+        }
+        return render_impact_all(quiet, output, sort, limit);
+    }
     match subcommand {
         Some(ImpactCli::Enable) => {
             let newly = impact::enable(root);
@@ -3686,6 +3742,47 @@ fn render_impact_status(
             Some(path) => println!("  Store file: {}", path.display()),
             None => println!("  Store file: (no user config dir resolved; not persisted)"),
         }
+    }
+    ExitCode::SUCCESS
+}
+
+/// Render the cross-repo `fallow impact --all` roll-up. Reads the user config
+/// dir; never reads `--root`. Human output adds ONE store-dir discoverability
+/// line gated on `is_human && !quiet`; JSON/markdown stay path-free.
+fn render_impact_all(
+    quiet: bool,
+    output: fallow_config::OutputFormat,
+    sort: ImpactSortCli,
+    limit: Option<usize>,
+) -> ExitCode {
+    let report = impact::aggregate(sort.to_impact());
+    let is_human = matches!(output, fallow_config::OutputFormat::Human);
+    let rendered = match output {
+        fallow_config::OutputFormat::Json => impact::render_cross_repo_json(&report),
+        fallow_config::OutputFormat::Markdown => impact::render_cross_repo_markdown(&report),
+        fallow_config::OutputFormat::Human => impact::render_cross_repo_human(&report, limit),
+        fallow_config::OutputFormat::Sarif
+        | fallow_config::OutputFormat::Compact
+        | fallow_config::OutputFormat::CodeClimate
+        | fallow_config::OutputFormat::PrCommentGithub
+        | fallow_config::OutputFormat::PrCommentGitlab
+        | fallow_config::OutputFormat::ReviewGithub
+        | fallow_config::OutputFormat::ReviewGitlab
+        | fallow_config::OutputFormat::Badge => {
+            return emit_known_failure(
+                "impact --all supports human, json, and markdown output",
+                2,
+                output,
+                telemetry::FailureReason::UnsupportedFormat,
+            );
+        }
+    };
+    println!("{rendered}");
+    if is_human
+        && !quiet
+        && let Some(dir) = impact::store_dir()
+    {
+        println!("  Stores: {}", dir.display());
     }
     ExitCode::SUCCESS
 }

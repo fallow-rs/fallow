@@ -1070,6 +1070,12 @@ pub enum FallowOutput {
     /// `command`, `total_issues`, or `report`.
     #[serde(rename = "impact")]
     Impact(crate::impact::ImpactReport),
+    /// `fallow impact --all --format json`. Required `project_count`,
+    /// `tracked_count`, `totals`, `projects`; the cross-repo roll-up. Each
+    /// `projects[]` entry embeds a per-project `report` (the same shape as the
+    /// `impact` variant). Independently versioned via `CrossRepoImpactSchemaVersion`.
+    #[serde(rename = "impact-cross-repo")]
+    ImpactCrossRepo(crate::impact::CrossRepoImpactReport),
     /// `fallow security --summary --format json`. Required `summary`; no
     /// per-finding arrays.
     #[serde(rename = "security")]
