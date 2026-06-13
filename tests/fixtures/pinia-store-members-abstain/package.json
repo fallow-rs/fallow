@@ -1,0 +1,1 @@
+{ "name": "abstain", "version": "1.0.0", "dependencies": { "pinia": "^2.1.0" } }

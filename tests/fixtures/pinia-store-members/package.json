@@ -1,0 +1,5 @@
+{
+  "name": "pinia-store-members-fixture",
+  "version": "1.0.0",
+  "dependencies": { "pinia": "^2.1.0", "vue": "^3.4.0" }
+}

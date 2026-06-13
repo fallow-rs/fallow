@@ -19,6 +19,75 @@ fn into_module_info_transfers_exports() {
     assert_eq!(info.file_id, FileId(0));
 }
 
+fn store_member_names(info: &crate::ModuleInfo, export: &str) -> Vec<String> {
+    info.exports
+        .iter()
+        .find(|e| e.name.to_string() == export)
+        .map(|e| {
+            let mut names: Vec<String> = e
+                .members
+                .iter()
+                .filter(|m| m.kind == MemberKind::StoreMember)
+                .map(|m| m.name.clone())
+                .collect();
+            names.sort();
+            names
+        })
+        .unwrap_or_default()
+}
+
+#[test]
+fn pinia_option_store_harvests_state_getters_actions_keys() {
+    let info = parse(
+        "import { defineStore } from 'pinia'\nexport const useS = defineStore('s', {\n  state: () => ({ count: 0, total: 1 }),\n  getters: { double: (s) => s.count },\n  actions: { inc() {} },\n})",
+    );
+    assert_eq!(
+        store_member_names(&info, "useS"),
+        vec![
+            "count".to_string(),
+            "double".to_string(),
+            "inc".to_string(),
+            "total".to_string()
+        ]
+    );
+}
+
+#[test]
+fn pinia_option_store_excludes_dollar_prefixed_api() {
+    let info = parse(
+        "import { defineStore } from 'pinia'\nexport const useS = defineStore('s', {\n  state: () => ({ count: 0 }),\n  actions: { inc() {}, $reset() {} },\n})",
+    );
+    let names = store_member_names(&info, "useS");
+    assert!(names.contains(&"count".to_string()));
+    assert!(names.contains(&"inc".to_string()));
+    assert!(
+        !names.contains(&"$reset".to_string()),
+        "Pinia $-API must be excluded from the declared set: {names:?}"
+    );
+}
+
+#[test]
+fn pinia_setup_store_harvests_returned_keys() {
+    let info = parse(
+        "import { defineStore } from 'pinia'\nexport const useS = defineStore('s', () => {\n  const count = 0\n  function inc() {}\n  return { count, inc }\n})",
+    );
+    assert_eq!(
+        store_member_names(&info, "useS"),
+        vec!["count".to_string(), "inc".to_string()]
+    );
+}
+
+#[test]
+fn pinia_setup_store_spread_return_abstains() {
+    let info = parse(
+        "import { defineStore } from 'pinia'\nexport const useS = defineStore('s', () => {\n  const base = { a: 1 }\n  return { ...base, b: 2 }\n})",
+    );
+    assert!(
+        store_member_names(&info, "useS").is_empty(),
+        "a spread return must abstain (no members harvested)"
+    );
+}
+
 #[test]
 fn into_module_info_transfers_imports() {
     let info = parse("import { foo } from './bar'; import baz from 'baz';");
