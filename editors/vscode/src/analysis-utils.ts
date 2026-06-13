@@ -21,6 +21,10 @@ const VERSION_GATED_FLAGS: Readonly<Record<string, string>> = {
   "--dupes-skip-local": "2.88.3",
   "--dupes-cross-language": "2.88.3",
   "--dupes-ignore-imports": "2.88.3",
+  // Opt-out of the default import exclusion (#1224). On older binaries
+  // (< 2.96.0) the dupes default was already "count imports", so omitting the
+  // flag yields the same behavior the user is asking for; degrade silently.
+  "--dupes-no-ignore-imports": "2.96.0",
 };
 
 interface AnalysisArgsOptions {
@@ -182,8 +186,13 @@ export const buildAnalysisArgs = (options: AnalysisArgsOptions): BuiltAnalysisAr
     pushVersionGatedFlag(args, skipped, "--dupes-cross-language", options.cliVersion);
   }
 
+  // `ignoreImports` defaults to true on the CLI (#1224); only forward a flag
+  // when the user explicitly set the setting. `true` is redundant-but-valid;
+  // `false` is the opt-out that the CLI default now requires a flag to express.
   if (options.dupesIgnoreImports === true) {
     pushVersionGatedFlag(args, skipped, "--dupes-ignore-imports", options.cliVersion);
+  } else if (options.dupesIgnoreImports === false) {
+    pushVersionGatedFlag(args, skipped, "--dupes-no-ignore-imports", options.cliVersion);
   }
 
   return { args, skipped };

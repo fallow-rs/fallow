@@ -32,7 +32,7 @@ const baseArgsOptions = {
   minOccurrences: 2,
   dupesSkipLocal: false,
   dupesCrossLanguage: false,
-  dupesIgnoreImports: false,
+  dupesIgnoreImports: undefined,
   cliVersion: null,
 };
 

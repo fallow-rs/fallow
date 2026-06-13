@@ -366,8 +366,8 @@
         "fallow.duplication.ignoreImports": {
           "scope": "resource",
           "type": "boolean",
-          "default": false,
-          "description": "Exclude import declarations from duplicate-code detection."
+          "default": true,
+          "description": "Exclude import declarations from duplicate-code detection. Enabled by default: token-identical sorted import blocks are a formatting artifact, not copy-paste. Set to false to count import blocks as clone candidates again."
         },
         "fallow.production": {
           "scope": "resource",

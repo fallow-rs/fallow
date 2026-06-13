@@ -140,6 +140,37 @@ describe("buildAnalysisArgs", () => {
     expect(skipped).toEqual([]);
   });
 
+  it("forwards --dupes-no-ignore-imports when the user opts out (false) on a new CLI", () => {
+    const { args, skipped } = buildAnalysisArgs({
+      ...baseOptions,
+      dupesIgnoreImports: false,
+      cliVersion: "2.96.0",
+    });
+    expect(args).toContain("--dupes-no-ignore-imports");
+    expect(args).not.toContain("--dupes-ignore-imports");
+    expect(skipped).toEqual([]);
+  });
+
+  it("skips --dupes-no-ignore-imports on an older CLI (default was already count-imports)", () => {
+    const { args, skipped } = buildAnalysisArgs({
+      ...baseOptions,
+      dupesIgnoreImports: false,
+      cliVersion: "2.95.0",
+    });
+    expect(args).not.toContain("--dupes-no-ignore-imports");
+    expect(skipped.some((s) => s.flag === "--dupes-no-ignore-imports")).toBe(true);
+  });
+
+  it("forwards neither import flag when the setting is unset", () => {
+    const { args } = buildAnalysisArgs({
+      ...baseOptions,
+      dupesIgnoreImports: undefined,
+      cliVersion: "2.96.0",
+    });
+    expect(args).not.toContain("--dupes-ignore-imports");
+    expect(args).not.toContain("--dupes-no-ignore-imports");
+  });
+
   it("forwards --dupes-min-occurrences at the floor when explicitly configured", () => {
     const { args, skipped } = buildAnalysisArgs({ ...baseOptions, minOccurrences: 2 });
     expect(args[args.indexOf("--dupes-min-occurrences") + 1]).toBe("2");
