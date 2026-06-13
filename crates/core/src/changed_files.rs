@@ -168,6 +168,47 @@ pub fn resolve_git_toplevel(cwd: &Path) -> Result<PathBuf, ChangedFilesError> {
     Ok(dunce::canonicalize(&path).unwrap_or(path))
 }
 
+/// Resolve the canonical git *common* directory for `cwd`.
+///
+/// Runs `git rev-parse --path-format=absolute --git-common-dir`. Unlike
+/// `--show-toplevel` (which returns each worktree's own working directory),
+/// `--git-common-dir` returns the SHARED `.git` directory of the repository,
+/// so every linked worktree of the same repo resolves to the SAME path. This
+/// is what lets the Impact store collapse all worktrees of a repo onto a
+/// single identity (one history per repo, not per checkout).
+///
+/// `--path-format=absolute` (git 2.31+) forces an absolute result, so the
+/// bare-`.git` relative form `--git-common-dir` would otherwise emit at the
+/// repo root is avoided. The path is canonicalized to agree with paths from
+/// `fs::canonicalize` elsewhere (macOS `/tmp` -> `/private/tmp`, Windows 8.3).
+pub fn resolve_git_common_dir(cwd: &Path) -> Result<PathBuf, ChangedFilesError> {
+    let output = spawn_output(&mut git_command(
+        cwd,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    ))
+    .map_err(|e| ChangedFilesError::GitMissing(e.to_string()))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(if stderr.contains("not a git repository") {
+            ChangedFilesError::NotARepository
+        } else {
+            ChangedFilesError::GitFailed(stderr.trim().to_owned())
+        });
+    }
+
+    let raw = String::from_utf8_lossy(&output.stdout);
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(ChangedFilesError::GitFailed(
+            "git rev-parse --git-common-dir returned empty output".to_owned(),
+        ));
+    }
+
+    let path = PathBuf::from(trimmed);
+    Ok(dunce::canonicalize(&path).unwrap_or(path))
+}
+
 fn collect_git_paths(
     cwd: &Path,
     toplevel: &Path,
@@ -1269,6 +1310,55 @@ mod tests {
     fn resolve_git_toplevel_not_a_repository() {
         let tmp = tempfile::tempdir().unwrap();
         let result = resolve_git_toplevel(tmp.path());
+        assert!(
+            matches!(result, Err(ChangedFilesError::NotARepository)),
+            "expected NotARepository, got {result:?}"
+        );
+    }
+
+    /// Two linked worktrees of the same repo resolve to the SAME common dir
+    /// (the shared `.git`), even though their `--show-toplevel` working
+    /// directories differ. This is the invariant the Impact store relies on to
+    /// collapse all worktrees of a repo onto one history.
+    #[test]
+    fn resolve_git_common_dir_collapses_worktrees() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = init_repo(tmp.path());
+        let linked = tmp.path().join("linked-worktree");
+        run_git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "--quiet",
+                linked.to_str().unwrap(),
+                "-b",
+                "feat",
+            ],
+        );
+
+        let main_common = resolve_git_common_dir(&repo).unwrap();
+        let linked_common = resolve_git_common_dir(&linked).unwrap();
+        assert_eq!(
+            main_common, linked_common,
+            "worktrees of one repo must share a common dir"
+        );
+
+        // The per-worktree toplevels DO differ, proving the collapse is real.
+        let main_top = resolve_git_toplevel(&repo).unwrap();
+        let linked_top = resolve_git_toplevel(&linked).unwrap();
+        assert_ne!(
+            main_top, linked_top,
+            "the two worktrees should have distinct toplevels"
+        );
+    }
+
+    /// Outside any git repo, `resolve_git_common_dir` returns `NotARepository`
+    /// so the Impact key can fall back to the canonical root.
+    #[test]
+    fn resolve_git_common_dir_not_a_repository() {
+        let tmp = tempfile::tempdir().unwrap();
+        let result = resolve_git_common_dir(tmp.path());
         assert!(
             matches!(result, Err(ChangedFilesError::NotARepository)),
             "expected NotARepository, got {result:?}"
