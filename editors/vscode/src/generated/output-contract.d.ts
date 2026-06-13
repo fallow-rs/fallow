@@ -566,7 +566,7 @@ export type TrendDirection = ("improving" | "declining" | "stable")
 /**
  * Discriminant for [`CssCandidateAction::kind`].
  */
-export type CssCandidateActionType = ("verify-unused" | "verify-undefined" | "consolidate")
+export type CssCandidateActionType = ("verify-unused" | "verify-undefined" | "consolidate" | "replace-with-token")
 /**
  * Singleton GitHub review-event marker.
  */
@@ -4655,6 +4655,14 @@ undefined_keyframes?: UndefinedKeyframes[]
  * descending.
  */
 duplicate_declaration_blocks?: CssDuplicateBlock[]
+/**
+ * Tailwind arbitrary-value utilities (`w-[13px]`, `bg-[#abc]`) found in
+ * markup, which hardcode a one-off value instead of a configured scale
+ * token (design-token bypass). Present only when the project uses Tailwind.
+ * Sorted by use count descending. Candidates, not findings: an arbitrary
+ * value is sometimes the right call.
+ */
+tailwind_arbitrary_values?: TailwindArbitraryValue[]
 }
 /**
  * Per-stylesheet CSS analytics.
@@ -4905,6 +4913,16 @@ duplicate_declaration_blocks: number
  */
 duplicate_declarations_total: number
 /**
+ * Distinct Tailwind arbitrary-value tokens used in markup (design-token
+ * bypass). Zero when the project does not use Tailwind. Located in
+ * `tailwind_arbitrary_values`.
+ */
+tailwind_arbitrary_values: number
+/**
+ * Total Tailwind arbitrary-value occurrences across markup.
+ */
+tailwind_arbitrary_value_uses: number
+/**
  * Number of analyzed stylesheets whose per-rule `notable_rules` list was
  * truncated at the per-file cap, so a consumer knows the per-rule detail is
  * incomplete without walking every file.
@@ -5046,6 +5064,35 @@ path: string
  * 1-based line of the rule's first selector.
  */
 line: number
+}
+/**
+ * A distinct Tailwind arbitrary-value utility token used in markup, with its
+ * total use count and first location (a design-token-bypass candidate).
+ */
+export interface TailwindArbitraryValue {
+/**
+ * The `prefix-[value]` token (e.g. `w-[13px]`). Variant prefixes are
+ * stripped, so `hover:w-[13px]` and `w-[13px]` aggregate under `w-[13px]`.
+ */
+value: string
+/**
+ * Total occurrences across all scanned markup files.
+ */
+count: number
+/**
+ * Project-root-relative, forward-slash path to the first file using it.
+ */
+path: string
+/**
+ * 1-based line of the first occurrence.
+ */
+line: number
+/**
+ * Read-only action(s): a find-all-occurrences search so the token can be
+ * replaced with a scale token. Always at least one entry, so consumers can
+ * iterate `actions` uniformly across every finding type.
+ */
+actions: CssCandidateAction[]
 }
 /**
  * Envelope emitted by `fallow explain <issue-type> --format json`.

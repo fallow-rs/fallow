@@ -34,6 +34,8 @@ pub mod sfc_css;
 mod sfc_template;
 mod source_map;
 pub mod suppress;
+/// Tailwind CSS arbitrary-value detection.
+pub mod tailwind;
 pub(crate) mod template_complexity;
 mod template_usage;
 /// Visitor utilities for AST extraction.
@@ -61,6 +63,7 @@ pub use mdx::extract_mdx_statements;
 pub use sfc::{extract_sfc_scripts, is_sfc_file};
 pub use sfc_css::{scoped_unused_classes, sfc_virtual_stylesheet};
 pub use sfc_template::angular::ANGULAR_TPL_SENTINEL;
+pub use tailwind::{TailwindArbitraryUse, scan_tailwind_arbitrary_values};
 
 #[expect(
     clippy::expect_used,

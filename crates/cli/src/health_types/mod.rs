@@ -112,6 +112,33 @@ pub struct CssAnalyticsReport {
     /// descending.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub duplicate_declaration_blocks: Vec<CssDuplicateBlock>,
+    /// Tailwind arbitrary-value utilities (`w-[13px]`, `bg-[#abc]`) found in
+    /// markup, which hardcode a one-off value instead of a configured scale
+    /// token (design-token bypass). Present only when the project uses Tailwind.
+    /// Sorted by use count descending. Candidates, not findings: an arbitrary
+    /// value is sometimes the right call.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tailwind_arbitrary_values: Vec<TailwindArbitraryValue>,
+}
+
+/// A distinct Tailwind arbitrary-value utility token used in markup, with its
+/// total use count and first location (a design-token-bypass candidate).
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct TailwindArbitraryValue {
+    /// The `prefix-[value]` token (e.g. `w-[13px]`). Variant prefixes are
+    /// stripped, so `hover:w-[13px]` and `w-[13px]` aggregate under `w-[13px]`.
+    pub value: String,
+    /// Total occurrences across all scanned markup files.
+    pub count: u32,
+    /// Project-root-relative, forward-slash path to the first file using it.
+    pub path: String,
+    /// 1-based line of the first occurrence.
+    pub line: u32,
+    /// Read-only action(s): a find-all-occurrences search so the token can be
+    /// replaced with a scale token. Always at least one entry, so consumers can
+    /// iterate `actions` uniformly across every finding type.
+    pub actions: Vec<CssCandidateAction>,
 }
 
 /// A group of style rules across the project that share an identical declaration
@@ -236,6 +263,9 @@ pub enum CssCandidateActionType {
     /// Extract the shared declaration block into one rule and reference it from
     /// each occurrence (the duplicate-declaration-block candidates).
     Consolidate,
+    /// Replace a Tailwind arbitrary value with a configured scale token, or
+    /// confirm the one-off is intentional (the arbitrary-value candidates).
+    ReplaceWithToken,
 }
 
 impl CssCandidateAction {
@@ -283,6 +313,28 @@ impl CssCandidateAction {
                 "Extract this declaration block into one rule and reference it from all {occurrence_count} occurrences, unless they are intentionally separate overrides."
             ),
             command: None,
+        }
+    }
+
+    /// Action for a Tailwind arbitrary-value bypass: a read-only fixed-string
+    /// search for every occurrence of the token so it can be replaced with a
+    /// scale token (or confirmed an intentional one-off). The value is a Tailwind
+    /// utility token (no quotes / whitespace by construction), so it is safe to
+    /// single-quote; the `-F` keeps the `[` / `]` literal rather than a glob.
+    #[must_use]
+    pub fn replace_arbitrary_value(value: &str) -> Self {
+        let command = (!value.contains('\'')).then(|| {
+            format!(
+                "grep -rnF '{value}' --include='*.jsx' --include='*.tsx' --include='*.html' --include='*.vue' --include='*.svelte' --include='*.astro' ."
+            )
+        });
+        Self {
+            kind: CssCandidateActionType::ReplaceWithToken,
+            auto_fixable: false,
+            description:
+                "Replace this one-off arbitrary value with a scale token from your Tailwind theme, or confirm it is intentional."
+                    .to_string(),
+            command,
         }
     }
 
@@ -395,6 +447,12 @@ pub struct CssAnalyticsSummary {
     /// Total declarations removable by consolidating every duplicate block:
     /// the sum of `(occurrence_count - 1) * declaration_count` across groups.
     pub duplicate_declarations_total: u32,
+    /// Distinct Tailwind arbitrary-value tokens used in markup (design-token
+    /// bypass). Zero when the project does not use Tailwind. Located in
+    /// `tailwind_arbitrary_values`.
+    pub tailwind_arbitrary_values: u32,
+    /// Total Tailwind arbitrary-value occurrences across markup.
+    pub tailwind_arbitrary_value_uses: u32,
     /// Number of analyzed stylesheets whose per-rule `notable_rules` list was
     /// truncated at the per-file cap, so a consumer knows the per-rule detail is
     /// incomplete without walking every file.

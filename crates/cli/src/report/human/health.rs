@@ -253,6 +253,7 @@ fn render_css_analytics(lines: &mut Vec<String>, report: &crate::health_types::H
         }
     }
     render_css_duplicate_blocks(lines, css);
+    render_css_tailwind_arbitrary(lines, css);
 
     let mut notable: Vec<(&str, &fallow_types::extract::CssRuleMetric)> = css
         .files
@@ -382,6 +383,39 @@ fn render_css_value_sprawl(
             "  value sprawl (cont.): {}",
             extra.join(" \u{00b7} ")
         ));
+    }
+}
+
+/// Render the Tailwind arbitrary-value section: a summary line plus the top 5
+/// most-used tokens (token, use count, first location). Present only when the
+/// project uses Tailwind and any arbitrary values were found.
+fn render_css_tailwind_arbitrary(
+    lines: &mut Vec<String>,
+    css: &crate::health_types::CssAnalyticsReport,
+) {
+    if css.tailwind_arbitrary_values.is_empty() {
+        return;
+    }
+    let summary = &css.summary;
+    lines.push(format!(
+        "  Tailwind arbitrary values: {} distinct ({} use{}) bypassing the scale (candidates; add a scale token or confirm one-off)",
+        summary.tailwind_arbitrary_values,
+        summary.tailwind_arbitrary_value_uses,
+        plural(summary.tailwind_arbitrary_value_uses as usize),
+    ));
+    for arb in css.tailwind_arbitrary_values.iter().take(5) {
+        lines.push(format!(
+            "    {} ({}x): {}:{}",
+            arb.value, arb.count, arb.path, arb.line
+        ));
+    }
+    if css.tailwind_arbitrary_values.len() > 5 {
+        let more = css.tailwind_arbitrary_values.len() - 5;
+        lines.push(
+            format!("  ... and {more} more (--format json for full list)")
+                .dimmed()
+                .to_string(),
+        );
     }
 }
 

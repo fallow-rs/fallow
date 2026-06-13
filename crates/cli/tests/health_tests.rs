@@ -3091,6 +3091,119 @@ fn health_css_counts_shadow_radius_lineheight_sprawl() {
 }
 
 #[test]
+fn health_css_flags_tailwind_arbitrary_values() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    // The tailwindcss dependency gates the arbitrary-value markup scan on.
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"tw","version":"1.0.0","devDependencies":{"tailwindcss":"^3.4.0"}}"#,
+    );
+    write_file(&root.join("src/index.ts"), "export const x = 1;\n");
+    write_file(&root.join("src/app.css"), ".x { color: red; }\n");
+    write_file(
+        &root.join("src/Button.tsx"),
+        "export const B = () => <div className=\"w-[13px] bg-[#abc] w-[13px]\">x</div>;\n",
+    );
+    write_file(
+        &root.join("src/Card.tsx"),
+        "export const C = () => <div className=\"top-[7px]\">y</div>;\n",
+    );
+
+    let out = run_fallow_in_root(
+        "health",
+        root,
+        &[
+            "--css",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let json = parse_json(&out);
+    let css = json
+        .get("css_analytics")
+        .expect("css_analytics present with --css");
+    let s = &css["summary"];
+    // Distinct tokens: w-[13px], bg-[#abc], top-[7px] = 3; total uses = 4.
+    assert_eq!(s["tailwind_arbitrary_values"], 3, "summary: {s}");
+    assert_eq!(s["tailwind_arbitrary_value_uses"], 4, "summary: {s}");
+
+    let arb = css["tailwind_arbitrary_values"]
+        .as_array()
+        .expect("tailwind_arbitrary_values array");
+    // Sorted by use count descending: w-[13px] (2x) first, located at its first file.
+    assert_eq!(arb[0]["value"], "w-[13px]");
+    assert_eq!(arb[0]["count"], 2);
+    assert_eq!(arb[0]["path"], "src/Button.tsx");
+
+    // Each entry carries a replace-with-token action with a find-all search.
+    let actions = arb[0]["actions"].as_array().expect("actions array");
+    assert_eq!(actions[0]["type"], "replace-with-token");
+    assert_eq!(actions[0]["auto_fixable"], false);
+    assert!(
+        actions[0]["command"]
+            .as_str()
+            .is_some_and(|c| c.contains("grep -rnF 'w-[13px]'")),
+        "action carries a fixed-string search for the token: {actions:#?}"
+    );
+
+    // Human output surfaces the bypass section.
+    let human = run_fallow_in_root("health", root, &["--css", "--max-crap", "10000", "--quiet"]);
+    assert!(
+        human.stdout.contains("Tailwind arbitrary values")
+            && human.stdout.contains("w-[13px] (2x)"),
+        "human renders the Tailwind arbitrary-value section: stdout={:?}",
+        human.stdout
+    );
+}
+
+#[test]
+fn health_css_tailwind_scan_gated_on_tailwind_dependency() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    // No tailwindcss dependency: the scan does not run even though the markup
+    // contains a bracket token (the gate avoids false positives off-Tailwind).
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"no-tw","version":"1.0.0"}"#,
+    );
+    write_file(&root.join("src/index.ts"), "export const x = 1;\n");
+    write_file(&root.join("src/app.css"), "#main { color: red; }\n");
+    write_file(
+        &root.join("src/Button.tsx"),
+        "export const B = () => <div className=\"w-[13px]\">x</div>;\n",
+    );
+
+    let out = run_fallow_in_root(
+        "health",
+        root,
+        &[
+            "--css",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let json = parse_json(&out);
+    let css = json
+        .get("css_analytics")
+        .expect("css_analytics present from the .css file");
+    assert_eq!(
+        css["summary"]["tailwind_arbitrary_values"], 0,
+        "no tailwind dep => no arbitrary-value scan"
+    );
+    assert!(
+        css.get("tailwind_arbitrary_values").is_none(),
+        "located list omitted when empty"
+    );
+}
+
+#[test]
 fn health_css_flags_unused_scoped_vue_class() {
     let dir = tempdir().unwrap();
     let root = dir.path();

@@ -688,6 +688,104 @@ fn occurrence_sort_key(block: &crate::health_types::CssDuplicateBlock) -> (&str,
         .map_or(("", 0), |occ| (occ.path.as_str(), occ.line))
 }
 
+/// Returns `true` when the project's root `package.json` declares a Tailwind
+/// dependency (`tailwindcss` or any `@tailwindcss/*`), used to gate the
+/// arbitrary-value markup scan: the `prefix-[value]` token shape is Tailwind-
+/// specific in practice but not formally exclusive.
+fn project_uses_tailwind(root: &std::path::Path) -> bool {
+    let Ok(text) = std::fs::read_to_string(root.join("package.json")) else {
+        return false;
+    };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return false;
+    };
+    ["dependencies", "devDependencies", "peerDependencies"]
+        .iter()
+        .any(|key| {
+            json.get(key)
+                .and_then(serde_json::Value::as_object)
+                .is_some_and(|deps| {
+                    deps.keys()
+                        .any(|k| k == "tailwindcss" || k.starts_with("@tailwindcss/"))
+                })
+        })
+}
+
+/// Scan the project's markup (`.jsx` / `.tsx` / `.html` / `.astro` / `.vue` /
+/// `.svelte`) for Tailwind arbitrary-value utility tokens, honoring the same
+/// ignore / changed / workspace filters as the CSS scan. Aggregates by token
+/// (total count + first location), sets the summary counts, and returns the
+/// located list sorted by use count descending.
+fn scan_markup_tailwind_arbitrary_values(
+    files: &[fallow_types::discover::DiscoveredFile],
+    config: &ResolvedConfig,
+    ignore_set: &globset::GlobSet,
+    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
+    ws_roots: Option<&[std::path::PathBuf]>,
+    summary: &mut crate::health_types::CssAnalyticsSummary,
+) -> Vec<crate::health_types::TailwindArbitraryValue> {
+    use crate::health_types::TailwindArbitraryValue;
+
+    if !project_uses_tailwind(&config.root) {
+        return Vec::new();
+    }
+    // token -> (total count, first path, first line). First-seen wins for the
+    // location; files are path-sorted, so the first occurrence is deterministic.
+    let mut agg: rustc_hash::FxHashMap<String, (u32, String, u32)> =
+        rustc_hash::FxHashMap::default();
+    let mut total_uses: u32 = 0;
+    for file in files {
+        let path = &file.path;
+        let extension = path.extension().and_then(|ext| ext.to_str());
+        if !matches!(
+            extension,
+            Some("jsx" | "tsx" | "html" | "astro" | "vue" | "svelte")
+        ) {
+            continue;
+        }
+        let relative = path.strip_prefix(&config.root).unwrap_or(path);
+        if ignore_set.is_match(relative) {
+            continue;
+        }
+        if let Some(changed) = changed_files
+            && !changed.contains(path)
+        {
+            continue;
+        }
+        if let Some(roots) = ws_roots
+            && !roots.iter().any(|root| path.starts_with(root))
+        {
+            continue;
+        }
+        let Ok(source) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        let rel = relative.to_string_lossy().replace('\\', "/");
+        for arb in fallow_core::extract::scan_tailwind_arbitrary_values(&source) {
+            total_uses = total_uses.saturating_add(1);
+            let entry = agg
+                .entry(arb.value)
+                .or_insert_with(|| (0, rel.clone(), arb.line));
+            entry.0 = entry.0.saturating_add(1);
+        }
+    }
+
+    summary.tailwind_arbitrary_values = saturate_len(agg.len());
+    summary.tailwind_arbitrary_value_uses = total_uses;
+    let mut out: Vec<TailwindArbitraryValue> = agg
+        .into_iter()
+        .map(|(value, (count, path, line))| TailwindArbitraryValue {
+            actions: vec![crate::health_types::CssCandidateAction::replace_arbitrary_value(&value)],
+            value,
+            count,
+            path,
+            line,
+        })
+        .collect();
+    out.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.value.cmp(&b.value)));
+    out
+}
+
 fn compute_css_analytics_report(
     files: &[fallow_types::discover::DiscoveredFile],
     config: &ResolvedConfig,
@@ -832,8 +930,20 @@ fn compute_css_analytics_report(
 
     let (unreferenced_keyframes, undefined_keyframes) = tokens.finalize(&mut summary);
     let duplicate_declaration_blocks = tokens.group_duplicate_blocks(&mut summary);
+    // Markup arbitrary-value scan (gated on the project using Tailwind).
+    let tailwind_arbitrary_values = scan_markup_tailwind_arbitrary_values(
+        files,
+        config,
+        ignore_set,
+        changed_files,
+        ws_roots,
+        &mut summary,
+    );
 
-    if summary.files_analyzed == 0 && scoped_unused.is_empty() {
+    if summary.files_analyzed == 0
+        && scoped_unused.is_empty()
+        && tailwind_arbitrary_values.is_empty()
+    {
         return None;
     }
     scoped_unused.sort_by(|a, b| a.path.cmp(&b.path));
@@ -844,6 +954,7 @@ fn compute_css_analytics_report(
         unreferenced_keyframes,
         undefined_keyframes,
         duplicate_declaration_blocks,
+        tailwind_arbitrary_values,
     })
 }
 

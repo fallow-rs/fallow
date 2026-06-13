@@ -12375,6 +12375,13 @@
             "$ref": "#/definitions/CssDuplicateBlock"
           },
           "description": "Groups of style rules across the project that share an identical\ndeclaration block (4+ declarations, sorted and `!important`-aware),\ngrouped by content: copy-paste consolidation candidates (fallow's\nduplication signal applied to CSS). Sorted by estimated savings\ndescending."
+        },
+        "tailwind_arbitrary_values": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TailwindArbitraryValue"
+          },
+          "description": "Tailwind arbitrary-value utilities (`w-[13px]`, `bg-[#abc]`) found in\nmarkup, which hardcode a one-off value instead of a configured scale\ntoken (design-token bypass). Present only when the project uses Tailwind.\nSorted by use count descending. Candidates, not findings: an arbitrary\nvalue is sometimes the right call."
         }
       },
       "required": [
@@ -12667,6 +12674,14 @@
           "type": "integer",
           "description": "Total declarations removable by consolidating every duplicate block:\nthe sum of `(occurrence_count - 1) * declaration_count` across groups."
         },
+        "tailwind_arbitrary_values": {
+          "type": "integer",
+          "description": "Distinct Tailwind arbitrary-value tokens used in markup (design-token\nbypass). Zero when the project does not use Tailwind. Located in\n`tailwind_arbitrary_values`."
+        },
+        "tailwind_arbitrary_value_uses": {
+          "type": "integer",
+          "description": "Total Tailwind arbitrary-value occurrences across markup."
+        },
         "notable_truncated_files": {
           "type": "integer",
           "description": "Number of analyzed stylesheets whose per-rule `notable_rules` list was\ntruncated at the per-file cap, so a consumer knows the per-rule detail is\nincomplete without walking every file."
@@ -12694,6 +12709,8 @@
         "scoped_unused_classes",
         "duplicate_declaration_blocks",
         "duplicate_declarations_total",
+        "tailwind_arbitrary_values",
+        "tailwind_arbitrary_value_uses",
         "notable_truncated_files"
       ],
       "description": "Project-wide CSS analytics aggregates across every analyzed stylesheet\n(including stylesheets with no notable rule, which are not listed\nindividually)."
@@ -12799,6 +12816,11 @@
           "type": "string",
           "const": "consolidate",
           "description": "Extract the shared declaration block into one rule and reference it from\neach occurrence (the duplicate-declaration-block candidates)."
+        },
+        {
+          "type": "string",
+          "const": "replace-with-token",
+          "description": "Replace a Tailwind arbitrary value with a configured scale token, or\nconfirm the one-off is intentional (the arbitrary-value candidates)."
         }
       ],
       "description": "Discriminant for [`CssCandidateAction::kind`]."
@@ -12894,6 +12916,42 @@
         "line"
       ],
       "description": "One occurrence of a duplicate declaration block."
+    },
+    "TailwindArbitraryValue": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": "string",
+          "description": "The `prefix-[value]` token (e.g. `w-[13px]`). Variant prefixes are\nstripped, so `hover:w-[13px]` and `w-[13px]` aggregate under `w-[13px]`."
+        },
+        "count": {
+          "type": "integer",
+          "description": "Total occurrences across all scanned markup files."
+        },
+        "path": {
+          "type": "string",
+          "description": "Project-root-relative, forward-slash path to the first file using it."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line of the first occurrence."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CssCandidateAction"
+          },
+          "description": "Read-only action(s): a find-all-occurrences search so the token can be\nreplaced with a scale token. Always at least one entry, so consumers can\niterate `actions` uniformly across every finding type."
+        }
+      },
+      "required": [
+        "value",
+        "count",
+        "path",
+        "line",
+        "actions"
+      ],
+      "description": "A distinct Tailwind arbitrary-value utility token used in markup, with its\ntotal use count and first location (a design-token-bypass candidate)."
     },
     "CrossRepoImpactReport": {
       "type": "object",
