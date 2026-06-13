@@ -3262,6 +3262,42 @@ fn health_css_flags_unused_at_rules() {
 }
 
 #[test]
+fn health_css_markdown_section_present() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"md","version":"1.0.0"}"#,
+    );
+    write_file(&root.join("src/index.ts"), "export const x = 1;\n");
+    write_file(
+        &root.join("src/styles.css"),
+        "#main { color: red; }\n.spinner { animation-name: ghost; }\n",
+    );
+
+    let out = run_fallow_in_root(
+        "health",
+        root,
+        &[
+            "--css",
+            "--max-crap",
+            "10000",
+            "--format",
+            "markdown",
+            "--quiet",
+        ],
+    );
+    assert!(
+        out.stdout.contains("## CSS Health")
+            && out.stdout.contains("Value sprawl")
+            && out.stdout.contains("Candidates")
+            && out.stdout.contains("ghost"),
+        "markdown CSS Health section renders summary + undefined keyframe: stdout={:?}",
+        out.stdout
+    );
+}
+
+#[test]
 fn health_css_flags_unused_scoped_vue_class() {
     let dir = tempdir().unwrap();
     let root = dir.path();

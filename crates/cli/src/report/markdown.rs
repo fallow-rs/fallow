@@ -803,6 +803,7 @@ pub fn build_health_markdown(report: &crate::health_types::HealthReport, root: &
         && report.runtime_coverage.is_none()
         && report.coverage_intelligence.is_none()
         && report.threshold_overrides.is_empty()
+        && report.css_analytics.is_none()
     {
         if report.vital_signs.is_none() {
             let _ = write!(
@@ -826,9 +827,78 @@ pub fn build_health_markdown(report: &crate::health_types::HealthReport, root: &
     write_file_scores_section(&mut out, report, root);
     write_hotspots_section(&mut out, report, root);
     write_targets_section(&mut out, report, root);
+    write_css_analytics_section(&mut out, report);
     write_metric_legend(&mut out, report);
 
     out
+}
+
+/// Render the opt-in `## CSS Health` markdown section (present only with
+/// `--css`): a summary of structural metrics, value sprawl, and candidate counts
+/// plus a bounded list of the most actionable located candidates.
+fn write_css_analytics_section(out: &mut String, report: &crate::health_types::HealthReport) {
+    let Some(ref css) = report.css_analytics else {
+        return;
+    };
+    let s = &css.summary;
+    if !out.is_empty() && !out.ends_with("\n\n") {
+        out.push('\n');
+    }
+    out.push_str("## CSS Health\n\n");
+    let important_pct = if s.total_declarations > 0 {
+        f64::from(s.important_declarations) / f64::from(s.total_declarations) * 100.0
+    } else {
+        0.0
+    };
+    let _ = writeln!(
+        out,
+        "- Stylesheets: {} | Rules: {} | !important: {important_pct:.1}% | Empty rules: {} | Max nesting: {}",
+        s.files_analyzed, s.total_rules, s.empty_rules, s.max_nesting_depth,
+    );
+    let _ = writeln!(
+        out,
+        "- Value sprawl: {} colors | {} font sizes | {} z-index | {} shadows | {} radii | {} line-heights",
+        s.unique_colors,
+        s.unique_font_sizes,
+        s.unique_z_indexes,
+        s.unique_box_shadows,
+        s.unique_border_radii,
+        s.unique_line_heights,
+    );
+    let _ = writeln!(
+        out,
+        "- Candidates: {} unreferenced + {} undefined @keyframes | {} duplicate blocks | {} scoped-unused classes | {} Tailwind arbitrary values | {} unused @property | {} unused @layer",
+        s.keyframes_unreferenced,
+        s.keyframes_undefined,
+        s.duplicate_declaration_blocks,
+        s.scoped_unused_classes,
+        s.tailwind_arbitrary_values,
+        s.unused_property_registrations,
+        s.unused_layers,
+    );
+    if !css.undefined_keyframes.is_empty() {
+        let named: Vec<String> = css
+            .undefined_keyframes
+            .iter()
+            .take(5)
+            .map(|kf| format!("`{}` ({})", kf.name, kf.path))
+            .collect();
+        let _ = writeln!(
+            out,
+            "- Undefined @keyframes (candidates; likely typo or CSS-in-JS): {}",
+            named.join(", "),
+        );
+    }
+    if !css.tailwind_arbitrary_values.is_empty() {
+        let named: Vec<String> = css
+            .tailwind_arbitrary_values
+            .iter()
+            .take(5)
+            .map(|a| format!("`{}` ({}x)", a.value, a.count))
+            .collect();
+        let _ = writeln!(out, "- Top Tailwind arbitrary values: {}", named.join(", "));
+    }
+    out.push('\n');
 }
 
 fn write_coverage_intelligence_section(
