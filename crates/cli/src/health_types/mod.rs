@@ -94,8 +94,17 @@ pub struct CssAnalyticsReport {
     /// `@keyframes` defined but referenced via no `animation` / `animation-name`
     /// in any stylesheet, with the stylesheet that defines them (cleanup
     /// candidates; an animation name can still be applied from JavaScript).
+    /// The "defined-but-unused" direction.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unreferenced_keyframes: Vec<UnreferencedKeyframes>,
+    /// Animation references (`animation` / `animation-name`) to a `@keyframes`
+    /// name that is defined in NO stylesheet anywhere in the project, with the
+    /// first stylesheet that references them. The "used-but-undefined" direction
+    /// (the inverse of `unreferenced_keyframes`): usually a typo or a removed
+    /// animation, occasionally a `@keyframes` defined in CSS-in-JS (which the
+    /// CSS parser never sees). Conservative candidates, never gated findings.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub undefined_keyframes: Vec<UndefinedKeyframes>,
 }
 
 /// A `@keyframes` defined in a stylesheet but referenced by no animation in any
@@ -110,6 +119,24 @@ pub struct UnreferencedKeyframes {
     /// Read-only verification step(s) an agent can run before removing the
     /// candidate. Always at least one entry, so consumers can iterate
     /// `actions` uniformly across every finding type.
+    pub actions: Vec<CssCandidateAction>,
+}
+
+/// An animation reference (`animation` / `animation-name`) to a `@keyframes`
+/// name that is defined in no stylesheet anywhere in the project (the
+/// "used-but-undefined" direction). Usually a typo or a removed animation;
+/// occasionally a `@keyframes` defined in CSS-in-JS the CSS parser never sees.
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UndefinedKeyframes {
+    /// The referenced `@keyframes` name that resolves to no definition.
+    pub name: String,
+    /// Project-root-relative, forward-slash path to the first stylesheet that
+    /// references it.
+    pub path: String,
+    /// Read-only verification step(s) an agent can run before fixing the
+    /// reference. Always at least one entry, so consumers can iterate `actions`
+    /// uniformly across every finding type.
     pub actions: Vec<CssCandidateAction>,
 }
 
@@ -161,8 +188,12 @@ pub struct CssCandidateAction {
 #[serde(rename_all = "kebab-case")]
 pub enum CssCandidateActionType {
     /// Confirm the candidate has no JavaScript / HTML / dynamic consumer
-    /// before removing it.
+    /// before removing it (the defined-but-unused candidates).
     VerifyUnused,
+    /// Confirm the referenced name is genuinely undefined (not defined in
+    /// CSS-in-JS the parser cannot see) before treating it as a typo (the
+    /// used-but-undefined candidates).
+    VerifyUndefined,
 }
 
 impl CssCandidateAction {
@@ -176,6 +207,22 @@ impl CssCandidateAction {
             auto_fixable: false,
             description: format!(
                 "Confirm no JavaScript or template applies the \"{name}\" animation before removing the @keyframes."
+            ),
+            command: safe_token_search(name),
+        }
+    }
+
+    /// Verify action for an animation reference to a `@keyframes` that is
+    /// defined in no stylesheet: a read-only token search for a CSS-in-JS
+    /// `@keyframes`/animation definition of the name (styled-components,
+    /// Emotion, vanilla-extract) before treating the reference as a typo.
+    #[must_use]
+    pub fn verify_undefined_keyframe(name: &str) -> Self {
+        Self {
+            kind: CssCandidateActionType::VerifyUndefined,
+            auto_fixable: false,
+            description: format!(
+                "Confirm \"{name}\" is not a @keyframes defined in CSS-in-JS (styled-components, Emotion, vanilla-extract) before treating the animation reference as a typo."
             ),
             command: safe_token_search(name),
         }
@@ -251,15 +298,29 @@ pub struct CssAnalyticsSummary {
     /// Distinct custom properties (`--x`) defined anywhere in the codebase.
     pub custom_properties_defined: u32,
     /// Custom properties defined but never referenced via `var()` in any
-    /// stylesheet. These are cleanup CANDIDATES, not confirmed dead: a property
-    /// may still be read or set from JavaScript or inline HTML styles.
+    /// stylesheet (the defined-but-unused direction). These are cleanup
+    /// CANDIDATES, not confirmed dead: a property may still be read or set from
+    /// JavaScript or inline HTML styles.
     pub custom_properties_unreferenced: u32,
+    /// Distinct custom properties referenced via `var()` that are defined in no
+    /// stylesheet anywhere (the used-but-undefined direction). A COUNT only, not
+    /// a located list: a `var(--x)` with no CSS definition is extremely common
+    /// in JavaScript-driven theming and design-token libraries, so locating
+    /// these would be net-noise. The count is an architecture signal (how much
+    /// of the `var()` surface is resolved outside CSS), not a finding.
+    pub custom_properties_undefined: u32,
     /// Distinct `@keyframes` defined anywhere in the codebase.
     pub keyframes_defined: u32,
     /// `@keyframes` defined but never referenced via `animation` /
-    /// `animation-name` in any stylesheet (cleanup CANDIDATES; an animation
-    /// name can still be applied from JavaScript).
+    /// `animation-name` in any stylesheet (the defined-but-unused direction;
+    /// cleanup CANDIDATES; an animation name can still be applied from
+    /// JavaScript).
     pub keyframes_unreferenced: u32,
+    /// Distinct animation names referenced via `animation` / `animation-name`
+    /// that resolve to no `@keyframes` definition anywhere (the used-but-
+    /// undefined direction). Located in `undefined_keyframes`; usually a typo or
+    /// a removed animation.
+    pub keyframes_undefined: u32,
     /// Total Vue `<style scoped>` classes used nowhere else in their component
     /// (cleanup candidates), across all SFCs.
     pub scoped_unused_classes: u32,

@@ -217,41 +217,22 @@ fn render_css_analytics(lines: &mut Vec<String>, report: &crate::health_types::H
             .to_string(),
         );
     }
-    // Cleanup candidates. Custom properties stay a count (high-cardinality and
-    // often JS/cross-app consumed); the safer @keyframes are located.
-    if summary.custom_properties_defined > 0 {
+    // Cleanup candidates. Custom properties stay a count in BOTH directions
+    // (high-cardinality and often JS/cross-app consumed, so locating them would
+    // be net-noise); the lower-cardinality @keyframes are located.
+    if summary.custom_properties_defined > 0 || summary.custom_properties_undefined > 0 {
+        let undefined = if summary.custom_properties_undefined > 0 {
+            format!(", {} undefined", summary.custom_properties_undefined)
+        } else {
+            String::new()
+        };
         lines.push(format!(
-            "  custom properties: {} defined, {} unreferenced in CSS (candidates; may be set from JS)",
+            "  custom properties: {} defined, {} unreferenced in CSS{undefined} (candidates; may be set from JS)",
             summary.custom_properties_defined,
             summary.custom_properties_unreferenced,
         ));
     }
-    if summary.keyframes_defined > 0 {
-        if css.unreferenced_keyframes.is_empty() {
-            lines.push(format!(
-                "  @keyframes: {} defined, 0 unreferenced",
-                summary.keyframes_defined,
-            ));
-        } else {
-            let named = css
-                .unreferenced_keyframes
-                .iter()
-                .take(5)
-                .map(|kf| format!("{} ({})", kf.name, kf.path))
-                .collect::<Vec<_>>()
-                .join(", ");
-            let extra = css.unreferenced_keyframes.len().saturating_sub(5);
-            let more = if extra > 0 {
-                format!(", +{extra} more")
-            } else {
-                String::new()
-            };
-            lines.push(format!(
-                "  @keyframes: {} defined, {} unreferenced (candidates; verify): {named}{more}",
-                summary.keyframes_defined, summary.keyframes_unreferenced,
-            ));
-        }
-    }
+    render_css_keyframe_candidates(lines, css);
     if !css.scoped_unused.is_empty() {
         let class_word = if summary.scoped_unused_classes == 1 {
             "class"
@@ -323,6 +304,65 @@ fn render_css_analytics(lines: &mut Vec<String>, report: &crate::health_types::H
                 .dimmed()
                 .to_string(),
         );
+    }
+}
+
+/// Render the two located `@keyframes` candidate lines: defined-but-unused
+/// (`unreferenced`) and used-but-defined-nowhere (`undefined`).
+fn render_css_keyframe_candidates(
+    lines: &mut Vec<String>,
+    css: &crate::health_types::CssAnalyticsReport,
+) {
+    let summary = &css.summary;
+    if summary.keyframes_defined > 0 {
+        if css.unreferenced_keyframes.is_empty() {
+            lines.push(format!(
+                "  @keyframes: {} defined, 0 unreferenced",
+                summary.keyframes_defined,
+            ));
+        } else {
+            let listed = join_located_keyframes(
+                css.unreferenced_keyframes
+                    .iter()
+                    .map(|kf| (kf.name.as_str(), kf.path.as_str())),
+                css.unreferenced_keyframes.len(),
+            );
+            lines.push(format!(
+                "  @keyframes: {} defined, {} unreferenced (candidates; verify): {listed}",
+                summary.keyframes_defined, summary.keyframes_unreferenced,
+            ));
+        }
+    }
+    if !css.undefined_keyframes.is_empty() {
+        let listed = join_located_keyframes(
+            css.undefined_keyframes
+                .iter()
+                .map(|kf| (kf.name.as_str(), kf.path.as_str())),
+            css.undefined_keyframes.len(),
+        );
+        lines.push(format!(
+            "  undefined @keyframes: {} referenced but defined nowhere (candidates; likely typo or defined in CSS-in-JS): {listed}",
+            summary.keyframes_undefined,
+        ));
+    }
+}
+
+/// Join the first 5 located keyframe names as `name (path)`, with a `, +N more`
+/// suffix when `total` exceeds 5.
+fn join_located_keyframes<'a>(
+    items: impl Iterator<Item = (&'a str, &'a str)>,
+    total: usize,
+) -> String {
+    let named = items
+        .take(5)
+        .map(|(name, path)| format!("{name} ({path})"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let extra = total.saturating_sub(5);
+    if extra > 0 {
+        format!("{named}, +{extra} more")
+    } else {
+        named
     }
 }
 

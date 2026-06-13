@@ -12360,7 +12360,14 @@
           "items": {
             "$ref": "#/definitions/UnreferencedKeyframes"
           },
-          "description": "`@keyframes` defined but referenced via no `animation` / `animation-name`\nin any stylesheet, with the stylesheet that defines them (cleanup\ncandidates; an animation name can still be applied from JavaScript)."
+          "description": "`@keyframes` defined but referenced via no `animation` / `animation-name`\nin any stylesheet, with the stylesheet that defines them (cleanup\ncandidates; an animation name can still be applied from JavaScript).\nThe \"defined-but-unused\" direction."
+        },
+        "undefined_keyframes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UndefinedKeyframes"
+          },
+          "description": "Animation references (`animation` / `animation-name`) to a `@keyframes`\nname that is defined in NO stylesheet anywhere in the project, with the\nfirst stylesheet that references them. The \"used-but-undefined\" direction\n(the inverse of `unreferenced_keyframes`): usually a typo or a removed\nanimation, occasionally a `@keyframes` defined in CSS-in-JS (which the\nCSS parser never sees). Conservative candidates, never gated findings."
         }
       },
       "required": [
@@ -12587,7 +12594,11 @@
         },
         "custom_properties_unreferenced": {
           "type": "integer",
-          "description": "Custom properties defined but never referenced via `var()` in any\nstylesheet. These are cleanup CANDIDATES, not confirmed dead: a property\nmay still be read or set from JavaScript or inline HTML styles."
+          "description": "Custom properties defined but never referenced via `var()` in any\nstylesheet (the defined-but-unused direction). These are cleanup\nCANDIDATES, not confirmed dead: a property may still be read or set from\nJavaScript or inline HTML styles."
+        },
+        "custom_properties_undefined": {
+          "type": "integer",
+          "description": "Distinct custom properties referenced via `var()` that are defined in no\nstylesheet anywhere (the used-but-undefined direction). A COUNT only, not\na located list: a `var(--x)` with no CSS definition is extremely common\nin JavaScript-driven theming and design-token libraries, so locating\nthese would be net-noise. The count is an architecture signal (how much\nof the `var()` surface is resolved outside CSS), not a finding."
         },
         "keyframes_defined": {
           "type": "integer",
@@ -12595,7 +12606,11 @@
         },
         "keyframes_unreferenced": {
           "type": "integer",
-          "description": "`@keyframes` defined but never referenced via `animation` /\n`animation-name` in any stylesheet (cleanup CANDIDATES; an animation\nname can still be applied from JavaScript)."
+          "description": "`@keyframes` defined but never referenced via `animation` /\n`animation-name` in any stylesheet (the defined-but-unused direction;\ncleanup CANDIDATES; an animation name can still be applied from\nJavaScript)."
+        },
+        "keyframes_undefined": {
+          "type": "integer",
+          "description": "Distinct animation names referenced via `animation` / `animation-name`\nthat resolve to no `@keyframes` definition anywhere (the used-but-\nundefined direction). Located in `undefined_keyframes`; usually a typo or\na removed animation."
         },
         "scoped_unused_classes": {
           "type": "integer",
@@ -12618,8 +12633,10 @@
         "unique_z_indexes",
         "custom_properties_defined",
         "custom_properties_unreferenced",
+        "custom_properties_undefined",
         "keyframes_defined",
         "keyframes_unreferenced",
+        "keyframes_undefined",
         "scoped_unused_classes",
         "notable_truncated_files"
       ],
@@ -12715,7 +12732,12 @@
         {
           "type": "string",
           "const": "verify-unused",
-          "description": "Confirm the candidate has no JavaScript / HTML / dynamic consumer\nbefore removing it."
+          "description": "Confirm the candidate has no JavaScript / HTML / dynamic consumer\nbefore removing it (the defined-but-unused candidates)."
+        },
+        {
+          "type": "string",
+          "const": "verify-undefined",
+          "description": "Confirm the referenced name is genuinely undefined (not defined in\nCSS-in-JS the parser cannot see) before treating it as a typo (the\nused-but-undefined candidates)."
         }
       ],
       "description": "Discriminant for [`CssCandidateAction::kind`]."
@@ -12728,6 +12750,32 @@
         "default"
       ],
       "description": "Why Impact tracking is (or is not) active for a project. `Project` = an\nexplicit per-repo `enable`; `User` = the user-global default with no per-repo\ndecision; `Default` = off (no per-repo decision and no global default)."
+    },
+    "UndefinedKeyframes": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The referenced `@keyframes` name that resolves to no definition."
+        },
+        "path": {
+          "type": "string",
+          "description": "Project-root-relative, forward-slash path to the first stylesheet that\nreferences it."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CssCandidateAction"
+          },
+          "description": "Read-only verification step(s) an agent can run before fixing the\nreference. Always at least one entry, so consumers can iterate `actions`\nuniformly across every finding type."
+        }
+      },
+      "required": [
+        "name",
+        "path",
+        "actions"
+      ],
+      "description": "An animation reference (`animation` / `animation-name`) to a `@keyframes`\nname that is defined in no stylesheet anywhere in the project (the\n\"used-but-undefined\" direction). Usually a typo or a removed animation;\noccasionally a `@keyframes` defined in CSS-in-JS the CSS parser never sees."
     },
     "CrossRepoImpactReport": {
       "type": "object",

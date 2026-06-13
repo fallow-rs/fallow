@@ -566,7 +566,7 @@ export type TrendDirection = ("improving" | "declining" | "stable")
 /**
  * Discriminant for [`CssCandidateAction::kind`].
  */
-export type CssCandidateActionType = "verify-unused"
+export type CssCandidateActionType = ("verify-unused" | "verify-undefined")
 /**
  * Singleton GitHub review-event marker.
  */
@@ -4635,8 +4635,18 @@ scoped_unused?: ScopedUnusedClasses[]
  * `@keyframes` defined but referenced via no `animation` / `animation-name`
  * in any stylesheet, with the stylesheet that defines them (cleanup
  * candidates; an animation name can still be applied from JavaScript).
+ * The "defined-but-unused" direction.
  */
 unreferenced_keyframes?: UnreferencedKeyframes[]
+/**
+ * Animation references (`animation` / `animation-name`) to a `@keyframes`
+ * name that is defined in NO stylesheet anywhere in the project, with the
+ * first stylesheet that references them. The "used-but-undefined" direction
+ * (the inverse of `unreferenced_keyframes`): usually a typo or a removed
+ * animation, occasionally a `@keyframes` defined in CSS-in-JS (which the
+ * CSS parser never sees). Conservative candidates, never gated findings.
+ */
+undefined_keyframes?: UndefinedKeyframes[]
 }
 /**
  * Per-stylesheet CSS analytics.
@@ -4813,20 +4823,38 @@ unique_z_indexes: number
 custom_properties_defined: number
 /**
  * Custom properties defined but never referenced via `var()` in any
- * stylesheet. These are cleanup CANDIDATES, not confirmed dead: a property
- * may still be read or set from JavaScript or inline HTML styles.
+ * stylesheet (the defined-but-unused direction). These are cleanup
+ * CANDIDATES, not confirmed dead: a property may still be read or set from
+ * JavaScript or inline HTML styles.
  */
 custom_properties_unreferenced: number
+/**
+ * Distinct custom properties referenced via `var()` that are defined in no
+ * stylesheet anywhere (the used-but-undefined direction). A COUNT only, not
+ * a located list: a `var(--x)` with no CSS definition is extremely common
+ * in JavaScript-driven theming and design-token libraries, so locating
+ * these would be net-noise. The count is an architecture signal (how much
+ * of the `var()` surface is resolved outside CSS), not a finding.
+ */
+custom_properties_undefined: number
 /**
  * Distinct `@keyframes` defined anywhere in the codebase.
  */
 keyframes_defined: number
 /**
  * `@keyframes` defined but never referenced via `animation` /
- * `animation-name` in any stylesheet (cleanup CANDIDATES; an animation
- * name can still be applied from JavaScript).
+ * `animation-name` in any stylesheet (the defined-but-unused direction;
+ * cleanup CANDIDATES; an animation name can still be applied from
+ * JavaScript).
  */
 keyframes_unreferenced: number
+/**
+ * Distinct animation names referenced via `animation` / `animation-name`
+ * that resolve to no `@keyframes` definition anywhere (the used-but-
+ * undefined direction). Located in `undefined_keyframes`; usually a typo or
+ * a removed animation.
+ */
+keyframes_undefined: number
 /**
  * Total Vue `<style scoped>` classes used nowhere else in their component
  * (cleanup candidates), across all SFCs.
@@ -4905,6 +4933,29 @@ path: string
  * Read-only verification step(s) an agent can run before removing the
  * candidate. Always at least one entry, so consumers can iterate
  * `actions` uniformly across every finding type.
+ */
+actions: CssCandidateAction[]
+}
+/**
+ * An animation reference (`animation` / `animation-name`) to a `@keyframes`
+ * name that is defined in no stylesheet anywhere in the project (the
+ * "used-but-undefined" direction). Usually a typo or a removed animation;
+ * occasionally a `@keyframes` defined in CSS-in-JS the CSS parser never sees.
+ */
+export interface UndefinedKeyframes {
+/**
+ * The referenced `@keyframes` name that resolves to no definition.
+ */
+name: string
+/**
+ * Project-root-relative, forward-slash path to the first stylesheet that
+ * references it.
+ */
+path: string
+/**
+ * Read-only verification step(s) an agent can run before fixing the
+ * reference. Always at least one entry, so consumers can iterate `actions`
+ * uniformly across every finding type.
  */
 actions: CssCandidateAction[]
 }

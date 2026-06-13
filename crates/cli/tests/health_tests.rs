@@ -2834,6 +2834,126 @@ fn health_css_flag_surfaces_css_analytics() {
             .is_some_and(|c| c.contains("dead-anim")),
         "keyframe verify action should carry a read-only search for the name: {kf_actions:#?}"
     );
+
+    // No false positives on a healthy fixture: every var() and animation-name
+    // resolves to a definition, so both undefined directions are zero and the
+    // located undefined list is omitted.
+    assert_eq!(
+        summary["custom_properties_undefined"], 0,
+        "summary: {summary}"
+    );
+    assert_eq!(summary["keyframes_undefined"], 0, "summary: {summary}");
+    assert!(
+        css.get("undefined_keyframes").is_none(),
+        "undefined_keyframes omitted when every animation resolves: {}",
+        out.stdout
+    );
+}
+
+#[test]
+fn health_css_flags_undefined_keyframe_and_var() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"css-undef","version":"1.0.0"}"#,
+    );
+    write_file(&root.join("src/index.ts"), "export const x = 1;\n");
+    // `wobble` references a @keyframes defined nowhere (undefined). `spin` is
+    // defined in a DIFFERENT stylesheet, so cross-file resolution must NOT flag
+    // it. `--ghost` has no definition (undefined); `--brand` is defined in b.css.
+    write_file(
+        &root.join("src/a.css"),
+        ".x { animation-name: wobble; color: var(--ghost); }\n\
+         .y { animation-name: spin; color: var(--brand); }\n",
+    );
+    write_file(
+        &root.join("src/b.css"),
+        ":root { --brand: red; }\n@keyframes spin { from {} to {} }\n",
+    );
+
+    let out = run_fallow_in_root(
+        "health",
+        root,
+        &[
+            "--css",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let json = parse_json(&out);
+    let css = json
+        .get("css_analytics")
+        .expect("css_analytics present with --css");
+    let summary = &css["summary"];
+
+    // `spin` and `--brand` resolve across the two stylesheets, so only `wobble`
+    // and `--ghost` are undefined (used-but-defined-nowhere).
+    assert_eq!(summary["keyframes_undefined"], 1, "summary: {summary}");
+    assert_eq!(
+        summary["custom_properties_undefined"], 1,
+        "summary: {summary}"
+    );
+
+    // The undefined @keyframes is LOCATED (name + first referencing file).
+    let undefined = css["undefined_keyframes"]
+        .as_array()
+        .expect("undefined_keyframes located list");
+    assert_eq!(undefined.len(), 1);
+    assert_eq!(undefined[0]["name"], "wobble");
+    assert_eq!(undefined[0]["path"], "src/a.css");
+    assert!(
+        !undefined.iter().any(|kf| kf["name"] == "spin"),
+        "spin resolves cross-file and must not be undefined: {undefined:#?}"
+    );
+
+    // It carries a distinct verify-undefined action (a CSS-in-JS @keyframes the
+    // parser cannot see is the residual non-typo case).
+    let actions = undefined[0]["actions"]
+        .as_array()
+        .expect("undefined keyframe actions array");
+    assert_eq!(actions[0]["type"], "verify-undefined");
+    assert_eq!(actions[0]["auto_fixable"], false);
+    assert!(
+        actions[0]["command"]
+            .as_str()
+            .is_some_and(|c| c.contains("wobble")),
+        "verify action carries a read-only token search: {actions:#?}"
+    );
+
+    // Undefined custom properties are COUNT-ONLY (per panel review): no located
+    // list, because a var() with no CSS definition is dominated by JS-set tokens.
+    assert!(
+        css.get("undefined_custom_properties").is_none(),
+        "undefined custom properties are count-only, never located"
+    );
+}
+
+#[test]
+fn health_css_undefined_keyframe_renders_in_human() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"css-undef-human","version":"1.0.0"}"#,
+    );
+    write_file(&root.join("src/index.ts"), "export const x = 1;\n");
+    write_file(
+        &root.join("src/styles.css"),
+        ".x { animation-name: wobble; }\n",
+    );
+
+    let out = run_fallow_in_root("health", root, &["--css", "--max-crap", "10000", "--quiet"]);
+    assert!(
+        out.stdout.contains("undefined @keyframes")
+            && out.stdout.contains("wobble")
+            && out.stdout.contains("CSS-in-JS"),
+        "human output renders the located undefined keyframe with CSS-in-JS framing: stdout={:?}",
+        out.stdout
+    );
 }
 
 #[test]

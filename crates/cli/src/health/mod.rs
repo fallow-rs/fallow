@@ -510,6 +510,117 @@ fn execute_health_inner(
 /// not Sass. Only stylesheets with a structurally notable rule are listed
 /// individually; the summary aggregates every analyzed stylesheet. Returns
 /// `None` when no stylesheet was analyzed.
+/// Project-wide CSS token accumulator: distinct design-token values plus the
+/// custom-property / `@keyframes` definition and reference sets, with the first
+/// stylesheet that defines/references each keyframe name so a candidate can be
+/// located. Populated per stylesheet during the discovery walk, then finalized
+/// into the summary counts and the two located keyframe candidate lists.
+#[derive(Default)]
+struct CssTokenSets {
+    colors: rustc_hash::FxHashSet<String>,
+    font_sizes: rustc_hash::FxHashSet<String>,
+    z_indexes: rustc_hash::FxHashSet<String>,
+    defined_custom_props: rustc_hash::FxHashSet<String>,
+    referenced_custom_props: rustc_hash::FxHashSet<String>,
+    defined_keyframes: rustc_hash::FxHashSet<String>,
+    referenced_keyframes: rustc_hash::FxHashSet<String>,
+    keyframes_definers: rustc_hash::FxHashMap<String, String>,
+    keyframe_referencers: rustc_hash::FxHashMap<String, String>,
+}
+
+impl CssTokenSets {
+    /// Fill the summary token counts and return the two located keyframe
+    /// candidate lists: defined-but-unused (`unreferenced`) and used-but-
+    /// undefined (`undefined`).
+    fn finalize(
+        &self,
+        summary: &mut crate::health_types::CssAnalyticsSummary,
+    ) -> (
+        Vec<crate::health_types::UnreferencedKeyframes>,
+        Vec<crate::health_types::UndefinedKeyframes>,
+    ) {
+        use crate::health_types::{CssCandidateAction, UndefinedKeyframes, UnreferencedKeyframes};
+
+        summary.unique_colors = saturate_len(self.colors.len());
+        summary.unique_font_sizes = saturate_len(self.font_sizes.len());
+        summary.unique_z_indexes = saturate_len(self.z_indexes.len());
+        summary.custom_properties_defined = saturate_len(self.defined_custom_props.len());
+        summary.custom_properties_unreferenced = saturate_len(
+            self.defined_custom_props
+                .difference(&self.referenced_custom_props)
+                .count(),
+        );
+        // Count-only (per panel review): a var() referenced but defined in no
+        // stylesheet is dominated by JS-set design tokens, so locating these
+        // would be net-noise. The count is an architecture signal.
+        summary.custom_properties_undefined = saturate_len(
+            self.referenced_custom_props
+                .difference(&self.defined_custom_props)
+                .count(),
+        );
+        summary.keyframes_defined = saturate_len(self.defined_keyframes.len());
+        summary.keyframes_unreferenced = saturate_len(
+            self.defined_keyframes
+                .difference(&self.referenced_keyframes)
+                .count(),
+        );
+        summary.keyframes_undefined = saturate_len(
+            self.referenced_keyframes
+                .difference(&self.defined_keyframes)
+                .count(),
+        );
+
+        // @keyframes are low-cardinality, so BOTH directions are located (not
+        // just counted): defined-but-unused, and used-but-defined-nowhere.
+        let unreferenced_keyframes = locate_keyframe_diff(
+            &self.defined_keyframes,
+            &self.referenced_keyframes,
+            &self.keyframes_definers,
+        )
+        .into_iter()
+        .map(|(name, path)| UnreferencedKeyframes {
+            actions: vec![CssCandidateAction::verify_keyframe(&name)],
+            name,
+            path,
+        })
+        .collect();
+        let undefined_keyframes = locate_keyframe_diff(
+            &self.referenced_keyframes,
+            &self.defined_keyframes,
+            &self.keyframe_referencers,
+        )
+        .into_iter()
+        .map(|(name, path)| UndefinedKeyframes {
+            actions: vec![CssCandidateAction::verify_undefined_keyframe(&name)],
+            name,
+            path,
+        })
+        .collect();
+        (unreferenced_keyframes, undefined_keyframes)
+    }
+}
+
+/// Build the sorted `(name, path)` set difference `present - absent`, locating
+/// each surviving name via `locator` (empty path when absent). Sorted by
+/// `(path, name)` for deterministic output.
+fn locate_keyframe_diff(
+    present: &rustc_hash::FxHashSet<String>,
+    absent: &rustc_hash::FxHashSet<String>,
+    locator: &rustc_hash::FxHashMap<String, String>,
+) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = present
+        .difference(absent)
+        .map(|name| (name.clone(), locator.get(name).cloned().unwrap_or_default()))
+        .collect();
+    out.sort_by(|a, b| (&a.1, &a.0).cmp(&(&b.1, &b.0)));
+    out
+}
+
+/// Saturating `usize -> u32` for token counts.
+fn saturate_len(len: usize) -> u32 {
+    u32::try_from(len).unwrap_or(u32::MAX)
+}
+
 fn compute_css_analytics_report(
     files: &[fallow_types::discover::DiscoveredFile],
     config: &ResolvedConfig,
@@ -519,31 +630,16 @@ fn compute_css_analytics_report(
 ) -> Option<crate::health_types::CssAnalyticsReport> {
     use crate::health_types::{
         CssAnalyticsReport, CssAnalyticsSummary, CssCandidateAction, CssFileAnalytics,
-        ScopedUnusedClasses, UnreferencedKeyframes,
+        ScopedUnusedClasses,
     };
 
     let mut file_reports = Vec::new();
     let mut summary = CssAnalyticsSummary::default();
     let mut scoped_unused: Vec<ScopedUnusedClasses> = Vec::new();
-    // Design-token sprawl is a whole-codebase signal, so distinct values are
+    // Project-wide design-token + custom-property + @keyframes accumulator,
     // unioned across every analyzed stylesheet (including ones with no notable
-    // rule, which are not listed individually).
-    let mut colors: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
-    let mut font_sizes: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
-    let mut z_indexes: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
-    // Project-wide custom-property / @keyframes definition + reference sets, so
-    // an unreferenced candidate is one defined somewhere and referenced nowhere
-    // in CSS (a property/keyframes used only from JS stays a candidate, hence the
-    // conservative "candidate" framing).
-    let mut defined_custom_props: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
-    let mut referenced_custom_props: rustc_hash::FxHashSet<String> =
-        rustc_hash::FxHashSet::default();
-    let mut defined_keyframes: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
-    let mut referenced_keyframes: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
-    // First stylesheet that defines each @keyframes name, so an unreferenced
-    // candidate can be located (not just counted).
-    let mut keyframes_definers: rustc_hash::FxHashMap<String, String> =
-        rustc_hash::FxHashMap::default();
+    // rule, which are not listed individually), finalized after the walk.
+    let mut tokens = CssTokenSets::default();
 
     for file in files {
         let path = &file.path;
@@ -616,15 +712,28 @@ fn compute_css_analytics_report(
         if analytics.notable_truncated {
             summary.notable_truncated_files = summary.notable_truncated_files.saturating_add(1);
         }
-        colors.extend(analytics.colors.iter().cloned());
-        font_sizes.extend(analytics.font_sizes.iter().cloned());
-        z_indexes.extend(analytics.z_indexes.iter().cloned());
-        defined_custom_props.extend(analytics.defined_custom_properties.iter().cloned());
-        referenced_custom_props.extend(analytics.referenced_custom_properties.iter().cloned());
-        referenced_keyframes.extend(analytics.referenced_keyframes.iter().cloned());
+        tokens.colors.extend(analytics.colors.iter().cloned());
+        tokens
+            .font_sizes
+            .extend(analytics.font_sizes.iter().cloned());
+        tokens.z_indexes.extend(analytics.z_indexes.iter().cloned());
+        tokens
+            .defined_custom_props
+            .extend(analytics.defined_custom_properties.iter().cloned());
+        tokens
+            .referenced_custom_props
+            .extend(analytics.referenced_custom_properties.iter().cloned());
+        for keyframes in &analytics.referenced_keyframes {
+            tokens.referenced_keyframes.insert(keyframes.clone());
+            tokens
+                .keyframe_referencers
+                .entry(keyframes.clone())
+                .or_insert_with(|| rel.clone());
+        }
         for keyframes in &analytics.defined_keyframes {
-            defined_keyframes.insert(keyframes.clone());
-            keyframes_definers
+            tokens.defined_keyframes.insert(keyframes.clone());
+            tokens
+                .keyframes_definers
                 .entry(keyframes.clone())
                 .or_insert_with(|| rel.clone());
         }
@@ -637,33 +746,7 @@ fn compute_css_analytics_report(
         }
     }
 
-    summary.unique_colors = u32::try_from(colors.len()).unwrap_or(u32::MAX);
-    summary.unique_font_sizes = u32::try_from(font_sizes.len()).unwrap_or(u32::MAX);
-    summary.unique_z_indexes = u32::try_from(z_indexes.len()).unwrap_or(u32::MAX);
-    summary.custom_properties_defined =
-        u32::try_from(defined_custom_props.len()).unwrap_or(u32::MAX);
-    summary.custom_properties_unreferenced = u32::try_from(
-        defined_custom_props
-            .difference(&referenced_custom_props)
-            .count(),
-    )
-    .unwrap_or(u32::MAX);
-    summary.keyframes_defined = u32::try_from(defined_keyframes.len()).unwrap_or(u32::MAX);
-    summary.keyframes_unreferenced =
-        u32::try_from(defined_keyframes.difference(&referenced_keyframes).count())
-            .unwrap_or(u32::MAX);
-
-    // @keyframes are low-cardinality and rarely set from JS, so it is safe and
-    // far more actionable to LOCATE the unreferenced ones (not just count them).
-    let mut unreferenced_keyframes: Vec<UnreferencedKeyframes> = defined_keyframes
-        .difference(&referenced_keyframes)
-        .map(|name| UnreferencedKeyframes {
-            name: name.clone(),
-            path: keyframes_definers.get(name).cloned().unwrap_or_default(),
-            actions: vec![CssCandidateAction::verify_keyframe(name)],
-        })
-        .collect();
-    unreferenced_keyframes.sort_by(|a, b| (&a.path, &a.name).cmp(&(&b.path, &b.name)));
+    let (unreferenced_keyframes, undefined_keyframes) = tokens.finalize(&mut summary);
 
     if summary.files_analyzed == 0 && scoped_unused.is_empty() {
         return None;
@@ -674,6 +757,7 @@ fn compute_css_analytics_report(
         summary,
         scoped_unused,
         unreferenced_keyframes,
+        undefined_keyframes,
     })
 }
 
