@@ -353,7 +353,7 @@ impl<'a> CompactLineBuilder<'a> {
         }
         for finding in &self.results.mixed_client_server_barrels {
             self.lines.push(format!(
-                "mixed-client-server-barrel:{}:{} (client \"{}\", server \"{}\")",
+                "mixed-client-server-barrel:{}:{}:{} (server-only \"{}\")",
                 self.rel(&finding.barrel.path),
                 finding.barrel.line,
                 finding.barrel.client_origin,
