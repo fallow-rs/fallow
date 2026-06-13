@@ -533,7 +533,7 @@ pub fn push_mixed_client_server_barrel_diagnostics(
     }
 }
 
-/// Push diagnostics for mis-positioned `"use client"` / `"use server"`
+/// Push diagnostics for misplaced `"use client"` / `"use server"`
 /// directives. Fixed `WARNING` severity (the rule's default), code
 /// `misplaced-directive`. Paths are absolute internally, so the URI is built
 /// directly (no `root.join`).

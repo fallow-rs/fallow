@@ -4770,7 +4770,7 @@
         },
         "misplaced_directives": {
           "type": "integer",
-          "description": "Mis-positioned `\"use client\"` / `\"use server\"` directives written as\nexpression statements after a non-directive statement."
+          "description": "Misplaced `\"use client\"` / `\"use server\"` directives written as\nexpression statements after a non-directive statement."
         }
       },
       "required": [
@@ -12380,7 +12380,7 @@
       "properties": {
         "path": {
           "type": "string",
-          "description": "The file carrying the mis-positioned directive."
+          "description": "The file carrying the misplaced directive."
         },
         "directive": {
           "type": "string",
@@ -12388,11 +12388,11 @@
         },
         "line": {
           "type": "integer",
-          "description": "1-based line number of the mis-positioned directive statement."
+          "description": "1-based line number of the misplaced directive statement."
         },
         "col": {
           "type": "integer",
-          "description": "0-based byte column offset of the mis-positioned directive statement."
+          "description": "0-based byte column offset of the misplaced directive statement."
         },
         "actions": {
           "type": "array",

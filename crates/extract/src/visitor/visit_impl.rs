@@ -2864,29 +2864,6 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             self.directives
                 .push(directive.directive.as_str().to_string());
         }
-        // Detect MIS-POSITIONED `"use client"` / `"use server"` directives.
-        // oxc places honored leading-prologue directives in `program.directives`
-        // (handled above), so any string-literal expression statement found in
-        // `program.body` is by definition NOT in the leading position: a
-        // non-directive statement (an import, a const) preceded it and the RSC
-        // bundler parses the string as an ordinary expression, silently ignoring
-        // it. Match ONLY the two RSC directive strings; a stray `"use strict"`
-        // expression statement is harmless and out of scope.
-        for statement in &program.body {
-            if let Statement::ExpressionStatement(stmt) = statement
-                && let Expression::StringLiteral(lit) = &stmt.expression
-            {
-                let is_server = match lit.value.as_str() {
-                    "use server" => true,
-                    "use client" => false,
-                    _ => continue,
-                };
-                self.misplaced_directives.push(MisplacedDirectiveSite {
-                    is_server,
-                    span_start: stmt.span.start,
-                });
-            }
-        }
         for statement in &program.body {
             match statement {
                 Statement::FunctionDeclaration(function) => {
@@ -2903,6 +2880,29 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     if let Some(Declaration::FunctionDeclaration(function)) = &export.declaration {
                         self.record_source_returning_function_declaration(function);
                         self.record_sanitizer_function_declaration(function);
+                    }
+                }
+                // Detect MISPLACED `"use client"` / `"use server"`
+                // directives. oxc places honored leading-prologue directives in
+                // `program.directives` (handled above), so any string-literal
+                // expression statement here is by definition NOT in the leading
+                // position: a non-directive statement (an import, a const)
+                // preceded it and the RSC bundler parses the string as an
+                // ordinary expression, silently ignoring it. Match ONLY the two
+                // RSC directive strings; a stray `"use strict"` is harmless.
+                Statement::ExpressionStatement(stmt) => {
+                    if let Expression::StringLiteral(lit) = &stmt.expression {
+                        let is_server = match lit.value.as_str() {
+                            "use server" => Some(true),
+                            "use client" => Some(false),
+                            _ => None,
+                        };
+                        if let Some(is_server) = is_server {
+                            self.misplaced_directives.push(MisplacedDirectiveSite {
+                                is_server,
+                                span_start: stmt.span.start,
+                            });
+                        }
                     }
                 }
                 _ => {}

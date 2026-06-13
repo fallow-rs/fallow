@@ -6244,7 +6244,7 @@ fn post_import_use_client_lands_in_misplaced_directives() {
     // It is NOT a honored prologue directive.
     assert!(
         !info.directives.iter().any(|d| d == "use client"),
-        "a mis-positioned directive must not appear in program.directives"
+        "a misplaced directive must not appear in program.directives"
     );
 }
 

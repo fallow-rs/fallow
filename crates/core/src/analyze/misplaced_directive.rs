@@ -1,4 +1,4 @@
-//! Detection of mis-positioned `"use client"` / `"use server"` directives.
+//! Detection of misplaced `"use client"` / `"use server"` directives.
 //!
 //! Next.js (and every React Server Components bundler) only honors a `"use
 //! client"` / `"use server"` directive when it sits in the leading PROLOGUE of
@@ -11,7 +11,7 @@
 //! footgun, so fallow flags it; the fix is to move the directive to the very
 //! top of the file.
 //!
-//! The extract layer records every such mis-positioned directive string on
+//! The extract layer records every such misplaced directive string on
 //! [`ModuleInfo::misplaced_directives`](fallow_types::extract::ModuleInfo); this
 //! detector resolves each site to a `(line, col)` and emits one finding per
 //! occurrence.
@@ -41,7 +41,7 @@ const USE_CLIENT: &str = "use client";
 /// the finding's `directive` field.
 const USE_SERVER: &str = "use server";
 
-/// Find mis-positioned `"use client"` / `"use server"` directives.
+/// Find misplaced `"use client"` / `"use server"` directives.
 ///
 /// Returns empty unless the project declares `next` (gated on `declared_deps`):
 /// without Next.js the directives carry no special meaning.

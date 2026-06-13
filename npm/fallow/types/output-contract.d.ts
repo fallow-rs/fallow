@@ -1231,7 +1231,7 @@ invalid_client_exports?: number
  */
 mixed_client_server_barrels?: number
 /**
- * Mis-positioned `"use client"` / `"use server"` directives written as
+ * Misplaced `"use client"` / `"use server"` directives written as
  * expression statements after a non-directive statement.
  */
 misplaced_directives?: number
@@ -2525,7 +2525,7 @@ introduced?: (AuditIntroduced | null)
  */
 export interface MisplacedDirectiveFinding {
 /**
- * The file carrying the mis-positioned directive.
+ * The file carrying the misplaced directive.
  */
 path: string
 /**
@@ -2534,11 +2534,11 @@ path: string
  */
 directive: string
 /**
- * 1-based line number of the mis-positioned directive statement.
+ * 1-based line number of the misplaced directive statement.
  */
 line: number
 /**
- * 0-based byte column offset of the mis-positioned directive statement.
+ * 0-based byte column offset of the misplaced directive statement.
  */
 col: number
 /**

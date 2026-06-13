@@ -224,7 +224,7 @@ pub(crate) struct ModuleInfoExtractor {
     /// cost one extra entry).
     pub(crate) seen_callee_paths: FxHashSet<String>,
     /// `"use client"` / `"use server"` directive strings written as expression
-    /// statements in `program.body` (mis-positioned, NOT in the leading
+    /// statements in `program.body` (misplaced, NOT in the leading
     /// prologue), so the RSC bundler silently ignores them. Captured by
     /// `visit_program` and consumed by the `misplaced-directive` detector.
     pub(crate) misplaced_directives: Vec<MisplacedDirectiveSite>,

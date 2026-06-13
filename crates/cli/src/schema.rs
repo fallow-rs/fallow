@@ -292,6 +292,14 @@ fn apply_architecture_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
             m.suppress = Some(("policy-violation", false));
             m.note = Some("Requires a configured rule pack (rulePacks config)");
         }
+        "invalid-client-export" => {
+            m.suppress = Some(("invalid-client-export", false));
+            m.note = Some("Requires the project to declare next");
+        }
+        "mixed-client-server-barrel" => {
+            m.suppress = Some(("mixed-client-server-barrel", false));
+            m.note = Some("Requires the project to declare next");
+        }
         "misplaced-directive" => {
             m.suppress = Some(("misplaced-directive", false));
             m.note = Some("Requires the project to declare next");

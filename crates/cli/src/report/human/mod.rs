@@ -156,6 +156,10 @@ fn section_footer_text(title: &str) -> Option<(&'static str, &'static str)> {
             "Barrel re-exports both a \"use client\" module and a server-only module (one import drags the other's directive across the boundary)",
             "https://docs.fallow.tools/explanations/dead-code#mixed-client-server-barrels",
         )),
+        "Misplaced directives" => Some((
+            "A \"use client\" / \"use server\" directive sits below an import, so the RSC bundler ignores it (move it above every import)",
+            "https://docs.fallow.tools/explanations/dead-code#misplaced-directives",
+        )),
         t if t.starts_with("Type-only") => Some((
             "Dependencies only used for type imports \u{2014} consider moving to devDependencies",
             "https://docs.fallow.tools/explanations/dead-code#type-only-dependencies",
@@ -187,6 +191,7 @@ fn section_suppress_rule(title: &str) -> Option<&'static str> {
         "Misconfigured dependency overrides" => Some("misconfigured-dependency-override"),
         "Invalid client exports" => Some("invalid-client-export"),
         "Mixed client/server barrels" => Some("mixed-client-server-barrel"),
+        "Misplaced directives" => Some("misplaced-directive"),
         _ => None,
     }
 }

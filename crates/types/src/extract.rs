@@ -131,7 +131,7 @@ pub struct ModuleInfo {
     /// unique-callee count.
     pub callee_uses: Vec<CalleeUse>,
     /// `"use client"` / `"use server"` directive strings written as expression
-    /// statements in `program.body` (mis-positioned, NOT in the leading
+    /// statements in `program.body` (misplaced, NOT in the leading
     /// prologue), so the RSC bundler silently ignores them. One entry per
     /// occurrence. Consumed by the `misplaced-directive` detector. Captured
     /// only by JS/TS extraction.
@@ -998,7 +998,7 @@ pub struct CalleeUse {
 pub struct MisplacedDirectiveSite {
     /// `true` for `"use server"`, `false` for `"use client"`.
     pub is_server: bool,
-    /// Start byte offset of the mis-positioned directive statement.
+    /// Start byte offset of the misplaced directive statement.
     pub span_start: u32,
 }
 

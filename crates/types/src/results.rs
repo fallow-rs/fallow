@@ -861,15 +861,15 @@ pub struct MixedClientServerBarrel {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MisplacedDirective {
-    /// The file carrying the mis-positioned directive.
+    /// The file carrying the misplaced directive.
     #[serde(serialize_with = "serde_path::serialize")]
     pub path: PathBuf,
     /// The directive string as written, either `"use client"` or
     /// `"use server"` (without the surrounding quotes).
     pub directive: String,
-    /// 1-based line number of the mis-positioned directive statement.
+    /// 1-based line number of the misplaced directive statement.
     pub line: u32,
-    /// 0-based byte column offset of the mis-positioned directive statement.
+    /// 0-based byte column offset of the misplaced directive statement.
     pub col: u32,
 }
 

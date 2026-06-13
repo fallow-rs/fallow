@@ -347,7 +347,7 @@ use crate::MemberKind;
 ///
 /// Bumped to 152 for the `misplaced-directive` detector: JS/TS extraction now
 /// records `"use client"` / `"use server"` directive strings written as
-/// expression statements in `program.body` (mis-positioned) on
+/// expression statements in `program.body` (misplaced) on
 /// `misplaced_directives`, so warm caches written before the bump would report
 /// zero misplaced-directive findings.
 pub(super) const CACHE_VERSION: u32 = 152;
@@ -526,7 +526,7 @@ pub struct CachedModule {
     /// `boundaries.calls.forbidden` detector sees call sites on warm-cache
     /// loads.
     pub callee_uses: Vec<fallow_types::extract::CalleeUse>,
-    /// Mis-positioned `"use client"` / `"use server"` directive sites.
+    /// Misplaced `"use client"` / `"use server"` directive sites.
     /// Round-trips so the `misplaced-directive` detector sees them on
     /// warm-cache loads.
     pub misplaced_directives: Vec<fallow_types::extract::MisplacedDirectiveSite>,
