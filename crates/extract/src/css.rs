@@ -289,9 +289,12 @@ fn mask_with_whitespace(src: &str, re: &regex::Regex) -> String {
 }
 
 /// Collect the authoritative set of class-selector names from a CSS source by
-/// parsing it into a real AST (lightningcss). Returns `None` when the source is
-/// not parseable as standard CSS (e.g. SCSS / Sass syntax), so the caller can
-/// fall back to the regex scanner.
+/// parsing it into a real AST (lightningcss). Returns `None` only on a
+/// catastrophic parse failure (Sass syntax that is not standard CSS), in which
+/// case the caller falls back to the regex scanner. With `error_recovery` on,
+/// individual malformed rules are recovered silently and contribute a partial
+/// set rather than triggering the fallback, so a broken rule drops only its own
+/// classes (a conservative miss) instead of returning `None`.
 ///
 /// This is the source of truth for which `.token` occurrences are genuine class
 /// selectors. It natively excludes `@layer foo.bar` layer names, `@import ...
@@ -401,7 +404,7 @@ fn collect_classes_from_selector(selector: &Selector<'_>, classes: &mut FxHashSe
 /// class name, no leading dot) so downstream `compute_line_offsets` resolves the
 /// real declaration line and column instead of falling back to line:1 col:0
 /// (issue #549). For SCSS (Sass syntax lightningcss does not parse) and for any
-/// CSS the parser rejects, the regex-only scanner is used unchanged.
+/// CSS that fails to parse outright, the regex-only scanner is used unchanged.
 pub fn extract_css_module_exports(source: &str, is_scss: bool) -> Vec<ExportInfo> {
     if !is_scss && let Some(class_set) = lightningcss_class_set(source) {
         return scan_css_module_exports(source, is_scss, Some(&class_set));
