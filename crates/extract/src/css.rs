@@ -409,6 +409,7 @@ pub(crate) fn parse_css_to_module(
         iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
         directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
         security_sinks: Vec::new(),
         security_sinks_skipped: 0,
         security_unresolved_callee_sites: Vec::new(),

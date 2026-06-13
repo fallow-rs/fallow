@@ -338,7 +338,13 @@ use crate::MemberKind;
 /// fixture wrapper aliases in `member_accesses`, so warm caches written before
 /// the bump can miss fixture members reached through `mergeTests` or chained
 /// wrapper `.extend(...)` calls.
-pub(super) const CACHE_VERSION: u32 = 150;
+///
+/// Bumped to 151 for the server-only-import security candidate: JS/TS extraction
+/// now records `next/dynamic(..., { ssr: false })` dynamic-import spans on
+/// `client_only_dynamic_import_spans`, so warm caches written before the bump
+/// miss the ssr:false client-only escape hatch the `client-server-leak` BFS uses
+/// to exclude that edge.
+pub(super) const CACHE_VERSION: u32 = 151;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -385,7 +391,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 808);
+assert_cached_type_size!(CachedModule, 832);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 56);
@@ -488,6 +494,10 @@ pub struct CachedModule {
     /// round-trips through the cache so the security `client-server-leak` detector
     /// sees directives on warm-cache loads.
     pub directives: Vec<String>,
+    /// Byte-offset starts of `next/dynamic(..., { ssr: false })` dynamic imports.
+    /// Content-local, round-trips so the security `client-server-leak` BFS sees
+    /// the ssr:false client-only escape hatch on warm-cache loads.
+    pub client_only_dynamic_import_spans: Vec<u32>,
     /// Captured security sink sites (category-blind). Round-trips through the
     /// cache so the catalogue-driven `tainted_sink` detector sees sinks on
     /// warm-cache loads.

@@ -1,14 +1,33 @@
 //! Local security candidate detection (opt-in, surfaced only by `fallow security`).
 //!
 //! These are CANDIDATES for downstream agent verification, NOT verified
-//! vulnerabilities. The MVP ships one graph-structural rule, `client-server-leak`:
-//! a `"use client"` file that transitively imports a module reading a non-public
-//! env secret. fallow emits the structural import-hop trace; it does not prove
-//! the path is exploitable.
+//! vulnerabilities. The graph-structural `client-server-leak` rule has two
+//! sink predicates over the SAME `"use client"` transitive static-import cone:
+//!
+//! 1. The cone reaches a module that reads a non-public env secret
+//!    (`category: None`, the original finding).
+//! 2. The cone reaches a SERVER-ONLY module (`category: Some("server-only-import")`):
+//!    a module carrying `"use server"`, importing the `server-only` poison
+//!    package, or importing a server-only Next.js / Node API
+//!    ([`SERVER_ONLY_PACKAGES`], [`NEXT_HEADERS_SERVER_NAMES`]).
+//!
+//! fallow emits the structural import-hop trace; it does not prove the path is
+//! exploitable.
 //!
 //! Blind spots (surfaced in-band via [`UnresolvedEdgeStats`], not silently
-//! dropped): the BFS follows only resolved static import edges, so dynamic
-//! `import()` and unresolved specifiers can hide a real leak.
+//! dropped): the BFS follows only resolved static import edges, so glob-shaped
+//! dynamic `import()` patterns and unresolved specifiers can hide a real leak.
+//!
+//! ssr:false escape hatch: a server module pulled in ONLY through
+//! `next/dynamic(() => import('./X'), { ssr: false })` is the sanctioned
+//! client-only escape hatch, NOT a leak. fallow's arrow-wrapped dynamic-import
+//! detection resolves `next/dynamic(() => import('./X'))` to a STATIC graph edge
+//! (it credits the target's default export), so that edge IS in the cone. The
+//! extract layer records the `import()` span of each ssr:false call on
+//! `ModuleInfo::client_only_dynamic_import_spans`, and the BFS excludes an edge
+//! reached ONLY through such a span (see
+//! `ModuleGraph::outgoing_edge_summaries_with_exclusions`). An edge also reached
+//! via a real static import stays in the cone.
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::VecDeque;
@@ -50,6 +69,12 @@ pub fn catalogue_title(id: &str) -> Option<&'static str> {
 
 /// The inline suppression kind token for the client-server-leak rule.
 const SUPPRESS_KIND: &str = "security-client-server-leak";
+
+/// Stable `category` string distinguishing the server-only-import sink from the
+/// secret-leak sink (`category: None`). Same rule, same suppress kind, same
+/// `SecurityFinding` shape; only the category differs so JSON / human / SARIF
+/// consumers can tell "reaches server-only code" apart from "reads a secret".
+const SERVER_ONLY_CATEGORY: &str = "server-only-import";
 
 /// Build the machine-actionable suppress hint emitted on every finding. Single
 /// file-level suppress action (`auto_fixable: false`): there is no auto-fix
@@ -107,11 +132,13 @@ pub fn find_security_findings(
         modules.iter().map(|m| (m.file_id, m)).collect();
 
     let secret_sources = compute_secret_source_set(&modules_by_id);
+    let server_only_sources = compute_server_only_source_set(&modules_by_id);
 
     find_client_server_leaks(
         graph,
         &modules_by_id,
         &secret_sources,
+        &server_only_sources,
         suppressions,
         line_offsets_by_file,
     )
@@ -143,19 +170,134 @@ fn compute_secret_source_set(
     sources
 }
 
-/// For each `"use client"` file, BFS its transitive static-import cone; if it
-/// reaches a secret source, emit one finding anchored on the client file with
-/// the shortest-path trace. Type-only edges are skipped (erased at build, so
-/// they cannot carry a secret into the client bundle).
+/// The React Server Components / Server Actions directive marking a module as
+/// server-only.
+const USE_SERVER: &str = "use server";
+
+/// The canonical "poison" package: importing it makes a module fail the build if
+/// it is ever bundled for the client. Its presence is a strong server-only
+/// signal.
+const SERVER_ONLY_POISON_PACKAGE: &str = "server-only";
+
+/// Server-only package specifiers that mark a module as a server-only sink no
+/// matter which name is imported. Deliberately conservative and narrow: a generic
+/// "DB client" or any package-name guess is NOT here (the panel dropped heuristic
+/// package matching; there is no clean syntactic sink for it). The `node:` and
+/// bare forms BOTH count, per the import-shape rule, so both are listed
+/// explicitly. `next/headers` is handled separately ([`NEXT_HEADERS_SOURCE`] +
+/// [`NEXT_HEADERS_SERVER_NAMES`]) because the sink is the specific server-only
+/// named API, not the module path.
+const SERVER_ONLY_PACKAGES: &[&str] = &[
+    SERVER_ONLY_POISON_PACKAGE,
+    "next/server",
+    "node:fs",
+    "fs",
+    "node:fs/promises",
+    "fs/promises",
+    "node:child_process",
+    "child_process",
+];
+
+/// The `next/headers` module specifier, gated on a named server-only import.
+const NEXT_HEADERS_SOURCE: &str = "next/headers";
+
+/// Server-only NAMED imports from `next/headers`. Importing any of these (named
+/// or namespace member) is reaching server-only runtime APIs Next.js refuses to
+/// run on the client. A bare side-effect `import "next/headers"` (no name) is NOT
+/// flagged here: without a named server-only binding it is just a module load,
+/// the conservative no-false-positive choice.
+const NEXT_HEADERS_SERVER_NAMES: &[&str] = &["cookies", "headers", "draftMode"];
+
+/// Set of file ids whose module is a SERVER-ONLY sink: it carries a `"use server"`
+/// directive, imports a server-only package ([`SERVER_ONLY_PACKAGES`]), or imports
+/// a server-only named API from `next/headers` ([`NEXT_HEADERS_SERVER_NAMES`]).
+/// The package check matches the import specifier directly, so `node:fs` and bare
+/// `fs` both count.
+fn compute_server_only_source_set(
+    modules_by_id: &FxHashMap<FileId, &ModuleInfo>,
+) -> FxHashSet<FileId> {
+    let mut server_only: FxHashSet<FileId> = FxHashSet::default();
+    for (&file_id, module) in modules_by_id {
+        if module_is_server_only(module) {
+            server_only.insert(file_id);
+        }
+    }
+    server_only
+}
+
+/// Whether a single module qualifies as a server-only sink. Conservative: a
+/// `"use server"` directive, an import of a known server-only package, or a
+/// named server-only API from `next/headers`.
+fn module_is_server_only(module: &ModuleInfo) -> bool {
+    // 1. A "use server" directive (Server Actions / server-only module).
+    if module.directives.iter().any(|d| d == USE_SERVER) {
+        return true;
+    }
+    module.imports.iter().any(|import| {
+        // 2/3. An import of the `server-only` poison package, a Node server
+        // runtime module, or `next/server`. The specifier is matched directly so
+        // both the `node:` and bare forms count.
+        if SERVER_ONLY_PACKAGES.contains(&import.source.as_str()) {
+            return true;
+        }
+        // A server-only named API from `next/headers` (cookies / headers /
+        // draftMode), in named (`import { cookies }`) or namespace
+        // (`import * as h`) form. A bare side-effect import does not match.
+        import.source == NEXT_HEADERS_SOURCE && is_next_headers_server_import(&import.imported_name)
+    })
+}
+
+/// Whether an import binding from `next/headers` names a server-only API. A
+/// named import of `cookies` / `headers` / `draftMode` matches; a namespace
+/// import (`import * as headers from "next/headers"`) matches conservatively
+/// because any member access could be a server-only API. A side-effect or
+/// default import does not match.
+fn is_next_headers_server_import(name: &fallow_types::extract::ImportedName) -> bool {
+    use fallow_types::extract::ImportedName;
+    match name {
+        ImportedName::Named(named) => NEXT_HEADERS_SERVER_NAMES.contains(&named.as_str()),
+        ImportedName::Namespace => true,
+        ImportedName::Default | ImportedName::SideEffect => false,
+    }
+}
+
+/// For each `"use client"` file, BFS its transitive static-import cone. Two
+/// distinct sink predicates run over the SAME cone:
+///
+/// - reaching a module that reads a non-public env secret emits the secret-leak
+///   finding (`category: None`);
+/// - reaching a SERVER-ONLY module emits the server-only finding
+///   (`category: Some("server-only-import")`).
+///
+/// Both can fire for one client file (they are different concerns). Type-only
+/// edges are skipped (erased at build, so they cannot carry a secret or a
+/// server-only import into the client bundle).
 fn find_client_server_leaks(
     graph: &ModuleGraph,
     modules_by_id: &FxHashMap<FileId, &ModuleInfo>,
     secret_sources: &FxHashMap<FileId, Vec<String>>,
+    server_only_sources: &FxHashSet<FileId>,
     suppressions: &SuppressionContext<'_>,
     line_offsets_by_file: &LineOffsetsMap<'_>,
 ) -> (Vec<SecurityFinding>, UnresolvedEdgeStats) {
     let mut findings = Vec::new();
     let mut stats = UnresolvedEdgeStats::default();
+
+    // Per-file set of `next/dynamic(..., { ssr: false })` dynamic-import span
+    // starts. The BFS excludes an edge reached ONLY through one of these so a
+    // server-only (or secret) module pulled in via the sanctioned client-only
+    // escape hatch is not flagged. Empty sets are skipped at the call site.
+    let client_only_spans: FxHashMap<FileId, FxHashSet<u32>> = modules_by_id
+        .iter()
+        .filter(|(_, m)| !m.client_only_dynamic_import_spans.is_empty())
+        .map(|(&id, m)| {
+            (
+                id,
+                m.client_only_dynamic_import_spans.iter().copied().collect(),
+            )
+        })
+        .collect();
+    let empty_spans: FxHashSet<u32> = FxHashSet::default();
 
     for node in &graph.modules {
         let Some(module) = modules_by_id.get(&node.file_id) else {
@@ -189,11 +331,12 @@ fn find_client_server_leaks(
         queue.push_back(client_id);
         let mut had_unresolved_edge = false;
         let mut reached_secret: Option<FileId> = None;
+        let mut reached_server_only: Option<FileId> = None;
 
-        // Drain the FULL cone (no early break): the first secret reached via BFS
+        // Drain the FULL cone (no early break): the first sink reached via BFS
         // is the shortest-path trace, but we keep going so the dynamic-import
         // blind-spot count reflects the whole cone, not just the path to the
-        // first secret (otherwise a leak hidden behind a dynamic edge past the
+        // first finding (otherwise a sink hidden behind a dynamic edge past the
         // first finding would be silently uncounted).
         while let Some(current) = queue.pop_front() {
             if let Some(current_module) = modules_by_id.get(&current)
@@ -202,16 +345,28 @@ fn find_client_server_leaks(
                 had_unresolved_edge = true;
             }
 
-            if current != client_id
-                && reached_secret.is_none()
-                && secret_sources.contains_key(&current)
-            {
-                reached_secret = Some(current);
+            if current != client_id {
+                if reached_secret.is_none() && secret_sources.contains_key(&current) {
+                    reached_secret = Some(current);
+                }
+                if reached_server_only.is_none() && server_only_sources.contains(&current) {
+                    reached_server_only = Some(current);
+                }
             }
 
-            for (target, all_type_only, span_start) in graph.outgoing_edge_summaries(current) {
+            // Exclude edges reached only through a `next/dynamic ssr:false`
+            // dynamic import made by `current` (the client-only escape hatch).
+            let excluded = client_only_spans.get(&current).unwrap_or(&empty_spans);
+            for (target, all_type_only, span_start, all_client_only) in
+                graph.outgoing_edge_summaries_with_exclusions(current, excluded)
+            {
                 if all_type_only {
                     continue; // type-only imports are erased at build; cannot leak.
+                }
+                if all_client_only {
+                    // Reached only via next/dynamic ssr:false: the sanctioned
+                    // client-only escape hatch, not a leak edge.
+                    continue;
                 }
                 if visited.insert(target) {
                     parent.insert(target, (current, span_start));
@@ -224,8 +379,8 @@ fn find_client_server_leaks(
             stats.client_files_with_unresolved_edges += 1;
         }
 
-        // Only emit a transitive finding when the client is not ALREADY flagged
-        // by the direct case (avoid double-flagging the same file).
+        // Only emit a transitive secret finding when the client is not ALREADY
+        // flagged by the direct case (avoid double-flagging the same file).
         if let Some(secret_id) = reached_secret
             && !secret_sources.contains_key(&client_id)
         {
@@ -238,27 +393,46 @@ fn find_client_server_leaks(
                 line_offsets_by_file,
             ));
         }
+
+        // The server-only sink is a DISTINCT category, independent of the secret
+        // case: a client cone can reach BOTH a secret reader and a server-only
+        // module, and a reviewer wants to see both.
+        if let Some(server_id) = reached_server_only {
+            findings.push(build_server_only_finding(
+                graph,
+                client_id,
+                server_id,
+                &parent,
+                line_offsets_by_file,
+            ));
+        }
     }
 
-    findings.sort_by(|a, b| a.path.cmp(&b.path).then(a.line.cmp(&b.line)));
+    findings.sort_by(|a, b| {
+        a.path
+            .cmp(&b.path)
+            .then(a.line.cmp(&b.line))
+            .then(a.category.cmp(&b.category))
+    });
     (findings, stats)
 }
 
-/// Reconstruct the shortest path `client -> ... -> secret` from the BFS parent
-/// map and build the finding. Each non-terminal hop's line is the import site in
-/// that file (where it imports the next hop); the secret-source hop has no
-/// outgoing edge in the chain so it anchors at line 1.
-fn build_leak_finding(
+/// Walk the BFS parent map from `sink_id` back to `client_id`, building the
+/// shortest-path trace. Each non-terminal hop's line is the import site in that
+/// file (where it imports the NEXT hop); the terminal sink hop has no outgoing
+/// edge in the chain so it anchors at line 1 with `terminal_role`. Shared by the
+/// secret-leak (`SecretSource`) and server-only (`Sink`) findings.
+fn build_client_server_trace(
     graph: &ModuleGraph,
     client_id: FileId,
-    secret_id: FileId,
+    sink_id: FileId,
     parent: &FxHashMap<FileId, (FileId, Option<u32>)>,
-    secret_sources: &FxHashMap<FileId, Vec<String>>,
     line_offsets_by_file: &LineOffsetsMap<'_>,
-) -> SecurityFinding {
-    // Walk parent pointers from the secret back to the client, then reverse.
-    let mut chain: Vec<FileId> = vec![secret_id];
-    let mut cursor = secret_id;
+    terminal_role: TraceHopRole,
+) -> Vec<TraceHop> {
+    // Walk parent pointers from the sink back to the client, then reverse.
+    let mut chain: Vec<FileId> = vec![sink_id];
+    let mut cursor = sink_id;
     while let Some(&(prev, _)) = parent.get(&cursor) {
         chain.push(prev);
         cursor = prev;
@@ -266,20 +440,20 @@ fn build_leak_finding(
             break;
         }
     }
-    chain.reverse(); // now [client_id, ..., secret_id]
+    chain.reverse(); // now [client_id, ..., sink_id]
 
     let mut trace: Vec<TraceHop> = Vec::with_capacity(chain.len());
     for (idx, &file_id) in chain.iter().enumerate() {
         let role = if idx == 0 {
             TraceHopRole::ClientBoundary
-        } else if file_id == secret_id {
-            TraceHopRole::SecretSource
+        } else if file_id == sink_id {
+            terminal_role
         } else {
             TraceHopRole::Intermediate
         };
         // The line for a non-terminal hop is where it imports the NEXT hop.
-        // Member-access extraction does not yet carry spans, so the terminal
-        // secret-source hop falls back to the source module start.
+        // Member-access / import extraction does not carry a precise span for the
+        // terminal sink hop, so it falls back to the source module start.
         let (line, col) = if let Some(&next) = chain.get(idx + 1) {
             parent
                 .get(&next)
@@ -297,6 +471,29 @@ fn build_leak_finding(
             role,
         });
     }
+    trace
+}
+
+/// Reconstruct the shortest path `client -> ... -> secret` from the BFS parent
+/// map and build the finding. Each non-terminal hop's line is the import site in
+/// that file (where it imports the next hop); the secret-source hop has no
+/// outgoing edge in the chain so it anchors at line 1.
+fn build_leak_finding(
+    graph: &ModuleGraph,
+    client_id: FileId,
+    secret_id: FileId,
+    parent: &FxHashMap<FileId, (FileId, Option<u32>)>,
+    secret_sources: &FxHashMap<FileId, Vec<String>>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+) -> SecurityFinding {
+    let trace = build_client_server_trace(
+        graph,
+        client_id,
+        secret_id,
+        parent,
+        line_offsets_by_file,
+        TraceHopRole::SecretSource,
+    );
 
     let anchor = &trace[0];
     let empty = Vec::new();
@@ -316,7 +513,7 @@ fn build_leak_finding(
     // The client-server-leak rule is graph-structural, not catalogue-driven:
     // no source kind, no callee, no CWE. The candidate's sink slot anchors on
     // the client boundary file; the boundary slot is filled by the ranking pass.
-    let candidate = client_leak_candidate(anchor.path.clone(), anchor.line, anchor.col);
+    let candidate = client_leak_candidate(anchor.path.clone(), anchor.line, anchor.col, None);
 
     SecurityFinding {
         finding_id: String::new(),
@@ -344,18 +541,92 @@ fn build_leak_finding(
     }
 }
 
+/// Build a finding for the SERVER-ONLY sink: a `"use client"` file whose
+/// transitive static-import cone reaches a server-only module (one carrying
+/// `"use server"` or importing a server-only package). Same rule, same suppress
+/// kind, same `SecurityFinding` shape as the secret leak; distinguished by
+/// `category: Some("server-only-import")` so consumers can tell the two apart.
+/// The terminal trace hop carries the `Sink` role (the server-only module is the
+/// sink of this candidate).
+fn build_server_only_finding(
+    graph: &ModuleGraph,
+    client_id: FileId,
+    server_id: FileId,
+    parent: &FxHashMap<FileId, (FileId, Option<u32>)>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+) -> SecurityFinding {
+    let trace = build_client_server_trace(
+        graph,
+        client_id,
+        server_id,
+        parent,
+        line_offsets_by_file,
+        TraceHopRole::Sink,
+    );
+
+    let anchor = &trace[0];
+    // Do NOT embed the server module path in the message: the Sink trace hop
+    // already names it (root-relativized by the CLI before display), so embedding
+    // the absolute path here would leak it past relativization and make output
+    // environment-dependent.
+    let evidence = "This \"use client\" file transitively imports a SERVER-ONLY module \
+         (it carries a \"use server\" directive or imports server-only code such as \
+         server-only, next/headers, next/server, or node:fs / node:child_process; see the \
+         sink hop in the trace). Candidate for verification: confirm whether this server-only \
+         code is meant to run on the client. If it is pulled in only through \
+         next/dynamic(..., { ssr: false }), it is the sanctioned client-only escape hatch and \
+         is a false positive."
+        .to_owned();
+
+    let candidate = client_leak_candidate(
+        anchor.path.clone(),
+        anchor.line,
+        anchor.col,
+        Some(SERVER_ONLY_CATEGORY.to_owned()),
+    );
+
+    SecurityFinding {
+        finding_id: String::new(),
+        kind: SecurityFindingKind::ClientServerLeak,
+        category: Some(SERVER_ONLY_CATEGORY.to_owned()),
+        cwe: None,
+        path: candidate.sink.path.clone(),
+        line: candidate.sink.line,
+        col: candidate.sink.col,
+        evidence,
+        source_backed: false,
+        source_read: None,
+        severity: SecuritySeverity::Low,
+        trace,
+        actions: build_actions(),
+        dead_code: None,
+        reachability: None,
+        candidate,
+        taint_flow: None,
+        runtime: None,
+        attack_surface: None,
+    }
+}
+
 /// Build the candidate record for a `client-server-leak` finding. These findings
 /// carry no source kind (graph-structural, not source-to-sink) and no callee;
 /// the sink slot anchors on the client boundary file. The boundary slot starts
-/// at its default and is filled by the post-detection ranking pass.
-fn client_leak_candidate(path: std::path::PathBuf, line: u32, col: u32) -> SecurityCandidate {
+/// at its default and is filled by the post-detection ranking pass. `category`
+/// is `None` for the secret-leak finding and `Some("server-only-import")` for the
+/// server-only finding, mirroring the finding's top-level `category`.
+fn client_leak_candidate(
+    path: std::path::PathBuf,
+    line: u32,
+    col: u32,
+    category: Option<String>,
+) -> SecurityCandidate {
     SecurityCandidate {
         source_kind: None,
         sink: SecurityCandidateSink {
             path,
             line,
             col,
-            category: None,
+            category,
             cwe: None,
             callee: None,
             url_shape: None,
@@ -383,7 +654,7 @@ fn build_direct_finding(
          Candidate for verification: confirm the secret value actually reaches client-bundled \
          code (it may be guarded, server-only, or build-time-stripped)."
     );
-    let candidate = client_leak_candidate(path.clone(), 1, 0);
+    let candidate = client_leak_candidate(path.clone(), 1, 0, None);
     SecurityFinding {
         finding_id: String::new(),
         kind: SecurityFindingKind::ClientServerLeak,

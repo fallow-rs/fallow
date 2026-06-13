@@ -357,6 +357,46 @@ impl ModuleGraph {
             (edge.target, all_type_only, span)
         })
     }
+
+    /// Like [`Self::outgoing_edge_summaries`] but additionally reports, as a
+    /// fourth boolean, whether EVERY non-type-only symbol on the edge has an
+    /// `import_span` start in `excluded_span_starts` (`all_client_only`). The
+    /// security `client-server-leak` BFS passes the `next/dynamic ssr:false`
+    /// dynamic-import span starts so it can skip an edge reached ONLY through the
+    /// client-only escape hatch. An edge with no non-type-only symbols, or with at
+    /// least one non-type-only symbol whose span is not excluded, reports `false`
+    /// (so a target also reached via a real static import stays in the cone).
+    ///
+    /// Returns an empty iterator for out-of-range file ids.
+    pub fn outgoing_edge_summaries_with_exclusions<'a>(
+        &'a self,
+        file_id: FileId,
+        excluded_span_starts: &'a FxHashSet<u32>,
+    ) -> impl Iterator<Item = (FileId, bool, Option<u32>, bool)> + 'a {
+        let idx = file_id.0 as usize;
+        let range = if idx < self.modules.len() {
+            self.modules[idx].edge_range.clone()
+        } else {
+            0..0
+        };
+        self.edges[range].iter().map(move |edge| {
+            let all_type_only =
+                !edge.symbols.is_empty() && edge.symbols.iter().all(|s| s.is_type_only);
+            let span = edge
+                .symbols
+                .iter()
+                .find(|s| !s.is_type_only)
+                .or_else(|| edge.symbols.first())
+                .map(|s| s.import_span.start);
+            // `all_client_only`: there is at least one non-type-only symbol and
+            // every such symbol's import span is in the excluded set. A
+            // non-excluded value symbol keeps the edge live.
+            let mut value_symbols = edge.symbols.iter().filter(|s| !s.is_type_only).peekable();
+            let all_client_only = value_symbols.peek().is_some()
+                && value_symbols.all(|s| excluded_span_starts.contains(&s.import_span.start));
+            (edge.target, all_type_only, span, all_client_only)
+        })
+    }
 }
 
 fn imported_name_label(name: &ImportedName) -> String {

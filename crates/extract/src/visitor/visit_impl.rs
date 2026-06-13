@@ -2560,7 +2560,51 @@ impl ModuleInfoExtractor {
                 is_speculative: false,
             });
             self.handled_import_spans.insert(import_expr.span);
+
+            // Record the `import()` span when this is a
+            // `next/dynamic(() => import('./X'), { ssr: false })` call. ssr:false
+            // is Next.js's sanctioned client-only escape hatch, so the security
+            // `client-server-leak` BFS must NOT treat a server-only module reached
+            // only through it as a leak. The span lets the BFS exclude exactly
+            // this edge. Recorded conservatively (next/dynamic provenance AND a
+            // literal `ssr: false`) so a real leak is never hidden by mistake.
+            if self.is_next_dynamic_ssr_false_call(expr) {
+                self.client_only_dynamic_import_spans
+                    .push(import_expr.span.start);
+            }
         }
+    }
+
+    /// Whether `expr` is a `next/dynamic(callback, { ssr: false })` call: the
+    /// callee is the local binding of the `next/dynamic` default import, and the
+    /// second argument is an object literal with a literal `ssr: false` property.
+    fn is_next_dynamic_ssr_false_call(&self, expr: &CallExpression<'_>) -> bool {
+        let Expression::Identifier(callee) = &expr.callee else {
+            return false;
+        };
+        if !self.is_default_import_from(&callee.name, "next/dynamic") {
+            return false;
+        }
+        let Some(Argument::ObjectExpression(options)) = expr.arguments.get(1) else {
+            return false;
+        };
+        options.properties.iter().any(|prop| {
+            let ObjectPropertyKind::ObjectProperty(prop) = prop else {
+                return false;
+            };
+            prop.key.static_name().as_deref() == Some("ssr")
+                && matches!(&prop.value, Expression::BooleanLiteral(lit) if !lit.value)
+        })
+    }
+
+    /// Whether `local_name` is bound to the default import of `source`
+    /// (`import dynamic from "next/dynamic"`, or an aliased default).
+    pub(super) fn is_default_import_from(&self, local_name: &str, source: &str) -> bool {
+        self.imports.iter().any(|import| {
+            import.source == source
+                && import.local_name == local_name
+                && matches!(import.imported_name, ImportedName::Default)
+        })
     }
 }
 

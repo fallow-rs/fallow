@@ -877,6 +877,7 @@ mod tests {
             iconify_icon_names: vec![],
             auto_import_candidates: vec![],
             directives: vec![],
+            client_only_dynamic_import_spans: vec![],
             security_sinks: vec![],
             security_sinks_skipped: 0,
             security_unresolved_callee_sites: Vec::new(),

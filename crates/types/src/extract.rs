@@ -86,6 +86,15 @@ pub struct ModuleInfo {
     /// Consumed by the security `client-server-leak` detector to identify
     /// React Server Component client boundaries.
     pub directives: Vec<String>,
+    /// Byte-offset starts of dynamic `import()` expressions wrapped in
+    /// `next/dynamic(() => import('./X'), { ssr: false })`. The ssr:false option
+    /// is Next.js's sanctioned way to pull a client-only module, so a server-only
+    /// module reached ONLY through such an import is NOT a client-server leak. The
+    /// security `client-server-leak` BFS resolves each dynamic import to a graph
+    /// edge; these span starts let the BFS exclude exactly those edges (matched
+    /// against the edge's `import_span`). Empty for files with no ssr:false
+    /// dynamic import. Captured only by JS/TS extraction.
+    pub client_only_dynamic_import_spans: Vec<u32>,
     /// Captured security sink sites (category-blind). Consumed by the
     /// catalogue-driven `tainted_sink` detector. Captured only by JS/TS
     /// extraction; empty for CSS/MDX/etc. See `security_matchers.toml`.
@@ -1061,7 +1070,7 @@ const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 216);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 792);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 816);
 
 /// A re-export declaration.
 #[derive(Debug, Clone)]
@@ -1273,6 +1282,7 @@ mod tests {
             iconify_icon_names: vec!["hero-home".to_string()],
             auto_import_candidates: vec!["useState".to_string()],
             directives: vec!["use client".to_string()],
+            client_only_dynamic_import_spans: Vec::new(),
             security_sinks: Vec::new(),
             security_sinks_skipped: 1,
             security_unresolved_callee_sites: Vec::new(),

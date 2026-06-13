@@ -254,22 +254,133 @@ fn every_finding_carries_a_suppress_action() {
 }
 
 #[test]
-fn exactly_five_leaks_reported() {
-    // Genuine leaks: client.tsx (single-hop), client2.tsx (multi-hop),
-    // direct-client.tsx (direct read), vite-client.tsx (transitive
-    // import.meta.env), and vite-direct-client.tsx (direct import.meta.env).
-    // public-client / vite-public-client / plain / dyn-client /
-    // conditional-client / suppressed-client must NOT produce findings.
+fn exactly_six_findings_reported() {
+    // Genuine secret leaks (category None): client.tsx (single-hop),
+    // client2.tsx (multi-hop), direct-client.tsx (direct read), vite-client.tsx
+    // (transitive import.meta.env), and vite-direct-client.tsx (direct
+    // import.meta.env). Plus ONE server-only-import finding: server-only-client.tsx
+    // -> headers-util (next/headers cookies). public-client / vite-public-client /
+    // plain / dyn-client / conditional-client / suppressed-client /
+    // shared-util-client (plain util, no sink) / ssr-false-client (server reached
+    // only via next/dynamic ssr:false) must NOT produce findings.
     let results = analyze_with_security();
     assert_eq!(
         results.security_findings.len(),
-        5,
-        "expected exactly five client-server-leak findings, got: {:?}",
+        6,
+        "expected exactly six findings (5 secret-leak + 1 server-only-import), got: {:?}",
         results
             .security_findings
             .iter()
-            .map(|f| f.path.to_string_lossy().into_owned())
+            .map(|f| {
+                format!(
+                    "{} [{}]",
+                    f.path.to_string_lossy(),
+                    f.category.as_deref().unwrap_or("none")
+                )
+            })
             .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn server_only_import_is_a_distinct_category() {
+    // Capability A: a "use client" file transitively importing a util that imports
+    // `cookies` from `next/headers` reports ONE finding with the server-only-import
+    // category, distinct from the secret-leak findings (category None).
+    let results = analyze_with_security();
+    let finding = results
+        .security_findings
+        .iter()
+        .find(|f| {
+            f.path
+                .to_string_lossy()
+                .replace('\\', "/")
+                .ends_with("src/server-only-client.tsx")
+        })
+        .expect("server-only-client.tsx should be flagged");
+    assert!(matches!(
+        finding.kind,
+        SecurityFindingKind::ClientServerLeak
+    ));
+    assert_eq!(
+        finding.category.as_deref(),
+        Some("server-only-import"),
+        "server-only sink must carry the distinct category"
+    );
+    // The candidate sink slot mirrors the top-level category.
+    assert_eq!(
+        finding.candidate.sink.category.as_deref(),
+        Some("server-only-import")
+    );
+    // Trace ends at the server-only module with the Sink role.
+    let last = finding.trace.last().expect("trace must have hops");
+    assert!(matches!(last.role, TraceHopRole::Sink));
+    assert!(
+        last.path
+            .to_string_lossy()
+            .replace('\\', "/")
+            .ends_with("src/headers-util.ts"),
+        "sink hop should be the next/headers module: {:?}",
+        last.path
+    );
+    assert!(matches!(
+        finding.trace[0].role,
+        TraceHopRole::ClientBoundary
+    ));
+    assert!(
+        finding.evidence.contains("SERVER-ONLY"),
+        "evidence should explain the server-only sink: {}",
+        finding.evidence
+    );
+}
+
+#[test]
+fn plain_shared_util_is_not_flagged() {
+    // Capability A FP guard (load-bearing): a "use client" file importing a plain
+    // shared util that reaches no server-only sink and no secret produces NO
+    // finding.
+    let results = analyze_with_security();
+    assert!(
+        !anchored_on(&results, "src/shared-util-client.tsx"),
+        "a client importing a plain util with no server-only sink must not be flagged"
+    );
+}
+
+#[test]
+fn ssr_false_dynamic_import_to_server_is_not_flagged() {
+    // Capability A ssr:false guard: a "use client" file reaching a server-only
+    // module (node:fs) ONLY through next/dynamic(() => import('./server-mod'),
+    // { ssr: false }) produces NO finding. fallow's arrow-wrapped dynamic-import
+    // detection DOES resolve next/dynamic to a static graph edge (it credits the
+    // default export), so the ssr:false edge IS in the cone and is explicitly
+    // excluded by the BFS via the captured ssr:false import span.
+    let results = analyze_with_security();
+    assert!(
+        !anchored_on(&results, "src/ssr-false-client.tsx"),
+        "a server module reached only via next/dynamic ssr:false must not be flagged"
+    );
+    // The server-only module itself is not a client boundary, so it is never an
+    // anchor either.
+    assert!(
+        !anchored_on(&results, "src/server-mod.ts"),
+        "the server-only module is not a client boundary and must not be an anchor"
+    );
+}
+
+#[test]
+fn server_only_import_is_off_by_default() {
+    // Capability A default-off half: with the rule at its default `off`, the
+    // server-only sink produces no finding either.
+    let root = fixture_path("security-client-server-leak");
+    let config = create_config(root);
+    assert_eq!(config.rules.security_client_server_leak, Severity::Off);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    assert!(
+        !results
+            .security_findings
+            .iter()
+            .any(|f| f.category.as_deref() == Some("server-only-import")),
+        "default-off rule must not populate server-only-import findings"
     );
 }
 

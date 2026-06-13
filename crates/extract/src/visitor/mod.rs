@@ -181,6 +181,11 @@ pub(crate) struct ModuleInfoExtractor {
     /// from `Program::directives`. Consumed by the security `client-server-leak`
     /// detector to identify React Server Component client boundaries.
     pub(crate) directives: Vec<String>,
+    /// Byte-offset starts of dynamic `import()` expressions wrapped in
+    /// `next/dynamic(() => import('./X'), { ssr: false })`. Consumed by the
+    /// security `client-server-leak` BFS to exclude the ssr:false client-only
+    /// escape hatch.
+    pub(crate) client_only_dynamic_import_spans: Vec<u32>,
     /// Captured security sink sites (category-blind). Consumed by the
     /// catalogue-driven `tainted_sink` detector.
     pub(crate) security_sinks: Vec<SinkSite>,
@@ -916,6 +921,7 @@ impl ModuleInfoExtractor {
             iconify_icon_names: Vec::new(),
             auto_import_candidates: Vec::new(),
             directives: self.directives,
+            client_only_dynamic_import_spans: self.client_only_dynamic_import_spans,
             security_sinks: self.security_sinks,
             security_sinks_skipped: self.security_sinks_skipped,
             security_unresolved_callee_sites: self.security_unresolved_callee_sites,
@@ -968,6 +974,8 @@ impl ModuleInfoExtractor {
         info.namespace_object_aliases
             .extend(namespace_object_aliases);
         info.directives.extend(self.directives);
+        info.client_only_dynamic_import_spans
+            .extend(self.client_only_dynamic_import_spans);
         info.security_sinks.extend(self.security_sinks);
         info.security_sinks_skipped += self.security_sinks_skipped;
         info.security_unresolved_callee_sites
