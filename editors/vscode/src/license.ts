@@ -17,6 +17,7 @@ import {
   validateEmail,
   validateJwtShape,
 } from "./license-utils.js";
+import { registerChild, unregisterChild } from "./process-registry.js";
 import type { LicenseActionResult, LicenseStatusJson } from "./license-types.js";
 
 /**
@@ -59,6 +60,7 @@ const execLicense = (
       cwd,
       stdio: [stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
     });
+    registerChild(child);
 
     let stdout = "";
     let stderr = "";
@@ -73,10 +75,12 @@ const execLicense = (
     });
 
     child.on("error", (error) => {
+      unregisterChild(child);
       reject(error);
     });
 
     child.on("close", (code, signal) => {
+      unregisterChild(child);
       if (signal) {
         reject(new Error(`fallow exited via signal ${signal}`));
         return;

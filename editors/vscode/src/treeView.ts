@@ -43,6 +43,7 @@ const CATEGORY_ICONS: Record<IssueCategory, string> = {
   "boundary-violation": "symbol-namespace",
   "stale-suppressions": "trash",
   "unused-catalog-entries": "package",
+  "empty-catalog-groups": "package",
   "unresolved-catalog-references": "error",
   "unused-dependency-overrides": "package",
   "misconfigured-dependency-overrides": "error",
@@ -69,6 +70,7 @@ const ISSUE_ICONS: Record<IssueCategory, string> = {
   "boundary-violation": "symbol-namespace",
   "stale-suppressions": "trash",
   "unused-catalog-entries": "package",
+  "empty-catalog-groups": "package",
   "unresolved-catalog-references": "error",
   "unused-dependency-overrides": "package",
   "misconfigured-dependency-overrides": "error",
@@ -412,6 +414,16 @@ export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeIte
               0,
               "unused-catalog-entries",
             ),
+        ),
+      );
+    }
+
+    if (this.result.empty_catalog_groups) {
+      addCategory(
+        "empty-catalog-groups",
+        this.result.empty_catalog_groups.map(
+          (group) =>
+            new IssueItem(group.catalog_name, group.path, group.line, 0, "empty-catalog-groups"),
         ),
       );
     }

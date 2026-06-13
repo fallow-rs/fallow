@@ -80,8 +80,16 @@ vi.mock("node:fs", () => ({
   },
 }));
 
+// getBinaryVersion uses promisify(execFile); the mock resolves with the
+// `{ stdout, stderr }` shape promisify hands back via the callback.
 vi.mock("node:child_process", () => ({
-  execFileSync: () => "fallow 2.26.0\n",
+  execFile: (...args: unknown[]) => {
+    const cb = args[args.length - 1] as (
+      err: Error | null,
+      result?: { stdout: string; stderr: string },
+    ) => void;
+    cb(null, { stdout: "fallow 2.26.0\n", stderr: "" });
+  },
 }));
 
 vi.mock("node:crypto", () => ({

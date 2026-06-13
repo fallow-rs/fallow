@@ -7,6 +7,7 @@ import {
   countDuplicationGroups,
 } from "./analysis-utils.js";
 import { startClient, stopClient, restartClient } from "./client.js";
+import { createSingleFlight } from "./analysis-single-flight.js";
 import {
   getHealthEnabled,
   getSecurityEnabled,
@@ -94,11 +95,12 @@ import {
 import { RuntimeCoverageTreeProvider } from "./coverageView.js";
 import { runCoverageAnalysis } from "./coverageCommand.js";
 import { coverageWatermarkMessage } from "./coverage-utils.js";
+import { killActiveChildren } from "./process-registry.js";
 import type {
   AuditOutput,
   FallowCheckResult,
   FallowDupesResult,
-  HealthReport,
+  HealthOutput,
   RuntimeCoverageReport,
 } from "./types.js";
 
@@ -120,9 +122,15 @@ const AUDIT_SAVE_DEBOUNCE_MS = 600;
 let outputChannel: vscode.OutputChannel;
 let lastCheckResult: FallowCheckResult | null = null;
 let lastDupesResult: FallowDupesResult | null = null;
-let lastHealthResult: HealthReport | null = null;
+let lastHealthResult: HealthOutput | null = null;
 let lastCoverageReport: RuntimeCoverageReport | null = null;
 let lastAuditResult: AuditOutput | null = null;
+
+// The diagnostic filter is activate-scoped, but `deactivate()` needs to flush
+// its pending workspaceState write before the window closes (its `dispose()` is
+// synchronous and cannot await the persist queue). A module-level handle bridges
+// that gap so the last mute toggle is not dropped mid-write on reload/shutdown.
+let activeDiagnosticFilter: DiagnosticFilter | null = null;
 
 // The security run is a separate, view-gated process with disjoint config keys
 // from the dead-code analysis: toggling security never re-runs the main
@@ -192,7 +200,13 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     getDiagnosticSeverity,
     getMutedDiagnosticCategories(),
   );
-  context.subscriptions.push({ dispose: () => diagnosticFilter.dispose() });
+  activeDiagnosticFilter = diagnosticFilter;
+  context.subscriptions.push({
+    dispose: () => {
+      activeDiagnosticFilter = null;
+      diagnosticFilter.dispose();
+    },
+  });
   registerDiagnosticMuteUi(context, diagnosticFilter);
 
   // Custom LSP notification handler: update the status bar from LSP data so
@@ -250,6 +264,18 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   const securityProvider = new SecurityTreeProvider();
   const coverageProvider = new RuntimeCoverageTreeProvider();
 
+  // Tie each TreeDataProvider's lifetime to the extension: createTreeView
+  // disposes the TreeView wrapper but NOT the provider, so its EventEmitter
+  // would otherwise leak on deactivate/reload. (The TreeViews themselves are
+  // pushed where they are created below.)
+  context.subscriptions.push(
+    deadCodeProvider,
+    duplicatesProvider,
+    healthProvider,
+    securityProvider,
+    coverageProvider,
+  );
+
   // Use createTreeView to get visibility events. Defer CLI analysis until the
   // tree view is first shown, avoiding a double analysis on activation (the LSP
   // runs its own analysis for diagnostics).
@@ -284,7 +310,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     readonly force?: boolean;
   }
 
-  const triggerCliAnalysis = async (options: CliAnalysisTriggerOptions = {}): Promise<boolean> => {
+  const runCliAnalysisOnce = async (options: CliAnalysisTriggerOptions = {}): Promise<boolean> => {
     setStatusBarAnalyzing();
     return await vscode.window.withProgress(
       {
@@ -351,6 +377,16 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     );
   };
 
+  // Concurrency guard: config-change re-analysis (fire-and-forget), workspace
+  // scope changes, the lazy view-visibility trigger, and explicit re-analyze /
+  // post-fix runs can all fire while another run is in flight. Without a guard
+  // they race on `lastCheckResult` / `lastDupesResult` (last-writer-wins).
+  // Background triggers dedup onto the in-flight run; an explicit `force` run
+  // arriving mid-run re-runs once afterward so it reflects the latest config.
+  const cliAnalysisFlight = createSingleFlight((force) => runCliAnalysisOnce({ force }));
+  const triggerCliAnalysis = async (options: CliAnalysisTriggerOptions = {}): Promise<boolean> =>
+    cliAnalysisFlight.run(options.force === true);
+
   // Inline complexity breakdown: per-line editor decorations driven by the same
   // health findings the tree renders. Reads the workspace root live so it tracks
   // the active folder; rendering and staleness live in the controller.
@@ -366,6 +402,9 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     }),
     vscode.workspace.onDidChangeTextDocument((event) => {
       complexityDecorations.handleDocumentChange(event.document);
+    }),
+    vscode.workspace.onDidCloseTextDocument((document) => {
+      complexityDecorations.handleDocumentClose(document);
     }),
   );
 
@@ -1097,5 +1136,12 @@ export const deactivate = async (): Promise<void> => {
   disposeWorkspacePicker();
   disposeAuditStatusBar();
   disposeDiagnosticStatusBar();
+  // Kill any in-flight CLI children (analysis, audit, health, security, fix,
+  // license) before stopping the LSP, so a window reload mid-analysis does not
+  // orphan a process that can hold file handles on the project directory.
+  killActiveChildren();
+  // Flush any in-flight mute-state write before tearing down, so the last toggle
+  // survives a window reload that closes mid-persist.
+  await activeDiagnosticFilter?.flushPersist();
   await stopClient();
 };

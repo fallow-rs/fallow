@@ -20,7 +20,7 @@ import { HEALTH_SECTION_ICONS, HEALTH_SECTION_LABELS } from "./health-labels.js"
 import type { HealthSection } from "./health-labels.js";
 import { openFileCommand } from "./openFileCommand.js";
 import { middleElidePath, resolveFilePath as resolveFilePathPure } from "./treeView-utils.js";
-import type { HealthReport } from "./types.js";
+import type { HealthOutput, HealthReport } from "./types.js";
 
 const resolveFilePath = (filePath: string | undefined) =>
   resolveFilePathPure(filePath, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
@@ -211,7 +211,7 @@ const buildTargetLeaves = (report: HealthReport): HealthLeafItem[] =>
   });
 
 export class HealthTreeProvider implements vscode.TreeDataProvider<HealthItem> {
-  private report: HealthReport | null = null;
+  private report: HealthOutput | null = null;
   private view: vscode.TreeView<HealthItem> | null = null;
 
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<
@@ -223,7 +223,7 @@ export class HealthTreeProvider implements vscode.TreeDataProvider<HealthItem> {
     this.view = view;
   }
 
-  update(report: HealthReport | null): void {
+  update(report: HealthOutput | null): void {
     this.report = report;
     this._onDidChangeTreeData.fire();
     this.updateBadge();
@@ -283,5 +283,9 @@ export class HealthTreeProvider implements vscode.TreeDataProvider<HealthItem> {
 
   dispose(): void {
     this._onDidChangeTreeData.dispose();
+    // Null the view so a late `triggerHealthAnalysis` continuation that resolves
+    // after disposal hits the `if (!this.view)` guard in updateBadge() and
+    // no-ops, rather than touching a disposed TreeView (`object is disposed`).
+    this.view = null;
   }
 }

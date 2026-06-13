@@ -20,12 +20,29 @@ vi.mock("node:fs", () => ({
     delete mockFiles[p];
   },
   mkdirSync: () => {},
+  readdirSync: (dir: string) => {
+    const prefix = `${dir}${path.sep}`;
+    return Object.keys(mockFiles)
+      .filter((p) => p.startsWith(prefix))
+      .map((p) => p.slice(prefix.length))
+      .filter((name) => !name.includes(path.sep));
+  },
 }));
 
+// getBinaryVersion now uses promisify(execFile). promisify resolves with the
+// callback's second argument, so the mock hands back `{ stdout, stderr }` to
+// match the shape getBinaryVersion destructures.
 vi.mock("node:child_process", () => ({
-  execFileSync: () => {
-    if (mockExecError) throw new Error("exec failed");
-    return mockExecOutput;
+  execFile: (...args: unknown[]) => {
+    const cb = args[args.length - 1] as (
+      err: Error | null,
+      result?: { stdout: string; stderr: string },
+    ) => void;
+    if (mockExecError) {
+      cb(new Error("exec failed"));
+      return;
+    }
+    cb(null, { stdout: mockExecOutput, stderr: "" });
   },
 }));
 
@@ -66,6 +83,7 @@ import {
   platformTargetFor,
   readVersionMarker,
   releaseApiUrlForVersion,
+  sweepOrphanTempFiles,
   verifyBinaryDigest,
   verifyBinarySignature,
   writeVersionMarker,
@@ -122,7 +140,7 @@ describe("matchesExtensionVersion", () => {
     mockExecError = false;
   });
 
-  it("purges ONLY the mismatched binary, sparing the verified sibling and the marker", () => {
+  it("purges ONLY the mismatched binary, sparing the verified sibling and the marker", async () => {
     for (const f of [
       lspPath,
       lspSigPath,
@@ -137,7 +155,7 @@ describe("matchesExtensionVersion", () => {
     // Extension is 2.26.0 (vscode mock); the CLI reports a stale version.
     mockExecOutput = "fallow 2.25.0\n";
 
-    const ok = matchesExtensionVersion(binDir, cliPath, "CLI");
+    const ok = await matchesExtensionVersion(binDir, cliPath, "CLI");
 
     expect(ok).toBe(false);
     // The mismatched CLI binary + its sidecars are removed.
@@ -153,10 +171,10 @@ describe("matchesExtensionVersion", () => {
     expect(versionPath in mockFiles).toBe(true);
   });
 
-  it("returns true (no purge) when the binary version matches the extension", () => {
+  it("returns true (no purge) when the binary version matches the extension", async () => {
     mockFiles[cliPath] = "x";
     mockExecOutput = "fallow 2.26.0\n";
-    expect(matchesExtensionVersion(binDir, cliPath, "CLI")).toBe(true);
+    expect(await matchesExtensionVersion(binDir, cliPath, "CLI")).toBe(true);
     expect(cliPath in mockFiles).toBe(true);
   });
 });
@@ -169,41 +187,41 @@ describe("getBinaryVersion", () => {
     mockHashInput = "";
   });
 
-  it("parses version from fallow-lsp output", () => {
+  it("parses version from fallow-lsp output", async () => {
     mockExecOutput = "fallow-lsp 2.25.0\n";
-    expect(getBinaryVersion("/bin/fallow-lsp")).toBe("2.25.0");
+    expect(await getBinaryVersion("/bin/fallow-lsp")).toBe("2.25.0");
   });
 
-  it("parses version from fallow CLI output", () => {
+  it("parses version from fallow CLI output", async () => {
     mockExecOutput = "fallow 2.88.1\n";
-    expect(getBinaryVersion("/bin/fallow")).toBe("2.88.1");
+    expect(await getBinaryVersion("/bin/fallow")).toBe("2.88.1");
   });
 
-  it("ignores the npm shim's appended verified line", () => {
+  it("ignores the npm shim's appended verified line", async () => {
     mockExecOutput = "fallow-lsp 2.88.1\nverified: yes (sentinel /Users/me/.cache/2.0.0/x)\n";
-    expect(getBinaryVersion("/bin/fallow-lsp")).toBe("2.88.1");
+    expect(await getBinaryVersion("/bin/fallow-lsp")).toBe("2.88.1");
   });
 
-  it("does not mistake a Node crash banner for the fallow version", () => {
+  it("does not mistake a Node crash banner for the fallow version", async () => {
     // A resolved npm shim that cannot find its platform binary can surface a
     // Node banner; that bare semver must not be read as the fallow version.
     mockExecOutput = "Cannot find module 'detect-libc'\nNode.js v22.22.1\n";
-    expect(getBinaryVersion("/bin/fallow-lsp")).toBeNull();
+    expect(await getBinaryVersion("/bin/fallow-lsp")).toBeNull();
   });
 
-  it("does not match a stray semver in a sentinel path with no version line", () => {
+  it("does not match a stray semver in a sentinel path with no version line", async () => {
     mockExecOutput = "verified: yes (sentinel /Users/me/.cache/fallow/2.0.0/sentinel)\n";
-    expect(getBinaryVersion("/bin/fallow-lsp")).toBeNull();
+    expect(await getBinaryVersion("/bin/fallow-lsp")).toBeNull();
   });
 
-  it("returns null on exec failure", () => {
+  it("returns null on exec failure", async () => {
     mockExecError = true;
-    expect(getBinaryVersion("/bin/fallow-lsp")).toBeNull();
+    expect(await getBinaryVersion("/bin/fallow-lsp")).toBeNull();
   });
 
-  it("returns null on unparsable output", () => {
+  it("returns null on unparsable output", async () => {
     mockExecOutput = "unknown";
-    expect(getBinaryVersion("/bin/fallow-lsp")).toBeNull();
+    expect(await getBinaryVersion("/bin/fallow-lsp")).toBeNull();
   });
 });
 
@@ -291,26 +309,26 @@ describe("getInstalledBinaryPath", () => {
     mockSignatureValid = true;
   });
 
-  it("returns null when no binary exists", () => {
-    expect(getInstalledBinaryPath(fakeContext)).toBeNull();
+  it("returns null when no binary exists", async () => {
+    expect(await getInstalledBinaryPath(fakeContext)).toBeNull();
   });
 
-  it("returns path when version marker matches", () => {
+  it("returns path when version marker matches", async () => {
     mockFiles[lspPath] = binaryBytes;
     mockFiles[lspSigPath] = signatureBytes;
     mockFiles[versionPath] = "2.26.0";
 
-    expect(getInstalledBinaryPath(fakeContext)).toBe(lspPath);
+    expect(await getInstalledBinaryPath(fakeContext)).toBe(lspPath);
   });
 
-  it("returns null and deletes ONLY the stale LSP binary (sibling CLI + marker survive)", () => {
+  it("returns null and deletes ONLY the stale LSP binary (sibling CLI + marker survive)", async () => {
     mockFiles[lspPath] = binaryBytes;
     mockFiles[lspSigPath] = signatureBytes;
     mockFiles[cliPath] = binaryBytes;
     mockFiles[cliSigPath] = signatureBytes;
     mockFiles[versionPath] = "2.25.0";
 
-    expect(getInstalledBinaryPath(fakeContext)).toBeNull();
+    expect(await getInstalledBinaryPath(fakeContext)).toBeNull();
     // The mismatched LSP binary + its sidecar are purged.
     expect(mockFiles[lspPath]).toBeUndefined();
     expect(mockFiles[lspSigPath]).toBeUndefined();
@@ -321,49 +339,49 @@ describe("getInstalledBinaryPath", () => {
     expect(mockFiles[versionPath]).not.toBeUndefined();
   });
 
-  it("falls back to --version when no marker exists", () => {
+  it("falls back to --version when no marker exists", async () => {
     mockFiles[lspPath] = binaryBytes;
     mockFiles[lspSigPath] = signatureBytes;
     mockExecOutput = "fallow-lsp 2.26.0\n";
 
-    expect(getInstalledBinaryPath(fakeContext)).toBe(lspPath);
+    expect(await getInstalledBinaryPath(fakeContext)).toBe(lspPath);
   });
 
-  it("treats unknown version as stale (null --version, no marker)", () => {
+  it("treats unknown version as stale (null --version, no marker)", async () => {
     mockFiles[lspPath] = binaryBytes;
     mockFiles[lspSigPath] = signatureBytes;
     mockExecError = true;
 
-    expect(getInstalledBinaryPath(fakeContext)).toBeNull();
+    expect(await getInstalledBinaryPath(fakeContext)).toBeNull();
     expect(mockFiles[lspPath]).toBeUndefined();
   });
 
-  it("treats mismatched --version as stale when no marker", () => {
+  it("treats mismatched --version as stale when no marker", async () => {
     mockFiles[lspPath] = binaryBytes;
     mockFiles[lspSigPath] = signatureBytes;
     mockExecOutput = "fallow-lsp 2.24.0\n";
 
-    expect(getInstalledBinaryPath(fakeContext)).toBeNull();
+    expect(await getInstalledBinaryPath(fakeContext)).toBeNull();
     expect(mockFiles[lspPath]).toBeUndefined();
   });
 
-  it("treats missing signature as stale without executing the binary", () => {
+  it("treats missing signature as stale without executing the binary", async () => {
     mockFiles[lspPath] = binaryBytes;
     mockExecOutput = "fallow-lsp 2.26.0\n";
 
-    expect(getInstalledBinaryPath(fakeContext)).toBeNull();
+    expect(await getInstalledBinaryPath(fakeContext)).toBeNull();
     expect(mockFiles[lspPath]).toBeUndefined();
   });
 
-  it("reuses a digest-verified binary when no signature file exists", () => {
+  it("reuses a digest-verified binary when no signature file exists", async () => {
     mockFiles[lspPath] = binaryBytes;
     mockFiles[lspDigestPath] = digestHex;
     mockFiles[versionPath] = "2.26.0";
 
-    expect(getInstalledBinaryPath(fakeContext)).toBe(lspPath);
+    expect(await getInstalledBinaryPath(fakeContext)).toBe(lspPath);
   });
 
-  it("treats invalid signature as stale and purges only that binary", () => {
+  it("treats invalid signature as stale and purges only that binary", async () => {
     mockFiles[lspPath] = binaryBytes;
     mockFiles[lspSigPath] = signatureBytes;
     mockFiles[cliPath] = binaryBytes;
@@ -371,33 +389,33 @@ describe("getInstalledBinaryPath", () => {
     mockFiles[versionPath] = "2.26.0";
     mockSignatureValid = false;
 
-    expect(getInstalledBinaryPath(fakeContext)).toBeNull();
+    expect(await getInstalledBinaryPath(fakeContext)).toBeNull();
     expect(mockFiles[lspPath]).toBeUndefined();
     expect(mockFiles[cliPath]).toBe(binaryBytes);
     expect(mockFiles[versionPath]).toBe("2.26.0");
   });
 
-  it("does not fall back to digest markers when a signature file is present but invalid", () => {
+  it("does not fall back to digest markers when a signature file is present but invalid", async () => {
     mockFiles[lspPath] = binaryBytes;
     mockFiles[lspSigPath] = signatureBytes;
     mockFiles[lspDigestPath] = digestHex;
     mockFiles[versionPath] = "2.26.0";
     mockSignatureValid = false;
 
-    expect(getInstalledBinaryPath(fakeContext)).toBeNull();
+    expect(await getInstalledBinaryPath(fakeContext)).toBeNull();
     expect(mockFiles[lspPath]).toBeUndefined();
     expect(mockFiles[lspSigPath]).toBeUndefined();
     expect(mockFiles[lspDigestPath]).toBeUndefined();
   });
 
-  it("purges only the failing binary when both signature and digest verification fail", () => {
+  it("purges only the failing binary when both signature and digest verification fail", async () => {
     mockFiles[lspPath] = binaryBytes;
     mockFiles[lspDigestPath] = "0".repeat(64);
     mockFiles[cliPath] = binaryBytes;
     mockFiles[cliDigestPath] = "0".repeat(64);
     mockFiles[versionPath] = "2.26.0";
 
-    expect(getInstalledBinaryPath(fakeContext)).toBeNull();
+    expect(await getInstalledBinaryPath(fakeContext)).toBeNull();
     expect(mockFiles[lspPath]).toBeUndefined();
     expect(mockFiles[lspDigestPath]).toBeUndefined();
     expect(mockFiles[cliPath]).toBe(binaryBytes);
@@ -413,36 +431,36 @@ describe("getInstalledCliPath", () => {
     mockSignatureValid = true;
   });
 
-  it("returns the CLI path when the managed install is signed and current", () => {
+  it("returns the CLI path when the managed install is signed and current", async () => {
     mockFiles[cliPath] = binaryBytes;
     mockFiles[cliSigPath] = signatureBytes;
     mockFiles[versionPath] = "2.26.0";
     mockExecOutput = "fallow 2.26.0\n";
 
-    expect(getInstalledCliPath(fakeContext)).toBe(cliPath);
+    expect(await getInstalledCliPath(fakeContext)).toBe(cliPath);
   });
 
-  it("returns the CLI path when the managed install is digest-verified and current", () => {
+  it("returns the CLI path when the managed install is digest-verified and current", async () => {
     mockFiles[cliPath] = binaryBytes;
     mockFiles[cliDigestPath] = digestHex;
     mockFiles[versionPath] = "2.26.0";
     mockExecOutput = "fallow 2.26.0\n";
 
-    expect(getInstalledCliPath(fakeContext)).toBe(cliPath);
+    expect(await getInstalledCliPath(fakeContext)).toBe(cliPath);
   });
 
-  it("treats a stale CLI binary as stale even when the shared marker is current", () => {
+  it("treats a stale CLI binary as stale even when the shared marker is current", async () => {
     mockFiles[cliPath] = binaryBytes;
     mockFiles[cliSigPath] = signatureBytes;
     mockFiles[versionPath] = "2.26.0";
     mockExecOutput = "fallow 2.25.0\n";
 
-    expect(getInstalledCliPath(fakeContext)).toBeNull();
+    expect(await getInstalledCliPath(fakeContext)).toBeNull();
     expect(mockFiles[cliPath]).toBeUndefined();
     expect(mockFiles[cliSigPath]).toBeUndefined();
   });
 
-  it("retries a missing managed CLI without purging a trusted LSP binary", () => {
+  it("retries a missing managed CLI without purging a trusted LSP binary", async () => {
     mockFiles[lspPath] = binaryBytes;
     mockFiles[lspSigPath] = signatureBytes;
     mockFiles[cliPath] = binaryBytes;
@@ -450,9 +468,70 @@ describe("getInstalledCliPath", () => {
     mockFiles[versionPath] = "2.26.0";
     mockSignatureValid = false;
 
-    expect(getInstalledCliPath(fakeContext)).toBeNull();
+    expect(await getInstalledCliPath(fakeContext)).toBeNull();
     expect(mockFiles[cliPath]).toBeUndefined();
     expect(mockFiles[lspPath]).toBe(binaryBytes);
     expect(mockFiles[lspSigPath]).toBe(signatureBytes);
+  });
+});
+
+describe("sweepOrphanTempFiles", () => {
+  // A pid that is NOT this process: such temps are crash orphans, never live.
+  const orphanPid = process.pid + 1;
+  const orphanBinary = path.join(binDir, `.fallow-lsp.${orphanPid}.1.tmp`);
+  const orphanSig = `${orphanBinary}.sig`;
+  const orphanDigest = `${orphanBinary}.sha256`;
+
+  beforeEach(() => {
+    mockFiles = {};
+  });
+
+  it("unlinks orphaned temp binaries and their sidecars from a crashed download", () => {
+    mockFiles[orphanBinary] = binaryBytes;
+    mockFiles[orphanSig] = signatureBytes;
+    mockFiles[orphanDigest] = digestHex;
+
+    sweepOrphanTempFiles(binDir);
+
+    expect(orphanBinary in mockFiles).toBe(false);
+    expect(orphanSig in mockFiles).toBe(false);
+    expect(orphanDigest in mockFiles).toBe(false);
+  });
+
+  it("spares installed binaries, sidecars, the version marker, and the lock", () => {
+    mockFiles[lspPath] = binaryBytes;
+    mockFiles[lspSigPath] = signatureBytes;
+    mockFiles[cliPath] = binaryBytes;
+    mockFiles[cliDigestPath] = digestHex;
+    mockFiles[versionPath] = "2.26.0";
+    mockFiles[path.join(binDir, ".install.lock")] = "123";
+    mockFiles[orphanBinary] = binaryBytes;
+
+    sweepOrphanTempFiles(binDir);
+
+    expect(orphanBinary in mockFiles).toBe(false);
+    expect(lspPath in mockFiles).toBe(true);
+    expect(lspSigPath in mockFiles).toBe(true);
+    expect(cliPath in mockFiles).toBe(true);
+    expect(cliDigestPath in mockFiles).toBe(true);
+    expect(versionPath in mockFiles).toBe(true);
+    expect(path.join(binDir, ".install.lock") in mockFiles).toBe(true);
+  });
+
+  it("never deletes a live temp owned by the current process", () => {
+    const livePid = process.pid;
+    const liveBinary = path.join(binDir, `.fallow.${livePid}.2.tmp`);
+    const liveSig = `${liveBinary}.sig`;
+    mockFiles[liveBinary] = binaryBytes;
+    mockFiles[liveSig] = signatureBytes;
+
+    sweepOrphanTempFiles(binDir);
+
+    expect(liveBinary in mockFiles).toBe(true);
+    expect(liveSig in mockFiles).toBe(true);
+  });
+
+  it("is a no-op when the bin directory cannot be read", () => {
+    expect(() => sweepOrphanTempFiles(path.join("/storage", "missing"))).not.toThrow();
   });
 });

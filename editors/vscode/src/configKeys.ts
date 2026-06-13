@@ -8,6 +8,13 @@ export const RESTART_CONFIG_KEYS = [
   // `fallow.production` is forwarded to the LSP via initializationOptions, which
   // the server only reads at startup, so a change must restart it (issue #1055).
   "fallow.production",
+  // `fallow.autoDownload` restarts so that enabling it can resolve + download a
+  // managed binary when none was found, and disabling it can fall back to a
+  // PATH/local binary. It re-runs `resolveBinaryPath`, which may pick a different
+  // binary than the running one. When an already-installed managed binary is the
+  // resolved choice either way, the restart re-resolves to the byte-identical
+  // path (a harmless no-op clearing of the Problems panel); a path-diffing guard
+  // would avoid that but adds complexity for a rare, low-cost case.
   "fallow.autoDownload",
 ] as const;
 

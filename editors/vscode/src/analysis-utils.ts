@@ -296,6 +296,10 @@ export const countCheckIssues = (result: FallowCheckResult | null): number => {
     (result.boundary_violations?.length ?? 0) +
     (result.stale_suppressions?.length ?? 0) +
     (result.unused_catalog_entries?.length ?? 0) +
+    // empty_catalog_groups has no per-type toggle (it is not in IssueTypeConfig),
+    // so it is always counted; omitting it under-reported total_issues and the
+    // status-bar count.
+    (result.empty_catalog_groups?.length ?? 0) +
     (result.unresolved_catalog_references?.length ?? 0) +
     (result.unused_dependency_overrides?.length ?? 0) +
     (result.misconfigured_dependency_overrides?.length ?? 0)

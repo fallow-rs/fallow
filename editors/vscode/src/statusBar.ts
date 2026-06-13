@@ -9,7 +9,7 @@ import {
   buildStatusBarTooltipMarkdown,
   renderStatusBarText,
 } from "./statusBar-utils.js";
-import type { FallowCheckResult, FallowDupesResult, HealthReport } from "./types.js";
+import type { FallowCheckResult, FallowDupesResult, HealthOutput } from "./types.js";
 export type { AnalysisCompleteParams } from "./statusBar-utils.js";
 import type { AnalysisCompleteParams } from "./statusBar-utils.js";
 
@@ -113,7 +113,7 @@ const applyStatusBarText = (parts: string[]): void => {
  * when it completes. A null report (or the `health.statusBar` setting off)
  * clears the segment so the existing behavior is unchanged.
  */
-export const updateStatusBarHealth = (report: HealthReport | null): void => {
+export const updateStatusBarHealth = (report: HealthOutput | null): void => {
   healthPart = getHealthStatusBar() ? formatHealthStatusPart(report) : null;
   if (!statusBarItem) {
     return;

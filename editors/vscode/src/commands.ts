@@ -48,6 +48,7 @@ import {
 } from "./download.js";
 import { buildFixArgs, createFixPreviewItems, resolveFixLocation } from "./fix-utils.js";
 import { buildHealthArgs, parseUnknownHealthSubcommand } from "./health-utils.js";
+import { registerChild, unregisterChild } from "./process-registry.js";
 import { buildSecurityArgs, parseUnknownSubcommand } from "./security-utils.js";
 import {
   cacheWorkspacesOutput,
@@ -63,12 +64,13 @@ import type {
   FallowFixResult,
   FixAction,
   HealthOutput,
-  HealthReport,
   SecurityOutput,
   WorkspacesOutput,
 } from "./types.js";
 
-export const findCliBinary = (context: vscode.ExtensionContext): string | null => {
+export const findCliBinary = async (
+  context: vscode.ExtensionContext,
+): Promise<string | null> => {
   const lspPath = getLspPath();
   if (lspPath) {
     const dir = path.dirname(lspPath);
@@ -88,7 +90,7 @@ export const findCliBinary = (context: vscode.ExtensionContext): string | null =
     return inPath;
   }
 
-  const installed = getInstalledCliPath(context);
+  const installed = await getInstalledCliPath(context);
   if (installed) {
     return installed;
   }
@@ -99,7 +101,7 @@ export const findCliBinary = (context: vscode.ExtensionContext): string | null =
 export const resolveCliBinary = async (
   context: vscode.ExtensionContext,
 ): Promise<string | null> => {
-  const existing = findCliBinary(context);
+  const existing = await findCliBinary(context);
   if (existing) {
     return existing;
   }
@@ -133,6 +135,16 @@ interface ExecFallowOptions {
   readonly env?: Readonly<Record<string, string>>;
 }
 
+/**
+ * Ceiling on captured `stdout` (and, symmetrically, `stderr`) for a single
+ * `execFallow` spawn. The `spawn` rewrite dropped the original `maxBuffer`, so
+ * without this the strings grow unbounded; a runaway CLI (or `--format json`
+ * over a pathological monorepo) would balloon the extension-host heap until the
+ * host crashes. 50MB matches the prior `maxBuffer` and comfortably exceeds the
+ * largest real JSON payloads the JSON call sites parse.
+ */
+const MAX_STDOUT_BYTES = 50 * 1024 * 1024;
+
 export const execFallow = (
   binary: string | null,
   args: ReadonlyArray<string>,
@@ -154,25 +166,67 @@ export const execFallow = (
       env: options.env ? { ...process.env, ...options.env } : process.env,
       stdio: ["ignore", "pipe", "pipe"],
     });
+    registerChild(child);
 
     let stdout = "";
     let stderr = "";
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+    // Guards a single reject path: chunks can still arrive (and `close` can
+    // fire) after we kill the child, so the first overflow wins and the rest
+    // are dropped without re-rejecting an already-settled promise.
+    let overflowed = false;
+
+    const rejectOnOverflow = (): void => {
+      overflowed = true;
+      child.kill();
+      reject(
+        new Error(
+          `fallow output exceeded ${MAX_STDOUT_BYTES / (1024 * 1024)} MB and was aborted. Add large generated files to ignorePatterns, or scope the analysis (e.g. --changed-since), then retry.`,
+        ),
+      );
+    };
 
     child.stdout?.setEncoding("utf8");
     child.stdout?.on("data", (chunk: string) => {
+      if (overflowed) {
+        return;
+      }
+      stdoutBytes += Buffer.byteLength(chunk, "utf8");
+      if (stdoutBytes > MAX_STDOUT_BYTES) {
+        rejectOnOverflow();
+        return;
+      }
       stdout += chunk;
     });
 
     child.stderr?.setEncoding("utf8");
     child.stderr?.on("data", (chunk: string) => {
+      if (overflowed) {
+        return;
+      }
+      stderrBytes += Buffer.byteLength(chunk, "utf8");
+      if (stderrBytes > MAX_STDOUT_BYTES) {
+        rejectOnOverflow();
+        return;
+      }
       stderr += chunk;
     });
 
     child.on("error", (error) => {
+      unregisterChild(child);
+      if (overflowed) {
+        return;
+      }
       reject(error);
     });
 
     child.on("close", (code, signal) => {
+      unregisterChild(child);
+      if (overflowed) {
+        return;
+      }
+
       if (signal) {
         const sizeLimit = options.env?.FALLOW_MAX_FILE_SIZE;
         const hint = sizeLimit
@@ -202,9 +256,11 @@ export const execFallow = (
  * every sidebar analysis (config-change reanalysis can fire these frequently).
  * `undefined` = not yet probed; `null` = probed but version could not be read.
  */
-const cliVersionCache = new Map<string, string | null>();
+const cliVersionCache = new Map<string, Promise<string | null>>();
 
-const probeCliVersion = (binaryPath: string): string | null => {
+const probeCliVersion = (binaryPath: string): Promise<string | null> => {
+  // Cache the in-flight PROMISE, not the resolved value, so concurrent callers
+  // share one `--version` spawn instead of each launching its own.
   const cached = cliVersionCache.get(binaryPath);
   if (cached !== undefined) {
     return cached;
@@ -236,21 +292,21 @@ export const resolveCliForRun = async (
   context: vscode.ExtensionContext,
   outputChannel?: vscode.OutputChannel,
 ): Promise<{ binary: string | null; version: string | null }> => {
-  const found = findCliBinary(context);
+  const found = await findCliBinary(context);
   if (!found) {
     const downloaded = await resolveCliBinary(context);
-    return { binary: downloaded, version: downloaded ? probeCliVersion(downloaded) : null };
+    return { binary: downloaded, version: downloaded ? await probeCliVersion(downloaded) : null };
   }
 
-  const version = probeCliVersion(found);
+  const version = await probeCliVersion(found);
   const required = getExtensionVersion();
   const tooOld = required !== null && version !== null && compareVersions(version, required) < 0;
 
   if (tooOld && getAutoDownload()) {
     const managed =
-      getInstalledCliPath(context, outputChannel) ?? (await downloadCliBinary(context));
+      (await getInstalledCliPath(context, outputChannel)) ?? (await downloadCliBinary(context));
     if (managed && managed !== found) {
-      const managedVersion = probeCliVersion(managed);
+      const managedVersion = await probeCliVersion(managed);
       outputChannel?.appendLine(
         `Fallow: resolved CLI v${version} predates the extension (v${required}); switched to the managed CLI v${managedVersion ?? "unknown"} so your settings apply.`,
       );
@@ -364,6 +420,11 @@ const filterCheckResult = (result: FallowCheckResult): FallowCheckResult => {
     boundary_violations: types["boundary-violation"] ? result.boundary_violations : [],
     stale_suppressions: types["stale-suppressions"] ? result.stale_suppressions : [],
     unused_catalog_entries: types["unused-catalog-entries"] ? result.unused_catalog_entries : [],
+    // Intentionally ungateable: there is no `empty-catalog-groups` key in
+    // IssueTypeConfig, so it is always passed through. Made explicit (rather than
+    // relying on the `...result` spread) so a future spread removal does not
+    // silently drop the field, and so the count/filter handling stays in step.
+    empty_catalog_groups: result.empty_catalog_groups,
     unresolved_catalog_references: types["unresolved-catalog-references"]
       ? result.unresolved_catalog_references
       : [],
@@ -797,7 +858,7 @@ export const resetHealthNoWorkspaceWarning = (): void => {
 export const runHealthAnalysis = async (
   context: vscode.ExtensionContext,
   outputChannel?: vscode.OutputChannel,
-): Promise<HealthReport | null> => {
+): Promise<HealthOutput | null> => {
   const root = getWorkspaceRoot();
   if (!root) {
     // Non-retryable until a folder is opened; warn once so re-reveals stay

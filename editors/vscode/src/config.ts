@@ -81,8 +81,22 @@ export const getDuplicationMinLinesOverride = (): number | undefined => {
   return value === undefined ? undefined : clampMinLines(value);
 };
 
-export const getDuplicationModeOverride = (): DuplicationMode | undefined =>
-  getConfiguredValue<DuplicationMode>("duplication.mode");
+const DUPLICATION_MODES: ReadonlySet<string> = new Set<DuplicationMode>([
+  "strict",
+  "mild",
+  "weak",
+  "semantic",
+]);
+
+export const getDuplicationModeOverride = (): DuplicationMode | undefined => {
+  const value = getConfiguredValue<DuplicationMode>("duplication.mode");
+  // A hand-edited settings.json can hold any string. An unknown value would be
+  // forwarded as `--dupes-mode <bad>`, which the CLI rejects; `--dupes-mode` is
+  // not version-gated, so planDegradation rethrows and the WHOLE analysis run
+  // fails instead of degrading. Drop invalid input and fall back to the CLI
+  // default rather than poisoning the run.
+  return value !== undefined && DUPLICATION_MODES.has(value) ? value : undefined;
+};
 
 export const getDuplicationMinOccurrencesOverride = (): number | undefined => {
   const value = getConfiguredValue<number>("duplication.minOccurrences");

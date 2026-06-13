@@ -138,5 +138,10 @@ export class RuntimeCoverageTreeProvider implements vscode.TreeDataProvider<Cove
 
   dispose(): void {
     this._onDidChangeTreeData.dispose();
+    // Null the view so a late fire-and-forget loadCoverage continuation that
+    // resolves after the TreeView is disposed (subscriptions dispose LIFO; the
+    // view goes before this provider) hits the `if (!this.view)` guard in
+    // updateBadge() instead of touching a disposed view.
+    this.view = null;
   }
 }

@@ -63,8 +63,12 @@ const summaryText = (filter: DiagnosticFilter): string => {
 /** A LanguageStatusItem in the right gutter that surfaces mute state.
  *  Severity is `Warning` whenever anything is muted, otherwise the item is
  *  hidden. Click opens the manage-mutes QuickPick. A secondary command
- *  clears all mutes in one click. */
-const createLanguageStatus = (filter: DiagnosticFilter): vscode.LanguageStatusItem => {
+ *  clears all mutes in one click.
+ *
+ *  Returns a composite disposable that tears down both the status item and the
+ *  `filter.onDidChange` subscription, so a re-create does not leak listeners
+ *  (and disposal no longer relies on LIFO ordering of the status item). */
+const createLanguageStatus = (filter: DiagnosticFilter): vscode.Disposable => {
   const selector = FALLOW_LANGUAGES.map((language) => ({
     scheme: "file",
     language,
@@ -97,8 +101,13 @@ const createLanguageStatus = (filter: DiagnosticFilter): vscode.LanguageStatusIt
   };
 
   apply();
-  filter.onDidChange(apply);
-  return item;
+  const subscription = filter.onDidChange(apply);
+  return {
+    dispose: () => {
+      subscription.dispose();
+      item.dispose();
+    },
+  };
 };
 
 interface ManagePickItem extends vscode.QuickPickItem {
@@ -169,10 +178,9 @@ const showManageQuickPick = async (filter: DiagnosticFilter): Promise<void> => {
       if (globalSelected) {
         filter.setMutedAll(true);
       } else {
-        if (filter.isMutedAll()) {
-          filter.setMutedAll(false);
-        }
-        filter.setMutedCategories(selected);
+        // Turn off mute-all AND apply the category selection in one cycle, so a
+        // single accept does not fire two persisted writes and two LSP re-pulls.
+        filter.applyMuteSelection(false, selected);
       }
       pick.hide();
     });
@@ -237,8 +245,7 @@ export const registerDiagnosticMuteUi = (
   context: vscode.ExtensionContext,
   filter: DiagnosticFilter,
 ): void => {
-  const statusItem = createLanguageStatus(filter);
-  context.subscriptions.push(statusItem);
+  context.subscriptions.push(createLanguageStatus(filter));
 
   context.subscriptions.push(filter.onDidChange(() => updateContextKey(filter)));
   updateContextKey(filter);

@@ -360,6 +360,101 @@ describe("DiagnosticFilter persistence", () => {
   });
 });
 
+describe("DiagnosticFilter corrupt-state recovery", () => {
+  it("does not throw when the persisted value is not an object", () => {
+    // A downgrade or hand-edit can leave a non-object (here a number) under the
+    // state key; the constructor must recover silently rather than disabling the
+    // whole extension for that workspace.
+    expect(() => new DiagnosticFilter(memento(42) as never)).not.toThrow();
+    const f = new DiagnosticFilter(memento(42) as never);
+    expect(f.isMutedAll()).toBe(false);
+    expect(f.anythingMuted()).toBe(false);
+  });
+
+  it("recovers to nothing-muted when array fields hold the wrong type", () => {
+    const f = new DiagnosticFilter(
+      memento({
+        mutedAll: "yes",
+        mutedCategories: 7,
+        localVisibleCategories: { a: 1 },
+      }) as never
+    );
+    expect(f.isMutedAll()).toBe(false);
+    expect(f.anythingMuted()).toBe(false);
+  });
+
+  it("filters non-string members out of a persisted category array", () => {
+    const f = new DiagnosticFilter(
+      memento({
+        mutedAll: false,
+        mutedCategories: ["code-duplication", 5, null, "unused-export"],
+      }) as never
+    );
+    expect(f.isCategoryMuted("code-duplication")).toBe(true);
+    expect(f.isCategoryMuted("unused-export")).toBe(true);
+  });
+});
+
+describe("DiagnosticFilter.applyMuteSelection", () => {
+  it("turns mute-all off and applies the selection in one persisted write", async () => {
+    const m = memento();
+    const f = new DiagnosticFilter(m as never, () => "warning", new Set(["code-duplication"]));
+
+    f.setMutedAll(true);
+    await flushPersistence();
+    m.update.mockClear();
+
+    // Mirrors the manage pick's accept when the global "All Findings" row is
+    // unchecked: select only `unused-export`, revealing the baseline category.
+    f.applyMuteSelection(false, new Set(["unused-export"]));
+    await flushPersistence();
+
+    expect(f.isMutedAll()).toBe(false);
+    expect(f.isCategoryMuted("unused-export")).toBe(true);
+    expect(f.isCategoryMuted("code-duplication")).toBe(false);
+    // One accept => exactly one persisted write (the old setMutedAll +
+    // setMutedCategories pair fired two).
+    expect(m.update).toHaveBeenCalledTimes(1);
+    expect(m.update).toHaveBeenLastCalledWith(
+      "fallow.diagnosticFilter.v1",
+      expect.objectContaining({
+        mutedAll: false,
+        mutedCategories: ["unused-export"],
+        localVisibleCategories: ["code-duplication"],
+      })
+    );
+  });
+
+  it("is a no-op (no write) when the selection already matches state", async () => {
+    const m = memento();
+    const f = new DiagnosticFilter(m as never);
+    f.applyMuteSelection(false, new Set());
+    await flushPersistence();
+    expect(m.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("DiagnosticFilter.flushPersist", () => {
+  it("resolves after the in-flight persisted write lands", async () => {
+    const m = memento();
+    const f = new DiagnosticFilter(m as never);
+    f.setCategoryMuted("code-duplication", true);
+    // Await the public drain API directly (what deactivate() calls), not the
+    // raw microtask helper.
+    await f.flushPersist();
+    expect(m.update).toHaveBeenCalledWith(
+      "fallow.diagnosticFilter.v1",
+      expect.objectContaining({ mutedCategories: ["code-duplication"] })
+    );
+  });
+
+  it("resolves immediately when there is nothing pending", async () => {
+    const m = memento();
+    const f = new DiagnosticFilter(m as never);
+    await expect(f.flushPersist()).resolves.toBeUndefined();
+  });
+});
+
 describe("DiagnosticFilter.handleDiagnostics + refresh", () => {
   it("caches unfiltered diagnostics and forwards filtered to next", () => {
     const f = new DiagnosticFilter(memento() as never);

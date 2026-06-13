@@ -27,6 +27,9 @@ const mockWorkspace = vi.hoisted(() => ({
 }));
 
 const mockLanguageClient = vi.hoisted(() => ({
+  // When set, the next LanguageClient.start() rejects with this error, so tests
+  // can exercise startClient's catch path.
+  startError: null as Error | null,
   instances: [] as Array<{
     start: ReturnType<typeof vi.fn>;
     stop: ReturnType<typeof vi.fn>;
@@ -58,7 +61,12 @@ vi.mock("vscode-languageclient/node.js", () => ({
   LanguageClient: class {
     state = 2;
     private stateListeners: Array<(event: { newState: number }) => void> = [];
-    readonly start = vi.fn(async () => undefined);
+    readonly start = vi.fn(async () => {
+      if (mockLanguageClient.startError) {
+        throw mockLanguageClient.startError;
+      }
+      return undefined;
+    });
     readonly stop = vi.fn(async () => undefined);
     readonly setTrace = vi.fn(async () => undefined);
     readonly sendRequest = vi.fn(async () => mockIssueTypesResponse);
@@ -124,6 +132,9 @@ vi.mock("../src/config.js", () => ({
   getMutedDiagnosticCategories: () => mockMutedDiagnosticCategories,
 }));
 
+// VS Code injects this module at runtime; here it resolves to the vi.mock above.
+// fallow-ignore-next-line unlisted-dependency
+import * as vscode from "vscode";
 import {
   createInitializationOptions,
   loadDiagnosticCategories,
@@ -164,6 +175,7 @@ beforeEach(() => {
   mockBinaryResolution.pathBinary = null;
   mockBinaryResolution.installedBinary = null;
   mockLanguageClient.instances = [];
+  mockLanguageClient.startError = null;
   mockWorkspace.textDocuments = [];
 });
 
@@ -296,6 +308,30 @@ describe("stopClient", () => {
     await expect(stopped).resolves.toBeUndefined();
     expect(instance!.onDidChangeState).toHaveBeenCalledOnce();
     expect(instance!.stop).toHaveBeenCalledOnce();
+  });
+});
+
+describe("startClient - start() throws", () => {
+  it("returns null, surfaces the error, and clears the client so a retry succeeds", async () => {
+    const showError = vi.mocked(vscode.window.showErrorMessage);
+    showError.mockClear();
+    const out = outputChannel();
+
+    mockLanguageClient.startError = new Error("spawn ENOENT");
+    const failed = await startClient({} as never, out as never);
+
+    expect(failed).toBeNull();
+    expect(showError).toHaveBeenCalledTimes(1);
+    expect(String(showError.mock.calls[0]?.[0])).toContain("failed to start");
+
+    // The catch must have nulled the module-level client; a subsequent start
+    // with a healthy server returns a fresh, non-null client.
+    mockLanguageClient.startError = null;
+    const recovered = await startClient({} as never, out as never);
+
+    expect(recovered).not.toBeNull();
+    expect(mockLanguageClient.instances).toHaveLength(2);
+    expect(recovered).toBe(mockLanguageClient.instances[1]);
   });
 });
 

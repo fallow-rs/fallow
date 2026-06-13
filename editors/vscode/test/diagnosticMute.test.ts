@@ -1,7 +1,17 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const vscodeMocks = vi.hoisted(() => ({
   createQuickPick: vi.fn(),
+  createLanguageStatusItem: vi.fn((id: string, selector: unknown) => ({
+    id,
+    selector,
+    name: undefined,
+    severity: undefined,
+    text: "",
+    detail: undefined,
+    command: undefined,
+    dispose: vi.fn(),
+  })),
 }));
 
 vi.mock("vscode", () => {
@@ -47,16 +57,7 @@ vi.mock("vscode", () => {
       parse: (s: string) => ({ toString: () => s, scheme: "file" }),
     },
     languages: {
-      createLanguageStatusItem: vi.fn((id: string, selector: unknown) => ({
-        id,
-        selector,
-        name: undefined,
-        severity: undefined,
-        text: "",
-        detail: undefined,
-        command: undefined,
-        dispose: vi.fn(),
-      })),
+      createLanguageStatusItem: vscodeMocks.createLanguageStatusItem,
     },
     window: {
       createQuickPick: vscodeMocks.createQuickPick,
@@ -123,6 +124,10 @@ const quickPickThatAcceptsDefaults = () => {
   };
 };
 
+beforeEach(() => {
+  vscodeMocks.createLanguageStatusItem.mockClear();
+});
+
 afterEach(() => {
   resetDiagnosticCategories();
 });
@@ -130,7 +135,12 @@ afterEach(() => {
 describe("diagnostic mute language status", () => {
   it("is hidden until a mute is active, then hides again after clearing", () => {
     const filter = new DiagnosticFilter(memento() as never);
-    const item = __testHelpers.createLanguageStatus(filter);
+    __testHelpers.createLanguageStatus(filter);
+    const item = vscodeMocks.createLanguageStatusItem.mock.results.at(-1)
+      ?.value as {
+      selector: unknown;
+      command: unknown;
+    };
 
     expect(item.selector).toEqual([]);
     expect(item.command).toBeUndefined();
@@ -154,6 +164,29 @@ describe("diagnostic mute language status", () => {
     filter.clearAllMutes();
     expect(item.selector).toEqual([]);
     expect(item.command).toBeUndefined();
+  });
+
+  it("disposing the status disposes both the item and the onDidChange subscription", () => {
+    const filter = new DiagnosticFilter(memento() as never);
+    const disposable = __testHelpers.createLanguageStatus(filter);
+    const item = vscodeMocks.createLanguageStatusItem.mock.results.at(-1)
+      ?.value as { dispose: ReturnType<typeof vi.fn> };
+
+    // One listener is registered while the status is live; firing it updates the
+    // item (it is not disposed yet).
+    filter.setCategoryMuted("code-duplication", true);
+    expect(item.dispose).not.toHaveBeenCalled();
+
+    disposable.dispose();
+    expect(item.dispose).toHaveBeenCalledTimes(1);
+
+    // After disposal the subscription is gone: a state change must not throw or
+    // re-touch the disposed item (no leaked listener across re-creates).
+    const callsBefore = vscodeMocks.createLanguageStatusItem.mock.calls.length;
+    expect(() => filter.clearAllMutes()).not.toThrow();
+    expect(vscodeMocks.createLanguageStatusItem.mock.calls.length).toBe(
+      callsBefore
+    );
   });
 
   it("keeps global mute separate when accepting the default manage picker state", async () => {

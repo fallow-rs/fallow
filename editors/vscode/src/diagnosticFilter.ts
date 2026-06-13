@@ -188,6 +188,14 @@ interface DiagnosticFilterStateChange {
   readonly mutedCategories: ReadonlySet<string>;
 }
 
+/** Coerce a persisted value to a string array, tolerating a corrupt or
+ *  hand-edited `workspaceState` entry (a non-array, or an array with non-string
+ *  members). Without this a bad value (e.g. a number where an array is expected)
+ *  throws in the constructor and disables the whole extension for that
+ *  workspace. */
+const asStringArray = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+
 export class DiagnosticFilter {
   private mutedAll = false;
   private baselineMutedCategories = new Set<string>();
@@ -207,11 +215,11 @@ export class DiagnosticFilter {
   ) {
     this.baselineMutedCategories = new Set(baselineMutedCategories);
     const persisted = memento.get<PersistedState>(STATE_KEY);
-    if (persisted) {
+    if (persisted && typeof persisted === "object") {
       this.mutedAll = persisted.mutedAll === true;
-      const localMuted = persisted.localMutedCategories ?? persisted.mutedCategories ?? [];
+      const localMuted = asStringArray(persisted.localMutedCategories ?? persisted.mutedCategories);
       this.localMutedCategories = new Set(localMuted);
-      this.localVisibleCategories = new Set(persisted.localVisibleCategories ?? []);
+      this.localVisibleCategories = new Set(asStringArray(persisted.localVisibleCategories));
     }
   }
 
@@ -227,6 +235,14 @@ export class DiagnosticFilter {
 
   public dispose(): void {
     this.emitter.dispose();
+  }
+
+  /** Await any in-flight persisted-state write. `dispose()` is synchronous (the
+   *  VS Code Disposable contract), so it cannot await the persist queue; the
+   *  extension's async `deactivate()` calls this so the last mute toggle is not
+   *  dropped when the window closes mid-write. */
+  public async flushPersist(): Promise<void> {
+    await this.persistQueue;
   }
 
   public isMutedAll(): boolean {
@@ -313,6 +329,38 @@ export class DiagnosticFilter {
       return;
     }
 
+    this.localMutedCategories = nextLocalMuted;
+    this.localVisibleCategories = nextLocalVisible;
+    this.persist();
+    this.refresh();
+    this.emitChange();
+  }
+
+  /** Apply the global mute-all flag AND an explicit category set in ONE
+   *  persist/refresh/emit cycle. The Manage quick pick otherwise called
+   *  setMutedAll then setMutedCategories for a single accept, firing two
+   *  persisted writes and two refreshes (two LSP re-pulls) per user action. */
+  public applyMuteSelection(mutedAll: boolean, codes: ReadonlySet<string>): void {
+    const nextLocalMuted = new Set<string>();
+    const nextLocalVisible = new Set<string>();
+    for (const code of codes) {
+      if (!this.baselineMutedCategories.has(code)) {
+        nextLocalMuted.add(code);
+      }
+    }
+    for (const code of this.baselineMutedCategories) {
+      if (!codes.has(code)) {
+        nextLocalVisible.add(code);
+      }
+    }
+    const changed =
+      this.mutedAll !== mutedAll ||
+      !setsEqual(this.localMutedCategories, nextLocalMuted) ||
+      !setsEqual(this.localVisibleCategories, nextLocalVisible);
+    if (!changed) {
+      return;
+    }
+    this.mutedAll = mutedAll;
     this.localMutedCategories = nextLocalMuted;
     this.localVisibleCategories = nextLocalVisible;
     this.persist();

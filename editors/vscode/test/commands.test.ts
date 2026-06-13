@@ -63,6 +63,8 @@ vi.mock("../src/config.js", () => ({
   getDuplicationThresholdOverride: () => undefined,
   getHealthHotspots: () => true,
   getHealthTopFindings: () => 20,
+  getComplexityBreakdownEnabled: () => false,
+  getComplexityDecorationCap: () => 200,
   getIssueTypes: () => ({}),
   getChangedSince: () => "",
   getResolvedConfigPath: () => "",
@@ -243,6 +245,40 @@ describe("execFallow", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it("rejects once with an actionable message when stdout exceeds the cap", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "fallow-vscode-exec-overflow-"));
+
+    try {
+      // Stream well past the 50MB cap in chunks so the overflow trips inside a
+      // `data` handler before the child finishes; the kill+guard must yield a
+      // single rejection, not a follow-up "exited via signal" reject on close.
+      const script = join(dir, "flood.mjs");
+      await writeFile(
+        script,
+        [
+          'const chunk = "x".repeat(4 * 1024 * 1024);',
+          "for (let i = 0; i < 16; i += 1) {",
+          "  process.stdout.write(chunk);",
+          "}",
+        ].join("\n"),
+        "utf8",
+      );
+
+      let caught: unknown = null;
+      try {
+        await execFallow(process.execPath, [script], dir);
+      } catch (err) {
+        caught = err;
+      }
+
+      expect(caught).toBeInstanceOf(Error);
+      expect((caught as Error).message).toContain("output exceeded 50 MB");
+      expect((caught as Error).message).toContain("ignorePatterns");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("findCliBinary", () => {
@@ -257,28 +293,28 @@ describe("findCliBinary", () => {
     vi.clearAllMocks();
   });
 
-  it("uses the CLI sibling of a configured LSP path first", () => {
+  it("uses the CLI sibling of a configured LSP path first", async () => {
     mockLspPath = "/tools/fallow-lsp";
     mockFiles = new Set(["/tools/fallow"]);
     mockLocalBinary = "/workspace/node_modules/.bin/fallow";
     mockPathBinary = "/usr/local/bin/fallow";
     mockInstalledCli = "/storage/bin/fallow";
 
-    expect(findCliBinary(context)).toBe("/tools/fallow");
+    expect(await findCliBinary(context)).toBe("/tools/fallow");
   });
 
-  it("prefers the workspace CLI before PATH and managed storage", () => {
+  it("prefers the workspace CLI before PATH and managed storage", async () => {
     mockLocalBinary = "/workspace/node_modules/.bin/fallow";
     mockPathBinary = "/usr/local/bin/fallow";
     mockInstalledCli = "/storage/bin/fallow";
 
-    expect(findCliBinary(context)).toBe("/workspace/node_modules/.bin/fallow");
+    expect(await findCliBinary(context)).toBe("/workspace/node_modules/.bin/fallow");
   });
 
-  it("uses the managed CLI after configured, workspace, and PATH lookups miss", () => {
+  it("uses the managed CLI after configured, workspace, and PATH lookups miss", async () => {
     mockInstalledCli = "/storage/bin/fallow";
 
-    expect(findCliBinary(context)).toBe("/storage/bin/fallow");
+    expect(await findCliBinary(context)).toBe("/storage/bin/fallow");
   });
 });
 
@@ -584,5 +620,63 @@ describe("runHealthAnalysis no-workspace gate (#902)", () => {
     resetHealthNoWorkspaceWarning();
     await runHealthAnalysis(context);
     expect(mockWindow.showWarningMessage).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("runHealthAnalysis return type (envelope reachable)", () => {
+  beforeEach(() => {
+    mockLspPath = "";
+    mockLocalBinary = null;
+    mockPathBinary = null;
+    mockInstalledCli = null;
+    mockDownloadedCli = null;
+    mockExtensionVersion = null;
+    mockBinaryVersions = {};
+    setWorkspaceRoot(null);
+    resetHealthNoWorkspaceWarning();
+    vi.clearAllMocks();
+  });
+
+  // The declared return type is `HealthOutput | null`, not `HealthReport | null`.
+  // `HealthOutput` is the envelope flattened over the report body, so the
+  // envelope fields (`schema_version`, `version`, `next_steps`) must be
+  // reachable on the resolved value WITHOUT a cast. Reading them here would not
+  // type-check if the declaration narrowed back to the report body.
+  it("resolves a value whose envelope fields are typed and present", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "fallow-vscode-health-envelope-"));
+    const script = join(dir, "fallow-cli.js");
+    const output = JSON.stringify({
+      schema_version: 7,
+      version: "9.9.9-test",
+      elapsed_ms: 12,
+      findings: [],
+      summary: {},
+      next_steps: [{ id: "health-clean", title: "Project is healthy", command: "fallow health" }],
+    });
+
+    try {
+      await writeFile(
+        script,
+        [
+          "#!/usr/bin/env node",
+          `process.stdout.write(${JSON.stringify(output)});`,
+        ].join("\n"),
+        "utf8",
+      );
+      await chmod(script, 0o755);
+
+      mockPathBinary = script;
+      setWorkspaceRoot(dir);
+
+      const report = await runHealthAnalysis(workspaceContext);
+      expect(report).not.toBeNull();
+      // Envelope-level access only compiles when the return type is HealthOutput.
+      expect(report?.schema_version).toBe(7);
+      expect(report?.version).toBe("9.9.9-test");
+      expect(report?.next_steps?.[0]?.id).toBe("health-clean");
+    } finally {
+      setWorkspaceRoot(null);
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

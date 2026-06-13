@@ -94,12 +94,15 @@ export const createInitializationOptions = (): LspInitializationOptions => ({
   },
 });
 
-const warnIfVersionMismatch = (binaryPath: string, outputChannel?: vscode.OutputChannel): void => {
+const warnIfVersionMismatch = async (
+  binaryPath: string,
+  outputChannel?: vscode.OutputChannel,
+): Promise<void> => {
   const extensionVersion = vscode.extensions.getExtension("fallow-rs.fallow-vscode")?.packageJSON
     ?.version as string | undefined;
   if (!extensionVersion) return;
 
-  const binaryVersion = getBinaryVersion(binaryPath);
+  const binaryVersion = await getBinaryVersion(binaryPath);
   if (binaryVersion && binaryVersion !== extensionVersion) {
     const msg = `Fallow: binary in PATH is v${binaryVersion}, extension is v${extensionVersion}. Update the binary or remove it from PATH to use the managed auto-download.`;
     outputChannel?.appendLine(msg);
@@ -135,12 +138,14 @@ const resolveBinaryPath = async (
   const inPath = findBinaryInPath("fallow-lsp");
   if (inPath) {
     outputChannel?.appendLine(`Binary resolution: using system PATH: ${inPath}`);
-    warnIfVersionMismatch(inPath, outputChannel);
+    // Fire-and-forget: the skew toast must not block binary resolution on the
+    // up-to-5s `--version` spawn (the reason getBinaryVersion is async).
+    void warnIfVersionMismatch(inPath, outputChannel);
     return inPath;
   }
   outputChannel?.appendLine("Binary resolution: fallow-lsp not found in PATH");
 
-  const installed = getInstalledBinaryPath(context, outputChannel);
+  const installed = await getInstalledBinaryPath(context, outputChannel);
   if (installed) {
     outputChannel?.appendLine(
       `Binary resolution: using previously downloaded binary: ${installed}`,

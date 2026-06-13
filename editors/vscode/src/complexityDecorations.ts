@@ -313,6 +313,15 @@ export class ComplexityDecorationController {
     this.changeEmitter.fire();
   }
 
+  /**
+   * Evict a closed document from the stale set so a later re-open is not stuck
+   * suppressed until the next health run. The document is not visible at close,
+   * so no re-render or `changeEmitter.fire()` is needed.
+   */
+  handleDocumentClose(document: vscode.TextDocument): void {
+    this.staleDocuments.delete(document.uri.toString());
+  }
+
   /** True when a document was edited since the last health run (markers stale). */
   isStale(document: vscode.TextDocument): boolean {
     return this.staleDocuments.has(document.uri.toString());

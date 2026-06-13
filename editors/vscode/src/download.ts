@@ -1,10 +1,11 @@
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { createHash, createPublicKey, verify } from "node:crypto";
 import * as fs from "node:fs";
 import type { IncomingMessage } from "node:http";
 import * as https from "node:https";
 import * as os from "node:os";
 import * as path from "node:path";
+import { promisify } from "node:util";
 // VS Code injects this module into the extension host at runtime.
 // fallow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
@@ -148,11 +149,47 @@ export const httpsDownload = (url: string, dest: string): Promise<void> =>
       }),
   );
 
+// Matches the `.${name}.${pid}.${counter}.tmp` names minted by `uniqueTempPath`
+// and the `.sig` / `.sha256` sidecars staged next to them. This naming is owned
+// solely by the download path, so a match is never a valid installed binary.
+const ORPHAN_TEMP_RE = /^\..+\.(\d+)\.\d+\.tmp(?:\.sig|\.sha256)?$/;
+
+/**
+ * Remove temp files left behind by a download that died (SIGKILL / crash /
+ * reboot) between writing the temp file and renaming it into place. The
+ * try/catch cleanup in `downloadAsset` only runs when the JS runtime reaches it,
+ * so a hard kill leaks the temp permanently. Skip temps tagged with the current
+ * pid: those may be a live in-flight download in this same process (sweeping
+ * runs outside the install lock), and a running pid is never a crash orphan.
+ */
+export const sweepOrphanTempFiles = (dir: string): void => {
+  const livePid = String(process.pid);
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(dir);
+  } catch {
+    // Best-effort: a missing or unreadable dir has nothing to sweep.
+    return;
+  }
+  for (const entry of entries) {
+    const match = ORPHAN_TEMP_RE.exec(entry);
+    if (!match || match[1] === livePid) {
+      continue;
+    }
+    try {
+      fs.unlinkSync(path.join(dir, entry));
+    } catch {
+      // Best-effort: a sibling window may have swept it first, or it is locked.
+    }
+  }
+};
+
 const getInstallDir = (context: vscode.ExtensionContext): string => {
   const dir = path.join(context.globalStorageUri.fsPath, "bin");
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
+  sweepOrphanTempFiles(dir);
   return dir;
 };
 
@@ -313,11 +350,16 @@ export const readVersionMarker = (dir: string): string | null => {
   }
 };
 
-/** Query the version of a fallow binary. Returns the version string or null. */
-export const getBinaryVersion = (binaryPath: string): string | null => {
+const execFileAsync = promisify(execFile);
+
+/** Query the version of a fallow binary. Returns the version string or null.
+ *  Async (`execFile`, not `execFileSync`) so the up-to-5s `--version` spawn runs
+ *  off the extension-host JS thread; a sync spawn here blocks activation and
+ *  every LSP restart. */
+export const getBinaryVersion = async (binaryPath: string): Promise<string | null> => {
   try {
-    // execFileSync is safe because there is no shell and the path is from our own storage dir.
-    const output = execFileSync(binaryPath, ["--version"], {
+    // execFile is safe because there is no shell and the path is from our own storage dir.
+    const { stdout: output } = await execFileAsync(binaryPath, ["--version"], {
       timeout: 5000,
       encoding: "utf-8",
     });
@@ -454,19 +496,25 @@ const fetchReleaseForExtension = async (): Promise<GithubRelease> => {
   return JSON.parse(releaseJson) as GithubRelease;
 };
 
-export const matchesExtensionVersion = (
+export const matchesExtensionVersion = async (
   dir: string,
   binaryPath: string,
   label: string,
   outputChannel?: vscode.OutputChannel,
-): boolean => {
+): Promise<boolean> => {
   const extensionVersion = getExtensionVersion();
   if (!extensionVersion) {
     return true;
   }
 
+  // The `--version` probe is authoritative, NOT the marker: the version marker
+  // is shared across the LSP and CLI binaries (written once per successful
+  // download), so a current marker does not prove THIS binary is current (a
+  // stale leftover CLI can sit beside a freshly-downloaded LSP). The marker is
+  // only a fallback when the binary cannot report its version. The probe is
+  // async so the up-to-5s spawn never blocks the activation/restart thread.
   const markerVersion = readVersionMarker(dir);
-  const binaryVersion = getBinaryVersion(binaryPath);
+  const binaryVersion = await getBinaryVersion(binaryPath);
 
   if (binaryVersion === extensionVersion) {
     return true;
@@ -487,12 +535,12 @@ export const matchesExtensionVersion = (
   return false;
 };
 
-const getManagedBinaryPath = (
+const getManagedBinaryPath = async (
   context: vscode.ExtensionContext,
   binaryName: string,
   label: string,
   outputChannel?: vscode.OutputChannel,
-): string | null => {
+): Promise<string | null> => {
   const dir = getInstallDir(context);
   const binaryPath = path.join(dir, `${binaryName}${getExecutableExtension()}`);
   if (!fs.existsSync(binaryPath)) {
@@ -503,7 +551,7 @@ const getManagedBinaryPath = (
     return null;
   }
 
-  if (!matchesExtensionVersion(dir, binaryPath, label, outputChannel)) {
+  if (!(await matchesExtensionVersion(dir, binaryPath, label, outputChannel))) {
     return null;
   }
 
@@ -513,12 +561,12 @@ const getManagedBinaryPath = (
 export const getInstalledBinaryPath = (
   context: vscode.ExtensionContext,
   outputChannel?: vscode.OutputChannel,
-): string | null => getManagedBinaryPath(context, LSP_BINARY_NAME, "LSP", outputChannel);
+): Promise<string | null> => getManagedBinaryPath(context, LSP_BINARY_NAME, "LSP", outputChannel);
 
 export const getInstalledCliPath = (
   context: vscode.ExtensionContext,
   outputChannel?: vscode.OutputChannel,
-): string | null => getManagedBinaryPath(context, CLI_BINARY_NAME, "CLI", outputChannel);
+): Promise<string | null> => getManagedBinaryPath(context, CLI_BINARY_NAME, "CLI", outputChannel);
 
 /** Download a single binary asset from a GitHub release. Returns the dest path or null. */
 const downloadAsset = async (
@@ -678,7 +726,7 @@ const downloadManagedBinary = async (
             async (): Promise<{ path: string; toast: string | null } | { tag: string }> => {
               // A sibling window may have installed it while we waited for the
               // lock; reuse it instead of downloading again.
-              const existing = getManagedBinaryPath(context, binaryName, label);
+              const existing = await getManagedBinaryPath(context, binaryName, label);
               if (existing) {
                 return { path: existing, toast: null };
               }
@@ -749,7 +797,7 @@ export const downloadBinary = async (context: vscode.ExtensionContext): Promise<
           // One lock per attempt; prompts run outside the lock. The locked body
           // double-checks each binary so a sibling-installed copy is reused.
           const result = await withInstallLock(dir, async (): Promise<LspCliInstall> => {
-            let lspPath = getManagedBinaryPath(context, LSP_BINARY_NAME, "LSP");
+            let lspPath = await getManagedBinaryPath(context, LSP_BINARY_NAME, "LSP");
             let lspDownloaded = false;
             let release: GithubRelease | null = null;
 
@@ -763,7 +811,7 @@ export const downloadBinary = async (context: vscode.ExtensionContext): Promise<
               lspDownloaded = true;
             }
 
-            let cliPath = getManagedBinaryPath(context, CLI_BINARY_NAME, "CLI");
+            let cliPath = await getManagedBinaryPath(context, CLI_BINARY_NAME, "CLI");
             let cliDownloaded = false;
             let cliError: string | null = null;
 
