@@ -344,6 +344,11 @@ where
                 .misplaced_directives
                 .push(item.clone());
         }
+        for item in &results.unprovided_injects {
+            self.entry_for_path(&item.inject.path)
+                .unprovided_injects
+                .push(item.clone());
+        }
         for item in &results.stale_suppressions {
             self.entry_for_path(&item.path)
                 .stale_suppressions

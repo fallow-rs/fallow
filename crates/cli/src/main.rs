@@ -470,6 +470,10 @@ enum Command {
         #[arg(long)]
         unused_store_members: bool,
 
+        /// Only report unprovided injects
+        #[arg(long)]
+        unprovided_injects: bool,
+
         /// Only report unresolved imports
         #[arg(long)]
         unresolved_imports: bool,
@@ -3151,6 +3155,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             unused_enum_members,
             unused_class_members,
             unused_store_members,
+            unprovided_injects,
             unresolved_imports,
             unlisted_deps,
             duplicate_exports,
@@ -3182,6 +3187,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
                     unused_enum_members,
                     unused_class_members,
                     unused_store_members,
+                    unprovided_injects,
                     unresolved_imports,
                     unlisted_deps,
                     duplicate_exports,

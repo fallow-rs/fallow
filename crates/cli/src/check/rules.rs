@@ -106,6 +106,12 @@ fn apply_file_override_rules(
             .unused_store_members
             != Severity::Off
     });
+    results.unprovided_injects.retain(|f| {
+        config
+            .resolve_rules_for_path(&f.inject.path)
+            .unprovided_injects
+            != Severity::Off
+    });
     results.unresolved_imports.retain(|i| {
         config
             .resolve_rules_for_path(&i.import.path)
@@ -186,6 +192,9 @@ fn apply_base_file_rules(results: &mut fallow_core::results::AnalysisResults, ru
     }
     if rules.unused_store_members == Severity::Off {
         results.unused_store_members.clear();
+    }
+    if rules.unprovided_injects == Severity::Off {
+        results.unprovided_injects.clear();
     }
     if rules.unresolved_imports == Severity::Off {
         results.unresolved_imports.clear();
@@ -294,6 +303,12 @@ fn has_override_file_scoped_error(
                 .unused_store_members
                 == Severity::Error
         })
+        || results.unprovided_injects.iter().any(|f| {
+            config
+                .resolve_rules_for_path(&f.inject.path)
+                .unprovided_injects
+                == Severity::Error
+        })
         || results.unresolved_imports.iter().any(|i| {
             config
                 .resolve_rules_for_path(&i.import.path)
@@ -366,6 +381,8 @@ fn has_default_file_scoped_error(
             && !results.unused_class_members.is_empty())
         || (rules.unused_store_members == Severity::Error
             && !results.unused_store_members.is_empty())
+        || (rules.unprovided_injects == Severity::Error
+            && !results.unprovided_injects.is_empty())
         || (rules.unresolved_imports == Severity::Error && !results.unresolved_imports.is_empty())
         || (rules.stale_suppressions == Severity::Error && !results.stale_suppressions.is_empty())
         || (rules.unresolved_catalog_references == Severity::Error
@@ -459,6 +476,9 @@ pub fn promote_warns_to_errors(rules: &mut RulesConfig) {
     }
     if rules.unused_store_members == Severity::Warn {
         rules.unused_store_members = Severity::Error;
+    }
+    if rules.unprovided_injects == Severity::Warn {
+        rules.unprovided_injects = Severity::Error;
     }
     if rules.unresolved_imports == Severity::Warn {
         rules.unresolved_imports = Severity::Error;
@@ -747,6 +767,7 @@ mod tests {
             unused_enum_members: Severity::Off,
             unused_class_members: Severity::Off,
             unused_store_members: Severity::Off,
+            unprovided_injects: Severity::Off,
             unresolved_imports: Severity::Off,
             unlisted_dependencies: Severity::Off,
             duplicate_exports: Severity::Off,
@@ -869,6 +890,7 @@ mod tests {
             unused_enum_members: Severity::Warn,
             unused_class_members: Severity::Warn,
             unused_store_members: Severity::Warn,
+            unprovided_injects: Severity::Warn,
             unresolved_imports: Severity::Warn,
             unlisted_dependencies: Severity::Warn,
             duplicate_exports: Severity::Warn,
@@ -914,6 +936,7 @@ mod tests {
             unused_enum_members: Severity::Warn,
             unused_class_members: Severity::Warn,
             unused_store_members: Severity::Warn,
+            unprovided_injects: Severity::Warn,
             unresolved_imports: Severity::Warn,
             unlisted_dependencies: Severity::Warn,
             duplicate_exports: Severity::Warn,
@@ -1380,6 +1403,7 @@ mod tests {
             unused_enum_members: Severity::Warn,
             unused_class_members: Severity::Warn,
             unused_store_members: Severity::Warn,
+            unprovided_injects: Severity::Warn,
             unresolved_imports: Severity::Warn,
             unlisted_dependencies: Severity::Warn,
             duplicate_exports: Severity::Warn,
@@ -1438,6 +1462,7 @@ mod tests {
             unused_enum_members: Severity::Off,
             unused_class_members: Severity::Off,
             unused_store_members: Severity::Off,
+            unprovided_injects: Severity::Off,
             unresolved_imports: Severity::Off,
             unlisted_dependencies: Severity::Off,
             duplicate_exports: Severity::Off,

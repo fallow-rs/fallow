@@ -8,7 +8,7 @@ use fallow_core::results::{
     CircularDependency, DuplicateExportFinding, EmptyCatalogGroupFinding, InvalidClientExport,
     MisconfiguredDependencyOverrideFinding, MisplacedDirective, MixedClientServerBarrel,
     PolicyViolation, PolicyViolationSeverity, PrivateTypeLeak, StaleSuppression,
-    TestOnlyDependency, TypeOnlyDependency, UnlistedDependencyFinding,
+    TestOnlyDependency, TypeOnlyDependency, UnlistedDependencyFinding, UnprovidedInject,
     UnresolvedCatalogReferenceFinding, UnresolvedImport, UnusedCatalogEntryFinding,
     UnusedDependency, UnusedDependencyOverrideFinding, UnusedExport, UnusedFile, UnusedMember,
 };
@@ -558,6 +558,25 @@ fn sarif_misplaced_directive_fields(
     }
 }
 
+fn sarif_unprovided_inject_fields(
+    inject: &UnprovidedInject,
+    root: &Path,
+    level: &'static str,
+) -> SarifFields {
+    SarifFields {
+        rule_id: "fallow/unprovided-inject",
+        level,
+        message: format!(
+            "inject(\"{}\") has no matching provide(\"{}\") in this project; at runtime it returns undefined; provide the key or remove this inject",
+            inject.key_name, inject.key_name
+        ),
+        uri: relative_uri(&inject.path, root),
+        region: Some((inject.line, inject.col + 1)),
+        source_path: Some(inject.path.clone()),
+        properties: None,
+    }
+}
+
 fn sarif_stale_suppression_fields(
     suppression: &StaleSuppression,
     root: &Path,
@@ -919,6 +938,11 @@ fn sarif_graph_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
             "fallow/misplaced-directive",
             "\"use client\" / \"use server\" directive is not in the leading position and is ignored",
             rules.misplaced_directive,
+        ),
+        (
+            "fallow/unprovided-inject",
+            "A Vue inject / Svelte getContext whose key is provided nowhere in the project",
+            rules.unprovided_injects,
         ),
         (
             "fallow/stale-suppression",
@@ -1291,6 +1315,13 @@ fn push_graph_sarif_results(
             )
         },
     );
+    push_sarif_results(sarif_results, &results.unprovided_injects, snippets, |i| {
+        sarif_unprovided_inject_fields(
+            &i.inject,
+            root,
+            severity_to_sarif_level(rules.unprovided_injects),
+        )
+    });
     push_sarif_results(sarif_results, &results.stale_suppressions, snippets, |s| {
         sarif_stale_suppression_fields(s, root, severity_to_sarif_level(rules.stale_suppressions))
     });
@@ -2048,7 +2079,7 @@ mod tests {
         let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
             .as_array()
             .expect("rules should be an array");
-        assert_eq!(rules.len(), 30);
+        assert_eq!(rules.len(), 31);
 
         let rule_ids: Vec<&str> = rules.iter().map(|r| r["id"].as_str().unwrap()).collect();
         assert!(rule_ids.contains(&"fallow/unused-file"));
@@ -2080,6 +2111,7 @@ mod tests {
         assert!(rule_ids.contains(&"fallow/invalid-client-export"));
         assert!(rule_ids.contains(&"fallow/mixed-client-server-barrel"));
         assert!(rule_ids.contains(&"fallow/misplaced-directive"));
+        assert!(rule_ids.contains(&"fallow/unprovided-inject"));
     }
 
     #[test]
@@ -2289,6 +2321,7 @@ mod tests {
         assert!(rule_ids.contains(&"fallow/unresolved-import"));
         assert!(rule_ids.contains(&"fallow/unlisted-dependency"));
         assert!(rule_ids.contains(&"fallow/duplicate-export"));
+        assert!(rule_ids.contains(&"fallow/unprovided-inject"));
     }
 
     #[test]

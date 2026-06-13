@@ -109,6 +109,7 @@ pub struct DeadCodeFilters {
     pub unused_enum_members: bool,
     pub unused_class_members: bool,
     pub unused_store_members: bool,
+    pub unprovided_injects: bool,
     pub unresolved_imports: bool,
     pub unlisted_deps: bool,
     pub duplicate_exports: bool,
@@ -517,6 +518,7 @@ fn to_issue_filters(filters: &DeadCodeFilters) -> IssueFilters {
         unused_enum_members: filters.unused_enum_members,
         unused_class_members: filters.unused_class_members,
         unused_store_members: filters.unused_store_members,
+        unprovided_injects: filters.unprovided_injects,
         unresolved_imports: filters.unresolved_imports,
         unlisted_deps: filters.unlisted_deps,
         duplicate_exports: filters.duplicate_exports,
@@ -614,6 +616,7 @@ fn filter_for_circular_dependencies(results: &AnalysisResults) -> AnalysisResult
     filtered.unused_enum_members.clear();
     filtered.unused_class_members.clear();
     filtered.unused_store_members.clear();
+    filtered.unprovided_injects.clear();
     filtered.unresolved_imports.clear();
     filtered.unlisted_dependencies.clear();
     filtered.duplicate_exports.clear();
@@ -639,6 +642,7 @@ fn filter_for_boundary_violations(results: &AnalysisResults) -> AnalysisResults 
     filtered.unused_enum_members.clear();
     filtered.unused_class_members.clear();
     filtered.unused_store_members.clear();
+    filtered.unprovided_injects.clear();
     filtered.unresolved_imports.clear();
     filtered.unlisted_dependencies.clear();
     filtered.duplicate_exports.clear();

@@ -1388,6 +1388,13 @@ fn collect_unused_symbol_findings(
             )),
         );
     }
+    for f in &results.unprovided_injects {
+        push(
+            &f.inject.path,
+            "unprovided-inject",
+            Some(f.inject.key_name.clone()),
+        );
+    }
     for f in &results.unresolved_imports {
         push(
             &f.import.path,

@@ -372,6 +372,14 @@ impl<'a> CompactLineBuilder<'a> {
                 finding.directive_site.directive,
             ));
         }
+        for finding in &self.results.unprovided_injects {
+            self.lines.push(format!(
+                "unprovided-inject:{}:{}:{}",
+                self.rel(&finding.inject.path),
+                finding.inject.line,
+                finding.inject.key_name,
+            ));
+        }
         for suppression in &self.results.stale_suppressions {
             self.lines
                 .push(compact_stale_suppression_line(suppression, self.root));
@@ -1148,7 +1156,7 @@ mod tests {
         let results = sample_results(&root);
         let lines = build_compact_lines(&results, &root);
 
-        assert_eq!(lines.len(), 17);
+        assert_eq!(lines.len(), 18);
 
         assert!(lines[0].starts_with("unused-file:"));
         assert!(lines[1].starts_with("unused-export:"));
@@ -1166,6 +1174,7 @@ mod tests {
         assert!(lines[13].starts_with("test-only-dep:"));
         assert!(lines[14].starts_with("circular-dependency:"));
         assert!(lines[15].starts_with("boundary-violation:"));
+        assert!(lines.iter().any(|l| l.starts_with("unprovided-inject:")));
     }
 
     #[test]

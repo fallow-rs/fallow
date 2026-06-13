@@ -299,6 +299,14 @@ pub const CHECK_RULES: &[RuleDef] = &[
         full: "A `\"use client\"` or `\"use server\"` directive string appears as an expression statement after a non-directive statement (an `import`, a `const`). React Server Components bundlers only honor a directive in the leading prologue, before any other statement; once any statement precedes it the string is parsed as an ordinary expression and SILENTLY IGNORED. The intended client/server boundary never takes effect, so the file is treated as a server module. To fix: move the directive to the very top of the file, above every import. The check runs only when the project declares `next`.",
         docs_path: "explanations/dead-code#misplaced-directives",
     },
+    RuleDef {
+        id: "fallow/unprovided-inject",
+        category: "Dead code",
+        name: "Unprovided injects",
+        short: "inject() / getContext() reads a key that no provide() / setContext() supplies",
+        full: "A component reads a dependency-injection key (Vue `inject()`, Angular `inject()`, or Svelte `getContext()`) that no matching `provide()` / `setContext()` supplies anywhere in the project. The read resolves to undefined at runtime, so the consumer is dead or silently broken. To fix: add a matching provider for the key, or remove the unreachable inject. Defaults to warn, not error: a provider may live outside the analyzed graph (a plugin, a host application).",
+        docs_path: "explanations/dead-code#unprovided-injects",
+    },
 ];
 
 /// Look up a rule definition by its SARIF rule ID across all rule sets.
@@ -404,6 +412,7 @@ fn dead_code_alias_id(normalized: &str) -> Option<&'static str> {
         "unused-enum-members" => Some("fallow/unused-enum-member"),
         "unused-class-members" => Some("fallow/unused-class-member"),
         "unused-store-members" => Some("fallow/unused-store-member"),
+        "unprovided-injects" | "unprovided-inject" => Some("fallow/unprovided-inject"),
         "unresolved-imports" => Some("fallow/unresolved-import"),
         "unlisted-deps" | "unlisted-dependencies" => Some("fallow/unlisted-dependency"),
         "duplicate-exports" => Some("fallow/duplicate-export"),
@@ -538,6 +547,10 @@ fn member_import_rule_guide(id: &str) -> Option<RuleGuide> {
         "fallow/unused-store-member" => RuleGuide {
             example: "useCartStore declares a discountTotal getter that no component, composable, or other store ever reads.",
             how_to_fix: "Remove the unused state property, getter, or action. If it is consumed reflectively (a Pinia plugin, $onAction, or dynamic dispatch), suppress the line with // fallow-ignore-next-line unused-store-member.",
+        },
+        "fallow/unprovided-inject" => RuleGuide {
+            example: "A component calls inject('theme') (or getContext('theme')), but no ancestor calls provide('theme') / setContext('theme') anywhere in the project.",
+            how_to_fix: "Add a matching provide() / setContext() for the key, or remove the dead inject() / getContext(). If a provider lives outside the analyzed graph (a plugin, a host app), suppress the line with // fallow-ignore-next-line unprovided-inject.",
         },
         "fallow/unresolved-import" => RuleGuide {
             example: "src/app.ts imports ./routes/admin, but no matching file exists after extension and index resolution.",
@@ -2206,7 +2219,7 @@ mod tests {
 
     #[test]
     fn check_rules_count() {
-        assert_eq!(CHECK_RULES.len(), 30);
+        assert_eq!(CHECK_RULES.len(), 31);
     }
 
     #[test]

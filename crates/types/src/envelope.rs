@@ -105,6 +105,9 @@ pub struct CheckSummary {
     /// Unused store members.
     #[serde(default)]
     pub unused_store_members: usize,
+    /// Vue/Svelte injects whose key is provided nowhere in the project.
+    #[serde(default)]
+    pub unprovided_injects: usize,
     /// Imports that could not be resolved against the project's module graph.
     pub unresolved_imports: usize,
     /// Dependencies imported but absent from `package.json`.

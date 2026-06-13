@@ -55,6 +55,7 @@ pub fn build_diagnostics(
     structural::push_invalid_client_export_diagnostics(&mut map, results);
     structural::push_mixed_client_server_barrel_diagnostics(&mut map, results);
     structural::push_misplaced_directive_diagnostics(&mut map, results);
+    structural::push_unprovided_inject_diagnostics(&mut map, results);
     quality::push_stale_suppression_diagnostics(&mut map, results);
     security::push_security_diagnostics(&mut map, results);
 

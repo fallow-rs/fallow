@@ -375,6 +375,7 @@ fn check_explain_for_header(line: &str) -> Option<&'static crate::explain::RuleD
             "Mixed client/server barrels",
             "fallow/mixed-client-server-barrel",
         ),
+        ("Unprovided injects", "fallow/unprovided-inject"),
     ];
     let (_, rule_id) = mappings
         .iter()
@@ -1271,6 +1272,7 @@ fn build_policy_section(
         && results.invalid_client_exports.is_empty()
         && results.mixed_client_server_barrels.is_empty()
         && results.misplaced_directives.is_empty()
+        && results.unprovided_injects.is_empty()
     {
         return;
     }
@@ -1315,6 +1317,19 @@ fn build_policy_section(
         },
         format_detail: &format_misplaced_directive,
     });
+
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.unprovided_injects,
+        title: "Unprovided injects",
+        level: severity_to_level(rules.unprovided_injects),
+        root,
+        max_files: MAX_FLAT_ITEMS,
+        get_path: |i: &fallow_types::output_dead_code::UnprovidedInjectFinding| {
+            i.inject.path.as_path()
+        },
+        format_detail: &format_unprovided_inject,
+    });
 }
 
 fn format_invalid_client_export(
@@ -1354,6 +1369,22 @@ fn format_misplaced_directive(
         format!(
             "\"{}\" is not in the leading position and is ignored",
             d.directive
+        )
+        .dimmed(),
+    )
+}
+
+fn format_unprovided_inject(
+    entry: &fallow_types::output_dead_code::UnprovidedInjectFinding,
+) -> String {
+    let i = &entry.inject;
+    format!(
+        "{} {} {}",
+        format!(":{}", i.line).dimmed(),
+        i.key_name.bold(),
+        format!(
+            "has no matching provide({}) in this project; at runtime it returns undefined (provide the key or remove this inject)",
+            i.key_name
         )
         .dimmed(),
     )
@@ -2110,6 +2141,9 @@ fn collect_matching_rules(
     for d in &results.misplaced_directives {
         check(&d.directive_site.path);
     }
+    for i in &results.unprovided_injects {
+        check(&i.inject.path);
+    }
     for s in &results.stale_suppressions {
         check(&s.path);
     }
@@ -2378,6 +2412,7 @@ fn build_summary_footer(
     add(results.circular_dependencies.len(), "circular dependencies");
     add(results.re_export_cycles.len(), "re-export cycles");
     add(results.boundary_violations.len(), "violations");
+    add(results.unprovided_injects.len(), "unprovided injects");
     add(results.stale_suppressions.len(), "stale suppressions");
 
     parts.join(" \u{00b7} ")
@@ -2515,6 +2550,11 @@ fn check_summary_categories(
             "Boundary violations",
             results.boundary_violations.len(),
             severity_to_level(rules.boundary_violation),
+        ),
+        (
+            "Unprovided injects",
+            results.unprovided_injects.len(),
+            severity_to_level(rules.unprovided_injects),
         ),
         (
             "Stale suppressions",

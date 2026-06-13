@@ -59,6 +59,8 @@ pub struct CheckCounts {
     #[serde(default)]
     pub unused_store_members: usize,
     #[serde(default)]
+    pub unprovided_injects: usize,
+    #[serde(default)]
     pub unresolved_imports: usize,
     #[serde(default)]
     pub unlisted_dependencies: usize,
@@ -96,6 +98,7 @@ impl CheckCounts {
             unused_enum_members: results.unused_enum_members.len(),
             unused_class_members: results.unused_class_members.len(),
             unused_store_members: results.unused_store_members.len(),
+            unprovided_injects: results.unprovided_injects.len(),
             unresolved_imports: results.unresolved_imports.len(),
             unlisted_dependencies: results.unlisted_dependencies.len(),
             duplicate_exports: results.duplicate_exports.len(),
@@ -126,6 +129,9 @@ impl CheckCounts {
             // `fallow_config::RegressionBaseline` has no `unused_store_members`
             // field; default to 0 until the config baseline schema gains one.
             unused_store_members: 0,
+            // `fallow_config::RegressionBaseline` has no `unprovided_injects`
+            // field; default to 0 until the config baseline schema gains one.
+            unprovided_injects: 0,
             unresolved_imports: b.unresolved_imports,
             unlisted_dependencies: b.unlisted_dependencies,
             duplicate_exports: b.duplicate_exports,
@@ -185,6 +191,7 @@ impl CheckCounts {
         push_delta!(unused_enum_members);
         push_delta!(unused_class_members);
         push_delta!(unused_store_members);
+        push_delta!(unprovided_injects);
         push_delta!(unresolved_imports);
         push_delta!(unlisted_dependencies);
         push_delta!(duplicate_exports);
@@ -266,6 +273,7 @@ mod tests {
             unused_enum_members: 0,
             unused_class_members: 0,
             unused_store_members: 0,
+            unprovided_injects: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 0,
             duplicate_exports: 0,
@@ -308,6 +316,7 @@ mod tests {
                 unused_enum_members: 1,
                 unused_class_members: 1,
                 unused_store_members: 0,
+                unprovided_injects: 0,
                 unresolved_imports: 0,
                 unlisted_dependencies: 1,
                 duplicate_exports: 0,
@@ -345,6 +354,7 @@ mod tests {
             unused_enum_members: 1,
             unused_class_members: 1,
             unused_store_members: 0,
+            unprovided_injects: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 1,
             duplicate_exports: 0,
@@ -389,6 +399,7 @@ mod tests {
             unused_enum_members: 0,
             unused_class_members: 0,
             unused_store_members: 0,
+            unprovided_injects: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 0,
             duplicate_exports: 0,
@@ -420,6 +431,7 @@ mod tests {
             unused_enum_members: 0,
             unused_class_members: 0,
             unused_store_members: 0,
+            unprovided_injects: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 0,
             duplicate_exports: 0,
@@ -449,6 +461,7 @@ mod tests {
             unused_enum_members: 0,
             unused_class_members: 0,
             unused_store_members: 0,
+            unprovided_injects: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 0,
             duplicate_exports: 0,
@@ -472,6 +485,7 @@ mod tests {
             unused_enum_members: 1,
             unused_class_members: 1,
             unused_store_members: 1,
+            unprovided_injects: 1,
             unresolved_imports: 1,
             unlisted_dependencies: 1,
             duplicate_exports: 1,
@@ -485,7 +499,7 @@ mod tests {
             policy_violations: 0,
         };
         let deltas = baseline.deltas(&current);
-        assert_eq!(deltas.len(), 16);
+        assert_eq!(deltas.len(), 17);
         for (_, d) in &deltas {
             assert_eq!(*d, 1);
         }
@@ -504,6 +518,7 @@ mod tests {
             unused_enum_members: 0,
             unused_class_members: 0,
             unused_store_members: 0,
+            unprovided_injects: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 0,
             duplicate_exports: 0,

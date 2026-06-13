@@ -572,6 +572,45 @@ pub fn push_misplaced_directive_diagnostics(
     }
 }
 
+/// Push diagnostics for `inject(KEY)` / `getContext(KEY)` calls that have no
+/// matching `provide(KEY)` ancestor. Fixed `WARNING` severity (the rule's
+/// default), code `unprovided-inject`. Paths are absolute internally, so the
+/// URI is built directly (no `root.join`).
+pub fn push_unprovided_inject_diagnostics(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+) {
+    for finding in &results.unprovided_injects {
+        let Some(uri) = Uri::from_file_path(&finding.inject.path) else {
+            continue;
+        };
+        let line = finding.inject.line.saturating_sub(1);
+        let message = format!(
+            "inject(`{}`) has no matching provide(`{}`); at runtime it returns undefined",
+            finding.inject.key_name, finding.inject.key_name
+        );
+        map.entry(uri).or_default().push(Diagnostic {
+            range: Range {
+                start: Position {
+                    line,
+                    character: finding.inject.col,
+                },
+                end: Position {
+                    line,
+                    character: u32::MAX,
+                },
+            },
+            severity: Some(DiagnosticSeverity::WARNING),
+            source: Some("fallow".to_string()),
+            code: Some(NumberOrString::String("unprovided-inject".to_string())),
+            code_description: doc_link("unprovided-injects"),
+            message,
+            related_information: None,
+            ..Default::default()
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;

@@ -267,6 +267,12 @@ fn push_markdown_graph_sections(
     );
     markdown_section(
         out,
+        &results.unprovided_injects,
+        "Unprovided injects",
+        |i| format_markdown_unprovided_inject(i, rel),
+    );
+    markdown_section(
+        out,
         &results.stale_suppressions,
         "Stale suppressions",
         |s| {
@@ -419,6 +425,19 @@ fn format_markdown_misplaced_directive(
         rel(&d.directive_site.path),
         d.directive_site.line,
         d.directive_site.directive,
+    )]
+}
+
+fn format_markdown_unprovided_inject(
+    i: &fallow_core::results::UnprovidedInjectFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    vec![format!(
+        "- `{}`:{} `{}` has no matching provide(`{}`) in this project; at runtime it returns undefined",
+        rel(&i.inject.path),
+        i.inject.line,
+        escape_backticks(&i.inject.key_name),
+        escape_backticks(&i.inject.key_name),
     )]
 }
 
