@@ -8,8 +8,8 @@
 //!
 //! The trigger is deliberately precise to avoid false positives:
 //! - It requires a client origin AND a SERVER-ONLY origin (see the shared
-//!   [`is_server_only_module`](super::server_only::is_server_only_module)
-//!   predicate). A barrel re-exporting a `"use client"` component and an
+//!   [`is_server_only_module`] predicate). A barrel re-exporting a
+//!   `"use client"` component and an
 //!   ordinary undirected utility module is completely normal and MUST NOT flag.
 //! - Type-only re-exports (`export type { X } from './client'`) are erased and
 //!   carry no runtime directive context, so they are skipped when classifying an

@@ -244,7 +244,7 @@ The MCP server also exposes `code_execute`, a bounded read-only Code Mode tool f
 
 For security review loops, see the [Security agent verification recipe](docs/security-agent-verification.md). It shows how to combine `fallow security --format json --surface`, candidate evidence, and MCP `security_candidates` output without adding model calls to fallow core.
 
-Run `fallow impact` to see what fallow has done for you: how many issues it is surfacing, the trend since your last recorded run, and how many commits its pre-commit gate caught before they shipped. It is opt-in (`fallow impact enable`) and entirely local: history lives in a gitignored `.fallow/impact.json` and is never uploaded.
+Run `fallow impact` to see what fallow has done for you: how many issues it is surfacing, the trend since your last recorded run, and how many commits its pre-commit gate caught before they shipped. Run `fallow impact --all` to roll every tracked project into one cross-repo view. It is opt-in (`fallow impact enable`) and entirely local: history lives in your user config directory (never written into the repo, so nothing to gitignore) and is never uploaded.
 
 Product telemetry for improving agent, CI, MCP, and editor workflows is off by default. Run `fallow telemetry inspect --example` to see the payload, or `FALLOW_TELEMETRY=inspect fallow audit --format json --quiet` to inspect a real run without sending it. Run `fallow telemetry enable` only when you want to help improve these integrations. See [Telemetry](docs/telemetry.md).
 
