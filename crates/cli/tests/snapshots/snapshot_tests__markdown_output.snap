@@ -2,7 +2,7 @@
 source: crates/cli/tests/snapshot_tests.rs
 expression: output
 ---
-## Fallow: 24 issues found
+## Fallow: 25 issues found
 
 ### Unused files (1)
 
@@ -81,6 +81,10 @@ expression: output
 ### Mixed client/server barrels (1)
 
 - `app/components/index.ts`:2 re-exports client `./Button` and server-only `./fetchUser`
+
+### Unprovided injects (1)
+
+- `src/useTheme.ts`:5 `THEME_KEY` has no matching provide(`THEME_KEY`) in this project; at runtime it returns undefined
 
 ### Unused catalog entries (2)
 

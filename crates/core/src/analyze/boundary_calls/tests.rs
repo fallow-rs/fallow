@@ -137,6 +137,8 @@ fn module(file_id: u32, callee_uses: Vec<CalleeUse>, imports: Vec<ImportInfo>) -
         security_control_sites: Vec::new(),
         callee_uses,
         misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
     }
 }
 

@@ -155,6 +155,7 @@
         "unused-enum-members": "error",
         "unused-class-members": "error",
         "unused-store-members": "warn",
+        "unprovided-injects": "warn",
         "unresolved-imports": "error",
         "unlisted-dependencies": "error",
         "duplicate-exports": "error",
@@ -1021,6 +1022,11 @@
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
+        "unprovided-injects": {
+          "description": "Vue `inject(KEY)` / Svelte `getContext(KEY)` whose symbol KEY is\n`provide`/`setContext`'d nowhere in the project (the\ninjected-never-provided dead-half). Defaults to `warn`, not `error`:\na DI key has an open provide surface (plugins, app-level provide) so\nanalyzer confidence is lower; warn encodes that without failing CI.",
+          "$ref": "#/$defs/Severity",
+          "default": "error"
+        },
         "unresolved-imports": {
           "$ref": "#/$defs/Severity",
           "default": "error"
@@ -1616,6 +1622,16 @@
           ]
         },
         "unused-store-members": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unprovided-injects": {
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"

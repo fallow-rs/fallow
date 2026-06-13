@@ -326,6 +326,19 @@ expression: redact_sarif_version(&json_str)
               }
             },
             {
+              "id": "fallow/unprovided-inject",
+              "shortDescription": {
+                "text": "inject() / getContext() reads a key that no provide() / setContext() supplies"
+              },
+              "fullDescription": {
+                "text": "A Vue `inject(KEY)` or Svelte `getContext(KEY)` reads a dependency-injection key (an imported or module-local symbol) that no matching `provide(KEY)` / `setContext(KEY)` supplies anywhere in the project. The read resolves to undefined at runtime, surfaced only at render. To fix: add a matching provider for the key, or remove the dead inject. Defaults to warn, not error: a provider may live outside the analyzed graph (an app-level provide registered elsewhere, a plugin, a host application). String-literal keys and keys imported from a package are abstained."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unprovided-injects",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
               "id": "fallow/stale-suppression",
               "shortDescription": {
                 "text": "Suppression comment or tag no longer matches any issue"
@@ -853,6 +866,30 @@ expression: redact_sarif_version(&json_str)
           "partialFingerprints": {
             "tools.fallow.fingerprint/v1": "00e3dd8f69239cba",
             "primaryLocationLineHash/v1": "00e3dd8f69239cba"
+          }
+        },
+        {
+          "ruleId": "fallow/unprovided-inject",
+          "level": "warning",
+          "message": {
+            "text": "inject(\"THEME_KEY\") has no matching provide(\"THEME_KEY\") in this project; at runtime it returns undefined; provide the key or remove this inject"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/useTheme.ts"
+                },
+                "region": {
+                  "startLine": 5,
+                  "startColumn": 3
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "tools.fallow.fingerprint/v1": "71ba812134fc4a35",
+            "primaryLocationLineHash/v1": "71ba812134fc4a35"
           }
         },
         {

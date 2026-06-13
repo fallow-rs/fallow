@@ -650,6 +650,13 @@
           },
           "description": "`\"use client\"` / `\"use server\"` directives written as expression\nstatements after a non-directive statement, so the RSC bundler parses\nthem as ordinary strings and silently ignores them. Wrapped in\n[`MisplacedDirectiveFinding`] so each entry carries a typed `actions`\narray natively. Default severity is `warn`."
         },
+        "unprovided_injects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnprovidedInjectFinding"
+          },
+          "description": "Vue `inject(KEY)` / Svelte `getContext(KEY)` calls whose symbol KEY is\nprovided nowhere in the project (the injected-never-provided dead-half).\nWrapped in [`UnprovidedInjectFinding`] so each entry carries a typed\n`actions` array natively. Default severity is `warn`."
+        },
         "baseline_deltas": {
           "anyOf": [
             {
@@ -1008,6 +1015,13 @@
             "$ref": "#/definitions/MisplacedDirectiveFinding"
           },
           "description": "`\"use client\"` / `\"use server\"` directives written as expression\nstatements after a non-directive statement, so the RSC bundler parses\nthem as ordinary strings and silently ignores them. Wrapped in\n[`MisplacedDirectiveFinding`] so each entry carries a typed `actions`\narray natively. Default severity is `warn`."
+        },
+        "unprovided_injects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnprovidedInjectFinding"
+          },
+          "description": "Vue `inject(KEY)` / Svelte `getContext(KEY)` calls whose symbol KEY is\nprovided nowhere in the project (the injected-never-provided dead-half).\nWrapped in [`UnprovidedInjectFinding`] so each entry carries a typed\n`actions` array natively. Default severity is `warn`."
         }
       },
       "required": [
@@ -4710,6 +4724,10 @@
           "type": "integer",
           "description": "Unused store members."
         },
+        "unprovided_injects": {
+          "type": "integer",
+          "description": "Vue/Svelte injects whose key is provided nowhere in the project."
+        },
         "unresolved_imports": {
           "type": "integer",
           "description": "Imports that could not be resolved against the project's module graph."
@@ -5500,6 +5518,13 @@
             "$ref": "#/definitions/MisplacedDirectiveFinding"
           },
           "description": "`\"use client\"` / `\"use server\"` directives written as expression\nstatements after a non-directive statement, so the RSC bundler parses\nthem as ordinary strings and silently ignores them. Wrapped in\n[`MisplacedDirectiveFinding`] so each entry carries a typed `actions`\narray natively. Default severity is `warn`."
+        },
+        "unprovided_injects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnprovidedInjectFinding"
+          },
+          "description": "Vue `inject(KEY)` / Svelte `getContext(KEY)` calls whose symbol KEY is\nprovided nowhere in the project (the injected-never-provided dead-half).\nWrapped in [`UnprovidedInjectFinding`] so each entry carries a typed\n`actions` array natively. Default severity is `warn`."
         }
       },
       "required": [
@@ -12638,6 +12663,58 @@
         "actions"
       ],
       "description": "Wire-shape envelope for an [`UnusedMember`] finding consumed under the\n`unused_store_members` key (a Pinia `state` / `getters` / `actions` key, or\na setup-store returned key, declared but never accessed by any consumer\nproject-wide). Same Rust struct as [`UnusedClassMemberFinding`]. Emits only\na line-level suppress action: there is no safe auto-fix because a store\nmember can be accessed reflectively (a Pinia plugin, `store.$onAction`, or\ndynamic dispatch) in ways syntactic analysis cannot see, so removal is a\nbehavioral change the user must own."
+    },
+    "UnprovidedInjectFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The file carrying the orphan inject / getContext call."
+        },
+        "key_name": {
+          "type": "string",
+          "description": "The injected key identifier as written at the call site."
+        },
+        "framework": {
+          "type": "string",
+          "description": "Which framework's DI API this came from: `\"vue\"` or `\"svelte\"`."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the inject / getContext call."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset of the inject / getContext call."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "path",
+        "key_name",
+        "framework",
+        "line",
+        "col",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for an [`UnprovidedInject`] finding. There is no safe\nauto-fix: the fix is binary but judgement-bearing (add a `provide` for the\nkey, or delete the dead inject). The only action is a line-level suppress."
     }
   }
 }

@@ -2622,6 +2622,7 @@ export function choose(value: number): string {
                     },
                 ),
             ],
+            unprovided_injects: vec![],
             suppression_count: 1,
             active_suppressions: Vec::new(),
             feature_flags: vec![fallow_core::results::FeatureFlag {

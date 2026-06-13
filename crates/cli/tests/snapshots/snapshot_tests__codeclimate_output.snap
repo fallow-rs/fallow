@@ -309,6 +309,22 @@ expression: json_str
   },
   {
     "type": "issue",
+    "check_name": "fallow/unprovided-inject",
+    "description": "inject(`THEME_KEY`) has no matching provide(`THEME_KEY`) in this project; at runtime it returns undefined (provide the key or remove this inject)",
+    "categories": [
+      "Bug Risk"
+    ],
+    "severity": "minor",
+    "fingerprint": "82ebf4620cc2bba5",
+    "location": {
+      "path": "src/useTheme.ts",
+      "lines": {
+        "begin": 5
+      }
+    }
+  },
+  {
+    "type": "issue",
     "check_name": "fallow/unused-catalog-entry",
     "description": "Catalog entry 'is-even' is not referenced by any workspace package",
     "categories": [

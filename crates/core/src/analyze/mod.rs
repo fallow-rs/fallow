@@ -1804,6 +1804,7 @@ mod tests {
                 unused_enum_members: Severity::Off,
                 unused_class_members: Severity::Off,
                 unused_store_members: Severity::Off,
+                unprovided_injects: Severity::Off,
                 unresolved_imports: Severity::Off,
                 unlisted_dependencies: Severity::Off,
                 duplicate_exports: Severity::Off,
@@ -2054,6 +2055,8 @@ mod tests {
                 security_control_sites: Vec::new(),
                 callee_uses: Vec::new(),
                 misplaced_directives: Vec::new(),
+                di_key_sites: Vec::new(),
+                has_dynamic_provide: false,
             }];
 
             let rules = RulesConfig {

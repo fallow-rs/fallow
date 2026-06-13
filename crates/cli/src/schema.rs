@@ -219,6 +219,10 @@ fn apply_source_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
             m.filter_flag = Some("--unused-store-members");
             m.suppress = Some(("unused-store-member", false));
         }
+        "unprovided-inject" => {
+            m.filter_flag = Some("--unprovided-injects");
+            m.suppress = Some(("unprovided-inject", false));
+        }
         "unresolved-import" => {
             m.filter_flag = Some("--unresolved-imports");
             m.suppress = Some(("unresolved-import", false));

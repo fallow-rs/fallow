@@ -1084,6 +1084,13 @@ mixed_client_server_barrels?: MixedClientServerBarrelFinding[]
  * array natively. Default severity is `warn`.
  */
 misplaced_directives?: MisplacedDirectiveFinding[]
+/**
+ * Vue `inject(KEY)` / Svelte `getContext(KEY)` calls whose symbol KEY is
+ * provided nowhere in the project (the injected-never-provided dead-half).
+ * Wrapped in [`UnprovidedInjectFinding`] so each entry carries a typed
+ * `actions` array natively. Default severity is `warn`.
+ */
+unprovided_injects?: UnprovidedInjectFinding[]
 baseline_deltas?: (BaselineDeltas | null)
 baseline?: (BaselineMatch | null)
 regression?: (RegressionResult | null)
@@ -1161,6 +1168,10 @@ unused_class_members: number
  * Unused store members.
  */
 unused_store_members?: number
+/**
+ * Vue/Svelte injects whose key is provided nowhere in the project.
+ */
+unprovided_injects?: number
 /**
  * Imports that could not be resolved against the project's module graph.
  */
@@ -2595,6 +2606,43 @@ directive: string
 line: number
 /**
  * 0-based byte column offset of the misplaced directive statement.
+ */
+col: number
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+}
+/**
+ * Wire-shape envelope for an [`UnprovidedInject`] finding. There is no safe
+ * auto-fix: the fix is binary but judgement-bearing (add a `provide` for the
+ * key, or delete the dead inject). The only action is a line-level suppress.
+ */
+export interface UnprovidedInjectFinding {
+/**
+ * The file carrying the orphan inject / getContext call.
+ */
+path: string
+/**
+ * The injected key identifier as written at the call site.
+ */
+key_name: string
+/**
+ * Which framework's DI API this came from: `"vue"` or `"svelte"`.
+ */
+framework: string
+/**
+ * 1-based line number of the inject / getContext call.
+ */
+line: number
+/**
+ * 0-based byte column offset of the inject / getContext call.
  */
 col: number
 /**
@@ -5458,6 +5506,13 @@ mixed_client_server_barrels?: MixedClientServerBarrelFinding[]
  * array natively. Default severity is `warn`.
  */
 misplaced_directives?: MisplacedDirectiveFinding[]
+/**
+ * Vue `inject(KEY)` / Svelte `getContext(KEY)` calls whose symbol KEY is
+ * provided nowhere in the project (the injected-never-provided dead-half).
+ * Wrapped in [`UnprovidedInjectFinding`] so each entry carries a typed
+ * `actions` array natively. Default severity is `warn`.
+ */
+unprovided_injects?: UnprovidedInjectFinding[]
 }
 /**
  * The rendered impact report, derived purely from the store (no analysis run).

@@ -575,6 +575,7 @@ mod tests {
             unused_enum_members: Some(true),
             unused_class_members: Some(true),
             unused_store_members: Some(true),
+            unprovided_injects: Some(true),
             unresolved_imports: Some(true),
             unlisted_deps: Some(true),
             duplicate_exports: Some(true),

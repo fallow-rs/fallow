@@ -4,10 +4,10 @@ expression: json_str
 ---
 {
   "event": "COMMENT",
-  "body": "### Fallow dead-code report\n\n23 inline findings selected for GitHub review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 93ab67e6447f3f9e -->",
+  "body": "### Fallow dead-code report\n\n24 inline findings selected for GitHub review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: a78073edbce3547d -->",
   "summary": {
-    "body": "### Fallow dead-code report\n\n23 inline findings selected for GitHub review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 93ab67e6447f3f9e -->",
-    "fingerprint": "93ab67e6447f3f9e"
+    "body": "### Fallow dead-code report\n\n24 inline findings selected for GitHub review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: a78073edbce3547d -->",
+    "fingerprint": "a78073edbce3547d"
   },
   "comments": [
     {
@@ -163,6 +163,13 @@ expression: json_str
       "side": "RIGHT",
       "body": "**error** `fallow/duplicate-export`: Export 'Config' appears in multiple modules\n\n<!-- fallow-fingerprint:v2: cc6a09c8dc227321 -->",
       "fingerprint": "cc6a09c8dc227321"
+    },
+    {
+      "path": "src/useTheme.ts",
+      "line": 5,
+      "side": "RIGHT",
+      "body": "**warn** `fallow/unprovided-inject`: inject\\(\\`THEME\\_KEY\\`\\) has no matching provide\\(\\`THEME\\_KEY\\`\\) in this project; at runtime it returns undefined \\(provide the key or remove this inject\\)\n\n<!-- fallow-fingerprint:v2: 82ebf4620cc2bba5 -->",
+      "fingerprint": "82ebf4620cc2bba5"
     },
     {
       "path": "src/utils.ts",

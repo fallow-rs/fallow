@@ -876,6 +876,7 @@ mod tests {
             unused_enum_members: Some(Severity::Off),
             unused_class_members: Some(Severity::Off),
             unused_store_members: Some(Severity::Off),
+            unprovided_injects: Some(Severity::Off),
             unresolved_imports: Some(Severity::Off),
             unlisted_dependencies: Some(Severity::Off),
             duplicate_exports: Some(Severity::Off),

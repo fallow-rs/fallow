@@ -5,10 +5,10 @@ expression: output
 <!-- fallow-id: fallow-results -->
 ### Fallow dead-code report
 
-Found **25** findings.
+Found **26** findings.
 
 <details>
-<summary>Dead code (9)</summary>
+<summary>Dead code (10)</summary>
 
 | Severity | Rule | Location | Description |
 | --- | --- | --- | --- |
@@ -20,6 +20,7 @@ Found **25** findings.
 | minor | `fallow/unused-store-member` | `src/stores/counter.ts`:24 | Store member 'useCounterStore.legacyAction' is never referenced |
 | major | `fallow/unused-type` | `src/types.ts`:5 | Type export 'OldType' is never imported by other modules |
 | major | `fallow/duplicate-export` | `src/types.ts`:30 | Export 'Config' appears in multiple modules |
+| minor | `fallow/unprovided-inject` | `src/useTheme.ts`:5 | inject\(\`THEME\_KEY\`\) has no matching provide\(\`THEME\_KEY\`\) in this project; at runtime it returns undefined \(provide the key or remove this inject\) |
 | major | `fallow/unused-export` | `src/utils.ts`:10 | Export 'helperFn' is never imported by other modules |
 
 </details>

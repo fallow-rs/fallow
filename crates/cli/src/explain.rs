@@ -304,7 +304,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         category: "Dead code",
         name: "Unprovided injects",
         short: "inject() / getContext() reads a key that no provide() / setContext() supplies",
-        full: "A component reads a dependency-injection key (Vue `inject()`, Angular `inject()`, or Svelte `getContext()`) that no matching `provide()` / `setContext()` supplies anywhere in the project. The read resolves to undefined at runtime, so the consumer is dead or silently broken. To fix: add a matching provider for the key, or remove the unreachable inject. Defaults to warn, not error: a provider may live outside the analyzed graph (a plugin, a host application).",
+        full: "A Vue `inject(KEY)` or Svelte `getContext(KEY)` reads a dependency-injection key (an imported or module-local symbol) that no matching `provide(KEY)` / `setContext(KEY)` supplies anywhere in the project. The read resolves to undefined at runtime, surfaced only at render. To fix: add a matching provider for the key, or remove the dead inject. Defaults to warn, not error: a provider may live outside the analyzed graph (an app-level provide registered elsewhere, a plugin, a host application). String-literal keys and keys imported from a package are abstained.",
         docs_path: "explanations/dead-code#unprovided-injects",
     },
 ];
@@ -549,8 +549,8 @@ fn member_import_rule_guide(id: &str) -> Option<RuleGuide> {
             how_to_fix: "Remove the unused state property, getter, or action. If it is consumed reflectively (a Pinia plugin, $onAction, or dynamic dispatch), suppress the line with // fallow-ignore-next-line unused-store-member.",
         },
         "fallow/unprovided-inject" => RuleGuide {
-            example: "A component calls inject('theme') (or getContext('theme')), but no ancestor calls provide('theme') / setContext('theme') anywhere in the project.",
-            how_to_fix: "Add a matching provide() / setContext() for the key, or remove the dead inject() / getContext(). If a provider lives outside the analyzed graph (a plugin, a host app), suppress the line with // fallow-ignore-next-line unprovided-inject.",
+            example: "A component calls inject(ThemeKey) (Vue) or getContext(ThemeKey) (Svelte) with an imported symbol key, but no provide(ThemeKey) / setContext(ThemeKey) exists anywhere in the project.",
+            how_to_fix: "Add a matching provide() / setContext() for the key, or remove the dead inject() / getContext(). If a provider lives outside the analyzed graph (an app-level provide registered elsewhere, a plugin, a host app), suppress the line with // fallow-ignore-next-line unprovided-inject.",
         },
         "fallow/unresolved-import" => RuleGuide {
             example: "src/app.ts imports ./routes/admin, but no matching file exists after extension and index resolution.",
