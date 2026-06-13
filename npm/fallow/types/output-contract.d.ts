@@ -4671,6 +4671,20 @@ notable_rules: CssRuleMetric[]
  * so consumers can note that per-rule findings were capped.
  */
 notable_truncated: boolean
+/**
+ * Distinct color values in the stylesheet, in their authored form, sorted.
+ * Distinct notations of the same color (`red` vs `#f00`) count separately,
+ * since inconsistent notation is itself a design-token-sprawl signal.
+ */
+colors: string[]
+/**
+ * Distinct `font-size` declaration values in the stylesheet, sorted.
+ */
+font_sizes: string[]
+/**
+ * Distinct `z-index` declaration values in the stylesheet, sorted.
+ */
+z_indexes: string[]
 }
 /**
  * Structural CSS metrics for a single style rule, computed from the parsed CSS
@@ -4749,6 +4763,19 @@ empty_rules: number
  * Deepest style-rule nesting depth observed across analyzed stylesheets.
  */
 max_nesting_depth: number
+/**
+ * Distinct color values (authored form) across the whole codebase. A high
+ * count signals an uncontrolled palette (design-token sprawl).
+ */
+unique_colors: number
+/**
+ * Distinct `font-size` values across the whole codebase.
+ */
+unique_font_sizes: number
+/**
+ * Distinct `z-index` values across the whole codebase.
+ */
+unique_z_indexes: number
 }
 /**
  * Envelope emitted by `fallow explain <issue-type> --format json`.

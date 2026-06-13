@@ -12406,6 +12406,27 @@
         "notable_truncated": {
           "type": "boolean",
           "description": "`true` when more rules crossed the structural floor than `notable_rules`\nretains (compiled utility CSS can emit thousands of `!important` rules),\nso consumers can note that per-rule findings were capped."
+        },
+        "colors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Distinct color values in the stylesheet, in their authored form, sorted.\nDistinct notations of the same color (`red` vs `#f00`) count separately,\nsince inconsistent notation is itself a design-token-sprawl signal."
+        },
+        "font_sizes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Distinct `font-size` declaration values in the stylesheet, sorted."
+        },
+        "z_indexes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Distinct `z-index` declaration values in the stylesheet, sorted."
         }
       },
       "required": [
@@ -12415,7 +12436,10 @@
         "empty_rule_count",
         "max_nesting_depth",
         "notable_rules",
-        "notable_truncated"
+        "notable_truncated",
+        "colors",
+        "font_sizes",
+        "z_indexes"
       ],
       "description": "Stylesheet-level structural CSS analytics, computed from the parsed CSS\nsyntax tree. Feeds `fallow health` penalty weights and located findings,\nnever a standalone CSS score."
     },
@@ -12498,6 +12522,18 @@
         "max_nesting_depth": {
           "type": "integer",
           "description": "Deepest style-rule nesting depth observed across analyzed stylesheets."
+        },
+        "unique_colors": {
+          "type": "integer",
+          "description": "Distinct color values (authored form) across the whole codebase. A high\ncount signals an uncontrolled palette (design-token sprawl)."
+        },
+        "unique_font_sizes": {
+          "type": "integer",
+          "description": "Distinct `font-size` values across the whole codebase."
+        },
+        "unique_z_indexes": {
+          "type": "integer",
+          "description": "Distinct `z-index` values across the whole codebase."
         }
       },
       "required": [
@@ -12506,7 +12542,10 @@
         "total_declarations",
         "important_declarations",
         "empty_rules",
-        "max_nesting_depth"
+        "max_nesting_depth",
+        "unique_colors",
+        "unique_font_sizes",
+        "unique_z_indexes"
       ],
       "description": "Project-wide CSS analytics aggregates across every analyzed stylesheet\n(including stylesheets with no notable rule, which are not listed\nindividually)."
     },

@@ -728,6 +728,14 @@ pub struct CssAnalytics {
     /// retains (compiled utility CSS can emit thousands of `!important` rules),
     /// so consumers can note that per-rule findings were capped.
     pub notable_truncated: bool,
+    /// Distinct color values in the stylesheet, in their authored form, sorted.
+    /// Distinct notations of the same color (`red` vs `#f00`) count separately,
+    /// since inconsistent notation is itself a design-token-sprawl signal.
+    pub colors: Vec<String>,
+    /// Distinct `font-size` declaration values in the stylesheet, sorted.
+    pub font_sizes: Vec<String>,
+    /// Distinct `z-index` declaration values in the stylesheet, sorted.
+    pub z_indexes: Vec<String>,
 }
 
 /// Which complexity metric a [`ComplexityContribution`] adds to.

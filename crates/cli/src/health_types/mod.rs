@@ -117,6 +117,13 @@ pub struct CssAnalyticsSummary {
     pub empty_rules: u32,
     /// Deepest style-rule nesting depth observed across analyzed stylesheets.
     pub max_nesting_depth: u8,
+    /// Distinct color values (authored form) across the whole codebase. A high
+    /// count signals an uncontrolled palette (design-token sprawl).
+    pub unique_colors: u32,
+    /// Distinct `font-size` values across the whole codebase.
+    pub unique_font_sizes: u32,
+    /// Distinct `z-index` values across the whole codebase.
+    pub unique_z_indexes: u32,
 }
 
 /// Result of complexity analysis for reporting.

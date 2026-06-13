@@ -196,6 +196,15 @@ fn render_css_analytics(lines: &mut Vec<String>, report: &crate::health_types::H
         summary.empty_rules,
         summary.max_nesting_depth,
     ));
+    lines.push(format!(
+        "  design tokens: {} unique color{} \u{00b7} {} font size{} \u{00b7} {} z-index value{}",
+        summary.unique_colors,
+        plural(summary.unique_colors as usize),
+        summary.unique_font_sizes,
+        plural(summary.unique_font_sizes as usize),
+        summary.unique_z_indexes,
+        plural(summary.unique_z_indexes as usize),
+    ));
 
     let mut notable: Vec<(&str, &fallow_types::extract::CssRuleMetric)> = css
         .files

@@ -9,10 +9,16 @@
 //! Sass syntax recovers into a partial, inaccurate result rather than failing).
 //! A hard parse failure yields `None`.
 
+use lightningcss::printer::PrinterOptions;
+use lightningcss::properties::Property;
 use lightningcss::rules::CssRule;
 use lightningcss::rules::style::StyleRule;
 use lightningcss::selector::{Component, Selector};
 use lightningcss::stylesheet::{ParserOptions, StyleSheet};
+use lightningcss::traits::ToCss;
+use lightningcss::values::color::CssColor;
+use lightningcss::visitor::{VisitTypes, Visitor};
+use rustc_hash::FxHashSet;
 
 use fallow_types::extract::{CssAnalytics, CssRuleMetric};
 
@@ -45,44 +51,97 @@ pub fn compute_css_analytics(source: &str) -> Option<CssAnalytics> {
         css_modules: Some(lightningcss::css_modules::Config::default()),
         ..ParserOptions::default()
     };
-    let stylesheet = StyleSheet::parse(source, options).ok()?;
-    let mut analytics = CssAnalytics::default();
-    walk_rules(&stylesheet.rules.0, 0, &mut analytics);
+    let mut stylesheet = StyleSheet::parse(source, options).ok()?;
+
+    // Pass 1: walk the rule tree for structural metrics + font-size / z-index
+    // design tokens (these are top-level declaration properties).
+    let mut acc = Accumulator::default();
+    walk_rules(&stylesheet.rules.0, 0, &mut acc);
+
+    // Pass 2: visit every color value (including colors nested inside shorthands
+    // and gradients) for the design-token-sprawl signal. The visitor needs `&mut`,
+    // so it runs after the immutable rule walk above.
+    let mut colors = ColorCollector::default();
+    let _ = colors.visit_stylesheet(&mut stylesheet);
+
+    let mut analytics = acc.analytics;
+    analytics.colors = sorted_vec(colors.colors);
+    analytics.font_sizes = sorted_vec(acc.font_sizes);
+    analytics.z_indexes = sorted_vec(acc.z_indexes);
     Some(analytics)
+}
+
+/// Working accumulator threaded through the rule walk: the structural analytics
+/// plus the per-stylesheet sets of distinct `font-size` / `z-index` values.
+#[derive(Default)]
+struct Accumulator {
+    analytics: CssAnalytics,
+    font_sizes: FxHashSet<String>,
+    z_indexes: FxHashSet<String>,
+}
+
+/// Collects every distinct color value (authored form) in a stylesheet via the
+/// lightningcss visitor, so colors nested inside shorthands (`border`,
+/// `background`) and gradients are caught, not just standalone `color:` values.
+#[derive(Default)]
+struct ColorCollector {
+    colors: FxHashSet<String>,
+}
+
+impl Visitor<'_> for ColorCollector {
+    type Error = std::convert::Infallible;
+
+    fn visit_types(&self) -> VisitTypes {
+        VisitTypes::COLORS
+    }
+
+    fn visit_color(&mut self, color: &mut CssColor) -> Result<(), Self::Error> {
+        if let Ok(rendered) = color.to_css_string(PrinterOptions::default()) {
+            self.colors.insert(rendered);
+        }
+        Ok(())
+    }
+}
+
+fn sorted_vec(set: FxHashSet<String>) -> Vec<String> {
+    let mut values: Vec<String> = set.into_iter().collect();
+    values.sort_unstable();
+    values
 }
 
 /// Recursively walk rules, tracking style-rule nesting depth. Grouping rules
 /// (`@media` / `@supports` / `@container` / `@layer {}` / `@document` /
 /// `@starting-style` / `@scope`) pass their nesting depth through unchanged;
 /// only nesting INSIDE a style rule increases the depth.
-fn walk_rules(rules: &[CssRule<'_>], depth: u8, analytics: &mut CssAnalytics) {
+fn walk_rules(rules: &[CssRule<'_>], depth: u8, acc: &mut Accumulator) {
     for rule in rules {
         match rule {
             CssRule::Style(style) => {
-                record_style_rule(style, depth, analytics);
-                walk_rules(&style.rules.0, depth.saturating_add(1), analytics);
+                record_style_rule(style, depth, acc);
+                walk_rules(&style.rules.0, depth.saturating_add(1), acc);
             }
-            CssRule::Media(rule) => walk_rules(&rule.rules.0, depth, analytics),
-            CssRule::Supports(rule) => walk_rules(&rule.rules.0, depth, analytics),
-            CssRule::Container(rule) => walk_rules(&rule.rules.0, depth, analytics),
-            CssRule::LayerBlock(rule) => walk_rules(&rule.rules.0, depth, analytics),
-            CssRule::MozDocument(rule) => walk_rules(&rule.rules.0, depth, analytics),
-            CssRule::StartingStyle(rule) => walk_rules(&rule.rules.0, depth, analytics),
-            CssRule::Scope(rule) => walk_rules(&rule.rules.0, depth, analytics),
+            CssRule::Media(rule) => walk_rules(&rule.rules.0, depth, acc),
+            CssRule::Supports(rule) => walk_rules(&rule.rules.0, depth, acc),
+            CssRule::Container(rule) => walk_rules(&rule.rules.0, depth, acc),
+            CssRule::LayerBlock(rule) => walk_rules(&rule.rules.0, depth, acc),
+            CssRule::MozDocument(rule) => walk_rules(&rule.rules.0, depth, acc),
+            CssRule::StartingStyle(rule) => walk_rules(&rule.rules.0, depth, acc),
+            CssRule::Scope(rule) => walk_rules(&rule.rules.0, depth, acc),
             CssRule::Nesting(rule) => {
-                record_style_rule(&rule.style, depth, analytics);
-                walk_rules(&rule.style.rules.0, depth.saturating_add(1), analytics);
+                record_style_rule(&rule.style, depth, acc);
+                walk_rules(&rule.style.rules.0, depth.saturating_add(1), acc);
             }
             _ => {}
         }
     }
 }
 
-fn record_style_rule(style: &StyleRule<'_>, depth: u8, analytics: &mut CssAnalytics) {
+fn record_style_rule(style: &StyleRule<'_>, depth: u8, acc: &mut Accumulator) {
     let normal = style.declarations.declarations.len();
     let important = style.declarations.important_declarations.len();
     let declaration_count = normal + important;
 
+    let analytics = &mut acc.analytics;
     analytics.rule_count = analytics.rule_count.saturating_add(1);
     analytics.total_declarations = analytics
         .total_declarations
@@ -113,6 +172,30 @@ fn record_style_rule(style: &StyleRule<'_>, depth: u8, analytics: &mut CssAnalyt
             analytics.notable_rules.push(metric);
         } else {
             analytics.notable_truncated = true;
+        }
+    }
+
+    // Design-token values: collect distinct `font-size` / `z-index` declaration
+    // values (their authored form). Colors are collected separately by the
+    // visitor because they nest inside shorthands and gradients.
+    for property in style
+        .declarations
+        .declarations
+        .iter()
+        .chain(style.declarations.important_declarations.iter())
+    {
+        match property {
+            Property::FontSize(font_size) => {
+                if let Ok(rendered) = font_size.to_css_string(PrinterOptions::default()) {
+                    acc.font_sizes.insert(rendered);
+                }
+            }
+            Property::ZIndex(z_index) => {
+                if let Ok(rendered) = z_index.to_css_string(PrinterOptions::default()) {
+                    acc.z_indexes.insert(rendered);
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -290,5 +373,36 @@ mod tests {
         assert_eq!(a.rule_count, 1);
         assert_eq!(a.notable_rules.len(), 1);
         assert_eq!(a.notable_rules[0].specificity_a, 1);
+    }
+
+    #[test]
+    fn collects_distinct_colors() {
+        let a = analytics(".a { color: red; } .b { color: blue; } .c { color: red; }");
+        assert_eq!(a.colors.len(), 2, "distinct colors deduped: {:?}", a.colors);
+    }
+
+    #[test]
+    fn collects_colors_nested_in_shorthands() {
+        // The color inside the `border` shorthand must be caught, not just the
+        // standalone `background` color: that is the point of the value visitor.
+        let a = analytics(".a { border: 1px solid green; background: yellow; }");
+        assert!(
+            a.colors.len() >= 2,
+            "shorthand + standalone colors collected: {:?}",
+            a.colors
+        );
+    }
+
+    #[test]
+    fn collects_distinct_font_sizes() {
+        let a =
+            analytics(".a { font-size: 14px; } .b { font-size: 14px; } .c { font-size: 1rem; }");
+        assert_eq!(a.font_sizes.len(), 2, "got {:?}", a.font_sizes);
+    }
+
+    #[test]
+    fn collects_distinct_z_indexes() {
+        let a = analytics(".a { z-index: 10; } .b { z-index: 10; } .c { z-index: 999; }");
+        assert_eq!(a.z_indexes.len(), 2, "got {:?}", a.z_indexes);
     }
 }

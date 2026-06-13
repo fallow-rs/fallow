@@ -2735,7 +2735,7 @@ fn health_css_flag_surfaces_css_analytics() {
     // both structurally notable; a plain class rule is not.
     write_file(
         &root.join("src/styles.css"),
-        "#main { color: red; }\n.a.b.c.d.e { color: blue; }\n.plain { color: green; }\n",
+        "#main { color: red; z-index: 5; }\n.a.b.c.d.e { color: blue; font-size: 12px; }\n.plain { color: green; }\n",
     );
 
     // Without --css the section is absent (default output unchanged).
@@ -2785,4 +2785,10 @@ fn health_css_flag_surfaces_css_analytics() {
             .any(|r| r["complexity"].as_u64().unwrap() > 4),
         "the five-class compound selector is over-complex"
     );
+
+    // Design-token sprawl: three distinct colors, one font size, one z-index.
+    let summary = &css["summary"];
+    assert_eq!(summary["unique_colors"], 3, "summary: {summary}");
+    assert_eq!(summary["unique_font_sizes"], 1, "summary: {summary}");
+    assert_eq!(summary["unique_z_indexes"], 1, "summary: {summary}");
 }
