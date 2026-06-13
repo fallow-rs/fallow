@@ -173,6 +173,95 @@ describe("diagnostic mute language status", () => {
     ).toBe(true);
   });
 
+  it("unchecking 'All findings' in the manage picker reveals everything instead of re-muting every category", async () => {
+    // Simulate: hide-all is on, the user opens Manage, unchecks the global
+    // "All Fallow Findings" row, and accepts. They expect findings to come
+    // back, not to stay hidden as per-category mutes.
+    let acceptListener: (() => void) | undefined;
+    let hideListener: (() => void) | undefined;
+    const pick = {
+      title: "",
+      placeholder: "",
+      canSelectMany: false,
+      matchOnDetail: false,
+      buttons: [] as unknown[],
+      items: [] as Array<{ code: string | null }>,
+      selectedItems: [] as Array<{ code: string | null }>,
+      onDidTriggerButton: vi.fn(() => ({ dispose: vi.fn() })),
+      onDidAccept: vi.fn((listener: () => void) => {
+        acceptListener = listener;
+        return { dispose: vi.fn() };
+      }),
+      onDidHide: vi.fn((listener: () => void) => {
+        hideListener = listener;
+        return { dispose: vi.fn() };
+      }),
+      show: vi.fn(() => {
+        // User unchecks the global row (drops the null-code item) before accept.
+        pick.selectedItems = pick.selectedItems.filter((item) => item.code !== null);
+        acceptListener?.();
+      }),
+      hide: vi.fn(() => {
+        hideListener?.();
+      }),
+      dispose: vi.fn(),
+    };
+    vscodeMocks.createQuickPick.mockReturnValueOnce(pick);
+    const filter = new DiagnosticFilter(memento() as never);
+    filter.setMutedAll(true);
+
+    await __testHelpers.showManageQuickPick(filter);
+
+    expect(filter.isMutedAll()).toBe(false);
+    // Nothing should remain hidden: unchecking "All findings" must not silently
+    // convert the hide-all into a hide-every-category.
+    expect(filter.anythingMuted()).toBe(false);
+  });
+
+  it("unchecking 'All findings' preserves a genuine per-category mute", async () => {
+    // hide-all on AND code-duplication individually hidden. The user unchecks
+    // only the global row: hide-all turns off, the per-category mute survives.
+    let acceptListener: (() => void) | undefined;
+    let hideListener: (() => void) | undefined;
+    const pick = {
+      title: "",
+      placeholder: "",
+      canSelectMany: false,
+      matchOnDetail: false,
+      buttons: [] as unknown[],
+      items: [] as Array<{ code: string | null }>,
+      selectedItems: [] as Array<{ code: string | null }>,
+      onDidTriggerButton: vi.fn(() => ({ dispose: vi.fn() })),
+      onDidAccept: vi.fn((listener: () => void) => {
+        acceptListener = listener;
+        return { dispose: vi.fn() };
+      }),
+      onDidHide: vi.fn((listener: () => void) => {
+        hideListener = listener;
+        return { dispose: vi.fn() };
+      }),
+      show: vi.fn(() => {
+        // Drop only the global row; keep the genuinely-muted category checked.
+        pick.selectedItems = pick.selectedItems.filter((item) => item.code !== null);
+        acceptListener?.();
+      }),
+      hide: vi.fn(() => {
+        hideListener?.();
+      }),
+      dispose: vi.fn(),
+    };
+    vscodeMocks.createQuickPick.mockReturnValueOnce(pick);
+    const filter = new DiagnosticFilter(memento() as never);
+    filter.setCategoryMuted("code-duplication", true);
+    filter.setMutedAll(true);
+
+    await __testHelpers.showManageQuickPick(filter);
+
+    expect(filter.isMutedAll()).toBe(false);
+    expect(filter.isCategoryMuted("code-duplication")).toBe(true);
+    expect(filter.isCategoryMuted("unused-export")).toBe(false);
+  });
+
   it("uses LSP-provided categories for labels and the manage picker", async () => {
     setDiagnosticCategories([
       { code: "future-rule", label: "Future Rule" },

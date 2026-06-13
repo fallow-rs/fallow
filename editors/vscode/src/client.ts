@@ -3,13 +3,14 @@ import * as fs from "node:fs";
 // fallow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
 import {
+  type DiagnosticProviderShape,
   LanguageClient,
   LanguageClientOptions,
   ServerOptions,
   State,
   TransportKind,
 } from "vscode-languageclient/node.js";
-import { Trace } from "vscode-languageserver-protocol";
+import { DocumentDiagnosticRequest, Trace } from "vscode-languageserver-protocol";
 import {
   getLspPath,
   getTraceLevel,
@@ -187,6 +188,43 @@ export const loadDiagnosticCategories = async (
   }
 };
 
+/**
+ * Force VS Code to re-pull `textDocument/diagnostic` for every open document.
+ *
+ * Firing a pull provider's `onDidChangeDiagnosticsEmitter` re-pulls all open
+ * documents the provider matches, the same path the server's
+ * `workspace/diagnostic/refresh` drives. The `DiagnosticFilter` needs this on
+ * every mute toggle because a toggle changes only the client-side filter
+ * (no server round-trip), and open-file diagnostics arrive via the LSP 3.17
+ * pull path, owned by vscode-languageclient rather than the push
+ * `DiagnosticCollection` the filter re-publishes directly. Without the re-pull,
+ * undoing "hide all findings" leaves open files stuck hidden until the next
+ * edit (regression from enabling pull diagnostics in VS Code).
+ *
+ * No-op when the pull feature is not registered (push-only server, or pull not
+ * yet initialized) or when no open document matches the fallow selector.
+ */
+export const triggerPullDiagnosticRefresh = (lspClient: LanguageClient): void => {
+  const feature = lspClient.getFeature(DocumentDiagnosticRequest.method);
+  if (!feature) {
+    return;
+  }
+  // `getProvider(document)` returns the same provider instance for every
+  // matching document, and one `fire()` re-pulls all of them; dedupe so we
+  // fire each unique provider exactly once.
+  const fired = new Set<DiagnosticProviderShape>();
+  for (const document of vscode.workspace.textDocuments) {
+    if (document.uri.scheme !== "file") {
+      continue;
+    }
+    const provider = feature.getProvider(document);
+    if (provider && !fired.has(provider)) {
+      fired.add(provider);
+      provider.onDidChangeDiagnosticsEmitter.fire();
+    }
+  }
+};
+
 export const startClient = async (
   context: vscode.ExtensionContext,
   outputChannel: vscode.OutputChannel,
@@ -268,7 +306,15 @@ export const startClient = async (
     return null;
   }
 
-  diagnosticFilter?.attachClient(nextClient);
+  diagnosticFilter?.attachClient({
+    // Lazy getter: `LanguageClient.diagnostics` (the push collection) may not
+    // exist until the server pushes its first diagnostics, so read it on each
+    // refresh rather than snapshotting it here.
+    get diagnostics() {
+      return nextClient.diagnostics;
+    },
+    refreshPullDiagnostics: () => triggerPullDiagnosticRefresh(nextClient),
+  });
 
   return nextClient;
 };

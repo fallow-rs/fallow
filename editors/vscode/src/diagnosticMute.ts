@@ -138,7 +138,15 @@ const showManageQuickPick = async (filter: DiagnosticFilter): Promise<void> => {
       label,
       description: code,
       code,
-      picked: filter.isMutedAll() || filter.isCategoryMuted(code),
+      // Reflect the genuine per-category mute state, NOT `isMutedAll()`. When
+      // hide-all is on, auto-checking every category made unchecking the global
+      // "All Findings" row re-mute each category individually on accept (the
+      // `else` branch applies `setMutedCategories(selected)`), so the user who
+      // unchecked it to reveal findings stayed fully hidden. mute-all is a
+      // separate flag the filter tracks independently, so per-category rows show
+      // their own state and unchecking the global row reveals what is actually
+      // hidden underneath.
+      picked: filter.isCategoryMuted(code),
     })),
   ];
   pick.items = items;

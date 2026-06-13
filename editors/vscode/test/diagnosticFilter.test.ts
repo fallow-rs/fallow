@@ -397,6 +397,31 @@ describe("DiagnosticFilter.handleDiagnostics + refresh", () => {
     expect(cleared?.diags).toHaveLength(2);
   });
 
+  it("preserves code/data/tags when re-rendering severity", () => {
+    // The LSP correlates "Fix all" / delete-file code actions by
+    // range + message + code, and rides changedSince / security triage facts in
+    // `data`. The severity re-render must not drop those fields.
+    let severity: "warning" | "hint" = "warning";
+    const f = new DiagnosticFilter(memento() as never, () => severity);
+    severity = "hint";
+    const d = {
+      source: "fallow",
+      code: "unused-export",
+      message: "unused export",
+      severity: 1,
+      data: { changedSince: "origin/main" },
+      tags: [1],
+      relatedInformation: [{ message: "ref" }],
+    };
+    const out = f.applyFilter([d] as never) as unknown as Array<typeof d>;
+    expect(out).toHaveLength(1);
+    expect(out[0]?.severity).toBe(3); // Hint
+    expect(out[0]?.code).toBe("unused-export");
+    expect(out[0]?.data).toEqual({ changedSince: "origin/main" });
+    expect(out[0]?.tags).toEqual([1]);
+    expect(out[0]?.relatedInformation).toEqual([{ message: "ref" }]);
+  });
+
   it("refresh re-applies a changed severity from cached diagnostics", () => {
     let severity: "warning" | "hint" = "warning";
     const f = new DiagnosticFilter(memento() as never, () => severity);
@@ -455,6 +480,50 @@ describe("DiagnosticFilter.handleDiagnostics + refresh", () => {
     // The cap is 5000; refresh should touch at most 5000 URIs.
     expect(c.sets.length).toBeLessThanOrEqual(5000);
     expect(c.sets.length).toBeGreaterThan(0);
+  });
+
+  it("refresh re-pulls open documents so pull-mode diagnostics update on a toggle", () => {
+    const f = new DiagnosticFilter(memento() as never);
+    const c = collection();
+    const refreshPullDiagnostics = vi.fn();
+    f.attachClient({ diagnostics: c as never, refreshPullDiagnostics });
+    // attachClient -> refresh once on attach.
+    expect(refreshPullDiagnostics).toHaveBeenCalledTimes(1);
+    refreshPullDiagnostics.mockClear();
+
+    f.setMutedAll(true);
+    expect(refreshPullDiagnostics).toHaveBeenCalledTimes(1);
+    f.setMutedAll(false);
+    expect(refreshPullDiagnostics).toHaveBeenCalledTimes(2);
+    f.setCategoryMuted("code-duplication", true);
+    expect(refreshPullDiagnostics).toHaveBeenCalledTimes(3);
+    f.clearAllMutes();
+    expect(refreshPullDiagnostics).toHaveBeenCalledTimes(4);
+  });
+
+  it("refresh re-pulls even when the push collection is absent (pure pull mode)", () => {
+    const f = new DiagnosticFilter(memento() as never);
+    const refreshPullDiagnostics = vi.fn();
+    // No `diagnostics`: a pull-only client has no push DiagnosticCollection.
+    f.attachClient({ refreshPullDiagnostics });
+    refreshPullDiagnostics.mockClear();
+    f.setMutedAll(true);
+    expect(refreshPullDiagnostics).toHaveBeenCalledTimes(1);
+  });
+
+  it("refresh tolerates a client without a pull-refresh hook (push-only)", () => {
+    const f = new DiagnosticFilter(memento() as never);
+    const c = collection();
+    f.attachClient({ diagnostics: c as never });
+    f.handleDiagnostics(
+      fakeUri("file:///a.ts") as never,
+      [diag({ code: "code-duplication" }), diag({ code: "unused-export" })] as never,
+      vi.fn()
+    );
+    c.sets.length = 0;
+    expect(() => f.setMutedAll(true)).not.toThrow();
+    // Push collection still re-published when no pull hook is present.
+    expect(c.sets[c.sets.length - 1]?.diags).toHaveLength(0);
   });
 
   it("evictUri drops the cached entry so refresh stops touching it", () => {
@@ -522,6 +591,58 @@ describe("DiagnosticFilter pull-mode middleware", () => {
       next as never
     );
     expect((result as { kind: string }).kind).toBe("unchanged");
+  });
+
+  it("does not cache pull results, so refresh never duplicates open-file diagnostics into the push collection", async () => {
+    const f = new DiagnosticFilter(memento() as never);
+    const c = collection();
+    const refreshPullDiagnostics = vi.fn();
+    f.attachClient({ diagnostics: c as never, refreshPullDiagnostics });
+    // An open file delivered via the pull path.
+    await f.provideDiagnostics(
+      fakeUri("file:///open.ts") as never,
+      undefined,
+      {} as never,
+      vi.fn(async () => ({
+        kind: "full",
+        items: [diag({ code: "unused-export" })],
+      })) as never
+    );
+    c.sets.length = 0;
+    refreshPullDiagnostics.mockClear();
+    // A mute toggle must re-pull (so pull-mode squiggles update) but must NOT
+    // write the pulled open file into the push collection: the pull provider
+    // owns a separate collection, so a push re-publish would render it twice.
+    f.setMutedAll(true);
+    expect(refreshPullDiagnostics).toHaveBeenCalledTimes(1);
+    expect(c.sets.some((s) => s.uri === "file:///open.ts")).toBe(false);
+  });
+
+  it("refresh re-publishes push-delivered files but leaves pull-delivered files to the re-pull", async () => {
+    const f = new DiagnosticFilter(memento() as never);
+    const c = collection();
+    f.attachClient({ diagnostics: c as never, refreshPullDiagnostics: vi.fn() });
+    // Push-delivered (e.g. package.json unlisted-dependency, never opened).
+    f.handleDiagnostics(
+      fakeUri("file:///package.json") as never,
+      [diag({ code: "unlisted-dependency" })] as never,
+      vi.fn()
+    );
+    // Pull-delivered (an open source file).
+    await f.provideDiagnostics(
+      fakeUri("file:///open.ts") as never,
+      undefined,
+      {} as never,
+      vi.fn(async () => ({
+        kind: "full",
+        items: [diag({ code: "unused-export" })],
+      })) as never
+    );
+    c.sets.length = 0;
+    f.setMutedAll(true);
+    const uris = c.sets.map((s) => s.uri);
+    expect(uris).toContain("file:///package.json");
+    expect(uris).not.toContain("file:///open.ts");
   });
 });
 

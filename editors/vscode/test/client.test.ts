@@ -22,6 +22,10 @@ const mockBinaryResolution = vi.hoisted(() => ({
   installedBinary: null as string | null,
 }));
 
+const mockWorkspace = vi.hoisted(() => ({
+  textDocuments: [] as Array<{ uri: { scheme: string }; languageId: string }>,
+}));
+
 const mockLanguageClient = vi.hoisted(() => ({
   instances: [] as Array<{
     start: ReturnType<typeof vi.fn>;
@@ -41,6 +45,11 @@ vi.mock("vscode", () => ({
   window: {
     showErrorMessage: vi.fn(),
     showWarningMessage: vi.fn(),
+  },
+  workspace: {
+    get textDocuments() {
+      return mockWorkspace.textDocuments;
+    },
   },
 }));
 
@@ -118,6 +127,7 @@ import {
   loadDiagnosticCategories,
   startClient,
   stopClient,
+  triggerPullDiagnosticRefresh,
 } from "../src/client.js";
 import {
   DIAGNOSTIC_CATEGORIES,
@@ -151,6 +161,7 @@ beforeEach(() => {
   mockBinaryResolution.pathBinary = null;
   mockBinaryResolution.installedBinary = null;
   mockLanguageClient.instances = [];
+  mockWorkspace.textDocuments = [];
 });
 
 const outputChannel = () => ({
@@ -235,7 +246,16 @@ describe("loadDiagnosticCategories", () => {
     expect(filter.updateBaselineMutedCategories).toHaveBeenCalledWith(
       new Set(["future-rule"]),
     );
-    expect(filter.attachClient).toHaveBeenCalledWith(client);
+    // attachClient receives an adapter (not the raw client): a lazy
+    // `diagnostics` getter delegating to the push collection plus a
+    // `refreshPullDiagnostics` hook that re-pulls open documents on a mute
+    // toggle (the pull-mode fix).
+    const attachArg = filter.attachClient.mock.calls[0]?.[0] as {
+      diagnostics: unknown;
+      refreshPullDiagnostics: () => void;
+    };
+    expect(attachArg.diagnostics).toBe(client!.diagnostics);
+    expect(typeof attachArg.refreshPullDiagnostics).toBe("function");
   });
 
   it("falls back to bundled categories when the request fails", async () => {
@@ -273,5 +293,53 @@ describe("stopClient", () => {
     await expect(stopped).resolves.toBeUndefined();
     expect(instance!.onDidChangeState).toHaveBeenCalledOnce();
     expect(instance!.stop).toHaveBeenCalledOnce();
+  });
+});
+
+describe("triggerPullDiagnosticRefresh", () => {
+  const fileDoc = (languageId: string) => ({
+    uri: { scheme: "file" },
+    languageId,
+  });
+
+  it("fires each unique provider once to re-pull open documents", () => {
+    const provider = { onDidChangeDiagnosticsEmitter: { fire: vi.fn() } };
+    const getProvider = vi.fn(() => provider);
+    const getFeature = vi.fn(() => ({ getProvider }));
+    mockWorkspace.textDocuments = [fileDoc("typescript"), fileDoc("javascript")];
+
+    triggerPullDiagnosticRefresh({ getFeature } as never);
+
+    expect(getFeature).toHaveBeenCalledWith("textDocument/diagnostic");
+    // Both open docs share one provider instance, so it fires exactly once.
+    expect(provider.onDidChangeDiagnosticsEmitter.fire).toHaveBeenCalledTimes(1);
+  });
+
+  it("is a no-op when the pull feature is not registered", () => {
+    const getFeature = vi.fn(() => undefined);
+    mockWorkspace.textDocuments = [fileDoc("typescript")];
+    expect(() => triggerPullDiagnosticRefresh({ getFeature } as never)).not.toThrow();
+    expect(getFeature).toHaveBeenCalledWith("textDocument/diagnostic");
+  });
+
+  it("skips non-file documents (output channels, git, etc.)", () => {
+    const provider = { onDidChangeDiagnosticsEmitter: { fire: vi.fn() } };
+    const getProvider = vi.fn(() => provider);
+    const getFeature = vi.fn(() => ({ getProvider }));
+    mockWorkspace.textDocuments = [{ uri: { scheme: "output" }, languageId: "log" }];
+
+    triggerPullDiagnosticRefresh({ getFeature } as never);
+
+    expect(getProvider).not.toHaveBeenCalled();
+    expect(provider.onDidChangeDiagnosticsEmitter.fire).not.toHaveBeenCalled();
+  });
+
+  it("does not fire when getProvider returns undefined for the document", () => {
+    const getProvider = vi.fn(() => undefined);
+    const getFeature = vi.fn(() => ({ getProvider }));
+    mockWorkspace.textDocuments = [fileDoc("typescript")];
+
+    expect(() => triggerPullDiagnosticRefresh({ getFeature } as never)).not.toThrow();
+    expect(getProvider).toHaveBeenCalledTimes(1);
   });
 });

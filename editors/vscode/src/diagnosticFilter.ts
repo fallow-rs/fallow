@@ -13,10 +13,12 @@ const FALLOW_SOURCE = "fallow";
 
 /**
  * Cap the per-URI cache so a workspace-wide LSP publish on a 50k-file
- * monorepo doesn't grow the heap forever. fallow-lsp publishes diagnostics
- * for every diagnosed file, not just open editors, and `onDidCloseTextDocument`
- * never fires for files that were never opened. When the cap is hit we evict
- * the oldest entry (insertion order, the first key in the Map).
+ * monorepo doesn't grow the heap forever. The cache holds only PUSH-delivered
+ * diagnostics (`handleDiagnostics`); fallow-lsp pushes diagnostics for every
+ * diagnosed unopened file, not just open editors, and `onDidCloseTextDocument`
+ * never fires for files that were never opened. (Pull results are not cached;
+ * see `provideDiagnostics`.) When the cap is hit we evict the oldest entry
+ * (insertion order, the first key in the Map).
  */
 const MAX_CACHE_ENTRIES = 5000;
 
@@ -118,6 +120,17 @@ interface PersistedState {
 
 interface FilterClient {
   readonly diagnostics?: vscode.DiagnosticCollection;
+  /**
+   * Force VS Code to re-pull `textDocument/diagnostic` for every open
+   * document. The push re-publish in `refresh()` only reaches diagnostics the
+   * server PUSHES (unopened files such as `package.json`); open documents
+   * arrive via the LSP 3.17 pull path and are owned by vscode-languageclient's
+   * internal pull collection, which `client.diagnostics.set` cannot touch. A
+   * mute toggle changes only the client-side filter (no server round-trip), so
+   * without an explicit re-pull the new filter state never reaches open-file
+   * squiggles until the next edit. Absent for push-only clients.
+   */
+  readonly refreshPullDiagnostics?: () => void;
 }
 
 type DiagnosticSeverityGetter = () => DiagnosticSeveritySetting;
@@ -365,7 +378,18 @@ export class DiagnosticFilter {
 
   /** Pull-mode middleware: intercepts `textDocument/diagnostic`. The LSP
    *  advertises `diagnostic_provider` in `build_server_capabilities()`, so
-   *  VS Code and strict 3.17 clients can hit this path. */
+   *  VS Code and strict 3.17 clients can hit this path.
+   *
+   *  Pull results are deliberately NOT cached. The pull path re-fetches from
+   *  the server on every re-pull (a mute toggle triggers one via
+   *  `refreshPullDiagnostics`), so a cached copy is never read back. Worse, the
+   *  pull provider owns its OWN `DiagnosticCollection` (named after the server's
+   *  diagnostic `identifier`), which is DISTINCT from the push collection
+   *  (`client.diagnostics`) that `refresh()` re-publishes into. Caching an
+   *  open-file pull result would let `refresh()` write it into the push
+   *  collection too, rendering every open-file squiggle TWICE after a toggle.
+   *  Only PUSH-delivered diagnostics (`handleDiagnostics`, for unopened files
+   *  such as `package.json`) belong in the cache. */
   public async provideDiagnostics(
     document: vscode.TextDocument | vscode.Uri,
     previousResultId: string | undefined,
@@ -379,30 +403,32 @@ export class DiagnosticFilter {
     if (result.kind !== "full") {
       return result;
     }
-    // `document` is `TextDocument | Uri`. TextDocument exposes `.uri`;
-    // a bare Uri does not. Structural detection works for both real and
-    // mocked Uri objects (mocks aren't `instanceof vscode.Uri`).
-    const uri =
-      "uri" in document && document.uri !== undefined ? document.uri : (document as vscode.Uri);
-    const key = uri.toString();
-    this.evictIfFull(key);
-    this.cache.set(key, result.items.slice());
     return { ...result, items: this.applyFilter(result.items) };
   }
 
-  /** Re-apply current filter to all cached diagnostics via the client's
-   *  collection. Called on toggle change so squiggles update instantly
-   *  without an LSP restart or re-analysis. Snapshots entries first to
-   *  future-proof against async creep in callers. */
+  /** Re-apply the current filter so squiggles update instantly on a toggle
+   *  change without an LSP restart or re-analysis. Two delivery paths need
+   *  refreshing: the PUSH collection (re-published in place from the cache,
+   *  covering unopened-file diagnostics such as `package.json`), and the PULL
+   *  path (open documents), which is owned by vscode-languageclient and can
+   *  only be updated by asking the client to re-pull. Snapshots entries first
+   *  to future-proof against async creep in callers. */
   public refresh(): void {
-    const collection = this.client?.diagnostics;
-    if (!collection) {
+    const client = this.client;
+    if (!client) {
       return;
     }
-    const entries = Array.from(this.cache.entries());
-    for (const [uriStr, diagnostics] of entries) {
-      collection.set(vscode.Uri.parse(uriStr), this.applyFilter(diagnostics));
+    const collection = client.diagnostics;
+    if (collection) {
+      const entries = Array.from(this.cache.entries());
+      for (const [uriStr, diagnostics] of entries) {
+        collection.set(vscode.Uri.parse(uriStr), this.applyFilter(diagnostics));
+      }
     }
+    // Re-pull open documents so the new filter state reaches pull-mode
+    // (open-file) squiggles immediately, not just on the next edit. Without
+    // this, undoing "hide all findings" leaves open files stuck hidden.
+    client.refreshPullDiagnostics?.();
   }
 
   /** Drop the oldest cache entry when at capacity, unless the URI we're

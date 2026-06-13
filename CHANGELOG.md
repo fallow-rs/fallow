@@ -17,6 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   Thanks [@danielo515](https://github.com/danielo515) for the report. (Closes [#1224](https://github.com/fallow-rs/fallow/issues/1224).)
 
+### Fixed
+
+- **Undoing "Fallow: Toggle Hide All Findings" in VS Code now brings diagnostics back immediately.** After the extension moved open-file diagnostics to the LSP 3.17 pull path, toggling a mute (or per-category hide, or "Show All Findings") only re-published the push diagnostic collection, which the language server keeps empty for open files once the editor starts pulling. So hiding took effect only on the next edit, and un-hiding did nothing visible, leaving findings stuck hidden through reinstalls and restarts because the muted state persists per workspace. Mute toggles now also ask VS Code to re-pull open documents, so squiggles and Problems entries hide and show instantly again. Thanks [@VariableVince](https://github.com/VariableVince) for the report. (Refs [discussion #287](https://github.com/fallow-rs/fallow/discussions/287).)
+
+- **VS Code no longer renders Fallow squiggles twice after a mute toggle.** The pull diagnostic provider owns its own collection, distinct from the push collection the mute filter re-publishes into. Because open-file pull results were cached and then re-published into the push collection on every mute, severity, or baseline change, each open-file finding could render twice (once per collection). Pull results are no longer cached (they are re-fetched on every re-pull), so open files render once.
+
+- **Unchecking "All Fallow Findings" in the Manage Hidden Findings picker now reveals findings.** While hide-all was active the picker auto-checked every category row, so unchecking the global row and accepting silently re-hid every category individually and findings stayed hidden. Category rows now reflect their real per-category state, so unchecking the global row shows everything (and any genuine per-category hide is preserved).
+
 ## [2.95.0] - 2026-06-12
 
 ### Added
