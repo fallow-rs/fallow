@@ -1671,7 +1671,8 @@ pub struct CrossRepoProjectEntry {
 )]
 pub struct CrossRepoImpactReport {
     pub schema_version: CrossRepoImpactSchemaVersion,
-    /// Total per-project stores found in the user config dir.
+    /// Per-project stores successfully parsed (add `unreadable_count` for the
+    /// total number of store files found in the user config dir).
     pub project_count: usize,
     /// Stores with recorded history (the rows in `projects`); excludes
     /// enabled-but-empty stores, which are still counted in `project_count`.
@@ -1806,7 +1807,11 @@ fn sort_cross_repo(projects: &mut [CrossRepoProjectEntry], sort: CrossRepoSort) 
                 .cmp(&a.report.containment_count)
                 .then_with(|| a.project_key.cmp(&b.project_key))
         }),
-        CrossRepoSort::Name => projects.sort_by_cached_key(cross_repo_label),
+        CrossRepoSort::Name => projects.sort_by(|a, b| {
+            cross_repo_label(a)
+                .cmp(&cross_repo_label(b))
+                .then_with(|| a.project_key.cmp(&b.project_key))
+        }),
     }
 }
 
@@ -2139,10 +2144,19 @@ pub fn render_cross_repo_human(report: &CrossRepoImpactReport, limit: Option<usi
     out.push_str("FALLOW IMPACT (ALL PROJECTS)\n\n");
 
     if report.project_count == 0 {
-        out.push_str(
-            "No projects tracked yet. Enable in a repo with `fallow impact enable`, or for \
-             every project with `fallow impact default on`.\n",
-        );
+        if report.unreadable_count > 0 {
+            out.push_str(&format!(
+                "No readable projects: skipped {} unreadable store{} (corrupt, or written by \
+                 a newer fallow). Upgrade fallow to read them.\n",
+                report.unreadable_count,
+                plural(report.unreadable_count),
+            ));
+        } else {
+            out.push_str(
+                "No projects tracked yet. Enable in a repo with `fallow impact enable`, or for \
+                 every project with `fallow impact default on`.\n",
+            );
+        }
         return out;
     }
 
@@ -2156,7 +2170,7 @@ pub fn render_cross_repo_human(report: &CrossRepoImpactReport, limit: Option<usi
     if !report.projects.is_empty() {
         out.push_str(&format!(
             "{:<24}{:>8}{:>10}{:>11}{:>10}{:>7}  {}\n",
-            "PROJECT", "LATEST", "PROJECT", "CONTAINED", "RESOLVED", "TREND", "LAST RUN",
+            "PROJECT", "LATEST", "REPO-WIDE", "CONTAINED", "RESOLVED", "TREND", "LAST RUN",
         ));
         let rows = limit.map_or(report.projects.len(), |n| n.min(report.projects.len()));
         for entry in report.projects.iter().take(rows) {
@@ -2193,7 +2207,7 @@ pub fn render_cross_repo_human(report: &CrossRepoImpactReport, limit: Option<usi
     let no_history = report.project_count.saturating_sub(report.tracked_count);
     if no_history > 0 {
         out.push_str(&format!(
-            "\n{no_history} tracked project{} have no history yet\n",
+            "\n{no_history} tracked project{} with no history yet\n",
             plural(no_history),
         ));
     }
@@ -2240,7 +2254,15 @@ pub fn render_cross_repo_markdown(report: &CrossRepoImpactReport) -> String {
     let mut out = String::new();
     out.push_str("## Fallow impact (all projects)\n\n");
     if report.project_count == 0 {
-        out.push_str("No projects tracked yet.\n");
+        if report.unreadable_count > 0 {
+            out.push_str(&format!(
+                "No readable projects: skipped {} unreadable store{}.\n",
+                report.unreadable_count,
+                plural(report.unreadable_count),
+            ));
+        } else {
+            out.push_str("No projects tracked yet.\n");
+        }
         return out;
     }
     out.push_str(&format!(
@@ -2248,8 +2270,8 @@ pub fn render_cross_repo_markdown(report: &CrossRepoImpactReport) -> String {
         report.project_count, report.tracked_count,
     ));
     if !report.projects.is_empty() {
-        out.push_str("| Project | Latest | Project-wide | Contained | Resolved | Last run |\n");
-        out.push_str("|:--------|-------:|-------------:|----------:|---------:|:---------|\n");
+        out.push_str("| Project | Latest | Repo-wide | Contained | Resolved | Last run |\n");
+        out.push_str("|:--------|-------:|----------:|----------:|---------:|:---------|\n");
         for entry in &report.projects {
             out.push_str(&format!(
                 "| {} | {} | {} | {} | {} | {} |\n",
@@ -3788,6 +3810,22 @@ mod tests {
         assert_eq!(report.project_count, 0);
         let human = render_cross_repo_human(&report, None);
         assert!(human.contains("No projects tracked yet"));
+    }
+
+    #[test]
+    fn cross_repo_all_corrupt_reports_unreadable_not_first_run() {
+        let _cfg = aggregate_env();
+        let dir = impact_config_dir().unwrap().join("impact");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("bad.json"), b"{ broken ][").unwrap();
+        let report = aggregate(CrossRepoSort::Recent);
+        assert_eq!(report.project_count, 0);
+        assert_eq!(report.unreadable_count, 1);
+        let human = render_cross_repo_human(&report, None);
+        assert!(
+            human.contains("unreadable store") && !human.contains("No projects tracked yet"),
+            "all-corrupt must report unreadable, not a misleading first-run hint: {human}"
+        );
     }
 
     #[test]

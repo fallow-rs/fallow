@@ -5459,7 +5459,8 @@ timestamp: string
 export interface CrossRepoImpactReport {
 schema_version: CrossRepoImpactSchemaVersion
 /**
- * Total per-project stores found in the user config dir.
+ * Per-project stores successfully parsed (add `unreadable_count` for the
+ * total number of store files found in the user config dir).
  */
 project_count: number
 /**
