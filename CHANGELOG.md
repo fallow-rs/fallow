@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`fallow dupes` now ignores import declarations by default.** Token-identical sorted import blocks are a structural property of well-formatted code, not copy-paste, so they no longer surface as clone groups. `ignoreImports` (shipped opt-in in 2.33.0) now defaults to `true`. Opt out with `"ignoreImports": false` in config, `--no-ignore-imports` on `fallow dupes`, or `--dupes-no-ignore-imports` on bare `fallow`; the MCP `find_dupes` / `trace_clone` tools accept `ignore_imports: false`, and the VS Code `fallow.duplication.ignoreImports` setting now controls both directions. Scope: ES `import` declarations only; CommonJS `require()` calls and `export ... from` re-export blocks are still counted (extending coverage to those is queued as [#1225](https://github.com/fallow-rs/fallow/issues/1225)).
+
+  Operational notes for upgraders:
+  - **`duplicates.threshold` gate users:** the measured duplication percentage drops, so a threshold tuned against import-inclusive counts is now effectively looser. Re-baseline against the new numbers, or set `"ignoreImports": false` to keep the old behavior.
+  - **Baseline / trend users:** import-block clone groups disappear from the next run, so a saved duplication baseline (`--save-baseline` / `--save-regression-baseline`) should be re-saved after upgrading, and a one-time step-down in `fallow impact` / duplication trend at the upgrade boundary is expected, not a real regression.
+
+  Thanks [@danielo515](https://github.com/danielo515) for the report. (Closes [#1224](https://github.com/fallow-rs/fallow/issues/1224).)
+
 ## [2.95.0] - 2026-06-12
 
 ### Added

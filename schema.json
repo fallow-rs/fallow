@@ -112,7 +112,7 @@
         "ignoreDefaults": true,
         "skipLocal": false,
         "crossLanguage": false,
-        "ignoreImports": false,
+        "ignoreImports": true,
         "normalization": {},
         "minCorpusSizeForShingleFilter": 1024,
         "minCorpusSizeForTokenCache": 5000
@@ -697,9 +697,9 @@
           "default": false
         },
         "ignoreImports": {
-          "description": "Exclude ES `import` declarations from clone detection.\n\nWhen enabled, all `import` statements (value imports, type imports, and\nside-effect imports) are stripped from the token stream before clone\ndetection. This reduces noise from sorted import blocks that naturally\nlook similar across files. Only affects ES `import` declarations;\nCommonJS `require()` calls are not filtered.",
+          "description": "Exclude ES `import` declarations from clone detection.\n\nDefaults to `true`: token-identical sorted import blocks are a structural\nproperty of well-formatted code, not copy-paste, so they should not\nsurface as clone groups. Set to `false` to count import blocks again.\nWhen enabled, all `import` statements (value imports, type imports, and\nside-effect imports) are stripped from the token stream before clone\ndetection. Only affects ES `import` declarations; CommonJS `require()`\ncalls and `export ... from` re-export blocks are still counted.",
           "type": "boolean",
-          "default": false
+          "default": true
         },
         "normalization": {
           "description": "Fine-grained normalization overrides on top of the detection mode.",

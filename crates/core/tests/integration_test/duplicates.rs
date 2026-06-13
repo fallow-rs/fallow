@@ -200,16 +200,20 @@ fn ignore_imports_removes_import_only_clones() {
         },
     ];
 
+    // ignore_imports now defaults to true, so counting import blocks requires
+    // an explicit opt-out (the `--no-ignore-imports` / `ignoreImports: false`
+    // path).
     let config_with_imports = fallow_core::duplicates::DuplicatesConfig {
         min_tokens: 10,
         min_lines: 3,
+        ignore_imports: false,
         ..Default::default()
     };
     let report_with =
         fallow_core::duplicates::find_duplicates(dir.path(), &files, &config_with_imports);
     assert!(
         !report_with.clone_groups.is_empty(),
-        "Without ignore_imports, identical import blocks should be detected as clones"
+        "With ignore_imports=false, identical import blocks should be detected as clones"
     );
 
     let config_ignore = fallow_core::duplicates::DuplicatesConfig {
