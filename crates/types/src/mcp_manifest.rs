@@ -263,7 +263,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
     McpToolInfo {
         name: "impact",
         kind: "introspection",
-        description: "Read the local Fallow Impact value-tracking report (.fallow/impact.json, local-dev only)",
+        description: "Read the local Fallow Impact value-tracking report (per-project history in the user config dir, never in the repo; local-dev only)",
         key_params: &["root"],
         license: McpToolLicense::Free,
         license_note: None,

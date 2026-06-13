@@ -3560,8 +3560,8 @@ fn dispatch_impact(
                 if newly {
                     println!(
                         "Fallow Impact enabled for this project. Each `fallow audit` / pre-commit \
-                         gate run is recorded in your user config dir, never written into the \
-                         repo and never uploaded."
+                         gate run is recorded in your user config dir (never written into the \
+                         repo, never uploaded)."
                     );
                     println!(
                         "Tip: run `fallow init --hooks` (or add `--gate-marker pre-commit` to \
