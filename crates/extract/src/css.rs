@@ -6,7 +6,11 @@
 use std::path::Path;
 use std::sync::LazyLock;
 
+use lightningcss::rules::CssRule;
+use lightningcss::selector::{Component, PseudoClass, Selector, SelectorList};
+use lightningcss::stylesheet::{ParserOptions, StyleSheet};
 use oxc_span::Span;
+use rustc_hash::FxHashSet;
 
 use crate::{ExportInfo, ExportName, ImportInfo, ImportedName, ModuleInfo, VisibilityTag};
 use fallow_types::discover::FileId;
@@ -284,25 +288,158 @@ fn mask_with_whitespace(src: &str, re: &regex::Regex) -> String {
     out
 }
 
+/// Collect the authoritative set of class-selector names from a CSS source by
+/// parsing it into a real AST (lightningcss). Returns `None` when the source is
+/// not parseable as standard CSS (e.g. SCSS / Sass syntax), so the caller can
+/// fall back to the regex scanner.
+///
+/// This is the source of truth for which `.token` occurrences are genuine class
+/// selectors. It natively excludes `@layer foo.bar` layer names, `@import ...
+/// layer(theme.button)` layer references, `@keyframes` step selectors, id and
+/// element selectors, and the contents of comments / strings / `url()`, which
+/// the older regex-only scanner had to approximate with a stack of masking
+/// passes. Classes nested inside `:is()` / `:where()` / `:not()` / `:has()` /
+/// `:any()` / `::slotted()` / `:host()` / `:nth-child(... of ...)` are
+/// collected too, matching the regex scanner's "every `.class` token" behavior.
+fn lightningcss_class_set(source: &str) -> Option<FxHashSet<String>> {
+    let options = ParserOptions {
+        // Recover from individual malformed rules so a single bad rule does not
+        // discard class names from the rest of the file.
+        error_recovery: true,
+        // These files are `.module.css` / `.module.scss`, so parse in CSS Modules
+        // mode. That makes the `:local()` / `:global()` pseudo-classes parse as
+        // real selectors rather than erroring, so classes wrapped in them are
+        // collected (matching the regex scanner). Renaming is a print-time
+        // concern, so the AST class names stay the original author-written names.
+        css_modules: Some(lightningcss::css_modules::Config::default()),
+        ..ParserOptions::default()
+    };
+    let stylesheet = StyleSheet::parse(source, options).ok()?;
+    let mut classes = FxHashSet::default();
+    collect_classes_from_rules(&stylesheet.rules.0, &mut classes);
+    Some(classes)
+}
+
+/// Recursively collect class-selector names from a list of CSS rules, descending
+/// into every grouping rule (`@media`, `@supports`, `@container`, `@layer {}`,
+/// `@document`, `@starting-style`, `@scope`, nested style rules) so a class
+/// declared anywhere contributes to the set.
+fn collect_classes_from_rules(rules: &[CssRule<'_>], classes: &mut FxHashSet<String>) {
+    for rule in rules {
+        match rule {
+            CssRule::Style(style) => {
+                collect_classes_from_selector_list(&style.selectors, classes);
+                collect_classes_from_rules(&style.rules.0, classes);
+            }
+            CssRule::Media(rule) => collect_classes_from_rules(&rule.rules.0, classes),
+            CssRule::Supports(rule) => collect_classes_from_rules(&rule.rules.0, classes),
+            CssRule::Container(rule) => collect_classes_from_rules(&rule.rules.0, classes),
+            CssRule::LayerBlock(rule) => collect_classes_from_rules(&rule.rules.0, classes),
+            CssRule::MozDocument(rule) => collect_classes_from_rules(&rule.rules.0, classes),
+            CssRule::StartingStyle(rule) => collect_classes_from_rules(&rule.rules.0, classes),
+            CssRule::Nesting(rule) => {
+                collect_classes_from_selector_list(&rule.style.selectors, classes);
+                collect_classes_from_rules(&rule.style.rules.0, classes);
+            }
+            CssRule::Scope(rule) => {
+                if let Some(scope_start) = &rule.scope_start {
+                    collect_classes_from_selector_list(scope_start, classes);
+                }
+                if let Some(scope_end) = &rule.scope_end {
+                    collect_classes_from_selector_list(scope_end, classes);
+                }
+                collect_classes_from_rules(&rule.rules.0, classes);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_classes_from_selector_list(list: &SelectorList<'_>, classes: &mut FxHashSet<String>) {
+    for selector in &list.0 {
+        collect_classes_from_selector(selector, classes);
+    }
+}
+
+fn collect_classes_from_selector(selector: &Selector<'_>, classes: &mut FxHashSet<String>) {
+    for component in selector.iter_raw_match_order() {
+        match component {
+            Component::Class(name) => {
+                classes.insert(name.0.to_string());
+            }
+            Component::Is(list)
+            | Component::Where(list)
+            | Component::Has(list)
+            | Component::Negation(list)
+            | Component::Any(_, list) => {
+                for nested in list.as_ref() {
+                    collect_classes_from_selector(nested, classes);
+                }
+            }
+            Component::Slotted(nested) | Component::Host(Some(nested)) => {
+                collect_classes_from_selector(nested, classes);
+            }
+            Component::NthOf(data) => {
+                for nested in data.selectors() {
+                    collect_classes_from_selector(nested, classes);
+                }
+            }
+            // CSS Modules `:local(.foo)` / `:global(.foo)` wrap a real selector.
+            Component::NonTSPseudoClass(
+                PseudoClass::Local { selector } | PseudoClass::Global { selector },
+            ) => collect_classes_from_selector(selector, classes),
+            _ => {}
+        }
+    }
+}
+
 /// Extract class names from a CSS module file as named exports.
 ///
-/// Each emitted [`ExportInfo`] carries a [`Span`] pointing at the bare class
-/// name in the ORIGINAL `source` (no leading dot), so downstream
-/// `compute_line_offsets` resolves the real declaration line and column
-/// instead of falling back to line:1 col:0 (issue #549).
+/// For standard CSS, lightningcss parses the source into an AST and supplies the
+/// authoritative set of class-selector names; the byte-offset scanner then
+/// locates each name's [`Span`] in the ORIGINAL `source` (pointing at the bare
+/// class name, no leading dot) so downstream `compute_line_offsets` resolves the
+/// real declaration line and column instead of falling back to line:1 col:0
+/// (issue #549). For SCSS (Sass syntax lightningcss does not parse) and for any
+/// CSS the parser rejects, the regex-only scanner is used unchanged.
 pub fn extract_css_module_exports(source: &str, is_scss: bool) -> Vec<ExportInfo> {
+    if !is_scss && let Some(class_set) = lightningcss_class_set(source) {
+        return scan_css_module_exports(source, is_scss, Some(&class_set));
+    }
+    scan_css_module_exports(source, is_scss, None)
+}
+
+/// Scan `source` for `.class` tokens and emit one [`ExportInfo`] per distinct
+/// class (first occurrence wins), with a [`Span`] pointing at the post-dot
+/// identifier in the original source.
+///
+/// When `class_filter` is `Some`, only tokens present in the AST-derived set are
+/// emitted, so the parser owns the membership decision and the scanner owns only
+/// span location. When `class_filter` is `None` (SCSS / parse-failure fallback),
+/// the at-rule prelude is masked to keep `@layer foo.bar` / `@import ...
+/// layer(...)` segments from being mistaken for classes.
+fn scan_css_module_exports(
+    source: &str,
+    is_scss: bool,
+    class_filter: Option<&FxHashSet<String>>,
+) -> Vec<ExportInfo> {
     let mut masked = mask_with_whitespace(source, &CSS_COMMENT_RE);
     if is_scss {
         masked = mask_with_whitespace(&masked, &SCSS_LINE_COMMENT_RE);
     }
     masked = mask_with_whitespace(&masked, &CSS_NON_SELECTOR_RE);
-    masked = mask_with_whitespace(&masked, &CSS_AT_RULE_PRELUDE_RE);
+    if class_filter.is_none() {
+        masked = mask_with_whitespace(&masked, &CSS_AT_RULE_PRELUDE_RE);
+    }
 
-    let mut seen = rustc_hash::FxHashSet::default();
+    let mut seen = FxHashSet::default();
     let mut exports = Vec::new();
     for cap in CSS_CLASS_RE.captures_iter(&masked) {
         if let Some(m) = cap.get(1) {
             let class_name = m.as_str().to_string();
+            if class_filter.is_some_and(|filter| !filter.contains(&class_name)) {
+                continue;
+            }
             if seen.insert(class_name.clone()) {
                 #[expect(
                     clippy::cast_possible_truncation,
@@ -520,6 +657,38 @@ mod tests {
     fn extracts_camel_case_class() {
         let names = export_names(".myClass { }");
         assert_eq!(names, vec!["myClass"]);
+    }
+
+    #[test]
+    fn extracts_class_inside_global_pseudo() {
+        // CSS Modules `:global(.foo)` must surface `foo`: the parser understands
+        // the wrapped selector, which the regex scanner could not on its own.
+        let names = export_names(":global(.globalClass) { color: red; }");
+        assert_eq!(names, vec!["globalClass"]);
+    }
+
+    #[test]
+    fn extracts_class_inside_local_pseudo() {
+        let names = export_names(":local(.localClass) { color: red; }");
+        assert_eq!(names, vec!["localClass"]);
+    }
+
+    #[test]
+    fn extracts_classes_inside_negation() {
+        let names = export_names(".btn:not(.disabled) { }");
+        assert!(names.contains(&"btn".to_string()), "got {names:?}");
+        assert!(names.contains(&"disabled".to_string()), "got {names:?}");
+    }
+
+    #[test]
+    fn extracts_classes_inside_is_and_where() {
+        let names = export_names(":is(.a, .b) :where(.c) { }");
+        for expected in ["a", "b", "c"] {
+            assert!(
+                names.contains(&expected.to_string()),
+                "missing {expected} in {names:?}"
+            );
+        }
     }
 
     #[test]

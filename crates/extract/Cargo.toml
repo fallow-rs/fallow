@@ -27,6 +27,9 @@ oxc_semantic = { workspace = true }
 oxc_span = { workspace = true }
 oxc_str = { workspace = true }
 
+# CSS AST parsing (class/import extraction + analytics)
+lightningcss = { workspace = true }
+
 # Parallelism
 rayon = { workspace = true }
 

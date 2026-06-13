@@ -350,7 +350,12 @@ use crate::MemberKind;
 /// expression statements in `program.body` (misplaced) on
 /// `misplaced_directives`, so warm caches written before the bump would report
 /// zero misplaced-directive findings.
-pub(super) const CACHE_VERSION: u32 = 153;
+///
+/// Bumped to 154 for #550: CSS Module class extraction now derives its class set
+/// from a real CSS AST (lightningcss) for standard CSS, so warm caches written
+/// by the regex-only extractor can differ on escaped class names and malformed
+/// at-rule preludes.
+pub(super) const CACHE_VERSION: u32 = 154;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
