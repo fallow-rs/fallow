@@ -165,6 +165,10 @@
         "title": "Fallow: Show All Findings"
       },
       {
+        "command": "fallow.resetDiagnosticFilters",
+        "title": "Fallow: Reset Hidden Findings (Restart Server)"
+      },
+      {
         "command": "fallow.muteDiagnosticCategory",
         "title": "Fallow: Hide Diagnostic Category"
       },
