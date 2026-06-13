@@ -29,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Concurrent `fallow impact` recordings no longer lose data.** When the pre-commit gate fires in two worktrees of the same repo at once, both runs now serialize their update through an advisory lock instead of overwriting each other, so neither run's record is dropped.
 
+- **The VS Code extension is more robust around LSP restarts and binary downloads.** Five hardening fixes from an extension audit: (1) the status bar no longer freezes after a config-change LSP restart (the analysis-complete handler is re-registered on every client, not just the first); (2) rapid config changes no longer race two language-server processes (restarts are serialized); (3) a language server that is slow to start or whose shutdown times out no longer orphans a process or wedges the LSP in a permanently-dead state; (4) a dropped binary download no longer crashes the extension host (the download response stream is error-guarded); and (5) a CLI version mismatch no longer deletes the already-verified LSP binary (only the mismatched binary is purged, not the whole managed set).
+
 ## [2.96.0] - 2026-06-13
 
 ### Changed
