@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`fallow` now flags server-only exports placed in a `"use client"` file (Next.js).** A new `invalid-client-export` rule (default severity `warn`) reports a file carrying the `"use client"` directive that also exports a Next.js server-only or route-segment-config name (`metadata`, `generateMetadata`, `generateStaticParams`, `getServerSideProps`, route HTTP methods, `revalidate`, `dynamic`, and friends). Next.js rejects this at build time; fallow catches it statically in the same pass as the rest of dead-code analysis, before a build, and reports it in human, JSON, SARIF, CodeClimate, compact, and markdown output plus the LSP. The client component's `default` export is never flagged, and the rule only runs when `next` is a declared dependency so it cannot false-positive on non-Next projects. Suppress with `// fallow-ignore-next-line invalid-client-export` or set the rule to `off`.
+
+- **Route-internal unused exports in Next.js app-router files are reported where other tools suppress them.** A stray helper export or a typo'd `metadata` (for example `meatdata`) inside `app/page.tsx` / `layout.tsx` surfaces as an unused export, because fallow credits a precise per-route-file export allowlist rather than treating the whole route file as an opaque entry point. Valid framework exports (`metadata`, `default`, segment config) stay credited.
+
 ## [2.96.0] - 2026-06-13
 
 ### Changed
