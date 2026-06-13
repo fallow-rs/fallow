@@ -283,6 +283,14 @@ pub const CHECK_RULES: &[RuleDef] = &[
         full: "A barrel file (a module whose exports are `export ... from` re-exports) forwards a name from a `\"use client\"` module alongside a name from a server-only module (one carrying `\"use server\"`, importing the `server-only` package, or importing a server-only Next.js API such as `next/headers`). Importing one name from such a barrel drags the other's directive context across the React Server Components boundary, the documented Next.js App Router footgun. Type-only re-exports are ignored (erased at build), and a barrel re-exporting a client module alongside an ordinary undirected utility does NOT flag. To fix: split the barrel so client and server-only modules are re-exported from separate entry points. The check runs only when the project declares `next`.",
         docs_path: "explanations/dead-code#mixed-client-server-barrels",
     },
+    RuleDef {
+        id: "fallow/misplaced-directive",
+        category: "Policy",
+        name: "Misplaced directive",
+        short: "\"use client\" / \"use server\" directive is not in the leading position and is ignored",
+        full: "A `\"use client\"` or `\"use server\"` directive string appears as an expression statement after a non-directive statement (an `import`, a `const`). React Server Components bundlers only honor a directive in the leading prologue, before any other statement; once any statement precedes it the string is parsed as an ordinary expression and SILENTLY IGNORED. The intended client/server boundary never takes effect, so the file is treated as a server module. To fix: move the directive to the very top of the file, above every import. The check runs only when the project declares `next`.",
+        docs_path: "explanations/dead-code#misplaced-directives",
+    },
 ];
 
 /// Look up a rule definition by its SARIF rule ID across all rule sets.
@@ -2185,7 +2193,7 @@ mod tests {
 
     #[test]
     fn check_rules_count() {
-        assert_eq!(CHECK_RULES.len(), 28);
+        assert_eq!(CHECK_RULES.len(), 29);
     }
 
     #[test]

@@ -49,6 +49,7 @@ else
     table_row("Policy violations"; "policy_violations"; "policy-violations"),
     table_row("Invalid client exports"; "invalid_client_exports"; "invalid-client-exports"),
     table_row("Mixed client/server barrels"; "mixed_client_server_barrels"; "mixed-client-server-barrels"),
+    table_row("Misplaced directives"; "misplaced_directives"; "misplaced-directives"),
     table_row("Type-only dependencies"; "type_only_dependencies"; "type-only-dependencies"),
     table_row("Test-only dependencies"; "test_only_dependencies"; "test-only-dependencies"),
     table_row("Stale suppressions"; "stale_suppressions"; "stale-suppressions"),
@@ -119,6 +120,9 @@ else
   section("Mixed client/server barrels"; "mixed_client_server_barrels";
     "Barrels re-exporting both a `\"use client\"` module and a server-only module. One import drags the other's directive across the boundary.\n\n| File | Client origin | Server origin |\n|------|---------------|---------------|\n";
     "| `\(.path):\(.line)` | `\(.client_origin)` | `\(.server_origin)` |") +
+  section("Misplaced directives"; "misplaced_directives";
+    "`\"use client\"` / `\"use server\"` directives written after a non-directive statement, so the RSC bundler ignores them. Move the directive to the top of the file.\n\n| File | Directive |\n|------|-----------|\n";
+    "| `\(.path):\(.line)` | `\"\(.directive)\"` |") +
   section("Type-only dependencies"; "type_only_dependencies";
     "Dependencies only used for type imports \u2014 consider moving to `devDependencies`.\n\n| Package |\n|---------|\n";
     "| `\(.package_name)` |") +

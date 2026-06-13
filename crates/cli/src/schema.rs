@@ -292,6 +292,10 @@ fn apply_architecture_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
             m.suppress = Some(("policy-violation", false));
             m.note = Some("Requires a configured rule pack (rulePacks config)");
         }
+        "misplaced-directive" => {
+            m.suppress = Some(("misplaced-directive", false));
+            m.note = Some("Requires the project to declare next");
+        }
         _ => return false,
     }
     true

@@ -741,6 +741,16 @@ assert_contains "$OUT_MCSB_ANN" "::warning file=src/index.ts,line=2,col=3,title=
 OUT_MCSB_FILTERED=$(jq '.mixed_client_server_barrels = [{"path": "src/index.ts", "line": 2, "col": 0, "client_origin": "./Button", "server_origin": "./fetchUser", "actions": []}, {"path": "src/other/index.ts", "line": 1, "col": 0, "client_origin": "./Widget", "server_origin": "./loadData", "actions": []}]' "$FIXTURES/check.json" | jq --argjson changed '["src/index.ts"]' -f "$JQ_DIR/filter-changed.jq" 2>&1)
 assert_json_value "$OUT_MCSB_FILTERED" '.mixed_client_server_barrels | length' "1" "mcsb: filter-changed keeps only changed-file findings"
 
+OUT_MD=$(jq '.misplaced_directives = [{"path": "src/widget.tsx", "line": 4, "col": 0, "directive": "use client", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_MD" "Misplaced directives" "md: shows summary row and section"
+assert_contains "$OUT_MD" "use client" "md: shows directive in section"
+
+OUT_MD_ANN=$(jq '.misplaced_directives = [{"path": "src/widget.tsx", "line": 4, "col": 2, "directive": "use client", "actions": []}]' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/annotations-check.jq" 2>&1)
+assert_contains "$OUT_MD_ANN" "::warning file=src/widget.tsx,line=4,col=3,title=Misplaced directive::" "md: warning-severity annotation"
+
+OUT_MD_FILTERED=$(jq '.misplaced_directives = [{"path": "src/widget.tsx", "line": 4, "col": 0, "directive": "use client", "actions": []}, {"path": "src/other.tsx", "line": 6, "col": 0, "directive": "use server", "actions": []}]' "$FIXTURES/check.json" | jq --argjson changed '["src/widget.tsx"]' -f "$JQ_DIR/filter-changed.jq" 2>&1)
+assert_json_value "$OUT_MD_FILTERED" '.misplaced_directives | length' "1" "md: filter-changed keeps only changed-file findings"
+
 OUT_CLEAN=$(jq -r -f "$JQ_DIR/summary-check.jq" "$FIXTURES/check-clean.json" 2>&1)
 assert_contains "$OUT_CLEAN" "No issues found" "clean: shows no issues"
 assert_not_contains "$OUT_CLEAN" "WARNING" "clean: no warning"

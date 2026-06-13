@@ -136,6 +136,7 @@ fn module(file_id: u32, callee_uses: Vec<CalleeUse>, imports: Vec<ImportInfo>) -
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses,
+        misplaced_directives: Vec::new(),
     }
 }
 

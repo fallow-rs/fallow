@@ -940,6 +940,42 @@ fn push_mixed_client_server_barrel_issues(
     }
 }
 
+fn push_misplaced_directive_issues(
+    issues: &mut Vec<CodeClimateIssue>,
+    findings: &[fallow_types::output_dead_code::MisplacedDirectiveFinding],
+    root: &Path,
+    severity: Severity,
+) {
+    if findings.is_empty() {
+        return;
+    }
+    let level = severity_to_codeclimate(severity);
+    for entry in findings {
+        let d = &entry.directive_site;
+        let path = cc_path(&d.path, root);
+        let fp = fingerprint_hash(&[
+            "fallow/misplaced-directive",
+            &path,
+            &d.line.to_string(),
+            &d.directive,
+        ]);
+        let line = if d.line > 0 { Some(d.line) } else { None };
+        let message = format!(
+            "Directive `\"{}\"` is not in the leading position, so the RSC bundler ignores it; move it to the top of the file",
+            d.directive
+        );
+        issues.push(cc_issue(
+            "fallow/misplaced-directive",
+            &message,
+            level,
+            "Bug Risk",
+            &path,
+            line,
+            &fp,
+        ));
+    }
+}
+
 fn push_stale_suppression_issues(
     issues: &mut Vec<CodeClimateIssue>,
     suppressions: &[fallow_core::results::StaleSuppression],
@@ -1405,6 +1441,12 @@ impl CodeClimateBuilder<'_> {
             &self.results.mixed_client_server_barrels,
             self.root,
             self.rules.mixed_client_server_barrel,
+        );
+        push_misplaced_directive_issues(
+            &mut self.issues,
+            &self.results.misplaced_directives,
+            self.root,
+            self.rules.misplaced_directive,
         );
     }
 

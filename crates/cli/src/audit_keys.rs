@@ -56,6 +56,15 @@ fn mixed_client_server_barrel_key(
     )
 }
 
+fn misplaced_directive_key(item: &fallow_core::results::MisplacedDirective, root: &Path) -> String {
+    format!(
+        "misplaced-directive:{}:{}:{}",
+        relative_key_path(&item.path, root),
+        item.line,
+        item.directive
+    )
+}
+
 fn unlisted_dependency_key(item: &fallow_core::results::UnlistedDependency, root: &Path) -> String {
     let mut sites = item
         .imported_from
@@ -308,6 +317,7 @@ pub(super) fn dead_code_keys(
         misconfigured_dependency_overrides,
         invalid_client_exports,
         mixed_client_server_barrels,
+        misplaced_directives,
         // Non-finding fields: counts and metadata, not attributable to a key.
         suppression_count: _suppression_count,
         active_suppressions: _active_suppressions,
@@ -353,6 +363,7 @@ pub(super) fn dead_code_keys(
     collector.add_misconfigured_dependency_overrides(misconfigured_dependency_overrides);
     collector.add_invalid_client_exports(invalid_client_exports);
     collector.add_mixed_client_server_barrels(mixed_client_server_barrels);
+    collector.add_misplaced_directives(misplaced_directives);
     collector.into_keys()
 }
 
@@ -432,6 +443,15 @@ impl<'a> DeadCodeKeyCollector<'a> {
     ) {
         for item in items {
             self.insert(mixed_client_server_barrel_key(&item.barrel, self.root));
+        }
+    }
+
+    fn add_misplaced_directives(
+        &mut self,
+        items: &[fallow_core::results::MisplacedDirectiveFinding],
+    ) {
+        for item in items {
+            self.insert(misplaced_directive_key(&item.directive_site, self.root));
         }
     }
 
@@ -699,6 +719,7 @@ pub(super) fn retain_introduced_dead_code(
         misconfigured_dependency_overrides,
         invalid_client_exports,
         mixed_client_server_barrels,
+        misplaced_directives,
         // Non-finding fields: counts and metadata, not subject to base-keyed
         // filtering.
         suppression_count: _suppression_count,
@@ -776,6 +797,7 @@ pub(super) fn retain_introduced_dead_code(
     invalid_client_exports.retain(|item| keep(invalid_client_export_key(&item.export, root)));
     mixed_client_server_barrels
         .retain(|item| keep(mixed_client_server_barrel_key(&item.barrel, root)));
+    misplaced_directives.retain(|item| keep(misplaced_directive_key(&item.directive_site, root)));
 }
 
 fn introduced_dead_code_keys(
@@ -1019,6 +1041,16 @@ impl DeadCodeJsonAnnotator<'_> {
             self.results.mixed_client_server_barrels.iter().map(|item| {
                 issue_was_introduced(
                     &mixed_client_server_barrel_key(&item.barrel, self.root),
+                    self.base,
+                )
+            }),
+        );
+        annotate_issue_array(
+            self.json,
+            "misplaced_directives",
+            self.results.misplaced_directives.iter().map(|item| {
+                issue_was_introduced(
+                    &misplaced_directive_key(&item.directive_site, self.root),
                     self.base,
                 )
             }),

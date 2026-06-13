@@ -12,7 +12,7 @@ use crate::output::IssueAction;
 use crate::output_dead_code::{
     BoundaryCallViolationFinding, BoundaryCoverageViolationFinding, BoundaryViolationFinding,
     CircularDependencyFinding, DuplicateExportFinding, EmptyCatalogGroupFinding,
-    InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding,
+    InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
     MixedClientServerBarrelFinding, PolicyViolationFinding, PrivateTypeLeakFinding,
     ReExportCycleFinding, TestOnlyDependencyFinding, TypeOnlyDependencyFinding,
     UnlistedDependencyFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
@@ -204,6 +204,13 @@ pub struct AnalysisResults {
     /// `actions` array natively. Default severity is `warn`.
     #[serde(default)]
     pub mixed_client_server_barrels: Vec<MixedClientServerBarrelFinding>,
+    /// `"use client"` / `"use server"` directives written as expression
+    /// statements after a non-directive statement, so the RSC bundler parses
+    /// them as ordinary strings and silently ignores them. Wrapped in
+    /// [`MisplacedDirectiveFinding`] so each entry carries a typed `actions`
+    /// array natively. Default severity is `warn`.
+    #[serde(default)]
+    pub misplaced_directives: Vec<MisplacedDirectiveFinding>,
     /// Number of suppression entries that matched an issue during analysis.
     /// Human output uses this for the suppression footer; it is skipped in
     /// machine output to avoid changing the public JSON issue contract.
@@ -322,6 +329,7 @@ impl AnalysisResults {
             + self.misconfigured_dependency_overrides.len()
             + self.invalid_client_exports.len()
             + self.mixed_client_server_barrels.len()
+            + self.misplaced_directives.len()
     }
 
     /// Whether any issues were found.
@@ -372,6 +380,7 @@ impl AnalysisResults {
             misconfigured_dependency_overrides,
             invalid_client_exports,
             mixed_client_server_barrels,
+            misplaced_directives,
             suppression_count,
             active_suppressions,
             feature_flags,
@@ -418,6 +427,7 @@ impl AnalysisResults {
         self.invalid_client_exports.extend(invalid_client_exports);
         self.mixed_client_server_barrels
             .extend(mixed_client_server_barrels);
+        self.misplaced_directives.extend(misplaced_directives);
         self.feature_flags.extend(feature_flags);
         self.security_findings.extend(security_findings);
         self.security_unresolved_edge_files += security_unresolved_edge_files;
@@ -542,6 +552,15 @@ impl AnalysisResults {
                 .then(a.barrel.line.cmp(&b.barrel.line))
                 .then(a.barrel.client_origin.cmp(&b.barrel.client_origin))
                 .then(a.barrel.server_origin.cmp(&b.barrel.server_origin))
+        });
+
+        self.misplaced_directives.sort_by(|a, b| {
+            a.directive_site
+                .path
+                .cmp(&b.directive_site.path)
+                .then(a.directive_site.line.cmp(&b.directive_site.line))
+                .then(a.directive_site.col.cmp(&b.directive_site.col))
+                .then(a.directive_site.directive.cmp(&b.directive_site.directive))
         });
     }
 
@@ -830,6 +849,27 @@ pub struct MixedClientServerBarrel {
     /// 1-based line number of the barrel's first offending re-export.
     pub line: u32,
     /// 0-based byte column offset of the barrel's first offending re-export.
+    pub col: u32,
+}
+
+/// A `"use client"` / `"use server"` directive written as an expression
+/// statement after a non-directive statement (an import, a const). The RSC
+/// bundler only honors a directive in the leading prologue, so once any
+/// statement precedes it the string is parsed as an ordinary expression and
+/// silently ignored: the intended client/server boundary never takes effect.
+/// The fix is to move the directive to the very top of the file.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MisplacedDirective {
+    /// The file carrying the mis-positioned directive.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// The directive string as written, either `"use client"` or
+    /// `"use server"` (without the surrounding quotes).
+    pub directive: String,
+    /// 1-based line number of the mis-positioned directive statement.
+    pub line: u32,
+    /// 0-based byte column offset of the mis-positioned directive statement.
     pub col: u32,
 }
 

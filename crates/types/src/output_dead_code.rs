@@ -38,10 +38,10 @@ use crate::output::{
 use crate::results::{
     BoundaryCallViolation, BoundaryCoverageViolation, BoundaryViolation, CircularDependency,
     DependencyOverrideSource, DuplicateExport, EmptyCatalogGroup, InvalidClientExport,
-    MisconfiguredDependencyOverride, MixedClientServerBarrel, PolicyViolation, PrivateTypeLeak,
-    ReExportCycle, ReExportCycleKind, TestOnlyDependency, TypeOnlyDependency, UnlistedDependency,
-    UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry, UnusedDependency,
-    UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedMember,
+    MisconfiguredDependencyOverride, MisplacedDirective, MixedClientServerBarrel, PolicyViolation,
+    PrivateTypeLeak, ReExportCycle, ReExportCycleKind, TestOnlyDependency, TypeOnlyDependency,
+    UnlistedDependency, UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry,
+    UnusedDependency, UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedMember,
 };
 
 /// Shared note for the `duplicate-exports` fix action. Mirrors the const used
@@ -798,6 +798,47 @@ impl MixedClientServerBarrelFinding {
         })];
         Self {
             barrel,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for a [`MisplacedDirective`] finding. There is no safe
+/// auto-fix: moving a directive to the leading prologue is a small but
+/// judgement-bearing edit (the author may have intended the file to be a
+/// server module after all). The only action is a line-level suppress; the
+/// real fix is to hoist the directive to the very top of the file.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MisplacedDirectiveFinding {
+    /// The underlying dead-code entry.
+    #[serde(flatten)]
+    pub directive_site: MisplacedDirective,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl MisplacedDirectiveFinding {
+    /// Build the wrapper from a raw [`MisplacedDirective`]. Emits only a
+    /// line-level suppress action: there is no safe auto-fix because moving a
+    /// directive is a human decision.
+    #[must_use]
+    pub fn with_actions(directive_site: MisplacedDirective) -> Self {
+        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
+            kind: SuppressLineKind::SuppressLine,
+            auto_fixable: false,
+            description: "Suppress with an inline comment above the line".to_string(),
+            comment: "// fallow-ignore-next-line misplaced-directive".to_string(),
+            scope: None,
+        })];
+        Self {
+            directive_site,
             actions,
             introduced: None,
         }

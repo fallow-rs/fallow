@@ -1946,3 +1946,100 @@ fn audit_annotates_newly_added_mixed_barrel_as_introduced() {
         "the newly-mixed barrel must be annotated introduced: true"
     );
 }
+
+/// A Next.js project whose base file has a correctly-positioned leading
+/// `"use client"` directive. The feature branch adds an import ABOVE the
+/// directive, demoting it to an ordinary expression statement the RSC bundler
+/// ignores: the finding is NEW relative to the base, so audit must annotate it
+/// `introduced: true`.
+fn create_misplaced_directive_audit_fixture() -> TempDir {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("app")).unwrap();
+
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name":"audit-misplaced-directive","dependencies":{"next":"^14.0.0","react":"^18.0.0"}}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("tsconfig.json"),
+        r#"{"compilerOptions":{"target":"ES2022","module":"ESNext","moduleResolution":"bundler","jsx":"preserve"},"include":["app"]}"#,
+    )
+    .unwrap();
+    fs::write(dir.join("app/helper.ts"), "export const helper = 1;\n").unwrap();
+    // Base: the directive is correctly positioned at the top of the file.
+    fs::write(
+        dir.join("app/page.tsx"),
+        "\"use client\";\nimport { helper } from \"./helper\";\nexport default function Page() {\n  return helper;\n}\n",
+    )
+    .unwrap();
+
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_AUTHOR_NAME", "test")
+            .env("GIT_AUTHOR_EMAIL", "test@test.com")
+            .env("GIT_COMMITTER_NAME", "test")
+            .env("GIT_COMMITTER_EMAIL", "test@test.com")
+            .output()
+            .expect("git command failed")
+    };
+
+    git(&["init", "-b", "main"]);
+    git(&["add", "."]);
+    git(&["-c", "commit.gpgsign=false", "commit", "-m", "initial"]);
+    git(&["checkout", "-b", "feature"]);
+
+    // Feature branch: move an import above the directive, demoting it.
+    fs::write(
+        dir.join("app/page.tsx"),
+        "import { helper } from \"./helper\";\n\"use client\";\nexport default function Page() {\n  return helper;\n}\n",
+    )
+    .unwrap();
+    git(&["add", "."]);
+    git(&[
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-m",
+        "move import above use client directive",
+    ]);
+
+    tmp
+}
+
+#[test]
+fn audit_annotates_newly_added_misplaced_directive_as_introduced() {
+    let tmp = create_misplaced_directive_audit_fixture();
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        tmp.path().to_str().unwrap(),
+        "--base",
+        "main",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    let json = parse_json(&output);
+    let directives = json["dead_code"]["misplaced_directives"]
+        .as_array()
+        .expect("dead_code.misplaced_directives should be an array");
+    assert_eq!(
+        directives.len(),
+        1,
+        "exactly one misplaced directive expected. full json: {}",
+        serde_json::to_string_pretty(&json).unwrap_or_default()
+    );
+    assert_eq!(
+        directives[0]["introduced"], true,
+        "the newly-misplaced directive must be annotated introduced: true"
+    );
+}

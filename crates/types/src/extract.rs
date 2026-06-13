@@ -130,6 +130,12 @@ pub struct ModuleInfo {
     /// extraction is config-blind; the per-module cost is bounded by the
     /// unique-callee count.
     pub callee_uses: Vec<CalleeUse>,
+    /// `"use client"` / `"use server"` directive strings written as expression
+    /// statements in `program.body` (mis-positioned, NOT in the leading
+    /// prologue), so the RSC bundler silently ignores them. One entry per
+    /// occurrence. Consumed by the `misplaced-directive` detector. Captured
+    /// only by JS/TS extraction.
+    pub misplaced_directives: Vec<MisplacedDirectiveSite>,
 }
 
 impl ModuleInfo {
@@ -984,6 +990,18 @@ pub struct CalleeUse {
     pub span_start: u32,
 }
 
+/// A `"use client"` / `"use server"` directive string written as an expression
+/// statement in `program.body` (NOT the leading prologue), so the RSC bundler
+/// silently ignores it. One entry per offending occurrence. Consumed by the
+/// `misplaced-directive` detector.
+#[derive(Debug, Clone, PartialEq, Eq, bitcode::Encode, bitcode::Decode)]
+pub struct MisplacedDirectiveSite {
+    /// `true` for `"use server"`, `false` for `"use client"`.
+    pub is_server: bool,
+    /// Start byte offset of the mis-positioned directive statement.
+    pub span_start: u32,
+}
+
 #[expect(
     clippy::trivially_copy_pass_by_ref,
     reason = "serde serialize_with requires &T"
@@ -1070,7 +1088,7 @@ const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 216);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 816);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 840);
 
 /// A re-export declaration.
 #[derive(Debug, Clone)]
@@ -1290,6 +1308,7 @@ mod tests {
             sanitized_sink_args: Vec::new(),
             security_control_sites: Vec::new(),
             callee_uses: Vec::new(),
+            misplaced_directives: Vec::new(),
         };
 
         module.release_resolution_payload();

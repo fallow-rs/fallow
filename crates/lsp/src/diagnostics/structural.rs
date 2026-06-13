@@ -533,6 +533,45 @@ pub fn push_mixed_client_server_barrel_diagnostics(
     }
 }
 
+/// Push diagnostics for mis-positioned `"use client"` / `"use server"`
+/// directives. Fixed `WARNING` severity (the rule's default), code
+/// `misplaced-directive`. Paths are absolute internally, so the URI is built
+/// directly (no `root.join`).
+pub fn push_misplaced_directive_diagnostics(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+) {
+    for finding in &results.misplaced_directives {
+        let Some(uri) = Uri::from_file_path(&finding.directive_site.path) else {
+            continue;
+        };
+        let line = finding.directive_site.line.saturating_sub(1);
+        let message = format!(
+            "Directive \"{}\" is not in the leading position, so the RSC bundler ignores it; move it to the top of the file",
+            finding.directive_site.directive
+        );
+        map.entry(uri).or_default().push(Diagnostic {
+            range: Range {
+                start: Position {
+                    line,
+                    character: finding.directive_site.col,
+                },
+                end: Position {
+                    line,
+                    character: u32::MAX,
+                },
+            },
+            severity: Some(DiagnosticSeverity::WARNING),
+            source: Some("fallow".to_string()),
+            code: Some(NumberOrString::String("misplaced-directive".to_string())),
+            code_description: doc_link("misplaced-directives"),
+            message,
+            related_information: None,
+            ..Default::default()
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -1121,6 +1160,43 @@ mod tests {
         assert!(d.message.contains("./Button"));
         assert!(d.message.contains("./fetchUser"));
         assert_eq!(d.range.start.line, 1); // 1-based 2 -> 0-based 1
+        assert_eq!(d.range.start.character, 0);
+    }
+
+    #[test]
+    fn misplaced_directive_produces_warning_diagnostic() {
+        let root = test_root();
+        let file = root.join("app/page.tsx");
+
+        let mut results = AnalysisResults::default();
+        results.misplaced_directives.push(
+            fallow_core::results::MisplacedDirectiveFinding::with_actions(
+                fallow_core::results::MisplacedDirective {
+                    path: file.clone(),
+                    directive: "use client".to_string(),
+                    line: 3,
+                    col: 0,
+                },
+            ),
+        );
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, &root);
+
+        let uri = Uri::from_file_path(&file).unwrap();
+        let file_diags = diags
+            .get(&uri)
+            .expect("misplaced-directive diagnostic should land under the file URI");
+        assert_eq!(file_diags.len(), 1);
+
+        let d = &file_diags[0];
+        assert_eq!(d.severity, Some(DiagnosticSeverity::WARNING));
+        assert_eq!(
+            d.code,
+            Some(NumberOrString::String("misplaced-directive".to_string()))
+        );
+        assert!(d.message.contains("use client"));
+        assert_eq!(d.range.start.line, 2); // 1-based 3 -> 0-based 2
         assert_eq!(d.range.start.character, 0);
     }
 

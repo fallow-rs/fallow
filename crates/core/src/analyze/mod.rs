@@ -4,6 +4,7 @@ mod boundary_coverage;
 pub mod feature_flags;
 mod iconify;
 mod invalid_client_exports;
+mod misplaced_directive;
 mod mixed_barrel;
 mod package_json_utils;
 mod policy;
@@ -38,7 +39,7 @@ use crate::resolve::ResolvedModule;
 use fallow_types::output_dead_code::{
     BoundaryCallViolationFinding, BoundaryCoverageViolationFinding, BoundaryViolationFinding,
     CircularDependencyFinding, DuplicateExportFinding, EmptyCatalogGroupFinding,
-    InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding,
+    InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
     MixedClientServerBarrelFinding, PolicyViolationFinding, PrivateTypeLeakFinding,
     ReExportCycleFinding, TestOnlyDependencyFinding, TypeOnlyDependencyFinding,
     UnlistedDependencyFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
@@ -51,6 +52,7 @@ use crate::results::{AnalysisResults, CircularDependency, CircularDependencyEdge
 use crate::suppress::{IssueKind, SuppressionContext};
 
 use invalid_client_exports::find_invalid_client_exports;
+use misplaced_directive::find_misplaced_directives;
 use mixed_barrel::find_mixed_client_server_barrels;
 use re_export_cycles::find_re_export_cycles;
 #[expect(
@@ -726,6 +728,15 @@ pub fn find_dead_code_full(
         &line_offsets_by_file,
         &mut results,
     );
+    populate_misplaced_directive_findings(
+        graph,
+        modules,
+        config,
+        &declared_deps,
+        &suppressions,
+        &line_offsets_by_file,
+        &mut results,
+    );
 
     results.sort();
 
@@ -789,6 +800,33 @@ fn populate_mixed_client_server_barrel_findings(
     )
     .into_iter()
     .map(MixedClientServerBarrelFinding::with_actions)
+    .collect();
+}
+
+/// Populate `misplaced_directives` when the rule is enabled. Gated on the
+/// project declaring `next` inside the detector (see
+/// [`find_misplaced_directives`]).
+fn populate_misplaced_directive_findings(
+    graph: &ModuleGraph,
+    modules: &[ModuleInfo],
+    config: &ResolvedConfig,
+    declared_deps: &FxHashSet<String>,
+    suppressions: &SuppressionContext<'_>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+    results: &mut AnalysisResults,
+) {
+    if config.rules.misplaced_directive == Severity::Off {
+        return;
+    }
+    results.misplaced_directives = find_misplaced_directives(
+        graph,
+        modules,
+        declared_deps,
+        suppressions,
+        line_offsets_by_file,
+    )
+    .into_iter()
+    .map(MisplacedDirectiveFinding::with_actions)
     .collect();
 }
 
@@ -1715,6 +1753,7 @@ mod tests {
                 policy_violation: Severity::Off,
                 invalid_client_export: Severity::Off,
                 mixed_client_server_barrel: Severity::Off,
+                misplaced_directive: Severity::Off,
             };
             let config = make_config_with_rules(rules);
             let results = find_dead_code(&graph, &config);
@@ -1942,6 +1981,7 @@ mod tests {
                 sanitized_sink_args: Vec::new(),
                 security_control_sites: Vec::new(),
                 callee_uses: Vec::new(),
+                misplaced_directives: Vec::new(),
             }];
 
             let rules = RulesConfig {

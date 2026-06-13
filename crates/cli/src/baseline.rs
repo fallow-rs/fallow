@@ -126,6 +126,10 @@ pub struct BaselineData {
     /// Mixed client/server barrels, keyed by `path:client_origin:server_origin`.
     #[serde(default)]
     pub mixed_client_server_barrels: Vec<String>,
+    /// Misplaced `"use client"` / `"use server"` directives, keyed by
+    /// `path:line:directive`.
+    #[serde(default)]
+    pub misplaced_directives: Vec<String>,
 }
 
 impl BaselineData {
@@ -165,6 +169,7 @@ impl BaselineData {
             misconfigured_dependency_overrides: catalog.misconfigured_dependency_overrides,
             invalid_client_exports: file_exports.invalid_client_exports,
             mixed_client_server_barrels: file_exports.mixed_client_server_barrels,
+            misplaced_directives: file_exports.misplaced_directives,
         }
     }
 
@@ -198,6 +203,7 @@ impl BaselineData {
             + self.misconfigured_dependency_overrides.len()
             + self.invalid_client_exports.len()
             + self.mixed_client_server_barrels.len()
+            + self.misplaced_directives.len()
     }
 }
 
@@ -208,6 +214,7 @@ struct BaselineFileExportKeys {
     private_type_leaks: Vec<String>,
     invalid_client_exports: Vec<String>,
     mixed_client_server_barrels: Vec<String>,
+    misplaced_directives: Vec<String>,
 }
 
 fn baseline_file_export_keys(
@@ -274,6 +281,18 @@ fn baseline_file_export_keys(
                     relative_path(&b.barrel.path, root),
                     b.barrel.client_origin,
                     b.barrel.server_origin
+                )
+            })
+            .collect(),
+        misplaced_directives: results
+            .misplaced_directives
+            .iter()
+            .map(|d| {
+                format!(
+                    "{}:{}:{}",
+                    relative_path(&d.directive_site.path, root),
+                    d.directive_site.line,
+                    d.directive_site.directive
                 )
             })
             .collect(),
@@ -739,6 +758,7 @@ impl BaselineFilterContext<'_> {
         self.filter_stale_suppressions(results);
         self.filter_invalid_client_exports(results);
         self.filter_mixed_client_server_barrels(results);
+        self.filter_misplaced_directives(results);
     }
 
     fn filter_invalid_client_exports(&self, results: &mut fallow_core::results::AnalysisResults) {
@@ -776,6 +796,24 @@ impl BaselineFilterContext<'_> {
                 finding.barrel.server_origin
             );
             !baseline_barrels.contains(key.as_str())
+        });
+    }
+
+    fn filter_misplaced_directives(&self, results: &mut fallow_core::results::AnalysisResults) {
+        let baseline_directives: FxHashSet<&str> = self
+            .baseline
+            .misplaced_directives
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.misplaced_directives.retain(|finding| {
+            let key = format!(
+                "{}:{}:{}",
+                relative_path(&finding.directive_site.path, self.root),
+                finding.directive_site.line,
+                finding.directive_site.directive
+            );
+            !baseline_directives.contains(key.as_str())
         });
     }
 
@@ -1757,6 +1795,7 @@ mod tests {
             misconfigured_dependency_overrides: vec![],
             invalid_client_exports: vec![],
             mixed_client_server_barrels: vec![],
+            misplaced_directives: vec![],
         };
         let results = AnalysisResults {
             unused_files: vec![
@@ -1808,6 +1847,7 @@ mod tests {
             misconfigured_dependency_overrides: vec![],
             invalid_client_exports: vec![],
             mixed_client_server_barrels: vec![],
+            misplaced_directives: vec![],
         };
         let results = make_results();
         let filtered = filter_new_issues(results, &baseline, Path::new(""));
@@ -1846,6 +1886,7 @@ mod tests {
             misconfigured_dependency_overrides: vec![],
             invalid_client_exports: vec![],
             mixed_client_server_barrels: vec![],
+            misplaced_directives: vec![],
         };
         let results = AnalysisResults {
             unused_exports: vec![

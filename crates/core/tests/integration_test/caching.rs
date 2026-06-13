@@ -58,6 +58,7 @@ fn cache_roundtrip() {
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
     };
 
     store.insert(std::path::Path::new("test.ts"), cached);
@@ -274,6 +275,7 @@ fn incremental_cache_prune_stale_entries() {
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
     };
 
     store.insert(std::path::Path::new("/project/existing.ts"), make_module());

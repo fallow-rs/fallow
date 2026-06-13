@@ -63,6 +63,9 @@ def filter_check:
   (if .mixed_client_server_barrels then
     .mixed_client_server_barrels |= map(select(.path | in_changed))
   else . end) |
+  (if .misplaced_directives then
+    .misplaced_directives |= map(select(.path | in_changed))
+  else . end) |
   # Recalculate total_issues from filtered arrays
   (if .total_issues != null then
     .total_issues = (
@@ -92,7 +95,8 @@ def filter_check:
       (.unused_dependency_overrides // [] | length) +
       (.misconfigured_dependency_overrides // [] | length) +
       (.invalid_client_exports // [] | length) +
-      (.mixed_client_server_barrels // [] | length)
+      (.mixed_client_server_barrels // [] | length) +
+      (.misplaced_directives // [] | length)
     )
   else . end);
 

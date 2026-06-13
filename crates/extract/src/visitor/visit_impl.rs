@@ -14,11 +14,11 @@ use crate::{
     MemberAccess, ReExportInfo, RequireCallInfo, VisibilityTag,
 };
 use fallow_types::extract::{
-    CalleeUse, ClassHeritageInfo, LocalTypeDeclaration, PublicSignatureTypeReference,
-    SanitizedSinkArg, SanitizerScope, SecurityControlKind, SecurityControlSite, SecurityUrlShape,
-    SinkArgKind, SinkLiteralValue, SinkObjectProperty, SinkShape, SinkSite,
-    SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason, SkippedSecurityCalleeSite,
-    TaintedBinding,
+    CalleeUse, ClassHeritageInfo, LocalTypeDeclaration, MisplacedDirectiveSite,
+    PublicSignatureTypeReference, SanitizedSinkArg, SanitizerScope, SecurityControlKind,
+    SecurityControlSite, SecurityUrlShape, SinkArgKind, SinkLiteralValue, SinkObjectProperty,
+    SinkShape, SinkSite, SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason,
+    SkippedSecurityCalleeSite, TaintedBinding,
 };
 
 use crate::asset_url::normalize_asset_url;
@@ -2863,6 +2863,29 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         for directive in &program.directives {
             self.directives
                 .push(directive.directive.as_str().to_string());
+        }
+        // Detect MIS-POSITIONED `"use client"` / `"use server"` directives.
+        // oxc places honored leading-prologue directives in `program.directives`
+        // (handled above), so any string-literal expression statement found in
+        // `program.body` is by definition NOT in the leading position: a
+        // non-directive statement (an import, a const) preceded it and the RSC
+        // bundler parses the string as an ordinary expression, silently ignoring
+        // it. Match ONLY the two RSC directive strings; a stray `"use strict"`
+        // expression statement is harmless and out of scope.
+        for statement in &program.body {
+            if let Statement::ExpressionStatement(stmt) = statement
+                && let Expression::StringLiteral(lit) = &stmt.expression
+            {
+                let is_server = match lit.value.as_str() {
+                    "use server" => true,
+                    "use client" => false,
+                    _ => continue,
+                };
+                self.misplaced_directives.push(MisplacedDirectiveSite {
+                    is_server,
+                    span_start: stmt.span.start,
+                });
+            }
         }
         for statement in &program.body {
             match statement {

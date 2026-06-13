@@ -485,6 +485,10 @@ OUT_MCSB=$(jq '.mixed_client_server_barrels = [{"path": "src/index.ts", "line": 
 assert_contains "$OUT_MCSB" "Mixed client/server barrels" "mcsb: shows summary row and section"
 assert_contains "$OUT_MCSB" "./fetchUser" "mcsb: shows server origin in section"
 
+OUT_MD=$(jq '.misplaced_directives = [{"path": "src/widget.tsx", "line": 4, "col": 0, "directive": "use client", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$CI_JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_MD" "Misplaced directives" "md: shows summary row and section"
+assert_contains "$OUT_MD" "use client" "md: shows directive in section"
+
 OUT_CLEAN=$(jq -r -f "$CI_JQ_DIR/summary-check.jq" "$FIXTURES/check-clean.json" 2>&1)
 assert_contains "$OUT_CLEAN" "No issues found" "clean: shows no issues"
 

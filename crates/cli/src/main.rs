@@ -3197,6 +3197,10 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
                     // the field exists for the same parity reason. The rule still
                     // runs and reports by default.
                     mixed_client_server_barrels: false,
+                    // No dedicated `--misplaced-directives` filter flag yet; the
+                    // field exists for the same parity reason. The rule still runs
+                    // and reports by default.
+                    misplaced_directives: false,
                 },
                 trace_opts: TraceOptions {
                     trace_export: trace,

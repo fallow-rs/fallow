@@ -417,6 +417,7 @@ pub(crate) fn parse_css_to_module(
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
     }
 }
 

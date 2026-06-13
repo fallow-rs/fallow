@@ -152,6 +152,10 @@ pub struct CheckSummary {
     /// server-only origin.
     #[serde(default)]
     pub mixed_client_server_barrels: usize,
+    /// Mis-positioned `"use client"` / `"use server"` directives written as
+    /// expression statements after a non-directive statement.
+    #[serde(default)]
+    pub misplaced_directives: usize,
 }
 
 /// Per-category delta comparison against a saved baseline. Only present in

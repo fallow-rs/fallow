@@ -344,7 +344,13 @@ use crate::MemberKind;
 /// `client_only_dynamic_import_spans`, so warm caches written before the bump
 /// miss the ssr:false client-only escape hatch the `client-server-leak` BFS uses
 /// to exclude that edge.
-pub(super) const CACHE_VERSION: u32 = 151;
+///
+/// Bumped to 152 for the `misplaced-directive` detector: JS/TS extraction now
+/// records `"use client"` / `"use server"` directive strings written as
+/// expression statements in `program.body` (mis-positioned) on
+/// `misplaced_directives`, so warm caches written before the bump would report
+/// zero misplaced-directive findings.
+pub(super) const CACHE_VERSION: u32 = 152;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -391,7 +397,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 832);
+assert_cached_type_size!(CachedModule, 856);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 56);
@@ -406,6 +412,7 @@ assert_cached_type_size!(CachedMember, 64);
 assert_cached_type_size!(CachedDynamicImportPattern, 56);
 assert_cached_type_size!(crate::MemberAccess, 48);
 assert_cached_type_size!(fallow_types::extract::CalleeUse, 32);
+assert_cached_type_size!(fallow_types::extract::MisplacedDirectiveSite, 8);
 assert_cached_type_size!(fallow_types::extract::SinkSite, 216);
 assert_cached_type_size!(fallow_types::extract::FunctionComplexity, 96);
 assert_cached_type_size!(fallow_types::extract::ComplexityContribution, 16);
@@ -519,6 +526,10 @@ pub struct CachedModule {
     /// `boundaries.calls.forbidden` detector sees call sites on warm-cache
     /// loads.
     pub callee_uses: Vec<fallow_types::extract::CalleeUse>,
+    /// Mis-positioned `"use client"` / `"use server"` directive sites.
+    /// Round-trips so the `misplaced-directive` detector sees them on
+    /// warm-cache loads.
+    pub misplaced_directives: Vec<fallow_types::extract::MisplacedDirectiveSite>,
 }
 
 /// Cached namespace-object alias.

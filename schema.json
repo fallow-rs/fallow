@@ -174,7 +174,8 @@
         "security-sink": "off",
         "policy-violation": "warn",
         "invalid-client-export": "warn",
-        "mixed-client-server-barrel": "warn"
+        "mixed-client-server-barrel": "warn",
+        "misplaced-directive": "warn"
       }
     },
     "boundaries": {
@@ -1102,6 +1103,11 @@
           "description": "A barrel file that re-exports BOTH a `\"use client\"` origin module AND a\nserver-only origin module. Importing one name from such a barrel drags\nthe other's directive context across the React Server Components\nboundary (the Next.js App Router footgun). Defaults to `warn`.",
           "$ref": "#/$defs/Severity",
           "default": "warn"
+        },
+        "misplaced-directive": {
+          "description": "A `\"use client\"` / `\"use server\"` directive written as an expression\nstatement after a non-directive statement (an import, a const), so the\nRSC bundler parses it as an ordinary string and silently ignores it.\nThe intended client/server boundary never takes effect. Defaults to\n`warn`.",
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
         }
       }
     },
@@ -1804,6 +1810,16 @@
           ]
         },
         "mixed-client-server-barrel": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "misplaced-directive": {
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"

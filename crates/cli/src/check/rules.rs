@@ -145,6 +145,12 @@ fn apply_file_override_rules(
             .mixed_client_server_barrel
             != Severity::Off
     });
+    results.misplaced_directives.retain(|d| {
+        config
+            .resolve_rules_for_path(&d.directive_site.path)
+            .misplaced_directive
+            != Severity::Off
+    });
     results.circular_dependencies.retain(|c| {
         c.cycle
             .files
@@ -183,6 +189,9 @@ fn apply_base_file_rules(results: &mut fallow_core::results::AnalysisResults, ru
     }
     if rules.mixed_client_server_barrel == Severity::Off {
         results.mixed_client_server_barrels.clear();
+    }
+    if rules.misplaced_directive == Severity::Off {
+        results.misplaced_directives.clear();
     }
 }
 
@@ -321,6 +330,12 @@ fn has_override_file_scoped_error(
                 .mixed_client_server_barrel
                 == Severity::Error
         })
+        || results.misplaced_directives.iter().any(|d| {
+            config
+                .resolve_rules_for_path(&d.directive_site.path)
+                .misplaced_directive
+                == Severity::Error
+        })
 }
 
 fn has_default_file_scoped_error(
@@ -344,6 +359,8 @@ fn has_default_file_scoped_error(
             && !results.invalid_client_exports.is_empty())
         || (rules.mixed_client_server_barrel == Severity::Error
             && !results.mixed_client_server_barrels.is_empty())
+        || (rules.misplaced_directive == Severity::Error
+            && !results.misplaced_directives.is_empty())
 }
 
 fn has_project_level_error(
@@ -476,6 +493,9 @@ pub fn promote_warns_to_errors(rules: &mut RulesConfig) {
     }
     if rules.mixed_client_server_barrel == Severity::Warn {
         rules.mixed_client_server_barrel = Severity::Error;
+    }
+    if rules.misplaced_directive == Severity::Warn {
+        rules.misplaced_directive = Severity::Error;
     }
 }
 
@@ -718,6 +738,7 @@ mod tests {
             policy_violation: Severity::Warn,
             invalid_client_export: Severity::Warn,
             mixed_client_server_barrel: Severity::Warn,
+            misplaced_directive: Severity::Warn,
         };
         let config = config_with_rules(rules);
         apply_rules(&mut results, &config);
@@ -834,6 +855,7 @@ mod tests {
             policy_violation: Severity::Warn,
             invalid_client_export: Severity::Warn,
             mixed_client_server_barrel: Severity::Warn,
+            misplaced_directive: Severity::Warn,
         };
         assert!(!has_error_severity_issues(&results, &rules, None));
     }
@@ -877,6 +899,7 @@ mod tests {
             policy_violation: Severity::Warn,
             invalid_client_export: Severity::Warn,
             mixed_client_server_barrel: Severity::Warn,
+            misplaced_directive: Severity::Warn,
         };
         assert!(!has_error_severity_issues(&results, &rules, None));
 
@@ -1341,6 +1364,7 @@ mod tests {
             policy_violation: Severity::Warn,
             invalid_client_export: Severity::Warn,
             mixed_client_server_barrel: Severity::Warn,
+            misplaced_directive: Severity::Warn,
         };
         promote_warns_to_errors(&mut rules);
 
@@ -1396,6 +1420,7 @@ mod tests {
             policy_violation: Severity::Warn,
             invalid_client_export: Severity::Warn,
             mixed_client_server_barrel: Severity::Warn,
+            misplaced_directive: Severity::Warn,
         };
         promote_warns_to_errors(&mut rules);
 

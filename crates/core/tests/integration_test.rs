@@ -102,6 +102,8 @@ mod config_file_loading;
 mod css_modules_unused;
 #[path = "integration_test/invalid_client_exports.rs"]
 mod invalid_client_exports;
+#[path = "integration_test/misplaced_directive.rs"]
+mod misplaced_directive;
 #[path = "integration_test/mixed_client_server_barrel.rs"]
 mod mixed_client_server_barrel;
 #[path = "integration_test/policy_violations.rs"]

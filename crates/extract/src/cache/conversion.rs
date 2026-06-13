@@ -501,6 +501,7 @@ pub fn cached_to_module_opts(
         sanitized_sink_args: cached.sanitized_sink_args.clone(),
         security_control_sites: cached.security_control_sites.clone(),
         callee_uses: cached.callee_uses.clone(),
+        misplaced_directives: cached.misplaced_directives.clone(),
     }
 }
 
@@ -562,5 +563,6 @@ pub fn module_to_cached(
         sanitized_sink_args: module.sanitized_sink_args.clone(),
         security_control_sites: module.security_control_sites.clone(),
         callee_uses: module.callee_uses.clone(),
+        misplaced_directives: module.misplaced_directives.clone(),
     }
 }

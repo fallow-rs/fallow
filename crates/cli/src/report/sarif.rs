@@ -6,11 +6,11 @@ use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::{
     AnalysisResults, BoundaryCallViolation, BoundaryCoverageViolation, BoundaryViolation,
     CircularDependency, DuplicateExportFinding, EmptyCatalogGroupFinding, InvalidClientExport,
-    MisconfiguredDependencyOverrideFinding, MixedClientServerBarrel, PolicyViolation,
-    PolicyViolationSeverity, PrivateTypeLeak, StaleSuppression, TestOnlyDependency,
-    TypeOnlyDependency, UnlistedDependencyFinding, UnresolvedCatalogReferenceFinding,
-    UnresolvedImport, UnusedCatalogEntryFinding, UnusedDependency, UnusedDependencyOverrideFinding,
-    UnusedExport, UnusedFile, UnusedMember,
+    MisconfiguredDependencyOverrideFinding, MisplacedDirective, MixedClientServerBarrel,
+    PolicyViolation, PolicyViolationSeverity, PrivateTypeLeak, StaleSuppression,
+    TestOnlyDependency, TypeOnlyDependency, UnlistedDependencyFinding,
+    UnresolvedCatalogReferenceFinding, UnresolvedImport, UnusedCatalogEntryFinding,
+    UnusedDependency, UnusedDependencyOverrideFinding, UnusedExport, UnusedFile, UnusedMember,
 };
 use rustc_hash::FxHashMap;
 
@@ -539,6 +539,25 @@ fn sarif_mixed_client_server_barrel_fields(
     }
 }
 
+fn sarif_misplaced_directive_fields(
+    directive_site: &MisplacedDirective,
+    root: &Path,
+    level: &'static str,
+) -> SarifFields {
+    SarifFields {
+        rule_id: "fallow/misplaced-directive",
+        level,
+        message: format!(
+            "Directive \"{}\" is not in the leading position, so the RSC bundler ignores it; move it to the top of the file",
+            directive_site.directive
+        ),
+        uri: relative_uri(&directive_site.path, root),
+        region: Some((directive_site.line, directive_site.col + 1)),
+        source_path: Some(directive_site.path.clone()),
+        properties: None,
+    }
+}
+
 fn sarif_stale_suppression_fields(
     suppression: &StaleSuppression,
     root: &Path,
@@ -892,6 +911,11 @@ fn sarif_graph_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
             rules.mixed_client_server_barrel,
         ),
         (
+            "fallow/misplaced-directive",
+            "\"use client\" / \"use server\" directive is not in the leading position and is ignored",
+            rules.misplaced_directive,
+        ),
+        (
             "fallow/stale-suppression",
             "Suppression comment or tag no longer matches any issue",
             rules.stale_suppressions,
@@ -1233,6 +1257,18 @@ fn push_graph_sarif_results(
                 &b.barrel,
                 root,
                 severity_to_sarif_level(rules.mixed_client_server_barrel),
+            )
+        },
+    );
+    push_sarif_results(
+        sarif_results,
+        &results.misplaced_directives,
+        snippets,
+        |d| {
+            sarif_misplaced_directive_fields(
+                &d.directive_site,
+                root,
+                severity_to_sarif_level(rules.misplaced_directive),
             )
         },
     );
@@ -1993,7 +2029,7 @@ mod tests {
         let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
             .as_array()
             .expect("rules should be an array");
-        assert_eq!(rules.len(), 28);
+        assert_eq!(rules.len(), 29);
 
         let rule_ids: Vec<&str> = rules.iter().map(|r| r["id"].as_str().unwrap()).collect();
         assert!(rule_ids.contains(&"fallow/unused-file"));
@@ -2023,6 +2059,7 @@ mod tests {
         assert!(rule_ids.contains(&"fallow/misconfigured-dependency-override"));
         assert!(rule_ids.contains(&"fallow/invalid-client-export"));
         assert!(rule_ids.contains(&"fallow/mixed-client-server-barrel"));
+        assert!(rule_ids.contains(&"fallow/misplaced-directive"));
     }
 
     #[test]

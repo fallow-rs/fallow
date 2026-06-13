@@ -15,9 +15,9 @@ use crate::{
     MemberAccess, MemberInfo, MemberKind, ModuleInfo, ReExportInfo, RequireCallInfo, VisibilityTag,
 };
 use fallow_types::extract::{
-    CalleeUse, ClassHeritageInfo, LocalTypeDeclaration, PublicSignatureTypeReference,
-    SanitizedSinkArg, SanitizerScope, SecurityControlSite, SinkLiteralValue, SinkSite,
-    SkippedSecurityCalleeSite, TaintedBinding,
+    CalleeUse, ClassHeritageInfo, LocalTypeDeclaration, MisplacedDirectiveSite,
+    PublicSignatureTypeReference, SanitizedSinkArg, SanitizerScope, SecurityControlSite,
+    SinkLiteralValue, SinkSite, SkippedSecurityCalleeSite, TaintedBinding,
 };
 use helpers::LitCustomElementDecorator;
 
@@ -223,6 +223,11 @@ pub(crate) struct ModuleInfoExtractor {
     /// the detector matches per unique path, so cross-block duplicates only
     /// cost one extra entry).
     pub(crate) seen_callee_paths: FxHashSet<String>,
+    /// `"use client"` / `"use server"` directive strings written as expression
+    /// statements in `program.body` (mis-positioned, NOT in the leading
+    /// prologue), so the RSC bundler silently ignores them. Captured by
+    /// `visit_program` and consumed by the `misplaced-directive` detector.
+    pub(crate) misplaced_directives: Vec<MisplacedDirectiveSite>,
     /// Module-scope default, namespace, or require bindings imported from
     /// DOMPurify-compatible packages.
     pub(crate) dompurify_bindings: FxHashSet<String>,
@@ -929,6 +934,7 @@ impl ModuleInfoExtractor {
             sanitized_sink_args: self.sanitized_sink_args,
             security_control_sites: self.security_control_sites,
             callee_uses: self.callee_uses,
+            misplaced_directives: self.misplaced_directives,
         }
     }
 
@@ -985,6 +991,7 @@ impl ModuleInfoExtractor {
         info.security_control_sites
             .extend(self.security_control_sites);
         info.callee_uses.extend(self.callee_uses);
+        info.misplaced_directives.extend(self.misplaced_directives);
     }
 }
 

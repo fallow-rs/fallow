@@ -94,6 +94,11 @@ pub enum IssueKind {
     /// server-only origin module (Next.js App Router footgun: one import drags
     /// the other's directive context across the boundary).
     MixedClientServerBarrel,
+    /// A `"use client"` / `"use server"` directive string written as an
+    /// expression statement after a non-directive statement (an import, a
+    /// const). It is no longer in the leading prologue, so the RSC bundler
+    /// parses it as an ordinary string and silently ignores it.
+    MisplacedDirective,
 }
 
 impl IssueKind {
@@ -144,6 +149,7 @@ impl IssueKind {
             "mixed-client-server-barrel" | "mixed-client-server-barrels" => {
                 Some(Self::MixedClientServerBarrel)
             }
+            "misplaced-directive" | "misplaced-directives" => Some(Self::MisplacedDirective),
             _ => None,
         }
     }
@@ -183,6 +189,7 @@ impl IssueKind {
             Self::PolicyViolation => 29,
             Self::InvalidClientExport => 30,
             Self::MixedClientServerBarrel => 31,
+            Self::MisplacedDirective => 32,
         }
     }
 
@@ -221,6 +228,7 @@ impl IssueKind {
             29 => Some(Self::PolicyViolation),
             30 => Some(Self::InvalidClientExport),
             31 => Some(Self::MixedClientServerBarrel),
+            32 => Some(Self::MisplacedDirective),
             _ => None,
         }
     }
@@ -319,6 +327,7 @@ pub const fn issue_kind_to_kebab(kind: IssueKind) -> &'static str {
         IssueKind::PolicyViolation => "policy-violation",
         IssueKind::InvalidClientExport => "invalid-client-export",
         IssueKind::MixedClientServerBarrel => "mixed-client-server-barrel",
+        IssueKind::MisplacedDirective => "misplaced-directive",
     }
 }
 
@@ -555,6 +564,8 @@ pub const KNOWN_ISSUE_KIND_NAMES: &[&str] = &[
     "invalid-client-exports",
     "mixed-client-server-barrel",
     "mixed-client-server-barrels",
+    "misplaced-directive",
+    "misplaced-directives",
 ];
 
 /// CLI filter flags on `fallow dead-code` that scope output to a single
@@ -814,6 +825,14 @@ mod tests {
             IssueKind::parse("mixed-client-server-barrels"),
             Some(IssueKind::MixedClientServerBarrel)
         );
+        assert_eq!(
+            IssueKind::parse("misplaced-directive"),
+            Some(IssueKind::MisplacedDirective)
+        );
+        assert_eq!(
+            IssueKind::parse("misplaced-directives"),
+            Some(IssueKind::MisplacedDirective)
+        );
     }
 
     #[test]
@@ -845,7 +864,11 @@ mod tests {
             IssueKind::from_discriminant(31),
             Some(IssueKind::MixedClientServerBarrel)
         );
-        assert_eq!(IssueKind::from_discriminant(32), None);
+        assert_eq!(
+            IssueKind::from_discriminant(32),
+            Some(IssueKind::MisplacedDirective)
+        );
+        assert_eq!(IssueKind::from_discriminant(33), None);
         assert_eq!(IssueKind::from_discriminant(u8::MAX), None);
     }
 
@@ -883,6 +906,7 @@ mod tests {
             IssueKind::PolicyViolation,
             IssueKind::InvalidClientExport,
             IssueKind::MixedClientServerBarrel,
+            IssueKind::MisplacedDirective,
         ] {
             assert_eq!(
                 IssueKind::from_discriminant(kind.to_discriminant()),
@@ -890,7 +914,7 @@ mod tests {
             );
         }
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(32), None);
+        assert_eq!(IssueKind::from_discriminant(33), None);
     }
 
     #[test]
@@ -927,6 +951,7 @@ mod tests {
             IssueKind::PolicyViolation,
             IssueKind::InvalidClientExport,
             IssueKind::MixedClientServerBarrel,
+            IssueKind::MisplacedDirective,
         ];
         let discriminants: Vec<u8> = all_kinds.iter().map(|k| k.to_discriminant()).collect();
         let mut sorted = discriminants.clone();

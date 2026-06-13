@@ -1257,6 +1257,7 @@ fn build_policy_section(
     if results.policy_violations.is_empty()
         && results.invalid_client_exports.is_empty()
         && results.mixed_client_server_barrels.is_empty()
+        && results.misplaced_directives.is_empty()
     {
         return;
     }
@@ -1288,6 +1289,19 @@ fn build_policy_section(
         },
         format_detail: &format_mixed_client_server_barrel,
     });
+
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.misplaced_directives,
+        title: "Misplaced directives",
+        level: severity_to_level(rules.misplaced_directive),
+        root,
+        max_files: MAX_FLAT_ITEMS,
+        get_path: |d: &fallow_types::output_dead_code::MisplacedDirectiveFinding| {
+            d.directive_site.path.as_path()
+        },
+        format_detail: &format_misplaced_directive,
+    });
 }
 
 fn format_invalid_client_export(
@@ -1312,6 +1326,21 @@ fn format_mixed_client_server_barrel(
         format!(
             "re-exports client \"{}\" and server-only \"{}\"",
             b.client_origin, b.server_origin
+        )
+        .dimmed(),
+    )
+}
+
+fn format_misplaced_directive(
+    entry: &fallow_types::output_dead_code::MisplacedDirectiveFinding,
+) -> String {
+    let d = &entry.directive_site;
+    format!(
+        "{} {}",
+        format!(":{}", d.line).dimmed(),
+        format!(
+            "\"{}\" is not in the leading position and is ignored",
+            d.directive
         )
         .dimmed(),
     )
@@ -2061,6 +2090,9 @@ fn collect_matching_rules(
     }
     for e in &results.invalid_client_exports {
         check(&e.export.path);
+    }
+    for d in &results.misplaced_directives {
+        check(&d.directive_site.path);
     }
     for s in &results.stale_suppressions {
         check(&s.path);

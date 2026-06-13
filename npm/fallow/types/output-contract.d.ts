@@ -1067,6 +1067,14 @@ invalid_client_exports?: InvalidClientExportFinding[]
  * `actions` array natively. Default severity is `warn`.
  */
 mixed_client_server_barrels?: MixedClientServerBarrelFinding[]
+/**
+ * `"use client"` / `"use server"` directives written as expression
+ * statements after a non-directive statement, so the RSC bundler parses
+ * them as ordinary strings and silently ignores them. Wrapped in
+ * [`MisplacedDirectiveFinding`] so each entry carries a typed `actions`
+ * array natively. Default severity is `warn`.
+ */
+misplaced_directives?: MisplacedDirectiveFinding[]
 baseline_deltas?: (BaselineDeltas | null)
 baseline?: (BaselineMatch | null)
 regression?: (RegressionResult | null)
@@ -1222,6 +1230,11 @@ invalid_client_exports?: number
  * server-only origin.
  */
 mixed_client_server_barrels?: number
+/**
+ * Mis-positioned `"use client"` / `"use server"` directives written as
+ * expression statements after a non-directive statement.
+ */
+misplaced_directives?: number
 }
 /**
  * Wire-shape envelope for an [`UnusedFile`] finding. The bare finding
@@ -2490,6 +2503,42 @@ server_origin: string
 line: number
 /**
  * 0-based byte column offset of the barrel's first offending re-export.
+ */
+col: number
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+}
+/**
+ * Wire-shape envelope for a [`MisplacedDirective`] finding. There is no safe
+ * auto-fix: moving a directive to the leading prologue is a small but
+ * judgement-bearing edit (the author may have intended the file to be a
+ * server module after all). The only action is a line-level suppress; the
+ * real fix is to hoist the directive to the very top of the file.
+ */
+export interface MisplacedDirectiveFinding {
+/**
+ * The file carrying the mis-positioned directive.
+ */
+path: string
+/**
+ * The directive string as written, either `"use client"` or
+ * `"use server"` (without the surrounding quotes).
+ */
+directive: string
+/**
+ * 1-based line number of the mis-positioned directive statement.
+ */
+line: number
+/**
+ * 0-based byte column offset of the mis-positioned directive statement.
  */
 col: number
 /**
@@ -5336,6 +5385,14 @@ invalid_client_exports?: InvalidClientExportFinding[]
  * `actions` array natively. Default severity is `warn`.
  */
 mixed_client_server_barrels?: MixedClientServerBarrelFinding[]
+/**
+ * `"use client"` / `"use server"` directives written as expression
+ * statements after a non-directive statement, so the RSC bundler parses
+ * them as ordinary strings and silently ignores them. Wrapped in
+ * [`MisplacedDirectiveFinding`] so each entry carries a typed `actions`
+ * array natively. Default severity is `warn`.
+ */
+misplaced_directives?: MisplacedDirectiveFinding[]
 }
 /**
  * The rendered impact report, derived purely from the store (no analysis run).

@@ -1114,6 +1114,7 @@ mod tests {
             sanitized_sink_args: Vec::new(),
             security_control_sites: Vec::new(),
             callee_uses: Vec::new(),
+            misplaced_directives: Vec::new(),
             complexity: vec![fallow_types::extract::FunctionComplexity {
                 name: format!("fn_{id}"),
                 line: id + 1,

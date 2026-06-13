@@ -534,6 +534,9 @@ fn to_issue_filters(filters: &DeadCodeFilters) -> IssueFilters {
         // No programmatic filter for mixed-client-server-barrels yet; the rule
         // runs and reports by default. Field exists for clear-parity only.
         mixed_client_server_barrels: false,
+        // No programmatic filter for misplaced-directives yet; the rule runs and
+        // reports by default. Field exists for clear-parity only.
+        misplaced_directives: false,
     }
 }
 

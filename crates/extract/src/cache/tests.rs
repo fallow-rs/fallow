@@ -95,6 +95,7 @@ fn cache_store_insert_and_get() {
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
     };
     store.insert(Path::new("test.ts"), module);
     assert_eq!(store.len(), 1);
@@ -146,6 +147,7 @@ fn cache_store_hash_mismatch_returns_none() {
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
     };
     store.insert(Path::new("test.ts"), module);
     assert!(store.get(Path::new("test.ts"), 99).is_none());
@@ -201,6 +203,7 @@ fn cache_store_overwrite_entry() {
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
     };
     let m2 = CachedModule {
         content_hash: 2,
@@ -243,6 +246,7 @@ fn cache_store_overwrite_entry() {
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
     };
     store.insert(Path::new("test.ts"), m1);
     store.insert(Path::new("test.ts"), m2);
@@ -301,6 +305,7 @@ fn module_to_cached_roundtrip_named_export() {
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -379,6 +384,7 @@ fn module_to_cached_roundtrip_side_effect_used_export() {
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -442,6 +448,7 @@ fn module_to_cached_roundtrip_default_export() {
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -528,6 +535,7 @@ fn module_to_cached_roundtrip_imports() {
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -598,6 +606,7 @@ fn module_to_cached_roundtrip_re_exports() {
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -666,6 +675,7 @@ fn module_to_cached_roundtrip_dynamic_imports() {
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -763,6 +773,7 @@ fn module_to_cached_roundtrip_members() {
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -839,6 +850,7 @@ fn cache_save_and_load_roundtrip() {
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
     };
     store.insert(Path::new("test.ts"), module);
     store.save(&dir, 0, DEFAULT_CACHE_MAX_SIZE).unwrap();
@@ -901,6 +913,7 @@ fn cache_version_mismatch_returns_none() {
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
     };
     store.insert(Path::new("test.ts"), module);
     store.save(&dir, 0, DEFAULT_CACHE_MAX_SIZE).unwrap();
@@ -968,6 +981,7 @@ fn module_to_cached_roundtrip_type_only_import() {
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1022,6 +1036,7 @@ fn get_by_path_only_returns_entry_regardless_of_hash() {
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
     };
     store.insert(Path::new("test.ts"), module);
 
@@ -1087,6 +1102,7 @@ fn retain_paths_removes_stale_entries() {
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
     };
 
     store.insert(Path::new("/project/a.ts"), m());
@@ -1158,6 +1174,7 @@ fn retain_paths_with_empty_files_clears_cache() {
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
     };
     store.insert(Path::new("a.ts"), m);
     assert_eq!(store.len(), 1);
@@ -1210,6 +1227,7 @@ fn get_by_metadata_returns_entry_on_match() {
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
     };
     store.insert(Path::new("test.ts"), module);
 
@@ -1262,6 +1280,7 @@ fn get_by_metadata_returns_none_on_mtime_mismatch() {
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
     };
     store.insert(Path::new("test.ts"), module);
 
@@ -1316,6 +1335,7 @@ fn get_by_metadata_returns_none_on_size_mismatch() {
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
     };
     store.insert(Path::new("test.ts"), module);
 
@@ -1370,6 +1390,7 @@ fn get_by_metadata_returns_none_for_zero_mtime() {
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
     };
     store.insert(Path::new("test.ts"), module);
 
@@ -1431,6 +1452,7 @@ fn module_to_cached_stores_mtime_and_size() {
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 12345, 6789);
@@ -1480,6 +1502,7 @@ fn module_to_cached_roundtrip_line_offsets() {
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
     };
     let cached = module_to_cached(&module, 0, 0);
     let restored = cached_to_module(&cached, FileId(0));
@@ -1534,6 +1557,7 @@ fn module_to_cached_roundtrip_suppressions_with_kinds() {
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1614,6 +1638,7 @@ fn module_to_cached_roundtrip_unknown_suppression_kinds() {
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1681,6 +1706,7 @@ fn module_to_cached_roundtrip_visibility() {
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1739,6 +1765,7 @@ fn module_to_cached_roundtrip_visibility_internal() {
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1797,6 +1824,7 @@ fn module_to_cached_roundtrip_visibility_beta() {
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1855,6 +1883,7 @@ fn module_to_cached_roundtrip_visibility_alpha() {
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1915,6 +1944,7 @@ fn module_to_cached_roundtrip_dynamic_import_patterns() {
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1973,6 +2003,7 @@ fn module_to_cached_roundtrip_unused_import_bindings() {
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -2058,6 +2089,7 @@ fn module_to_cached_roundtrip_complexity() {
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -2120,6 +2152,7 @@ fn module_to_cached_roundtrip_require_with_destructured() {
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -2181,6 +2214,7 @@ fn module_to_cached_roundtrip_dynamic_import_with_local() {
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -2241,6 +2275,7 @@ fn module_to_cached_roundtrip_source_span() {
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -2308,6 +2343,7 @@ fn module_to_cached_roundtrip_member_decorators() {
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -2364,6 +2400,7 @@ fn synthetic_module(content_hash: u64, last_access_secs: u64, payload_kb: usize)
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
     }
 }
 

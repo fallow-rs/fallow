@@ -360,6 +360,14 @@ impl<'a> CompactLineBuilder<'a> {
                 finding.barrel.server_origin,
             ));
         }
+        for finding in &self.results.misplaced_directives {
+            self.lines.push(format!(
+                "misplaced-directive:{}:{}:{}",
+                self.rel(&finding.directive_site.path),
+                finding.directive_site.line,
+                finding.directive_site.directive,
+            ));
+        }
         for suppression in &self.results.stale_suppressions {
             self.lines
                 .push(compact_stale_suppression_line(suppression, self.root));

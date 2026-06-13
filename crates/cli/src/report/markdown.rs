@@ -253,6 +253,12 @@ fn push_markdown_graph_sections(
     );
     markdown_section(
         out,
+        &results.misplaced_directives,
+        "Misplaced directives",
+        |d| format_markdown_misplaced_directive(d, rel),
+    );
+    markdown_section(
+        out,
         &results.stale_suppressions,
         "Stale suppressions",
         |s| {
@@ -393,6 +399,18 @@ fn format_markdown_mixed_client_server_barrel(
         b.barrel.line,
         b.barrel.client_origin,
         b.barrel.server_origin,
+    )]
+}
+
+fn format_markdown_misplaced_directive(
+    d: &fallow_core::results::MisplacedDirectiveFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    vec![format!(
+        "- `{}`:{} `\"{}\"` is not in the leading position and is ignored",
+        rel(&d.directive_site.path),
+        d.directive_site.line,
+        d.directive_site.directive,
     )]
 }
 

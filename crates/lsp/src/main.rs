@@ -236,6 +236,11 @@ const DIAGNOSTIC_ISSUE_TYPES: &[DiagnosticIssueType] = &[
         label: "Mixed Client/Server Barrels",
     },
     DiagnosticIssueType {
+        config_key: Some("misplaced-directive"),
+        code: "misplaced-directive",
+        label: "Misplaced Directives",
+    },
+    DiagnosticIssueType {
         config_key: Some("stale-suppressions"),
         code: "stale-suppression",
         label: "Stale Suppressions",
@@ -2585,6 +2590,16 @@ export function choose(value: number): string {
                     },
                 ),
             ],
+            misplaced_directives: vec![
+                fallow_core::results::MisplacedDirectiveFinding::with_actions(
+                    fallow_core::results::MisplacedDirective {
+                        path: "/app/widget.tsx".into(),
+                        directive: "use client".to_string(),
+                        line: 24,
+                        col: 0,
+                    },
+                ),
+            ],
             suppression_count: 1,
             active_suppressions: Vec::new(),
             feature_flags: vec![fallow_core::results::FeatureFlag {
@@ -2675,6 +2690,7 @@ export function choose(value: number): string {
         assert_eq!(target.misconfigured_dependency_overrides.len(), 1);
         assert_eq!(target.invalid_client_exports.len(), 1);
         assert_eq!(target.mixed_client_server_barrels.len(), 1);
+        assert_eq!(target.misplaced_directives.len(), 1);
         assert_eq!(target.export_usages.len(), 1);
         assert_eq!(target.feature_flags.len(), 1);
         assert_eq!(target.security_findings.len(), 1);

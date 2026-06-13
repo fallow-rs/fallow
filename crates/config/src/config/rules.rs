@@ -157,6 +157,13 @@ pub struct RulesConfig {
         alias = "mixed-client-server-barrels"
     )]
     pub mixed_client_server_barrel: Severity,
+    /// A `"use client"` / `"use server"` directive written as an expression
+    /// statement after a non-directive statement (an import, a const), so the
+    /// RSC bundler parses it as an ordinary string and silently ignores it.
+    /// The intended client/server boundary never takes effect. Defaults to
+    /// `warn`.
+    #[serde(default = "Severity::default_warn", alias = "misplaced-directives")]
+    pub misplaced_directive: Severity,
 }
 
 impl Default for RulesConfig {
@@ -192,6 +199,7 @@ impl Default for RulesConfig {
             policy_violation: Severity::Warn,
             invalid_client_export: Severity::Warn,
             mixed_client_server_barrel: Severity::Warn,
+            misplaced_directive: Severity::Warn,
         }
     }
 }
@@ -288,6 +296,9 @@ impl RulesConfig {
         }
         if let Some(s) = partial.mixed_client_server_barrel {
             self.mixed_client_server_barrel = s;
+        }
+        if let Some(s) = partial.misplaced_directive {
+            self.misplaced_directive = s;
         }
     }
 }
@@ -470,6 +481,12 @@ pub struct PartialRulesConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub mixed_client_server_barrel: Option<Severity>,
+    #[serde(
+        default,
+        alias = "misplaced-directives",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub misplaced_directive: Option<Severity>,
 }
 
 /// Every rule name accepted by `RulesConfig` deserialization, in kebab-case.
@@ -514,6 +531,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "policy-violations",
     "invalid-client-export",
     "mixed-client-server-barrel",
+    "misplaced-directive",
     "unused-file",
     "unused-export",
     "unused-type",
@@ -543,6 +561,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "misconfigured-dependency-override",
     "invalid-client-exports",
     "mixed-client-server-barrels",
+    "misplaced-directives",
 ];
 
 /// Find the closest known rule name to `input` when it is plausibly a typo.
@@ -837,6 +856,7 @@ mod tests {
             policy_violation: Some(Severity::Off),
             invalid_client_export: Some(Severity::Off),
             mixed_client_server_barrel: Some(Severity::Off),
+            misplaced_directive: Some(Severity::Off),
         };
         rules.apply_partial(&partial);
         assert_eq!(rules.unused_files, Severity::Off);
@@ -852,6 +872,7 @@ mod tests {
         assert_eq!(rules.policy_violation, Severity::Off);
         assert_eq!(rules.invalid_client_export, Severity::Off);
         assert_eq!(rules.mixed_client_server_barrel, Severity::Off);
+        assert_eq!(rules.misplaced_directive, Severity::Off);
     }
 
     #[test]
@@ -895,7 +916,7 @@ mod tests {
 
     #[test]
     fn known_rule_names_count_matches_struct() {
-        assert_eq!(KNOWN_RULE_NAMES.len(), 60);
+        assert_eq!(KNOWN_RULE_NAMES.len(), 62);
     }
 
     #[test]
@@ -936,8 +957,8 @@ mod tests {
 
         assert_eq!(
             aliases_found.len(),
-            60,
-            "expected 60 source-level alias attrs (30 per struct); got {}: {:?}",
+            62,
+            "expected 62 source-level alias attrs (31 per struct); got {}: {:?}",
             aliases_found.len(),
             aliases_found
         );

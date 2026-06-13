@@ -334,6 +334,11 @@ where
                 .mixed_client_server_barrels
                 .push(item.clone());
         }
+        for item in &results.misplaced_directives {
+            self.entry_for_path(&item.directive_site.path)
+                .misplaced_directives
+                .push(item.clone());
+        }
         for item in &results.stale_suppressions {
             self.entry_for_path(&item.path)
                 .stale_suppressions

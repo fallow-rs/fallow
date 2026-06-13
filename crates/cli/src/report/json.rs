@@ -275,6 +275,7 @@ fn build_check_summary(results: &AnalysisResults) -> CheckSummary {
         misconfigured_dependency_overrides: results.misconfigured_dependency_overrides.len(),
         invalid_client_exports: results.invalid_client_exports.len(),
         mixed_client_server_barrels: results.mixed_client_server_barrels.len(),
+        misplaced_directives: results.misplaced_directives.len(),
     }
 }
 

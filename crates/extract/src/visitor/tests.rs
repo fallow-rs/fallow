@@ -6224,3 +6224,63 @@ fn ts_import_type_inside_declare_module_augmentation() {
     assert!(entry.is_type_only);
     assert!(matches!(entry.imported_name, ImportedName::SideEffect));
 }
+
+#[test]
+fn post_import_use_client_lands_in_misplaced_directives() {
+    // An import precedes the string, so oxc parses it as an expression statement
+    // in `program.body`, NOT a leading prologue directive.
+    let info = parse("import { x } from './x';\n\"use client\";\nexport const y = x;\n");
+
+    assert_eq!(
+        info.misplaced_directives.len(),
+        1,
+        "post-import \"use client\" must be captured as misplaced: {:?}",
+        info.misplaced_directives
+    );
+    assert!(
+        !info.misplaced_directives[0].is_server,
+        "\"use client\" is a client directive"
+    );
+    // It is NOT a honored prologue directive.
+    assert!(
+        !info.directives.iter().any(|d| d == "use client"),
+        "a mis-positioned directive must not appear in program.directives"
+    );
+}
+
+#[test]
+fn post_statement_use_server_lands_in_misplaced_directives() {
+    let info = parse("const a = 1;\n\"use server\";\nexport const b = a;\n");
+
+    assert_eq!(info.misplaced_directives.len(), 1);
+    assert!(
+        info.misplaced_directives[0].is_server,
+        "\"use server\" is a server directive"
+    );
+}
+
+#[test]
+fn leading_use_client_is_a_prologue_directive_not_misplaced() {
+    let info = parse("\"use client\";\nimport { x } from './x';\nexport const y = x;\n");
+
+    assert!(
+        info.misplaced_directives.is_empty(),
+        "a leading directive is honored and must not be flagged: {:?}",
+        info.misplaced_directives
+    );
+    assert!(
+        info.directives.iter().any(|d| d == "use client"),
+        "a leading directive lands in program.directives"
+    );
+}
+
+#[test]
+fn misplaced_use_strict_is_out_of_scope() {
+    let info = parse("import { x } from './x';\n\"use strict\";\nexport const y = x;\n");
+
+    assert!(
+        info.misplaced_directives.is_empty(),
+        "a misplaced \"use strict\" is harmless and out of scope: {:?}",
+        info.misplaced_directives
+    );
+}

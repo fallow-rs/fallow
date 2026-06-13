@@ -1,0 +1,6 @@
+{
+  "name": "misplaced-directive-no-next",
+  "dependencies": {
+    "react": "^18.0.0"
+  }
+}

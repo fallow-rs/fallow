@@ -300,6 +300,19 @@ expression: redact_sarif_version(&json_str)
               }
             },
             {
+              "id": "fallow/misplaced-directive",
+              "shortDescription": {
+                "text": "\"use client\" / \"use server\" directive is not in the leading position and is ignored"
+              },
+              "fullDescription": {
+                "text": "A `\"use client\"` or `\"use server\"` directive string appears as an expression statement after a non-directive statement (an `import`, a `const`). React Server Components bundlers only honor a directive in the leading prologue, before any other statement; once any statement precedes it the string is parsed as an ordinary expression and SILENTLY IGNORED. The intended client/server boundary never takes effect, so the file is treated as a server module. To fix: move the directive to the very top of the file, above every import. The check runs only when the project declares `next`."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#misplaced-directives",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
               "id": "fallow/stale-suppression",
               "shortDescription": {
                 "text": "Suppression comment or tag no longer matches any issue"

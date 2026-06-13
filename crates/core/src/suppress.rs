@@ -62,6 +62,7 @@ fn severity_for_kind(rules: &RulesConfig, kind: IssueKind) -> Severity {
         IssueKind::PolicyViolation => rules.policy_violation,
         IssueKind::InvalidClientExport => rules.invalid_client_export,
         IssueKind::MixedClientServerBarrel => rules.mixed_client_server_barrel,
+        IssueKind::MisplacedDirective => rules.misplaced_directive,
         IssueKind::Complexity | IssueKind::CodeDuplication => Severity::Error,
     }
 }
@@ -530,6 +531,7 @@ mod tests {
             IssueKind::PolicyViolation,
             IssueKind::InvalidClientExport,
             IssueKind::MixedClientServerBarrel,
+            IssueKind::MisplacedDirective,
         ] {
             assert_eq!(
                 IssueKind::from_discriminant(kind.to_discriminant()),
@@ -537,7 +539,7 @@ mod tests {
             );
         }
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(32), None);
+        assert_eq!(IssueKind::from_discriminant(33), None);
     }
 
     #[test]
