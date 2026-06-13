@@ -387,9 +387,19 @@ struct Cli {
     #[arg(long = "dupes-cross-language", global = true)]
     dupes_cross_language: bool,
 
-    /// Exclude import declarations from duplicate detection in combined mode.
+    /// Exclude import declarations from duplicate detection in combined mode
+    /// (default). Pass `--dupes-no-ignore-imports` to count them again.
     #[arg(long = "dupes-ignore-imports", global = true)]
     dupes_ignore_imports: bool,
+
+    /// Count import declarations as clone candidates in combined mode (opt out
+    /// of the default import exclusion).
+    #[arg(
+        long = "dupes-no-ignore-imports",
+        global = true,
+        conflicts_with = "dupes_ignore_imports"
+    )]
+    dupes_no_ignore_imports: bool,
 
     /// Compute health score in combined mode.
     #[arg(long)]
@@ -725,9 +735,16 @@ enum Command {
         #[arg(long)]
         cross_language: bool,
 
-        /// Exclude import declarations from clone detection (reduces noise from sorted import blocks)
+        /// Exclude import declarations from clone detection (default; reduces
+        /// noise from sorted import blocks). Pass `--no-ignore-imports` to
+        /// count them again.
         #[arg(long)]
         ignore_imports: bool,
+
+        /// Count import declarations as clone candidates (opt out of the
+        /// default import exclusion).
+        #[arg(long, conflicts_with = "ignore_imports")]
+        no_ignore_imports: bool,
 
         /// Show only the N most-duplicated clone groups (sorted by instance
         /// count descending, then line count descending)
@@ -2126,6 +2143,8 @@ fn unsupported_security_global(cli: &Cli) -> Option<&'static str> {
         Some("--dupes-cross-language")
     } else if cli.dupes_ignore_imports {
         Some("--dupes-ignore-imports")
+    } else if cli.dupes_no_ignore_imports {
+        Some("--dupes-no-ignore-imports")
     } else if cli.include_entry_exports {
         Some("--include-entry-exports")
     } else {
@@ -3037,7 +3056,10 @@ fn dispatch_bare_command(dispatch: &DispatchContext<'_>) -> ExitCode {
         dupes_min_occurrences: cli.dupes_min_occurrences,
         dupes_skip_local: cli.dupes_skip_local,
         dupes_cross_language: cli.dupes_cross_language,
-        dupes_ignore_imports: cli.dupes_ignore_imports,
+        dupes_ignore_imports: resolve_ignore_imports(
+            cli.dupes_ignore_imports,
+            cli.dupes_no_ignore_imports,
+        ),
         score: cli.score || cli.trend,
         trend: cli.trend,
         save_snapshot: cli.save_snapshot.as_ref(),
@@ -3201,6 +3223,7 @@ fn dispatch_dupes_command(command: Command, dispatch: &DispatchContext<'_>) -> E
         skip_local,
         cross_language,
         ignore_imports,
+        no_ignore_imports,
         top,
         trace,
     } = command
@@ -3219,6 +3242,7 @@ fn dispatch_dupes_command(command: Command, dispatch: &DispatchContext<'_>) -> E
             skip_local,
             cross_language,
             ignore_imports,
+            no_ignore_imports,
             top,
             trace,
         },
@@ -4064,6 +4088,21 @@ fn dispatch_check(dispatch: &DispatchContext<'_>, args: &CheckDispatchArgs) -> E
     })
 }
 
+/// Resolve the three-state `ignoreImports` CLI override from the opt-in /
+/// opt-out flag pair. clap's `conflicts_with` guarantees the two are never both
+/// set, so this maps `--no-ignore-imports` -> `Some(false)`, `--ignore-imports`
+/// -> `Some(true)`, and neither -> `None` (defer to config, which defaults to
+/// `true`).
+fn resolve_ignore_imports(ignore_imports: bool, no_ignore_imports: bool) -> Option<bool> {
+    if no_ignore_imports {
+        Some(false)
+    } else if ignore_imports {
+        Some(true)
+    } else {
+        None
+    }
+}
+
 struct DupesDispatchArgs {
     mode: Option<DupesMode>,
     min_tokens: Option<usize>,
@@ -4073,6 +4112,7 @@ struct DupesDispatchArgs {
     skip_local: bool,
     cross_language: bool,
     ignore_imports: bool,
+    no_ignore_imports: bool,
     top: Option<usize>,
     trace: Option<String>,
 }
@@ -4098,7 +4138,7 @@ fn dispatch_dupes(dispatch: &DispatchContext<'_>, args: &DupesDispatchArgs) -> E
         threshold: args.threshold,
         skip_local: args.skip_local,
         cross_language: args.cross_language,
-        ignore_imports: args.ignore_imports,
+        ignore_imports: resolve_ignore_imports(args.ignore_imports, args.no_ignore_imports),
         top: args.top,
         baseline_path: cli.baseline.as_deref(),
         save_baseline_path: cli.save_baseline.as_deref(),

@@ -56,7 +56,10 @@ pub struct CombinedOptions<'a> {
     pub dupes_min_occurrences: Option<usize>,
     pub dupes_skip_local: bool,
     pub dupes_cross_language: bool,
-    pub dupes_ignore_imports: bool,
+    /// CLI override for excluding import declarations from duplicate detection.
+    /// `None` defers to config (default `true`); `Some(false)` is the
+    /// `--dupes-no-ignore-imports` opt-out.
+    pub dupes_ignore_imports: Option<bool>,
     pub score: bool,
     pub trend: bool,
     pub save_snapshot: Option<&'a Option<String>>,
@@ -304,7 +307,9 @@ fn run_combined_dupes(
         threshold: Some(opts.dupes_threshold.unwrap_or(dupes_cfg.threshold)),
         skip_local: opts.dupes_skip_local || dupes_cfg.skip_local,
         cross_language: opts.dupes_cross_language || dupes_cfg.cross_language,
-        ignore_imports: opts.dupes_ignore_imports || dupes_cfg.ignore_imports,
+        // `None` defers to config inside `build_dupes_config`; an explicit
+        // `--dupes-no-ignore-imports` (`Some(false)`) overrides config.
+        ignore_imports: opts.dupes_ignore_imports,
         top: None,
         baseline_path: None,
         save_baseline_path: None,

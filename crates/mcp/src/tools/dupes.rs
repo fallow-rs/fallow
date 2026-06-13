@@ -54,8 +54,10 @@ pub fn build_find_dupes_args(params: &FindDupesParams) -> Result<Vec<String>, St
     if params.cross_language == Some(true) {
         args.push("--cross-language".to_string());
     }
-    if params.ignore_imports == Some(true) {
-        args.push("--ignore-imports".to_string());
+    match params.ignore_imports {
+        Some(true) => args.push("--ignore-imports".to_string()),
+        Some(false) => args.push("--no-ignore-imports".to_string()),
+        None => {}
     }
     if params.explain_skipped == Some(true) {
         args.push("--explain-skipped".to_string());

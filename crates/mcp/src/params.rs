@@ -157,6 +157,9 @@ pub struct FindDupesParams {
 
     pub cross_language: Option<bool>,
 
+    /// Exclude import declarations from clone detection. Defaults to `true`
+    /// (sorted import blocks are a formatting artifact, not copy-paste); set
+    /// `false` to count them again.
     pub ignore_imports: Option<bool>,
 
     pub explain_skipped: Option<bool>,
@@ -343,6 +346,9 @@ pub struct TraceCloneParams {
 
     pub cross_language: Option<bool>,
 
+    /// Exclude import declarations from clone detection. Defaults to `true`
+    /// (sorted import blocks are a formatting artifact, not copy-paste); set
+    /// `false` to count them again.
     pub ignore_imports: Option<bool>,
 
     pub no_cache: Option<bool>,

@@ -170,7 +170,10 @@ pub struct DuplicationOptions {
     pub threshold: f64,
     pub skip_local: bool,
     pub cross_language: bool,
-    pub ignore_imports: bool,
+    /// Exclude import declarations from clone detection. `None` defers to the
+    /// project config (which defaults to `true` since #1224); `Some(false)`
+    /// forces import blocks to be counted again.
+    pub ignore_imports: Option<bool>,
     pub top: Option<usize>,
 }
 
@@ -185,7 +188,7 @@ impl Default for DuplicationOptions {
             threshold: 0.0,
             skip_local: false,
             cross_language: false,
-            ignore_imports: false,
+            ignore_imports: None,
             top: None,
         }
     }

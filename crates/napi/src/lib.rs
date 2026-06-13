@@ -332,7 +332,10 @@ impl TryFrom<DuplicationOptions> for programmatic::DuplicationOptions {
             threshold: value.threshold.unwrap_or(defaults.threshold),
             skip_local: value.skip_local.unwrap_or(defaults.skip_local),
             cross_language: value.cross_language.unwrap_or(defaults.cross_language),
-            ignore_imports: value.ignore_imports.unwrap_or(defaults.ignore_imports),
+            // `None` defers to the project config (default `true`); `Some(false)`
+            // forces import blocks to be counted. No `unwrap_or` so the
+            // defer-to-config semantics survive (#1224).
+            ignore_imports: value.ignore_imports,
             top: value.top.map(|n| n as usize),
         })
     }
@@ -772,7 +775,7 @@ mod tests {
         assert!((options.threshold - 2.5).abs() < f64::EPSILON);
         assert!(options.skip_local);
         assert!(options.cross_language);
-        assert!(options.ignore_imports);
+        assert_eq!(options.ignore_imports, Some(true));
         assert_eq!(options.top, Some(7));
     }
 

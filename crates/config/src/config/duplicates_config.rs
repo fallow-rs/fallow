@@ -100,12 +100,14 @@ pub struct DuplicatesConfig {
 
     /// Exclude ES `import` declarations from clone detection.
     ///
+    /// Defaults to `true`: token-identical sorted import blocks are a structural
+    /// property of well-formatted code, not copy-paste, so they should not
+    /// surface as clone groups. Set to `false` to count import blocks again.
     /// When enabled, all `import` statements (value imports, type imports, and
     /// side-effect imports) are stripped from the token stream before clone
-    /// detection. This reduces noise from sorted import blocks that naturally
-    /// look similar across files. Only affects ES `import` declarations;
-    /// CommonJS `require()` calls are not filtered.
-    #[serde(default)]
+    /// detection. Only affects ES `import` declarations; CommonJS `require()`
+    /// calls and `export ... from` re-export blocks are still counted.
+    #[serde(default = "default_true")]
     pub ignore_imports: bool,
 
     /// Fine-grained normalization overrides on top of the detection mode.
@@ -138,7 +140,7 @@ impl Default for DuplicatesConfig {
             ignore_defaults: true,
             skip_local: false,
             cross_language: false,
-            ignore_imports: false,
+            ignore_imports: true,
             normalization: NormalizationConfig::default(),
             min_corpus_size_for_shingle_filter: default_min_corpus_size_for_shingle_filter(),
             min_corpus_size_for_token_cache: default_min_corpus_size_for_token_cache(),
@@ -259,7 +261,7 @@ mod tests {
         assert!(config.ignore_defaults);
         assert!(!config.skip_local);
         assert!(!config.cross_language);
-        assert!(!config.ignore_imports);
+        assert!(config.ignore_imports);
         assert_eq!(config.min_corpus_size_for_shingle_filter, 1024);
         assert_eq!(config.min_corpus_size_for_token_cache, 5_000);
     }
@@ -438,6 +440,25 @@ mod tests {
         let config: DuplicatesConfig = serde_json::from_str(json).unwrap();
         assert_eq!(config.ignore, vec!["**/foo/**"]);
         assert!(config.ignore_defaults);
+    }
+
+    #[test]
+    fn ignore_imports_defaults_true_when_field_omitted() {
+        // The field-level serde default is `default_true`, NOT `bool::default()`
+        // (which would be `false`). An empty duplicates object and a config that
+        // sets only an unrelated field must both leave `ignoreImports` at `true`.
+        let empty: DuplicatesConfig = serde_json::from_str("{}").unwrap();
+        assert!(empty.ignore_imports);
+        let partial: DuplicatesConfig = serde_json::from_str(r#"{"minLines": 8}"#).unwrap();
+        assert!(partial.ignore_imports);
+    }
+
+    #[test]
+    fn ignore_imports_false_opts_out() {
+        let json: DuplicatesConfig = serde_json::from_str(r#"{"ignoreImports": false}"#).unwrap();
+        assert!(!json.ignore_imports);
+        let toml_cfg: DuplicatesConfig = toml::from_str("ignoreImports = false").unwrap();
+        assert!(!toml_cfg.ignore_imports);
     }
 
     #[test]

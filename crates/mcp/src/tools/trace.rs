@@ -163,8 +163,10 @@ pub fn build_trace_clone_args(params: &TraceCloneParams) -> Result<Vec<String>, 
     if params.cross_language == Some(true) {
         args.push("--cross-language".to_string());
     }
-    if params.ignore_imports == Some(true) {
-        args.push("--ignore-imports".to_string());
+    match params.ignore_imports {
+        Some(true) => args.push("--ignore-imports".to_string()),
+        Some(false) => args.push("--no-ignore-imports".to_string()),
+        None => {}
     }
     args.extend(["--trace".to_string(), trace_spec]);
 

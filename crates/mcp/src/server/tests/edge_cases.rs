@@ -96,6 +96,39 @@ fn find_dupes_args_cross_language_false_is_omitted() {
 }
 
 #[test]
+fn find_dupes_args_ignore_imports_false_emits_opt_out() {
+    let params = FindDupesParams {
+        ignore_imports: Some(false),
+        ..Default::default()
+    };
+    let args = build_find_dupes_args(&params).unwrap();
+    assert!(args.contains(&"--no-ignore-imports".to_string()));
+    assert!(!args.contains(&"--ignore-imports".to_string()));
+}
+
+#[test]
+fn find_dupes_args_ignore_imports_true_emits_opt_in() {
+    let params = FindDupesParams {
+        ignore_imports: Some(true),
+        ..Default::default()
+    };
+    let args = build_find_dupes_args(&params).unwrap();
+    assert!(args.contains(&"--ignore-imports".to_string()));
+    assert!(!args.contains(&"--no-ignore-imports".to_string()));
+}
+
+#[test]
+fn find_dupes_args_ignore_imports_none_emits_neither() {
+    let params = FindDupesParams {
+        ignore_imports: None,
+        ..Default::default()
+    };
+    let args = build_find_dupes_args(&params).unwrap();
+    assert!(!args.contains(&"--ignore-imports".to_string()));
+    assert!(!args.contains(&"--no-ignore-imports".to_string()));
+}
+
+#[test]
 fn fix_preview_args_production_false_is_omitted() {
     let params = FixParams {
         production: Some(false),

@@ -1483,7 +1483,7 @@ fn run_audit_dupes<'a>(
         threshold: Some(dupes_cfg.threshold),
         skip_local: dupes_cfg.skip_local,
         cross_language: dupes_cfg.cross_language,
-        ignore_imports: dupes_cfg.ignore_imports,
+        ignore_imports: Some(dupes_cfg.ignore_imports),
         top: None,
         baseline_path: opts.dupes_baseline,
         save_baseline_path: None,

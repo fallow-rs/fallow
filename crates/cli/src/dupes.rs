@@ -51,7 +51,10 @@ pub struct DupesOptions<'a> {
     pub threshold: Option<f64>,
     pub skip_local: bool,
     pub cross_language: bool,
-    pub ignore_imports: bool,
+    /// CLI/caller override for excluding import declarations from clone
+    /// detection. `None` defers to the config value (which defaults to `true`);
+    /// `Some(false)` is the explicit opt-out (`--no-ignore-imports`).
+    pub ignore_imports: Option<bool>,
     pub top: Option<usize>,
     pub baseline_path: Option<&'a std::path::Path>,
     pub save_baseline_path: Option<&'a std::path::Path>,
@@ -132,9 +135,11 @@ fn run_clone_trace(
 /// CLI scalar fields (`mode`, `min_tokens`, `min_lines`, `threshold`) are
 /// `Option<T>` so an absent flag falls through to the value declared in
 /// `toml_dupes`. This is what lets users set e.g. `duplicates.minLines = 8`
-/// in `.fallowrc.jsonc` and have `fallow dupes` honor it. Boolean toggles
-/// (`skip_local`, `cross_language`, `ignore_imports`) use OR-merge, so any
-/// `true` (CLI or config) wins.
+/// in `.fallowrc.jsonc` and have `fallow dupes` honor it. The opt-in toggles
+/// (`skip_local`, `cross_language`) use OR-merge, so any `true` (CLI or config)
+/// wins. `ignore_imports` defaults to `true` and supports opt-out, so it uses
+/// precedence instead: an explicit CLI `Some(true|false)` wins over config,
+/// `None` defers to the config value.
 fn build_dupes_config(
     opts: &DupesOptions<'_>,
     toml_dupes: &fallow_config::DuplicatesConfig,
@@ -156,7 +161,7 @@ fn build_dupes_config(
         ignore_defaults: toml_dupes.ignore_defaults,
         skip_local: opts.skip_local || toml_dupes.skip_local,
         cross_language: opts.cross_language || toml_dupes.cross_language,
-        ignore_imports: opts.ignore_imports || toml_dupes.ignore_imports,
+        ignore_imports: opts.ignore_imports.unwrap_or(toml_dupes.ignore_imports),
         normalization: toml_dupes.normalization.clone(),
         min_corpus_size_for_shingle_filter: toml_dupes.min_corpus_size_for_shingle_filter,
         min_corpus_size_for_token_cache: toml_dupes.min_corpus_size_for_token_cache,
@@ -249,6 +254,10 @@ pub struct DupesResult {
     /// the human-format note to display the value that was actually applied;
     /// `config.duplicates.min_occurrences` only carries the toml value.
     pub min_occurrences: usize,
+    /// Effective `ignoreImports` (CLI override merged with config). Used by the
+    /// human-format note; `config.duplicates.ignore_imports` only carries the
+    /// toml value, not the resolved CLI/default precedence.
+    pub ignore_imports: bool,
     pub explain_skipped: bool,
 }
 
@@ -355,6 +364,7 @@ fn execute_dupes_inner(
         elapsed,
         threshold: dupes_config.threshold,
         min_occurrences: dupes_config.min_occurrences,
+        ignore_imports: dupes_config.ignore_imports,
         explain_skipped: opts.explain_skipped,
     })
 }
@@ -596,6 +606,7 @@ pub fn print_dupes_result(
     };
     print_default_ignore_note(result, quiet);
     print_min_occurrences_note(result, quiet);
+    print_ignore_imports_note(result, quiet);
     let report_code = report::print_duplication_report(&result.report, &ctx, result.config.output);
     if report_code != ExitCode::SUCCESS {
         return report_code;
@@ -722,6 +733,7 @@ fn print_dupes_result_with_grouping(
     };
     print_default_ignore_note(result, quiet);
     print_min_occurrences_note(result, quiet);
+    print_ignore_imports_note(result, quiet);
     report::print_duplication_report(&result.report, &ctx, result.config.output)
 }
 
@@ -790,6 +802,33 @@ pub fn print_min_occurrences_note(result: &DupesResult, quiet: bool) {
     let noun = if hidden == 1 { "group" } else { "groups" };
     eprintln!(
         "note: hid {hidden} clone {noun} below minOccurrences={min} (lower --min-occurrences to see them)"
+    );
+}
+
+/// Emit a stderr note when import declarations were excluded from clone
+/// detection (the default since #1224). Human-format only, so machine readers
+/// never see decorative stderr noise. Fires only when clone groups were
+/// reported, so a clean run stays quiet; it tells users the report excludes a
+/// category and how to opt back in.
+pub fn print_ignore_imports_note(result: &DupesResult, quiet: bool) {
+    if quiet
+        || !result.ignore_imports
+        || result.report.clone_groups.is_empty()
+        || !matches!(
+            result.config.output,
+            OutputFormat::Human
+                | OutputFormat::Markdown
+                | OutputFormat::PrCommentGithub
+                | OutputFormat::PrCommentGitlab
+                | OutputFormat::ReviewGithub
+                | OutputFormat::ReviewGitlab
+        )
+    {
+        return;
+    }
+
+    eprintln!(
+        "note: import declarations excluded from clone detection (--no-ignore-imports to include them)"
     );
 }
 
@@ -866,7 +905,7 @@ mod tests {
             threshold: Some(0.0),
             skip_local: false,
             cross_language: false,
-            ignore_imports: false,
+            ignore_imports: None,
             top: None,
             baseline_path: None,
             save_baseline_path: None,
@@ -1284,32 +1323,52 @@ mod tests {
     }
 
     #[test]
-    fn build_config_ignore_imports_cli_true_overrides_toml_false() {
+    fn build_config_ignore_imports_cli_none_defers_to_config_default_true() {
+        // No CLI override: the config default (now true) flows through.
         let root = PathBuf::from("/project");
-        let mut opts = default_opts_for_config(&root, DupesMode::Mild);
-        opts.ignore_imports = true;
+        let opts = default_opts_for_config(&root, DupesMode::Mild);
         let toml = DuplicatesConfig::default();
         let config = build_dupes_config(&opts, &toml);
         assert!(config.ignore_imports);
     }
 
     #[test]
-    fn build_config_ignore_imports_toml_true_with_cli_false() {
+    fn build_config_ignore_imports_cli_opt_out_overrides_config_true() {
+        // `--no-ignore-imports` (Some(false)) wins over a config `ignoreImports: true`.
         let root = PathBuf::from("/project");
-        let opts = default_opts_for_config(&root, DupesMode::Mild);
+        let mut opts = default_opts_for_config(&root, DupesMode::Mild);
+        opts.ignore_imports = Some(false);
         let toml = DuplicatesConfig {
             ignore_imports: true,
             ..DuplicatesConfig::default()
         };
         let config = build_dupes_config(&opts, &toml);
-        assert!(config.ignore_imports, "OR semantics: toml true should win");
+        assert!(!config.ignore_imports, "CLI opt-out must win over config");
     }
 
     #[test]
-    fn build_config_ignore_imports_both_false() {
+    fn build_config_ignore_imports_cli_opt_in_overrides_config_false() {
+        // `--ignore-imports` (Some(true)) wins over a config `ignoreImports: false`.
+        let root = PathBuf::from("/project");
+        let mut opts = default_opts_for_config(&root, DupesMode::Mild);
+        opts.ignore_imports = Some(true);
+        let toml = DuplicatesConfig {
+            ignore_imports: false,
+            ..DuplicatesConfig::default()
+        };
+        let config = build_dupes_config(&opts, &toml);
+        assert!(config.ignore_imports, "CLI opt-in must win over config");
+    }
+
+    #[test]
+    fn build_config_ignore_imports_cli_none_defers_to_config_false() {
+        // Config opt-out with no CLI override: imports are counted.
         let root = PathBuf::from("/project");
         let opts = default_opts_for_config(&root, DupesMode::Mild);
-        let toml = DuplicatesConfig::default();
+        let toml = DuplicatesConfig {
+            ignore_imports: false,
+            ..DuplicatesConfig::default()
+        };
         let config = build_dupes_config(&opts, &toml);
         assert!(!config.ignore_imports);
     }
