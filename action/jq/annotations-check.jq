@@ -34,6 +34,8 @@ def dependency_action(pkg):
     "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Unused enum member::Enum member '\(.parent_name | san).\(.member_name | san)' is never referenced in the codebase.\(nl)\(nl)Consider removing it to keep the enum minimal."),
   (.unused_class_members[]? |
     "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Unused class member::Class member '\(.parent_name | san).\(.member_name | san)' is never referenced.\(nl)\(nl)Consider removing it or marking it as private."),
+  (.unused_store_members[]? |
+    "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Unused store member::Store member '\(.parent_name | san).\(.member_name | san)' is never accessed by any consumer.\(nl)\(nl)Consider removing the unused store state, getter, or action."),
   (.unresolved_imports[]? |
     "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Unresolved import::Import '\(.specifier | san)' could not be resolved to a file or package.\(nl)\(nl)Check for typos, missing dependencies, or incorrect path aliases."),
   (.unlisted_dependencies[]? | (.package_name | san) as $pkg | .imported_from[]? |

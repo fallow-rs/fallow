@@ -41,6 +41,7 @@ else
     table_row("Unused optionalDependencies"; "unused_optional_dependencies"; "unused-dependencies"),
     table_row("Unused enum members"; "unused_enum_members"; "unused-enum-members"),
     table_row("Unused class members"; "unused_class_members"; "unused-class-members"),
+    table_row("Unused store members"; "unused_store_members"; "unused-store-members"),
     table_row("Unresolved imports"; "unresolved_imports"; "unresolved-imports"),
     table_row("Unlisted dependencies"; "unlisted_dependencies"; "unlisted-dependencies"),
     table_row("Duplicate exports"; "duplicate_exports"; "duplicate-exports"),
@@ -89,6 +90,9 @@ else
     "| `\(.path)` | \(.line) | `\(.parent_name)` | `\(.member_name)` |") +
   section("Unused class members"; "unused_class_members";
     "Class methods or properties never referenced outside their class.\n\n| File | Line | Class | Member |\n|------|-----:|-------|--------|\n";
+    "| `\(.path)` | \(.line) | `\(.parent_name)` | `\(.member_name)` |") +
+  section("Unused store members"; "unused_store_members";
+    "Pinia store members (state, getter, action) never accessed by any consumer.\n\n| File | Line | Store | Member |\n|------|-----:|-------|--------|\n";
     "| `\(.path)` | \(.line) | `\(.parent_name)` | `\(.member_name)` |") +
   section("Unresolved imports"; "unresolved_imports";
     "Import paths that could not be resolved \u2014 check for missing packages or broken paths.\n\n| File | Line | Import |\n|------|-----:|--------|\n";

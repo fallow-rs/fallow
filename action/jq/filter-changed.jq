@@ -17,6 +17,7 @@ def filter_check:
   (if .private_type_leaks   then .private_type_leaks   |= map(select(.path | in_changed))      else . end) |
   (if .unused_enum_members  then .unused_enum_members  |= map(select(.path | in_changed))      else . end) |
   (if .unused_class_members then .unused_class_members |= map(select(.path | in_changed))      else . end) |
+  (if .unused_store_members then .unused_store_members |= map(select(.path | in_changed))      else . end) |
   (if .unresolved_imports   then .unresolved_imports   |= map(select(.path | in_changed))      else . end) |
   (if .unlisted_dependencies then
     .unlisted_dependencies |= map(select(.imported_from | any(.path | in_changed)))
@@ -78,6 +79,7 @@ def filter_check:
       (.unused_optional_dependencies // [] | length) +
       (.unused_enum_members // [] | length) +
       (.unused_class_members // [] | length) +
+      (.unused_store_members // [] | length) +
       (.unresolved_imports // [] | length) +
       (.unlisted_dependencies // [] | length) +
       (.duplicate_exports // [] | length) +
