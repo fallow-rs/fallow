@@ -674,6 +674,62 @@ pub struct FunctionComplexity {
     pub contributions: Vec<ComplexityContribution>,
 }
 
+/// Structural CSS metrics for a single style rule, computed from the parsed CSS
+/// syntax tree. A rule is recorded only when it crosses a structural floor (an
+/// id selector, a complex selector, a `!important` declaration, or deep
+/// nesting), so the vector stays bounded on normal stylesheets.
+///
+/// Not persisted in the extraction cache: `fallow health` computes these
+/// on demand from the CSS source, so there is no `bitcode` derive.
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CssRuleMetric {
+    /// 1-based line of the rule's first selector.
+    pub line: u32,
+    /// 1-based column of the rule's first selector.
+    pub col: u32,
+    /// Specificity component `a` (id selectors), max across the rule's selectors.
+    pub specificity_a: u16,
+    /// Specificity component `b` (class / attribute / pseudo-class selectors).
+    pub specificity_b: u16,
+    /// Specificity component `c` (type / pseudo-element selectors).
+    pub specificity_c: u16,
+    /// Largest selector component count across the rule's selector list.
+    pub complexity: u16,
+    /// Declaration count in the rule (normal plus `!important`).
+    pub declaration_count: u16,
+    /// `!important` declaration count in the rule.
+    pub important_count: u16,
+    /// Style-rule nesting depth (0 = top level).
+    pub nesting_depth: u8,
+}
+
+/// Stylesheet-level structural CSS analytics, computed from the parsed CSS
+/// syntax tree. Feeds `fallow health` penalty weights and located findings,
+/// never a standalone CSS score.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CssAnalytics {
+    /// Total declarations across every style rule (normal plus `!important`).
+    pub total_declarations: u32,
+    /// Total `!important` declarations across every style rule.
+    pub important_declarations: u32,
+    /// Number of style rules.
+    pub rule_count: u32,
+    /// Number of style rules with no declarations.
+    pub empty_rule_count: u32,
+    /// Deepest style-rule nesting depth observed (0 = no nesting).
+    pub max_nesting_depth: u8,
+    /// Rules that crossed the structural floor, in source order. Bounded; see
+    /// [`Self::notable_truncated`]. The scalar aggregates above always reflect
+    /// the full stylesheet regardless of truncation.
+    pub notable_rules: Vec<CssRuleMetric>,
+    /// `true` when more rules crossed the structural floor than `notable_rules`
+    /// retains (compiled utility CSS can emit thousands of `!important` rules),
+    /// so consumers can note that per-rule findings were capped.
+    pub notable_truncated: bool,
+}
+
 /// Which complexity metric a [`ComplexityContribution`] adds to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]

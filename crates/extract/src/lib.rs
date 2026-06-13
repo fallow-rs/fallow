@@ -20,6 +20,7 @@ pub mod astro;
 pub mod cache;
 pub(crate) mod complexity;
 pub mod css;
+pub mod css_metrics;
 pub mod flags;
 pub mod glimmer;
 pub mod graphql;
@@ -53,6 +54,7 @@ pub use fallow_types::extract::{
 
 pub use astro::extract_astro_frontmatter;
 pub use css::extract_css_module_exports;
+pub use css_metrics::compute_css_analytics;
 pub use glimmer::{is_glimmer_file, strip_glimmer_templates};
 pub use mdx::extract_mdx_statements;
 pub use sfc::{extract_sfc_scripts, is_sfc_file};
