@@ -6190,11 +6190,7 @@ impl ModuleInfoExtractor {
     /// instances and credit destructure reads (`const { count } = s` /
     /// `storeToRefs(s)` / `const { count } = useFooStore()`) so a member
     /// consumed only that way is not falsely flagged.
-    fn record_pinia_store(
-        &mut self,
-        declarator: &VariableDeclarator<'_>,
-        init: &Expression<'_>,
-    ) {
+    fn record_pinia_store(&mut self, declarator: &VariableDeclarator<'_>, init: &Expression<'_>) {
         // Declaration: const <name> = defineStore('id', <options|setup>)
         if let BindingPattern::BindingIdentifier(id) = &declarator.id
             && let Expression::CallExpression(call) = init

@@ -282,6 +282,10 @@ impl<'a> CompactLineBuilder<'a> {
             self.lines
                 .push(self.compact_member(&member.member, "unused-class-member"));
         }
+        for member in &self.results.unused_store_members {
+            self.lines
+                .push(self.compact_member(&member.member, "unused-store-member"));
+        }
         for import in &self.results.unresolved_imports {
             self.lines.push(format!(
                 "unresolved-import:{}:{}:{}",
@@ -1144,7 +1148,7 @@ mod tests {
         let results = sample_results(&root);
         let lines = build_compact_lines(&results, &root);
 
-        assert_eq!(lines.len(), 16);
+        assert_eq!(lines.len(), 17);
 
         assert!(lines[0].starts_with("unused-file:"));
         assert!(lines[1].starts_with("unused-export:"));
@@ -1154,13 +1158,14 @@ mod tests {
         assert!(lines[5].starts_with("unused-optionaldep:"));
         assert!(lines[6].starts_with("unused-enum-member:"));
         assert!(lines[7].starts_with("unused-class-member:"));
-        assert!(lines[8].starts_with("unresolved-import:"));
-        assert!(lines[9].starts_with("unlisted-dep:"));
-        assert!(lines[10].starts_with("duplicate-export:"));
-        assert!(lines[11].starts_with("type-only-dep:"));
-        assert!(lines[12].starts_with("test-only-dep:"));
-        assert!(lines[13].starts_with("circular-dependency:"));
-        assert!(lines[14].starts_with("boundary-violation:"));
+        assert!(lines[8].starts_with("unused-store-member:"));
+        assert!(lines[9].starts_with("unresolved-import:"));
+        assert!(lines[10].starts_with("unlisted-dep:"));
+        assert!(lines[11].starts_with("duplicate-export:"));
+        assert!(lines[12].starts_with("type-only-dep:"));
+        assert!(lines[13].starts_with("test-only-dep:"));
+        assert!(lines[14].starts_with("circular-dependency:"));
+        assert!(lines[15].starts_with("boundary-violation:"));
     }
 
     #[test]

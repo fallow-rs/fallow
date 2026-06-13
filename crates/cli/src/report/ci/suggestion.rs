@@ -27,7 +27,10 @@ pub fn suggestion_block_for_issue_line(
     if rule_id.contains("unused-import") {
         return unused_import_suggestion(provider, line);
     }
-    if rule_id.contains("unused-enum-member") || rule_id.contains("unused-class-member") {
+    if rule_id.contains("unused-enum-member")
+        || rule_id.contains("unused-class-member")
+        || rule_id.contains("unused-store-member")
+    {
         return delete_line_suggestion(provider, line);
     }
     if rule_id.contains("unused-export") || rule_id.contains("unused-type") {

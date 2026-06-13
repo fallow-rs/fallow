@@ -2,7 +2,7 @@
 source: crates/cli/tests/snapshot_tests.rs
 expression: output
 ---
-## Fallow: 23 issues found
+## Fallow: 24 issues found
 
 ### Unused files (1)
 
@@ -39,6 +39,11 @@ expression: output
 
 - `src/service.ts`
   - :42 `UserService.legacyMethod`
+
+### Unused store members (1)
+
+- `src/stores/counter.ts`
+  - :24 `useCounterStore.legacyAction`
 
 ### Unresolved imports (1)
 

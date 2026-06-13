@@ -1372,6 +1372,14 @@ impl CodeClimateBuilder<'_> {
             "Class",
             self.rules.unused_class_members,
         );
+        push_unused_member_issues(
+            &mut self.issues,
+            self.results.unused_store_members.iter().map(|m| &m.member),
+            self.root,
+            "fallow/unused-store-member",
+            "Store",
+            self.rules.unused_store_members,
+        );
     }
 
     fn push_import_and_duplicate_issues(&mut self) {

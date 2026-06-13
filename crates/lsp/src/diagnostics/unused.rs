@@ -474,6 +474,7 @@ pub fn push_member_diagnostics(
 ) {
     let enum_iter = results.unused_enum_members.iter().map(|f| &f.member);
     let class_iter = results.unused_class_members.iter().map(|f| &f.member);
+    let store_iter = results.unused_store_members.iter().map(|f| &f.member);
     for (members, code, anchor, kind_label) in [
         (
             Box::new(enum_iter) as Box<dyn Iterator<Item = &fallow_core::results::UnusedMember>>,
@@ -486,6 +487,12 @@ pub fn push_member_diagnostics(
             "unused-class-member",
             "unused-class-members",
             "Class member",
+        ),
+        (
+            Box::new(store_iter) as Box<dyn Iterator<Item = &fallow_core::results::UnusedMember>>,
+            "unused-store-member",
+            "unused-store-members",
+            "Store member",
         ),
     ] {
         for member in members {
@@ -533,7 +540,7 @@ mod tests {
         UnusedClassMemberFinding, UnusedDependency, UnusedDependencyFinding,
         UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExport, UnusedExportFinding,
         UnusedFile, UnusedFileFinding, UnusedMember, UnusedOptionalDependencyFinding,
-        UnusedTypeFinding,
+        UnusedStoreMemberFinding, UnusedTypeFinding,
     };
     use ls_types::{DiagnosticSeverity, DiagnosticTag, NumberOrString, Uri};
 
@@ -852,6 +859,37 @@ mod tests {
         assert_eq!(
             d.code,
             Some(NumberOrString::String("unused-class-member".to_string()))
+        );
+    }
+
+    #[test]
+    fn unused_store_member_produces_hint() {
+        let root = test_root();
+        let mut results = AnalysisResults::default();
+        results
+            .unused_store_members
+            .push(UnusedStoreMemberFinding::with_actions(UnusedMember {
+                path: root.join("src/store.ts"),
+                parent_name: "useStore".to_string(),
+                member_name: "reset".to_string(),
+                kind: MemberKind::StoreMember,
+                line: 20,
+                col: 4,
+            }));
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, &root);
+
+        let uri = Uri::from_file_path(root.join("src/store.ts")).unwrap();
+        let file_diags = &diags[&uri];
+        assert_eq!(file_diags.len(), 1);
+
+        let d = &file_diags[0];
+        assert_eq!(d.severity, Some(DiagnosticSeverity::HINT));
+        assert_eq!(d.message, "Store member 'useStore.reset' is unused");
+        assert_eq!(
+            d.code,
+            Some(NumberOrString::String("unused-store-member".to_string()))
         );
     }
 

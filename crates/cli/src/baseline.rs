@@ -71,6 +71,9 @@ pub struct BaselineData {
     /// Unused class members, keyed by `file:parent.member`.
     #[serde(default)]
     pub unused_class_members: Vec<String>,
+    /// Unused store members, keyed by `file:parent.member`.
+    #[serde(default)]
+    pub unused_store_members: Vec<String>,
     /// Unresolved imports, keyed by `file:specifier`.
     #[serde(default)]
     pub unresolved_imports: Vec<String>,
@@ -152,6 +155,7 @@ impl BaselineData {
             unused_optional_dependencies: dependencies.unused_optional,
             unused_enum_members: member_imports.unused_enum_members,
             unused_class_members: member_imports.unused_class_members,
+            unused_store_members: member_imports.unused_store_members,
             unresolved_imports: member_imports.unresolved_imports,
             unlisted_dependencies: dependencies.unlisted,
             duplicate_exports: member_imports.duplicate_exports,
@@ -186,6 +190,7 @@ impl BaselineData {
             + self.unused_optional_dependencies.len()
             + self.unused_enum_members.len()
             + self.unused_class_members.len()
+            + self.unused_store_members.len()
             + self.unresolved_imports.len()
             + self.unlisted_dependencies.len()
             + self.duplicate_exports.len()
@@ -302,6 +307,7 @@ fn baseline_file_export_keys(
 struct BaselineMemberImportKeys {
     unused_enum_members: Vec<String>,
     unused_class_members: Vec<String>,
+    unused_store_members: Vec<String>,
     unresolved_imports: Vec<String>,
     duplicate_exports: Vec<String>,
     stale_suppressions: Vec<String>,
@@ -326,6 +332,18 @@ fn baseline_member_import_keys(
             .collect(),
         unused_class_members: results
             .unused_class_members
+            .iter()
+            .map(|m| {
+                format!(
+                    "{}:{}.{}",
+                    relative_path(&m.member.path, root),
+                    m.member.parent_name,
+                    m.member.member_name
+                )
+            })
+            .collect(),
+        unused_store_members: results
+            .unused_store_members
             .iter()
             .map(|m| {
                 format!(
@@ -652,6 +670,22 @@ impl BaselineFilterContext<'_> {
                 member.member.member_name
             );
             !baseline_class_members.contains(key.as_str())
+        });
+
+        let baseline_store_members: FxHashSet<&str> = self
+            .baseline
+            .unused_store_members
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.unused_store_members.retain(|member| {
+            let key = format!(
+                "{}:{}.{}",
+                relative_path(&member.member.path, self.root),
+                member.member.parent_name,
+                member.member.member_name
+            );
+            !baseline_store_members.contains(key.as_str())
         });
     }
 
@@ -1778,6 +1812,7 @@ mod tests {
             unused_optional_dependencies: vec![],
             unused_enum_members: vec![],
             unused_class_members: vec![],
+            unused_store_members: vec![],
             unresolved_imports: vec![],
             unlisted_dependencies: vec![],
             duplicate_exports: vec![],
@@ -1830,6 +1865,7 @@ mod tests {
             unused_optional_dependencies: vec![],
             unused_enum_members: vec![],
             unused_class_members: vec![],
+            unused_store_members: vec![],
             unresolved_imports: vec![],
             unlisted_dependencies: vec![],
             duplicate_exports: vec![],
@@ -1869,6 +1905,7 @@ mod tests {
             unused_optional_dependencies: vec![],
             unused_enum_members: vec![],
             unused_class_members: vec![],
+            unused_store_members: vec![],
             unresolved_imports: vec![],
             unlisted_dependencies: vec![],
             duplicate_exports: vec![],
@@ -2471,6 +2508,15 @@ mod tests {
                 line: 42,
                 col: 0,
             }));
+        r.unused_store_members
+            .push(UnusedStoreMemberFinding::with_actions(UnusedMember {
+                path: PathBuf::from("src/store.ts"),
+                parent_name: "useStore".to_string(),
+                member_name: "legacyAction".to_string(),
+                kind: MemberKind::StoreMember,
+                line: 17,
+                col: 0,
+            }));
         r.unresolved_imports.push(
             fallow_types::output_dead_code::UnresolvedImportFinding::with_actions(
                 fallow_core::results::UnresolvedImport {
@@ -2549,6 +2595,8 @@ mod tests {
         assert!(baseline.unused_enum_members[0].contains("Status.Deprecated"));
         assert_eq!(baseline.unused_class_members.len(), 1);
         assert!(baseline.unused_class_members[0].contains("UserService.legacy"));
+        assert_eq!(baseline.unused_store_members.len(), 1);
+        assert!(baseline.unused_store_members[0].contains("useStore.legacyAction"));
         assert_eq!(baseline.unresolved_imports.len(), 1);
         assert!(baseline.unresolved_imports[0].contains("./missing"));
         assert_eq!(baseline.unlisted_dependencies, vec!["chalk"]);
@@ -2569,6 +2617,7 @@ mod tests {
         assert!(filtered.unused_optional_dependencies.is_empty());
         assert!(filtered.unused_enum_members.is_empty());
         assert!(filtered.unused_class_members.is_empty());
+        assert!(filtered.unused_store_members.is_empty());
         assert!(filtered.unresolved_imports.is_empty());
         assert!(filtered.unlisted_dependencies.is_empty());
         assert!(filtered.duplicate_exports.is_empty());
@@ -2791,6 +2840,14 @@ mod tests {
                 line: 42,
                 col: 0,
             })],
+            unused_store_members: vec![UnusedStoreMemberFinding::with_actions(UnusedMember {
+                path: p("src/store.ts"),
+                parent_name: "useStore".to_string(),
+                member_name: "legacyAction".to_string(),
+                kind: MemberKind::StoreMember,
+                line: 17,
+                col: 0,
+            })],
             unresolved_imports: vec![UnresolvedImportFinding::with_actions(UnresolvedImport {
                 path: p("src/app.ts"),
                 specifier: "./missing".to_string(),
@@ -2853,6 +2910,10 @@ mod tests {
             baseline.unused_class_members,
             vec!["src/service.ts:UserService.legacy"]
         );
+        assert_eq!(
+            baseline.unused_store_members,
+            vec!["src/store.ts:useStore.legacyAction"]
+        );
         assert_eq!(baseline.unresolved_imports, vec!["src/app.ts:./missing"]);
         assert_eq!(baseline.duplicate_exports, vec!["Config|src/a.ts|src/b.ts"]);
 
@@ -2870,6 +2931,7 @@ mod tests {
         assert!(filtered.circular_dependencies.is_empty(), "circular deps");
         assert!(filtered.unused_enum_members.is_empty(), "enum members");
         assert!(filtered.unused_class_members.is_empty(), "class members");
+        assert!(filtered.unused_store_members.is_empty(), "store members");
         assert!(filtered.unresolved_imports.is_empty(), "unresolved imports");
         assert!(filtered.duplicate_exports.is_empty(), "duplicate exports");
     }

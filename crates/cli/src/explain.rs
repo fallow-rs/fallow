@@ -148,6 +148,14 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#unused-class-members",
     },
     RuleDef {
+        id: "fallow/unused-store-member",
+        category: "Dead code",
+        name: "Unused Store Members",
+        short: "Store member is never accessed by any consumer",
+        full: "Pinia store members (a `state` / `getters` / `actions` key, or a setup-store returned key) declared but never accessed by any consumer project-wide. The store binding is imported (so the module is reachable) yet a specific member is dead. Defaults to warn, not error: a store has an open declaration surface (plugins, dynamic dispatch) so confidence is lower. Activates only when pinia or @pinia/nuxt is a declared dependency.",
+        docs_path: "explanations/dead-code#unused-store-members",
+    },
+    RuleDef {
         id: "fallow/unresolved-import",
         category: "Dead code",
         name: "Unresolved Imports",
@@ -395,6 +403,7 @@ fn dead_code_alias_id(normalized: &str) -> Option<&'static str> {
         "test-only-deps" | "test-only-dependencies" => Some("fallow/test-only-dependency"),
         "unused-enum-members" => Some("fallow/unused-enum-member"),
         "unused-class-members" => Some("fallow/unused-class-member"),
+        "unused-store-members" => Some("fallow/unused-store-member"),
         "unresolved-imports" => Some("fallow/unresolved-import"),
         "unlisted-deps" | "unlisted-dependencies" => Some("fallow/unlisted-dependency"),
         "duplicate-exports" => Some("fallow/duplicate-export"),
@@ -525,6 +534,10 @@ fn member_import_rule_guide(id: &str) -> Option<RuleGuide> {
         "fallow/unused-class-member" => RuleGuide {
             example: "class Parser has a public parseLegacy method that is never called in the project.",
             how_to_fix: "Remove or privatize the member. For reflection/framework lifecycle hooks, configure or suppress the intentional entry point.",
+        },
+        "fallow/unused-store-member" => RuleGuide {
+            example: "useCartStore declares a discountTotal getter that no component, composable, or other store ever reads.",
+            how_to_fix: "Remove the unused state property, getter, or action. If it is consumed reflectively (a Pinia plugin, $onAction, or dynamic dispatch), suppress the line with // fallow-ignore-next-line unused-store-member.",
         },
         "fallow/unresolved-import" => RuleGuide {
             example: "src/app.ts imports ./routes/admin, but no matching file exists after extension and index resolution.",
@@ -2193,7 +2206,7 @@ mod tests {
 
     #[test]
     fn check_rules_count() {
-        assert_eq!(CHECK_RULES.len(), 29);
+        assert_eq!(CHECK_RULES.len(), 30);
     }
 
     #[test]

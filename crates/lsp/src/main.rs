@@ -60,6 +60,7 @@ struct AnalysisCompleteParams {
     unused_optional_dependencies: usize,
     unused_enum_members: usize,
     unused_class_members: usize,
+    unused_store_members: usize,
     unresolved_imports: usize,
     unlisted_dependencies: usize,
     duplicate_exports: usize,
@@ -93,6 +94,7 @@ fn analysis_complete_params(
         unused_optional_dependencies: results.unused_optional_dependencies.len(),
         unused_enum_members: results.unused_enum_members.len(),
         unused_class_members: results.unused_class_members.len(),
+        unused_store_members: results.unused_store_members.len(),
         unresolved_imports: results.unresolved_imports.len(),
         unlisted_dependencies: results.unlisted_dependencies.len(),
         duplicate_exports: results.duplicate_exports.len(),
@@ -179,6 +181,11 @@ const DIAGNOSTIC_ISSUE_TYPES: &[DiagnosticIssueType] = &[
         config_key: Some("unused-class-members"),
         code: "unused-class-member",
         label: "Unused Class Members",
+    },
+    DiagnosticIssueType {
+        config_key: Some("unused-store-members"),
+        code: "unused-store-member",
+        label: "Unused Store Members",
     },
     DiagnosticIssueType {
         config_key: Some("unresolved-imports"),
@@ -1536,7 +1543,7 @@ mod tests {
         UnusedClassMemberFinding, UnusedDependency, UnusedDependencyFinding,
         UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExport, UnusedExportFinding,
         UnusedFile, UnusedFileFinding, UnusedMember, UnusedOptionalDependencyFinding,
-        UnusedTypeFinding,
+        UnusedStoreMemberFinding, UnusedTypeFinding,
     };
     use serde_json::json;
     use tower::{Service, ServiceExt};
@@ -2387,6 +2394,14 @@ export function choose(value: number): string {
                     7,
                 ),
             )],
+            unused_store_members: vec![UnusedStoreMemberFinding::with_actions(
+                merge_test_unused_member(
+                    "S",
+                    "a",
+                    fallow_core::extract::MemberKind::StoreMember,
+                    7,
+                ),
+            )],
             unresolved_imports: vec![fallow_core::results::UnresolvedImportFinding::with_actions(
                 fallow_core::results::UnresolvedImport {
                     path: "/f.ts".into(),
@@ -2672,6 +2687,7 @@ export function choose(value: number): string {
         assert_eq!(target.unused_optional_dependencies.len(), 1);
         assert_eq!(target.unused_enum_members.len(), 1);
         assert_eq!(target.unused_class_members.len(), 1);
+        assert_eq!(target.unused_store_members.len(), 1);
         assert_eq!(target.unresolved_imports.len(), 1);
         assert_eq!(target.unlisted_dependencies.len(), 1);
         assert_eq!(target.duplicate_exports.len(), 1);
@@ -2964,6 +2980,7 @@ export function choose(value: number): string {
         assert!(keys.contains(&"unused-optional-dependencies"));
         assert!(keys.contains(&"unused-enum-members"));
         assert!(keys.contains(&"unused-class-members"));
+        assert!(keys.contains(&"unused-store-members"));
         assert!(keys.contains(&"unresolved-imports"));
         assert!(keys.contains(&"unlisted-dependencies"));
         assert!(keys.contains(&"duplicate-exports"));

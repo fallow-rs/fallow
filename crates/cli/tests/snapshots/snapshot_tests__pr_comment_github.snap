@@ -5,10 +5,10 @@ expression: output
 <!-- fallow-id: fallow-results -->
 ### Fallow dead-code report
 
-Found **24** findings.
+Found **25** findings.
 
 <details>
-<summary>Dead code (8)</summary>
+<summary>Dead code (9)</summary>
 
 | Severity | Rule | Location | Description |
 | --- | --- | --- | --- |
@@ -17,6 +17,7 @@ Found **24** findings.
 | major | `fallow/unused-file` | `src/dead.ts`:1 | File is not reachable from any entry point |
 | major | `fallow/unused-enum-member` | `src/enums.ts`:8 | Enum member 'Status.Deprecated' is never referenced |
 | major | `fallow/unused-class-member` | `src/service.ts`:42 | Class member 'UserService.legacyMethod' is never referenced |
+| minor | `fallow/unused-store-member` | `src/stores/counter.ts`:24 | Store member 'useCounterStore.legacyAction' is never referenced |
 | major | `fallow/unused-type` | `src/types.ts`:5 | Type export 'OldType' is never imported by other modules |
 | major | `fallow/duplicate-export` | `src/types.ts`:30 | Export 'Config' appears in multiple modules |
 | major | `fallow/unused-export` | `src/utils.ts`:10 | Export 'helperFn' is never imported by other modules |

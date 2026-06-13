@@ -215,6 +215,10 @@ fn apply_source_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
             m.filter_flag = Some("--unused-class-members");
             m.suppress = Some(("unused-class-member", false));
         }
+        "unused-store-member" => {
+            m.filter_flag = Some("--unused-store-members");
+            m.suppress = Some(("unused-store-member", false));
+        }
         "unresolved-import" => {
             m.filter_flag = Some("--unresolved-imports");
             m.suppress = Some(("unresolved-import", false));

@@ -375,7 +375,11 @@ const BARE_DEAD_CODE_UNION_ALIASES = [
   },
   {
     name: "UnusedMember",
-    parents: ["UnusedClassMemberFinding", "UnusedEnumMemberFinding"],
+    parents: [
+      "UnusedClassMemberFinding",
+      "UnusedEnumMemberFinding",
+      "UnusedStoreMemberFinding",
+    ],
   },
 ];
 

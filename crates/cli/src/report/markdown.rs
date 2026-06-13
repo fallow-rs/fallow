@@ -6,7 +6,7 @@ use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::{
     AnalysisResults, UnresolvedCatalogReferenceFinding, UnusedCatalogEntryFinding,
     UnusedClassMemberFinding, UnusedDependencyOverrideFinding, UnusedEnumMemberFinding,
-    UnusedExport, UnusedExportFinding, UnusedMember, UnusedTypeFinding,
+    UnusedExport, UnusedExportFinding, UnusedMember, UnusedStoreMemberFinding, UnusedTypeFinding,
 };
 
 use super::grouping::ResultGroup;
@@ -179,6 +179,14 @@ fn push_markdown_member_sections(out: &mut String, results: &AnalysisResults, ro
         root,
         |m| m.member.path.as_path(),
         |m: &UnusedClassMemberFinding| format_member(&m.member),
+    );
+    markdown_grouped_section(
+        out,
+        &results.unused_store_members,
+        "Unused store members",
+        root,
+        |m| m.member.path.as_path(),
+        |m: &UnusedStoreMemberFinding| format_member(&m.member),
     );
 }
 

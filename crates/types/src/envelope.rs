@@ -102,6 +102,9 @@ pub struct CheckSummary {
     pub unused_enum_members: usize,
     /// Unused class members.
     pub unused_class_members: usize,
+    /// Unused store members.
+    #[serde(default)]
+    pub unused_store_members: usize,
     /// Imports that could not be resolved against the project's module graph.
     pub unresolved_imports: usize,
     /// Dependencies imported but absent from `package.json`.

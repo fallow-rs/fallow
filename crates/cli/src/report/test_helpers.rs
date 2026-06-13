@@ -7,7 +7,7 @@ use fallow_types::output_dead_code::{
     TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnresolvedImportFinding,
     UnusedClassMemberFinding, UnusedDependencyFinding, UnusedDevDependencyFinding,
     UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
-    UnusedOptionalDependencyFinding, UnusedTypeFinding,
+    UnusedOptionalDependencyFinding, UnusedStoreMemberFinding, UnusedTypeFinding,
 };
 
 /// Build an `AnalysisResults` populated with one issue of every type.
@@ -87,6 +87,15 @@ pub fn sample_results(root: &Path) -> AnalysisResults {
             kind: MemberKind::ClassMethod,
             line: 42,
             col: 4,
+        }));
+    r.unused_store_members
+        .push(UnusedStoreMemberFinding::with_actions(UnusedMember {
+            path: root.join("src/store.ts"),
+            parent_name: "useStore".to_string(),
+            member_name: "legacyAction".to_string(),
+            kind: MemberKind::StoreMember,
+            line: 24,
+            col: 2,
         }));
     r.unresolved_imports
         .push(UnresolvedImportFinding::with_actions(UnresolvedImport {

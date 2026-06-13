@@ -19,7 +19,6 @@ fn into_module_info_transfers_exports() {
     assert_eq!(info.file_id, FileId(0));
 }
 
-
 #[test]
 fn into_module_info_transfers_imports() {
     let info = parse("import { foo } from './bar'; import baz from 'baz';");

@@ -157,6 +157,19 @@ expression: redact_sarif_version(&json_str)
               }
             },
             {
+              "id": "fallow/unused-store-member",
+              "shortDescription": {
+                "text": "Store member is never accessed by any consumer"
+              },
+              "fullDescription": {
+                "text": "Pinia store members (a `state` / `getters` / `actions` key, or a setup-store returned key) declared but never accessed by any consumer project-wide. The store binding is imported (so the module is reachable) yet a specific member is dead. Defaults to warn, not error: a store has an open declaration surface (plugins, dynamic dispatch) so confidence is lower. Activates only when pinia or @pinia/nuxt is a declared dependency."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-store-members",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
               "id": "fallow/unresolved-import",
               "shortDescription": {
                 "text": "Import could not be resolved"

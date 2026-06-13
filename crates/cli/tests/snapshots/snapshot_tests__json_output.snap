@@ -7,9 +7,9 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
   "schema_version": 7,
   "version": "[VERSION]",
   "elapsed_ms": 42,
-  "total_issues": 23,
+  "total_issues": 24,
   "summary": {
-    "total_issues": 23,
+    "total_issues": 24,
     "unused_files": 1,
     "unused_exports": 1,
     "unused_types": 1,
@@ -17,6 +17,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
     "unused_dependencies": 3,
     "unused_enum_members": 1,
     "unused_class_members": 1,
+    "unused_store_members": 1,
     "unresolved_imports": 1,
     "unlisted_dependencies": 1,
     "duplicate_exports": 1,
@@ -218,6 +219,24 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "auto_fixable": false,
           "description": "Suppress with an inline comment above the line",
           "comment": "// fallow-ignore-next-line unused-class-member"
+        }
+      ]
+    }
+  ],
+  "unused_store_members": [
+    {
+      "path": "src/stores/counter.ts",
+      "parent_name": "useCounterStore",
+      "member_name": "legacyAction",
+      "kind": "store_member",
+      "line": 24,
+      "col": 2,
+      "actions": [
+        {
+          "type": "suppress-line",
+          "auto_fixable": false,
+          "description": "Suppress with an inline comment above the line",
+          "comment": "// fallow-ignore-next-line unused-store-member"
         }
       ]
     }

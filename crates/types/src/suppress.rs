@@ -595,6 +595,7 @@ pub const DEAD_CODE_FILTER_FLAGS: &[&str] = &[
     "--unused-deps",
     "--unused-enum-members",
     "--unused-class-members",
+    "--unused-store-members",
     "--unresolved-imports",
     "--unlisted-deps",
     "--duplicate-exports",

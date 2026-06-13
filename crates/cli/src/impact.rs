@@ -1378,6 +1378,16 @@ fn collect_unused_symbol_findings(
             )),
         );
     }
+    for f in &results.unused_store_members {
+        push(
+            &f.member.path,
+            "unused-store-member",
+            Some(format!(
+                "{}{ID_SEP}{}",
+                f.member.parent_name, f.member.member_name
+            )),
+        );
+    }
     for f in &results.unresolved_imports {
         push(
             &f.import.path,

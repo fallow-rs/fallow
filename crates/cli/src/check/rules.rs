@@ -100,6 +100,12 @@ fn apply_file_override_rules(
             .unused_class_members
             != Severity::Off
     });
+    results.unused_store_members.retain(|m| {
+        config
+            .resolve_rules_for_path(&m.member.path)
+            .unused_store_members
+            != Severity::Off
+    });
     results.unresolved_imports.retain(|i| {
         config
             .resolve_rules_for_path(&i.import.path)
@@ -177,6 +183,9 @@ fn apply_base_file_rules(results: &mut fallow_core::results::AnalysisResults, ru
     }
     if rules.unused_class_members == Severity::Off {
         results.unused_class_members.clear();
+    }
+    if rules.unused_store_members == Severity::Off {
+        results.unused_store_members.clear();
     }
     if rules.unresolved_imports == Severity::Off {
         results.unresolved_imports.clear();
@@ -279,6 +288,12 @@ fn has_override_file_scoped_error(
                 .unused_class_members
                 == Severity::Error
         })
+        || results.unused_store_members.iter().any(|m| {
+            config
+                .resolve_rules_for_path(&m.member.path)
+                .unused_store_members
+                == Severity::Error
+        })
         || results.unresolved_imports.iter().any(|i| {
             config
                 .resolve_rules_for_path(&i.import.path)
@@ -349,6 +364,8 @@ fn has_default_file_scoped_error(
         || (rules.unused_enum_members == Severity::Error && !results.unused_enum_members.is_empty())
         || (rules.unused_class_members == Severity::Error
             && !results.unused_class_members.is_empty())
+        || (rules.unused_store_members == Severity::Error
+            && !results.unused_store_members.is_empty())
         || (rules.unresolved_imports == Severity::Error && !results.unresolved_imports.is_empty())
         || (rules.stale_suppressions == Severity::Error && !results.stale_suppressions.is_empty())
         || (rules.unresolved_catalog_references == Severity::Error
@@ -439,6 +456,9 @@ pub fn promote_warns_to_errors(rules: &mut RulesConfig) {
     }
     if rules.unused_class_members == Severity::Warn {
         rules.unused_class_members = Severity::Error;
+    }
+    if rules.unused_store_members == Severity::Warn {
+        rules.unused_store_members = Severity::Error;
     }
     if rules.unresolved_imports == Severity::Warn {
         rules.unresolved_imports = Severity::Error;
@@ -583,6 +603,15 @@ mod tests {
                 line: 10,
                 col: 0,
             }));
+        r.unused_store_members
+            .push(UnusedStoreMemberFinding::with_actions(UnusedMember {
+                path: PathBuf::from("/project/src/store.ts"),
+                parent_name: "useStore".into(),
+                member_name: "unusedAction".into(),
+                kind: MemberKind::StoreMember,
+                line: 12,
+                col: 0,
+            }));
         r.unresolved_imports
             .push(UnresolvedImportFinding::with_actions(UnresolvedImport {
                 path: PathBuf::from("/project/src/f.ts"),
@@ -717,6 +746,7 @@ mod tests {
             unused_optional_dependencies: Severity::Off,
             unused_enum_members: Severity::Off,
             unused_class_members: Severity::Off,
+            unused_store_members: Severity::Off,
             unresolved_imports: Severity::Off,
             unlisted_dependencies: Severity::Off,
             duplicate_exports: Severity::Off,
@@ -781,6 +811,10 @@ mod tests {
                 |res| res.unused_class_members.is_empty(),
             ),
             (
+                |r| r.unused_store_members = Severity::Off,
+                |res| res.unused_store_members.is_empty(),
+            ),
+            (
                 |r| r.unresolved_imports = Severity::Off,
                 |res| res.unresolved_imports.is_empty(),
             ),
@@ -834,6 +868,7 @@ mod tests {
             unused_optional_dependencies: Severity::Warn,
             unused_enum_members: Severity::Warn,
             unused_class_members: Severity::Warn,
+            unused_store_members: Severity::Warn,
             unresolved_imports: Severity::Warn,
             unlisted_dependencies: Severity::Warn,
             duplicate_exports: Severity::Warn,
@@ -878,6 +913,7 @@ mod tests {
             unused_optional_dependencies: Severity::Warn,
             unused_enum_members: Severity::Warn,
             unused_class_members: Severity::Warn,
+            unused_store_members: Severity::Warn,
             unresolved_imports: Severity::Warn,
             unlisted_dependencies: Severity::Warn,
             duplicate_exports: Severity::Warn,
@@ -1343,6 +1379,7 @@ mod tests {
             unused_optional_dependencies: Severity::Warn,
             unused_enum_members: Severity::Warn,
             unused_class_members: Severity::Warn,
+            unused_store_members: Severity::Warn,
             unresolved_imports: Severity::Warn,
             unlisted_dependencies: Severity::Warn,
             duplicate_exports: Severity::Warn,
@@ -1377,6 +1414,7 @@ mod tests {
         assert_eq!(rules.unused_optional_dependencies, Severity::Error);
         assert_eq!(rules.unused_enum_members, Severity::Error);
         assert_eq!(rules.unused_class_members, Severity::Error);
+        assert_eq!(rules.unused_store_members, Severity::Error);
         assert_eq!(rules.unresolved_imports, Severity::Error);
         assert_eq!(rules.unlisted_dependencies, Severity::Error);
         assert_eq!(rules.duplicate_exports, Severity::Error);
@@ -1399,6 +1437,7 @@ mod tests {
             unused_optional_dependencies: Severity::Off,
             unused_enum_members: Severity::Off,
             unused_class_members: Severity::Off,
+            unused_store_members: Severity::Off,
             unresolved_imports: Severity::Off,
             unlisted_dependencies: Severity::Off,
             duplicate_exports: Severity::Off,

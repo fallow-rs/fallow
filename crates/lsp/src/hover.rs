@@ -347,6 +347,7 @@ fn check_unused_member(
 ) -> Option<Hover> {
     let enum_iter = results.unused_enum_members.iter().map(|f| &f.member);
     let class_iter = results.unused_class_members.iter().map(|f| &f.member);
+    let store_iter = results.unused_store_members.iter().map(|f| &f.member);
     for (members, kind_label) in [
         (
             Box::new(enum_iter) as Box<dyn Iterator<Item = &fallow_core::results::UnusedMember>>,
@@ -355,6 +356,10 @@ fn check_unused_member(
         (
             Box::new(class_iter) as Box<dyn Iterator<Item = &fallow_core::results::UnusedMember>>,
             "Class member",
+        ),
+        (
+            Box::new(store_iter) as Box<dyn Iterator<Item = &fallow_core::results::UnusedMember>>,
+            "Store member",
         ),
     ] {
         for member in members {
@@ -548,7 +553,8 @@ mod tests {
     use fallow_core::results::{
         ExportUsage, ReferenceLocation, SecuritySeverity, UnresolvedImport,
         UnresolvedImportFinding, UnusedClassMemberFinding, UnusedEnumMemberFinding, UnusedExport,
-        UnusedExportFinding, UnusedFile, UnusedFileFinding, UnusedMember, UnusedTypeFinding,
+        UnusedExportFinding, UnusedFile, UnusedFileFinding, UnusedMember, UnusedStoreMemberFinding,
+        UnusedTypeFinding,
     };
 
     /// Extract the markdown text from a Hover's contents.
@@ -819,6 +825,33 @@ mod tests {
         let value = markup_value(&hover);
         assert!(value.contains("UserService.reset"));
         assert!(value.contains("Class member"));
+    }
+
+    #[test]
+    fn hover_on_unused_store_member() {
+        let root = test_root();
+        let path = root.join("src/store.ts");
+        let mut results = AnalysisResults::default();
+        results
+            .unused_store_members
+            .push(UnusedStoreMemberFinding::with_actions(UnusedMember {
+                path: path.clone(),
+                parent_name: "useStore".to_string(),
+                member_name: "reset".to_string(),
+                kind: MemberKind::StoreMember,
+                line: 20,
+                col: 4,
+            }));
+        let duplication = DuplicationReport::default();
+        let pos = Position {
+            line: 19,
+            character: 6,
+        };
+
+        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let value = markup_value(&hover);
+        assert!(value.contains("useStore.reset"));
+        assert!(value.contains("Store member"));
     }
 
     #[test]

@@ -1418,10 +1418,6 @@ fn run_export_detectors(
     clippy::too_many_arguments,
     reason = "member detection needs graph context plus public API and allowlist filters"
 )]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "detector wiring threads many graph/config inputs; matches sibling detectors"
-)]
 fn run_member_detectors(
     graph: &ModuleGraph,
     resolved_modules: &[ResolvedModule],
@@ -1759,6 +1755,7 @@ mod tests {
                 unused_optional_dependencies: Severity::Off,
                 unused_enum_members: Severity::Off,
                 unused_class_members: Severity::Off,
+                unused_store_members: Severity::Off,
                 unresolved_imports: Severity::Off,
                 unlisted_dependencies: Severity::Off,
                 duplicate_exports: Severity::Off,

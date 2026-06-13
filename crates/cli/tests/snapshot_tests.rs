@@ -90,6 +90,15 @@ fn sample_results(root: &Path) -> AnalysisResults {
             line: 42,
             col: 4,
         }));
+    r.unused_store_members
+        .push(UnusedStoreMemberFinding::with_actions(UnusedMember {
+            path: root.join("src/stores/counter.ts"),
+            parent_name: "useCounterStore".to_string(),
+            member_name: "legacyAction".to_string(),
+            kind: MemberKind::StoreMember,
+            line: 24,
+            col: 2,
+        }));
     r.unresolved_imports
         .push(UnresolvedImportFinding::with_actions(UnresolvedImport {
             path: root.join("src/app.ts"),
@@ -709,6 +718,7 @@ fn sarif_mixed_severity_snapshot() {
         unused_optional_dependencies: fallow_config::Severity::Warn,
         unused_enum_members: fallow_config::Severity::Warn,
         unused_class_members: fallow_config::Severity::Warn,
+        unused_store_members: fallow_config::Severity::Warn,
         unresolved_imports: fallow_config::Severity::Error,
         unlisted_dependencies: fallow_config::Severity::Error,
         duplicate_exports: fallow_config::Severity::Warn,
@@ -1574,6 +1584,7 @@ fn codeclimate_mixed_severity_snapshot() {
         unused_optional_dependencies: fallow_config::Severity::Warn,
         unused_enum_members: fallow_config::Severity::Warn,
         unused_class_members: fallow_config::Severity::Warn,
+        unused_store_members: fallow_config::Severity::Warn,
         unresolved_imports: fallow_config::Severity::Error,
         unlisted_dependencies: fallow_config::Severity::Error,
         duplicate_exports: fallow_config::Severity::Warn,

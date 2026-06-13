@@ -154,6 +154,7 @@
         "unused-optional-dependencies": "warn",
         "unused-enum-members": "error",
         "unused-class-members": "error",
+        "unused-store-members": "warn",
         "unresolved-imports": "error",
         "unlisted-dependencies": "error",
         "duplicate-exports": "error",
@@ -1015,6 +1016,11 @@
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
+        "unused-store-members": {
+          "description": "Store members (Pinia `state` / `getters` / `actions` key, or a\nsetup-store returned key) declared but never accessed by any consumer\nproject-wide. Defaults to `warn`, not `error` like the closed-set\nclass/enum member rules: a store has an OPEN declaration surface\n(plugins, `$onAction`, dynamic dispatch) so analyzer confidence is\ngenuinely lower; warn encodes that without failing CI. Promotable to\n`error` once validated on a codebase.",
+          "$ref": "#/$defs/Severity",
+          "default": "error"
+        },
         "unresolved-imports": {
           "$ref": "#/$defs/Severity",
           "default": "error"
@@ -1600,6 +1606,16 @@
           ]
         },
         "unused-class-members": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unused-store-members": {
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"

@@ -35,6 +35,9 @@ pub fn filter_to_workspaces(
         .unused_class_members
         .retain(|m| any_under(&m.member.path));
     results
+        .unused_store_members
+        .retain(|m| any_under(&m.member.path));
+    results
         .unresolved_imports
         .retain(|i| any_under(&i.import.path));
 
@@ -371,6 +374,9 @@ pub fn filter_results_by_diff(
         .retain(|m| line_in_diff(&m.member.path, m.member.line));
     results
         .unused_class_members
+        .retain(|m| line_in_diff(&m.member.path, m.member.line));
+    results
+        .unused_store_members
         .retain(|m| line_in_diff(&m.member.path, m.member.line));
     results
         .unresolved_imports

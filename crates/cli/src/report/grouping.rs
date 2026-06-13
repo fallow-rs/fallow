@@ -241,6 +241,11 @@ where
                 .unused_class_members
                 .push(item.clone());
         }
+        for item in &results.unused_store_members {
+            self.entry_for_path(&item.member.path)
+                .unused_store_members
+                .push(item.clone());
+        }
         for item in &results.unresolved_imports {
             self.entry_for_path(&item.import.path)
                 .unresolved_imports

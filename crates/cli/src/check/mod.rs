@@ -31,6 +31,7 @@ pub struct IssueFilters {
     pub private_type_leaks: bool,
     pub unused_enum_members: bool,
     pub unused_class_members: bool,
+    pub unused_store_members: bool,
     pub unresolved_imports: bool,
     pub unlisted_deps: bool,
     pub duplicate_exports: bool,
@@ -58,6 +59,7 @@ impl IssueFilters {
             || self.private_type_leaks
             || self.unused_enum_members
             || self.unused_class_members
+            || self.unused_store_members
             || self.unresolved_imports
             || self.unlisted_deps
             || self.duplicate_exports
@@ -112,6 +114,9 @@ impl IssueFilters {
         }
         if !self.unused_class_members {
             results.unused_class_members.clear();
+        }
+        if !self.unused_store_members {
+            results.unused_store_members.clear();
         }
         if !self.unresolved_imports {
             results.unresolved_imports.clear();
@@ -796,6 +801,7 @@ mod tests {
             private_type_leaks: false,
             unused_enum_members: false,
             unused_class_members: false,
+            unused_store_members: false,
             unresolved_imports: false,
             unlisted_deps: false,
             duplicate_exports: false,
@@ -1215,6 +1221,7 @@ mod tests {
             private_type_leaks: true,
             unused_enum_members: true,
             unused_class_members: true,
+            unused_store_members: true,
             unresolved_imports: true,
             unlisted_deps: true,
             duplicate_exports: true,

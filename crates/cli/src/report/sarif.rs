@@ -850,6 +850,11 @@ fn sarif_member_import_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
             rules.unused_class_members,
         ),
         (
+            "fallow/unused-store-member",
+            "Store member is never referenced",
+            rules.unused_store_members,
+        ),
+        (
             "fallow/unresolved-import",
             "Import could not be resolved",
             rules.unresolved_imports,
@@ -1144,6 +1149,20 @@ fn push_member_sarif_results(
                 "fallow/unused-class-member",
                 severity_to_sarif_level(rules.unused_class_members),
                 "Class",
+            )
+        },
+    );
+    push_sarif_results(
+        sarif_results,
+        &results.unused_store_members,
+        snippets,
+        |m| {
+            sarif_member_fields(
+                &m.member,
+                root,
+                "fallow/unused-store-member",
+                severity_to_sarif_level(rules.unused_store_members),
+                "Store",
             )
         },
     );
@@ -2029,7 +2048,7 @@ mod tests {
         let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
             .as_array()
             .expect("rules should be an array");
-        assert_eq!(rules.len(), 29);
+        assert_eq!(rules.len(), 30);
 
         let rule_ids: Vec<&str> = rules.iter().map(|r| r["id"].as_str().unwrap()).collect();
         assert!(rule_ids.contains(&"fallow/unused-file"));
@@ -2043,6 +2062,7 @@ mod tests {
         assert!(rule_ids.contains(&"fallow/test-only-dependency"));
         assert!(rule_ids.contains(&"fallow/unused-enum-member"));
         assert!(rule_ids.contains(&"fallow/unused-class-member"));
+        assert!(rule_ids.contains(&"fallow/unused-store-member"));
         assert!(rule_ids.contains(&"fallow/unresolved-import"));
         assert!(rule_ids.contains(&"fallow/unlisted-dependency"));
         assert!(rule_ids.contains(&"fallow/duplicate-export"));
@@ -2265,6 +2285,7 @@ mod tests {
         assert!(rule_ids.contains(&"fallow/test-only-dependency"));
         assert!(rule_ids.contains(&"fallow/unused-enum-member"));
         assert!(rule_ids.contains(&"fallow/unused-class-member"));
+        assert!(rule_ids.contains(&"fallow/unused-store-member"));
         assert!(rule_ids.contains(&"fallow/unresolved-import"));
         assert!(rule_ids.contains(&"fallow/unlisted-dependency"));
         assert!(rule_ids.contains(&"fallow/duplicate-export"));

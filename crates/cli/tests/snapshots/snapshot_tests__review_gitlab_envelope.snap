@@ -3,10 +3,10 @@ source: crates/cli/tests/snapshot_tests.rs
 expression: json_str
 ---
 {
-  "body": "### Fallow dead-code report\n\n22 inline findings selected for GitLab review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: db7b3fd85e8a96cf -->",
+  "body": "### Fallow dead-code report\n\n23 inline findings selected for GitLab review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: b3fec9b6c89ba216 -->",
   "summary": {
-    "body": "### Fallow dead-code report\n\n22 inline findings selected for GitLab review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: db7b3fd85e8a96cf -->",
-    "fingerprint": "db7b3fd85e8a96cf"
+    "body": "### Fallow dead-code report\n\n23 inline findings selected for GitLab review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: b3fec9b6c89ba216 -->",
+    "fingerprint": "b3fec9b6c89ba216"
   },
   "comments": [
     {
@@ -198,6 +198,16 @@ expression: json_str
         "new_line": 42
       },
       "fingerprint": "25579ea7b6940453"
+    },
+    {
+      "body": "**warn** `fallow/unused-store-member`: Store member 'useCounterStore.legacyAction' is never referenced\n\n<!-- fallow-fingerprint:v2: a2cd7cf87121a06f -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "src/stores/counter.ts",
+        "new_path": "src/stores/counter.ts",
+        "new_line": 24
+      },
+      "fingerprint": "a2cd7cf87121a06f"
     },
     {
       "body": "**error** `fallow/unused-type`: Type export 'OldType' is never imported by other modules\n\n<!-- fallow-fingerprint:v2: deb0e9de35cc06d9 -->",

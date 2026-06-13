@@ -634,6 +634,7 @@ mod tests {
             "fallow/unused-type",
             "fallow/unused-enum-member",
             "fallow/unused-class-member",
+            "fallow/unused-store-member",
             "fallow/unresolved-import",
             "fallow/unlisted-dependency",
             "fallow/duplicate-export",

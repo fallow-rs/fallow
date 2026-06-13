@@ -229,7 +229,7 @@ export type DependencyLocation = ("dependencies" | "devDependencies" | "optional
 /**
  * The kind of member.
  */
-export type MemberKind = ("enum_member" | "class_method" | "class_property" | "namespace_member")
+export type MemberKind = ("enum_member" | "class_method" | "class_property" | "namespace_member" | "store_member")
 /**
  * Discriminator for [`ReExportCycle`]: which structural shape was detected.
  */
@@ -942,6 +942,15 @@ unused_enum_members: UnusedEnumMemberFinding[]
  */
 unused_class_members: UnusedClassMemberFinding[]
 /**
+ * Store members (Pinia `state` / `getters` / `actions` key, or a
+ * setup-store returned key) declared but never accessed by any consumer
+ * project-wide. Wrapped in [`UnusedStoreMemberFinding`]: same inner
+ * [`UnusedMember`] struct as `unused_class_members`, with a
+ * store-targeted fix description. Cross-graph: the store binding is
+ * imported (the module is reachable) yet a specific member is dead.
+ */
+unused_store_members?: UnusedStoreMemberFinding[]
+/**
  * Import specifiers that could not be resolved. Wrapped in
  * [`UnresolvedImportFinding`] so each entry carries a typed `actions`
  * array natively.
@@ -1148,6 +1157,10 @@ unused_enum_members: number
  * Unused class members.
  */
 unused_class_members: number
+/**
+ * Unused store members.
+ */
+unused_store_members?: number
 /**
  * Imports that could not be resolved against the project's module graph.
  */
@@ -1696,6 +1709,49 @@ introduced?: (AuditIntroduced | null)
  * the class-member kebab-case identifier instead.
  */
 export interface UnusedClassMemberFinding {
+/**
+ * File containing the unused member.
+ */
+path: string
+/**
+ * Name of the parent enum or class.
+ */
+parent_name: string
+/**
+ * Name of the unused member.
+ */
+member_name: string
+kind: MemberKind
+/**
+ * 1-based line number.
+ */
+line: number
+/**
+ * 0-based byte column offset.
+ */
+col: number
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+}
+/**
+ * Wire-shape envelope for an [`UnusedMember`] finding consumed under the
+ * `unused_store_members` key (a Pinia `state` / `getters` / `actions` key, or
+ * a setup-store returned key, declared but never accessed by any consumer
+ * project-wide). Same Rust struct as [`UnusedClassMemberFinding`]. Emits only
+ * a line-level suppress action: there is no safe auto-fix because a store
+ * member can be accessed reflectively (a Pinia plugin, `store.$onAction`, or
+ * dynamic dispatch) in ways syntactic analysis cannot see, so removal is a
+ * behavioral change the user must own.
+ */
+export interface UnusedStoreMemberFinding {
 /**
  * File containing the unused member.
  */
@@ -5260,6 +5316,15 @@ unused_enum_members: UnusedEnumMemberFinding[]
  */
 unused_class_members: UnusedClassMemberFinding[]
 /**
+ * Store members (Pinia `state` / `getters` / `actions` key, or a
+ * setup-store returned key) declared but never accessed by any consumer
+ * project-wide. Wrapped in [`UnusedStoreMemberFinding`]: same inner
+ * [`UnusedMember`] struct as `unused_class_members`, with a
+ * store-targeted fix description. Cross-graph: the store binding is
+ * imported (the module is reachable) yet a specific member is dead.
+ */
+unused_store_members?: UnusedStoreMemberFinding[]
+/**
  * Import specifiers that could not be resolved. Wrapped in
  * [`UnresolvedImportFinding`] so each entry carries a typed `actions`
  * array natively.
@@ -6607,11 +6672,11 @@ export type UnusedDependency = UnusedDependencyFinding | UnusedDevDependencyFind
 
 /**
  * Backwards-compat alias for the pre-#384 bare `UnusedMember` union name.
- * Maps to the union of typed wrappers (`UnusedClassMemberFinding`, `UnusedEnumMemberFinding`)
+ * Maps to the union of typed wrappers (`UnusedClassMemberFinding`, `UnusedEnumMemberFinding`, `UnusedStoreMemberFinding`)
  * that replaced the pre-migration bare union. The wire shape per variant
  * is byte-identical (each wrapper flattens its bare payload and adds
  * `actions[]` plus optional `introduced`). Consumers that imported
  * `UnusedMember` from `fallow/types` pre-migration continue to work via
  * this alias; new code should narrow on the specific wrapper variant.
  */
-export type UnusedMember = UnusedClassMemberFinding | UnusedEnumMemberFinding;
+export type UnusedMember = UnusedClassMemberFinding | UnusedEnumMemberFinding | UnusedStoreMemberFinding;

@@ -165,6 +165,22 @@ expression: json_str
   },
   {
     "type": "issue",
+    "check_name": "fallow/unused-store-member",
+    "description": "Store member 'useCounterStore.legacyAction' is never referenced",
+    "categories": [
+      "Bug Risk"
+    ],
+    "severity": "minor",
+    "fingerprint": "a2cd7cf87121a06f",
+    "location": {
+      "path": "src/stores/counter.ts",
+      "lines": {
+        "begin": 24
+      }
+    }
+  },
+  {
+    "type": "issue",
     "check_name": "fallow/unresolved-import",
     "description": "Import './missing-module' could not be resolved",
     "categories": [

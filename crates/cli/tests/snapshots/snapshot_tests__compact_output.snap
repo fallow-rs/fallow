@@ -10,6 +10,7 @@ unused-devdep:jest
 unused-optionaldep:fsevents
 unused-enum-member:src/enums.ts:8:Status.Deprecated
 unused-class-member:src/service.ts:42:UserService.legacyMethod
+unused-store-member:src/stores/counter.ts:24:useCounterStore.legacyAction
 unresolved-import:src/app.ts:3:./missing-module
 unlisted-dep:chalk
 duplicate-export:Config

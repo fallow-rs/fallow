@@ -4,10 +4,10 @@ expression: json_str
 ---
 {
   "event": "COMMENT",
-  "body": "### Fallow dead-code report\n\n22 inline findings selected for GitHub review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 077ddc8e6ac98477 -->",
+  "body": "### Fallow dead-code report\n\n23 inline findings selected for GitHub review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 93ab67e6447f3f9e -->",
   "summary": {
-    "body": "### Fallow dead-code report\n\n22 inline findings selected for GitHub review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 077ddc8e6ac98477 -->",
-    "fingerprint": "077ddc8e6ac98477"
+    "body": "### Fallow dead-code report\n\n23 inline findings selected for GitHub review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 93ab67e6447f3f9e -->",
+    "fingerprint": "93ab67e6447f3f9e"
   },
   "comments": [
     {
@@ -142,6 +142,13 @@ expression: json_str
       "side": "RIGHT",
       "body": "**error** `fallow/unused-class-member`: Class member 'UserService.legacyMethod' is never referenced\n\n<!-- fallow-fingerprint:v2: 25579ea7b6940453 -->",
       "fingerprint": "25579ea7b6940453"
+    },
+    {
+      "path": "src/stores/counter.ts",
+      "line": 24,
+      "side": "RIGHT",
+      "body": "**warn** `fallow/unused-store-member`: Store member 'useCounterStore.legacyAction' is never referenced\n\n<!-- fallow-fingerprint:v2: a2cd7cf87121a06f -->",
+      "fingerprint": "a2cd7cf87121a06f"
     },
     {
       "path": "src/types.ts",

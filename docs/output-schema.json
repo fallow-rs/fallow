@@ -503,6 +503,13 @@
           },
           "description": "Class members never accessed. Wrapped in\n[`UnusedClassMemberFinding`]: same inner [`UnusedMember`] struct as\n`unused_enum_members`, with a class-targeted fix description and the\n`auto_fixable: false` default to reflect dependency-injection\npatterns."
         },
+        "unused_store_members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedStoreMemberFinding"
+          },
+          "description": "Store members (Pinia `state` / `getters` / `actions` key, or a\nsetup-store returned key) declared but never accessed by any consumer\nproject-wide. Wrapped in [`UnusedStoreMemberFinding`]: same inner\n[`UnusedMember`] struct as `unused_class_members`, with a\nstore-targeted fix description. Cross-graph: the store binding is\nimported (the module is reachable) yet a specific member is dead."
+        },
         "unresolved_imports": {
           "type": "array",
           "items": {
@@ -854,6 +861,13 @@
             "$ref": "#/definitions/UnusedClassMemberFinding"
           },
           "description": "Class members never accessed. Wrapped in\n[`UnusedClassMemberFinding`]: same inner [`UnusedMember`] struct as\n`unused_enum_members`, with a class-targeted fix description and the\n`auto_fixable: false` default to reflect dependency-injection\npatterns."
+        },
+        "unused_store_members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedStoreMemberFinding"
+          },
+          "description": "Store members (Pinia `state` / `getters` / `actions` key, or a\nsetup-store returned key) declared but never accessed by any consumer\nproject-wide. Wrapped in [`UnusedStoreMemberFinding`]: same inner\n[`UnusedMember`] struct as `unused_class_members`, with a\nstore-targeted fix description. Cross-graph: the store binding is\nimported (the module is reachable) yet a specific member is dead."
         },
         "unresolved_imports": {
           "type": "array",
@@ -4692,6 +4706,10 @@
           "type": "integer",
           "description": "Unused class members."
         },
+        "unused_store_members": {
+          "type": "integer",
+          "description": "Unused store members."
+        },
         "unresolved_imports": {
           "type": "integer",
           "description": "Imports that could not be resolved against the project's module graph."
@@ -5336,6 +5354,13 @@
           },
           "description": "Class members never accessed. Wrapped in\n[`UnusedClassMemberFinding`]: same inner [`UnusedMember`] struct as\n`unused_enum_members`, with a class-targeted fix description and the\n`auto_fixable: false` default to reflect dependency-injection\npatterns."
         },
+        "unused_store_members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedStoreMemberFinding"
+          },
+          "description": "Store members (Pinia `state` / `getters` / `actions` key, or a\nsetup-store returned key) declared but never accessed by any consumer\nproject-wide. Wrapped in [`UnusedStoreMemberFinding`]: same inner\n[`UnusedMember`] struct as `unused_class_members`, with a\nstore-targeted fix description. Cross-graph: the store binding is\nimported (the module is reachable) yet a specific member is dead."
+        },
         "unresolved_imports": {
           "type": "array",
           "items": {
@@ -5536,6 +5561,11 @@
           "type": "string",
           "const": "namespace_member",
           "description": "A member exported from a TypeScript namespace."
+        },
+        {
+          "type": "string",
+          "const": "store_member",
+          "description": "A member declared by a store object (Pinia `state` / `getters` /\n`actions` key, or a setup-store returned key). Cross-graph dead-member\ndetection: a store member never accessed by any consumer project-wide."
         }
       ],
       "description": "The kind of member."
@@ -12551,6 +12581,63 @@
         "projects_with_baseline"
       ],
       "description": "Grand totals across every tracked project (including repos whose directory no\nlonger exists on disk: their past wins still count toward lifetime impact)."
+    },
+    "UnusedStoreMemberFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File containing the unused member."
+        },
+        "parent_name": {
+          "type": "string",
+          "description": "Name of the parent enum or class."
+        },
+        "member_name": {
+          "type": "string",
+          "description": "Name of the unused member."
+        },
+        "kind": {
+          "description": "Whether this is an enum member, class method, or class property.",
+          "$ref": "#/definitions/MemberKind"
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "path",
+        "parent_name",
+        "member_name",
+        "kind",
+        "line",
+        "col",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for an [`UnusedMember`] finding consumed under the\n`unused_store_members` key (a Pinia `state` / `getters` / `actions` key, or\na setup-store returned key, declared but never accessed by any consumer\nproject-wide). Same Rust struct as [`UnusedClassMemberFinding`]. Emits only\na line-level suppress action: there is no safe auto-fix because a store\nmember can be accessed reflectively (a Pinia plugin, `store.$onAction`, or\ndynamic dispatch) in ways syntactic analysis cannot see, so removal is a\nbehavioral change the user must own."
     }
   }
 }

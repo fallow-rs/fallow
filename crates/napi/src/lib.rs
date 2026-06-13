@@ -33,6 +33,7 @@ pub struct DeadCodeOptions {
     pub private_type_leaks: Option<bool>,
     pub unused_enum_members: Option<bool>,
     pub unused_class_members: Option<bool>,
+    pub unused_store_members: Option<bool>,
     pub unresolved_imports: Option<bool>,
     pub unlisted_deps: Option<bool>,
     pub duplicate_exports: Option<bool>,
@@ -271,6 +272,7 @@ impl TryFrom<DeadCodeOptions> for programmatic::DeadCodeOptions {
                 private_type_leaks: value.private_type_leaks.unwrap_or(false),
                 unused_enum_members: value.unused_enum_members.unwrap_or(false),
                 unused_class_members: value.unused_class_members.unwrap_or(false),
+                unused_store_members: value.unused_store_members.unwrap_or(false),
                 unresolved_imports: value.unresolved_imports.unwrap_or(false),
                 unlisted_deps: value.unlisted_deps.unwrap_or(false),
                 duplicate_exports: value.duplicate_exports.unwrap_or(false),
@@ -570,6 +572,7 @@ mod tests {
             private_type_leaks: Some(true),
             unused_enum_members: Some(true),
             unused_class_members: Some(true),
+            unused_store_members: Some(true),
             unresolved_imports: Some(true),
             unlisted_deps: Some(true),
             duplicate_exports: Some(true),
@@ -618,6 +621,7 @@ mod tests {
         assert!(options.filters.private_type_leaks);
         assert!(options.filters.unused_enum_members);
         assert!(options.filters.unused_class_members);
+        assert!(options.filters.unused_store_members);
         assert!(options.filters.unresolved_imports);
         assert!(options.filters.unlisted_deps);
         assert!(options.filters.duplicate_exports);

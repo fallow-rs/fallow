@@ -57,6 +57,8 @@ pub struct CheckCounts {
     #[serde(default)]
     pub unused_class_members: usize,
     #[serde(default)]
+    pub unused_store_members: usize,
+    #[serde(default)]
     pub unresolved_imports: usize,
     #[serde(default)]
     pub unlisted_dependencies: usize,
@@ -93,6 +95,7 @@ impl CheckCounts {
             unused_optional_dependencies: results.unused_optional_dependencies.len(),
             unused_enum_members: results.unused_enum_members.len(),
             unused_class_members: results.unused_class_members.len(),
+            unused_store_members: results.unused_store_members.len(),
             unresolved_imports: results.unresolved_imports.len(),
             unlisted_dependencies: results.unlisted_dependencies.len(),
             duplicate_exports: results.duplicate_exports.len(),
@@ -120,6 +123,9 @@ impl CheckCounts {
             unused_optional_dependencies: b.unused_optional_dependencies,
             unused_enum_members: b.unused_enum_members,
             unused_class_members: b.unused_class_members,
+            // `fallow_config::RegressionBaseline` has no `unused_store_members`
+            // field; default to 0 until the config baseline schema gains one.
+            unused_store_members: 0,
             unresolved_imports: b.unresolved_imports,
             unlisted_dependencies: b.unlisted_dependencies,
             duplicate_exports: b.duplicate_exports,
@@ -178,6 +184,7 @@ impl CheckCounts {
         push_delta!(unused_optional_dependencies);
         push_delta!(unused_enum_members);
         push_delta!(unused_class_members);
+        push_delta!(unused_store_members);
         push_delta!(unresolved_imports);
         push_delta!(unlisted_dependencies);
         push_delta!(duplicate_exports);
@@ -258,6 +265,7 @@ mod tests {
             unused_optional_dependencies: 0,
             unused_enum_members: 0,
             unused_class_members: 0,
+            unused_store_members: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 0,
             duplicate_exports: 0,
@@ -299,6 +307,7 @@ mod tests {
                 unused_optional_dependencies: 0,
                 unused_enum_members: 1,
                 unused_class_members: 1,
+                unused_store_members: 0,
                 unresolved_imports: 0,
                 unlisted_dependencies: 1,
                 duplicate_exports: 0,
@@ -335,6 +344,7 @@ mod tests {
             unused_optional_dependencies: 1,
             unused_enum_members: 1,
             unused_class_members: 1,
+            unused_store_members: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 1,
             duplicate_exports: 0,
@@ -378,6 +388,7 @@ mod tests {
             unused_optional_dependencies: 0,
             unused_enum_members: 0,
             unused_class_members: 0,
+            unused_store_members: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 0,
             duplicate_exports: 0,
@@ -408,6 +419,7 @@ mod tests {
             unused_optional_dependencies: 0,
             unused_enum_members: 0,
             unused_class_members: 0,
+            unused_store_members: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 0,
             duplicate_exports: 0,
@@ -436,6 +448,7 @@ mod tests {
             unused_optional_dependencies: 0,
             unused_enum_members: 0,
             unused_class_members: 0,
+            unused_store_members: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 0,
             duplicate_exports: 0,
@@ -449,7 +462,7 @@ mod tests {
             policy_violations: 0,
         };
         let current = CheckCounts {
-            total_issues: 14,
+            total_issues: 15,
             unused_files: 1,
             unused_exports: 1,
             unused_types: 1,
@@ -458,6 +471,7 @@ mod tests {
             unused_optional_dependencies: 1,
             unused_enum_members: 1,
             unused_class_members: 1,
+            unused_store_members: 1,
             unresolved_imports: 1,
             unlisted_dependencies: 1,
             duplicate_exports: 1,
@@ -471,7 +485,7 @@ mod tests {
             policy_violations: 0,
         };
         let deltas = baseline.deltas(&current);
-        assert_eq!(deltas.len(), 15);
+        assert_eq!(deltas.len(), 16);
         for (_, d) in &deltas {
             assert_eq!(*d, 1);
         }
@@ -489,6 +503,7 @@ mod tests {
             unused_optional_dependencies: 0,
             unused_enum_members: 0,
             unused_class_members: 0,
+            unused_store_members: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 0,
             duplicate_exports: 0,
