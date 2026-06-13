@@ -2735,7 +2735,14 @@ fn health_css_flag_surfaces_css_analytics() {
     // both structurally notable; a plain class rule is not.
     write_file(
         &root.join("src/styles.css"),
-        "#main { color: red; z-index: 5; }\n.a.b.c.d.e { color: blue; font-size: 12px; }\n.plain { color: green; }\n",
+        ":root { --brand: 4px; --unused-token: 0; }\n\
+         #main { color: red; z-index: 5; }\n\
+         .a.b.c.d.e { color: blue; font-size: 12px; }\n\
+         .themed { width: var(--brand); }\n\
+         @keyframes spin { from {} to {} }\n\
+         @keyframes dead-anim { from {} }\n\
+         .spinner { animation-name: spin; }\n\
+         .plain { color: green; }\n",
     );
 
     // Without --css the section is absent (default output unchanged).
@@ -2791,4 +2798,17 @@ fn health_css_flag_surfaces_css_analytics() {
     assert_eq!(summary["unique_colors"], 3, "summary: {summary}");
     assert_eq!(summary["unique_font_sizes"], 1, "summary: {summary}");
     assert_eq!(summary["unique_z_indexes"], 1, "summary: {summary}");
+
+    // Deadness candidates: --unused-token and @keyframes dead-anim are defined
+    // but never referenced in CSS.
+    assert_eq!(
+        summary["custom_properties_defined"], 2,
+        "summary: {summary}"
+    );
+    assert_eq!(
+        summary["custom_properties_unreferenced"], 1,
+        "summary: {summary}"
+    );
+    assert_eq!(summary["keyframes_defined"], 2, "summary: {summary}");
+    assert_eq!(summary["keyframes_unreferenced"], 1, "summary: {summary}");
 }

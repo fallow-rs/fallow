@@ -736,6 +736,14 @@ pub struct CssAnalytics {
     pub font_sizes: Vec<String>,
     /// Distinct `z-index` declaration values in the stylesheet, sorted.
     pub z_indexes: Vec<String>,
+    /// Distinct custom properties (`--x`) DEFINED in the stylesheet, sorted.
+    pub defined_custom_properties: Vec<String>,
+    /// Distinct custom properties REFERENCED via `var()` in the stylesheet.
+    pub referenced_custom_properties: Vec<String>,
+    /// Distinct `@keyframes` names DEFINED in the stylesheet, sorted.
+    pub defined_keyframes: Vec<String>,
+    /// Distinct `@keyframes` names REFERENCED via `animation` / `animation-name`.
+    pub referenced_keyframes: Vec<String>,
 }
 
 /// Which complexity metric a [`ComplexityContribution`] adds to.

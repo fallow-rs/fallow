@@ -12427,6 +12427,34 @@
             "type": "string"
           },
           "description": "Distinct `z-index` declaration values in the stylesheet, sorted."
+        },
+        "defined_custom_properties": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Distinct custom properties (`--x`) DEFINED in the stylesheet, sorted."
+        },
+        "referenced_custom_properties": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Distinct custom properties REFERENCED via `var()` in the stylesheet."
+        },
+        "defined_keyframes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Distinct `@keyframes` names DEFINED in the stylesheet, sorted."
+        },
+        "referenced_keyframes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Distinct `@keyframes` names REFERENCED via `animation` / `animation-name`."
         }
       },
       "required": [
@@ -12439,7 +12467,11 @@
         "notable_truncated",
         "colors",
         "font_sizes",
-        "z_indexes"
+        "z_indexes",
+        "defined_custom_properties",
+        "referenced_custom_properties",
+        "defined_keyframes",
+        "referenced_keyframes"
       ],
       "description": "Stylesheet-level structural CSS analytics, computed from the parsed CSS\nsyntax tree. Feeds `fallow health` penalty weights and located findings,\nnever a standalone CSS score."
     },
@@ -12534,6 +12566,22 @@
         "unique_z_indexes": {
           "type": "integer",
           "description": "Distinct `z-index` values across the whole codebase."
+        },
+        "custom_properties_defined": {
+          "type": "integer",
+          "description": "Distinct custom properties (`--x`) defined anywhere in the codebase."
+        },
+        "custom_properties_unreferenced": {
+          "type": "integer",
+          "description": "Custom properties defined but never referenced via `var()` in any\nstylesheet. These are cleanup CANDIDATES, not confirmed dead: a property\nmay still be read or set from JavaScript or inline HTML styles."
+        },
+        "keyframes_defined": {
+          "type": "integer",
+          "description": "Distinct `@keyframes` defined anywhere in the codebase."
+        },
+        "keyframes_unreferenced": {
+          "type": "integer",
+          "description": "`@keyframes` defined but never referenced via `animation` /\n`animation-name` in any stylesheet (cleanup CANDIDATES; an animation\nname can still be applied from JavaScript)."
         }
       },
       "required": [
@@ -12545,7 +12593,11 @@
         "max_nesting_depth",
         "unique_colors",
         "unique_font_sizes",
-        "unique_z_indexes"
+        "unique_z_indexes",
+        "custom_properties_defined",
+        "custom_properties_unreferenced",
+        "keyframes_defined",
+        "keyframes_unreferenced"
       ],
       "description": "Project-wide CSS analytics aggregates across every analyzed stylesheet\n(including stylesheets with no notable rule, which are not listed\nindividually)."
     },

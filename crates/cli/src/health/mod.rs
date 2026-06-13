@@ -527,6 +527,15 @@ fn compute_css_analytics_report(
     let mut colors: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
     let mut font_sizes: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
     let mut z_indexes: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
+    // Project-wide custom-property / @keyframes definition + reference sets, so
+    // an unreferenced candidate is one defined somewhere and referenced nowhere
+    // in CSS (a property/keyframes used only from JS stays a candidate, hence the
+    // conservative "candidate" framing).
+    let mut defined_custom_props: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
+    let mut referenced_custom_props: rustc_hash::FxHashSet<String> =
+        rustc_hash::FxHashSet::default();
+    let mut defined_keyframes: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
+    let mut referenced_keyframes: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
 
     for file in files {
         let path = &file.path;
@@ -569,6 +578,10 @@ fn compute_css_analytics_report(
         colors.extend(analytics.colors.iter().cloned());
         font_sizes.extend(analytics.font_sizes.iter().cloned());
         z_indexes.extend(analytics.z_indexes.iter().cloned());
+        defined_custom_props.extend(analytics.defined_custom_properties.iter().cloned());
+        referenced_custom_props.extend(analytics.referenced_custom_properties.iter().cloned());
+        defined_keyframes.extend(analytics.defined_keyframes.iter().cloned());
+        referenced_keyframes.extend(analytics.referenced_keyframes.iter().cloned());
 
         if !analytics.notable_rules.is_empty() {
             file_reports.push(CssFileAnalytics {
@@ -581,6 +594,18 @@ fn compute_css_analytics_report(
     summary.unique_colors = u32::try_from(colors.len()).unwrap_or(u32::MAX);
     summary.unique_font_sizes = u32::try_from(font_sizes.len()).unwrap_or(u32::MAX);
     summary.unique_z_indexes = u32::try_from(z_indexes.len()).unwrap_or(u32::MAX);
+    summary.custom_properties_defined =
+        u32::try_from(defined_custom_props.len()).unwrap_or(u32::MAX);
+    summary.custom_properties_unreferenced = u32::try_from(
+        defined_custom_props
+            .difference(&referenced_custom_props)
+            .count(),
+    )
+    .unwrap_or(u32::MAX);
+    summary.keyframes_defined = u32::try_from(defined_keyframes.len()).unwrap_or(u32::MAX);
+    summary.keyframes_unreferenced =
+        u32::try_from(defined_keyframes.difference(&referenced_keyframes).count())
+            .unwrap_or(u32::MAX);
 
     if summary.files_analyzed == 0 {
         return None;

@@ -124,6 +124,18 @@ pub struct CssAnalyticsSummary {
     pub unique_font_sizes: u32,
     /// Distinct `z-index` values across the whole codebase.
     pub unique_z_indexes: u32,
+    /// Distinct custom properties (`--x`) defined anywhere in the codebase.
+    pub custom_properties_defined: u32,
+    /// Custom properties defined but never referenced via `var()` in any
+    /// stylesheet. These are cleanup CANDIDATES, not confirmed dead: a property
+    /// may still be read or set from JavaScript or inline HTML styles.
+    pub custom_properties_unreferenced: u32,
+    /// Distinct `@keyframes` defined anywhere in the codebase.
+    pub keyframes_defined: u32,
+    /// `@keyframes` defined but never referenced via `animation` /
+    /// `animation-name` in any stylesheet (cleanup CANDIDATES; an animation
+    /// name can still be applied from JavaScript).
+    pub keyframes_unreferenced: u32,
 }
 
 /// Result of complexity analysis for reporting.

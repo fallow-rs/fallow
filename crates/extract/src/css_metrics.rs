@@ -11,7 +11,10 @@
 
 use lightningcss::printer::PrinterOptions;
 use lightningcss::properties::Property;
+use lightningcss::properties::animation::AnimationName;
+use lightningcss::properties::custom::{CustomPropertyName, Variable};
 use lightningcss::rules::CssRule;
+use lightningcss::rules::keyframes::KeyframesName;
 use lightningcss::rules::style::StyleRule;
 use lightningcss::selector::{Component, Selector};
 use lightningcss::stylesheet::{ParserOptions, StyleSheet};
@@ -61,13 +64,17 @@ pub fn compute_css_analytics(source: &str) -> Option<CssAnalytics> {
     // Pass 2: visit every color value (including colors nested inside shorthands
     // and gradients) for the design-token-sprawl signal. The visitor needs `&mut`,
     // so it runs after the immutable rule walk above.
-    let mut colors = ColorCollector::default();
-    let _ = colors.visit_stylesheet(&mut stylesheet);
+    let mut collector = ValueCollector::default();
+    let _ = collector.visit_stylesheet(&mut stylesheet);
 
     let mut analytics = acc.analytics;
-    analytics.colors = sorted_vec(colors.colors);
+    analytics.colors = sorted_vec(collector.colors);
+    analytics.referenced_custom_properties = sorted_vec(collector.referenced_custom_properties);
     analytics.font_sizes = sorted_vec(acc.font_sizes);
     analytics.z_indexes = sorted_vec(acc.z_indexes);
+    analytics.defined_custom_properties = sorted_vec(acc.defined_custom_properties);
+    analytics.defined_keyframes = sorted_vec(acc.defined_keyframes);
+    analytics.referenced_keyframes = sorted_vec(acc.referenced_keyframes);
     Some(analytics)
 }
 
@@ -78,27 +85,38 @@ struct Accumulator {
     analytics: CssAnalytics,
     font_sizes: FxHashSet<String>,
     z_indexes: FxHashSet<String>,
+    defined_custom_properties: FxHashSet<String>,
+    defined_keyframes: FxHashSet<String>,
+    referenced_keyframes: FxHashSet<String>,
 }
 
-/// Collects every distinct color value (authored form) in a stylesheet via the
-/// lightningcss visitor, so colors nested inside shorthands (`border`,
-/// `background`) and gradients are caught, not just standalone `color:` values.
+/// Collects value-level design tokens via the lightningcss visitor: every
+/// distinct color (including colors nested in shorthands like `border` /
+/// `background` and gradients, not just standalone `color:` values) and every
+/// `var()` custom-property reference.
 #[derive(Default)]
-struct ColorCollector {
+struct ValueCollector {
     colors: FxHashSet<String>,
+    referenced_custom_properties: FxHashSet<String>,
 }
 
-impl Visitor<'_> for ColorCollector {
+impl Visitor<'_> for ValueCollector {
     type Error = std::convert::Infallible;
 
     fn visit_types(&self) -> VisitTypes {
-        VisitTypes::COLORS
+        VisitTypes::COLORS | VisitTypes::VARIABLES
     }
 
     fn visit_color(&mut self, color: &mut CssColor) -> Result<(), Self::Error> {
         if let Ok(rendered) = color.to_css_string(PrinterOptions::default()) {
             self.colors.insert(rendered);
         }
+        Ok(())
+    }
+
+    fn visit_variable(&mut self, var: &mut Variable<'_>) -> Result<(), Self::Error> {
+        self.referenced_custom_properties
+            .insert(var.name.ident.0.to_string());
         Ok(())
     }
 }
@@ -131,8 +149,25 @@ fn walk_rules(rules: &[CssRule<'_>], depth: u8, acc: &mut Accumulator) {
                 record_style_rule(&rule.style, depth, acc);
                 walk_rules(&rule.style.rules.0, depth.saturating_add(1), acc);
             }
+            CssRule::Keyframes(keyframes) => {
+                acc.defined_keyframes
+                    .insert(keyframes_name_string(&keyframes.name));
+            }
             _ => {}
         }
+    }
+}
+
+fn keyframes_name_string(name: &KeyframesName<'_>) -> String {
+    match name {
+        KeyframesName::Ident(ident) => ident.0.to_string(),
+        KeyframesName::Custom(value) => value.to_string(),
+    }
+}
+
+fn collect_animation_name(name: &AnimationName<'_>, out: &mut FxHashSet<String>) {
+    if let AnimationName::Ident(ident) = name {
+        out.insert(ident.0.to_string());
     }
 }
 
@@ -175,9 +210,9 @@ fn record_style_rule(style: &StyleRule<'_>, depth: u8, acc: &mut Accumulator) {
         }
     }
 
-    // Design-token values: collect distinct `font-size` / `z-index` declaration
-    // values (their authored form). Colors are collected separately by the
-    // visitor because they nest inside shorthands and gradients.
+    // Design-token values (font-size / z-index, authored form), custom-property
+    // definitions, and animation-name references to @keyframes. Colors and
+    // `var()` references are collected separately by the value visitor.
     for property in style
         .declarations
         .declarations
@@ -193,6 +228,21 @@ fn record_style_rule(style: &StyleRule<'_>, depth: u8, acc: &mut Accumulator) {
             Property::ZIndex(z_index) => {
                 if let Ok(rendered) = z_index.to_css_string(PrinterOptions::default()) {
                     acc.z_indexes.insert(rendered);
+                }
+            }
+            Property::Custom(custom) => {
+                if let CustomPropertyName::Custom(name) = &custom.name {
+                    acc.defined_custom_properties.insert(name.0.to_string());
+                }
+            }
+            Property::AnimationName(names, _) => {
+                for name in names {
+                    collect_animation_name(name, &mut acc.referenced_keyframes);
+                }
+            }
+            Property::Animation(animations, _) => {
+                for animation in animations {
+                    collect_animation_name(&animation.name, &mut acc.referenced_keyframes);
                 }
             }
             _ => {}
@@ -404,5 +454,54 @@ mod tests {
     fn collects_distinct_z_indexes() {
         let a = analytics(".a { z-index: 10; } .b { z-index: 10; } .c { z-index: 999; }");
         assert_eq!(a.z_indexes.len(), 2, "got {:?}", a.z_indexes);
+    }
+
+    #[test]
+    fn collects_defined_and_referenced_custom_properties() {
+        let a = analytics(":root { --brand: red; --unused: blue; }\n.a { color: var(--brand); }");
+        assert!(
+            a.defined_custom_properties.contains(&"--brand".to_string()),
+            "defined: {:?}",
+            a.defined_custom_properties
+        );
+        assert!(
+            a.defined_custom_properties
+                .contains(&"--unused".to_string())
+        );
+        assert!(
+            a.referenced_custom_properties
+                .contains(&"--brand".to_string()),
+            "referenced: {:?}",
+            a.referenced_custom_properties
+        );
+        assert!(
+            !a.referenced_custom_properties
+                .contains(&"--unused".to_string()),
+            "--unused has no var() reference"
+        );
+    }
+
+    #[test]
+    fn collects_defined_and_referenced_keyframes() {
+        let a = analytics(
+            "@keyframes spin { from {} to {} }\n@keyframes unused { from {} }\n.a { animation-name: spin; }",
+        );
+        assert!(a.defined_keyframes.contains(&"spin".to_string()));
+        assert!(a.defined_keyframes.contains(&"unused".to_string()));
+        assert!(a.referenced_keyframes.contains(&"spin".to_string()));
+        assert!(
+            !a.referenced_keyframes.contains(&"unused".to_string()),
+            "no animation references `unused`"
+        );
+    }
+
+    #[test]
+    fn animation_shorthand_references_keyframes() {
+        let a = analytics("@keyframes pulse { from {} }\n.a { animation: pulse 1s infinite; }");
+        assert!(
+            a.referenced_keyframes.contains(&"pulse".to_string()),
+            "referenced: {:?}",
+            a.referenced_keyframes
+        );
     }
 }

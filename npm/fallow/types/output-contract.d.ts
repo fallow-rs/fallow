@@ -4685,6 +4685,22 @@ font_sizes: string[]
  * Distinct `z-index` declaration values in the stylesheet, sorted.
  */
 z_indexes: string[]
+/**
+ * Distinct custom properties (`--x`) DEFINED in the stylesheet, sorted.
+ */
+defined_custom_properties: string[]
+/**
+ * Distinct custom properties REFERENCED via `var()` in the stylesheet.
+ */
+referenced_custom_properties: string[]
+/**
+ * Distinct `@keyframes` names DEFINED in the stylesheet, sorted.
+ */
+defined_keyframes: string[]
+/**
+ * Distinct `@keyframes` names REFERENCED via `animation` / `animation-name`.
+ */
+referenced_keyframes: string[]
 }
 /**
  * Structural CSS metrics for a single style rule, computed from the parsed CSS
@@ -4776,6 +4792,26 @@ unique_font_sizes: number
  * Distinct `z-index` values across the whole codebase.
  */
 unique_z_indexes: number
+/**
+ * Distinct custom properties (`--x`) defined anywhere in the codebase.
+ */
+custom_properties_defined: number
+/**
+ * Custom properties defined but never referenced via `var()` in any
+ * stylesheet. These are cleanup CANDIDATES, not confirmed dead: a property
+ * may still be read or set from JavaScript or inline HTML styles.
+ */
+custom_properties_unreferenced: number
+/**
+ * Distinct `@keyframes` defined anywhere in the codebase.
+ */
+keyframes_defined: number
+/**
+ * `@keyframes` defined but never referenced via `animation` /
+ * `animation-name` in any stylesheet (cleanup CANDIDATES; an animation
+ * name can still be applied from JavaScript).
+ */
+keyframes_unreferenced: number
 }
 /**
  * Envelope emitted by `fallow explain <issue-type> --format json`.

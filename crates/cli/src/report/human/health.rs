@@ -205,6 +205,15 @@ fn render_css_analytics(lines: &mut Vec<String>, report: &crate::health_types::H
         summary.unique_z_indexes,
         plural(summary.unique_z_indexes as usize),
     ));
+    if summary.custom_properties_defined > 0 || summary.keyframes_defined > 0 {
+        lines.push(format!(
+            "  custom properties: {} defined, {} unreferenced in CSS \u{00b7} @keyframes: {} defined, {} unreferenced",
+            summary.custom_properties_defined,
+            summary.custom_properties_unreferenced,
+            summary.keyframes_defined,
+            summary.keyframes_unreferenced,
+        ));
+    }
 
     let mut notable: Vec<(&str, &fallow_types::extract::CssRuleMetric)> = css
         .files
