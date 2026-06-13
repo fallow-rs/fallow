@@ -10272,6 +10272,11 @@
           "type": "string",
           "const": "6",
           "description": "Adds `candidate.sink.url_shape` for URL-shaped security candidates."
+        },
+        {
+          "type": "string",
+          "const": "7",
+          "description": "Adds the server-only-import category on client-server-leak findings when a\nuse-client cone reaches a server-only module."
         }
       ],
       "description": "The `fallow security --format json` schema version. Independently versioned\nfrom the main contract, mirroring `ImpactReportSchemaVersion`."
@@ -10292,7 +10297,7 @@
             "string",
             "null"
           ],
-          "description": "The catalogue category id (e.g. `\"dangerous-html\"`). `None` for\n`ClientServerLeak`; `Some` for `TaintedSink`."
+          "description": "The catalogue category id (e.g. `\"dangerous-html\"`). `Some` for\n`TaintedSink`. For `ClientServerLeak` this is `None` for the secret-leak\nfinding, and `Some(\"server-only-import\")` when a `\"use client\"` cone\nreaches server-only code."
         },
         "cwe": {
           "type": [
@@ -10928,7 +10933,7 @@
             "string",
             "null"
           ],
-          "description": "Catalogue category id of the sink (e.g. `\"dangerous-html\"`). `None` for\n`client-server-leak`."
+          "description": "Catalogue category id of the sink (e.g. `\"dangerous-html\"`). For\n`client-server-leak` this is `None` for the secret-leak finding, and\n`Some(\"server-only-import\")` when a `\"use client\"` cone reaches\nserver-only code."
         },
         "cwe": {
           "type": [

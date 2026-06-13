@@ -322,6 +322,15 @@ fn find_client_server_leaks(
             // Still count its dynamic-import blind spot below.
         }
 
+        // Direct server-only case: the client file itself IS a server-only sink
+        // (carries "use server", imports a server-only package, or imports a
+        // server-only next/headers API). The most direct server-only leak; no
+        // import hop needed. The transitive server-only emit below is gated so a
+        // file that is both a direct AND a transitive sink is flagged once.
+        if server_only_sources.contains(&client_id) {
+            findings.push(build_direct_server_only_finding(graph, client_id));
+        }
+
         // Transitive case: BFS the import cone. parent maps child ->
         // (parent, span_start of the parent's import).
         let mut visited: FxHashSet<FileId> = FxHashSet::default();
@@ -396,8 +405,12 @@ fn find_client_server_leaks(
 
         // The server-only sink is a DISTINCT category, independent of the secret
         // case: a client cone can reach BOTH a secret reader and a server-only
-        // module, and a reviewer wants to see both.
-        if let Some(server_id) = reached_server_only {
+        // module, and a reviewer wants to see both. Only emit a transitive
+        // server-only finding when the client is not ALREADY flagged by the
+        // direct server-only case above (avoid double-flagging the same file).
+        if let Some(server_id) = reached_server_only
+            && !server_only_sources.contains(&client_id)
+        {
             findings.push(build_server_only_finding(
                 graph,
                 client_id,
@@ -673,6 +686,49 @@ fn build_direct_finding(
             line: 1,
             col: 0,
             role: TraceHopRole::SecretSource,
+        }],
+        actions: build_actions(),
+        dead_code: None,
+        reachability: None,
+        candidate,
+        taint_flow: None,
+        runtime: None,
+        attack_surface: None,
+    }
+}
+
+/// Build a finding for the direct SERVER-ONLY case: a `"use client"` file that is
+/// itself a server-only sink (carries `"use server"`, imports a server-only
+/// package, or imports a server-only `next/headers` API). No import hop is needed,
+/// so the trace is a single self-hop on the client file, which is both the client
+/// boundary and the server-only sink. Mirrors [`build_direct_finding`] for the
+/// secret case; distinguished by `category: Some("server-only-import")`.
+fn build_direct_server_only_finding(graph: &ModuleGraph, client_id: FileId) -> SecurityFinding {
+    let path = graph.modules[client_id.0 as usize].path.clone();
+    let evidence = "This \"use client\" file directly imports SERVER-ONLY code \
+         (it carries a \"use server\" directive or imports server-only code such as \
+         server-only, next/headers, next/server, or node:fs / node:child_process). Candidate \
+         for verification: confirm whether this server-only code is meant to run on the client."
+        .to_owned();
+    let candidate =
+        client_leak_candidate(path.clone(), 1, 0, Some(SERVER_ONLY_CATEGORY.to_owned()));
+    SecurityFinding {
+        finding_id: String::new(),
+        kind: SecurityFindingKind::ClientServerLeak,
+        category: Some(SERVER_ONLY_CATEGORY.to_owned()),
+        cwe: None,
+        path: path.clone(),
+        line: 1,
+        col: 0,
+        evidence,
+        source_backed: false,
+        source_read: None,
+        severity: SecuritySeverity::Low,
+        trace: vec![TraceHop {
+            path,
+            line: 1,
+            col: 0,
+            role: TraceHopRole::Sink,
         }],
         actions: build_actions(),
         dead_code: None,

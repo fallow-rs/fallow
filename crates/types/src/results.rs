@@ -1135,8 +1135,10 @@ pub struct SecurityCandidateSink {
     pub line: u32,
     /// 0-based byte column of the sink site.
     pub col: u32,
-    /// Catalogue category id of the sink (e.g. `"dangerous-html"`). `None` for
-    /// `client-server-leak`.
+    /// Catalogue category id of the sink (e.g. `"dangerous-html"`). For
+    /// `client-server-leak` this is `None` for the secret-leak finding, and
+    /// `Some("server-only-import")` when a `"use client"` cone reaches
+    /// server-only code.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
     /// CWE number declared by the catalogue entry. `None` for
@@ -1403,8 +1405,10 @@ pub struct SecurityFinding {
     pub finding_id: String,
     /// The rule that produced this candidate.
     pub kind: SecurityFindingKind,
-    /// The catalogue category id (e.g. `"dangerous-html"`). `None` for
-    /// `ClientServerLeak`; `Some` for `TaintedSink`.
+    /// The catalogue category id (e.g. `"dangerous-html"`). `Some` for
+    /// `TaintedSink`. For `ClientServerLeak` this is `None` for the secret-leak
+    /// finding, and `Some("server-only-import")` when a `"use client"` cone
+    /// reaches server-only code.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
     /// The CWE number declared by the matched catalogue entry. `None` for

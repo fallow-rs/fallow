@@ -637,7 +637,7 @@ export type ImpactTrendDirection = ("improving" | "declining" | "stable")
  * The `fallow security --format json` schema version. Independently versioned
  * from the main contract, mirroring `ImpactReportSchemaVersion`.
  */
-export type SecuritySchemaVersion = ("1" | "2" | "3" | "4" | "5" | "6")
+export type SecuritySchemaVersion = ("1" | "2" | "3" | "4" | "5" | "6" | "7")
 /**
  * Severity level for rules.
  *
@@ -5487,8 +5487,10 @@ export interface SecurityFinding {
 finding_id: string
 kind: SecurityFindingKind
 /**
- * The catalogue category id (e.g. `"dangerous-html"`). `None` for
- * `ClientServerLeak`; `Some` for `TaintedSink`.
+ * The catalogue category id (e.g. `"dangerous-html"`). `Some` for
+ * `TaintedSink`. For `ClientServerLeak` this is `None` for the secret-leak
+ * finding, and `Some("server-only-import")` when a `"use client"` cone
+ * reaches server-only code.
  */
 category?: (string | null)
 /**
@@ -5721,8 +5723,10 @@ line: number
  */
 col: number
 /**
- * Catalogue category id of the sink (e.g. `"dangerous-html"`). `None` for
- * `client-server-leak`.
+ * Catalogue category id of the sink (e.g. `"dangerous-html"`). For
+ * `client-server-leak` this is `None` for the secret-leak finding, and
+ * `Some("server-only-import")` when a `"use client"` cone reaches
+ * server-only code.
  */
 category?: (string | null)
 /**
