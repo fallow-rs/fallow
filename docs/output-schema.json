@@ -12456,6 +12456,27 @@
           },
           "description": "Distinct `z-index` declaration values in the stylesheet, sorted."
         },
+        "box_shadows": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Distinct `box-shadow` declaration values in the stylesheet, sorted. A\nhigh count signals an uncontrolled shadow scale (design-token sprawl)."
+        },
+        "border_radii": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Distinct `border-radius` declaration values in the stylesheet, sorted."
+        },
+        "line_heights": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Distinct `line-height` declaration values in the stylesheet, sorted."
+        },
         "defined_custom_properties": {
           "type": "array",
           "items": {
@@ -12496,6 +12517,9 @@
         "colors",
         "font_sizes",
         "z_indexes",
+        "box_shadows",
+        "border_radii",
+        "line_heights",
         "defined_custom_properties",
         "referenced_custom_properties",
         "defined_keyframes",
@@ -12595,6 +12619,18 @@
           "type": "integer",
           "description": "Distinct `z-index` values across the whole codebase."
         },
+        "unique_box_shadows": {
+          "type": "integer",
+          "description": "Distinct `box-shadow` values across the whole codebase (shadow-scale sprawl)."
+        },
+        "unique_border_radii": {
+          "type": "integer",
+          "description": "Distinct `border-radius` values across the whole codebase (radius-scale sprawl)."
+        },
+        "unique_line_heights": {
+          "type": "integer",
+          "description": "Distinct `line-height` values across the whole codebase (type-scale sprawl)."
+        },
         "custom_properties_defined": {
           "type": "integer",
           "description": "Distinct custom properties (`--x`) defined anywhere in the codebase."
@@ -12646,6 +12682,9 @@
         "unique_colors",
         "unique_font_sizes",
         "unique_z_indexes",
+        "unique_box_shadows",
+        "unique_border_radii",
+        "unique_line_heights",
         "custom_properties_defined",
         "custom_properties_unreferenced",
         "custom_properties_undefined",

@@ -353,6 +353,12 @@ pub struct CssAnalyticsSummary {
     pub unique_font_sizes: u32,
     /// Distinct `z-index` values across the whole codebase.
     pub unique_z_indexes: u32,
+    /// Distinct `box-shadow` values across the whole codebase (shadow-scale sprawl).
+    pub unique_box_shadows: u32,
+    /// Distinct `border-radius` values across the whole codebase (radius-scale sprawl).
+    pub unique_border_radii: u32,
+    /// Distinct `line-height` values across the whole codebase (type-scale sprawl).
+    pub unique_line_heights: u32,
     /// Distinct custom properties (`--x`) defined anywhere in the codebase.
     pub custom_properties_defined: u32,
     /// Custom properties defined but never referenced via `var()` in any

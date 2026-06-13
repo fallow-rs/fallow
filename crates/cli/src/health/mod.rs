@@ -520,6 +520,9 @@ struct CssTokenSets {
     colors: rustc_hash::FxHashSet<String>,
     font_sizes: rustc_hash::FxHashSet<String>,
     z_indexes: rustc_hash::FxHashSet<String>,
+    box_shadows: rustc_hash::FxHashSet<String>,
+    border_radii: rustc_hash::FxHashSet<String>,
+    line_heights: rustc_hash::FxHashSet<String>,
     defined_custom_props: rustc_hash::FxHashSet<String>,
     referenced_custom_props: rustc_hash::FxHashSet<String>,
     defined_keyframes: rustc_hash::FxHashSet<String>,
@@ -596,6 +599,9 @@ impl CssTokenSets {
         summary.unique_colors = saturate_len(self.colors.len());
         summary.unique_font_sizes = saturate_len(self.font_sizes.len());
         summary.unique_z_indexes = saturate_len(self.z_indexes.len());
+        summary.unique_box_shadows = saturate_len(self.box_shadows.len());
+        summary.unique_border_radii = saturate_len(self.border_radii.len());
+        summary.unique_line_heights = saturate_len(self.line_heights.len());
         summary.custom_properties_defined = saturate_len(self.defined_custom_props.len());
         summary.custom_properties_unreferenced = saturate_len(
             self.defined_custom_props
@@ -778,6 +784,15 @@ fn compute_css_analytics_report(
             .font_sizes
             .extend(analytics.font_sizes.iter().cloned());
         tokens.z_indexes.extend(analytics.z_indexes.iter().cloned());
+        tokens
+            .box_shadows
+            .extend(analytics.box_shadows.iter().cloned());
+        tokens
+            .border_radii
+            .extend(analytics.border_radii.iter().cloned());
+        tokens
+            .line_heights
+            .extend(analytics.line_heights.iter().cloned());
         tokens
             .defined_custom_props
             .extend(analytics.defined_custom_properties.iter().cloned());

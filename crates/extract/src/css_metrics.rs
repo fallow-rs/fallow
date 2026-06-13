@@ -82,6 +82,9 @@ pub fn compute_css_analytics(source: &str) -> Option<CssAnalytics> {
     analytics.referenced_custom_properties = sorted_vec(collector.referenced_custom_properties);
     analytics.font_sizes = sorted_vec(acc.font_sizes);
     analytics.z_indexes = sorted_vec(acc.z_indexes);
+    analytics.box_shadows = sorted_vec(acc.box_shadows);
+    analytics.border_radii = sorted_vec(acc.border_radii);
+    analytics.line_heights = sorted_vec(acc.line_heights);
     analytics.defined_custom_properties = sorted_vec(acc.defined_custom_properties);
     analytics.defined_keyframes = sorted_vec(acc.defined_keyframes);
     analytics.referenced_keyframes = sorted_vec(acc.referenced_keyframes);
@@ -95,6 +98,9 @@ struct Accumulator {
     analytics: CssAnalytics,
     font_sizes: FxHashSet<String>,
     z_indexes: FxHashSet<String>,
+    box_shadows: FxHashSet<String>,
+    border_radii: FxHashSet<String>,
+    line_heights: FxHashSet<String>,
     defined_custom_properties: FxHashSet<String>,
     defined_keyframes: FxHashSet<String>,
     referenced_keyframes: FxHashSet<String>,
@@ -251,6 +257,29 @@ fn record_style_rule(style: &StyleRule<'_>, depth: u8, acc: &mut Accumulator) {
             Property::ZIndex(z_index) => {
                 if let Ok(rendered) = z_index.to_css_string(PrinterOptions::default()) {
                     acc.z_indexes.insert(rendered);
+                }
+            }
+            // Shadow / radius / line-height tokens (design-token-sprawl axes).
+            // The INNER value is serialized (not the property), so the vendor
+            // prefix is dropped and `-webkit-box-shadow: X` collapses to the same
+            // distinct value as `box-shadow: X` rather than inflating the count.
+            Property::BoxShadow(shadows, _) => {
+                let rendered: Vec<String> = shadows
+                    .iter()
+                    .filter_map(|shadow| shadow.to_css_string(PrinterOptions::default()).ok())
+                    .collect();
+                if !rendered.is_empty() && rendered.len() == shadows.len() {
+                    acc.box_shadows.insert(rendered.join(", "));
+                }
+            }
+            Property::BorderRadius(radius, _) => {
+                if let Ok(rendered) = radius.to_css_string(PrinterOptions::default()) {
+                    acc.border_radii.insert(rendered);
+                }
+            }
+            Property::LineHeight(line_height) => {
+                if let Ok(rendered) = line_height.to_css_string(PrinterOptions::default()) {
+                    acc.line_heights.insert(rendered);
                 }
             }
             Property::Custom(custom) => {

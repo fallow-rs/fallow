@@ -197,15 +197,7 @@ fn render_css_analytics(lines: &mut Vec<String>, report: &crate::health_types::H
         summary.empty_rules,
         summary.max_nesting_depth,
     ));
-    lines.push(format!(
-        "  value sprawl: {} distinct color{} \u{00b7} {} font size{} \u{00b7} {} z-index value{}",
-        summary.unique_colors,
-        plural(summary.unique_colors as usize),
-        summary.unique_font_sizes,
-        plural(summary.unique_font_sizes as usize),
-        summary.unique_z_indexes,
-        plural(summary.unique_z_indexes as usize),
-    ));
+    render_css_value_sprawl(lines, summary);
     if summary.notable_truncated_files > 0 {
         lines.push(
             format!(
@@ -344,6 +336,51 @@ fn render_css_keyframe_candidates(
         lines.push(format!(
             "  undefined @keyframes: {} referenced but defined nowhere (candidates; likely typo or defined in CSS-in-JS): {listed}",
             summary.keyframes_undefined,
+        ));
+    }
+}
+
+/// Render the value-sprawl lines: colors / font-sizes / z-indexes always, plus a
+/// continuation line for shadow / radius / line-height scales when present.
+fn render_css_value_sprawl(
+    lines: &mut Vec<String>,
+    summary: &crate::health_types::CssAnalyticsSummary,
+) {
+    lines.push(format!(
+        "  value sprawl: {} distinct color{} \u{00b7} {} font size{} \u{00b7} {} z-index value{}",
+        summary.unique_colors,
+        plural(summary.unique_colors as usize),
+        summary.unique_font_sizes,
+        plural(summary.unique_font_sizes as usize),
+        summary.unique_z_indexes,
+        plural(summary.unique_z_indexes as usize),
+    ));
+    let mut extra: Vec<String> = Vec::new();
+    if summary.unique_box_shadows > 0 {
+        extra.push(format!(
+            "{} shadow{}",
+            summary.unique_box_shadows,
+            plural(summary.unique_box_shadows as usize)
+        ));
+    }
+    if summary.unique_border_radii > 0 {
+        extra.push(format!(
+            "{} radius value{}",
+            summary.unique_border_radii,
+            plural(summary.unique_border_radii as usize)
+        ));
+    }
+    if summary.unique_line_heights > 0 {
+        extra.push(format!(
+            "{} line-height{}",
+            summary.unique_line_heights,
+            plural(summary.unique_line_heights as usize)
+        ));
+    }
+    if !extra.is_empty() {
+        lines.push(format!(
+            "  value sprawl (cont.): {}",
+            extra.join(" \u{00b7} ")
         ));
     }
 }

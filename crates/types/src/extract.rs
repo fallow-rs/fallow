@@ -752,6 +752,13 @@ pub struct CssAnalytics {
     pub font_sizes: Vec<String>,
     /// Distinct `z-index` declaration values in the stylesheet, sorted.
     pub z_indexes: Vec<String>,
+    /// Distinct `box-shadow` declaration values in the stylesheet, sorted. A
+    /// high count signals an uncontrolled shadow scale (design-token sprawl).
+    pub box_shadows: Vec<String>,
+    /// Distinct `border-radius` declaration values in the stylesheet, sorted.
+    pub border_radii: Vec<String>,
+    /// Distinct `line-height` declaration values in the stylesheet, sorted.
+    pub line_heights: Vec<String>,
     /// Distinct custom properties (`--x`) DEFINED in the stylesheet, sorted.
     pub defined_custom_properties: Vec<String>,
     /// Distinct custom properties REFERENCED via `var()` in the stylesheet.

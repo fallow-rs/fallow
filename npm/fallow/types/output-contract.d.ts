@@ -4719,6 +4719,19 @@ font_sizes: string[]
  */
 z_indexes: string[]
 /**
+ * Distinct `box-shadow` declaration values in the stylesheet, sorted. A
+ * high count signals an uncontrolled shadow scale (design-token sprawl).
+ */
+box_shadows: string[]
+/**
+ * Distinct `border-radius` declaration values in the stylesheet, sorted.
+ */
+border_radii: string[]
+/**
+ * Distinct `line-height` declaration values in the stylesheet, sorted.
+ */
+line_heights: string[]
+/**
  * Distinct custom properties (`--x`) DEFINED in the stylesheet, sorted.
  */
 defined_custom_properties: string[]
@@ -4825,6 +4838,18 @@ unique_font_sizes: number
  * Distinct `z-index` values across the whole codebase.
  */
 unique_z_indexes: number
+/**
+ * Distinct `box-shadow` values across the whole codebase (shadow-scale sprawl).
+ */
+unique_box_shadows: number
+/**
+ * Distinct `border-radius` values across the whole codebase (radius-scale sprawl).
+ */
+unique_border_radii: number
+/**
+ * Distinct `line-height` values across the whole codebase (type-scale sprawl).
+ */
+unique_line_heights: number
 /**
  * Distinct custom properties (`--x`) defined anywhere in the codebase.
  */

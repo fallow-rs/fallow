@@ -3045,6 +3045,52 @@ fn health_css_flags_duplicate_declaration_blocks() {
 }
 
 #[test]
+fn health_css_counts_shadow_radius_lineheight_sprawl() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"css-sprawl","version":"1.0.0"}"#,
+    );
+    write_file(&root.join("src/index.ts"), "export const x = 1;\n");
+    // Distinct shadows {0 1px 2px #000, 0 2px 4px #111} = 2; radii {4px, 8px} = 2;
+    // line-heights {1.5, 2} = 2. Each rule has 3 declarations (below the
+    // duplicate-block floor, so no interference).
+    write_file(
+        &root.join("src/styles.css"),
+        ".a { box-shadow: 0 1px 2px #000; border-radius: 4px; line-height: 1.5; }\n\
+         .b { box-shadow: 0 2px 4px #111; border-radius: 4px; line-height: 1.5; }\n\
+         .c { box-shadow: 0 1px 2px #000; border-radius: 8px; line-height: 2; }\n",
+    );
+
+    let out = run_fallow_in_root(
+        "health",
+        root,
+        &[
+            "--css",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let json = parse_json(&out);
+    let s = &json["css_analytics"]["summary"];
+    assert_eq!(s["unique_box_shadows"], 2, "summary: {s}");
+    assert_eq!(s["unique_border_radii"], 2, "summary: {s}");
+    assert_eq!(s["unique_line_heights"], 2, "summary: {s}");
+
+    // The human "(cont.)" line surfaces them only when present.
+    let human = run_fallow_in_root("health", root, &["--css", "--max-crap", "10000", "--quiet"]);
+    assert!(
+        human.stdout.contains("value sprawl (cont.)") && human.stdout.contains("shadow"),
+        "human renders shadow/radius/line-height sprawl: stdout={:?}",
+        human.stdout
+    );
+}
+
+#[test]
 fn health_css_flags_unused_scoped_vue_class() {
     let dir = tempdir().unwrap();
     let root = dir.path();
