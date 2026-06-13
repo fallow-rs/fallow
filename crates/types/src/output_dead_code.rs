@@ -37,11 +37,11 @@ use crate::output::{
 };
 use crate::results::{
     BoundaryCallViolation, BoundaryCoverageViolation, BoundaryViolation, CircularDependency,
-    DependencyOverrideSource, DuplicateExport, EmptyCatalogGroup, MisconfiguredDependencyOverride,
-    PolicyViolation, PrivateTypeLeak, ReExportCycle, ReExportCycleKind, TestOnlyDependency,
-    TypeOnlyDependency, UnlistedDependency, UnresolvedCatalogReference, UnresolvedImport,
-    UnusedCatalogEntry, UnusedDependency, UnusedDependencyOverride, UnusedExport, UnusedFile,
-    UnusedMember,
+    DependencyOverrideSource, DuplicateExport, EmptyCatalogGroup, InvalidClientExport,
+    MisconfiguredDependencyOverride, PolicyViolation, PrivateTypeLeak, ReExportCycle,
+    ReExportCycleKind, TestOnlyDependency, TypeOnlyDependency, UnlistedDependency,
+    UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry, UnusedDependency,
+    UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedMember,
 };
 
 /// Shared note for the `duplicate-exports` fix action. Mirrors the const used
@@ -713,6 +713,48 @@ impl UnusedTypeFinding {
                 scope: None,
             }),
         ];
+        Self {
+            export,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for an [`InvalidClientExport`] finding. There is no safe
+/// auto-fix: the export itself may be a legitimate client-component value
+/// export that happens to collide with a Next.js server-only name, so removing
+/// it could break the component. The only action is a line-level suppress
+/// (mirroring how a non-auto-fixable finding builds actions); the real fix is
+/// for the author to move the server-only export to a non-client module.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct InvalidClientExportFinding {
+    /// The underlying dead-code entry.
+    #[serde(flatten)]
+    pub export: InvalidClientExport,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl InvalidClientExportFinding {
+    /// Build the wrapper from a raw [`InvalidClientExport`]. Emits only a
+    /// line-level suppress action: there is no safe auto-fix because removing
+    /// the export could break a legitimate client component.
+    #[must_use]
+    pub fn with_actions(export: InvalidClientExport) -> Self {
+        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
+            kind: SuppressLineKind::SuppressLine,
+            auto_fixable: false,
+            description: "Suppress with an inline comment above the line".to_string(),
+            comment: "// fallow-ignore-next-line invalid-client-export".to_string(),
+            scope: None,
+        })];
         Self {
             export,
             actions,

@@ -172,7 +172,8 @@
         "misconfigured-dependency-overrides": "error",
         "security-client-server-leak": "off",
         "security-sink": "off",
-        "policy-violation": "warn"
+        "policy-violation": "warn",
+        "invalid-client-export": "warn"
       }
     },
     "boundaries": {
@@ -1090,6 +1091,11 @@
           "description": "Master severity for rule-pack findings (`rulePacks` config). Defaults\nto `warn` so enabling a brand-new policy pack never hard-fails CI on\nits first run; individual pack rules opt up via `\"severity\": \"error\"`.\n`off` is a kill switch that disables the whole evaluator (per-rule\nseverity cannot resurrect it).",
           "$ref": "#/$defs/Severity",
           "default": "warn"
+        },
+        "invalid-client-export": {
+          "description": "A `\"use client\"` file that exports a Next.js server-only /\nroute-segment config name (e.g. `metadata`, `revalidate`, `GET`).\nNext.js rejects this at build time; fallow catches it statically.\nDefaults to `warn`.",
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
         }
       }
     },
@@ -1772,6 +1778,16 @@
           ]
         },
         "policy-violation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "invalid-client-export": {
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"

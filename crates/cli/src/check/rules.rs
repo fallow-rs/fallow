@@ -133,6 +133,12 @@ fn apply_file_override_rules(
             .misconfigured_dependency_overrides
             != Severity::Off
     });
+    results.invalid_client_exports.retain(|e| {
+        config
+            .resolve_rules_for_path(&e.export.path)
+            .invalid_client_export
+            != Severity::Off
+    });
     results.circular_dependencies.retain(|c| {
         c.cycle
             .files
@@ -165,6 +171,9 @@ fn apply_base_file_rules(results: &mut fallow_core::results::AnalysisResults, ru
     }
     if rules.stale_suppressions == Severity::Off {
         results.stale_suppressions.clear();
+    }
+    if rules.invalid_client_export == Severity::Off {
+        results.invalid_client_exports.clear();
     }
 }
 
@@ -291,6 +300,12 @@ fn has_override_file_scoped_error(
                 config.resolve_rules_for_path(path).circular_dependencies == Severity::Error
             })
         })
+        || results.invalid_client_exports.iter().any(|e| {
+            config
+                .resolve_rules_for_path(&e.export.path)
+                .invalid_client_export
+                == Severity::Error
+        })
 }
 
 fn has_default_file_scoped_error(
@@ -310,6 +325,8 @@ fn has_default_file_scoped_error(
             && !results.unresolved_catalog_references.is_empty())
         || (rules.empty_catalog_groups == Severity::Error
             && !results.empty_catalog_groups.is_empty())
+        || (rules.invalid_client_export == Severity::Error
+            && !results.invalid_client_exports.is_empty())
 }
 
 fn has_project_level_error(
@@ -436,6 +453,9 @@ pub fn promote_warns_to_errors(rules: &mut RulesConfig) {
     }
     if rules.policy_violation == Severity::Warn {
         rules.policy_violation = Severity::Error;
+    }
+    if rules.invalid_client_export == Severity::Warn {
+        rules.invalid_client_export = Severity::Error;
     }
 }
 
@@ -676,6 +696,7 @@ mod tests {
             security_client_server_leak: Severity::Off,
             security_sink: Severity::Off,
             policy_violation: Severity::Warn,
+            invalid_client_export: Severity::Warn,
         };
         let config = config_with_rules(rules);
         apply_rules(&mut results, &config);
@@ -790,6 +811,7 @@ mod tests {
             security_client_server_leak: Severity::Off,
             security_sink: Severity::Off,
             policy_violation: Severity::Warn,
+            invalid_client_export: Severity::Warn,
         };
         assert!(!has_error_severity_issues(&results, &rules, None));
     }
@@ -831,6 +853,7 @@ mod tests {
             security_client_server_leak: Severity::Off,
             security_sink: Severity::Off,
             policy_violation: Severity::Warn,
+            invalid_client_export: Severity::Warn,
         };
         assert!(!has_error_severity_issues(&results, &rules, None));
 
@@ -1293,6 +1316,7 @@ mod tests {
             security_client_server_leak: Severity::Off,
             security_sink: Severity::Off,
             policy_violation: Severity::Warn,
+            invalid_client_export: Severity::Warn,
         };
         promote_warns_to_errors(&mut rules);
 
@@ -1346,6 +1370,7 @@ mod tests {
             security_client_server_leak: Severity::Off,
             security_sink: Severity::Off,
             policy_violation: Severity::Warn,
+            invalid_client_export: Severity::Warn,
         };
         promote_warns_to_errors(&mut rules);
 

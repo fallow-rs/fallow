@@ -181,7 +181,7 @@ Clone families and duplicated implementation patterns that increase maintenance 
 
 ### Architecture
 
-Circular dependencies, boundary violations across layers and modules, re-export chains, and other dependency-graph issues. Zero-config presets for bulletproof, layered, hexagonal, and feature-sliced architectures.
+Circular dependencies, boundary violations across layers and modules, re-export chains, and other dependency-graph issues. Zero-config presets for bulletproof, layered, hexagonal, and feature-sliced architectures. Framework correctness checks catch Next.js `"use client"` files that export a server-only or route-segment config name (such as `metadata`, `revalidate`, or a route HTTP method) before the build does.
 
 ### Dependency hygiene
 

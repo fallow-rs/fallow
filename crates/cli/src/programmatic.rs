@@ -528,6 +528,9 @@ fn to_issue_filters(filters: &DeadCodeFilters) -> IssueFilters {
         unresolved_catalog_references: filters.unresolved_catalog_references,
         unused_dependency_overrides: filters.unused_dependency_overrides,
         misconfigured_dependency_overrides: filters.misconfigured_dependency_overrides,
+        // No programmatic filter for invalid-client-exports yet; the rule runs
+        // and reports by default. Field exists for clear-parity only.
+        invalid_client_exports: false,
     }
 }
 

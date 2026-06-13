@@ -453,6 +453,45 @@ pub fn push_policy_violation_diagnostics(
     }
 }
 
+/// Push diagnostics for `"use client"` files that export a Next.js
+/// server-only / route-config name. Fixed `WARNING` severity (the rule's
+/// default), code `invalid-client-export`. Paths are absolute internally, so
+/// the URI is built directly (no `root.join`).
+pub fn push_invalid_client_export_diagnostics(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+) {
+    for finding in &results.invalid_client_exports {
+        let Some(uri) = Uri::from_file_path(&finding.export.path) else {
+            continue;
+        };
+        let line = finding.export.line.saturating_sub(1);
+        let message = format!(
+            "Export `{}` is not allowed in a \"{}\" file (Next.js server-only / route-config name)",
+            finding.export.export_name, finding.export.directive
+        );
+        map.entry(uri).or_default().push(Diagnostic {
+            range: Range {
+                start: Position {
+                    line,
+                    character: finding.export.col,
+                },
+                end: Position {
+                    line,
+                    character: u32::MAX,
+                },
+            },
+            severity: Some(DiagnosticSeverity::WARNING),
+            source: Some("fallow".to_string()),
+            code: Some(NumberOrString::String("invalid-client-export".to_string())),
+            code_description: doc_link("invalid-client-exports"),
+            message,
+            related_information: None,
+            ..Default::default()
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -962,6 +1001,45 @@ mod tests {
         assert!(d.message.contains("Use date-fns."));
         assert_eq!(d.range.start.line, 6); // 1-based 7 -> 0-based 6
         assert_eq!(d.range.start.character, 2);
+    }
+
+    #[test]
+    fn invalid_client_export_produces_warning_diagnostic() {
+        let root = test_root();
+        let file = root.join("app/page.tsx");
+
+        let mut results = AnalysisResults::default();
+        results.invalid_client_exports.push(
+            fallow_core::results::InvalidClientExportFinding::with_actions(
+                fallow_core::results::InvalidClientExport {
+                    path: file.clone(),
+                    export_name: "metadata".to_string(),
+                    directive: "use client".to_string(),
+                    line: 4,
+                    col: 0,
+                },
+            ),
+        );
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, &root);
+
+        let uri = Uri::from_file_path(&file).unwrap();
+        let file_diags = diags
+            .get(&uri)
+            .expect("invalid-client-export diagnostic should land under the file URI");
+        assert_eq!(file_diags.len(), 1);
+
+        let d = &file_diags[0];
+        assert_eq!(d.severity, Some(DiagnosticSeverity::WARNING));
+        assert_eq!(
+            d.code,
+            Some(NumberOrString::String("invalid-client-export".to_string()))
+        );
+        assert!(d.message.contains("metadata"));
+        assert!(d.message.contains("use client"));
+        assert_eq!(d.range.start.line, 3); // 1-based 4 -> 0-based 3
+        assert_eq!(d.range.start.character, 0);
     }
 
     #[test]

@@ -33,6 +33,17 @@ fn unused_dependency_key(item: &fallow_core::results::UnusedDependency, root: &P
     )
 }
 
+fn invalid_client_export_key(
+    item: &fallow_core::results::InvalidClientExport,
+    root: &Path,
+) -> String {
+    format!(
+        "invalid-client-export:{}:{}",
+        relative_key_path(&item.path, root),
+        item.export_name
+    )
+}
+
 fn unlisted_dependency_key(item: &fallow_core::results::UnlistedDependency, root: &Path) -> String {
     let mut sites = item
         .imported_from
@@ -283,6 +294,7 @@ pub(super) fn dead_code_keys(
         unresolved_catalog_references,
         unused_dependency_overrides,
         misconfigured_dependency_overrides,
+        invalid_client_exports,
         // Non-finding fields: counts and metadata, not attributable to a key.
         suppression_count: _suppression_count,
         active_suppressions: _active_suppressions,
@@ -326,6 +338,7 @@ pub(super) fn dead_code_keys(
     collector.add_empty_catalog_groups(empty_catalog_groups);
     collector.add_unused_dependency_overrides(unused_dependency_overrides);
     collector.add_misconfigured_dependency_overrides(misconfigured_dependency_overrides);
+    collector.add_invalid_client_exports(invalid_client_exports);
     collector.into_keys()
 }
 
@@ -387,6 +400,15 @@ impl<'a> DeadCodeKeyCollector<'a> {
                 item.leak.export_name,
                 item.leak.type_name
             ));
+        }
+    }
+
+    fn add_invalid_client_exports(
+        &mut self,
+        items: &[fallow_core::results::InvalidClientExportFinding],
+    ) {
+        for item in items {
+            self.insert(invalid_client_export_key(&item.export, self.root));
         }
     }
 
@@ -652,6 +674,7 @@ pub(super) fn retain_introduced_dead_code(
         unresolved_catalog_references,
         unused_dependency_overrides,
         misconfigured_dependency_overrides,
+        invalid_client_exports,
         // Non-finding fields: counts and metadata, not subject to base-keyed
         // filtering.
         suppression_count: _suppression_count,
@@ -726,6 +749,7 @@ pub(super) fn retain_introduced_dead_code(
     unused_dependency_overrides.retain(|item| keep(unused_dependency_override_key(item, root)));
     misconfigured_dependency_overrides
         .retain(|item| keep(misconfigured_dependency_override_key(item, root)));
+    invalid_client_exports.retain(|item| keep(invalid_client_export_key(&item.export, root)));
 }
 
 fn introduced_dead_code_keys(

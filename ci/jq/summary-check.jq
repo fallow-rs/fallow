@@ -50,6 +50,7 @@ else
     table_row("Boundary coverage"; "boundary_coverage_violations"; "boundary-violations"),
     table_row("Boundary calls"; "boundary_call_violations"; "boundary-violations"),
     table_row("Policy violations"; "policy_violations"; "policy-violations"),
+    table_row("Invalid client exports"; "invalid_client_exports"; "invalid-client-exports"),
     table_row("Type-only dependencies"; "type_only_dependencies"; "type-only-dependencies"),
     table_row("Test-only dependencies"; "test_only_dependencies"; "test-only-dependencies"),
     table_row("Stale suppressions"; "stale_suppressions"; "stale-suppressions"),
@@ -114,6 +115,9 @@ else
   section("Policy violations"; "policy_violations";
     "Banned calls and banned imports matched by configured rule packs.\n\n| File | Matched | Rule | Severity |\n|------|---------|------|----------|\n";
     "| `\(.path):\(.line)` | `\(.matched)` | `\(.pack)/\(.rule_id)` | \(.severity) |") +
+  section("Invalid client exports"; "invalid_client_exports";
+    "`\"use client\"` files exporting a Next.js server-only / route-config name. Next.js rejects this at build time.\n\n| File | Export | Directive |\n|------|--------|-----------|\n";
+    "| `\(.path):\(.line)` | `\(.export_name)` | `\"\(.directive)\"` |") +
   section("Type-only dependencies"; "type_only_dependencies";
     "Dependencies only used for type imports \u2014 consider moving to `devDependencies`.\n\n| Package |\n|---------|\n";
     "| `\(.package_name)` |") +

@@ -33,7 +33,8 @@ expression: redact_version(&json_str)
     "empty_catalog_groups": 0,
     "unresolved_catalog_references": 0,
     "unused_dependency_overrides": 0,
-    "misconfigured_dependency_overrides": 0
+    "misconfigured_dependency_overrides": 0,
+    "invalid_client_exports": 0
   },
   "unused_files": [],
   "unused_exports": [],
@@ -104,5 +105,6 @@ expression: redact_version(&json_str)
   "empty_catalog_groups": [],
   "unresolved_catalog_references": [],
   "unused_dependency_overrides": [],
-  "misconfigured_dependency_overrides": []
+  "misconfigured_dependency_overrides": [],
+  "invalid_client_exports": []
 }

@@ -5,7 +5,7 @@ use fallow_config::{RulesConfig, Severity};
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::{
     AnalysisResults, BoundaryCallViolation, BoundaryCoverageViolation, BoundaryViolation,
-    CircularDependency, DuplicateExportFinding, EmptyCatalogGroupFinding,
+    CircularDependency, DuplicateExportFinding, EmptyCatalogGroupFinding, InvalidClientExport,
     MisconfiguredDependencyOverrideFinding, PolicyViolation, PolicyViolationSeverity,
     PrivateTypeLeak, StaleSuppression, TestOnlyDependency, TypeOnlyDependency,
     UnlistedDependencyFinding, UnresolvedCatalogReferenceFinding, UnresolvedImport,
@@ -501,6 +501,25 @@ fn sarif_policy_violation_fields(violation: &PolicyViolation, root: &Path) -> Sa
     }
 }
 
+fn sarif_invalid_client_export_fields(
+    export: &InvalidClientExport,
+    root: &Path,
+    level: &'static str,
+) -> SarifFields {
+    SarifFields {
+        rule_id: "fallow/invalid-client-export",
+        level,
+        message: format!(
+            "Export '{}' is not allowed in a \"{}\" file (Next.js server-only / route-config name)",
+            export.export_name, export.directive
+        ),
+        uri: relative_uri(&export.path, root),
+        region: Some((export.line, export.col + 1)),
+        source_path: Some(export.path.clone()),
+        properties: None,
+    }
+}
+
 fn sarif_stale_suppression_fields(
     suppression: &StaleSuppression,
     root: &Path,
@@ -844,6 +863,11 @@ fn sarif_graph_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
             rules.policy_violation,
         ),
         (
+            "fallow/invalid-client-export",
+            "\"use client\" file exports a Next.js server-only / route-config name",
+            rules.invalid_client_export,
+        ),
+        (
             "fallow/stale-suppression",
             "Suppression comment or tag no longer matches any issue",
             rules.stale_suppressions,
@@ -1164,6 +1188,18 @@ fn push_graph_sarif_results(
     push_sarif_results(sarif_results, &results.policy_violations, snippets, |v| {
         sarif_policy_violation_fields(&v.violation, root)
     });
+    push_sarif_results(
+        sarif_results,
+        &results.invalid_client_exports,
+        snippets,
+        |e| {
+            sarif_invalid_client_export_fields(
+                &e.export,
+                root,
+                severity_to_sarif_level(rules.invalid_client_export),
+            )
+        },
+    );
     push_sarif_results(sarif_results, &results.stale_suppressions, snippets, |s| {
         sarif_stale_suppression_fields(s, root, severity_to_sarif_level(rules.stale_suppressions))
     });
@@ -1921,7 +1957,7 @@ mod tests {
         let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
             .as_array()
             .expect("rules should be an array");
-        assert_eq!(rules.len(), 26);
+        assert_eq!(rules.len(), 27);
 
         let rule_ids: Vec<&str> = rules.iter().map(|r| r["id"].as_str().unwrap()).collect();
         assert!(rule_ids.contains(&"fallow/unused-file"));
@@ -1949,6 +1985,7 @@ mod tests {
         assert!(rule_ids.contains(&"fallow/unresolved-catalog-reference"));
         assert!(rule_ids.contains(&"fallow/unused-dependency-override"));
         assert!(rule_ids.contains(&"fallow/misconfigured-dependency-override"));
+        assert!(rule_ids.contains(&"fallow/invalid-client-export"));
     }
 
     #[test]

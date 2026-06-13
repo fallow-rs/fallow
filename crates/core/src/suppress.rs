@@ -60,6 +60,7 @@ fn severity_for_kind(rules: &RulesConfig, kind: IssueKind) -> Severity {
         IssueKind::SecurityClientServerLeak => rules.security_client_server_leak,
         IssueKind::SecuritySink => rules.security_sink,
         IssueKind::PolicyViolation => rules.policy_violation,
+        IssueKind::InvalidClientExport => rules.invalid_client_export,
         IssueKind::Complexity | IssueKind::CodeDuplication => Severity::Error,
     }
 }
@@ -526,6 +527,7 @@ mod tests {
             IssueKind::SecurityClientServerLeak,
             IssueKind::SecuritySink,
             IssueKind::PolicyViolation,
+            IssueKind::InvalidClientExport,
         ] {
             assert_eq!(
                 IssueKind::from_discriminant(kind.to_discriminant()),
@@ -533,7 +535,7 @@ mod tests {
             );
         }
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(30), None);
+        assert_eq!(IssueKind::from_discriminant(31), None);
     }
 
     #[test]
@@ -777,6 +779,7 @@ mod tests {
             IssueKind::DuplicateExport,
             IssueKind::CircularDependency,
             IssueKind::BoundaryViolation,
+            IssueKind::InvalidClientExport,
         ];
 
         let all_kinds = [
@@ -804,6 +807,7 @@ mod tests {
             IssueKind::UnresolvedCatalogReference,
             IssueKind::UnusedDependencyOverride,
             IssueKind::MisconfiguredDependencyOverride,
+            IssueKind::InvalidClientExport,
         ];
 
         for kind in all_kinds {

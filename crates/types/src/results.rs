@@ -12,12 +12,13 @@ use crate::output::IssueAction;
 use crate::output_dead_code::{
     BoundaryCallViolationFinding, BoundaryCoverageViolationFinding, BoundaryViolationFinding,
     CircularDependencyFinding, DuplicateExportFinding, EmptyCatalogGroupFinding,
-    MisconfiguredDependencyOverrideFinding, PolicyViolationFinding, PrivateTypeLeakFinding,
-    ReExportCycleFinding, TestOnlyDependencyFinding, TypeOnlyDependencyFinding,
-    UnlistedDependencyFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
-    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedDependencyFinding,
-    UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
-    UnusedExportFinding, UnusedFileFinding, UnusedOptionalDependencyFinding, UnusedTypeFinding,
+    InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding, PolicyViolationFinding,
+    PrivateTypeLeakFinding, ReExportCycleFinding, TestOnlyDependencyFinding,
+    TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnresolvedCatalogReferenceFinding,
+    UnresolvedImportFinding, UnusedCatalogEntryFinding, UnusedClassMemberFinding,
+    UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
+    UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
+    UnusedOptionalDependencyFinding, UnusedTypeFinding,
 };
 use crate::serde_path;
 use crate::suppress::{IssueKind, closest_known_kind_name};
@@ -191,6 +192,12 @@ pub struct AnalysisResults {
     /// error. Wrapped in [`MisconfiguredDependencyOverrideFinding`].
     #[serde(default)]
     pub misconfigured_dependency_overrides: Vec<MisconfiguredDependencyOverrideFinding>,
+    /// `"use client"` files that export a Next.js server-only / route-segment
+    /// config name (e.g. `metadata`, `revalidate`, `GET`). Next.js rejects this
+    /// at build time. Wrapped in [`InvalidClientExportFinding`] so each entry
+    /// carries a typed `actions` array natively. Default severity is `warn`.
+    #[serde(default)]
+    pub invalid_client_exports: Vec<InvalidClientExportFinding>,
     /// Number of suppression entries that matched an issue during analysis.
     /// Human output uses this for the suppression footer; it is skipped in
     /// machine output to avoid changing the public JSON issue contract.
@@ -307,6 +314,7 @@ impl AnalysisResults {
             + self.unresolved_catalog_references.len()
             + self.unused_dependency_overrides.len()
             + self.misconfigured_dependency_overrides.len()
+            + self.invalid_client_exports.len()
     }
 
     /// Whether any issues were found.
@@ -355,6 +363,7 @@ impl AnalysisResults {
             unresolved_catalog_references,
             unused_dependency_overrides,
             misconfigured_dependency_overrides,
+            invalid_client_exports,
             suppression_count,
             active_suppressions,
             feature_flags,
@@ -398,6 +407,7 @@ impl AnalysisResults {
             .extend(unused_dependency_overrides);
         self.misconfigured_dependency_overrides
             .extend(misconfigured_dependency_overrides);
+        self.invalid_client_exports.extend(invalid_client_exports);
         self.feature_flags.extend(feature_flags);
         self.security_findings.extend(security_findings);
         self.security_unresolved_edge_files += security_unresolved_edge_files;
@@ -505,6 +515,14 @@ impl AnalysisResults {
                 .then(a.import.line.cmp(&b.import.line))
                 .then(a.import.col.cmp(&b.import.col))
                 .then(a.import.specifier.cmp(&b.import.specifier))
+        });
+
+        self.invalid_client_exports.sort_by(|a, b| {
+            a.export
+                .path
+                .cmp(&b.export.path)
+                .then(a.export.line.cmp(&b.export.line))
+                .then(a.export.export_name.cmp(&b.export.export_name))
         });
     }
 
@@ -751,6 +769,27 @@ pub struct PrivateTypeLeak {
     pub col: u32,
     /// Byte offset of the type reference.
     pub span_start: u32,
+}
+
+/// A `"use client"` file that exports a Next.js server-only / route-segment
+/// config name. Next.js rejects this combination at build time; fallow catches
+/// it statically before the build runs.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct InvalidClientExport {
+    /// File carrying the `"use client"` directive and the illegal export.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// Name of the server-only / route-config export that is illegal in a
+    /// client file (e.g. `metadata`, `generateMetadata`, `revalidate`, `GET`).
+    pub export_name: String,
+    /// The file-level directive that makes the export illegal. Always
+    /// `"use client"` today; carried so the message can name it verbatim.
+    pub directive: String,
+    /// 1-based line number of the export.
+    pub line: u32,
+    /// 0-based byte column offset of the export.
+    pub col: u32,
 }
 
 /// A dependency that is listed in package.json but never imported.

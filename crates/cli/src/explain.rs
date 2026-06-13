@@ -267,6 +267,14 @@ pub const CHECK_RULES: &[RuleDef] = &[
         full: "An entry in `pnpm-workspace.yaml`'s `overrides:` or `package.json`'s `pnpm.overrides` whose key or value does not parse as a valid pnpm override spec. Common shapes: empty key, empty value, malformed version selector on the target (`@types/react@<<18`), unbalanced parent matcher (`react>`), or unsupported `npm:alias@` syntax in the version (only the `-`, `$ref`, and `npm:alias` pnpm idioms are allowed). pnpm rejects the workspace at install time with a parser error. To fix: correct the key/value shape, or remove the entry. See also: fallow/unused-dependency-override.",
         docs_path: "explanations/dead-code#misconfigured-dependency-overrides",
     },
+    RuleDef {
+        id: "fallow/invalid-client-export",
+        category: "Policy",
+        name: "Invalid client export",
+        short: "\"use client\" file exports a server-only / route-config name",
+        full: "A file carrying the `\"use client\"` directive also exports a Next.js server-only or route-segment config name (such as `metadata`, `generateMetadata`, `revalidate`, `generateStaticParams`, or a route HTTP method like `GET`/`POST`). Next.js rejects this combination at build time. Move the server-only export to a non-client module (a server component, a `route.ts`, or a separate config file), or remove the `\"use client\"` directive if the module does not need to be a client boundary. The check runs only when the project declares `next`.",
+        docs_path: "explanations/dead-code#invalid-client-exports",
+    },
 ];
 
 /// Look up a rule definition by its SARIF rule ID across all rule sets.
@@ -2169,7 +2177,7 @@ mod tests {
 
     #[test]
     fn check_rules_count() {
-        assert_eq!(CHECK_RULES.len(), 26);
+        assert_eq!(CHECK_RULES.len(), 27);
     }
 
     #[test]

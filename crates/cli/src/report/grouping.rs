@@ -324,6 +324,11 @@ where
                 .policy_violations
                 .push(item.clone());
         }
+        for item in &results.invalid_client_exports {
+            self.entry_for_path(&item.export.path)
+                .invalid_client_exports
+                .push(item.clone());
+        }
         for item in &results.stale_suppressions {
             self.entry_for_path(&item.path)
                 .stale_suppressions

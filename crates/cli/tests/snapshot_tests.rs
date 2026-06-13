@@ -243,6 +243,17 @@ fn sample_results(root: &Path) -> AnalysisResults {
             },
         ),
     );
+    r.invalid_client_exports.push(
+        fallow_core::results::InvalidClientExportFinding::with_actions(
+            fallow_core::results::InvalidClientExport {
+                path: root.join("app/page.tsx"),
+                export_name: "metadata".to_string(),
+                directive: "use client".to_string(),
+                line: 3,
+                col: 0,
+            },
+        ),
+    );
 
     r
 }
@@ -706,6 +717,7 @@ fn sarif_mixed_severity_snapshot() {
         security_client_server_leak: fallow_config::Severity::Off,
         security_sink: fallow_config::Severity::Off,
         policy_violation: fallow_config::Severity::Warn,
+        invalid_client_export: fallow_config::Severity::Warn,
     };
     let sarif = build_sarif(&results, &root, &rules);
     let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");
@@ -1568,6 +1580,7 @@ fn codeclimate_mixed_severity_snapshot() {
         security_client_server_leak: fallow_config::Severity::Off,
         security_sink: fallow_config::Severity::Off,
         policy_violation: fallow_config::Severity::Warn,
+        invalid_client_export: fallow_config::Severity::Warn,
     };
     let cc = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");

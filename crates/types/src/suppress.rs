@@ -87,6 +87,9 @@ pub enum IssueKind {
     /// (`rulePacks` config). The bare token covers every pack rule; scoped
     /// tokens can target one `<pack>/<rule-id>` identity.
     PolicyViolation,
+    /// A `"use client"` file that exports a Next.js server-only /
+    /// route-segment config name (e.g. `metadata`, `revalidate`, `GET`).
+    InvalidClientExport,
 }
 
 impl IssueKind {
@@ -133,6 +136,7 @@ impl IssueKind {
             "security-client-server-leak" => Some(Self::SecurityClientServerLeak),
             "security-sink" => Some(Self::SecuritySink),
             "policy-violation" | "policy-violations" => Some(Self::PolicyViolation),
+            "invalid-client-export" | "invalid-client-exports" => Some(Self::InvalidClientExport),
             _ => None,
         }
     }
@@ -170,6 +174,7 @@ impl IssueKind {
             Self::SecurityClientServerLeak => 27,
             Self::SecuritySink => 28,
             Self::PolicyViolation => 29,
+            Self::InvalidClientExport => 30,
         }
     }
 
@@ -206,6 +211,7 @@ impl IssueKind {
             27 => Some(Self::SecurityClientServerLeak),
             28 => Some(Self::SecuritySink),
             29 => Some(Self::PolicyViolation),
+            30 => Some(Self::InvalidClientExport),
             _ => None,
         }
     }
@@ -302,6 +308,7 @@ pub const fn issue_kind_to_kebab(kind: IssueKind) -> &'static str {
         IssueKind::SecurityClientServerLeak => "security-client-server-leak",
         IssueKind::SecuritySink => "security-sink",
         IssueKind::PolicyViolation => "policy-violation",
+        IssueKind::InvalidClientExport => "invalid-client-export",
     }
 }
 
@@ -534,6 +541,8 @@ pub const KNOWN_ISSUE_KIND_NAMES: &[&str] = &[
     "security-sink",
     "policy-violation",
     "policy-violations",
+    "invalid-client-export",
+    "invalid-client-exports",
 ];
 
 /// CLI filter flags on `fallow dead-code` that scope output to a single
@@ -773,6 +782,14 @@ mod tests {
             IssueKind::parse("policy-violations"),
             Some(IssueKind::PolicyViolation)
         );
+        assert_eq!(
+            IssueKind::parse("invalid-client-export"),
+            Some(IssueKind::InvalidClientExport)
+        );
+        assert_eq!(
+            IssueKind::parse("invalid-client-exports"),
+            Some(IssueKind::InvalidClientExport)
+        );
     }
 
     #[test]
@@ -796,7 +813,11 @@ mod tests {
             IssueKind::from_discriminant(29),
             Some(IssueKind::PolicyViolation)
         );
-        assert_eq!(IssueKind::from_discriminant(30), None);
+        assert_eq!(
+            IssueKind::from_discriminant(30),
+            Some(IssueKind::InvalidClientExport)
+        );
+        assert_eq!(IssueKind::from_discriminant(31), None);
         assert_eq!(IssueKind::from_discriminant(u8::MAX), None);
     }
 
@@ -832,6 +853,7 @@ mod tests {
             IssueKind::SecurityClientServerLeak,
             IssueKind::SecuritySink,
             IssueKind::PolicyViolation,
+            IssueKind::InvalidClientExport,
         ] {
             assert_eq!(
                 IssueKind::from_discriminant(kind.to_discriminant()),
@@ -839,7 +861,7 @@ mod tests {
             );
         }
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(30), None);
+        assert_eq!(IssueKind::from_discriminant(31), None);
     }
 
     #[test]
@@ -874,6 +896,7 @@ mod tests {
             IssueKind::SecurityClientServerLeak,
             IssueKind::SecuritySink,
             IssueKind::PolicyViolation,
+            IssueKind::InvalidClientExport,
         ];
         let discriminants: Vec<u8> = all_kinds.iter().map(|k| k.to_discriminant()).collect();
         let mut sorted = discriminants.clone();

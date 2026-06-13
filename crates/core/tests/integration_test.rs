@@ -94,10 +94,14 @@ mod workspaces;
 
 #[path = "integration_test/boundary_violations.rs"]
 mod boundary_violations;
+#[path = "integration_test/capability_e_route_exports.rs"]
+mod capability_e_route_exports;
 #[path = "integration_test/config_file_loading.rs"]
 mod config_file_loading;
 #[path = "integration_test/css_modules_unused.rs"]
 mod css_modules_unused;
+#[path = "integration_test/invalid_client_exports.rs"]
+mod invalid_client_exports;
 #[path = "integration_test/policy_violations.rs"]
 mod policy_violations;
 #[path = "integration_test/private_type_leaks.rs"]

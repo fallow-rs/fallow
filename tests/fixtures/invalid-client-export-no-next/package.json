@@ -1,0 +1,6 @@
+{
+  "name": "invalid-client-export-no-next",
+  "dependencies": {
+    "react": "^18.0.0"
+  }
+}

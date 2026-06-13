@@ -120,6 +120,9 @@ pub struct BaselineData {
     /// Misconfigured pnpm dependency overrides, keyed by `source:raw_key`.
     #[serde(default)]
     pub misconfigured_dependency_overrides: Vec<String>,
+    /// Invalid `"use client"` exports, keyed by `path:export_name`.
+    #[serde(default)]
+    pub invalid_client_exports: Vec<String>,
 }
 
 impl BaselineData {
@@ -157,6 +160,7 @@ impl BaselineData {
             unresolved_catalog_references: catalog.unresolved_catalog_references,
             unused_dependency_overrides: catalog.unused_dependency_overrides,
             misconfigured_dependency_overrides: catalog.misconfigured_dependency_overrides,
+            invalid_client_exports: file_exports.invalid_client_exports,
         }
     }
 
@@ -188,6 +192,7 @@ impl BaselineData {
             + self.unresolved_catalog_references.len()
             + self.unused_dependency_overrides.len()
             + self.misconfigured_dependency_overrides.len()
+            + self.invalid_client_exports.len()
     }
 }
 
@@ -196,6 +201,7 @@ struct BaselineFileExportKeys {
     unused_exports: Vec<String>,
     unused_types: Vec<String>,
     private_type_leaks: Vec<String>,
+    invalid_client_exports: Vec<String>,
 }
 
 fn baseline_file_export_keys(
@@ -239,6 +245,17 @@ fn baseline_file_export_keys(
                     relative_path(&e.leak.path, root),
                     e.leak.export_name,
                     e.leak.type_name
+                )
+            })
+            .collect(),
+        invalid_client_exports: results
+            .invalid_client_exports
+            .iter()
+            .map(|e| {
+                format!(
+                    "{}:{}",
+                    relative_path(&e.export.path, root),
+                    e.export.export_name
                 )
             })
             .collect(),
@@ -702,6 +719,24 @@ impl BaselineFilterContext<'_> {
 
         self.filter_boundary_details(results);
         self.filter_stale_suppressions(results);
+        self.filter_invalid_client_exports(results);
+    }
+
+    fn filter_invalid_client_exports(&self, results: &mut fallow_core::results::AnalysisResults) {
+        let baseline_invalid: FxHashSet<&str> = self
+            .baseline
+            .invalid_client_exports
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.invalid_client_exports.retain(|finding| {
+            let key = format!(
+                "{}:{}",
+                relative_path(&finding.export.path, self.root),
+                finding.export.export_name
+            );
+            !baseline_invalid.contains(key.as_str())
+        });
     }
 
     fn filter_boundary_details(&self, results: &mut fallow_core::results::AnalysisResults) {
@@ -1680,6 +1715,7 @@ mod tests {
             unresolved_catalog_references: vec![],
             unused_dependency_overrides: vec![],
             misconfigured_dependency_overrides: vec![],
+            invalid_client_exports: vec![],
         };
         let results = AnalysisResults {
             unused_files: vec![
@@ -1729,6 +1765,7 @@ mod tests {
             unresolved_catalog_references: vec![],
             unused_dependency_overrides: vec![],
             misconfigured_dependency_overrides: vec![],
+            invalid_client_exports: vec![],
         };
         let results = make_results();
         let filtered = filter_new_issues(results, &baseline, Path::new(""));
@@ -1765,6 +1802,7 @@ mod tests {
             unresolved_catalog_references: vec![],
             unused_dependency_overrides: vec![],
             misconfigured_dependency_overrides: vec![],
+            invalid_client_exports: vec![],
         };
         let results = AnalysisResults {
             unused_exports: vec![

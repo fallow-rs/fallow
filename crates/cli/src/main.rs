@@ -3153,6 +3153,10 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
                     unresolved_catalog_references,
                     unused_dependency_overrides,
                     misconfigured_dependency_overrides,
+                    // No dedicated `--invalid-client-exports` filter flag yet; the
+                    // field exists so an unrelated active filter clears this rule
+                    // for parity. The rule still runs and reports by default.
+                    invalid_client_exports: false,
                 },
                 trace_opts: TraceOptions {
                     trace_export: trace,

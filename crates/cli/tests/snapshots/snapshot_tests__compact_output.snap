@@ -1,6 +1,5 @@
 ---
 source: crates/cli/tests/snapshot_tests.rs
-assertion_line: 313
 expression: output
 ---
 unused-file:src/dead.ts
@@ -18,6 +17,7 @@ type-only-dep:zod
 test-only-dep:msw
 circular-dependency:src/a.ts:3:src/a.ts → src/b.ts → src/a.ts
 re-export-cycle:src/api/index.ts:src/api/index.ts <-> src/api/internal/index.ts
+invalid-client-export:app/page.tsx:3:metadata (from "use client")
 unused-catalog-entry:pnpm-workspace.yaml:6:default:is-even
 unused-catalog-entry:pnpm-workspace.yaml:12:legacy:old-thing
 empty-catalog-group:pnpm-workspace.yaml:10:react17

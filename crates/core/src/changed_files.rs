@@ -432,6 +432,7 @@ pub fn filter_results_by_changed_files(
         unresolved_catalog_references,
         unused_dependency_overrides,
         misconfigured_dependency_overrides,
+        invalid_client_exports,
         // Non-finding fields: counts and metadata, not issue collections.
         suppression_count: _suppression_count,
         active_suppressions: _active_suppressions,
@@ -499,6 +500,8 @@ pub fn filter_results_by_changed_files(
 
     unused_dependency_overrides.retain(|o| contains_normalized(&cf, &o.entry.path));
     misconfigured_dependency_overrides.retain(|o| contains_normalized(&cf, &o.entry.path));
+
+    invalid_client_exports.retain(|e| contains_normalized(&cf, &e.export.path));
 }
 
 /// Pre-normalise a `changed_files` set through `dunce::simplified` so each

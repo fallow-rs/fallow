@@ -3,6 +3,7 @@ mod boundary_calls;
 mod boundary_coverage;
 pub mod feature_flags;
 mod iconify;
+mod invalid_client_exports;
 mod package_json_utils;
 mod policy;
 mod predicates;
@@ -35,17 +36,19 @@ use crate::resolve::ResolvedModule;
 use fallow_types::output_dead_code::{
     BoundaryCallViolationFinding, BoundaryCoverageViolationFinding, BoundaryViolationFinding,
     CircularDependencyFinding, DuplicateExportFinding, EmptyCatalogGroupFinding,
-    MisconfiguredDependencyOverrideFinding, PolicyViolationFinding, PrivateTypeLeakFinding,
-    ReExportCycleFinding, TestOnlyDependencyFinding, TypeOnlyDependencyFinding,
-    UnlistedDependencyFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
-    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedDependencyFinding,
-    UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
-    UnusedExportFinding, UnusedFileFinding, UnusedOptionalDependencyFinding, UnusedTypeFinding,
+    InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding, PolicyViolationFinding,
+    PrivateTypeLeakFinding, ReExportCycleFinding, TestOnlyDependencyFinding,
+    TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnresolvedCatalogReferenceFinding,
+    UnresolvedImportFinding, UnusedCatalogEntryFinding, UnusedClassMemberFinding,
+    UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
+    UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
+    UnusedOptionalDependencyFinding, UnusedTypeFinding,
 };
 
 use crate::results::{AnalysisResults, CircularDependency, CircularDependencyEdge};
 use crate::suppress::{IssueKind, SuppressionContext};
 
+use invalid_client_exports::find_invalid_client_exports;
 use re_export_cycles::find_re_export_cycles;
 #[expect(
     deprecated,
@@ -701,10 +704,46 @@ pub fn find_dead_code_full(
 
     populate_pnpm_catalog_findings(config, workspaces, &mut results);
     populate_pnpm_override_findings(config, workspaces, &mut results);
+    populate_invalid_client_export_findings(
+        graph,
+        modules,
+        config,
+        &declared_deps,
+        &suppressions,
+        &line_offsets_by_file,
+        &mut results,
+    );
 
     results.sort();
 
     results
+}
+
+/// Populate `invalid_client_exports` when the rule is enabled. Gated on the
+/// project declaring `next` inside the detector (see
+/// [`find_invalid_client_exports`]).
+fn populate_invalid_client_export_findings(
+    graph: &ModuleGraph,
+    modules: &[ModuleInfo],
+    config: &ResolvedConfig,
+    declared_deps: &FxHashSet<String>,
+    suppressions: &SuppressionContext<'_>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+    results: &mut AnalysisResults,
+) {
+    if config.rules.invalid_client_export == Severity::Off {
+        return;
+    }
+    results.invalid_client_exports = find_invalid_client_exports(
+        graph,
+        modules,
+        declared_deps,
+        suppressions,
+        line_offsets_by_file,
+    )
+    .into_iter()
+    .map(InvalidClientExportFinding::with_actions)
+    .collect();
 }
 
 #[derive(Clone, Copy)]
@@ -1628,6 +1667,7 @@ mod tests {
                 security_client_server_leak: Severity::Off,
                 security_sink: Severity::Off,
                 policy_violation: Severity::Off,
+                invalid_client_export: Severity::Off,
             };
             let config = make_config_with_rules(rules);
             let results = find_dead_code(&graph, &config);

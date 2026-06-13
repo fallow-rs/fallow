@@ -145,6 +145,9 @@ pub struct CheckSummary {
     pub unused_dependency_overrides: usize,
     /// Pnpm `overrides:` entries whose key or value cannot be parsed.
     pub misconfigured_dependency_overrides: usize,
+    /// `"use client"` files that export a Next.js server-only / route-config name.
+    #[serde(default)]
+    pub invalid_client_exports: usize,
 }
 
 /// Per-category delta comparison against a saved baseline. Only present in

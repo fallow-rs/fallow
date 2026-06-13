@@ -304,7 +304,7 @@ fn build_human_lines_with_explain(
         total_issues,
     );
     build_structure_section(&mut lines, results, root, rules, total_issues);
-    build_policy_section(&mut lines, results, root, total_issues);
+    build_policy_section(&mut lines, results, root, rules, total_issues);
     build_maintenance_section(&mut lines, results, root, rules, total_issues);
 
     if explain {
@@ -369,6 +369,7 @@ fn check_explain_for_header(line: &str) -> Option<&'static crate::explain::RuleD
             "Misconfigured dependency overrides",
             "fallow/misconfigured-dependency-override",
         ),
+        ("Invalid client exports", "fallow/invalid-client-export"),
     ];
     let (_, rule_id) = mappings
         .iter()
@@ -1246,13 +1247,39 @@ fn build_policy_section(
     lines: &mut Vec<String>,
     results: &AnalysisResults,
     root: &Path,
+    rules: &RulesConfig,
     total_issues: usize,
 ) {
-    if results.policy_violations.is_empty() {
+    if results.policy_violations.is_empty() && results.invalid_client_exports.is_empty() {
         return;
     }
     push_category_header(lines, "Policy");
     build_policy_violations_section(lines, &results.policy_violations, root, total_issues);
+
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.invalid_client_exports,
+        title: "Invalid client exports",
+        level: severity_to_level(rules.invalid_client_export),
+        root,
+        max_files: MAX_FLAT_ITEMS,
+        get_path: |e: &fallow_types::output_dead_code::InvalidClientExportFinding| {
+            e.export.path.as_path()
+        },
+        format_detail: &format_invalid_client_export,
+    });
+}
+
+fn format_invalid_client_export(
+    entry: &fallow_types::output_dead_code::InvalidClientExportFinding,
+) -> String {
+    let e = &entry.export;
+    format!(
+        "{} {} {}",
+        format!(":{}", e.line).dimmed(),
+        e.export_name.bold(),
+        format!("(from \"{}\")", e.directive).dimmed(),
+    )
 }
 
 /// Build the rule-pack policy-violation section. The header level reflects
@@ -1996,6 +2023,9 @@ fn collect_matching_rules(
     }
     for v in &results.policy_violations {
         check(&v.violation.path);
+    }
+    for e in &results.invalid_client_exports {
+        check(&e.export.path);
     }
     for s in &results.stale_suppressions {
         check(&s.path);

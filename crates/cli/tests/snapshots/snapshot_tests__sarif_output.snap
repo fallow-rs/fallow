@@ -274,6 +274,19 @@ expression: redact_sarif_version(&json_str)
               }
             },
             {
+              "id": "fallow/invalid-client-export",
+              "shortDescription": {
+                "text": "\"use client\" file exports a server-only / route-config name"
+              },
+              "fullDescription": {
+                "text": "A file carrying the `\"use client\"` directive also exports a Next.js server-only or route-segment config name (such as `metadata`, `generateMetadata`, `revalidate`, `generateStaticParams`, or a route HTTP method like `GET`/`POST`). Next.js rejects this combination at build time. Move the server-only export to a non-client module (a server component, a `route.ts`, or a separate config file), or remove the `\"use client\"` directive if the module does not need to be a client boundary. The check runs only when the project declares `next`."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#invalid-client-exports",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
               "id": "fallow/stale-suppression",
               "shortDescription": {
                 "text": "Suppression comment or tag no longer matches any issue"
@@ -729,6 +742,30 @@ expression: redact_sarif_version(&json_str)
           "partialFingerprints": {
             "tools.fallow.fingerprint/v1": "3521b0160c2c9d9f",
             "primaryLocationLineHash/v1": "3521b0160c2c9d9f"
+          }
+        },
+        {
+          "ruleId": "fallow/invalid-client-export",
+          "level": "warning",
+          "message": {
+            "text": "Export 'metadata' is not allowed in a \"use client\" file (Next.js server-only / route-config name)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "app/page.tsx"
+                },
+                "region": {
+                  "startLine": 3,
+                  "startColumn": 1
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "tools.fallow.fingerprint/v1": "005800d24cc7dcc1",
+            "primaryLocationLineHash/v1": "005800d24cc7dcc1"
           }
         },
         {

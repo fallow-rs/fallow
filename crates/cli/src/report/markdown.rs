@@ -241,6 +241,12 @@ fn push_markdown_graph_sections(
     });
     markdown_section(
         out,
+        &results.invalid_client_exports,
+        "Invalid client exports",
+        |e| format_markdown_invalid_client_export(e, rel),
+    );
+    markdown_section(
+        out,
         &results.stale_suppressions,
         "Stale suppressions",
         |s| {
@@ -355,6 +361,19 @@ fn format_markdown_policy_violation(
             .as_deref()
             .map(|m| format!(" ({m})"))
             .unwrap_or_default(),
+    )]
+}
+
+fn format_markdown_invalid_client_export(
+    e: &fallow_core::results::InvalidClientExportFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    vec![format!(
+        "- `{}`:{} `{}` (from `\"{}\"`)",
+        rel(&e.export.path),
+        e.export.line,
+        e.export.export_name,
+        e.export.directive,
     )]
 }
 

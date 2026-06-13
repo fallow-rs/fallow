@@ -142,6 +142,12 @@ pub struct RulesConfig {
     /// severity cannot resurrect it).
     #[serde(default = "Severity::default_warn", alias = "policy-violations")]
     pub policy_violation: Severity,
+    /// A `"use client"` file that exports a Next.js server-only /
+    /// route-segment config name (e.g. `metadata`, `revalidate`, `GET`).
+    /// Next.js rejects this at build time; fallow catches it statically.
+    /// Defaults to `warn`.
+    #[serde(default = "Severity::default_warn", alias = "invalid-client-exports")]
+    pub invalid_client_export: Severity,
 }
 
 impl Default for RulesConfig {
@@ -175,6 +181,7 @@ impl Default for RulesConfig {
             security_client_server_leak: Severity::Off,
             security_sink: Severity::Off,
             policy_violation: Severity::Warn,
+            invalid_client_export: Severity::Warn,
         }
     }
 }
@@ -265,6 +272,9 @@ impl RulesConfig {
         }
         if let Some(s) = partial.policy_violation {
             self.policy_violation = s;
+        }
+        if let Some(s) = partial.invalid_client_export {
+            self.invalid_client_export = s;
         }
     }
 }
@@ -435,6 +445,12 @@ pub struct PartialRulesConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub policy_violation: Option<Severity>,
+    #[serde(
+        default,
+        alias = "invalid-client-exports",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub invalid_client_export: Option<Severity>,
 }
 
 /// Every rule name accepted by `RulesConfig` deserialization, in kebab-case.
@@ -477,6 +493,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "security-sink",
     "policy-violation",
     "policy-violations",
+    "invalid-client-export",
     "unused-file",
     "unused-export",
     "unused-type",
@@ -504,6 +521,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unresolved-catalog-reference",
     "unused-dependency-override",
     "misconfigured-dependency-override",
+    "invalid-client-exports",
 ];
 
 /// Find the closest known rule name to `input` when it is plausibly a typo.
@@ -796,6 +814,7 @@ mod tests {
             security_client_server_leak: Some(Severity::Off),
             security_sink: Some(Severity::Off),
             policy_violation: Some(Severity::Off),
+            invalid_client_export: Some(Severity::Off),
         };
         rules.apply_partial(&partial);
         assert_eq!(rules.unused_files, Severity::Off);
@@ -809,6 +828,7 @@ mod tests {
         assert_eq!(rules.stale_suppressions, Severity::Off);
         assert_eq!(rules.security_sink, Severity::Off);
         assert_eq!(rules.policy_violation, Severity::Off);
+        assert_eq!(rules.invalid_client_export, Severity::Off);
     }
 
     #[test]
@@ -852,7 +872,7 @@ mod tests {
 
     #[test]
     fn known_rule_names_count_matches_struct() {
-        assert_eq!(KNOWN_RULE_NAMES.len(), 56);
+        assert_eq!(KNOWN_RULE_NAMES.len(), 58);
     }
 
     #[test]
@@ -893,8 +913,8 @@ mod tests {
 
         assert_eq!(
             aliases_found.len(),
-            56,
-            "expected 56 source-level alias attrs (28 per struct); got {}: {:?}",
+            58,
+            "expected 58 source-level alias attrs (29 per struct); got {}: {:?}",
             aliases_found.len(),
             aliases_found
         );

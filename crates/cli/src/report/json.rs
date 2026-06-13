@@ -273,6 +273,7 @@ fn build_check_summary(results: &AnalysisResults) -> CheckSummary {
         unresolved_catalog_references: results.unresolved_catalog_references.len(),
         unused_dependency_overrides: results.unused_dependency_overrides.len(),
         misconfigured_dependency_overrides: results.misconfigured_dependency_overrides.len(),
+        invalid_client_exports: results.invalid_client_exports.len(),
     }
 }
 

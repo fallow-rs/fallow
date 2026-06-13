@@ -57,6 +57,9 @@ def filter_check:
   (if .misconfigured_dependency_overrides then
     .misconfigured_dependency_overrides |= map(select(.path | in_changed))
   else . end) |
+  (if .invalid_client_exports then
+    .invalid_client_exports |= map(select(.path | in_changed))
+  else . end) |
   # Recalculate total_issues from filtered arrays
   (if .total_issues != null then
     .total_issues = (
@@ -84,7 +87,8 @@ def filter_check:
       (.empty_catalog_groups // [] | length) +
       (.unresolved_catalog_references // [] | length) +
       (.unused_dependency_overrides // [] | length) +
-      (.misconfigured_dependency_overrides // [] | length)
+      (.misconfigured_dependency_overrides // [] | length) +
+      (.invalid_client_exports // [] | length)
     )
   else . end);
 

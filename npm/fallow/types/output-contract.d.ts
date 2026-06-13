@@ -1045,6 +1045,13 @@ unused_dependency_overrides?: UnusedDependencyOverrideFinding[]
  * error. Wrapped in [`MisconfiguredDependencyOverrideFinding`].
  */
 misconfigured_dependency_overrides?: MisconfiguredDependencyOverrideFinding[]
+/**
+ * `"use client"` files that export a Next.js server-only / route-segment
+ * config name (e.g. `metadata`, `revalidate`, `GET`). Next.js rejects this
+ * at build time. Wrapped in [`InvalidClientExportFinding`] so each entry
+ * carries a typed `actions` array natively. Default severity is `warn`.
+ */
+invalid_client_exports?: InvalidClientExportFinding[]
 baseline_deltas?: (BaselineDeltas | null)
 baseline?: (BaselineMatch | null)
 regression?: (RegressionResult | null)
@@ -1191,6 +1198,10 @@ unused_dependency_overrides: number
  * Pnpm `overrides:` entries whose key or value cannot be parsed.
  */
 misconfigured_dependency_overrides: number
+/**
+ * `"use client"` files that export a Next.js server-only / route-config name.
+ */
+invalid_client_exports?: number
 }
 /**
  * Wire-shape envelope for an [`UnusedFile`] finding. The bare finding
@@ -2381,6 +2392,48 @@ path: string
 line: number
 /**
  * Suggested next steps. Always emitted.
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+}
+/**
+ * Wire-shape envelope for an [`InvalidClientExport`] finding. There is no safe
+ * auto-fix: the export itself may be a legitimate client-component value
+ * export that happens to collide with a Next.js server-only name, so removing
+ * it could break the component. The only action is a line-level suppress
+ * (mirroring how a non-auto-fixable finding builds actions); the real fix is
+ * for the author to move the server-only export to a non-client module.
+ */
+export interface InvalidClientExportFinding {
+/**
+ * File carrying the `"use client"` directive and the illegal export.
+ */
+path: string
+/**
+ * Name of the server-only / route-config export that is illegal in a
+ * client file (e.g. `metadata`, `generateMetadata`, `revalidate`, `GET`).
+ */
+export_name: string
+/**
+ * The file-level directive that makes the export illegal. Always
+ * `"use client"` today; carried so the message can name it verbatim.
+ */
+directive: string
+/**
+ * 1-based line number of the export.
+ */
+line: number
+/**
+ * 0-based byte column offset of the export.
+ */
+col: number
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
  */
 actions: IssueAction[]
 /**
@@ -5208,6 +5261,13 @@ unused_dependency_overrides?: UnusedDependencyOverrideFinding[]
  * error. Wrapped in [`MisconfiguredDependencyOverrideFinding`].
  */
 misconfigured_dependency_overrides?: MisconfiguredDependencyOverrideFinding[]
+/**
+ * `"use client"` files that export a Next.js server-only / route-segment
+ * config name (e.g. `metadata`, `revalidate`, `GET`). Next.js rejects this
+ * at build time. Wrapped in [`InvalidClientExportFinding`] so each entry
+ * carries a typed `actions` array natively. Default severity is `warn`.
+ */
+invalid_client_exports?: InvalidClientExportFinding[]
 }
 /**
  * The rendered impact report, derived purely from the store (no analysis run).

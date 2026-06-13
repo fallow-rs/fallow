@@ -4,12 +4,19 @@ expression: json_str
 ---
 {
   "event": "COMMENT",
-  "body": "### Fallow dead-code report\n\n20 inline findings selected for GitHub review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 160e72a4b11ed241 -->",
+  "body": "### Fallow dead-code report\n\n21 inline findings selected for GitHub review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 57349683537349d8 -->",
   "summary": {
-    "body": "### Fallow dead-code report\n\n20 inline findings selected for GitHub review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 160e72a4b11ed241 -->",
-    "fingerprint": "160e72a4b11ed241"
+    "body": "### Fallow dead-code report\n\n21 inline findings selected for GitHub review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 57349683537349d8 -->",
+    "fingerprint": "57349683537349d8"
   },
   "comments": [
+    {
+      "path": "app/page.tsx",
+      "line": 3,
+      "side": "RIGHT",
+      "body": "**warn** `fallow/invalid-client-export`: Export \\`metadata\\` is not allowed in a \"use client\" file \\(Next.js server-only / route-config name\\)\n\n<!-- fallow-fingerprint:v2: 8e530508aa988833 -->",
+      "fingerprint": "8e530508aa988833"
+    },
     {
       "path": "package.json",
       "line": 3,

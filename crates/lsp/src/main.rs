@@ -226,6 +226,11 @@ const DIAGNOSTIC_ISSUE_TYPES: &[DiagnosticIssueType] = &[
         label: "Policy Violations",
     },
     DiagnosticIssueType {
+        config_key: Some("invalid-client-export"),
+        code: "invalid-client-export",
+        label: "Invalid Client Exports",
+    },
+    DiagnosticIssueType {
         config_key: Some("stale-suppressions"),
         code: "stale-suppression",
         label: "Stale Suppressions",
@@ -2553,6 +2558,17 @@ export function choose(value: number): string {
                     },
                 ),
             ],
+            invalid_client_exports: vec![
+                fallow_core::results::InvalidClientExportFinding::with_actions(
+                    fallow_core::results::InvalidClientExport {
+                        path: "/app/page.tsx".into(),
+                        export_name: "metadata".to_string(),
+                        directive: "use client".to_string(),
+                        line: 22,
+                        col: 0,
+                    },
+                ),
+            ],
             suppression_count: 1,
             active_suppressions: Vec::new(),
             feature_flags: vec![fallow_core::results::FeatureFlag {
@@ -2641,6 +2657,7 @@ export function choose(value: number): string {
         assert_eq!(target.unresolved_catalog_references.len(), 1);
         assert_eq!(target.unused_dependency_overrides.len(), 1);
         assert_eq!(target.misconfigured_dependency_overrides.len(), 1);
+        assert_eq!(target.invalid_client_exports.len(), 1);
         assert_eq!(target.export_usages.len(), 1);
         assert_eq!(target.feature_flags.len(), 1);
         assert_eq!(target.security_findings.len(), 1);

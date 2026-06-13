@@ -873,6 +873,37 @@ fn push_policy_violation_issues(
     }
 }
 
+fn push_invalid_client_export_issues(
+    issues: &mut Vec<CodeClimateIssue>,
+    findings: &[fallow_types::output_dead_code::InvalidClientExportFinding],
+    root: &Path,
+    severity: Severity,
+) {
+    if findings.is_empty() {
+        return;
+    }
+    let level = severity_to_codeclimate(severity);
+    for entry in findings {
+        let e = &entry.export;
+        let path = cc_path(&e.path, root);
+        let fp = fingerprint_hash(&["fallow/invalid-client-export", &path, &e.export_name]);
+        let line = if e.line > 0 { Some(e.line) } else { None };
+        let message = format!(
+            "Export `{}` is not allowed in a \"{}\" file (Next.js server-only / route-config name)",
+            e.export_name, e.directive
+        );
+        issues.push(cc_issue(
+            "fallow/invalid-client-export",
+            &message,
+            level,
+            "Bug Risk",
+            &path,
+            line,
+            &fp,
+        ));
+    }
+}
+
 fn push_stale_suppression_issues(
     issues: &mut Vec<CodeClimateIssue>,
     suppressions: &[fallow_core::results::StaleSuppression],
@@ -1327,6 +1358,12 @@ impl CodeClimateBuilder<'_> {
             self.rules.boundary_violation,
         );
         push_policy_violation_issues(&mut self.issues, &self.results.policy_violations, self.root);
+        push_invalid_client_export_issues(
+            &mut self.issues,
+            &self.results.invalid_client_exports,
+            self.root,
+            self.rules.invalid_client_export,
+        );
     }
 
     fn push_suppression_and_catalog_issues(&mut self) {

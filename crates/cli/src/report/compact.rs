@@ -342,6 +342,15 @@ impl<'a> CompactLineBuilder<'a> {
                 violation.violation.rule_id,
             ));
         }
+        for finding in &self.results.invalid_client_exports {
+            self.lines.push(format!(
+                "invalid-client-export:{}:{}:{} (from \"{}\")",
+                self.rel(&finding.export.path),
+                finding.export.line,
+                finding.export.export_name,
+                finding.export.directive,
+            ));
+        }
         for suppression in &self.results.stale_suppressions {
             self.lines
                 .push(compact_stale_suppression_line(suppression, self.root));
