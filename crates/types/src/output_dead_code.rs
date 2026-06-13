@@ -725,9 +725,8 @@ impl UnusedTypeFinding {
 /// Wire-shape envelope for an [`InvalidClientExport`] finding. There is no safe
 /// auto-fix: the export itself may be a legitimate client-component value
 /// export that happens to collide with a Next.js server-only name, so removing
-/// it could break the component. The only action is a line-level suppress
-/// (mirroring how a non-auto-fixable finding builds actions); the real fix is
-/// for the author to move the server-only export to a non-client module.
+/// it could break the component. Actions are a manual `move-to-server-module`
+/// fix (the real remediation) plus a line-level suppress.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct InvalidClientExportFinding {
@@ -744,18 +743,33 @@ pub struct InvalidClientExportFinding {
 }
 
 impl InvalidClientExportFinding {
-    /// Build the wrapper from a raw [`InvalidClientExport`]. Emits only a
-    /// line-level suppress action: there is no safe auto-fix because removing
-    /// the export could break a legitimate client component.
+    /// Build the wrapper from a raw [`InvalidClientExport`]. Emits a manual
+    /// fix action (move the server-only export to a non-client module) plus a
+    /// line-level suppress: there is no safe auto-fix because removing the
+    /// export could break a legitimate client component.
     #[must_use]
     pub fn with_actions(export: InvalidClientExport) -> Self {
-        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
-            kind: SuppressLineKind::SuppressLine,
-            auto_fixable: false,
-            description: "Suppress with an inline comment above the line".to_string(),
-            comment: "// fallow-ignore-next-line invalid-client-export".to_string(),
-            scope: None,
-        })];
+        let actions = vec![
+            IssueAction::Fix(FixAction {
+                kind: FixActionType::MoveToServerModule,
+                auto_fixable: false,
+                description: "Move the server-only export to a non-client module and import it from there"
+                    .to_string(),
+                note: Some(
+                    "A \"use client\" file cannot export a Next.js server-only or route-config name; Next.js rejects it at build time"
+                        .to_string(),
+                ),
+                available_in_catalogs: None,
+                suggested_target: None,
+            }),
+            IssueAction::SuppressLine(SuppressLineAction {
+                kind: SuppressLineKind::SuppressLine,
+                auto_fixable: false,
+                description: "Suppress with an inline comment above the line".to_string(),
+                comment: "// fallow-ignore-next-line invalid-client-export".to_string(),
+                scope: None,
+            }),
+        ];
         Self {
             export,
             actions,
@@ -766,9 +780,9 @@ impl InvalidClientExportFinding {
 
 /// Wire-shape envelope for a [`MixedClientServerBarrel`] finding. There is no
 /// safe auto-fix: splitting a barrel into separate client and server modules is
-/// a human decision (the barrel may intentionally aggregate both surfaces). The
-/// only action is a line-level suppress; the real fix is for the author to stop
-/// re-exporting client and server-only modules from the same barrel.
+/// a human decision (the barrel may intentionally aggregate both surfaces).
+/// Actions are a manual `split-mixed-barrel` fix (the real remediation) plus a
+/// line-level suppress.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MixedClientServerBarrelFinding {
@@ -785,18 +799,33 @@ pub struct MixedClientServerBarrelFinding {
 }
 
 impl MixedClientServerBarrelFinding {
-    /// Build the wrapper from a raw [`MixedClientServerBarrel`]. Emits only a
-    /// line-level suppress action: there is no safe auto-fix because splitting
+    /// Build the wrapper from a raw [`MixedClientServerBarrel`]. Emits a manual
+    /// fix action (split the barrel into separate client and server halves)
+    /// plus a line-level suppress: there is no safe auto-fix because splitting
     /// the barrel is a human decision.
     #[must_use]
     pub fn with_actions(barrel: MixedClientServerBarrel) -> Self {
-        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
-            kind: SuppressLineKind::SuppressLine,
-            auto_fixable: false,
-            description: "Suppress with an inline comment above the line".to_string(),
-            comment: "// fallow-ignore-next-line mixed-client-server-barrel".to_string(),
-            scope: None,
-        })];
+        let actions = vec![
+            IssueAction::Fix(FixAction {
+                kind: FixActionType::SplitMixedBarrel,
+                auto_fixable: false,
+                description: "Split the barrel so client and server-only modules are re-exported from separate files"
+                    .to_string(),
+                note: Some(
+                    "Importing one name from this barrel drags the other's directive across the client/server boundary"
+                        .to_string(),
+                ),
+                available_in_catalogs: None,
+                suggested_target: None,
+            }),
+            IssueAction::SuppressLine(SuppressLineAction {
+                kind: SuppressLineKind::SuppressLine,
+                auto_fixable: false,
+                description: "Suppress with an inline comment above the line".to_string(),
+                comment: "// fallow-ignore-next-line mixed-client-server-barrel".to_string(),
+                scope: None,
+            }),
+        ];
         Self {
             barrel,
             actions,
@@ -808,8 +837,8 @@ impl MixedClientServerBarrelFinding {
 /// Wire-shape envelope for a [`MisplacedDirective`] finding. There is no safe
 /// auto-fix: moving a directive to the leading prologue is a small but
 /// judgement-bearing edit (the author may have intended the file to be a
-/// server module after all). The only action is a line-level suppress; the
-/// real fix is to hoist the directive to the very top of the file.
+/// server module after all). Actions are a manual `hoist-directive` fix (the
+/// real remediation) plus a line-level suppress.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MisplacedDirectiveFinding {
@@ -826,18 +855,33 @@ pub struct MisplacedDirectiveFinding {
 }
 
 impl MisplacedDirectiveFinding {
-    /// Build the wrapper from a raw [`MisplacedDirective`]. Emits only a
-    /// line-level suppress action: there is no safe auto-fix because moving a
-    /// directive is a human decision.
+    /// Build the wrapper from a raw [`MisplacedDirective`]. Emits a manual fix
+    /// action (hoist the directive to the leading prologue) plus a line-level
+    /// suppress: there is no safe auto-fix because moving a directive can
+    /// change module semantics and is a human decision.
     #[must_use]
     pub fn with_actions(directive_site: MisplacedDirective) -> Self {
-        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
-            kind: SuppressLineKind::SuppressLine,
-            auto_fixable: false,
-            description: "Suppress with an inline comment above the line".to_string(),
-            comment: "// fallow-ignore-next-line misplaced-directive".to_string(),
-            scope: None,
-        })];
+        let actions = vec![
+            IssueAction::Fix(FixAction {
+                kind: FixActionType::HoistDirective,
+                auto_fixable: false,
+                description: "Move the directive to the very top of the file, above all imports and statements"
+                    .to_string(),
+                note: Some(
+                    "An RSC bundler honors the directive only in the leading prologue; here it precedes other statements and is silently ignored"
+                        .to_string(),
+                ),
+                available_in_catalogs: None,
+                suggested_target: None,
+            }),
+            IssueAction::SuppressLine(SuppressLineAction {
+                kind: SuppressLineKind::SuppressLine,
+                auto_fixable: false,
+                description: "Suppress with an inline comment above the line".to_string(),
+                comment: "// fallow-ignore-next-line misplaced-directive".to_string(),
+                scope: None,
+            }),
+        ];
         Self {
             directive_site,
             actions,
@@ -1855,6 +1899,9 @@ mod position_0_invariants {
                 FixActionType::RemoveDependencyOverride => "remove-dependency-override",
                 FixActionType::FixDependencyOverride => "fix-dependency-override",
                 FixActionType::ResolvePolicyViolation => "resolve-policy-violation",
+                FixActionType::MoveToServerModule => "move-to-server-module",
+                FixActionType::SplitMixedBarrel => "split-mixed-barrel",
+                FixActionType::HoistDirective => "hoist-directive",
             },
             IssueAction::SuppressLine(_) => "suppress-line",
             IssueAction::SuppressFile(_) => "suppress-file",

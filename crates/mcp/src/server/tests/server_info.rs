@@ -147,6 +147,7 @@ fn open_world_hint_on_analysis_tools() {
         "list_boundaries",
         "feature_flags",
         "check_runtime_coverage",
+        "impact_all",
     ];
     for tool in &tools {
         let name = tool.name.to_string();
@@ -169,6 +170,21 @@ fn impact_is_read_only_closed_world() {
     let ann = impact.annotations.as_ref().unwrap();
     assert_eq!(ann.read_only_hint, Some(true));
     assert_eq!(ann.open_world_hint, Some(false));
+    assert_eq!(ann.idempotent_hint, Some(true));
+}
+
+#[test]
+fn impact_all_is_read_only_open_world_idempotent() {
+    // The load-bearing distinction from single-repo `impact`: the cross-repo
+    // roll-up's result set varies with the machine's tracked repos, so it is
+    // OPEN-world while staying read-only and idempotent. A regression that
+    // dropped any of these hints would otherwise pass CI.
+    let server = FallowMcp::new();
+    let tools = server.tool_router.list_all();
+    let impact_all = tools.iter().find(|t| t.name == "impact_all").unwrap();
+    let ann = impact_all.annotations.as_ref().unwrap();
+    assert_eq!(ann.read_only_hint, Some(true));
+    assert_eq!(ann.open_world_hint, Some(true));
     assert_eq!(ann.idempotent_hint, Some(true));
 }
 

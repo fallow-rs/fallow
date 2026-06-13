@@ -524,6 +524,21 @@ fn resolve_store_max_age() -> Option<std::time::Duration> {
 /// `impact.json` toggle (it is a sibling FILE one level up, not inside the
 /// `impact/` dir). Skips `keep_key`'s own store so the just-written file is
 /// never reclaimed by a stale-mtime race in the same run.
+///
+/// Cross-project GC race: this sweep does NOT take the per-store
+/// [`ImpactStoreLock`] of the OTHER projects it inspects, so in principle it
+/// could delete a store another process is mid-writing. This is a bounded,
+/// best-effort limitation rather than a corruption bug. A store becomes a
+/// deletion candidate only when its file mtime is already older than
+/// `max_age`, and any record refreshes the mtime via an atomic replace, so a
+/// repo with even occasional activity never ages out. The one genuinely lossy
+/// window is sub-millisecond: a concurrent writer that completes its atomic
+/// replace AFTER this fn's `metadata().modified()` read but BEFORE the
+/// `remove_file` would have its just-written (fresh) record deleted. That
+/// window is vanishingly small, the deletion is opt-in (gated on
+/// [`STORE_MAX_AGE_ENV`]), and the store is reconstructed on the project's
+/// next recorded run, so the worst case is the loss of a single just-written
+/// record for an otherwise-dormant project, never partial/corrupt state.
 fn sweep_old_stores(keep_key: &str, max_age: std::time::Duration) {
     let Some(dir) = store_dir() else {
         return;
@@ -2395,8 +2410,10 @@ pub fn render_cross_repo_markdown(report: &CrossRepoImpactReport) -> String {
         return out;
     }
     out.push_str(&format!(
-        "{} projects tracked, {} with history.\n\n",
-        report.project_count, report.tracked_count,
+        "{} project{} tracked, {} with history.\n\n",
+        report.project_count,
+        plural(report.project_count),
+        report.tracked_count,
     ));
     if !report.projects.is_empty() {
         out.push_str("| Project | Latest | Repo-wide | Contained | Resolved | Last run |\n");
@@ -2415,13 +2432,20 @@ pub fn render_cross_repo_markdown(report: &CrossRepoImpactReport) -> String {
     }
     let t = &report.totals;
     out.push_str(&format!(
-        "\n**Grand totals:** {} resolved, {} contained, {} marked intentional across {} tracked projects",
-        t.resolved_total, t.containment_count, t.suppressed_total, report.tracked_count,
+        "\n**Grand totals:** {} resolved, {} contained, {} marked intentional across {} tracked project{}",
+        t.resolved_total,
+        t.containment_count,
+        t.suppressed_total,
+        report.tracked_count,
+        plural(report.tracked_count),
     ));
     if t.projects_with_baseline > 0 {
         out.push_str(&format!(
-            "; {} issues project-wide across {} with a full-run baseline (as of each project's last full run)",
-            t.project_wide_issues, t.projects_with_baseline,
+            "; {} issue{} project-wide across {} project{} with a full-run baseline (as of each project's last full run)",
+            t.project_wide_issues,
+            plural(t.project_wide_issues),
+            t.projects_with_baseline,
+            plural(t.projects_with_baseline),
         ));
     }
     out.push_str(".\n\n_Local-only; never uploaded; accrues on this machine, not CI._\n");
@@ -3915,6 +3939,32 @@ mod tests {
         assert!(
             !json.contains('/') || !json.contains("Users"),
             "json must not leak an absolute home path"
+        );
+    }
+
+    #[test]
+    fn cross_repo_markdown_pluralizes_single_project() {
+        let _cfg = aggregate_env();
+        seed_store("solo", &store_with("solo", 3, 1, "2026-06-10T00:00:00Z", 2));
+        let report = aggregate(CrossRepoSort::Recent);
+        assert_eq!(report.project_count, 1);
+        assert_eq!(report.tracked_count, 1);
+        let md = render_cross_repo_markdown(&report);
+        assert!(
+            md.contains("1 project tracked"),
+            "single project must read 'project', got:\n{md}"
+        );
+        assert!(
+            !md.contains("1 projects tracked"),
+            "must not pluralize a single project, got:\n{md}"
+        );
+        assert!(
+            md.contains("across 1 tracked project"),
+            "grand totals must read 'tracked project' (singular), got:\n{md}"
+        );
+        assert!(
+            !md.contains("tracked projects"),
+            "must not pluralize a single tracked project, got:\n{md}"
         );
     }
 

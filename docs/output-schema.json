@@ -5990,6 +5990,21 @@
           "type": "string",
           "const": "resolve-policy-violation",
           "description": "Replace a banned call or banned import flagged by a rule-pack rule\n(manual; the rule's message usually names the sanctioned alternative)."
+        },
+        {
+          "type": "string",
+          "const": "move-to-server-module",
+          "description": "Move a server-only export out of a `\"use client\"` file into a\nnon-client module (manual; used by invalid-client-export findings)."
+        },
+        {
+          "type": "string",
+          "const": "split-mixed-barrel",
+          "description": "Split a barrel that re-exports both client and server-only modules\ninto separate client and server barrels (manual; used by\nmixed-client-server-barrel findings)."
+        },
+        {
+          "type": "string",
+          "const": "hoist-directive",
+          "description": "Hoist a misplaced `\"use client\"` / `\"use server\"` directive to the\nleading prologue of the file (manual; used by misplaced-directive\nfindings)."
         }
       ],
       "description": "Discriminant string for [`FixAction`]. Kebab-case per the JSON output\ncontract."
@@ -12387,7 +12402,7 @@
         "col",
         "actions"
       ],
-      "description": "Wire-shape envelope for an [`InvalidClientExport`] finding. There is no safe\nauto-fix: the export itself may be a legitimate client-component value\nexport that happens to collide with a Next.js server-only name, so removing\nit could break the component. The only action is a line-level suppress\n(mirroring how a non-auto-fixable finding builds actions); the real fix is\nfor the author to move the server-only export to a non-client module."
+      "description": "Wire-shape envelope for an [`InvalidClientExport`] finding. There is no safe\nauto-fix: the export itself may be a legitimate client-component value\nexport that happens to collide with a Next.js server-only name, so removing\nit could break the component. Actions are a manual `move-to-server-module`\nfix (the real remediation) plus a line-level suppress."
     },
     "EnabledSource": {
       "type": "string",
@@ -12448,7 +12463,7 @@
         "col",
         "actions"
       ],
-      "description": "Wire-shape envelope for a [`MixedClientServerBarrel`] finding. There is no\nsafe auto-fix: splitting a barrel into separate client and server modules is\na human decision (the barrel may intentionally aggregate both surfaces). The\nonly action is a line-level suppress; the real fix is for the author to stop\nre-exporting client and server-only modules from the same barrel."
+      "description": "Wire-shape envelope for a [`MixedClientServerBarrel`] finding. There is no\nsafe auto-fix: splitting a barrel into separate client and server modules is\na human decision (the barrel may intentionally aggregate both surfaces).\nActions are a manual `split-mixed-barrel` fix (the real remediation) plus a\nline-level suppress."
     },
     "MisplacedDirectiveFinding": {
       "type": "object",
@@ -12495,7 +12510,7 @@
         "col",
         "actions"
       ],
-      "description": "Wire-shape envelope for a [`MisplacedDirective`] finding. There is no safe\nauto-fix: moving a directive to the leading prologue is a small but\njudgement-bearing edit (the author may have intended the file to be a\nserver module after all). The only action is a line-level suppress; the\nreal fix is to hoist the directive to the very top of the file."
+      "description": "Wire-shape envelope for a [`MisplacedDirective`] finding. There is no safe\nauto-fix: moving a directive to the leading prologue is a small but\njudgement-bearing edit (the author may have intended the file to be a\nserver module after all). Actions are a manual `hoist-directive` fix (the\nreal remediation) plus a line-level suppress."
     },
     "CrossRepoImpactReport": {
       "type": "object",

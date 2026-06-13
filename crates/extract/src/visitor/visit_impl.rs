@@ -2886,11 +2886,13 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 // Detect MISPLACED `"use client"` / `"use server"`
                 // directives. oxc places honored leading-prologue directives in
                 // `program.directives` (handled above), so any string-literal
-                // expression statement here is by definition NOT in the leading
-                // position: a non-directive statement (an import, a const)
-                // preceded it and the RSC bundler parses the string as an
-                // ordinary expression, silently ignoring it. Match ONLY the two
-                // RSC directive strings; a stray `"use strict"` is harmless.
+                // expression statement reaching `program.body` is by definition
+                // NOT in the leading position: some non-string-literal statement
+                // (an import, a const, a function call, anything that is not part
+                // of the directive prologue) preceded it, so the RSC bundler
+                // parses the string as an ordinary expression and silently
+                // ignores it. Match ONLY the two RSC directive strings; a stray
+                // `"use strict"` is harmless.
                 Statement::ExpressionStatement(stmt) => {
                     if let Expression::StringLiteral(lit) = &stmt.expression {
                         let is_server = match lit.value.as_str() {

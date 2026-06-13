@@ -376,6 +376,7 @@ fn check_explain_for_header(line: &str) -> Option<&'static crate::explain::RuleD
             "fallow/mixed-client-server-barrel",
         ),
         ("Unprovided injects", "fallow/unprovided-inject"),
+        ("Misplaced directives", "fallow/misplaced-directive"),
     ];
     let (_, rule_id) = mappings
         .iter()
@@ -2138,6 +2139,9 @@ fn collect_matching_rules(
     for e in &results.invalid_client_exports {
         check(&e.export.path);
     }
+    for b in &results.mixed_client_server_barrels {
+        check(&b.barrel.path);
+    }
     for d in &results.misplaced_directives {
         check(&d.directive_site.path);
     }
@@ -2617,6 +2621,37 @@ mod tests {
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);
         assert!(lines.is_empty());
+    }
+
+    #[test]
+    fn collect_matching_rules_routes_mixed_client_server_barrels() {
+        // A file whose ONLY finding is a mixed-client-server-barrel must still
+        // surface its CODEOWNERS rule in the `--group-by owner` "matched by"
+        // header. Reverting the `mixed_client_server_barrels` loop in
+        // `collect_matching_rules` makes this assertion fail (empty rules),
+        // pinning the fix that was previously missing alongside the sibling
+        // invalid-client-export / misplaced-directive loops.
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .mixed_client_server_barrels
+            .push(MixedClientServerBarrelFinding::with_actions(
+                MixedClientServerBarrel {
+                    path: root.join("src/index.ts"),
+                    client_origin: "./Button".to_string(),
+                    server_origin: "./fetchUser".to_string(),
+                    line: 2,
+                    col: 0,
+                },
+            ));
+        let resolver = OwnershipResolver::Owner(
+            crate::codeowners::CodeOwners::parse("/src/ @frontend\n").unwrap(),
+        );
+        let matched = collect_matching_rules(&results, &root, &resolver);
+        assert!(
+            matched.iter().any(|r| r.contains("src")),
+            "mixed-barrel path must route through the ownership resolver, got: {matched:?}"
+        );
     }
 
     #[test]

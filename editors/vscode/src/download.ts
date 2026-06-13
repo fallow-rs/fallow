@@ -189,7 +189,13 @@ const getInstallDir = (context: vscode.ExtensionContext): string => {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  sweepOrphanTempFiles(dir);
+  // Orphan cleanup is best-effort and its result never affects the returned
+  // dir, so defer the synchronous `readdirSync` off the activation /
+  // binary-resolution path: running it inline blocked the extension-host JS
+  // thread on every `getInstallDir` call (notably slow on network-mounted
+  // global storage). `setImmediate` fire-and-forget keeps the same single
+  // thread but unblocks the caller.
+  setImmediate(() => sweepOrphanTempFiles(dir));
   return dir;
 };
 

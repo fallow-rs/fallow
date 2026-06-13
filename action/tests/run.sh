@@ -751,6 +751,20 @@ assert_contains "$OUT_MD_ANN" "::warning file=src/widget.tsx,line=4,col=3,title=
 OUT_MD_FILTERED=$(jq '.misplaced_directives = [{"path": "src/widget.tsx", "line": 4, "col": 0, "directive": "use client", "actions": []}, {"path": "src/other.tsx", "line": 6, "col": 0, "directive": "use server", "actions": []}]' "$FIXTURES/check.json" | jq --argjson changed '["src/widget.tsx"]' -f "$JQ_DIR/filter-changed.jq" 2>&1)
 assert_json_value "$OUT_MD_FILTERED" '.misplaced_directives | length' "1" "md: filter-changed keeps only changed-file findings"
 
+# Directive column renders with the surrounding quotes from the `\"\(.directive)\"` template.
+# Asserting the export-cell + directive-cell pair so a regression in quote escaping is caught
+# (the bare "use client" string also appears in the section header text).
+assert_contains "$OUT_ICE" '`metadata` | `"use client"` |' "ice: directive column renders with surrounding quotes"
+# `"use server"` directive path (the section description mentions both, so a use-server-only
+# fixture proves the row template, not just the header text).
+OUT_MD_SERVER=$(jq '.misplaced_directives = [{"path": "src/action.ts", "line": 3, "col": 0, "directive": "use server", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_MD_SERVER" '`"use server"` |' "md: use-server directive renders in section row"
+
+# filter-changed recalculates total_issues from the surviving arrays (synthetic minimal input
+# so the assertion does not depend on the base fixture's other findings).
+OUT_RSC_RECALC=$(jq -n '{total_issues: 2, invalid_client_exports: [{"path": "src/a.tsx", "line": 1, "col": 0, "export_name": "metadata", "directive": "use client", "actions": []}, {"path": "src/b.tsx", "line": 1, "col": 0, "export_name": "revalidate", "directive": "use client", "actions": []}]}' | jq --argjson changed '["src/a.tsx"]' -f "$JQ_DIR/filter-changed.jq" 2>&1)
+assert_json_value "$OUT_RSC_RECALC" '.total_issues' "1" "rsc: filter-changed recalculates total_issues after dropping non-changed finding"
+
 OUT_CLEAN=$(jq -r -f "$JQ_DIR/summary-check.jq" "$FIXTURES/check-clean.json" 2>&1)
 assert_contains "$OUT_CLEAN" "No issues found" "clean: shows no issues"
 assert_not_contains "$OUT_CLEAN" "WARNING" "clean: no warning"
@@ -973,6 +987,13 @@ assert_not_contains "$OUT_SINGULAR" "**1** health findings" "status-bar: no '1 h
 # Complexity <details> summary pluralizes when functions_above_threshold == 1
 assert_contains "$OUT_SINGULAR" "(1 function above threshold)" "complexity dropdown: singular function"
 assert_not_contains "$OUT_SINGULAR" "(1 functions above threshold)" "complexity dropdown: no '1 functions' grammar"
+
+# RSC findings appear in the combined-mode Code issues breakdown table (not just
+# summary-check.jq standalone). All three RSC types injected into .check at once.
+OUT_RSC=$(jq '.check.invalid_client_exports = [{"path": "src/app.tsx", "line": 5, "col": 0, "export_name": "metadata", "directive": "use client", "actions": []}] | .check.mixed_client_server_barrels = [{"path": "src/index.ts", "line": 2, "col": 0, "client_origin": "./Button", "server_origin": "./fetchUser", "actions": []}] | .check.misplaced_directives = [{"path": "src/widget.tsx", "line": 4, "col": 0, "directive": "use server", "actions": []}] | .check.total_issues = (.check.total_issues + 3)' "$FIXTURES/combined.json" | jq -r -f "$JQ_DIR/summary-combined.jq" 2>&1)
+assert_contains "$OUT_RSC" "| [Invalid client exports](" "combined: RSC invalid-client-exports row in breakdown"
+assert_contains "$OUT_RSC" "| [Mixed client/server barrels](" "combined: RSC mixed-barrel row in breakdown"
+assert_contains "$OUT_RSC" "| [Misplaced directives](" "combined: RSC misplaced-directives row in breakdown"
 
 # Worst-case truncation: 50 groups synthesized (paths differentiated per-group via `. as $g |`),
 # top-5 displayed + "and N more" line, total under 65k chars.

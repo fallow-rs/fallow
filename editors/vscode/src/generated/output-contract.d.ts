@@ -172,7 +172,7 @@ export type IssueAction = (FixAction | SuppressLineAction | SuppressFileAction |
  * Discriminant string for [`FixAction`]. Kebab-case per the JSON output
  * contract.
  */
-export type FixActionType = ("remove-export" | "delete-file" | "remove-dependency" | "move-dependency" | "remove-enum-member" | "remove-class-member" | "resolve-import" | "install-dependency" | "remove-duplicate" | "move-to-dev" | "refactor-cycle" | "refactor-re-export-cycle" | "refactor-boundary" | "export-type" | "remove-catalog-entry" | "remove-empty-catalog-group" | "update-catalog-reference" | "add-catalog-entry" | "remove-catalog-reference" | "remove-dependency-override" | "fix-dependency-override" | "resolve-policy-violation")
+export type FixActionType = ("remove-export" | "delete-file" | "remove-dependency" | "move-dependency" | "remove-enum-member" | "remove-class-member" | "resolve-import" | "install-dependency" | "remove-duplicate" | "move-to-dev" | "refactor-cycle" | "refactor-re-export-cycle" | "refactor-boundary" | "export-type" | "remove-catalog-entry" | "remove-empty-catalog-group" | "update-catalog-reference" | "add-catalog-entry" | "remove-catalog-reference" | "remove-dependency-override" | "fix-dependency-override" | "resolve-policy-violation" | "move-to-server-module" | "split-mixed-barrel" | "hoist-directive")
 /**
  * Singleton discriminant for [`SuppressLineAction`].
  */
@@ -2504,9 +2504,8 @@ introduced?: (AuditIntroduced | null)
  * Wire-shape envelope for an [`InvalidClientExport`] finding. There is no safe
  * auto-fix: the export itself may be a legitimate client-component value
  * export that happens to collide with a Next.js server-only name, so removing
- * it could break the component. The only action is a line-level suppress
- * (mirroring how a non-auto-fixable finding builds actions); the real fix is
- * for the author to move the server-only export to a non-client module.
+ * it could break the component. Actions are a manual `move-to-server-module`
+ * fix (the real remediation) plus a line-level suppress.
  */
 export interface InvalidClientExportFinding {
 /**
@@ -2545,9 +2544,9 @@ introduced?: (AuditIntroduced | null)
 /**
  * Wire-shape envelope for a [`MixedClientServerBarrel`] finding. There is no
  * safe auto-fix: splitting a barrel into separate client and server modules is
- * a human decision (the barrel may intentionally aggregate both surfaces). The
- * only action is a line-level suppress; the real fix is for the author to stop
- * re-exporting client and server-only modules from the same barrel.
+ * a human decision (the barrel may intentionally aggregate both surfaces).
+ * Actions are a manual `split-mixed-barrel` fix (the real remediation) plus a
+ * line-level suppress.
  */
 export interface MixedClientServerBarrelFinding {
 /**
@@ -2587,8 +2586,8 @@ introduced?: (AuditIntroduced | null)
  * Wire-shape envelope for a [`MisplacedDirective`] finding. There is no safe
  * auto-fix: moving a directive to the leading prologue is a small but
  * judgement-bearing edit (the author may have intended the file to be a
- * server module after all). The only action is a line-level suppress; the
- * real fix is to hoist the directive to the very top of the file.
+ * server module after all). Actions are a manual `hoist-directive` fix (the
+ * real remediation) plus a line-level suppress.
  */
 export interface MisplacedDirectiveFinding {
 /**

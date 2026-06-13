@@ -37,6 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **More VS Code extension hardening across diagnostics, binary probing, and the sidebar.** A follow-up pass from the same extension audit: the binary version check now runs off the activation/restart thread, so a slow `--version` no longer stalls the editor; a corrupt stored "hidden findings" state recovers to nothing-hidden instead of disabling the extension for that workspace; toggling categories from the manage view applies in a single step (one refresh, not two); the final hide/show toggle is no longer dropped when a window closes mid-write; empty pnpm catalog groups now appear in the Issues tree (and are counted in the issue total) instead of being counted but unnavigable; an invalid `fallow.duplication.mode` value falls back to the default instead of failing the whole analysis; and the tree and status views clean up correctly on reload so a late background result can no longer touch a disposed view.
 
+- **Next.js RSC findings carry a fix action and show up in the combined-mode CI summary.** The three RSC checks (invalid client exports, mixed client/server barrels, misplaced directives) now emit a structured fix action in JSON output (move the export to a server module, split the barrel, hoist the directive) next to the suppress action, so agents and CI integrations see the remediation, not just "ignore this". They also list by name in the GitHub Action and GitLab CI combined-mode "Code issues" breakdown table, where a combined run previously surfaced them only in the headline count. The `fallow dead-code --explain` output now also prints a description for the misplaced-directive section.
+
 ## [2.96.0] - 2026-06-13
 
 ### Changed

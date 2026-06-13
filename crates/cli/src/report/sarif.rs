@@ -926,7 +926,7 @@ fn sarif_graph_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
         ),
         (
             "fallow/invalid-client-export",
-            "\"use client\" file exports a Next.js server-only / route-config name",
+            "\"use client\" file exports a server-only / route-config name",
             rules.invalid_client_export,
         ),
         (

@@ -628,6 +628,12 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
       "col": 0,
       "actions": [
         {
+          "type": "move-to-server-module",
+          "auto_fixable": false,
+          "description": "Move the server-only export to a non-client module and import it from there",
+          "note": "A \"use client\" file cannot export a Next.js server-only or route-config name; Next.js rejects it at build time"
+        },
+        {
           "type": "suppress-line",
           "auto_fixable": false,
           "description": "Suppress with an inline comment above the line",
@@ -644,6 +650,12 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
       "line": 2,
       "col": 0,
       "actions": [
+        {
+          "type": "split-mixed-barrel",
+          "auto_fixable": false,
+          "description": "Split the barrel so client and server-only modules are re-exported from separate files",
+          "note": "Importing one name from this barrel drags the other's directive across the client/server boundary"
+        },
         {
           "type": "suppress-line",
           "auto_fixable": false,

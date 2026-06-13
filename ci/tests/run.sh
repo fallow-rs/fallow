@@ -489,6 +489,15 @@ OUT_MD=$(jq '.misplaced_directives = [{"path": "src/widget.tsx", "line": 4, "col
 assert_contains "$OUT_MD" "Misplaced directives" "md: shows summary row and section"
 assert_contains "$OUT_MD" "use client" "md: shows directive in section"
 
+# Directive column renders with the surrounding quotes from the `\"\(.directive)\"` template.
+# Asserting the export-cell + directive-cell pair so a quote-escaping regression is caught
+# (the bare "use client" string also appears in the section header text).
+assert_contains "$OUT_ICE" '`metadata` | `"use client"` |' "ice: directive column renders with surrounding quotes"
+# `"use server"` directive path (the section description mentions both, so a use-server-only
+# fixture proves the row template, not just the header text).
+OUT_MD_SERVER=$(jq '.misplaced_directives = [{"path": "src/action.ts", "line": 3, "col": 0, "directive": "use server", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$CI_JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_MD_SERVER" '`"use server"` |' "md: use-server directive renders in section row"
+
 OUT_CLEAN=$(jq -r -f "$CI_JQ_DIR/summary-check.jq" "$FIXTURES/check-clean.json" 2>&1)
 assert_contains "$OUT_CLEAN" "No issues found" "clean: shows no issues"
 
@@ -638,6 +647,13 @@ assert_not_contains "$OUT_SINGULAR_GL" "**1** health findings" "status-bar: no '
 # Complexity <details> summary pluralizes when functions_above_threshold == 1
 assert_contains "$OUT_SINGULAR_GL" "(1 function above threshold)" "complexity dropdown: singular function"
 assert_not_contains "$OUT_SINGULAR_GL" "(1 functions above threshold)" "complexity dropdown: no '1 functions' grammar"
+
+# RSC findings appear in the combined-mode Code issues breakdown table (not just
+# summary-check.jq standalone). All three RSC types injected into .check at once.
+OUT_RSC_GL=$(jq '.check.invalid_client_exports = [{"path": "src/app.tsx", "line": 5, "col": 0, "export_name": "metadata", "directive": "use client", "actions": []}] | .check.mixed_client_server_barrels = [{"path": "src/index.ts", "line": 2, "col": 0, "client_origin": "./Button", "server_origin": "./fetchUser", "actions": []}] | .check.misplaced_directives = [{"path": "src/widget.tsx", "line": 4, "col": 0, "directive": "use server", "actions": []}] | .check.total_issues = (.check.total_issues + 3)' "$FIXTURES/combined.json" | jq -r -f "$CI_JQ_DIR/summary-combined.jq" 2>&1)
+assert_contains "$OUT_RSC_GL" "| [Invalid client exports](" "combined: RSC invalid-client-exports row in breakdown"
+assert_contains "$OUT_RSC_GL" "| [Mixed client/server barrels](" "combined: RSC mixed-barrel row in breakdown"
+assert_contains "$OUT_RSC_GL" "| [Misplaced directives](" "combined: RSC misplaced-directives row in breakdown"
 
 # Worst-case truncation: 50 groups (paths differentiated per-group via `. as $g |`),
 # top-5 + overflow line, output stays under 65k chars.
