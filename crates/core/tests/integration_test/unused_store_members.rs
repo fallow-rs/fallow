@@ -99,6 +99,35 @@ fn abstains_on_whole_object_dynamic_and_map_helpers() {
 }
 
 #[test]
+fn flags_dead_members_in_a_workspace_store_package() {
+    // A shared `packages/stores` module is a workspace-package entry boundary,
+    // yet its members are app-internal: a member consumed by no sibling package
+    // is dead, while cross-package consumers credit the used members.
+    let root = fixture_path("pinia-store-members-monorepo");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let names: Vec<String> = store_members(&results, &root)
+        .into_iter()
+        .map(|(_, m)| m)
+        .collect();
+
+    assert!(
+        names.contains(&"deadShared".to_string()),
+        "a workspace-store member consumed by no package is dead: {names:?}"
+    );
+    assert!(
+        names.contains(&"deadSharedAction".to_string()),
+        "a workspace-store action consumed by no package is dead: {names:?}"
+    );
+    for credited in ["count", "double", "inc"] {
+        assert!(
+            !names.contains(&credited.to_string()),
+            "{credited} is consumed cross-package and must be credited: {names:?}"
+        );
+    }
+}
+
+#[test]
 fn dep_gate_suppresses_without_pinia() {
     let root = fixture_path("pinia-store-members-no-dep");
     let config = create_config(root.clone());

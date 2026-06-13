@@ -1782,6 +1782,10 @@ pub struct UnusedMemberResults {
     clippy::too_many_arguments,
     reason = "member tracking requires many graph traversal steps; further splitting is possible but not yet a priority"
 )]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the per-module member scan is a single cohesive pass; the propagation setup above it dominates the line count"
+)]
 pub(super) fn find_unused_members_with_public_api_entry_points(
     graph: &ModuleGraph,
     resolved_modules: &[ResolvedModule],
@@ -1864,16 +1868,34 @@ pub(super) fn find_unused_members_with_public_api_entry_points(
             let mut unused_class_members = Vec::new();
             let mut unused_store_members = Vec::new();
 
-            if !module.is_reachable() || module.is_entry_point() {
+            if !module.is_reachable() {
                 return (
                     unused_enum_members,
                     unused_class_members,
                     unused_store_members,
                 );
             }
+            // Entry-point modules skip enum/class member detection (their
+            // exports are public API), but a Pinia store member is dead when no
+            // CONSUMER accesses it regardless of the module's entry-point status:
+            // a monorepo shared-store package (`packages/stores`) is an entry
+            // boundary yet its members are app-internal, not a published API.
+            // So scan such modules in STORE-ONLY mode (consumers across the
+            // project still credit used members; a member consumed only outside
+            // the analyzed scope is the rare published-store-library case, gated
+            // by the pinia dependency and reported at `warn`).
+            let store_only_scan = module.is_entry_point();
 
             for export in &module.exports {
                 if should_skip_export_member_scan(graph, module, export) {
+                    continue;
+                }
+                if store_only_scan
+                    && !export
+                        .members
+                        .iter()
+                        .any(|m| m.kind == MemberKind::StoreMember)
+                {
                     continue;
                 }
 
@@ -1901,6 +1923,11 @@ pub(super) fn find_unused_members_with_public_api_entry_points(
                 let file_self_accesses = self_accessed_members.get(&module.file_id);
 
                 for member in &export.members {
+                    // In an entry-point module, only store members are scanned;
+                    // enum/class members keep their public-API skip.
+                    if store_only_scan && member.kind != MemberKind::StoreMember {
+                        continue;
+                    }
                     if should_skip_member_for_unused_report(
                         member,
                         &MemberSkipContext {

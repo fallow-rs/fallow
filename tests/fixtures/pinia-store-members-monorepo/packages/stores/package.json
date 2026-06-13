@@ -1,0 +1,1 @@
+{ "name": "@mono/stores", "version": "1.0.0", "main": "src/index.ts", "dependencies": { "pinia": "^2.1.0" } }

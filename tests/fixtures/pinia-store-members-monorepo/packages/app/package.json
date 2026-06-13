@@ -1,0 +1,1 @@
+{ "name": "@mono/app", "version": "1.0.0", "dependencies": { "@mono/stores": "workspace:*", "pinia": "^2.1.0" } }

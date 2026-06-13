@@ -1,0 +1,1 @@
+export { useCounterStore } from './counter'
