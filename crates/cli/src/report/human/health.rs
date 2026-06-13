@@ -48,6 +48,7 @@ pub(in crate::report) fn print_health_human(input: &PrintHealthHumanInput<'_>) {
         && report.runtime_coverage.is_none()
         && report.coverage_intelligence.is_none()
         && report.threshold_overrides.is_empty()
+        && report.css_analytics.is_none()
         && !has_score
     {
         if !quiet {

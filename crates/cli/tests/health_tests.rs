@@ -2856,3 +2856,32 @@ fn health_css_flags_unused_scoped_vue_class() {
     assert_eq!(scoped.len(), 1);
     assert_eq!(scoped[0]["classes"][0], "dead");
 }
+
+#[test]
+fn health_css_human_section_survives_empty_complexity_section() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"css-human","version":"1.0.0"}"#,
+    );
+    // Trivial code: no complexity finding, so the `--complexity` section is empty.
+    write_file(&root.join("src/index.ts"), "export const x = 1;\n");
+    write_file(&root.join("src/styles.css"), "#main { color: red; }\n");
+
+    // `--complexity` selects an (empty) section without forcing a score. Without
+    // including css_analytics in the empty-report early-return, the human
+    // renderer would print the green "no findings" line and drop the CSS
+    // section. This is the human-output path the JSON tests do not cover.
+    let out = run_fallow_in_root(
+        "health",
+        root,
+        &["--css", "--complexity", "--max-crap", "10000", "--quiet"],
+    );
+    assert!(
+        out.stdout.contains("CSS health"),
+        "human output must keep the CSS health section: stdout={:?} stderr={:?}",
+        out.stdout,
+        out.stderr
+    );
+}
