@@ -2721,3 +2721,68 @@ fn health_churn_file_powers_hotspots_and_ownership_without_git() {
         inert.stdout, inert.stderr
     );
 }
+
+#[test]
+fn health_css_flag_surfaces_css_analytics() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"css-fixture","version":"1.0.0"}"#,
+    );
+    write_file(&root.join("src/index.ts"), "export const x = 1;\n");
+    // An id selector (specificity a=1) and an over-complex compound selector are
+    // both structurally notable; a plain class rule is not.
+    write_file(
+        &root.join("src/styles.css"),
+        "#main { color: red; }\n.a.b.c.d.e { color: blue; }\n.plain { color: green; }\n",
+    );
+
+    // Without --css the section is absent (default output unchanged).
+    let plain = run_fallow_in_root(
+        "health",
+        root,
+        &["--max-crap", "10000", "--format", "json", "--quiet"],
+    );
+    let plain_json = parse_json(&plain);
+    assert!(
+        plain_json.get("css_analytics").is_none(),
+        "css_analytics must be absent without --css: {}",
+        plain.stdout
+    );
+
+    // With --css the section reports the stylesheet and its notable rules.
+    let out = run_fallow_in_root(
+        "health",
+        root,
+        &[
+            "--css",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let json = parse_json(&out);
+    let css = json
+        .get("css_analytics")
+        .expect("css_analytics present with --css");
+    assert_eq!(css["summary"]["files_analyzed"], 1);
+    let files = css["files"].as_array().expect("files array");
+    assert!(!files.is_empty(), "notable rules surface the stylesheet");
+    let notable: Vec<_> = files
+        .iter()
+        .flat_map(|f| f["analytics"]["notable_rules"].as_array().unwrap().iter())
+        .collect();
+    assert!(
+        notable.iter().any(|r| r["specificity_a"] == 1),
+        "the #main id selector contributes specificity a=1"
+    );
+    assert!(
+        notable
+            .iter()
+            .any(|r| r["complexity"].as_u64().unwrap() > 4),
+        "the five-class compound selector is over-complex"
+    );
+}

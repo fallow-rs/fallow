@@ -79,6 +79,46 @@ pub struct HealthActionsMeta {
     pub scope: String,
 }
 
+/// Structural CSS analytics surfaced by `fallow health --css`.
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CssAnalyticsReport {
+    /// Stylesheets with at least one structurally notable rule, in scan order.
+    pub files: Vec<CssFileAnalytics>,
+    /// Project-wide CSS aggregates across every analyzed stylesheet.
+    pub summary: CssAnalyticsSummary,
+}
+
+/// Per-stylesheet CSS analytics.
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CssFileAnalytics {
+    /// Project-root-relative, forward-slash path.
+    pub path: String,
+    /// The stylesheet's structural metrics.
+    pub analytics: fallow_types::extract::CssAnalytics,
+}
+
+/// Project-wide CSS analytics aggregates across every analyzed stylesheet
+/// (including stylesheets with no notable rule, which are not listed
+/// individually).
+#[derive(Debug, Clone, Default, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CssAnalyticsSummary {
+    /// Stylesheets analyzed (standard CSS only; SCSS is skipped).
+    pub files_analyzed: u32,
+    /// Total style rules across analyzed stylesheets.
+    pub total_rules: u32,
+    /// Total declarations across analyzed stylesheets.
+    pub total_declarations: u32,
+    /// Total `!important` declarations across analyzed stylesheets.
+    pub important_declarations: u32,
+    /// Total empty style rules across analyzed stylesheets.
+    pub empty_rules: u32,
+    /// Deepest style-rule nesting depth observed across analyzed stylesheets.
+    pub max_nesting_depth: u8,
+}
+
 /// Result of complexity analysis for reporting.
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -153,6 +193,10 @@ pub struct HealthReport {
     /// back to the report root.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub actions_meta: Option<HealthActionsMeta>,
+    /// Structural CSS analytics (specificity hotspots, `!important` density,
+    /// over-complex selectors, deep nesting). Present only with `--css`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub css_analytics: Option<CssAnalyticsReport>,
 }
 
 #[cfg(test)]
@@ -179,6 +223,7 @@ impl Default for HealthReport {
             target_thresholds: None,
             health_trend: None,
             actions_meta: None,
+            css_analytics: None,
         }
     }
 }

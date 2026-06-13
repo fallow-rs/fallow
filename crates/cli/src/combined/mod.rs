@@ -380,6 +380,7 @@ fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
         ownership: false,
         ownership_emails: None,
         targets: true,
+        css: false,
         force_full: false,
         score_only_output: false,
         enforce_coverage_gap_gate: false,

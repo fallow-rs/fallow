@@ -269,6 +269,7 @@ Fallow answers those questions with deterministic, graph-based analysis and stru
 fallow                       # Full codebase analysis: cleanup + duplication + health
 fallow audit                 # Audit changed files (verdict: pass/warn/fail)
 fallow health                # Complexity + refactor targets
+fallow health --css          # + structural CSS analytics (specificity, !important, nesting)
 fallow dupes                 # Repeated logic
 fallow dead-code             # Cleanup candidates
 fallow security              # Security candidates, hardcoded-secret needs explicit category include

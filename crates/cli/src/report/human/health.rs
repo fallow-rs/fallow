@@ -163,10 +163,82 @@ fn build_health_human_lines_with_explain(
     render_file_scores(&mut lines, report, root);
     render_hotspots(&mut lines, report, root);
     render_refactoring_targets(&mut lines, report, root);
+    render_css_analytics(&mut lines, report);
     if explain {
         inject_explain_blocks(lines)
     } else {
         lines
+    }
+}
+
+/// Render the opt-in `--css` structural CSS analytics section: a one-line
+/// stylesheet summary plus the most structurally notable rules (highest
+/// specificity, then complexity, then `!important`).
+fn render_css_analytics(lines: &mut Vec<String>, report: &crate::health_types::HealthReport) {
+    let Some(ref css) = report.css_analytics else {
+        return;
+    };
+    let summary = &css.summary;
+
+    lines.push(String::new());
+    lines.push("CSS health".bold().to_string());
+
+    let important_pct = if summary.total_declarations > 0 {
+        f64::from(summary.important_declarations) / f64::from(summary.total_declarations) * 100.0
+    } else {
+        0.0
+    };
+    lines.push(format!(
+        "  {} stylesheet{} \u{00b7} {} rules \u{00b7} {important_pct:.1}% !important \u{00b7} {} empty \u{00b7} max nesting {}",
+        summary.files_analyzed,
+        plural(summary.files_analyzed as usize),
+        summary.total_rules,
+        summary.empty_rules,
+        summary.max_nesting_depth,
+    ));
+
+    let mut notable: Vec<(&str, &fallow_types::extract::CssRuleMetric)> = css
+        .files
+        .iter()
+        .flat_map(|file| {
+            file.analytics
+                .notable_rules
+                .iter()
+                .map(move |rule| (file.path.as_str(), rule))
+        })
+        .collect();
+    let total_notable = notable.len();
+    notable.sort_by(|a, b| {
+        let key = |m: &fallow_types::extract::CssRuleMetric| {
+            (
+                m.specificity_a,
+                m.specificity_b,
+                m.specificity_c,
+                m.complexity,
+                m.important_count,
+            )
+        };
+        key(b.1).cmp(&key(a.1))
+    });
+
+    for (path, rule) in notable.iter().take(5) {
+        lines.push(format!(
+            "  {path}:{}  specificity ({},{},{}) \u{00b7} complexity {} \u{00b7} {} !important \u{00b7} nesting {}",
+            rule.line,
+            rule.specificity_a,
+            rule.specificity_b,
+            rule.specificity_c,
+            rule.complexity,
+            rule.important_count,
+            rule.nesting_depth,
+        ));
+    }
+    if total_notable > 5 {
+        lines.push(
+            "  ... see --format json for all notable rules"
+                .dimmed()
+                .to_string(),
+        );
     }
 }
 

@@ -101,6 +101,10 @@ pub struct HealthOptions<'a> {
     pub ownership: bool,
     pub ownership_emails: Option<fallow_config::EmailMode>,
     pub targets: bool,
+    /// Compute structural CSS analytics (`--css`): specificity hotspots,
+    /// `!important` density, over-complex selectors, deep nesting. Opt-in
+    /// because it reads and parses every project stylesheet.
+    pub css: bool,
     /// Run the full health pipeline even if some sections are hidden, so score
     /// and snapshot outputs stay accurate.
     pub force_full: bool,
@@ -433,7 +437,7 @@ fn execute_health_inner(
     )?;
 
     let HealthOutputParts {
-        report,
+        mut report,
         grouping,
         timings,
         coverage_gaps_has_findings,
@@ -476,6 +480,16 @@ fn execute_health_inner(
         },
     );
 
+    if opts.css {
+        report.css_analytics = compute_css_analytics_report(
+            &files,
+            &config,
+            &ignore_set,
+            changed_files.as_ref(),
+            ws_roots.as_deref(),
+        );
+    }
+
     record_health_telemetry(&report, coverage_gaps_has_findings);
 
     Ok(build_health_result(HealthResultInput {
@@ -488,6 +502,80 @@ fn execute_health_inner(
         coverage_gaps_has_findings,
         should_fail_on_coverage_gaps: enforce_coverage_gaps,
     }))
+}
+
+/// Compute structural CSS analytics for the project's standard-CSS stylesheets,
+/// honoring the same ignore / changed-since / workspace filters as the rest of
+/// `fallow health`. SCSS is skipped because lightningcss parses standard CSS,
+/// not Sass. Only stylesheets with a structurally notable rule are listed
+/// individually; the summary aggregates every analyzed stylesheet. Returns
+/// `None` when no stylesheet was analyzed.
+fn compute_css_analytics_report(
+    files: &[fallow_types::discover::DiscoveredFile],
+    config: &ResolvedConfig,
+    ignore_set: &globset::GlobSet,
+    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
+    ws_roots: Option<&[std::path::PathBuf]>,
+) -> Option<crate::health_types::CssAnalyticsReport> {
+    use crate::health_types::{CssAnalyticsReport, CssAnalyticsSummary, CssFileAnalytics};
+
+    let mut file_reports = Vec::new();
+    let mut summary = CssAnalyticsSummary::default();
+
+    for file in files {
+        let path = &file.path;
+        if path.extension().and_then(|ext| ext.to_str()) != Some("css") {
+            continue;
+        }
+        let relative = path.strip_prefix(&config.root).unwrap_or(path);
+        if ignore_set.is_match(relative) {
+            continue;
+        }
+        if let Some(changed) = changed_files
+            && !changed.contains(path)
+        {
+            continue;
+        }
+        if let Some(roots) = ws_roots
+            && !roots.iter().any(|root| path.starts_with(root))
+        {
+            continue;
+        }
+        let Ok(source) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        let Some(analytics) = fallow_core::extract::compute_css_analytics(&source) else {
+            continue;
+        };
+
+        summary.files_analyzed = summary.files_analyzed.saturating_add(1);
+        summary.total_rules = summary.total_rules.saturating_add(analytics.rule_count);
+        summary.total_declarations = summary
+            .total_declarations
+            .saturating_add(analytics.total_declarations);
+        summary.important_declarations = summary
+            .important_declarations
+            .saturating_add(analytics.important_declarations);
+        summary.empty_rules = summary
+            .empty_rules
+            .saturating_add(analytics.empty_rule_count);
+        summary.max_nesting_depth = summary.max_nesting_depth.max(analytics.max_nesting_depth);
+
+        if !analytics.notable_rules.is_empty() {
+            file_reports.push(CssFileAnalytics {
+                path: relative.to_string_lossy().replace('\\', "/"),
+                analytics,
+            });
+        }
+    }
+
+    if summary.files_analyzed == 0 {
+        return None;
+    }
+    Some(CssAnalyticsReport {
+        files: file_reports,
+        summary,
+    })
 }
 
 struct HealthCoverageSettings {

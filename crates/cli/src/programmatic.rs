@@ -860,6 +860,7 @@ fn build_complexity_options<'a>(
         ownership: ownership && eff_hotspots,
         ownership_emails: options.ownership_emails.map(OwnershipEmailMode::to_config),
         targets: eff_targets,
+        css: false,
         force_full,
         score_only_output,
         enforce_coverage_gap_gate: true,

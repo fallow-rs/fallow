@@ -1156,6 +1156,7 @@ fn analyze_security_runtime(
             ownership: false,
             ownership_emails: None,
             targets: false,
+            css: false,
             force_full: false,
             score_only_output: false,
             enforce_coverage_gap_gate: false,

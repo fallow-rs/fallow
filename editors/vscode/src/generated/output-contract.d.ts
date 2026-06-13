@@ -3125,6 +3125,11 @@ health_trend?: (HealthTrend | null)
  * back to the report root.
  */
 actions_meta?: (HealthActionsMeta | null)
+/**
+ * Structural CSS analytics (specificity hotspots, `!important` density,
+ * over-complex selectors, deep nesting). Present only with `--css`.
+ */
+css_analytics?: (CssAnalyticsReport | null)
 }
 /**
  * Wire envelope for a single complexity finding.
@@ -4609,6 +4614,143 @@ reason: string
 scope: string
 }
 /**
+ * Structural CSS analytics surfaced by `fallow health --css`.
+ */
+export interface CssAnalyticsReport {
+/**
+ * Stylesheets with at least one structurally notable rule, in scan order.
+ */
+files: CssFileAnalytics[]
+summary: CssAnalyticsSummary
+}
+/**
+ * Per-stylesheet CSS analytics.
+ */
+export interface CssFileAnalytics {
+/**
+ * Project-root-relative, forward-slash path.
+ */
+path: string
+analytics: CssAnalytics
+}
+/**
+ * Stylesheet-level structural CSS analytics, computed from the parsed CSS
+ * syntax tree. Feeds `fallow health` penalty weights and located findings,
+ * never a standalone CSS score.
+ */
+export interface CssAnalytics {
+/**
+ * Total declarations across every style rule (normal plus `!important`).
+ */
+total_declarations: number
+/**
+ * Total `!important` declarations across every style rule.
+ */
+important_declarations: number
+/**
+ * Number of style rules.
+ */
+rule_count: number
+/**
+ * Number of style rules with no declarations.
+ */
+empty_rule_count: number
+/**
+ * Deepest style-rule nesting depth observed (0 = no nesting).
+ */
+max_nesting_depth: number
+/**
+ * Rules that crossed the structural floor, in source order. Bounded; see
+ * [`Self::notable_truncated`]. The scalar aggregates above always reflect
+ * the full stylesheet regardless of truncation.
+ */
+notable_rules: CssRuleMetric[]
+/**
+ * `true` when more rules crossed the structural floor than `notable_rules`
+ * retains (compiled utility CSS can emit thousands of `!important` rules),
+ * so consumers can note that per-rule findings were capped.
+ */
+notable_truncated: boolean
+}
+/**
+ * Structural CSS metrics for a single style rule, computed from the parsed CSS
+ * syntax tree. A rule is recorded only when it crosses a structural floor (an
+ * id selector, a complex selector, a `!important` declaration, or deep
+ * nesting), so the vector stays bounded on normal stylesheets.
+ *
+ * Not persisted in the extraction cache: `fallow health` computes these
+ * on demand from the CSS source, so there is no `bitcode` derive.
+ */
+export interface CssRuleMetric {
+/**
+ * 1-based line of the rule's first selector.
+ */
+line: number
+/**
+ * 1-based column of the rule's first selector.
+ */
+col: number
+/**
+ * Specificity component `a` (id selectors), max across the rule's selectors.
+ */
+specificity_a: number
+/**
+ * Specificity component `b` (class / attribute / pseudo-class selectors).
+ */
+specificity_b: number
+/**
+ * Specificity component `c` (type / pseudo-element selectors).
+ */
+specificity_c: number
+/**
+ * Largest selector component count across the rule's selector list.
+ */
+complexity: number
+/**
+ * Declaration count in the rule (normal plus `!important`).
+ */
+declaration_count: number
+/**
+ * `!important` declaration count in the rule.
+ */
+important_count: number
+/**
+ * Style-rule nesting depth (0 = top level).
+ */
+nesting_depth: number
+}
+/**
+ * Project-wide CSS analytics aggregates across every analyzed stylesheet
+ * (including stylesheets with no notable rule, which are not listed
+ * individually).
+ */
+export interface CssAnalyticsSummary {
+/**
+ * Stylesheets analyzed (standard CSS only; SCSS is skipped).
+ */
+files_analyzed: number
+/**
+ * Total style rules across analyzed stylesheets.
+ */
+total_rules: number
+/**
+ * Total declarations across analyzed stylesheets.
+ */
+total_declarations: number
+/**
+ * Total `!important` declarations across analyzed stylesheets.
+ */
+important_declarations: number
+/**
+ * Total empty style rules across analyzed stylesheets.
+ */
+empty_rules: number
+/**
+ * Deepest style-rule nesting depth observed across analyzed stylesheets.
+ */
+max_nesting_depth: number
+}
+/**
  * Envelope emitted by `fallow explain <issue-type> --format json`.
  *
  * Standalone rule explanation. This command does not run project analysis
@@ -4970,6 +5112,11 @@ health_trend?: (HealthTrend | null)
  * back to the report root.
  */
 actions_meta?: (HealthActionsMeta | null)
+/**
+ * Structural CSS analytics (specificity hotspots, `!important` density,
+ * over-complex selectors, deep nesting). Present only with `--css`.
+ */
+css_analytics?: (CssAnalyticsReport | null)
 grouped_by?: (GroupByMode | null)
 groups?: (HealthGroup[] | null)
 _meta?: (Meta | null)

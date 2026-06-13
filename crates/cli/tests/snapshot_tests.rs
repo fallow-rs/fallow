@@ -2410,6 +2410,7 @@ fn sample_health_report(root: &Path) -> HealthReport {
         runtime_coverage: None,
         coverage_intelligence: None,
         actions_meta: None,
+        css_analytics: None,
     }
 }
 
@@ -2671,6 +2672,7 @@ const fn empty_health_report() -> HealthReport {
         runtime_coverage: None,
         coverage_intelligence: None,
         actions_meta: None,
+        css_analytics: None,
     }
 }
 

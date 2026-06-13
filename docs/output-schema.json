@@ -1187,6 +1187,17 @@
           ],
           "description": "Audit breadcrumb explaining systemic action-array adjustments. Present\nonly when at least one adjustment was made (e.g., health finding\nsuppression hints omitted because a baseline is active). When --group-by\nis active, each entry of `groups` may carry its own `actions_meta`\ndescribing the same omission so per-group consumers do not need to walk\nback to the report root."
         },
+        "css_analytics": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CssAnalyticsReport"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Structural CSS analytics (specificity hotspots, `!important` density,\nover-complex selectors, deep nesting). Present only with `--css`."
+        },
         "grouped_by": {
           "anyOf": [
             {
@@ -2123,6 +2134,17 @@
             }
           ],
           "description": "Audit breadcrumb explaining systemic action-array adjustments. Present\nonly when at least one adjustment was made (e.g., health finding\nsuppression hints omitted because a baseline is active). When --group-by\nis active, each entry of `groups` may carry its own `actions_meta`\ndescribing the same omission so per-group consumers do not need to walk\nback to the report root."
+        },
+        "css_analytics": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CssAnalyticsReport"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Structural CSS analytics (specificity hotspots, `!important` density,\nover-complex selectors, deep nesting). Present only with `--css`."
         }
       },
       "required": [
@@ -12312,57 +12334,181 @@
       ],
       "description": "Current complexity metrics for a matched threshold override entry."
     },
-    "InvalidClientExportFinding": {
+    "CssAnalyticsReport": {
+      "type": "object",
+      "properties": {
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CssFileAnalytics"
+          },
+          "description": "Stylesheets with at least one structurally notable rule, in scan order."
+        },
+        "summary": {
+          "description": "Project-wide CSS aggregates across every analyzed stylesheet.",
+          "$ref": "#/definitions/CssAnalyticsSummary"
+        }
+      },
+      "required": [
+        "files",
+        "summary"
+      ],
+      "description": "Structural CSS analytics surfaced by `fallow health --css`."
+    },
+    "CssFileAnalytics": {
       "type": "object",
       "properties": {
         "path": {
           "type": "string",
-          "description": "File carrying the `\"use client\"` directive and the illegal export."
+          "description": "Project-root-relative, forward-slash path."
         },
-        "export_name": {
-          "type": "string",
-          "description": "Name of the server-only / route-config export that is illegal in a\nclient file (e.g. `metadata`, `generateMetadata`, `revalidate`, `GET`)."
-        },
-        "directive": {
-          "type": "string",
-          "description": "The file-level directive that makes the export illegal. Always\n`\"use client\"` today; carried so the message can name it verbatim."
-        },
-        "line": {
-          "type": "integer",
-          "description": "1-based line number of the export."
-        },
-        "col": {
-          "type": "integer",
-          "description": "0-based byte column offset of the export."
-        },
-        "actions": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/IssueAction"
-          },
-          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
-        },
-        "introduced": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/AuditIntroduced"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        "analytics": {
+          "description": "The stylesheet's structural metrics.",
+          "$ref": "#/definitions/CssAnalytics"
         }
       },
       "required": [
         "path",
-        "export_name",
-        "directive",
+        "analytics"
+      ],
+      "description": "Per-stylesheet CSS analytics."
+    },
+    "CssAnalytics": {
+      "type": "object",
+      "properties": {
+        "total_declarations": {
+          "type": "integer",
+          "description": "Total declarations across every style rule (normal plus `!important`)."
+        },
+        "important_declarations": {
+          "type": "integer",
+          "description": "Total `!important` declarations across every style rule."
+        },
+        "rule_count": {
+          "type": "integer",
+          "description": "Number of style rules."
+        },
+        "empty_rule_count": {
+          "type": "integer",
+          "description": "Number of style rules with no declarations."
+        },
+        "max_nesting_depth": {
+          "type": "integer",
+          "description": "Deepest style-rule nesting depth observed (0 = no nesting)."
+        },
+        "notable_rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CssRuleMetric"
+          },
+          "description": "Rules that crossed the structural floor, in source order. Bounded; see\n[`Self::notable_truncated`]. The scalar aggregates above always reflect\nthe full stylesheet regardless of truncation."
+        },
+        "notable_truncated": {
+          "type": "boolean",
+          "description": "`true` when more rules crossed the structural floor than `notable_rules`\nretains (compiled utility CSS can emit thousands of `!important` rules),\nso consumers can note that per-rule findings were capped."
+        }
+      },
+      "required": [
+        "total_declarations",
+        "important_declarations",
+        "rule_count",
+        "empty_rule_count",
+        "max_nesting_depth",
+        "notable_rules",
+        "notable_truncated"
+      ],
+      "description": "Stylesheet-level structural CSS analytics, computed from the parsed CSS\nsyntax tree. Feeds `fallow health` penalty weights and located findings,\nnever a standalone CSS score."
+    },
+    "CssRuleMetric": {
+      "type": "object",
+      "properties": {
+        "line": {
+          "type": "integer",
+          "description": "1-based line of the rule's first selector."
+        },
+        "col": {
+          "type": "integer",
+          "description": "1-based column of the rule's first selector."
+        },
+        "specificity_a": {
+          "type": "integer",
+          "description": "Specificity component `a` (id selectors), max across the rule's selectors."
+        },
+        "specificity_b": {
+          "type": "integer",
+          "description": "Specificity component `b` (class / attribute / pseudo-class selectors)."
+        },
+        "specificity_c": {
+          "type": "integer",
+          "description": "Specificity component `c` (type / pseudo-element selectors)."
+        },
+        "complexity": {
+          "type": "integer",
+          "description": "Largest selector component count across the rule's selector list."
+        },
+        "declaration_count": {
+          "type": "integer",
+          "description": "Declaration count in the rule (normal plus `!important`)."
+        },
+        "important_count": {
+          "type": "integer",
+          "description": "`!important` declaration count in the rule."
+        },
+        "nesting_depth": {
+          "type": "integer",
+          "description": "Style-rule nesting depth (0 = top level)."
+        }
+      },
+      "required": [
         "line",
         "col",
-        "actions"
+        "specificity_a",
+        "specificity_b",
+        "specificity_c",
+        "complexity",
+        "declaration_count",
+        "important_count",
+        "nesting_depth"
       ],
-      "description": "Wire-shape envelope for an [`InvalidClientExport`] finding. There is no safe\nauto-fix: the export itself may be a legitimate client-component value\nexport that happens to collide with a Next.js server-only name, so removing\nit could break the component. The only action is a line-level suppress\n(mirroring how a non-auto-fixable finding builds actions); the real fix is\nfor the author to move the server-only export to a non-client module."
+      "description": "Structural CSS metrics for a single style rule, computed from the parsed CSS\nsyntax tree. A rule is recorded only when it crosses a structural floor (an\nid selector, a complex selector, a `!important` declaration, or deep\nnesting), so the vector stays bounded on normal stylesheets.\n\nNot persisted in the extraction cache: `fallow health` computes these\non demand from the CSS source, so there is no `bitcode` derive."
+    },
+    "CssAnalyticsSummary": {
+      "type": "object",
+      "properties": {
+        "files_analyzed": {
+          "type": "integer",
+          "description": "Stylesheets analyzed (standard CSS only; SCSS is skipped)."
+        },
+        "total_rules": {
+          "type": "integer",
+          "description": "Total style rules across analyzed stylesheets."
+        },
+        "total_declarations": {
+          "type": "integer",
+          "description": "Total declarations across analyzed stylesheets."
+        },
+        "important_declarations": {
+          "type": "integer",
+          "description": "Total `!important` declarations across analyzed stylesheets."
+        },
+        "empty_rules": {
+          "type": "integer",
+          "description": "Total empty style rules across analyzed stylesheets."
+        },
+        "max_nesting_depth": {
+          "type": "integer",
+          "description": "Deepest style-rule nesting depth observed across analyzed stylesheets."
+        }
+      },
+      "required": [
+        "files_analyzed",
+        "total_rules",
+        "total_declarations",
+        "important_declarations",
+        "empty_rules",
+        "max_nesting_depth"
+      ],
+      "description": "Project-wide CSS analytics aggregates across every analyzed stylesheet\n(including stylesheets with no notable rule, which are not listed\nindividually)."
     },
     "EnabledSource": {
       "type": "string",
@@ -12372,105 +12518,6 @@
         "default"
       ],
       "description": "Why Impact tracking is (or is not) active for a project. `Project` = an\nexplicit per-repo `enable`; `User` = the user-global default with no per-repo\ndecision; `Default` = off (no per-repo decision and no global default)."
-    },
-    "MixedClientServerBarrelFinding": {
-      "type": "object",
-      "properties": {
-        "path": {
-          "type": "string",
-          "description": "The barrel file re-exporting both a client and a server-only origin."
-        },
-        "client_origin": {
-          "type": "string",
-          "description": "The `\"use client\"` origin's relative path or specifier as written in the\nbarrel's offending re-export."
-        },
-        "server_origin": {
-          "type": "string",
-          "description": "The server-only origin's relative path or specifier as written in the\nbarrel's offending re-export."
-        },
-        "line": {
-          "type": "integer",
-          "description": "1-based line number of the barrel's first offending re-export."
-        },
-        "col": {
-          "type": "integer",
-          "description": "0-based byte column offset of the barrel's first offending re-export."
-        },
-        "actions": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/IssueAction"
-          },
-          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
-        },
-        "introduced": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/AuditIntroduced"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
-        }
-      },
-      "required": [
-        "path",
-        "client_origin",
-        "server_origin",
-        "line",
-        "col",
-        "actions"
-      ],
-      "description": "Wire-shape envelope for a [`MixedClientServerBarrel`] finding. There is no\nsafe auto-fix: splitting a barrel into separate client and server modules is\na human decision (the barrel may intentionally aggregate both surfaces). The\nonly action is a line-level suppress; the real fix is for the author to stop\nre-exporting client and server-only modules from the same barrel."
-    },
-    "MisplacedDirectiveFinding": {
-      "type": "object",
-      "properties": {
-        "path": {
-          "type": "string",
-          "description": "The file carrying the misplaced directive."
-        },
-        "directive": {
-          "type": "string",
-          "description": "The directive string as written, either `\"use client\"` or\n`\"use server\"` (without the surrounding quotes)."
-        },
-        "line": {
-          "type": "integer",
-          "description": "1-based line number of the misplaced directive statement."
-        },
-        "col": {
-          "type": "integer",
-          "description": "0-based byte column offset of the misplaced directive statement."
-        },
-        "actions": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/IssueAction"
-          },
-          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
-        },
-        "introduced": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/AuditIntroduced"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
-        }
-      },
-      "required": [
-        "path",
-        "directive",
-        "line",
-        "col",
-        "actions"
-      ],
-      "description": "Wire-shape envelope for a [`MisplacedDirective`] finding. There is no safe\nauto-fix: moving a directive to the leading prologue is a small but\njudgement-bearing edit (the author may have intended the file to be a\nserver module after all). The only action is a line-level suppress; the\nreal fix is to hoist the directive to the very top of the file."
     },
     "CrossRepoImpactReport": {
       "type": "object",
@@ -12638,6 +12685,157 @@
         "actions"
       ],
       "description": "Wire-shape envelope for an [`UnusedMember`] finding consumed under the\n`unused_store_members` key (a Pinia `state` / `getters` / `actions` key, or\na setup-store returned key, declared but never accessed by any consumer\nproject-wide). Same Rust struct as [`UnusedClassMemberFinding`]. Emits only\na line-level suppress action: there is no safe auto-fix because a store\nmember can be accessed reflectively (a Pinia plugin, `store.$onAction`, or\ndynamic dispatch) in ways syntactic analysis cannot see, so removal is a\nbehavioral change the user must own."
+    },
+    "InvalidClientExportFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File carrying the `\"use client\"` directive and the illegal export."
+        },
+        "export_name": {
+          "type": "string",
+          "description": "Name of the server-only / route-config export that is illegal in a\nclient file (e.g. `metadata`, `generateMetadata`, `revalidate`, `GET`)."
+        },
+        "directive": {
+          "type": "string",
+          "description": "The file-level directive that makes the export illegal. Always\n`\"use client\"` today; carried so the message can name it verbatim."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the export."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset of the export."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "path",
+        "export_name",
+        "directive",
+        "line",
+        "col",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for an [`InvalidClientExport`] finding. There is no safe\nauto-fix: the export itself may be a legitimate client-component value\nexport that happens to collide with a Next.js server-only name, so removing\nit could break the component. The only action is a line-level suppress\n(mirroring how a non-auto-fixable finding builds actions); the real fix is\nfor the author to move the server-only export to a non-client module."
+    },
+    "MixedClientServerBarrelFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The barrel file re-exporting both a client and a server-only origin."
+        },
+        "client_origin": {
+          "type": "string",
+          "description": "The `\"use client\"` origin's relative path or specifier as written in the\nbarrel's offending re-export."
+        },
+        "server_origin": {
+          "type": "string",
+          "description": "The server-only origin's relative path or specifier as written in the\nbarrel's offending re-export."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the barrel's first offending re-export."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset of the barrel's first offending re-export."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "path",
+        "client_origin",
+        "server_origin",
+        "line",
+        "col",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for a [`MixedClientServerBarrel`] finding. There is no\nsafe auto-fix: splitting a barrel into separate client and server modules is\na human decision (the barrel may intentionally aggregate both surfaces). The\nonly action is a line-level suppress; the real fix is for the author to stop\nre-exporting client and server-only modules from the same barrel."
+    },
+    "MisplacedDirectiveFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The file carrying the misplaced directive."
+        },
+        "directive": {
+          "type": "string",
+          "description": "The directive string as written, either `\"use client\"` or\n`\"use server\"` (without the surrounding quotes)."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the misplaced directive statement."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset of the misplaced directive statement."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "path",
+        "directive",
+        "line",
+        "col",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for a [`MisplacedDirective`] finding. There is no safe\nauto-fix: moving a directive to the leading prologue is a small but\njudgement-bearing edit (the author may have intended the file to be a\nserver module after all). The only action is a line-level suppress; the\nreal fix is to hoist the directive to the very top of the file."
     }
   }
 }

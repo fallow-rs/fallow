@@ -164,6 +164,7 @@ fn run_local(path: &Path, args: &AnalyzeArgs, ctx: &RunContext<'_>) -> ExitCode 
         ownership: false,
         ownership_emails: None,
         targets: false,
+        css: false,
         force_full: false,
         score_only_output: false,
         enforce_coverage_gap_gate: false,

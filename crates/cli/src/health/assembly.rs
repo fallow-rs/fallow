@@ -117,6 +117,7 @@ pub(super) fn assemble_health_report(
         },
         health_trend,
         actions_meta: build_health_actions_meta(action_ctx),
+        css_analytics: None,
     };
     if !opts.score_only_output {
         report.coverage_intelligence = coverage_intelligence::build_coverage_intelligence(
