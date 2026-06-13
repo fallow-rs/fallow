@@ -2,7 +2,7 @@
 source: crates/cli/tests/snapshot_tests.rs
 expression: output
 ---
-## Fallow: 22 issues found
+## Fallow: 23 issues found
 
 ### Unused files (1)
 
@@ -72,6 +72,10 @@ expression: output
 ### Invalid client exports (1)
 
 - `app/page.tsx`:3 `metadata` (from `"use client"`)
+
+### Mixed client/server barrels (1)
+
+- `app/components/index.ts`:2 re-exports client `./Button` and server-only `./fetchUser`
 
 ### Unused catalog entries (2)
 

@@ -123,6 +123,9 @@ pub struct BaselineData {
     /// Invalid `"use client"` exports, keyed by `path:export_name`.
     #[serde(default)]
     pub invalid_client_exports: Vec<String>,
+    /// Mixed client/server barrels, keyed by `path:client_origin:server_origin`.
+    #[serde(default)]
+    pub mixed_client_server_barrels: Vec<String>,
 }
 
 impl BaselineData {
@@ -161,6 +164,7 @@ impl BaselineData {
             unused_dependency_overrides: catalog.unused_dependency_overrides,
             misconfigured_dependency_overrides: catalog.misconfigured_dependency_overrides,
             invalid_client_exports: file_exports.invalid_client_exports,
+            mixed_client_server_barrels: file_exports.mixed_client_server_barrels,
         }
     }
 
@@ -193,6 +197,7 @@ impl BaselineData {
             + self.unused_dependency_overrides.len()
             + self.misconfigured_dependency_overrides.len()
             + self.invalid_client_exports.len()
+            + self.mixed_client_server_barrels.len()
     }
 }
 
@@ -202,6 +207,7 @@ struct BaselineFileExportKeys {
     unused_types: Vec<String>,
     private_type_leaks: Vec<String>,
     invalid_client_exports: Vec<String>,
+    mixed_client_server_barrels: Vec<String>,
 }
 
 fn baseline_file_export_keys(
@@ -256,6 +262,18 @@ fn baseline_file_export_keys(
                     "{}:{}",
                     relative_path(&e.export.path, root),
                     e.export.export_name
+                )
+            })
+            .collect(),
+        mixed_client_server_barrels: results
+            .mixed_client_server_barrels
+            .iter()
+            .map(|b| {
+                format!(
+                    "{}:{}:{}",
+                    relative_path(&b.barrel.path, root),
+                    b.barrel.client_origin,
+                    b.barrel.server_origin
                 )
             })
             .collect(),
@@ -720,6 +738,7 @@ impl BaselineFilterContext<'_> {
         self.filter_boundary_details(results);
         self.filter_stale_suppressions(results);
         self.filter_invalid_client_exports(results);
+        self.filter_mixed_client_server_barrels(results);
     }
 
     fn filter_invalid_client_exports(&self, results: &mut fallow_core::results::AnalysisResults) {
@@ -736,6 +755,27 @@ impl BaselineFilterContext<'_> {
                 finding.export.export_name
             );
             !baseline_invalid.contains(key.as_str())
+        });
+    }
+
+    fn filter_mixed_client_server_barrels(
+        &self,
+        results: &mut fallow_core::results::AnalysisResults,
+    ) {
+        let baseline_barrels: FxHashSet<&str> = self
+            .baseline
+            .mixed_client_server_barrels
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.mixed_client_server_barrels.retain(|finding| {
+            let key = format!(
+                "{}:{}:{}",
+                relative_path(&finding.barrel.path, self.root),
+                finding.barrel.client_origin,
+                finding.barrel.server_origin
+            );
+            !baseline_barrels.contains(key.as_str())
         });
     }
 
@@ -1716,6 +1756,7 @@ mod tests {
             unused_dependency_overrides: vec![],
             misconfigured_dependency_overrides: vec![],
             invalid_client_exports: vec![],
+            mixed_client_server_barrels: vec![],
         };
         let results = AnalysisResults {
             unused_files: vec![
@@ -1766,6 +1807,7 @@ mod tests {
             unused_dependency_overrides: vec![],
             misconfigured_dependency_overrides: vec![],
             invalid_client_exports: vec![],
+            mixed_client_server_barrels: vec![],
         };
         let results = make_results();
         let filtered = filter_new_issues(results, &baseline, Path::new(""));
@@ -1803,6 +1845,7 @@ mod tests {
             unused_dependency_overrides: vec![],
             misconfigured_dependency_overrides: vec![],
             invalid_client_exports: vec![],
+            mixed_client_server_barrels: vec![],
         };
         let results = AnalysisResults {
             unused_exports: vec![

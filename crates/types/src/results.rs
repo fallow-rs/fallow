@@ -12,13 +12,13 @@ use crate::output::IssueAction;
 use crate::output_dead_code::{
     BoundaryCallViolationFinding, BoundaryCoverageViolationFinding, BoundaryViolationFinding,
     CircularDependencyFinding, DuplicateExportFinding, EmptyCatalogGroupFinding,
-    InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding, PolicyViolationFinding,
-    PrivateTypeLeakFinding, ReExportCycleFinding, TestOnlyDependencyFinding,
-    TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnresolvedCatalogReferenceFinding,
-    UnresolvedImportFinding, UnusedCatalogEntryFinding, UnusedClassMemberFinding,
-    UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
-    UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
-    UnusedOptionalDependencyFinding, UnusedTypeFinding,
+    InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding,
+    MixedClientServerBarrelFinding, PolicyViolationFinding, PrivateTypeLeakFinding,
+    ReExportCycleFinding, TestOnlyDependencyFinding, TypeOnlyDependencyFinding,
+    UnlistedDependencyFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
+    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedDependencyFinding,
+    UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
+    UnusedExportFinding, UnusedFileFinding, UnusedOptionalDependencyFinding, UnusedTypeFinding,
 };
 use crate::serde_path;
 use crate::suppress::{IssueKind, closest_known_kind_name};
@@ -198,6 +198,12 @@ pub struct AnalysisResults {
     /// carries a typed `actions` array natively. Default severity is `warn`.
     #[serde(default)]
     pub invalid_client_exports: Vec<InvalidClientExportFinding>,
+    /// Barrel files that re-export BOTH a `"use client"` origin module AND a
+    /// server-only origin module (the Next.js App Router footgun). Wrapped in
+    /// [`MixedClientServerBarrelFinding`] so each entry carries a typed
+    /// `actions` array natively. Default severity is `warn`.
+    #[serde(default)]
+    pub mixed_client_server_barrels: Vec<MixedClientServerBarrelFinding>,
     /// Number of suppression entries that matched an issue during analysis.
     /// Human output uses this for the suppression footer; it is skipped in
     /// machine output to avoid changing the public JSON issue contract.
@@ -315,6 +321,7 @@ impl AnalysisResults {
             + self.unused_dependency_overrides.len()
             + self.misconfigured_dependency_overrides.len()
             + self.invalid_client_exports.len()
+            + self.mixed_client_server_barrels.len()
     }
 
     /// Whether any issues were found.
@@ -364,6 +371,7 @@ impl AnalysisResults {
             unused_dependency_overrides,
             misconfigured_dependency_overrides,
             invalid_client_exports,
+            mixed_client_server_barrels,
             suppression_count,
             active_suppressions,
             feature_flags,
@@ -408,6 +416,8 @@ impl AnalysisResults {
         self.misconfigured_dependency_overrides
             .extend(misconfigured_dependency_overrides);
         self.invalid_client_exports.extend(invalid_client_exports);
+        self.mixed_client_server_barrels
+            .extend(mixed_client_server_barrels);
         self.feature_flags.extend(feature_flags);
         self.security_findings.extend(security_findings);
         self.security_unresolved_edge_files += security_unresolved_edge_files;
@@ -523,6 +533,15 @@ impl AnalysisResults {
                 .cmp(&b.export.path)
                 .then(a.export.line.cmp(&b.export.line))
                 .then(a.export.export_name.cmp(&b.export.export_name))
+        });
+
+        self.mixed_client_server_barrels.sort_by(|a, b| {
+            a.barrel
+                .path
+                .cmp(&b.barrel.path)
+                .then(a.barrel.line.cmp(&b.barrel.line))
+                .then(a.barrel.client_origin.cmp(&b.barrel.client_origin))
+                .then(a.barrel.server_origin.cmp(&b.barrel.server_origin))
         });
     }
 
@@ -789,6 +808,28 @@ pub struct InvalidClientExport {
     /// 1-based line number of the export.
     pub line: u32,
     /// 0-based byte column offset of the export.
+    pub col: u32,
+}
+
+/// A barrel file that re-exports BOTH a `"use client"` origin module AND a
+/// server-only origin module. Importing one name from such a barrel drags the
+/// other's directive context across the React Server Components boundary (the
+/// Next.js App Router footgun); fallow catches it statically.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MixedClientServerBarrel {
+    /// The barrel file re-exporting both a client and a server-only origin.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// The `"use client"` origin's relative path or specifier as written in the
+    /// barrel's offending re-export.
+    pub client_origin: String,
+    /// The server-only origin's relative path or specifier as written in the
+    /// barrel's offending re-export.
+    pub server_origin: String,
+    /// 1-based line number of the barrel's first offending re-export.
+    pub line: u32,
+    /// 0-based byte column offset of the barrel's first offending re-export.
     pub col: u32,
 }
 

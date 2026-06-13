@@ -247,6 +247,12 @@ fn push_markdown_graph_sections(
     );
     markdown_section(
         out,
+        &results.mixed_client_server_barrels,
+        "Mixed client/server barrels",
+        |b| format_markdown_mixed_client_server_barrel(b, rel),
+    );
+    markdown_section(
+        out,
         &results.stale_suppressions,
         "Stale suppressions",
         |s| {
@@ -374,6 +380,19 @@ fn format_markdown_invalid_client_export(
         e.export.line,
         e.export.export_name,
         e.export.directive,
+    )]
+}
+
+fn format_markdown_mixed_client_server_barrel(
+    b: &fallow_core::results::MixedClientServerBarrelFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    vec![format!(
+        "- `{}`:{} re-exports client `{}` and server-only `{}`",
+        rel(&b.barrel.path),
+        b.barrel.line,
+        b.barrel.client_origin,
+        b.barrel.server_origin,
     )]
 }
 

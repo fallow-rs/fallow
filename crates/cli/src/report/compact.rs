@@ -351,6 +351,15 @@ impl<'a> CompactLineBuilder<'a> {
                 finding.export.directive,
             ));
         }
+        for finding in &self.results.mixed_client_server_barrels {
+            self.lines.push(format!(
+                "mixed-client-server-barrel:{}:{} (client \"{}\", server \"{}\")",
+                self.rel(&finding.barrel.path),
+                finding.barrel.line,
+                finding.barrel.client_origin,
+                finding.barrel.server_origin,
+            ));
+        }
         for suppression in &self.results.stale_suppressions {
             self.lines
                 .push(compact_stale_suppression_line(suppression, self.root));

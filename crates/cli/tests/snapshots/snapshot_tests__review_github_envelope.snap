@@ -4,12 +4,19 @@ expression: json_str
 ---
 {
   "event": "COMMENT",
-  "body": "### Fallow dead-code report\n\n21 inline findings selected for GitHub review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 57349683537349d8 -->",
+  "body": "### Fallow dead-code report\n\n22 inline findings selected for GitHub review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 077ddc8e6ac98477 -->",
   "summary": {
-    "body": "### Fallow dead-code report\n\n21 inline findings selected for GitHub review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 57349683537349d8 -->",
-    "fingerprint": "57349683537349d8"
+    "body": "### Fallow dead-code report\n\n22 inline findings selected for GitHub review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 077ddc8e6ac98477 -->",
+    "fingerprint": "077ddc8e6ac98477"
   },
   "comments": [
+    {
+      "path": "app/components/index.ts",
+      "line": 2,
+      "side": "RIGHT",
+      "body": "**warn** `fallow/mixed-client-server-barrel`: Barrel re-exports both a \"use client\" module \\(\\`./Button\\`\\) and a server-only module \\(\\`./fetchUser\\`\\); one import drags the other's directive across the boundary\n\n<!-- fallow-fingerprint:v2: 2e57fc499772bc84 -->",
+      "fingerprint": "2e57fc499772bc84"
+    },
     {
       "path": "app/page.tsx",
       "line": 3,

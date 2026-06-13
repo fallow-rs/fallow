@@ -277,6 +277,22 @@ expression: json_str
   },
   {
     "type": "issue",
+    "check_name": "fallow/mixed-client-server-barrel",
+    "description": "Barrel re-exports both a \"use client\" module (`./Button`) and a server-only module (`./fetchUser`); one import drags the other's directive across the boundary",
+    "categories": [
+      "Bug Risk"
+    ],
+    "severity": "minor",
+    "fingerprint": "2e57fc499772bc84",
+    "location": {
+      "path": "app/components/index.ts",
+      "lines": {
+        "begin": 2
+      }
+    }
+  },
+  {
+    "type": "issue",
     "check_name": "fallow/unused-catalog-entry",
     "description": "Catalog entry 'is-even' is not referenced by any workspace package",
     "categories": [

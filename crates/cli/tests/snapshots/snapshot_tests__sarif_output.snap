@@ -287,6 +287,19 @@ expression: redact_sarif_version(&json_str)
               }
             },
             {
+              "id": "fallow/mixed-client-server-barrel",
+              "shortDescription": {
+                "text": "Barrel re-exports both a \"use client\" module and a server-only module"
+              },
+              "fullDescription": {
+                "text": "A barrel file (a module whose exports are `export ... from` re-exports) forwards a name from a `\"use client\"` module alongside a name from a server-only module (one carrying `\"use server\"`, importing the `server-only` package, or importing a server-only Next.js API such as `next/headers`). Importing one name from such a barrel drags the other's directive context across the React Server Components boundary, the documented Next.js App Router footgun. Type-only re-exports are ignored (erased at build), and a barrel re-exporting a client module alongside an ordinary undirected utility does NOT flag. To fix: split the barrel so client and server-only modules are re-exported from separate entry points. The check runs only when the project declares `next`."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#mixed-client-server-barrels",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
               "id": "fallow/stale-suppression",
               "shortDescription": {
                 "text": "Suppression comment or tag no longer matches any issue"
@@ -766,6 +779,30 @@ expression: redact_sarif_version(&json_str)
           "partialFingerprints": {
             "tools.fallow.fingerprint/v1": "005800d24cc7dcc1",
             "primaryLocationLineHash/v1": "005800d24cc7dcc1"
+          }
+        },
+        {
+          "ruleId": "fallow/mixed-client-server-barrel",
+          "level": "warning",
+          "message": {
+            "text": "Barrel re-exports both a \"use client\" module ('./Button') and a server-only module ('./fetchUser'); one import drags the other's directive across the boundary"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "app/components/index.ts"
+                },
+                "region": {
+                  "startLine": 2,
+                  "startColumn": 1
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "tools.fallow.fingerprint/v1": "00e3dd8f69239cba",
+            "primaryLocationLineHash/v1": "00e3dd8f69239cba"
           }
         },
         {

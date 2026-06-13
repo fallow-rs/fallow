@@ -629,6 +629,13 @@
           },
           "description": "`\"use client\"` files that export a Next.js server-only / route-segment\nconfig name (e.g. `metadata`, `revalidate`, `GET`). Next.js rejects this\nat build time. Wrapped in [`InvalidClientExportFinding`] so each entry\ncarries a typed `actions` array natively. Default severity is `warn`."
         },
+        "mixed_client_server_barrels": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MixedClientServerBarrelFinding"
+          },
+          "description": "Barrel files that re-export BOTH a `\"use client\"` origin module AND a\nserver-only origin module (the Next.js App Router footgun). Wrapped in\n[`MixedClientServerBarrelFinding`] so each entry carries a typed\n`actions` array natively. Default severity is `warn`."
+        },
         "baseline_deltas": {
           "anyOf": [
             {
@@ -966,6 +973,13 @@
             "$ref": "#/definitions/InvalidClientExportFinding"
           },
           "description": "`\"use client\"` files that export a Next.js server-only / route-segment\nconfig name (e.g. `metadata`, `revalidate`, `GET`). Next.js rejects this\nat build time. Wrapped in [`InvalidClientExportFinding`] so each entry\ncarries a typed `actions` array natively. Default severity is `warn`."
+        },
+        "mixed_client_server_barrels": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MixedClientServerBarrelFinding"
+          },
+          "description": "Barrel files that re-export BOTH a `\"use client\"` origin module AND a\nserver-only origin module (the Next.js App Router footgun). Wrapped in\n[`MixedClientServerBarrelFinding`] so each entry carries a typed\n`actions` array natively. Default severity is `warn`."
         }
       },
       "required": [
@@ -4735,6 +4749,10 @@
         "invalid_client_exports": {
           "type": "integer",
           "description": "`\"use client\"` files that export a Next.js server-only / route-config name."
+        },
+        "mixed_client_server_barrels": {
+          "type": "integer",
+          "description": "Barrel files that re-export both a `\"use client\"` origin and a\nserver-only origin."
         }
       },
       "required": [
@@ -5425,6 +5443,13 @@
             "$ref": "#/definitions/InvalidClientExportFinding"
           },
           "description": "`\"use client\"` files that export a Next.js server-only / route-segment\nconfig name (e.g. `metadata`, `revalidate`, `GET`). Next.js rejects this\nat build time. Wrapped in [`InvalidClientExportFinding`] so each entry\ncarries a typed `actions` array natively. Default severity is `warn`."
+        },
+        "mixed_client_server_barrels": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MixedClientServerBarrelFinding"
+          },
+          "description": "Barrel files that re-export BOTH a `\"use client\"` origin module AND a\nserver-only origin module (the Next.js App Router footgun). Wrapped in\n[`MixedClientServerBarrelFinding`] so each entry carries a typed\n`actions` array natively. Default severity is `warn`."
         }
       },
       "required": [
@@ -12272,6 +12297,58 @@
         "default"
       ],
       "description": "Why Impact tracking is (or is not) active for a project. `Project` = an\nexplicit per-repo `enable`; `User` = the user-global default with no per-repo\ndecision; `Default` = off (no per-repo decision and no global default)."
+    },
+    "MixedClientServerBarrelFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The barrel file re-exporting both a client and a server-only origin."
+        },
+        "client_origin": {
+          "type": "string",
+          "description": "The `\"use client\"` origin's relative path or specifier as written in the\nbarrel's offending re-export."
+        },
+        "server_origin": {
+          "type": "string",
+          "description": "The server-only origin's relative path or specifier as written in the\nbarrel's offending re-export."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the barrel's first offending re-export."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset of the barrel's first offending re-export."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "path",
+        "client_origin",
+        "server_origin",
+        "line",
+        "col",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for a [`MixedClientServerBarrel`] finding. There is no\nsafe auto-fix: splitting a barrel into separate client and server modules is\na human decision (the barrel may intentionally aggregate both surfaces). The\nonly action is a line-level suppress; the real fix is for the author to stop\nre-exporting client and server-only modules from the same barrel."
     }
   }
 }

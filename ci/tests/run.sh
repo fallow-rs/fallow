@@ -481,6 +481,10 @@ OUT_ICE=$(jq '.invalid_client_exports = [{"path": "src/app.ts", "line": 5, "col"
 assert_contains "$OUT_ICE" "Invalid client exports" "ice: shows summary row and section"
 assert_contains "$OUT_ICE" "metadata" "ice: shows export name in section"
 
+OUT_MCSB=$(jq '.mixed_client_server_barrels = [{"path": "src/index.ts", "line": 2, "col": 0, "client_origin": "./Button", "server_origin": "./fetchUser", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$CI_JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_MCSB" "Mixed client/server barrels" "mcsb: shows summary row and section"
+assert_contains "$OUT_MCSB" "./fetchUser" "mcsb: shows server origin in section"
+
 OUT_CLEAN=$(jq -r -f "$CI_JQ_DIR/summary-check.jq" "$FIXTURES/check-clean.json" 2>&1)
 assert_contains "$OUT_CLEAN" "No issues found" "clean: shows no issues"
 

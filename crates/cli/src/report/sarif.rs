@@ -6,11 +6,11 @@ use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::{
     AnalysisResults, BoundaryCallViolation, BoundaryCoverageViolation, BoundaryViolation,
     CircularDependency, DuplicateExportFinding, EmptyCatalogGroupFinding, InvalidClientExport,
-    MisconfiguredDependencyOverrideFinding, PolicyViolation, PolicyViolationSeverity,
-    PrivateTypeLeak, StaleSuppression, TestOnlyDependency, TypeOnlyDependency,
-    UnlistedDependencyFinding, UnresolvedCatalogReferenceFinding, UnresolvedImport,
-    UnusedCatalogEntryFinding, UnusedDependency, UnusedDependencyOverrideFinding, UnusedExport,
-    UnusedFile, UnusedMember,
+    MisconfiguredDependencyOverrideFinding, MixedClientServerBarrel, PolicyViolation,
+    PolicyViolationSeverity, PrivateTypeLeak, StaleSuppression, TestOnlyDependency,
+    TypeOnlyDependency, UnlistedDependencyFinding, UnresolvedCatalogReferenceFinding,
+    UnresolvedImport, UnusedCatalogEntryFinding, UnusedDependency, UnusedDependencyOverrideFinding,
+    UnusedExport, UnusedFile, UnusedMember,
 };
 use rustc_hash::FxHashMap;
 
@@ -520,6 +520,25 @@ fn sarif_invalid_client_export_fields(
     }
 }
 
+fn sarif_mixed_client_server_barrel_fields(
+    barrel: &MixedClientServerBarrel,
+    root: &Path,
+    level: &'static str,
+) -> SarifFields {
+    SarifFields {
+        rule_id: "fallow/mixed-client-server-barrel",
+        level,
+        message: format!(
+            "Barrel re-exports both a \"use client\" module ('{}') and a server-only module ('{}'); one import drags the other's directive across the boundary",
+            barrel.client_origin, barrel.server_origin
+        ),
+        uri: relative_uri(&barrel.path, root),
+        region: Some((barrel.line, barrel.col + 1)),
+        source_path: Some(barrel.path.clone()),
+        properties: None,
+    }
+}
+
 fn sarif_stale_suppression_fields(
     suppression: &StaleSuppression,
     root: &Path,
@@ -868,6 +887,11 @@ fn sarif_graph_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
             rules.invalid_client_export,
         ),
         (
+            "fallow/mixed-client-server-barrel",
+            "Barrel re-exports both a \"use client\" module and a server-only module",
+            rules.mixed_client_server_barrel,
+        ),
+        (
             "fallow/stale-suppression",
             "Suppression comment or tag no longer matches any issue",
             rules.stale_suppressions,
@@ -1197,6 +1221,18 @@ fn push_graph_sarif_results(
                 &e.export,
                 root,
                 severity_to_sarif_level(rules.invalid_client_export),
+            )
+        },
+    );
+    push_sarif_results(
+        sarif_results,
+        &results.mixed_client_server_barrels,
+        snippets,
+        |b| {
+            sarif_mixed_client_server_barrel_fields(
+                &b.barrel,
+                root,
+                severity_to_sarif_level(rules.mixed_client_server_barrel),
             )
         },
     );
@@ -1957,7 +1993,7 @@ mod tests {
         let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
             .as_array()
             .expect("rules should be an array");
-        assert_eq!(rules.len(), 27);
+        assert_eq!(rules.len(), 28);
 
         let rule_ids: Vec<&str> = rules.iter().map(|r| r["id"].as_str().unwrap()).collect();
         assert!(rule_ids.contains(&"fallow/unused-file"));
@@ -1986,6 +2022,7 @@ mod tests {
         assert!(rule_ids.contains(&"fallow/unused-dependency-override"));
         assert!(rule_ids.contains(&"fallow/misconfigured-dependency-override"));
         assert!(rule_ids.contains(&"fallow/invalid-client-export"));
+        assert!(rule_ids.contains(&"fallow/mixed-client-server-barrel"));
     }
 
     #[test]

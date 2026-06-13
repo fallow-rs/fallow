@@ -3,12 +3,22 @@ source: crates/cli/tests/snapshot_tests.rs
 expression: json_str
 ---
 {
-  "body": "### Fallow dead-code report\n\n21 inline findings selected for GitLab review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: a28f5c6f83422900 -->",
+  "body": "### Fallow dead-code report\n\n22 inline findings selected for GitLab review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: db7b3fd85e8a96cf -->",
   "summary": {
-    "body": "### Fallow dead-code report\n\n21 inline findings selected for GitLab review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: a28f5c6f83422900 -->",
-    "fingerprint": "a28f5c6f83422900"
+    "body": "### Fallow dead-code report\n\n22 inline findings selected for GitLab review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: db7b3fd85e8a96cf -->",
+    "fingerprint": "db7b3fd85e8a96cf"
   },
   "comments": [
+    {
+      "body": "**warn** `fallow/mixed-client-server-barrel`: Barrel re-exports both a \"use client\" module \\(\\`./Button\\`\\) and a server-only module \\(\\`./fetchUser\\`\\); one import drags the other's directive across the boundary\n\n<!-- fallow-fingerprint:v2: 2e57fc499772bc84 -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "app/components/index.ts",
+        "new_path": "app/components/index.ts",
+        "new_line": 2
+      },
+      "fingerprint": "2e57fc499772bc84"
+    },
     {
       "body": "**warn** `fallow/invalid-client-export`: Export \\`metadata\\` is not allowed in a \"use client\" file \\(Next.js server-only / route-config name\\)\n\n<!-- fallow-fingerprint:v2: 8e530508aa988833 -->",
       "position": {

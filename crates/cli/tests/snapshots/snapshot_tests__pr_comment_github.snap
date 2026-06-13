@@ -5,7 +5,7 @@ expression: output
 <!-- fallow-id: fallow-results -->
 ### Fallow dead-code report
 
-Found **23** findings.
+Found **24** findings.
 
 <details>
 <summary>Dead code (8)</summary>
@@ -54,10 +54,11 @@ Found **23** findings.
 </details>
 
 <details>
-<summary>Policy (1)</summary>
+<summary>Policy (2)</summary>
 
 | Severity | Rule | Location | Description |
 | --- | --- | --- | --- |
+| minor | `fallow/mixed-client-server-barrel` | `app/components/index.ts`:2 | Barrel re-exports both a "use client" module \(\`./Button\`\) and a server-only module \(\`./fetchUser\`\); one import drags the other's directive across the boundary |
 | minor | `fallow/invalid-client-export` | `app/page.tsx`:3 | Export \`metadata\` is not allowed in a "use client" file \(Next.js server-only / route-config name\) |
 
 </details>

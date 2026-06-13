@@ -45,6 +45,7 @@ pub struct IssueFilters {
     pub unused_dependency_overrides: bool,
     pub misconfigured_dependency_overrides: bool,
     pub invalid_client_exports: bool,
+    pub mixed_client_server_barrels: bool,
 }
 
 impl IssueFilters {
@@ -70,6 +71,7 @@ impl IssueFilters {
             || self.unused_dependency_overrides
             || self.misconfigured_dependency_overrides
             || self.invalid_client_exports
+            || self.mixed_client_server_barrels
     }
 
     /// Enable off-by-default issue types when explicitly requested as filters.
@@ -152,6 +154,9 @@ impl IssueFilters {
         }
         if !self.invalid_client_exports {
             results.invalid_client_exports.clear();
+        }
+        if !self.mixed_client_server_barrels {
+            results.mixed_client_server_barrels.clear();
         }
     }
 }
@@ -800,6 +805,7 @@ mod tests {
             unused_dependency_overrides: false,
             misconfigured_dependency_overrides: false,
             invalid_client_exports: false,
+            mixed_client_server_barrels: false,
         }
     }
 
@@ -1217,6 +1223,7 @@ mod tests {
             unused_dependency_overrides: true,
             misconfigured_dependency_overrides: true,
             invalid_client_exports: true,
+            mixed_client_server_barrels: true,
         };
         let total_before = results.total_issues();
         f.apply(&mut results);

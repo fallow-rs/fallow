@@ -1052,6 +1052,13 @@ misconfigured_dependency_overrides?: MisconfiguredDependencyOverrideFinding[]
  * carries a typed `actions` array natively. Default severity is `warn`.
  */
 invalid_client_exports?: InvalidClientExportFinding[]
+/**
+ * Barrel files that re-export BOTH a `"use client"` origin module AND a
+ * server-only origin module (the Next.js App Router footgun). Wrapped in
+ * [`MixedClientServerBarrelFinding`] so each entry carries a typed
+ * `actions` array natively. Default severity is `warn`.
+ */
+mixed_client_server_barrels?: MixedClientServerBarrelFinding[]
 baseline_deltas?: (BaselineDeltas | null)
 baseline?: (BaselineMatch | null)
 regression?: (RegressionResult | null)
@@ -1202,6 +1209,11 @@ misconfigured_dependency_overrides: number
  * `"use client"` files that export a Next.js server-only / route-config name.
  */
 invalid_client_exports?: number
+/**
+ * Barrel files that re-export both a `"use client"` origin and a
+ * server-only origin.
+ */
+mixed_client_server_barrels?: number
 }
 /**
  * Wire-shape envelope for an [`UnusedFile`] finding. The bare finding
@@ -2429,6 +2441,47 @@ directive: string
 line: number
 /**
  * 0-based byte column offset of the export.
+ */
+col: number
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+}
+/**
+ * Wire-shape envelope for a [`MixedClientServerBarrel`] finding. There is no
+ * safe auto-fix: splitting a barrel into separate client and server modules is
+ * a human decision (the barrel may intentionally aggregate both surfaces). The
+ * only action is a line-level suppress; the real fix is for the author to stop
+ * re-exporting client and server-only modules from the same barrel.
+ */
+export interface MixedClientServerBarrelFinding {
+/**
+ * The barrel file re-exporting both a client and a server-only origin.
+ */
+path: string
+/**
+ * The `"use client"` origin's relative path or specifier as written in the
+ * barrel's offending re-export.
+ */
+client_origin: string
+/**
+ * The server-only origin's relative path or specifier as written in the
+ * barrel's offending re-export.
+ */
+server_origin: string
+/**
+ * 1-based line number of the barrel's first offending re-export.
+ */
+line: number
+/**
+ * 0-based byte column offset of the barrel's first offending re-export.
  */
 col: number
 /**
@@ -5268,6 +5321,13 @@ misconfigured_dependency_overrides?: MisconfiguredDependencyOverrideFinding[]
  * carries a typed `actions` array natively. Default severity is `warn`.
  */
 invalid_client_exports?: InvalidClientExportFinding[]
+/**
+ * Barrel files that re-export BOTH a `"use client"` origin module AND a
+ * server-only origin module (the Next.js App Router footgun). Wrapped in
+ * [`MixedClientServerBarrelFinding`] so each entry carries a typed
+ * `actions` array natively. Default severity is `warn`.
+ */
+mixed_client_server_barrels?: MixedClientServerBarrelFinding[]
 }
 /**
  * The rendered impact report, derived purely from the store (no analysis run).

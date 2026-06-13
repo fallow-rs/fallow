@@ -1,0 +1,8 @@
+{
+  "name": "mixed-client-server-barrel",
+  "dependencies": {
+    "next": "^14.0.0",
+    "react": "^18.0.0",
+    "server-only": "^0.0.1"
+  }
+}

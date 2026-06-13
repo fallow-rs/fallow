@@ -254,6 +254,17 @@ fn sample_results(root: &Path) -> AnalysisResults {
             },
         ),
     );
+    r.mixed_client_server_barrels.push(
+        fallow_core::results::MixedClientServerBarrelFinding::with_actions(
+            fallow_core::results::MixedClientServerBarrel {
+                path: root.join("app/components/index.ts"),
+                client_origin: "./Button".to_string(),
+                server_origin: "./fetchUser".to_string(),
+                line: 2,
+                col: 0,
+            },
+        ),
+    );
 
     r
 }
@@ -718,6 +729,7 @@ fn sarif_mixed_severity_snapshot() {
         security_sink: fallow_config::Severity::Off,
         policy_violation: fallow_config::Severity::Warn,
         invalid_client_export: fallow_config::Severity::Warn,
+        mixed_client_server_barrel: fallow_config::Severity::Warn,
     };
     let sarif = build_sarif(&results, &root, &rules);
     let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");
@@ -1581,6 +1593,7 @@ fn codeclimate_mixed_severity_snapshot() {
         security_sink: fallow_config::Severity::Off,
         policy_violation: fallow_config::Severity::Warn,
         invalid_client_export: fallow_config::Severity::Warn,
+        mixed_client_server_barrel: fallow_config::Severity::Warn,
     };
     let cc = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");

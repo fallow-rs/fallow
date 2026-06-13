@@ -492,6 +492,47 @@ pub fn push_invalid_client_export_diagnostics(
     }
 }
 
+/// Push diagnostics for barrel files that re-export both a `"use client"`
+/// origin and a server-only origin. Fixed `WARNING` severity (the rule's
+/// default), code `mixed-client-server-barrel`. Paths are absolute internally,
+/// so the URI is built directly (no `root.join`).
+pub fn push_mixed_client_server_barrel_diagnostics(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+) {
+    for finding in &results.mixed_client_server_barrels {
+        let Some(uri) = Uri::from_file_path(&finding.barrel.path) else {
+            continue;
+        };
+        let line = finding.barrel.line.saturating_sub(1);
+        let message = format!(
+            "Barrel re-exports both a \"use client\" module (`{}`) and a server-only module (`{}`); one import drags the other's directive across the boundary",
+            finding.barrel.client_origin, finding.barrel.server_origin
+        );
+        map.entry(uri).or_default().push(Diagnostic {
+            range: Range {
+                start: Position {
+                    line,
+                    character: finding.barrel.col,
+                },
+                end: Position {
+                    line,
+                    character: u32::MAX,
+                },
+            },
+            severity: Some(DiagnosticSeverity::WARNING),
+            source: Some("fallow".to_string()),
+            code: Some(NumberOrString::String(
+                "mixed-client-server-barrel".to_string(),
+            )),
+            code_description: doc_link("mixed-client-server-barrels"),
+            message,
+            related_information: None,
+            ..Default::default()
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -1039,6 +1080,47 @@ mod tests {
         assert!(d.message.contains("metadata"));
         assert!(d.message.contains("use client"));
         assert_eq!(d.range.start.line, 3); // 1-based 4 -> 0-based 3
+        assert_eq!(d.range.start.character, 0);
+    }
+
+    #[test]
+    fn mixed_client_server_barrel_produces_warning_diagnostic() {
+        let root = test_root();
+        let file = root.join("app/components/index.ts");
+
+        let mut results = AnalysisResults::default();
+        results.mixed_client_server_barrels.push(
+            fallow_core::results::MixedClientServerBarrelFinding::with_actions(
+                fallow_core::results::MixedClientServerBarrel {
+                    path: file.clone(),
+                    client_origin: "./Button".to_string(),
+                    server_origin: "./fetchUser".to_string(),
+                    line: 2,
+                    col: 0,
+                },
+            ),
+        );
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, &root);
+
+        let uri = Uri::from_file_path(&file).unwrap();
+        let file_diags = diags
+            .get(&uri)
+            .expect("mixed-client-server-barrel diagnostic should land under the file URI");
+        assert_eq!(file_diags.len(), 1);
+
+        let d = &file_diags[0];
+        assert_eq!(d.severity, Some(DiagnosticSeverity::WARNING));
+        assert_eq!(
+            d.code,
+            Some(NumberOrString::String(
+                "mixed-client-server-barrel".to_string()
+            ))
+        );
+        assert!(d.message.contains("./Button"));
+        assert!(d.message.contains("./fetchUser"));
+        assert_eq!(d.range.start.line, 1); // 1-based 2 -> 0-based 1
         assert_eq!(d.range.start.character, 0);
     }
 

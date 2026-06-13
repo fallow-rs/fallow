@@ -8,8 +8,8 @@
 //!    (`category: None`, the original finding).
 //! 2. The cone reaches a SERVER-ONLY module (`category: Some("server-only-import")`):
 //!    a module carrying `"use server"`, importing the `server-only` poison
-//!    package, or importing a server-only Next.js / Node API
-//!    ([`SERVER_ONLY_PACKAGES`], [`NEXT_HEADERS_SERVER_NAMES`]).
+//!    package, or importing a server-only Next.js / Node API (see the shared
+//!    `is_server_only_module` predicate in `analyze::server_only`).
 //!
 //! fallow emits the structural import-hop trace; it does not prove the path is
 //! exploitable.
@@ -170,95 +170,22 @@ fn compute_secret_source_set(
     sources
 }
 
-/// The React Server Components / Server Actions directive marking a module as
-/// server-only.
-const USE_SERVER: &str = "use server";
-
-/// The canonical "poison" package: importing it makes a module fail the build if
-/// it is ever bundled for the client. Its presence is a strong server-only
-/// signal.
-const SERVER_ONLY_POISON_PACKAGE: &str = "server-only";
-
-/// Server-only package specifiers that mark a module as a server-only sink no
-/// matter which name is imported. Deliberately conservative and narrow: a generic
-/// "DB client" or any package-name guess is NOT here (the panel dropped heuristic
-/// package matching; there is no clean syntactic sink for it). The `node:` and
-/// bare forms BOTH count, per the import-shape rule, so both are listed
-/// explicitly. `next/headers` is handled separately ([`NEXT_HEADERS_SOURCE`] +
-/// [`NEXT_HEADERS_SERVER_NAMES`]) because the sink is the specific server-only
-/// named API, not the module path.
-const SERVER_ONLY_PACKAGES: &[&str] = &[
-    SERVER_ONLY_POISON_PACKAGE,
-    "next/server",
-    "node:fs",
-    "fs",
-    "node:fs/promises",
-    "fs/promises",
-    "node:child_process",
-    "child_process",
-];
-
-/// The `next/headers` module specifier, gated on a named server-only import.
-const NEXT_HEADERS_SOURCE: &str = "next/headers";
-
-/// Server-only NAMED imports from `next/headers`. Importing any of these (named
-/// or namespace member) is reaching server-only runtime APIs Next.js refuses to
-/// run on the client. A bare side-effect `import "next/headers"` (no name) is NOT
-/// flagged here: without a named server-only binding it is just a module load,
-/// the conservative no-false-positive choice.
-const NEXT_HEADERS_SERVER_NAMES: &[&str] = &["cookies", "headers", "draftMode"];
-
 /// Set of file ids whose module is a SERVER-ONLY sink: it carries a `"use server"`
-/// directive, imports a server-only package ([`SERVER_ONLY_PACKAGES`]), or imports
-/// a server-only named API from `next/headers` ([`NEXT_HEADERS_SERVER_NAMES`]).
-/// The package check matches the import specifier directly, so `node:fs` and bare
-/// `fs` both count.
+/// directive, imports a server-only package, or imports a server-only named API
+/// from `next/headers`. Delegates to the shared
+/// [`is_server_only_module`](super::server_only::is_server_only_module) predicate
+/// so the server-only definition is identical to the
+/// `mixed_client_server_barrel` detector's.
 fn compute_server_only_source_set(
     modules_by_id: &FxHashMap<FileId, &ModuleInfo>,
 ) -> FxHashSet<FileId> {
     let mut server_only: FxHashSet<FileId> = FxHashSet::default();
     for (&file_id, module) in modules_by_id {
-        if module_is_server_only(module) {
+        if super::server_only::is_server_only_module(module) {
             server_only.insert(file_id);
         }
     }
     server_only
-}
-
-/// Whether a single module qualifies as a server-only sink. Conservative: a
-/// `"use server"` directive, an import of a known server-only package, or a
-/// named server-only API from `next/headers`.
-fn module_is_server_only(module: &ModuleInfo) -> bool {
-    // 1. A "use server" directive (Server Actions / server-only module).
-    if module.directives.iter().any(|d| d == USE_SERVER) {
-        return true;
-    }
-    module.imports.iter().any(|import| {
-        // 2/3. An import of the `server-only` poison package, a Node server
-        // runtime module, or `next/server`. The specifier is matched directly so
-        // both the `node:` and bare forms count.
-        if SERVER_ONLY_PACKAGES.contains(&import.source.as_str()) {
-            return true;
-        }
-        // A server-only named API from `next/headers` (cookies / headers /
-        // draftMode), in named (`import { cookies }`) or namespace
-        // (`import * as h`) form. A bare side-effect import does not match.
-        import.source == NEXT_HEADERS_SOURCE && is_next_headers_server_import(&import.imported_name)
-    })
-}
-
-/// Whether an import binding from `next/headers` names a server-only API. A
-/// named import of `cookies` / `headers` / `draftMode` matches; a namespace
-/// import (`import * as headers from "next/headers"`) matches conservatively
-/// because any member access could be a server-only API. A side-effect or
-/// default import does not match.
-fn is_next_headers_server_import(name: &fallow_types::extract::ImportedName) -> bool {
-    use fallow_types::extract::ImportedName;
-    match name {
-        ImportedName::Named(named) => NEXT_HEADERS_SERVER_NAMES.contains(&named.as_str()),
-        ImportedName::Namespace => true,
-        ImportedName::Default | ImportedName::SideEffect => false,
-    }
 }
 
 /// For each `"use client"` file, BFS its transitive static-import cone. Two

@@ -152,6 +152,10 @@ fn section_footer_text(title: &str) -> Option<(&'static str, &'static str)> {
             "Server-only or route-config exports in a \"use client\" file (Next.js rejects this at build time)",
             "https://docs.fallow.tools/explanations/dead-code#invalid-client-exports",
         )),
+        "Mixed client/server barrels" => Some((
+            "Barrel re-exports both a \"use client\" module and a server-only module (one import drags the other's directive across the boundary)",
+            "https://docs.fallow.tools/explanations/dead-code#mixed-client-server-barrels",
+        )),
         t if t.starts_with("Type-only") => Some((
             "Dependencies only used for type imports \u{2014} consider moving to devDependencies",
             "https://docs.fallow.tools/explanations/dead-code#type-only-dependencies",
@@ -182,6 +186,7 @@ fn section_suppress_rule(title: &str) -> Option<&'static str> {
         "Unused dependency overrides" => Some("unused-dependency-override"),
         "Misconfigured dependency overrides" => Some("misconfigured-dependency-override"),
         "Invalid client exports" => Some("invalid-client-export"),
+        "Mixed client/server barrels" => Some("mixed-client-server-barrel"),
         _ => None,
     }
 }

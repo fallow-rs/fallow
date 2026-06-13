@@ -231,6 +231,11 @@ const DIAGNOSTIC_ISSUE_TYPES: &[DiagnosticIssueType] = &[
         label: "Invalid Client Exports",
     },
     DiagnosticIssueType {
+        config_key: Some("mixed-client-server-barrel"),
+        code: "mixed-client-server-barrel",
+        label: "Mixed Client/Server Barrels",
+    },
+    DiagnosticIssueType {
         config_key: Some("stale-suppressions"),
         code: "stale-suppression",
         label: "Stale Suppressions",
@@ -2569,6 +2574,17 @@ export function choose(value: number): string {
                     },
                 ),
             ],
+            mixed_client_server_barrels: vec![
+                fallow_core::results::MixedClientServerBarrelFinding::with_actions(
+                    fallow_core::results::MixedClientServerBarrel {
+                        path: "/app/components/index.ts".into(),
+                        client_origin: "./Button".to_string(),
+                        server_origin: "./fetchUser".to_string(),
+                        line: 23,
+                        col: 0,
+                    },
+                ),
+            ],
             suppression_count: 1,
             active_suppressions: Vec::new(),
             feature_flags: vec![fallow_core::results::FeatureFlag {
@@ -2658,6 +2674,7 @@ export function choose(value: number): string {
         assert_eq!(target.unused_dependency_overrides.len(), 1);
         assert_eq!(target.misconfigured_dependency_overrides.len(), 1);
         assert_eq!(target.invalid_client_exports.len(), 1);
+        assert_eq!(target.mixed_client_server_barrels.len(), 1);
         assert_eq!(target.export_usages.len(), 1);
         assert_eq!(target.feature_flags.len(), 1);
         assert_eq!(target.security_findings.len(), 1);

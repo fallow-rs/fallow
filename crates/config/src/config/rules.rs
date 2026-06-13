@@ -148,6 +148,15 @@ pub struct RulesConfig {
     /// Defaults to `warn`.
     #[serde(default = "Severity::default_warn", alias = "invalid-client-exports")]
     pub invalid_client_export: Severity,
+    /// A barrel file that re-exports BOTH a `"use client"` origin module AND a
+    /// server-only origin module. Importing one name from such a barrel drags
+    /// the other's directive context across the React Server Components
+    /// boundary (the Next.js App Router footgun). Defaults to `warn`.
+    #[serde(
+        default = "Severity::default_warn",
+        alias = "mixed-client-server-barrels"
+    )]
+    pub mixed_client_server_barrel: Severity,
 }
 
 impl Default for RulesConfig {
@@ -182,6 +191,7 @@ impl Default for RulesConfig {
             security_sink: Severity::Off,
             policy_violation: Severity::Warn,
             invalid_client_export: Severity::Warn,
+            mixed_client_server_barrel: Severity::Warn,
         }
     }
 }
@@ -275,6 +285,9 @@ impl RulesConfig {
         }
         if let Some(s) = partial.invalid_client_export {
             self.invalid_client_export = s;
+        }
+        if let Some(s) = partial.mixed_client_server_barrel {
+            self.mixed_client_server_barrel = s;
         }
     }
 }
@@ -451,6 +464,12 @@ pub struct PartialRulesConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub invalid_client_export: Option<Severity>,
+    #[serde(
+        default,
+        alias = "mixed-client-server-barrels",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub mixed_client_server_barrel: Option<Severity>,
 }
 
 /// Every rule name accepted by `RulesConfig` deserialization, in kebab-case.
@@ -494,6 +513,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "policy-violation",
     "policy-violations",
     "invalid-client-export",
+    "mixed-client-server-barrel",
     "unused-file",
     "unused-export",
     "unused-type",
@@ -522,6 +542,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unused-dependency-override",
     "misconfigured-dependency-override",
     "invalid-client-exports",
+    "mixed-client-server-barrels",
 ];
 
 /// Find the closest known rule name to `input` when it is plausibly a typo.
@@ -815,6 +836,7 @@ mod tests {
             security_sink: Some(Severity::Off),
             policy_violation: Some(Severity::Off),
             invalid_client_export: Some(Severity::Off),
+            mixed_client_server_barrel: Some(Severity::Off),
         };
         rules.apply_partial(&partial);
         assert_eq!(rules.unused_files, Severity::Off);
@@ -829,6 +851,7 @@ mod tests {
         assert_eq!(rules.security_sink, Severity::Off);
         assert_eq!(rules.policy_violation, Severity::Off);
         assert_eq!(rules.invalid_client_export, Severity::Off);
+        assert_eq!(rules.mixed_client_server_barrel, Severity::Off);
     }
 
     #[test]
@@ -872,7 +895,7 @@ mod tests {
 
     #[test]
     fn known_rule_names_count_matches_struct() {
-        assert_eq!(KNOWN_RULE_NAMES.len(), 58);
+        assert_eq!(KNOWN_RULE_NAMES.len(), 60);
     }
 
     #[test]
@@ -913,8 +936,8 @@ mod tests {
 
         assert_eq!(
             aliases_found.len(),
-            58,
-            "expected 58 source-level alias attrs (29 per struct); got {}: {:?}",
+            60,
+            "expected 60 source-level alias attrs (30 per struct); got {}: {:?}",
             aliases_found.len(),
             aliases_found
         );

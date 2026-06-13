@@ -4,11 +4,13 @@ mod boundary_coverage;
 pub mod feature_flags;
 mod iconify;
 mod invalid_client_exports;
+mod mixed_barrel;
 mod package_json_utils;
 mod policy;
 mod predicates;
 mod re_export_cycles;
 mod security;
+mod server_only;
 mod unused_catalog;
 mod unused_deps;
 mod unused_exports;
@@ -36,19 +38,20 @@ use crate::resolve::ResolvedModule;
 use fallow_types::output_dead_code::{
     BoundaryCallViolationFinding, BoundaryCoverageViolationFinding, BoundaryViolationFinding,
     CircularDependencyFinding, DuplicateExportFinding, EmptyCatalogGroupFinding,
-    InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding, PolicyViolationFinding,
-    PrivateTypeLeakFinding, ReExportCycleFinding, TestOnlyDependencyFinding,
-    TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnresolvedCatalogReferenceFinding,
-    UnresolvedImportFinding, UnusedCatalogEntryFinding, UnusedClassMemberFinding,
-    UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
-    UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
-    UnusedOptionalDependencyFinding, UnusedTypeFinding,
+    InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding,
+    MixedClientServerBarrelFinding, PolicyViolationFinding, PrivateTypeLeakFinding,
+    ReExportCycleFinding, TestOnlyDependencyFinding, TypeOnlyDependencyFinding,
+    UnlistedDependencyFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
+    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedDependencyFinding,
+    UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
+    UnusedExportFinding, UnusedFileFinding, UnusedOptionalDependencyFinding, UnusedTypeFinding,
 };
 
 use crate::results::{AnalysisResults, CircularDependency, CircularDependencyEdge};
 use crate::suppress::{IssueKind, SuppressionContext};
 
 use invalid_client_exports::find_invalid_client_exports;
+use mixed_barrel::find_mixed_client_server_barrels;
 use re_export_cycles::find_re_export_cycles;
 #[expect(
     deprecated,
@@ -713,6 +716,16 @@ pub fn find_dead_code_full(
         &line_offsets_by_file,
         &mut results,
     );
+    populate_mixed_client_server_barrel_findings(
+        graph,
+        modules,
+        resolved_modules,
+        config,
+        &declared_deps,
+        &suppressions,
+        &line_offsets_by_file,
+        &mut results,
+    );
 
     results.sort();
 
@@ -743,6 +756,39 @@ fn populate_invalid_client_export_findings(
     )
     .into_iter()
     .map(InvalidClientExportFinding::with_actions)
+    .collect();
+}
+
+/// Populate `mixed_client_server_barrels` when the rule is enabled. Gated on the
+/// project declaring `next` inside the detector (see
+/// [`find_mixed_client_server_barrels`]).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "mirrors the invalid-client-export populate site; threading the resolved modules + gate context is intrinsic"
+)]
+fn populate_mixed_client_server_barrel_findings(
+    graph: &ModuleGraph,
+    modules: &[ModuleInfo],
+    resolved_modules: &[ResolvedModule],
+    config: &ResolvedConfig,
+    declared_deps: &FxHashSet<String>,
+    suppressions: &SuppressionContext<'_>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+    results: &mut AnalysisResults,
+) {
+    if config.rules.mixed_client_server_barrel == Severity::Off {
+        return;
+    }
+    results.mixed_client_server_barrels = find_mixed_client_server_barrels(
+        graph,
+        modules,
+        resolved_modules,
+        declared_deps,
+        suppressions,
+        line_offsets_by_file,
+    )
+    .into_iter()
+    .map(MixedClientServerBarrelFinding::with_actions)
     .collect();
 }
 
@@ -1668,6 +1714,7 @@ mod tests {
                 security_sink: Severity::Off,
                 policy_violation: Severity::Off,
                 invalid_client_export: Severity::Off,
+                mixed_client_server_barrel: Severity::Off,
             };
             let config = make_config_with_rules(rules);
             let results = find_dead_code(&graph, &config);

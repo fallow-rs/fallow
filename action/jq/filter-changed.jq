@@ -60,6 +60,9 @@ def filter_check:
   (if .invalid_client_exports then
     .invalid_client_exports |= map(select(.path | in_changed))
   else . end) |
+  (if .mixed_client_server_barrels then
+    .mixed_client_server_barrels |= map(select(.path | in_changed))
+  else . end) |
   # Recalculate total_issues from filtered arrays
   (if .total_issues != null then
     .total_issues = (
@@ -88,7 +91,8 @@ def filter_check:
       (.unresolved_catalog_references // [] | length) +
       (.unused_dependency_overrides // [] | length) +
       (.misconfigured_dependency_overrides // [] | length) +
-      (.invalid_client_exports // [] | length)
+      (.invalid_client_exports // [] | length) +
+      (.mixed_client_server_barrels // [] | length)
     )
   else . end);
 

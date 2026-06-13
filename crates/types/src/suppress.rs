@@ -90,6 +90,10 @@ pub enum IssueKind {
     /// A `"use client"` file that exports a Next.js server-only /
     /// route-segment config name (e.g. `metadata`, `revalidate`, `GET`).
     InvalidClientExport,
+    /// A barrel file that re-exports BOTH a `"use client"` origin module AND a
+    /// server-only origin module (Next.js App Router footgun: one import drags
+    /// the other's directive context across the boundary).
+    MixedClientServerBarrel,
 }
 
 impl IssueKind {
@@ -137,6 +141,9 @@ impl IssueKind {
             "security-sink" => Some(Self::SecuritySink),
             "policy-violation" | "policy-violations" => Some(Self::PolicyViolation),
             "invalid-client-export" | "invalid-client-exports" => Some(Self::InvalidClientExport),
+            "mixed-client-server-barrel" | "mixed-client-server-barrels" => {
+                Some(Self::MixedClientServerBarrel)
+            }
             _ => None,
         }
     }
@@ -175,6 +182,7 @@ impl IssueKind {
             Self::SecuritySink => 28,
             Self::PolicyViolation => 29,
             Self::InvalidClientExport => 30,
+            Self::MixedClientServerBarrel => 31,
         }
     }
 
@@ -212,6 +220,7 @@ impl IssueKind {
             28 => Some(Self::SecuritySink),
             29 => Some(Self::PolicyViolation),
             30 => Some(Self::InvalidClientExport),
+            31 => Some(Self::MixedClientServerBarrel),
             _ => None,
         }
     }
@@ -309,6 +318,7 @@ pub const fn issue_kind_to_kebab(kind: IssueKind) -> &'static str {
         IssueKind::SecuritySink => "security-sink",
         IssueKind::PolicyViolation => "policy-violation",
         IssueKind::InvalidClientExport => "invalid-client-export",
+        IssueKind::MixedClientServerBarrel => "mixed-client-server-barrel",
     }
 }
 
@@ -543,6 +553,8 @@ pub const KNOWN_ISSUE_KIND_NAMES: &[&str] = &[
     "policy-violations",
     "invalid-client-export",
     "invalid-client-exports",
+    "mixed-client-server-barrel",
+    "mixed-client-server-barrels",
 ];
 
 /// CLI filter flags on `fallow dead-code` that scope output to a single
@@ -639,6 +651,10 @@ mod tests {
     use super::*;
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "exhaustive per-variant parse assertions; one block per issue kind"
+    )]
     fn issue_kind_from_str_all_variants() {
         assert_eq!(IssueKind::parse("unused-file"), Some(IssueKind::UnusedFile));
         assert_eq!(
@@ -790,6 +806,14 @@ mod tests {
             IssueKind::parse("invalid-client-exports"),
             Some(IssueKind::InvalidClientExport)
         );
+        assert_eq!(
+            IssueKind::parse("mixed-client-server-barrel"),
+            Some(IssueKind::MixedClientServerBarrel)
+        );
+        assert_eq!(
+            IssueKind::parse("mixed-client-server-barrels"),
+            Some(IssueKind::MixedClientServerBarrel)
+        );
     }
 
     #[test]
@@ -817,7 +841,11 @@ mod tests {
             IssueKind::from_discriminant(30),
             Some(IssueKind::InvalidClientExport)
         );
-        assert_eq!(IssueKind::from_discriminant(31), None);
+        assert_eq!(
+            IssueKind::from_discriminant(31),
+            Some(IssueKind::MixedClientServerBarrel)
+        );
+        assert_eq!(IssueKind::from_discriminant(32), None);
         assert_eq!(IssueKind::from_discriminant(u8::MAX), None);
     }
 
@@ -854,6 +882,7 @@ mod tests {
             IssueKind::SecuritySink,
             IssueKind::PolicyViolation,
             IssueKind::InvalidClientExport,
+            IssueKind::MixedClientServerBarrel,
         ] {
             assert_eq!(
                 IssueKind::from_discriminant(kind.to_discriminant()),
@@ -861,7 +890,7 @@ mod tests {
             );
         }
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(31), None);
+        assert_eq!(IssueKind::from_discriminant(32), None);
     }
 
     #[test]
@@ -897,6 +926,7 @@ mod tests {
             IssueKind::SecuritySink,
             IssueKind::PolicyViolation,
             IssueKind::InvalidClientExport,
+            IssueKind::MixedClientServerBarrel,
         ];
         let discriminants: Vec<u8> = all_kinds.iter().map(|k| k.to_discriminant()).collect();
         let mut sorted = discriminants.clone();

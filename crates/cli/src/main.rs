@@ -3157,6 +3157,10 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
                     // field exists so an unrelated active filter clears this rule
                     // for parity. The rule still runs and reports by default.
                     invalid_client_exports: false,
+                    // No dedicated `--mixed-client-server-barrels` filter flag yet;
+                    // the field exists for the same parity reason. The rule still
+                    // runs and reports by default.
+                    mixed_client_server_barrels: false,
                 },
                 trace_opts: TraceOptions {
                     trace_export: trace,

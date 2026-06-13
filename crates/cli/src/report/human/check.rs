@@ -370,6 +370,10 @@ fn check_explain_for_header(line: &str) -> Option<&'static crate::explain::RuleD
             "fallow/misconfigured-dependency-override",
         ),
         ("Invalid client exports", "fallow/invalid-client-export"),
+        (
+            "Mixed client/server barrels",
+            "fallow/mixed-client-server-barrel",
+        ),
     ];
     let (_, rule_id) = mappings
         .iter()
@@ -1250,7 +1254,10 @@ fn build_policy_section(
     rules: &RulesConfig,
     total_issues: usize,
 ) {
-    if results.policy_violations.is_empty() && results.invalid_client_exports.is_empty() {
+    if results.policy_violations.is_empty()
+        && results.invalid_client_exports.is_empty()
+        && results.mixed_client_server_barrels.is_empty()
+    {
         return;
     }
     push_category_header(lines, "Policy");
@@ -1268,6 +1275,19 @@ fn build_policy_section(
         },
         format_detail: &format_invalid_client_export,
     });
+
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.mixed_client_server_barrels,
+        title: "Mixed client/server barrels",
+        level: severity_to_level(rules.mixed_client_server_barrel),
+        root,
+        max_files: MAX_FLAT_ITEMS,
+        get_path: |b: &fallow_types::output_dead_code::MixedClientServerBarrelFinding| {
+            b.barrel.path.as_path()
+        },
+        format_detail: &format_mixed_client_server_barrel,
+    });
 }
 
 fn format_invalid_client_export(
@@ -1279,6 +1299,21 @@ fn format_invalid_client_export(
         format!(":{}", e.line).dimmed(),
         e.export_name.bold(),
         format!("(from \"{}\")", e.directive).dimmed(),
+    )
+}
+
+fn format_mixed_client_server_barrel(
+    entry: &fallow_types::output_dead_code::MixedClientServerBarrelFinding,
+) -> String {
+    let b = &entry.barrel;
+    format!(
+        "{} {}",
+        format!(":{}", b.line).dimmed(),
+        format!(
+            "re-exports client \"{}\" and server-only \"{}\"",
+            b.client_origin, b.server_origin
+        )
+        .dimmed(),
     )
 }
 

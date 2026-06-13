@@ -139,6 +139,12 @@ fn apply_file_override_rules(
             .invalid_client_export
             != Severity::Off
     });
+    results.mixed_client_server_barrels.retain(|b| {
+        config
+            .resolve_rules_for_path(&b.barrel.path)
+            .mixed_client_server_barrel
+            != Severity::Off
+    });
     results.circular_dependencies.retain(|c| {
         c.cycle
             .files
@@ -174,6 +180,9 @@ fn apply_base_file_rules(results: &mut fallow_core::results::AnalysisResults, ru
     }
     if rules.invalid_client_export == Severity::Off {
         results.invalid_client_exports.clear();
+    }
+    if rules.mixed_client_server_barrel == Severity::Off {
+        results.mixed_client_server_barrels.clear();
     }
 }
 
@@ -306,6 +315,12 @@ fn has_override_file_scoped_error(
                 .invalid_client_export
                 == Severity::Error
         })
+        || results.mixed_client_server_barrels.iter().any(|b| {
+            config
+                .resolve_rules_for_path(&b.barrel.path)
+                .mixed_client_server_barrel
+                == Severity::Error
+        })
 }
 
 fn has_default_file_scoped_error(
@@ -327,6 +342,8 @@ fn has_default_file_scoped_error(
             && !results.empty_catalog_groups.is_empty())
         || (rules.invalid_client_export == Severity::Error
             && !results.invalid_client_exports.is_empty())
+        || (rules.mixed_client_server_barrel == Severity::Error
+            && !results.mixed_client_server_barrels.is_empty())
 }
 
 fn has_project_level_error(
@@ -456,6 +473,9 @@ pub fn promote_warns_to_errors(rules: &mut RulesConfig) {
     }
     if rules.invalid_client_export == Severity::Warn {
         rules.invalid_client_export = Severity::Error;
+    }
+    if rules.mixed_client_server_barrel == Severity::Warn {
+        rules.mixed_client_server_barrel = Severity::Error;
     }
 }
 
@@ -697,6 +717,7 @@ mod tests {
             security_sink: Severity::Off,
             policy_violation: Severity::Warn,
             invalid_client_export: Severity::Warn,
+            mixed_client_server_barrel: Severity::Warn,
         };
         let config = config_with_rules(rules);
         apply_rules(&mut results, &config);
@@ -812,6 +833,7 @@ mod tests {
             security_sink: Severity::Off,
             policy_violation: Severity::Warn,
             invalid_client_export: Severity::Warn,
+            mixed_client_server_barrel: Severity::Warn,
         };
         assert!(!has_error_severity_issues(&results, &rules, None));
     }
@@ -854,6 +876,7 @@ mod tests {
             security_sink: Severity::Off,
             policy_violation: Severity::Warn,
             invalid_client_export: Severity::Warn,
+            mixed_client_server_barrel: Severity::Warn,
         };
         assert!(!has_error_severity_issues(&results, &rules, None));
 
@@ -1317,6 +1340,7 @@ mod tests {
             security_sink: Severity::Off,
             policy_violation: Severity::Warn,
             invalid_client_export: Severity::Warn,
+            mixed_client_server_barrel: Severity::Warn,
         };
         promote_warns_to_errors(&mut rules);
 
@@ -1371,6 +1395,7 @@ mod tests {
             security_sink: Severity::Off,
             policy_violation: Severity::Warn,
             invalid_client_export: Severity::Warn,
+            mixed_client_server_barrel: Severity::Warn,
         };
         promote_warns_to_errors(&mut rules);
 

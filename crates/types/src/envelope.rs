@@ -148,6 +148,10 @@ pub struct CheckSummary {
     /// `"use client"` files that export a Next.js server-only / route-config name.
     #[serde(default)]
     pub invalid_client_exports: usize,
+    /// Barrel files that re-export both a `"use client"` origin and a
+    /// server-only origin.
+    #[serde(default)]
+    pub mixed_client_server_barrels: usize,
 }
 
 /// Per-category delta comparison against a saved baseline. Only present in

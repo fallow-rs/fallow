@@ -1841,3 +1841,108 @@ fn audit_json_only_change_is_behavioral() {
         "audit must produce an attribution block even when package.json is the only change"
     );
 }
+
+/// A Next.js project whose base barrel re-exports only a `"use client"`
+/// component. The feature branch adds a server-only re-export to that barrel,
+/// turning it into a mixed client/server barrel: the finding is NEW relative to
+/// the base, so audit must annotate it `introduced: true`.
+fn create_mixed_barrel_audit_fixture() -> TempDir {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("app/components")).unwrap();
+
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name":"audit-mixed-barrel","dependencies":{"next":"^14.0.0","react":"^18.0.0","server-only":"^0.0.1"}}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("tsconfig.json"),
+        r#"{"compilerOptions":{"target":"ES2022","module":"ESNext","moduleResolution":"bundler","jsx":"preserve"},"include":["app"]}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("app/components/Button.tsx"),
+        "\"use client\";\nexport function Button() {\n  return null;\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("app/components/fetchUser.ts"),
+        "import \"server-only\";\nexport function fetchUser() {\n  return { id: 1 };\n}\n",
+    )
+    .unwrap();
+    // Base barrel: client-only re-export, NOT a mixed barrel yet.
+    fs::write(
+        dir.join("app/components/index.ts"),
+        "export { Button } from \"./Button\";\n",
+    )
+    .unwrap();
+
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_AUTHOR_NAME", "test")
+            .env("GIT_AUTHOR_EMAIL", "test@test.com")
+            .env("GIT_COMMITTER_NAME", "test")
+            .env("GIT_COMMITTER_EMAIL", "test@test.com")
+            .output()
+            .expect("git command failed")
+    };
+
+    git(&["init", "-b", "main"]);
+    git(&["add", "."]);
+    git(&["-c", "commit.gpgsign=false", "commit", "-m", "initial"]);
+    git(&["checkout", "-b", "feature"]);
+
+    // Feature branch: add the server-only re-export, creating the mix.
+    fs::write(
+        dir.join("app/components/index.ts"),
+        "export { Button } from \"./Button\";\nexport { fetchUser } from \"./fetchUser\";\n",
+    )
+    .unwrap();
+    git(&["add", "."]);
+    git(&[
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-m",
+        "add server-only re-export to barrel",
+    ]);
+
+    tmp
+}
+
+#[test]
+fn audit_annotates_newly_added_mixed_barrel_as_introduced() {
+    let tmp = create_mixed_barrel_audit_fixture();
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        tmp.path().to_str().unwrap(),
+        "--base",
+        "main",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    let json = parse_json(&output);
+    let barrels = json["dead_code"]["mixed_client_server_barrels"]
+        .as_array()
+        .expect("dead_code.mixed_client_server_barrels should be an array");
+    assert_eq!(
+        barrels.len(),
+        1,
+        "exactly one mixed client/server barrel expected. full json: {}",
+        serde_json::to_string_pretty(&json).unwrap_or_default()
+    );
+    assert_eq!(
+        barrels[0]["introduced"], true,
+        "the newly-mixed barrel must be annotated introduced: true"
+    );
+}

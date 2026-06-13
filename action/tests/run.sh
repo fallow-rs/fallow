@@ -731,6 +731,16 @@ assert_contains "$OUT_ICE_ANN" "::warning file=src/app.ts,line=5,col=3,title=Inv
 OUT_ICE_FILTERED=$(jq '.invalid_client_exports = [{"path": "src/app.ts", "line": 5, "col": 0, "export_name": "metadata", "directive": "use client", "actions": []}, {"path": "src/other.ts", "line": 3, "col": 0, "export_name": "generateMetadata", "directive": "use client", "actions": []}]' "$FIXTURES/check.json" | jq --argjson changed '["src/app.ts"]' -f "$JQ_DIR/filter-changed.jq" 2>&1)
 assert_json_value "$OUT_ICE_FILTERED" '.invalid_client_exports | length' "1" "ice: filter-changed keeps only changed-file findings"
 
+OUT_MCSB=$(jq '.mixed_client_server_barrels = [{"path": "src/index.ts", "line": 2, "col": 0, "client_origin": "./Button", "server_origin": "./fetchUser", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_MCSB" "Mixed client/server barrels" "mcsb: shows summary row and section"
+assert_contains "$OUT_MCSB" "./fetchUser" "mcsb: shows server origin in section"
+
+OUT_MCSB_ANN=$(jq '.mixed_client_server_barrels = [{"path": "src/index.ts", "line": 2, "col": 2, "client_origin": "./Button", "server_origin": "./fetchUser", "actions": []}]' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/annotations-check.jq" 2>&1)
+assert_contains "$OUT_MCSB_ANN" "::warning file=src/index.ts,line=2,col=3,title=Mixed client/server barrel::" "mcsb: warning-severity annotation"
+
+OUT_MCSB_FILTERED=$(jq '.mixed_client_server_barrels = [{"path": "src/index.ts", "line": 2, "col": 0, "client_origin": "./Button", "server_origin": "./fetchUser", "actions": []}, {"path": "src/other/index.ts", "line": 1, "col": 0, "client_origin": "./Widget", "server_origin": "./loadData", "actions": []}]' "$FIXTURES/check.json" | jq --argjson changed '["src/index.ts"]' -f "$JQ_DIR/filter-changed.jq" 2>&1)
+assert_json_value "$OUT_MCSB_FILTERED" '.mixed_client_server_barrels | length' "1" "mcsb: filter-changed keeps only changed-file findings"
+
 OUT_CLEAN=$(jq -r -f "$JQ_DIR/summary-check.jq" "$FIXTURES/check-clean.json" 2>&1)
 assert_contains "$OUT_CLEAN" "No issues found" "clean: shows no issues"
 assert_not_contains "$OUT_CLEAN" "WARNING" "clean: no warning"

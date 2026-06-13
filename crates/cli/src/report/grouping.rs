@@ -329,6 +329,11 @@ where
                 .invalid_client_exports
                 .push(item.clone());
         }
+        for item in &results.mixed_client_server_barrels {
+            self.entry_for_path(&item.barrel.path)
+                .mixed_client_server_barrels
+                .push(item.clone());
+        }
         for item in &results.stale_suppressions {
             self.entry_for_path(&item.path)
                 .stale_suppressions

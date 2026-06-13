@@ -38,8 +38,8 @@ use crate::output::{
 use crate::results::{
     BoundaryCallViolation, BoundaryCoverageViolation, BoundaryViolation, CircularDependency,
     DependencyOverrideSource, DuplicateExport, EmptyCatalogGroup, InvalidClientExport,
-    MisconfiguredDependencyOverride, PolicyViolation, PrivateTypeLeak, ReExportCycle,
-    ReExportCycleKind, TestOnlyDependency, TypeOnlyDependency, UnlistedDependency,
+    MisconfiguredDependencyOverride, MixedClientServerBarrel, PolicyViolation, PrivateTypeLeak,
+    ReExportCycle, ReExportCycleKind, TestOnlyDependency, TypeOnlyDependency, UnlistedDependency,
     UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry, UnusedDependency,
     UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedMember,
 };
@@ -757,6 +757,47 @@ impl InvalidClientExportFinding {
         })];
         Self {
             export,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for a [`MixedClientServerBarrel`] finding. There is no
+/// safe auto-fix: splitting a barrel into separate client and server modules is
+/// a human decision (the barrel may intentionally aggregate both surfaces). The
+/// only action is a line-level suppress; the real fix is for the author to stop
+/// re-exporting client and server-only modules from the same barrel.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MixedClientServerBarrelFinding {
+    /// The underlying dead-code entry.
+    #[serde(flatten)]
+    pub barrel: MixedClientServerBarrel,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl MixedClientServerBarrelFinding {
+    /// Build the wrapper from a raw [`MixedClientServerBarrel`]. Emits only a
+    /// line-level suppress action: there is no safe auto-fix because splitting
+    /// the barrel is a human decision.
+    #[must_use]
+    pub fn with_actions(barrel: MixedClientServerBarrel) -> Self {
+        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
+            kind: SuppressLineKind::SuppressLine,
+            auto_fixable: false,
+            description: "Suppress with an inline comment above the line".to_string(),
+            comment: "// fallow-ignore-next-line mixed-client-server-barrel".to_string(),
+            scope: None,
+        })];
+        Self {
+            barrel,
             actions,
             introduced: None,
         }

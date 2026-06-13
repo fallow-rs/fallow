@@ -104,6 +104,10 @@ pub fn filter_to_workspaces(
     results
         .invalid_client_exports
         .retain(|e| any_under(&e.export.path));
+
+    results
+        .mixed_client_server_barrels
+        .retain(|b| any_under(&b.barrel.path));
 }
 
 /// Resolve `--workspace <patterns...>` to a set of workspace roots, or exit with
@@ -426,6 +430,10 @@ pub fn filter_results_by_diff(
     results
         .invalid_client_exports
         .retain(|e| line_in_diff(&e.export.path, e.export.line));
+
+    results
+        .mixed_client_server_barrels
+        .retain(|b| line_in_diff(&b.barrel.path, b.barrel.line));
 }
 
 /// Strict gate predicate for `fallow security --gate new` (issue #886): retain a

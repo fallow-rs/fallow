@@ -904,6 +904,42 @@ fn push_invalid_client_export_issues(
     }
 }
 
+fn push_mixed_client_server_barrel_issues(
+    issues: &mut Vec<CodeClimateIssue>,
+    findings: &[fallow_types::output_dead_code::MixedClientServerBarrelFinding],
+    root: &Path,
+    severity: Severity,
+) {
+    if findings.is_empty() {
+        return;
+    }
+    let level = severity_to_codeclimate(severity);
+    for entry in findings {
+        let b = &entry.barrel;
+        let path = cc_path(&b.path, root);
+        let fp = fingerprint_hash(&[
+            "fallow/mixed-client-server-barrel",
+            &path,
+            &b.client_origin,
+            &b.server_origin,
+        ]);
+        let line = if b.line > 0 { Some(b.line) } else { None };
+        let message = format!(
+            "Barrel re-exports both a \"use client\" module (`{}`) and a server-only module (`{}`); one import drags the other's directive across the boundary",
+            b.client_origin, b.server_origin
+        );
+        issues.push(cc_issue(
+            "fallow/mixed-client-server-barrel",
+            &message,
+            level,
+            "Bug Risk",
+            &path,
+            line,
+            &fp,
+        ));
+    }
+}
+
 fn push_stale_suppression_issues(
     issues: &mut Vec<CodeClimateIssue>,
     suppressions: &[fallow_core::results::StaleSuppression],
@@ -1363,6 +1399,12 @@ impl CodeClimateBuilder<'_> {
             &self.results.invalid_client_exports,
             self.root,
             self.rules.invalid_client_export,
+        );
+        push_mixed_client_server_barrel_issues(
+            &mut self.issues,
+            &self.results.mixed_client_server_barrels,
+            self.root,
+            self.rules.mixed_client_server_barrel,
         );
     }
 
