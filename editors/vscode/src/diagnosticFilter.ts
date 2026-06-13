@@ -45,6 +45,7 @@ export const DIAGNOSTIC_CATEGORIES: ReadonlyArray<DiagnosticCategory> = [
   },
   { code: "unused-enum-member", label: "Unused Enum Members" },
   { code: "unused-class-member", label: "Unused Class Members" },
+  { code: "unused-store-member", label: "Unused Store Members" },
   { code: "unresolved-import", label: "Unresolved Imports" },
   { code: "unlisted-dependency", label: "Unlisted Dependencies" },
   { code: "duplicate-export", label: "Duplicate Exports" },
