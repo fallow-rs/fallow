@@ -1018,6 +1018,30 @@ fn trace_clone_args_by_fingerprint() {
 }
 
 #[test]
+fn trace_clone_args_ignore_imports_false_emits_opt_out() {
+    let args = build_trace_clone_args(&TraceCloneParams {
+        fingerprint: Some("dup:7f3a2c1e".to_string()),
+        ignore_imports: Some(false),
+        ..Default::default()
+    })
+    .expect("fingerprint-only is a valid addressing form");
+    assert!(args.contains(&"--no-ignore-imports".to_string()));
+    assert!(!args.contains(&"--ignore-imports".to_string()));
+}
+
+#[test]
+fn trace_clone_args_ignore_imports_none_emits_neither() {
+    let args = build_trace_clone_args(&TraceCloneParams {
+        fingerprint: Some("dup:7f3a2c1e".to_string()),
+        ignore_imports: None,
+        ..Default::default()
+    })
+    .expect("fingerprint-only is a valid addressing form");
+    assert!(!args.contains(&"--ignore-imports".to_string()));
+    assert!(!args.contains(&"--no-ignore-imports".to_string()));
+}
+
+#[test]
 fn trace_clone_args_both_addressing_forms_is_error() {
     let err = build_trace_clone_args(&TraceCloneParams {
         file: Some("src/original.ts".to_string()),

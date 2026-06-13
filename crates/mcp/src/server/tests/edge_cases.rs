@@ -933,35 +933,10 @@ fn find_dupes_args_cross_language_none_is_omitted() {
     assert!(!args.contains(&"--cross-language".to_string()));
 }
 
-#[test]
-fn find_dupes_args_ignore_imports_true() {
-    let params = FindDupesParams {
-        ignore_imports: Some(true),
-        ..Default::default()
-    };
-    let args = build_find_dupes_args(&params).unwrap();
-    assert!(args.contains(&"--ignore-imports".to_string()));
-}
-
-#[test]
-fn find_dupes_args_ignore_imports_false_is_omitted() {
-    let params = FindDupesParams {
-        ignore_imports: Some(false),
-        ..Default::default()
-    };
-    let args = build_find_dupes_args(&params).unwrap();
-    assert!(!args.contains(&"--ignore-imports".to_string()));
-}
-
-#[test]
-fn find_dupes_args_ignore_imports_none_is_omitted() {
-    let params = FindDupesParams {
-        ignore_imports: None,
-        ..Default::default()
-    };
-    let args = build_find_dupes_args(&params).unwrap();
-    assert!(!args.contains(&"--ignore-imports".to_string()));
-}
+// `ignore_imports` opt-in / opt-out / defer coverage lives in the
+// `find_dupes_args_ignore_imports_{false_emits_opt_out,true_emits_opt_in,none_emits_neither}`
+// trio earlier in this file (asserts both the emitted flag and the absence of
+// its opposite); the older absence-only tests were removed as redundant.
 
 #[test]
 fn find_dupes_args_skip_local_true() {
