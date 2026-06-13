@@ -7530,6 +7530,26 @@
           ]
         },
         {
+          "description": "`fallow impact --all --format json`. Required `project_count`,\n`tracked_count`, `unreadable_count`, `totals`, `projects`; each `projects[]`\nentry embeds a per-project `report`. Independently versioned via\n`CrossRepoImpactSchemaVersion`.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/CrossRepoImpactReport"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "impact-cross-repo"
+                }
+              },
+              "required": [
+                "kind"
+              ]
+            }
+          ]
+        },
+        {
           "description": "`fallow security --format json`. Full mode requires `security_findings`,\n`unresolved_edge_files`, and `unresolved_callee_sites`; summary mode requires\n`summary` and omits per-finding arrays.",
           "allOf": [
             {
@@ -12349,6 +12369,116 @@
         "actions"
       ],
       "description": "Wire-shape envelope for a [`MixedClientServerBarrel`] finding. There is no\nsafe auto-fix: splitting a barrel into separate client and server modules is\na human decision (the barrel may intentionally aggregate both surfaces). The\nonly action is a line-level suppress; the real fix is for the author to stop\nre-exporting client and server-only modules from the same barrel."
+    },
+    "CrossRepoImpactReport": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "$ref": "#/definitions/CrossRepoImpactSchemaVersion"
+        },
+        "project_count": {
+          "type": "integer",
+          "description": "Per-project stores successfully parsed (add `unreadable_count` for the\ntotal number of store files found in the user config dir)."
+        },
+        "tracked_count": {
+          "type": "integer",
+          "description": "Stores with recorded history (the rows in `projects`); excludes\nenabled-but-empty stores, which are still counted in `project_count`."
+        },
+        "unreadable_count": {
+          "type": "integer",
+          "description": "Stores that failed to parse and were skipped (corrupt or newer-schema)."
+        },
+        "totals": {
+          "$ref": "#/definitions/CrossRepoTotals"
+        },
+        "projects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CrossRepoProjectEntry"
+          }
+        }
+      },
+      "required": [
+        "schema_version",
+        "project_count",
+        "tracked_count",
+        "unreadable_count",
+        "totals",
+        "projects"
+      ],
+      "title": "fallow impact --all --format json",
+      "description": "The cross-repo aggregate report (`fallow impact --all --format json`)."
+    },
+    "CrossRepoImpactSchemaVersion": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "1",
+          "description": "First release of the `fallow impact --all --format json` shape."
+        }
+      ],
+      "description": "Independent wire-version for the cross-repo report, on its own cadence (it\nversions separately from the per-project `ImpactReportSchemaVersion` and the\non-disk `STORE_SCHEMA_VERSION`)."
+    },
+    "CrossRepoProjectEntry": {
+      "type": "object",
+      "properties": {
+        "project_key": {
+          "type": "string",
+          "description": "Stable, non-reversible project key (the store filename stem); the\ncross-tool/cross-run JOIN key. NEVER a path."
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Repo basename for display (never a full path). Absent on pre-v5 stores\n(the row falls back to the short key)."
+        },
+        "last_recorded": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Timestamp of the project's most recent recorded run (changed-file or\nwhole-project), for the LAST RUN column and the default `recent` sort."
+        },
+        "report": {
+          "description": "The full per-project report (identical shape to `fallow impact --format\njson`), reused verbatim so the per-project wire contract is the sub-shape.",
+          "$ref": "#/definitions/ImpactReport"
+        }
+      },
+      "required": [
+        "project_key",
+        "report"
+      ],
+      "description": "One project's row in the cross-repo roll-up."
+    },
+    "CrossRepoTotals": {
+      "type": "object",
+      "properties": {
+        "resolved_total": {
+          "type": "integer"
+        },
+        "suppressed_total": {
+          "type": "integer"
+        },
+        "containment_count": {
+          "type": "integer"
+        },
+        "project_wide_issues": {
+          "type": "integer",
+          "description": "Sum of whole-project issue totals across projects that have a full-run\nbaseline, as of EACH project's last full `fallow` run (not a simultaneous\nsnapshot)."
+        },
+        "projects_with_baseline": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "resolved_total",
+        "suppressed_total",
+        "containment_count",
+        "project_wide_issues",
+        "projects_with_baseline"
+      ],
+      "description": "Grand totals across every tracked project (including repos whose directory no\nlonger exists on disk: their past wins still count toward lifetime impact)."
     }
   }
 }
