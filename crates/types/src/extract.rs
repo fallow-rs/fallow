@@ -767,6 +767,15 @@ pub struct CssAnalytics {
     pub defined_keyframes: Vec<String>,
     /// Distinct `@keyframes` names REFERENCED via `animation` / `animation-name`.
     pub referenced_keyframes: Vec<String>,
+    /// Distinct custom properties REGISTERED via an `@property` rule, sorted.
+    pub registered_custom_properties: Vec<String>,
+    /// Distinct cascade layers DECLARED (via `@layer a, b;` statements or named
+    /// `@layer a { }` blocks), sorted.
+    pub declared_layers: Vec<String>,
+    /// Distinct cascade layers POPULATED by a named `@layer a { }` block, sorted.
+    /// A layer declared but never populated (and not imported into) is a
+    /// cleanup candidate.
+    pub populated_layers: Vec<String>,
     /// Per-rule declaration-block fingerprints for rules at or above the minimum
     /// block size, used to detect duplicate declaration blocks across the
     /// project. Internal staging consumed by the health layer; never serialized

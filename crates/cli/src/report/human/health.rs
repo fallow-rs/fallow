@@ -225,6 +225,7 @@ fn render_css_analytics(lines: &mut Vec<String>, report: &crate::health_types::H
         ));
     }
     render_css_keyframe_candidates(lines, css);
+    render_css_unused_at_rules(lines, css);
     if !css.scoped_unused.is_empty() {
         let class_word = if summary.scoped_unused_classes == 1 {
             "class"
@@ -339,6 +340,57 @@ fn render_css_keyframe_candidates(
             summary.keyframes_undefined,
         ));
     }
+}
+
+/// Render unused CSS at-rule entities: `@property` registrations never read via
+/// `var()`, and cascade layers declared but never populated. One line per kind,
+/// shown only when present, with up to 5 located names.
+fn render_css_unused_at_rules(
+    lines: &mut Vec<String>,
+    css: &crate::health_types::CssAnalyticsReport,
+) {
+    use crate::health_types::UnusedAtRuleKind;
+    if css.unused_at_rules.is_empty() {
+        return;
+    }
+    let render_kind = |lines: &mut Vec<String>, kind: UnusedAtRuleKind, label: &str, what: &str| {
+        let named: Vec<String> = css
+            .unused_at_rules
+            .iter()
+            .filter(|e| e.kind == kind)
+            .take(5)
+            .map(|e| format!("{} ({})", e.name, e.path))
+            .collect();
+        if named.is_empty() {
+            return;
+        }
+        let total = css
+            .unused_at_rules
+            .iter()
+            .filter(|e| e.kind == kind)
+            .count();
+        let more = if total > 5 {
+            format!(", +{} more", total - 5)
+        } else {
+            String::new()
+        };
+        lines.push(format!(
+            "  {label}: {total} {what} (candidates; verify): {}{more}",
+            named.join(", ")
+        ));
+    };
+    render_kind(
+        lines,
+        UnusedAtRuleKind::PropertyRegistration,
+        "unused @property",
+        "registered but never used via var()",
+    );
+    render_kind(
+        lines,
+        UnusedAtRuleKind::Layer,
+        "unused @layer",
+        "declared but never populated",
+    );
 }
 
 /// Render the value-sprawl lines: colors / font-sizes / z-indexes always, plus a

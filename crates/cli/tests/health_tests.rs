@@ -3204,6 +3204,64 @@ fn health_css_tailwind_scan_gated_on_tailwind_dependency() {
 }
 
 #[test]
+fn health_css_flags_unused_at_rules() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"atrules","version":"1.0.0"}"#,
+    );
+    write_file(&root.join("src/index.ts"), "export const x = 1;\n");
+    // `--used` is registered AND referenced; `--orphan` is registered but never
+    // var()'d -> unused @property. `base` is declared and populated; `utilities`
+    // is declared but never populated -> unused @layer.
+    write_file(
+        &root.join("src/styles.css"),
+        "@property --used { syntax: \"<color>\"; inherits: false; initial-value: red; }\n\
+         @property --orphan { syntax: \"<length>\"; inherits: false; initial-value: 0px; }\n\
+         @layer base, utilities;\n\
+         @layer base { .a { color: var(--used); } }\n",
+    );
+
+    let out = run_fallow_in_root(
+        "health",
+        root,
+        &[
+            "--css",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let json = parse_json(&out);
+    let css = json
+        .get("css_analytics")
+        .expect("css_analytics present with --css");
+    let s = &css["summary"];
+    assert_eq!(s["unused_property_registrations"], 1, "summary: {s}");
+    assert_eq!(s["unused_layers"], 1, "summary: {s}");
+
+    let entries = css["unused_at_rules"]
+        .as_array()
+        .expect("unused_at_rules array");
+    assert_eq!(entries.len(), 2);
+    let prop = entries
+        .iter()
+        .find(|e| e["type"] == "property-registration")
+        .expect("property-registration entry");
+    assert_eq!(prop["name"], "--orphan");
+    assert_eq!(prop["path"], "src/styles.css");
+    assert_eq!(prop["actions"][0]["type"], "verify-unused");
+    let layer = entries
+        .iter()
+        .find(|e| e["type"] == "layer")
+        .expect("layer entry");
+    assert_eq!(layer["name"], "utilities");
+}
+
+#[test]
 fn health_css_flags_unused_scoped_vue_class() {
     let dir = tempdir().unwrap();
     let root = dir.path();

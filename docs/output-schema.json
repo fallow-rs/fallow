@@ -12382,6 +12382,13 @@
             "$ref": "#/definitions/TailwindArbitraryValue"
           },
           "description": "Tailwind arbitrary-value utilities (`w-[13px]`, `bg-[#abc]`) found in\nmarkup, which hardcode a one-off value instead of a configured scale\ntoken (design-token bypass). Present only when the project uses Tailwind.\nSorted by use count descending. Candidates, not findings: an arbitrary\nvalue is sometimes the right call."
+        },
+        "unused_at_rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedAtRule"
+          },
+          "description": "Unused CSS at-rule entities: an `@property` registered but never read via\n`var()` in any stylesheet, or an `@layer` declared but never populated by\na block. Cleanup candidates (an `@property` can be read from JS; a layer\ncan be populated via `@import layer()`). Located by first definition."
         }
       },
       "required": [
@@ -12511,6 +12518,27 @@
             "type": "string"
           },
           "description": "Distinct `@keyframes` names REFERENCED via `animation` / `animation-name`."
+        },
+        "registered_custom_properties": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Distinct custom properties REGISTERED via an `@property` rule, sorted."
+        },
+        "declared_layers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Distinct cascade layers DECLARED (via `@layer a, b;` statements or named\n`@layer a { }` blocks), sorted."
+        },
+        "populated_layers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Distinct cascade layers POPULATED by a named `@layer a { }` block, sorted.\nA layer declared but never populated (and not imported into) is a\ncleanup candidate."
         }
       },
       "required": [
@@ -12530,7 +12558,10 @@
         "defined_custom_properties",
         "referenced_custom_properties",
         "defined_keyframes",
-        "referenced_keyframes"
+        "referenced_keyframes",
+        "registered_custom_properties",
+        "declared_layers",
+        "populated_layers"
       ],
       "description": "Stylesheet-level structural CSS analytics, computed from the parsed CSS\nsyntax tree. Feeds `fallow health` penalty weights and located findings,\nnever a standalone CSS score."
     },
@@ -12682,6 +12713,14 @@
           "type": "integer",
           "description": "Total Tailwind arbitrary-value occurrences across markup."
         },
+        "unused_property_registrations": {
+          "type": "integer",
+          "description": "`@property` registrations never referenced via `var()` in any stylesheet\n(located in `unused_at_rules`). Cleanup candidates."
+        },
+        "unused_layers": {
+          "type": "integer",
+          "description": "Cascade layers declared but never populated by a block (located in\n`unused_at_rules`). Cleanup candidates."
+        },
         "notable_truncated_files": {
           "type": "integer",
           "description": "Number of analyzed stylesheets whose per-rule `notable_rules` list was\ntruncated at the per-file cap, so a consumer knows the per-rule detail is\nincomplete without walking every file."
@@ -12711,6 +12750,8 @@
         "duplicate_declarations_total",
         "tailwind_arbitrary_values",
         "tailwind_arbitrary_value_uses",
+        "unused_property_registrations",
+        "unused_layers",
         "notable_truncated_files"
       ],
       "description": "Project-wide CSS analytics aggregates across every analyzed stylesheet\n(including stylesheets with no notable rule, which are not listed\nindividually)."
@@ -12952,6 +12993,52 @@
         "actions"
       ],
       "description": "A distinct Tailwind arbitrary-value utility token used in markup, with its\ntotal use count and first location (a design-token-bypass candidate)."
+    },
+    "UnusedAtRule": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "Which kind of at-rule entity is unused.",
+          "$ref": "#/definitions/UnusedAtRuleKind"
+        },
+        "name": {
+          "type": "string",
+          "description": "The entity name (`--x` for `@property`, the layer name for `@layer`)."
+        },
+        "path": {
+          "type": "string",
+          "description": "Project-root-relative, forward-slash path to the first defining stylesheet."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CssCandidateAction"
+          },
+          "description": "Read-only verification step(s) before removal (parity with other findings)."
+        }
+      },
+      "required": [
+        "type",
+        "name",
+        "path",
+        "actions"
+      ],
+      "description": "An unused CSS at-rule entity (an `@property` registration with no `var()`\nreference, or an `@layer` declaration never populated), located by its first\ndefinition. A cleanup candidate, never a gated finding."
+    },
+    "UnusedAtRuleKind": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "property-registration",
+          "description": "An `@property --x { }` registered but never referenced via `var()`."
+        },
+        {
+          "type": "string",
+          "const": "layer",
+          "description": "An `@layer a` declared (in a statement or named block) but never\npopulated by a `@layer a { }` block."
+        }
+      ],
+      "description": "Discriminant for [`UnusedAtRule::kind`]."
     },
     "CrossRepoImpactReport": {
       "type": "object",

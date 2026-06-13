@@ -88,6 +88,9 @@ pub fn compute_css_analytics(source: &str) -> Option<CssAnalytics> {
     analytics.defined_custom_properties = sorted_vec(acc.defined_custom_properties);
     analytics.defined_keyframes = sorted_vec(acc.defined_keyframes);
     analytics.referenced_keyframes = sorted_vec(acc.referenced_keyframes);
+    analytics.registered_custom_properties = sorted_vec(acc.registered_custom_properties);
+    analytics.declared_layers = sorted_vec(acc.declared_layers);
+    analytics.populated_layers = sorted_vec(acc.populated_layers);
     Some(analytics)
 }
 
@@ -104,6 +107,9 @@ struct Accumulator {
     defined_custom_properties: FxHashSet<String>,
     defined_keyframes: FxHashSet<String>,
     referenced_keyframes: FxHashSet<String>,
+    registered_custom_properties: FxHashSet<String>,
+    declared_layers: FxHashSet<String>,
+    populated_layers: FxHashSet<String>,
 }
 
 /// Collects value-level design tokens via the lightningcss visitor: every
@@ -157,7 +163,25 @@ fn walk_rules(rules: &[CssRule<'_>], depth: u8, acc: &mut Accumulator) {
             CssRule::Media(rule) => walk_rules(&rule.rules.0, depth, acc),
             CssRule::Supports(rule) => walk_rules(&rule.rules.0, depth, acc),
             CssRule::Container(rule) => walk_rules(&rule.rules.0, depth, acc),
-            CssRule::LayerBlock(rule) => walk_rules(&rule.rules.0, depth, acc),
+            CssRule::LayerBlock(rule) => {
+                // A named `@layer a { }` both declares and populates layer `a`.
+                if let Some(name) = &rule.name {
+                    let name = layer_name_string(name);
+                    acc.declared_layers.insert(name.clone());
+                    acc.populated_layers.insert(name);
+                }
+                walk_rules(&rule.rules.0, depth, acc);
+            }
+            CssRule::LayerStatement(stmt) => {
+                // `@layer a, b, c;` declares ordering but populates nothing.
+                for name in &stmt.names {
+                    acc.declared_layers.insert(layer_name_string(name));
+                }
+            }
+            CssRule::Property(prop) => {
+                acc.registered_custom_properties
+                    .insert(prop.name.0.to_string());
+            }
             CssRule::MozDocument(rule) => walk_rules(&rule.rules.0, depth, acc),
             CssRule::StartingStyle(rule) => walk_rules(&rule.rules.0, depth, acc),
             CssRule::Scope(rule) => walk_rules(&rule.rules.0, depth, acc),
@@ -172,6 +196,14 @@ fn walk_rules(rules: &[CssRule<'_>], depth: u8, acc: &mut Accumulator) {
             _ => {}
         }
     }
+}
+
+fn layer_name_string(name: &lightningcss::rules::layer::LayerName<'_>) -> String {
+    name.0
+        .iter()
+        .map(std::string::ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(".")
 }
 
 fn keyframes_name_string(name: &KeyframesName<'_>) -> String {

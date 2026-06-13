@@ -119,6 +119,42 @@ pub struct CssAnalyticsReport {
     /// value is sometimes the right call.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tailwind_arbitrary_values: Vec<TailwindArbitraryValue>,
+    /// Unused CSS at-rule entities: an `@property` registered but never read via
+    /// `var()` in any stylesheet, or an `@layer` declared but never populated by
+    /// a block. Cleanup candidates (an `@property` can be read from JS; a layer
+    /// can be populated via `@import layer()`). Located by first definition.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unused_at_rules: Vec<UnusedAtRule>,
+}
+
+/// An unused CSS at-rule entity (an `@property` registration with no `var()`
+/// reference, or an `@layer` declaration never populated), located by its first
+/// definition. A cleanup candidate, never a gated finding.
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedAtRule {
+    /// Which kind of at-rule entity is unused.
+    #[serde(rename = "type")]
+    pub kind: UnusedAtRuleKind,
+    /// The entity name (`--x` for `@property`, the layer name for `@layer`).
+    pub name: String,
+    /// Project-root-relative, forward-slash path to the first defining stylesheet.
+    pub path: String,
+    /// Read-only verification step(s) before removal (parity with other findings).
+    pub actions: Vec<CssCandidateAction>,
+}
+
+/// Discriminant for [`UnusedAtRule::kind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+#[repr(u8)]
+pub enum UnusedAtRuleKind {
+    /// An `@property --x { }` registered but never referenced via `var()`.
+    PropertyRegistration,
+    /// An `@layer a` declared (in a statement or named block) but never
+    /// populated by a `@layer a { }` block.
+    Layer,
 }
 
 /// A distinct Tailwind arbitrary-value utility token used in markup, with its
@@ -338,6 +374,27 @@ impl CssCandidateAction {
         }
     }
 
+    /// Verify action for an unused CSS at-rule entity: a read-only search for
+    /// any out-of-CSS consumer (JS reading an `@property`; an `@import layer()`
+    /// populating a layer) before removing it.
+    #[must_use]
+    pub fn verify_unused_at_rule(kind: UnusedAtRuleKind, name: &str) -> Self {
+        let description = match kind {
+            UnusedAtRuleKind::PropertyRegistration => format!(
+                "Confirm \"{name}\" is not read or set from JavaScript before removing the @property registration."
+            ),
+            UnusedAtRuleKind::Layer => format!(
+                "Confirm the @layer \"{name}\" is not populated via @import layer() before removing the declaration."
+            ),
+        };
+        Self {
+            kind: CssCandidateActionType::VerifyUnused,
+            auto_fixable: false,
+            description,
+            command: safe_token_search(name),
+        }
+    }
+
     /// Verify action for a Vue SFC's unused scoped classes. The component-scoped
     /// scan already covers every static use, so the only residual risk is a
     /// class assembled from a dynamic string; that is a manual check, so the
@@ -453,6 +510,12 @@ pub struct CssAnalyticsSummary {
     pub tailwind_arbitrary_values: u32,
     /// Total Tailwind arbitrary-value occurrences across markup.
     pub tailwind_arbitrary_value_uses: u32,
+    /// `@property` registrations never referenced via `var()` in any stylesheet
+    /// (located in `unused_at_rules`). Cleanup candidates.
+    pub unused_property_registrations: u32,
+    /// Cascade layers declared but never populated by a block (located in
+    /// `unused_at_rules`). Cleanup candidates.
+    pub unused_layers: u32,
     /// Number of analyzed stylesheets whose per-rule `notable_rules` list was
     /// truncated at the per-file cap, so a consumer knows the per-rule detail is
     /// incomplete without walking every file.

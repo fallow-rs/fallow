@@ -568,6 +568,10 @@ export type TrendDirection = ("improving" | "declining" | "stable")
  */
 export type CssCandidateActionType = ("verify-unused" | "verify-undefined" | "consolidate" | "replace-with-token")
 /**
+ * Discriminant for [`UnusedAtRule::kind`].
+ */
+export type UnusedAtRuleKind = ("property-registration" | "layer")
+/**
  * Singleton GitHub review-event marker.
  */
 export type ReviewEnvelopeEvent = "COMMENT"
@@ -4663,6 +4667,13 @@ duplicate_declaration_blocks?: CssDuplicateBlock[]
  * value is sometimes the right call.
  */
 tailwind_arbitrary_values?: TailwindArbitraryValue[]
+/**
+ * Unused CSS at-rule entities: an `@property` registered but never read via
+ * `var()` in any stylesheet, or an `@layer` declared but never populated by
+ * a block. Cleanup candidates (an `@property` can be read from JS; a layer
+ * can be populated via `@import layer()`). Located by first definition.
+ */
+unused_at_rules?: UnusedAtRule[]
 }
 /**
  * Per-stylesheet CSS analytics.
@@ -4755,6 +4766,21 @@ defined_keyframes: string[]
  * Distinct `@keyframes` names REFERENCED via `animation` / `animation-name`.
  */
 referenced_keyframes: string[]
+/**
+ * Distinct custom properties REGISTERED via an `@property` rule, sorted.
+ */
+registered_custom_properties: string[]
+/**
+ * Distinct cascade layers DECLARED (via `@layer a, b;` statements or named
+ * `@layer a { }` blocks), sorted.
+ */
+declared_layers: string[]
+/**
+ * Distinct cascade layers POPULATED by a named `@layer a { }` block, sorted.
+ * A layer declared but never populated (and not imported into) is a
+ * cleanup candidate.
+ */
+populated_layers: string[]
 }
 /**
  * Structural CSS metrics for a single style rule, computed from the parsed CSS
@@ -4922,6 +4948,16 @@ tailwind_arbitrary_values: number
  * Total Tailwind arbitrary-value occurrences across markup.
  */
 tailwind_arbitrary_value_uses: number
+/**
+ * `@property` registrations never referenced via `var()` in any stylesheet
+ * (located in `unused_at_rules`). Cleanup candidates.
+ */
+unused_property_registrations: number
+/**
+ * Cascade layers declared but never populated by a block (located in
+ * `unused_at_rules`). Cleanup candidates.
+ */
+unused_layers: number
 /**
  * Number of analyzed stylesheets whose per-rule `notable_rules` list was
  * truncated at the per-file cap, so a consumer knows the per-rule detail is
@@ -5091,6 +5127,26 @@ line: number
  * Read-only action(s): a find-all-occurrences search so the token can be
  * replaced with a scale token. Always at least one entry, so consumers can
  * iterate `actions` uniformly across every finding type.
+ */
+actions: CssCandidateAction[]
+}
+/**
+ * An unused CSS at-rule entity (an `@property` registration with no `var()`
+ * reference, or an `@layer` declaration never populated), located by its first
+ * definition. A cleanup candidate, never a gated finding.
+ */
+export interface UnusedAtRule {
+type: UnusedAtRuleKind
+/**
+ * The entity name (`--x` for `@property`, the layer name for `@layer`).
+ */
+name: string
+/**
+ * Project-root-relative, forward-slash path to the first defining stylesheet.
+ */
+path: string
+/**
+ * Read-only verification step(s) before removal (parity with other findings).
  */
 actions: CssCandidateAction[]
 }

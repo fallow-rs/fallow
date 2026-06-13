@@ -532,6 +532,13 @@ struct CssTokenSets {
     /// Declaration-block fingerprint -> (declaration count, occurrences as
     /// `(path, line)`), for cross-file duplicate-block detection.
     declaration_blocks: rustc_hash::FxHashMap<u64, (u16, Vec<(String, u32)>)>,
+    /// `@property` registrations + cascade-layer declarations / populations for
+    /// cross-file unused-at-rule detection, with the first defining file per name.
+    registered_custom_props: rustc_hash::FxHashSet<String>,
+    declared_layers: rustc_hash::FxHashSet<String>,
+    populated_layers: rustc_hash::FxHashSet<String>,
+    property_registrars: rustc_hash::FxHashMap<String, String>,
+    layer_declarers: rustc_hash::FxHashMap<String, String>,
 }
 
 impl CssTokenSets {
@@ -582,6 +589,104 @@ impl CssTokenSets {
             .iter()
             .fold(0u32, |acc, g| acc.saturating_add(g.estimated_savings));
         groups
+    }
+
+    /// Fold one stylesheet's analytics into the project-wide token sets,
+    /// recording the first-defining file (`rel`) per located name.
+    fn record(&mut self, analytics: &fallow_types::extract::CssAnalytics, rel: &str) {
+        self.colors.extend(analytics.colors.iter().cloned());
+        self.font_sizes.extend(analytics.font_sizes.iter().cloned());
+        self.z_indexes.extend(analytics.z_indexes.iter().cloned());
+        self.box_shadows
+            .extend(analytics.box_shadows.iter().cloned());
+        self.border_radii
+            .extend(analytics.border_radii.iter().cloned());
+        self.line_heights
+            .extend(analytics.line_heights.iter().cloned());
+        self.defined_custom_props
+            .extend(analytics.defined_custom_properties.iter().cloned());
+        self.referenced_custom_props
+            .extend(analytics.referenced_custom_properties.iter().cloned());
+        for keyframes in &analytics.referenced_keyframes {
+            self.referenced_keyframes.insert(keyframes.clone());
+            self.keyframe_referencers
+                .entry(keyframes.clone())
+                .or_insert_with(|| rel.to_owned());
+        }
+        for keyframes in &analytics.defined_keyframes {
+            self.defined_keyframes.insert(keyframes.clone());
+            self.keyframes_definers
+                .entry(keyframes.clone())
+                .or_insert_with(|| rel.to_owned());
+        }
+        for block in &analytics.declaration_blocks {
+            self.declaration_blocks
+                .entry(block.fingerprint)
+                .or_insert_with(|| (block.declaration_count, Vec::new()))
+                .1
+                .push((rel.to_owned(), block.line));
+        }
+        for name in &analytics.registered_custom_properties {
+            self.registered_custom_props.insert(name.clone());
+            self.property_registrars
+                .entry(name.clone())
+                .or_insert_with(|| rel.to_owned());
+        }
+        for name in &analytics.populated_layers {
+            self.populated_layers.insert(name.clone());
+        }
+        for name in &analytics.declared_layers {
+            self.declared_layers.insert(name.clone());
+            self.layer_declarers
+                .entry(name.clone())
+                .or_insert_with(|| rel.to_owned());
+        }
+    }
+
+    /// Group unused CSS at-rule entities: `@property` registrations never read
+    /// via `var()`, and cascade layers declared but never populated. Sets the
+    /// summary counts and returns the located list sorted by (kind, path, name).
+    fn group_unused_at_rules(
+        &self,
+        summary: &mut crate::health_types::CssAnalyticsSummary,
+    ) -> Vec<crate::health_types::UnusedAtRule> {
+        use crate::health_types::{CssCandidateAction, UnusedAtRule, UnusedAtRuleKind};
+
+        let mut out: Vec<UnusedAtRule> = Vec::new();
+        for name in self
+            .registered_custom_props
+            .difference(&self.referenced_custom_props)
+        {
+            out.push(UnusedAtRule {
+                kind: UnusedAtRuleKind::PropertyRegistration,
+                name: name.clone(),
+                path: self
+                    .property_registrars
+                    .get(name)
+                    .cloned()
+                    .unwrap_or_default(),
+                actions: vec![CssCandidateAction::verify_unused_at_rule(
+                    UnusedAtRuleKind::PropertyRegistration,
+                    name,
+                )],
+            });
+        }
+        summary.unused_property_registrations = saturate_len(out.len());
+        let property_count = out.len();
+        for name in self.declared_layers.difference(&self.populated_layers) {
+            out.push(UnusedAtRule {
+                kind: UnusedAtRuleKind::Layer,
+                name: name.clone(),
+                path: self.layer_declarers.get(name).cloned().unwrap_or_default(),
+                actions: vec![CssCandidateAction::verify_unused_at_rule(
+                    UnusedAtRuleKind::Layer,
+                    name,
+                )],
+            });
+        }
+        summary.unused_layers = saturate_len(out.len() - property_count);
+        out.sort_by(|a, b| (a.kind as u8, &a.path, &a.name).cmp(&(b.kind as u8, &b.path, &b.name)));
+        out
     }
 
     /// Fill the summary token counts and return the two located keyframe
@@ -877,48 +982,7 @@ fn compute_css_analytics_report(
         if analytics.notable_truncated {
             summary.notable_truncated_files = summary.notable_truncated_files.saturating_add(1);
         }
-        tokens.colors.extend(analytics.colors.iter().cloned());
-        tokens
-            .font_sizes
-            .extend(analytics.font_sizes.iter().cloned());
-        tokens.z_indexes.extend(analytics.z_indexes.iter().cloned());
-        tokens
-            .box_shadows
-            .extend(analytics.box_shadows.iter().cloned());
-        tokens
-            .border_radii
-            .extend(analytics.border_radii.iter().cloned());
-        tokens
-            .line_heights
-            .extend(analytics.line_heights.iter().cloned());
-        tokens
-            .defined_custom_props
-            .extend(analytics.defined_custom_properties.iter().cloned());
-        tokens
-            .referenced_custom_props
-            .extend(analytics.referenced_custom_properties.iter().cloned());
-        for keyframes in &analytics.referenced_keyframes {
-            tokens.referenced_keyframes.insert(keyframes.clone());
-            tokens
-                .keyframe_referencers
-                .entry(keyframes.clone())
-                .or_insert_with(|| rel.clone());
-        }
-        for keyframes in &analytics.defined_keyframes {
-            tokens.defined_keyframes.insert(keyframes.clone());
-            tokens
-                .keyframes_definers
-                .entry(keyframes.clone())
-                .or_insert_with(|| rel.clone());
-        }
-        for block in &analytics.declaration_blocks {
-            tokens
-                .declaration_blocks
-                .entry(block.fingerprint)
-                .or_insert_with(|| (block.declaration_count, Vec::new()))
-                .1
-                .push((rel.clone(), block.line));
-        }
+        tokens.record(&analytics, &rel);
 
         if !analytics.notable_rules.is_empty() {
             file_reports.push(CssFileAnalytics {
@@ -930,6 +994,7 @@ fn compute_css_analytics_report(
 
     let (unreferenced_keyframes, undefined_keyframes) = tokens.finalize(&mut summary);
     let duplicate_declaration_blocks = tokens.group_duplicate_blocks(&mut summary);
+    let unused_at_rules = tokens.group_unused_at_rules(&mut summary);
     // Markup arbitrary-value scan (gated on the project using Tailwind).
     let tailwind_arbitrary_values = scan_markup_tailwind_arbitrary_values(
         files,
@@ -955,6 +1020,7 @@ fn compute_css_analytics_report(
         undefined_keyframes,
         duplicate_declaration_blocks,
         tailwind_arbitrary_values,
+        unused_at_rules,
     })
 }
 
