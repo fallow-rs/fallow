@@ -518,8 +518,8 @@ fn compute_css_analytics_report(
     ws_roots: Option<&[std::path::PathBuf]>,
 ) -> Option<crate::health_types::CssAnalyticsReport> {
     use crate::health_types::{
-        CssAnalyticsReport, CssAnalyticsSummary, CssFileAnalytics, ScopedUnusedClasses,
-        UnreferencedKeyframes,
+        CssAnalyticsReport, CssAnalyticsSummary, CssCandidateAction, CssFileAnalytics,
+        ScopedUnusedClasses, UnreferencedKeyframes,
     };
 
     let mut file_reports = Vec::new();
@@ -580,6 +580,7 @@ fn compute_css_analytics_report(
                 scoped_unused.push(ScopedUnusedClasses {
                     path: relative.to_string_lossy().replace('\\', "/"),
                     classes,
+                    actions: vec![CssCandidateAction::verify_scoped_classes()],
                 });
             }
         }
@@ -659,6 +660,7 @@ fn compute_css_analytics_report(
         .map(|name| UnreferencedKeyframes {
             name: name.clone(),
             path: keyframes_definers.get(name).cloned().unwrap_or_default(),
+            actions: vec![CssCandidateAction::verify_keyframe(name)],
         })
         .collect();
     unreferenced_keyframes.sort_by(|a, b| (&a.path, &a.name).cmp(&(&b.path, &b.name)));

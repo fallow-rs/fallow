@@ -240,10 +240,11 @@ fn render_css_analytics(lines: &mut Vec<String>, report: &crate::health_types::H
                 .map(|kf| format!("{} ({})", kf.name, kf.path))
                 .collect::<Vec<_>>()
                 .join(", ");
-            let more = if css.unreferenced_keyframes.len() > 5 {
-                ", ..."
+            let extra = css.unreferenced_keyframes.len().saturating_sub(5);
+            let more = if extra > 0 {
+                format!(", +{extra} more")
             } else {
-                ""
+                String::new()
             };
             lines.push(format!(
                 "  @keyframes: {} defined, {} unreferenced (candidates; verify): {named}{more}",
@@ -267,7 +268,15 @@ fn render_css_analytics(lines: &mut Vec<String>, report: &crate::health_types::H
             lines.push(format!("  {}: {}", entry.path, entry.classes.join(", ")));
         }
         if css.scoped_unused.len() > 5 {
-            lines.push("  ... see --format json for all SFCs".dimmed().to_string());
+            let more = css.scoped_unused.len() - 5;
+            lines.push(
+                format!(
+                    "  ... and {more} more SFC{} (--format json for full list)",
+                    plural(more),
+                )
+                .dimmed()
+                .to_string(),
+            );
         }
     }
 
@@ -308,8 +317,9 @@ fn render_css_analytics(lines: &mut Vec<String>, report: &crate::health_types::H
         ));
     }
     if total_notable > 5 {
+        let more = total_notable - 5;
         lines.push(
-            "  ... see --format json for all notable rules"
+            format!("  ... and {more} more (--format json for full list)")
                 .dimmed()
                 .to_string(),
         );

@@ -564,6 +564,10 @@ export type RefactoringTargetActionType = ("apply-refactoring" | "suppress-line"
  */
 export type TrendDirection = ("improving" | "declining" | "stable")
 /**
+ * Discriminant for [`CssCandidateAction::kind`].
+ */
+export type CssCandidateActionType = "verify-unused"
+/**
  * Singleton GitHub review-event marker.
  */
 export type ReviewEnvelopeEvent = "COMMENT"
@@ -4848,6 +4852,41 @@ path: string
  * The scoped class names with no use elsewhere in the component, sorted.
  */
 classes: string[]
+/**
+ * Read-only verification step(s) an agent can run before removing the
+ * candidate. Always at least one entry, so consumers can iterate
+ * `actions` uniformly across every finding type.
+ */
+actions: CssCandidateAction[]
+}
+/**
+ * A read-only verification step attached to a CSS cleanup candidate.
+ *
+ * CSS candidates (unreferenced `@keyframes`, unused scoped classes) are never
+ * auto-removed: an animation name can still be applied from JavaScript, and a
+ * class can be assembled from a dynamic string binding. The action gives an
+ * agent a machine-readable next step, mirroring the `actions` array carried by
+ * every other health finding, plus an optional runnable probe to confirm the
+ * candidate is genuinely unused before deleting it.
+ */
+export interface CssCandidateAction {
+type: CssCandidateActionType
+/**
+ * Always `false`: CSS candidates are never auto-fixed (`fallow fix` does
+ * not touch them) because the residual consumer may live outside CSS.
+ */
+auto_fixable: boolean
+/**
+ * Human-readable description of what to confirm before removing.
+ */
+description: string
+/**
+ * A runnable, read-only, placeholder-free token search that surfaces any
+ * out-of-CSS use of the candidate. Absent when no shell-safe command can
+ * be built (e.g. the residual risk is a dynamic string binding that a
+ * single search cannot probe), in which case `description` is the guide.
+ */
+command?: (string | null)
 }
 /**
  * A `@keyframes` defined in a stylesheet but referenced by no animation in any
@@ -4862,6 +4901,12 @@ name: string
  * Project-root-relative, forward-slash path to the stylesheet that defines it.
  */
 path: string
+/**
+ * Read-only verification step(s) an agent can run before removing the
+ * candidate. Always at least one entry, so consumers can iterate
+ * `actions` uniformly across every finding type.
+ */
+actions: CssCandidateAction[]
 }
 /**
  * Envelope emitted by `fallow explain <issue-type> --format json`.

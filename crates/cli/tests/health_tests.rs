@@ -2820,6 +2820,20 @@ fn health_css_flag_surfaces_css_analytics() {
     assert_eq!(keyframes.len(), 1);
     assert_eq!(keyframes[0]["name"], "dead-anim");
     assert_eq!(keyframes[0]["path"], "src/styles.css");
+
+    // Located cleanup candidates carry a read-only verify action so agents have
+    // a machine-readable next step (parity with every other health finding).
+    let kf_actions = keyframes[0]["actions"]
+        .as_array()
+        .expect("keyframe actions array");
+    assert_eq!(kf_actions[0]["type"], "verify-unused");
+    assert_eq!(kf_actions[0]["auto_fixable"], false);
+    assert!(
+        kf_actions[0]["command"]
+            .as_str()
+            .is_some_and(|c| c.contains("dead-anim")),
+        "keyframe verify action should carry a read-only search for the name: {kf_actions:#?}"
+    );
 }
 
 #[test]
@@ -2864,6 +2878,18 @@ fn health_css_flags_unused_scoped_vue_class() {
         .expect("scoped_unused array");
     assert_eq!(scoped.len(), 1);
     assert_eq!(scoped[0]["classes"][0], "dead");
+
+    // The scoped candidate also carries a verify action, but with no command:
+    // the component-scoped scan already covers static uses, so the residual
+    // check (dynamic string bindings) is manual.
+    let scoped_actions = scoped[0]["actions"]
+        .as_array()
+        .expect("scoped_unused actions array");
+    assert_eq!(scoped_actions[0]["type"], "verify-unused");
+    assert!(
+        scoped_actions[0].get("command").is_none(),
+        "scoped verify action omits a command: {scoped_actions:#?}"
+    );
 
     // The SFC `<style>` block is folded into the metric path, so the component's
     // styles are analyzed (red + blue), not silently excluded.

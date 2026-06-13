@@ -107,6 +107,10 @@ pub struct UnreferencedKeyframes {
     pub name: String,
     /// Project-root-relative, forward-slash path to the stylesheet that defines it.
     pub path: String,
+    /// Read-only verification step(s) an agent can run before removing the
+    /// candidate. Always at least one entry, so consumers can iterate
+    /// `actions` uniformly across every finding type.
+    pub actions: Vec<CssCandidateAction>,
 }
 
 /// A Vue SFC's `<style scoped>` classes that appear nowhere else in the
@@ -118,6 +122,95 @@ pub struct ScopedUnusedClasses {
     pub path: String,
     /// The scoped class names with no use elsewhere in the component, sorted.
     pub classes: Vec<String>,
+    /// Read-only verification step(s) an agent can run before removing the
+    /// candidate. Always at least one entry, so consumers can iterate
+    /// `actions` uniformly across every finding type.
+    pub actions: Vec<CssCandidateAction>,
+}
+
+/// A read-only verification step attached to a CSS cleanup candidate.
+///
+/// CSS candidates (unreferenced `@keyframes`, unused scoped classes) are never
+/// auto-removed: an animation name can still be applied from JavaScript, and a
+/// class can be assembled from a dynamic string binding. The action gives an
+/// agent a machine-readable next step, mirroring the `actions` array carried by
+/// every other health finding, plus an optional runnable probe to confirm the
+/// candidate is genuinely unused before deleting it.
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CssCandidateAction {
+    /// Action type identifier (`verify-unused`).
+    #[serde(rename = "type")]
+    pub kind: CssCandidateActionType,
+    /// Always `false`: CSS candidates are never auto-fixed (`fallow fix` does
+    /// not touch them) because the residual consumer may live outside CSS.
+    pub auto_fixable: bool,
+    /// Human-readable description of what to confirm before removing.
+    pub description: String,
+    /// A runnable, read-only, placeholder-free token search that surfaces any
+    /// out-of-CSS use of the candidate. Absent when no shell-safe command can
+    /// be built (e.g. the residual risk is a dynamic string binding that a
+    /// single search cannot probe), in which case `description` is the guide.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+}
+
+/// Discriminant for [`CssCandidateAction::kind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum CssCandidateActionType {
+    /// Confirm the candidate has no JavaScript / HTML / dynamic consumer
+    /// before removing it.
+    VerifyUnused,
+}
+
+impl CssCandidateAction {
+    /// Verify action for an unreferenced `@keyframes`: a read-only token search
+    /// for any JavaScript or template reference that applies the animation
+    /// (which the CSS-only scan cannot see).
+    #[must_use]
+    pub fn verify_keyframe(name: &str) -> Self {
+        Self {
+            kind: CssCandidateActionType::VerifyUnused,
+            auto_fixable: false,
+            description: format!(
+                "Confirm no JavaScript or template applies the \"{name}\" animation before removing the @keyframes."
+            ),
+            command: safe_token_search(name),
+        }
+    }
+
+    /// Verify action for a Vue SFC's unused scoped classes. The component-scoped
+    /// scan already covers every static use, so the only residual risk is a
+    /// class assembled from a dynamic string; that is a manual check, so the
+    /// action carries guidance but no command.
+    #[must_use]
+    pub fn verify_scoped_classes() -> Self {
+        Self {
+            kind: CssCandidateActionType::VerifyUnused,
+            auto_fixable: false,
+            description:
+                "Confirm none of these scoped classes is assembled from a dynamic string (e.g. `:class=\"prefix + name\"`) before removing them."
+                    .to_string(),
+            command: None,
+        }
+    }
+}
+
+/// Build a read-only, placeholder-free token search for `name`, or `None` when
+/// the name is not a plain CSS identifier, so the emitted command is always
+/// shell-safe without quoting tricks.
+fn safe_token_search(name: &str) -> Option<String> {
+    let is_plain = !name.is_empty()
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+    is_plain.then(|| {
+        format!(
+            "grep -rnw '{name}' --include='*.js' --include='*.jsx' --include='*.ts' --include='*.tsx' --include='*.vue' --include='*.svelte' --include='*.html' ."
+        )
+    })
 }
 
 /// Per-stylesheet CSS analytics.

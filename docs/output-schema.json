@@ -12638,11 +12638,19 @@
             "type": "string"
           },
           "description": "The scoped class names with no use elsewhere in the component, sorted."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CssCandidateAction"
+          },
+          "description": "Read-only verification step(s) an agent can run before removing the\ncandidate. Always at least one entry, so consumers can iterate\n`actions` uniformly across every finding type."
         }
       },
       "required": [
         "path",
-        "classes"
+        "classes",
+        "actions"
       ],
       "description": "A Vue SFC's `<style scoped>` classes that appear nowhere else in the\ncomponent (cleanup candidates)."
     },
@@ -12656,13 +12664,61 @@
         "path": {
           "type": "string",
           "description": "Project-root-relative, forward-slash path to the stylesheet that defines it."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CssCandidateAction"
+          },
+          "description": "Read-only verification step(s) an agent can run before removing the\ncandidate. Always at least one entry, so consumers can iterate\n`actions` uniformly across every finding type."
         }
       },
       "required": [
         "name",
-        "path"
+        "path",
+        "actions"
       ],
       "description": "A `@keyframes` defined in a stylesheet but referenced by no animation in any\nstylesheet (cleanup candidate)."
+    },
+    "CssCandidateAction": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "Action type identifier (`verify-unused`).",
+          "$ref": "#/definitions/CssCandidateActionType"
+        },
+        "auto_fixable": {
+          "type": "boolean",
+          "description": "Always `false`: CSS candidates are never auto-fixed (`fallow fix` does\nnot touch them) because the residual consumer may live outside CSS."
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of what to confirm before removing."
+        },
+        "command": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "A runnable, read-only, placeholder-free token search that surfaces any\nout-of-CSS use of the candidate. Absent when no shell-safe command can\nbe built (e.g. the residual risk is a dynamic string binding that a\nsingle search cannot probe), in which case `description` is the guide."
+        }
+      },
+      "required": [
+        "type",
+        "auto_fixable",
+        "description"
+      ],
+      "description": "A read-only verification step attached to a CSS cleanup candidate.\n\nCSS candidates (unreferenced `@keyframes`, unused scoped classes) are never\nauto-removed: an animation name can still be applied from JavaScript, and a\nclass can be assembled from a dynamic string binding. The action gives an\nagent a machine-readable next step, mirroring the `actions` array carried by\nevery other health finding, plus an optional runnable probe to confirm the\ncandidate is genuinely unused before deleting it."
+    },
+    "CssCandidateActionType": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "verify-unused",
+          "description": "Confirm the candidate has no JavaScript / HTML / dynamic consumer\nbefore removing it."
+        }
+      ],
+      "description": "Discriminant for [`CssCandidateAction::kind`]."
     },
     "EnabledSource": {
       "type": "string",
