@@ -1592,6 +1592,13 @@ pub fn render_human(report: &ImpactReport) -> String {
         return out;
     }
 
+    if report.enabled_source == EnabledSource::User {
+        out.push_str(
+            "Enabled by your user-global default (`fallow impact default on`). Run\n\
+             `fallow impact disable` to opt this project out.\n\n",
+        );
+    }
+
     if report.record_count == 0 && report.project_surfacing.is_none() {
         out.push_str(
             "Tracking enabled. No history yet: check back after your next few\n\
@@ -3023,6 +3030,28 @@ mod tests {
             resolve_enabled(&off_explicit),
             (false, EnabledSource::Project)
         );
+    }
+
+    #[test]
+    fn human_report_explains_user_global_default() {
+        let (_config, _dir) = test_env();
+        set_global_default(true);
+        // A never-asked store resolved on a project: enabled via the global default.
+        let report = build_report(&ImpactStore::default());
+        assert_eq!(report.enabled_source, EnabledSource::User);
+        let human = render_human(&report);
+        assert!(
+            human.contains("Enabled by your user-global default"),
+            "human report must explain a global-default enable: {human}"
+        );
+        // A project-enabled report does NOT show the global-default note.
+        let project = build_report(&ImpactStore {
+            enabled: true,
+            explicit_decision: true,
+            ..Default::default()
+        });
+        assert_eq!(project.enabled_source, EnabledSource::Project);
+        assert!(!render_human(&project).contains("user-global default"));
     }
 
     #[test]
