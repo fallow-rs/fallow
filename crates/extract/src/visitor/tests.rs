@@ -6518,3 +6518,45 @@ fn spread_provide_key_sets_dynamic_provide() {
         "a spread provide argument must set has_dynamic_provide"
     );
 }
+
+#[test]
+fn string_bound_const_di_key_is_dropped() {
+    // A module-scope const bound to a string literal has STRING identity, not a
+    // symbol: a provider supplying the literal (often inside a package) matches
+    // it, so the inject must abstain. The const may be declared after the call.
+    let info = parse(
+        r#"
+        import { inject } from 'vue'
+        export function setup() {
+          return inject(JSONFORMS_KEY)
+        }
+        const JSONFORMS_KEY = "jsonforms"
+        "#,
+    );
+    assert!(
+        info.di_key_sites.is_empty(),
+        "an inject keyed by a string-bound const must be dropped (string identity): {:?}",
+        info.di_key_sites
+    );
+}
+
+#[test]
+fn symbol_bound_const_di_key_is_kept() {
+    // A const bound to Symbol() keeps symbol identity and is recorded.
+    let info = parse(
+        r"
+        import { inject } from 'vue'
+        const KEY = Symbol('k')
+        export function setup() {
+          return inject(KEY)
+        }
+        ",
+    );
+    assert!(
+        info.di_key_sites
+            .iter()
+            .any(|s| s.key_local == "KEY" && s.role == DiRole::Inject),
+        "an inject keyed by a Symbol()-bound const must be recorded: {:?}",
+        info.di_key_sites
+    );
+}

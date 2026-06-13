@@ -2246,6 +2246,7 @@ impl ModuleInfoExtractor {
             }
             self.record_current_module_file_path_binding(id.name.as_str(), init);
             self.record_injection_token(id.name.as_str(), init);
+            self.record_di_string_key_const(id.name.as_str(), decl, init);
             self.record_child_process_fork_target_binding(id.name.as_str(), init);
             self.record_tainted_source_binding(id.name.as_str(), init);
             self.record_tainted_helper_call_binding(id.name.as_str(), init);
@@ -6368,6 +6369,31 @@ impl ModuleInfoExtractor {
         }
     }
 
+    /// Track a module-scope `const NAME = "literal"` so the `unprovided-inject`
+    /// detector treats an inject/provide keyed by `NAME` as a string-keyed DI
+    /// link (string identity), not a symbol. Catches the `const KEY =
+    /// "jsonforms"; inject(KEY)` shape where the provider supplies the literal
+    /// string (commonly inside a package), which is NOT a dead inject. The
+    /// matching `di_key_sites` are dropped in `finalize_di_key_sites`.
+    fn record_di_string_key_const(
+        &mut self,
+        name: &str,
+        decl: &VariableDeclaration<'_>,
+        init: &Expression<'_>,
+    ) {
+        if decl.kind != VariableDeclarationKind::Const || !self.is_module_scope() {
+            return;
+        }
+        let is_string_literal = match init {
+            Expression::StringLiteral(_) => true,
+            Expression::TemplateLiteral(t) => t.expressions.is_empty(),
+            _ => false,
+        };
+        if is_string_literal {
+            self.string_keyed_di_consts.insert(name.to_string());
+        }
+    }
+
     /// Whether a bare-identifier callee is a Pinia store factory: either an
     /// imported binding (explicit `import { useFooStore } from ...`) or a name
     /// following the `use<Name>Store` convention (Nuxt `@pinia/nuxt`
@@ -6412,6 +6438,21 @@ impl ModuleInfoExtractor {
                 export.members = members.clone();
             }
         }
+    }
+
+    /// Drop `di_key_sites` whose key is a module-scope const bound to a string
+    /// literal (string identity, abstain). Run at finalize so a const declared
+    /// after the inject/provide call (a forward reference into a function body)
+    /// is still resolved. See [`Self::record_di_string_key_const`].
+    pub(super) fn finalize_di_key_sites(&mut self) {
+        if self.string_keyed_di_consts.is_empty() {
+            return;
+        }
+        let sites = std::mem::take(&mut self.di_key_sites);
+        self.di_key_sites = sites
+            .into_iter()
+            .filter(|site| !self.string_keyed_di_consts.contains(&site.key_local))
+            .collect();
     }
 
     fn risky_regex_fragment_for_expr(&self, expr: &Expression<'_>) -> Option<String> {

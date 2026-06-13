@@ -355,7 +355,11 @@ use crate::MemberKind;
 /// now record Vue `provide`/`inject` and Svelte `setContext`/`getContext` call
 /// sites on `di_key_sites` plus a `has_dynamic_provide` flag, so warm caches
 /// written before the bump would report zero unprovided-inject findings.
-pub(super) const CACHE_VERSION: u32 = 154;
+///
+/// Bumped to 155 because `di_key_sites` now drops keys bound to a module-scope
+/// string-literal const (string identity, not a symbol), so a warm cache from
+/// 154 would carry those dropped sites and false-flag a string-keyed inject.
+pub(super) const CACHE_VERSION: u32 = 155;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

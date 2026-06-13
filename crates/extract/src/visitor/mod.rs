@@ -236,6 +236,11 @@ pub(crate) struct ModuleInfoExtractor {
     /// non-identifier, a spread, or a transient nested-scope local) was seen.
     /// Forces the `unprovided-inject` detector to abstain project-wide.
     pub(crate) has_dynamic_provide: bool,
+    /// Module-scope `const NAME = "literal"` names: a DI key bound to a string
+    /// literal has STRING identity (a provider supplying the literal, often
+    /// inside a package, matches it), so its `di_key_sites` are dropped at
+    /// finalize. Working state, not persisted.
+    pub(crate) string_keyed_di_consts: FxHashSet<String>,
     /// Module-scope default, namespace, or require bindings imported from
     /// DOMPurify-compatible packages.
     pub(crate) dompurify_bindings: FxHashSet<String>,
@@ -907,6 +912,7 @@ impl ModuleInfoExtractor {
         self.resolve_pending_local_export_specifiers();
         self.enrich_local_class_exports();
         self.enrich_store_exports();
+        self.finalize_di_key_sites();
         self.record_exported_instance_bindings();
         self.resolve_object_binding_candidates();
         self.resolve_factory_call_candidates();
@@ -973,6 +979,7 @@ impl ModuleInfoExtractor {
         self.resolve_pending_local_export_specifiers();
         self.enrich_local_class_exports();
         self.enrich_store_exports();
+        self.finalize_di_key_sites();
         self.record_exported_instance_bindings();
         self.resolve_object_binding_candidates();
         self.resolve_factory_call_candidates();

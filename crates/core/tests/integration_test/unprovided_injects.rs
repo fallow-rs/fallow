@@ -96,15 +96,19 @@ fn abstains_on_package_imported_key() {
 }
 
 #[test]
-fn abstains_on_string_literal_key() {
+fn abstains_on_string_literal_and_string_const_keys() {
     let root = fixture_path("unprovided-inject-string-abstain");
     let config = create_config(root.clone());
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
     let found = injects(&results, &root);
 
+    // Both a bare string-literal key (`inject('stringKey')`) and a key bound to
+    // a string-literal const (`const K = 'jsonforms'; inject(K)`) have STRING
+    // identity, not symbol identity: a provider supplying the literal (often
+    // inside a package) matches them, so both must abstain.
     assert!(
         found.is_empty(),
-        "a string-literal inject key must never be flagged: {found:?}"
+        "string-literal and string-const inject keys must never be flagged: {found:?}"
     );
 }
 
