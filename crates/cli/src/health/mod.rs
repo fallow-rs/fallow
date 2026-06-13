@@ -519,6 +519,7 @@ fn compute_css_analytics_report(
 ) -> Option<crate::health_types::CssAnalyticsReport> {
     use crate::health_types::{
         CssAnalyticsReport, CssAnalyticsSummary, CssFileAnalytics, ScopedUnusedClasses,
+        UnreferencedKeyframes,
     };
 
     let mut file_reports = Vec::new();
@@ -539,6 +540,10 @@ fn compute_css_analytics_report(
         rustc_hash::FxHashSet::default();
     let mut defined_keyframes: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
     let mut referenced_keyframes: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
+    // First stylesheet that defines each @keyframes name, so an unreferenced
+    // candidate can be located (not just counted).
+    let mut keyframes_definers: rustc_hash::FxHashMap<String, String> =
+        rustc_hash::FxHashMap::default();
 
     for file in files {
         let path = &file.path;
@@ -577,13 +582,24 @@ fn compute_css_analytics_report(
                     classes,
                 });
             }
-            continue;
         }
 
-        let Some(analytics) = fallow_core::extract::compute_css_analytics(&source) else {
+        // Vue/Svelte SFC `<style>` blocks are folded into a virtual stylesheet so
+        // their structural metrics (specificity, !important, design tokens) count
+        // the same as a standalone .css file; SFCs with only SCSS blocks yield None.
+        let css_source = if is_sfc {
+            match fallow_core::extract::sfc_virtual_stylesheet(&source) {
+                Some(virtual_css) => std::borrow::Cow::Owned(virtual_css),
+                None => continue,
+            }
+        } else {
+            std::borrow::Cow::Borrowed(source.as_str())
+        };
+        let Some(analytics) = fallow_core::extract::compute_css_analytics(&css_source) else {
             continue;
         };
 
+        let rel = relative.to_string_lossy().replace('\\', "/");
         summary.files_analyzed = summary.files_analyzed.saturating_add(1);
         summary.total_rules = summary.total_rules.saturating_add(analytics.rule_count);
         summary.total_declarations = summary
@@ -596,17 +612,25 @@ fn compute_css_analytics_report(
             .empty_rules
             .saturating_add(analytics.empty_rule_count);
         summary.max_nesting_depth = summary.max_nesting_depth.max(analytics.max_nesting_depth);
+        if analytics.notable_truncated {
+            summary.notable_truncated_files = summary.notable_truncated_files.saturating_add(1);
+        }
         colors.extend(analytics.colors.iter().cloned());
         font_sizes.extend(analytics.font_sizes.iter().cloned());
         z_indexes.extend(analytics.z_indexes.iter().cloned());
         defined_custom_props.extend(analytics.defined_custom_properties.iter().cloned());
         referenced_custom_props.extend(analytics.referenced_custom_properties.iter().cloned());
-        defined_keyframes.extend(analytics.defined_keyframes.iter().cloned());
         referenced_keyframes.extend(analytics.referenced_keyframes.iter().cloned());
+        for keyframes in &analytics.defined_keyframes {
+            defined_keyframes.insert(keyframes.clone());
+            keyframes_definers
+                .entry(keyframes.clone())
+                .or_insert_with(|| rel.clone());
+        }
 
         if !analytics.notable_rules.is_empty() {
             file_reports.push(CssFileAnalytics {
-                path: relative.to_string_lossy().replace('\\', "/"),
+                path: rel,
                 analytics,
             });
         }
@@ -628,6 +652,17 @@ fn compute_css_analytics_report(
         u32::try_from(defined_keyframes.difference(&referenced_keyframes).count())
             .unwrap_or(u32::MAX);
 
+    // @keyframes are low-cardinality and rarely set from JS, so it is safe and
+    // far more actionable to LOCATE the unreferenced ones (not just count them).
+    let mut unreferenced_keyframes: Vec<UnreferencedKeyframes> = defined_keyframes
+        .difference(&referenced_keyframes)
+        .map(|name| UnreferencedKeyframes {
+            name: name.clone(),
+            path: keyframes_definers.get(name).cloned().unwrap_or_default(),
+        })
+        .collect();
+    unreferenced_keyframes.sort_by(|a, b| (&a.path, &a.name).cmp(&(&b.path, &b.name)));
+
     if summary.files_analyzed == 0 && scoped_unused.is_empty() {
         return None;
     }
@@ -636,6 +671,7 @@ fn compute_css_analytics_report(
         files: file_reports,
         summary,
         scoped_unused,
+        unreferenced_keyframes,
     })
 }
 

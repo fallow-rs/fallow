@@ -4627,6 +4627,12 @@ summary: CssAnalyticsSummary
  * component (cleanup candidates).
  */
 scoped_unused?: ScopedUnusedClasses[]
+/**
+ * `@keyframes` defined but referenced via no `animation` / `animation-name`
+ * in any stylesheet, with the stylesheet that defines them (cleanup
+ * candidates; an animation name can still be applied from JavaScript).
+ */
+unreferenced_keyframes?: UnreferencedKeyframes[]
 }
 /**
  * Per-stylesheet CSS analytics.
@@ -4822,6 +4828,12 @@ keyframes_unreferenced: number
  * (cleanup candidates), across all SFCs.
  */
 scoped_unused_classes: number
+/**
+ * Number of analyzed stylesheets whose per-rule `notable_rules` list was
+ * truncated at the per-file cap, so a consumer knows the per-rule detail is
+ * incomplete without walking every file.
+ */
+notable_truncated_files: number
 }
 /**
  * A Vue SFC's `<style scoped>` classes that appear nowhere else in the
@@ -4836,6 +4848,20 @@ path: string
  * The scoped class names with no use elsewhere in the component, sorted.
  */
 classes: string[]
+}
+/**
+ * A `@keyframes` defined in a stylesheet but referenced by no animation in any
+ * stylesheet (cleanup candidate).
+ */
+export interface UnreferencedKeyframes {
+/**
+ * The `@keyframes` name.
+ */
+name: string
+/**
+ * Project-root-relative, forward-slash path to the stylesheet that defines it.
+ */
+path: string
 }
 /**
  * Envelope emitted by `fallow explain <issue-type> --format json`.

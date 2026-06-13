@@ -198,7 +198,7 @@ fn render_css_analytics(lines: &mut Vec<String>, report: &crate::health_types::H
         summary.max_nesting_depth,
     ));
     lines.push(format!(
-        "  design tokens: {} unique color{} \u{00b7} {} font size{} \u{00b7} {} z-index value{}",
+        "  value sprawl: {} distinct color{} \u{00b7} {} font size{} \u{00b7} {} z-index value{}",
         summary.unique_colors,
         plural(summary.unique_colors as usize),
         summary.unique_font_sizes,
@@ -206,14 +206,50 @@ fn render_css_analytics(lines: &mut Vec<String>, report: &crate::health_types::H
         summary.unique_z_indexes,
         plural(summary.unique_z_indexes as usize),
     ));
-    if summary.custom_properties_defined > 0 || summary.keyframes_defined > 0 {
+    if summary.notable_truncated_files > 0 {
+        lines.push(
+            format!(
+                "  (per-rule detail truncated in {} file{}; see --format json)",
+                summary.notable_truncated_files,
+                plural(summary.notable_truncated_files as usize),
+            )
+            .dimmed()
+            .to_string(),
+        );
+    }
+    // Cleanup candidates. Custom properties stay a count (high-cardinality and
+    // often JS/cross-app consumed); the safer @keyframes are located.
+    if summary.custom_properties_defined > 0 {
         lines.push(format!(
-            "  custom properties: {} defined, {} unreferenced in CSS \u{00b7} @keyframes: {} defined, {} unreferenced",
+            "  custom properties: {} defined, {} unreferenced in CSS (candidates; may be set from JS)",
             summary.custom_properties_defined,
             summary.custom_properties_unreferenced,
-            summary.keyframes_defined,
-            summary.keyframes_unreferenced,
         ));
+    }
+    if summary.keyframes_defined > 0 {
+        if css.unreferenced_keyframes.is_empty() {
+            lines.push(format!(
+                "  @keyframes: {} defined, 0 unreferenced",
+                summary.keyframes_defined,
+            ));
+        } else {
+            let named = css
+                .unreferenced_keyframes
+                .iter()
+                .take(5)
+                .map(|kf| format!("{} ({})", kf.name, kf.path))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let more = if css.unreferenced_keyframes.len() > 5 {
+                ", ..."
+            } else {
+                ""
+            };
+            lines.push(format!(
+                "  @keyframes: {} defined, {} unreferenced (candidates; verify): {named}{more}",
+                summary.keyframes_defined, summary.keyframes_unreferenced,
+            ));
+        }
     }
     if !css.scoped_unused.is_empty() {
         let class_word = if summary.scoped_unused_classes == 1 {
@@ -222,7 +258,7 @@ fn render_css_analytics(lines: &mut Vec<String>, report: &crate::health_types::H
             "classes"
         };
         lines.push(format!(
-            "  {} unused scoped {class_word} in {} Vue SFC{}",
+            "  {} unused scoped {class_word} in {} Vue SFC{} (candidates; verify)",
             summary.scoped_unused_classes,
             css.scoped_unused.len(),
             plural(css.scoped_unused.len()),

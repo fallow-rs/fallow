@@ -91,6 +91,22 @@ pub struct CssAnalyticsReport {
     /// component (cleanup candidates).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub scoped_unused: Vec<ScopedUnusedClasses>,
+    /// `@keyframes` defined but referenced via no `animation` / `animation-name`
+    /// in any stylesheet, with the stylesheet that defines them (cleanup
+    /// candidates; an animation name can still be applied from JavaScript).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unreferenced_keyframes: Vec<UnreferencedKeyframes>,
+}
+
+/// A `@keyframes` defined in a stylesheet but referenced by no animation in any
+/// stylesheet (cleanup candidate).
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnreferencedKeyframes {
+    /// The `@keyframes` name.
+    pub name: String,
+    /// Project-root-relative, forward-slash path to the stylesheet that defines it.
+    pub path: String,
 }
 
 /// A Vue SFC's `<style scoped>` classes that appear nowhere else in the
@@ -154,6 +170,10 @@ pub struct CssAnalyticsSummary {
     /// Total Vue `<style scoped>` classes used nowhere else in their component
     /// (cleanup candidates), across all SFCs.
     pub scoped_unused_classes: u32,
+    /// Number of analyzed stylesheets whose per-rule `notable_rules` list was
+    /// truncated at the per-file cap, so a consumer knows the per-rule detail is
+    /// incomplete without walking every file.
+    pub notable_truncated_files: u32,
 }
 
 /// Result of complexity analysis for reporting.

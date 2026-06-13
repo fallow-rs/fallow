@@ -2811,6 +2811,15 @@ fn health_css_flag_surfaces_css_analytics() {
     );
     assert_eq!(summary["keyframes_defined"], 2, "summary: {summary}");
     assert_eq!(summary["keyframes_unreferenced"], 1, "summary: {summary}");
+    assert_eq!(summary["notable_truncated_files"], 0, "summary: {summary}");
+
+    // The unreferenced @keyframes is LOCATED (name + path), not just counted.
+    let keyframes = css["unreferenced_keyframes"]
+        .as_array()
+        .expect("unreferenced_keyframes located list");
+    assert_eq!(keyframes.len(), 1);
+    assert_eq!(keyframes[0]["name"], "dead-anim");
+    assert_eq!(keyframes[0]["path"], "src/styles.css");
 }
 
 #[test]
@@ -2855,6 +2864,19 @@ fn health_css_flags_unused_scoped_vue_class() {
         .expect("scoped_unused array");
     assert_eq!(scoped.len(), 1);
     assert_eq!(scoped[0]["classes"][0], "dead");
+
+    // The SFC `<style>` block is folded into the metric path, so the component's
+    // styles are analyzed (red + blue), not silently excluded.
+    assert_eq!(
+        css["summary"]["files_analyzed"], 1,
+        "stdout: {}",
+        out.stdout
+    );
+    assert!(
+        css["summary"]["unique_colors"].as_u64().unwrap() >= 2,
+        "the SFC <style> colors are counted: {}",
+        out.stdout
+    );
 }
 
 #[test]

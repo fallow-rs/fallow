@@ -105,6 +105,40 @@ pub fn scoped_unused_classes(source: &str) -> Vec<String> {
     candidates
 }
 
+/// Build a "virtual stylesheet" from an SFC's plain-CSS `<style>` blocks (any
+/// scoping). Each block body is placed at its real line in the SFC via blank-line
+/// padding, so CSS metric line numbers from `compute_css_analytics` map straight
+/// back onto the SFC. Returns `None` when the SFC has no plain-CSS `<style>`
+/// block (e.g. only `lang="scss"` blocks, which the CSS parser cannot read), so
+/// callers run the standard `.css` metric path on Vue/Svelte component styles.
+#[must_use]
+pub fn sfc_virtual_stylesheet(source: &str) -> Option<String> {
+    let mut out = String::new();
+    let mut current_line: usize = 1;
+    let mut found = false;
+    for caps in STYLE_BLOCK_RE.captures_iter(source) {
+        let attrs = caps.name("attrs").map_or("", |m| m.as_str());
+        if has_non_css_lang(attrs) {
+            continue;
+        }
+        let Some(body) = caps.name("body") else {
+            continue;
+        };
+        found = true;
+        let block_line = 1 + source[..body.start()]
+            .bytes()
+            .filter(|&b| b == b'\n')
+            .count();
+        while current_line < block_line {
+            out.push('\n');
+            current_line += 1;
+        }
+        out.push_str(body.as_str());
+        current_line += body.as_str().bytes().filter(|&b| b == b'\n').count();
+    }
+    found.then_some(out)
+}
+
 /// Replace the given byte ranges in `source` with spaces (preserving length),
 /// so the returned string can be searched for class uses without the `<style>`
 /// blocks themselves matching.
@@ -221,6 +255,32 @@ mod tests {
              <style>.dead { color: red; }</style>",
         );
         assert!(dead.is_empty(), "only scoped blocks are analyzed");
+    }
+
+    #[test]
+    fn virtual_stylesheet_places_rules_at_sfc_lines() {
+        // The `.a` rule is on line 3 of the SFC; the virtual stylesheet must keep
+        // it on line 3 so metric line numbers map back onto the source.
+        let source = "<template>\n  <div/>\n</template>\n<style>\n.a { color: red; }\n</style>";
+        let vcss = super::sfc_virtual_stylesheet(source).expect("has a plain-CSS style block");
+        let line_of_a = 1 + vcss[..vcss.find(".a").unwrap()]
+            .bytes()
+            .filter(|&b| b == b'\n')
+            .count();
+        let sfc_line_of_a = 1 + source[..source.find(".a").unwrap()]
+            .bytes()
+            .filter(|&b| b == b'\n')
+            .count();
+        assert_eq!(line_of_a, sfc_line_of_a, "vcss={vcss:?}");
+    }
+
+    #[test]
+    fn virtual_stylesheet_none_without_plain_css_block() {
+        assert!(super::sfc_virtual_stylesheet("<template><div/></template>").is_none());
+        assert!(
+            super::sfc_virtual_stylesheet("<style lang=\"scss\">.a { .b {} }</style>").is_none(),
+            "scss-only SFC yields no virtual stylesheet"
+        );
     }
 
     #[test]

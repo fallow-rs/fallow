@@ -12354,6 +12354,13 @@
             "$ref": "#/definitions/ScopedUnusedClasses"
           },
           "description": "Vue SFCs whose `<style scoped>` defines classes used nowhere else in the\ncomponent (cleanup candidates)."
+        },
+        "unreferenced_keyframes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnreferencedKeyframes"
+          },
+          "description": "`@keyframes` defined but referenced via no `animation` / `animation-name`\nin any stylesheet, with the stylesheet that defines them (cleanup\ncandidates; an animation name can still be applied from JavaScript)."
         }
       },
       "required": [
@@ -12593,6 +12600,10 @@
         "scoped_unused_classes": {
           "type": "integer",
           "description": "Total Vue `<style scoped>` classes used nowhere else in their component\n(cleanup candidates), across all SFCs."
+        },
+        "notable_truncated_files": {
+          "type": "integer",
+          "description": "Number of analyzed stylesheets whose per-rule `notable_rules` list was\ntruncated at the per-file cap, so a consumer knows the per-rule detail is\nincomplete without walking every file."
         }
       },
       "required": [
@@ -12609,7 +12620,8 @@
         "custom_properties_unreferenced",
         "keyframes_defined",
         "keyframes_unreferenced",
-        "scoped_unused_classes"
+        "scoped_unused_classes",
+        "notable_truncated_files"
       ],
       "description": "Project-wide CSS analytics aggregates across every analyzed stylesheet\n(including stylesheets with no notable rule, which are not listed\nindividually)."
     },
@@ -12633,6 +12645,24 @@
         "classes"
       ],
       "description": "A Vue SFC's `<style scoped>` classes that appear nowhere else in the\ncomponent (cleanup candidates)."
+    },
+    "UnreferencedKeyframes": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The `@keyframes` name."
+        },
+        "path": {
+          "type": "string",
+          "description": "Project-root-relative, forward-slash path to the stylesheet that defines it."
+        }
+      },
+      "required": [
+        "name",
+        "path"
+      ],
+      "description": "A `@keyframes` defined in a stylesheet but referenced by no animation in any\nstylesheet (cleanup candidate)."
     },
     "EnabledSource": {
       "type": "string",
