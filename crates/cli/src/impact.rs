@@ -1678,8 +1678,8 @@ pub fn render_human(report: &ImpactReport) -> String {
         ));
     }
     out.push_str(
-        "Resolution tracking is a local-developer signal: it accrues where\n\
-         .fallow/impact.json persists across runs, not in ephemeral CI runners.\n",
+        "Resolution tracking is a local-developer signal: it accrues on your\n\
+         machine across runs, not in CI (fallow never records there).\n",
     );
     out
 }
