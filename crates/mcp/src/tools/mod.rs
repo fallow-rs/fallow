@@ -28,7 +28,7 @@ pub use explain::build_explain_args;
 pub use fix::{build_fix_apply_args, build_fix_preview_args};
 pub use flags::build_feature_flags_args;
 pub use health::build_health_args;
-pub use impact::build_impact_args;
+pub use impact::{build_impact_all_args, build_impact_args};
 pub use inspect_target::inspect_target;
 pub use list_boundaries::build_list_boundaries_args;
 pub use project_info::build_project_info_args;

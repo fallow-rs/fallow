@@ -512,6 +512,10 @@ const ENVIRONMENT_VARIABLES: &[(&str, &str)] = &[
         "GC threshold in days for reusable audit base-snapshot caches (default 30; 0 disables the sweep).",
     ),
     (
+        "FALLOW_IMPACT_STORE_MAX_AGE_DAYS",
+        "GC threshold in days for per-project fallow impact stores; a recorded run reclaims stores older than this (unset/0 keeps every store forever).",
+    ),
+    (
         "FALLOW_ROOT",
         "Project root used by the review-github/review-gitlab renderers to read source for suggestion blocks. Set it alongside --root when rendering review formats outside the bundled CI integrations.",
     ),
@@ -691,6 +695,7 @@ mod tests {
         assert!(env_vars["FALLOW_CACHE_MAX_SIZE"].is_string());
         assert!(env_vars["FALLOW_TELEMETRY"].is_string());
         assert!(env_vars["FALLOW_AUDIT_BASE"].is_string());
+        assert!(env_vars["FALLOW_IMPACT_STORE_MAX_AGE_DAYS"].is_string());
         assert!(env_vars["FALLOW_TIMEOUT_SECS"].is_string());
         assert!(env_vars["FALLOW_SUGGESTIONS"].is_string());
         assert!(env_vars["DO_NOT_TRACK"].is_string());

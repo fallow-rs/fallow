@@ -270,6 +270,15 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         read_only: true,
     },
     McpToolInfo {
+        name: "impact_all",
+        kind: "introspection",
+        description: "Roll every tracked fallow project on this machine into one cross-repo value report (hashed keys plus basename labels, never paths; local-dev only)",
+        key_params: &["sort", "limit"],
+        license: McpToolLicense::Free,
+        license_note: None,
+        read_only: true,
+    },
+    McpToolInfo {
         name: "trace_export",
         kind: "trace",
         description: "Trace why an export is used or unused, including re-export chains and entry-point status",

@@ -21,6 +21,12 @@ const TREND_TOLERANCE: i64 = 0;
 
 const STORE_FILE: &str = "impact.json";
 
+/// Env var: when set to a positive integer N, a recorded run opportunistically
+/// removes per-project store files whose file mtime is older than N days,
+/// reclaiming stores left behind by deleted repos. Unset / `0` / unparseable
+/// disables the sweep (default: keep every store forever).
+const STORE_MAX_AGE_ENV: &str = "FALLOW_IMPACT_STORE_MAX_AGE_DAYS";
+
 const MAX_RECENT_RESOLVED: usize = 50;
 
 const ID_SEP: &str = "\u{1f}";
@@ -451,6 +457,102 @@ fn save(store: &ImpactStore, root: &Path) {
     }
 }
 
+/// The advisory-lock sidecar path for a store file (`<store>.json.lock`).
+fn lock_path_for(store: &Path) -> PathBuf {
+    let mut raw = store.as_os_str().to_owned();
+    raw.push(".lock");
+    PathBuf::from(raw)
+}
+
+/// Advisory lock serialising the load -> mutate -> save critical section of an
+/// Impact record across concurrent `fallow` processes.
+///
+/// Two worktrees of the same repo collapse to the SAME store key (and SAME
+/// store path), so a pre-commit gate firing in both at once would otherwise
+/// lost-update each other (A loads, B loads, A saves, B saves => A's record is
+/// dropped). Records BLOCK on this lock so a contended run is serialised rather
+/// than dropped. The `.lock` sidecar is intentionally never deleted (an
+/// unlinked-but-locked inode plus a racer's `O_CREAT` would split the lock
+/// across two inodes); the kernel releases the lock when the handle drops,
+/// including at process exit, so an abandoned record never wedges the next run.
+struct ImpactStoreLock {
+    _file: std::fs::File,
+}
+
+impl ImpactStoreLock {
+    /// Block until the per-project store lock for `root` is held. Best-effort:
+    /// returns `None` (proceed unlocked) when no store path resolves or the lock
+    /// file cannot be opened/locked, so a lock-layer failure never drops a
+    /// record (it only loses the cross-worktree serialisation guarantee).
+    fn acquire(root: &Path) -> Option<Self> {
+        let lock_path = lock_path_for(&store_path(root)?);
+        if let Some(parent) = lock_path.parent()
+            && std::fs::create_dir_all(parent).is_err()
+        {
+            return None;
+        }
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&lock_path)
+            .ok()?;
+        match file.lock() {
+            Ok(()) => Some(Self { _file: file }),
+            Err(err) => {
+                tracing::debug!(error = %err, "could not acquire impact store lock");
+                None
+            }
+        }
+    }
+}
+
+/// Resolve the store-GC window from [`STORE_MAX_AGE_ENV`]. `None` (no sweep)
+/// when unset, `0`, or unparseable.
+fn resolve_store_max_age() -> Option<std::time::Duration> {
+    let raw = std::env::var(STORE_MAX_AGE_ENV).ok()?;
+    let days: u32 = raw.trim().parse().ok()?;
+    crate::base_worktree::days_to_duration(days)
+}
+
+/// Remove per-project store files older than `max_age`, reclaiming stores left
+/// behind by deleted repos. Age is the store FILE's mtime (any recorded run
+/// rewrites the file via atomic replace, refreshing the mtime), so an
+/// actively-tracked repo never ages out. Best-effort and opportunistic (called
+/// after a successful record), gated entirely on [`STORE_MAX_AGE_ENV`]. Never
+/// deletes `.lock` sidecars (the lock-lifecycle invariant) and never the global
+/// `impact.json` toggle (it is a sibling FILE one level up, not inside the
+/// `impact/` dir). Skips `keep_key`'s own store so the just-written file is
+/// never reclaimed by a stale-mtime race in the same run.
+fn sweep_old_stores(keep_key: &str, max_age: std::time::Duration) {
+    let Some(dir) = store_dir() else {
+        return;
+    };
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return;
+    };
+    let now = std::time::SystemTime::now();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        // Only `<key>.json` store files; `.lock` sidecars have a `lock`
+        // extension and are skipped (never deleted).
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        if path.file_stem().and_then(|s| s.to_str()) == Some(keep_key) {
+            continue;
+        }
+        let aged_out = std::fs::metadata(&path)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|mtime| now.duration_since(mtime).ok())
+            .is_some_and(|age| age >= max_age);
+        if aged_out {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+}
+
 /// One-time import of a pre-relocation in-repo `.fallow/impact.json` into the
 /// user store. The legacy store had a FLAT frontier (schema <= 3); this reads
 /// it via [`LegacyFlatStore`] and wraps the flat frontier under the current
@@ -703,6 +805,9 @@ pub fn record_audit_run(root: &Path, summary: &AuditSummary, record: &AuditRunRe
     if record_gate_is_ci() {
         return;
     }
+    // Serialise the load -> mutate -> save window so two worktrees of the same
+    // repo (same store key) cannot lost-update each other's record.
+    let _lock = ImpactStoreLock::acquire(root);
     let mut store = load(root);
     if !resolve_enabled(&store).0 {
         return;
@@ -737,6 +842,9 @@ pub fn record_audit_run(root: &Path, summary: &AuditSummary, record: &AuditRunRe
     }
 
     save(&store, root);
+    if let Some(max_age) = resolve_store_max_age() {
+        sweep_old_stores(&project_identity(root).0, max_age);
+    }
 }
 
 /// Record a whole-project combined run into the project track.
@@ -751,6 +859,7 @@ pub fn record_combined_run(
     if record_gate_is_ci() {
         return;
     }
+    let _lock = ImpactStoreLock::acquire(root);
     let mut store = load(root);
     if !resolve_enabled(&store).0 {
         return;
@@ -786,6 +895,9 @@ pub fn record_combined_run(
     }
 
     save(&store, root);
+    if let Some(max_age) = resolve_store_max_age() {
+        sweep_old_stores(&project_identity(root).0, max_age);
+    }
 }
 
 /// Update pending/contained state from a gate run's verdict.
@@ -3847,5 +3959,77 @@ mod tests {
             !label.contains('/') && !label.contains('\\'),
             "label must be a basename, got {label}"
         );
+    }
+
+    // ----- store advisory lock + age-based GC --------------------------------
+
+    #[test]
+    fn lock_path_appends_lock_suffix() {
+        assert_eq!(
+            lock_path_for(Path::new("/c/fallow/impact/abc.json")),
+            PathBuf::from("/c/fallow/impact/abc.json.lock")
+        );
+    }
+
+    #[test]
+    fn store_lock_acquire_drop_then_record_roundtrips() {
+        let (_config, dir) = test_env();
+        let root = dir.path();
+        enable(root);
+        // Acquiring + dropping the lock around a record must not deadlock and
+        // the record must persist.
+        {
+            let _lock = ImpactStoreLock::acquire(root).expect("lock acquires");
+        }
+        record_v1(
+            root,
+            &summary(1, 0, 0),
+            AuditVerdict::Warn,
+            false,
+            None,
+            "2.0.0",
+            "t0",
+        );
+        assert_eq!(load(root).records.len(), 1, "record persisted under lock");
+        // The lock sidecar lives next to the store and is never the store itself.
+        let store = store_path(root).unwrap();
+        assert!(lock_path_for(&store).exists(), "lock sidecar created");
+        assert!(store.exists(), "store file is distinct from its lock");
+    }
+
+    #[test]
+    fn sweep_keeps_fresh_and_self_deletes_aged_out() {
+        let _cfg = aggregate_env();
+        seed_store("keepme", &store_with("keep", 1, 0, "t0", 1));
+        seed_store("oldone", &store_with("old", 1, 0, "t0", 1));
+        // A `.lock` sidecar must survive the sweep (lock-lifecycle invariant).
+        let lock = impact_config_dir()
+            .unwrap()
+            .join("impact")
+            .join("oldone.json.lock");
+        std::fs::write(&lock, b"").unwrap();
+
+        // max_age = 0 ages out every non-kept store regardless of mtime.
+        sweep_old_stores("keepme", std::time::Duration::ZERO);
+
+        let dir = impact_config_dir().unwrap().join("impact");
+        assert!(dir.join("keepme.json").exists(), "kept store survives");
+        assert!(
+            !dir.join("oldone.json").exists(),
+            "aged-out store reclaimed"
+        );
+        assert!(lock.exists(), "lock sidecar never deleted by the sweep");
+    }
+
+    #[test]
+    fn sweep_keeps_everything_under_a_large_window() {
+        let _cfg = aggregate_env();
+        seed_store("a", &store_with("a", 1, 0, "t0", 1));
+        seed_store("b", &store_with("b", 1, 0, "t0", 1));
+        // 10-year window: freshly-written stores are never aged out.
+        sweep_old_stores("a", std::time::Duration::from_hours(10 * 365 * 24));
+        let dir = impact_config_dir().unwrap().join("impact");
+        assert!(dir.join("a.json").exists());
+        assert!(dir.join("b.json").exists());
     }
 }

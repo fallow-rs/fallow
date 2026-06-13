@@ -45,7 +45,8 @@ fn all_tools_registered() {
     assert!(names.contains(&"get_importance".to_string()));
     assert!(names.contains(&"get_cleanup_candidates".to_string()));
     assert!(names.contains(&"impact".to_string()));
-    assert_eq!(tools.len(), 24);
+    assert!(names.contains(&"impact_all".to_string()));
+    assert_eq!(tools.len(), 25);
 }
 
 #[test]
@@ -76,6 +77,7 @@ fn read_only_tools_have_annotations() {
         "get_importance",
         "get_cleanup_candidates",
         "impact",
+        "impact_all",
     ];
     for tool in &tools {
         let name = tool.name.to_string();

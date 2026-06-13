@@ -747,6 +747,19 @@ pub struct ImpactParams {
     pub root: Option<String>,
 }
 
+/// Parameters for the `impact_all` cross-repo value-report tool.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub struct ImpactAllParams {
+    /// Row ordering: `recent` (default, most recently recorded project first),
+    /// `resolved` (most findings resolved first), `contained` (most commits
+    /// contained first), or `name` (alphabetical by project label).
+    pub sort: Option<String>,
+
+    /// Cap the number of project rows returned. Grand totals still reflect
+    /// every tracked project, including any beyond the cap. Omit for all rows.
+    pub limit: Option<usize>,
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub struct CodeExecuteParams {
     /// JavaScript function expression or function body. The function receives

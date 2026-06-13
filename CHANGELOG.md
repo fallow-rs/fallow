@@ -19,6 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`fallow impact --all` shows what fallow has done for you across every repo.** A read-only roll-up that aggregates the per-project histories in your user config dir into one ranked table plus grand totals (findings resolved, commits contained), so you can see your impact across all your projects in one view. Sort with `--sort {recent,resolved,contained,name}` (default `recent`) and cap printed rows with `--limit N` (grand totals always reflect every project). `--format json` emits a new `impact-cross-repo` envelope whose `projects[]` each embed the same per-project report as `fallow impact`, carry a stable `project_key` for cross-run correlation, and a repo `label`; the single-project `fallow impact` output is unchanged. JSON and markdown never include any filesystem path. Repos are labeled by their folder basename, captured at record time (a new optional store field; old histories show a short key until their next recorded run). Recording stays off in CI, so this reflects local-developer work, never a CI metric.
 
+- **New `impact_all` MCP tool.** Agents can read the cross-repo roll-up over MCP, the same view as `fallow impact --all`. It takes `sort` and `limit`, returns the `impact-cross-repo` shape (hashed project keys plus basename labels, never filesystem paths), and is read-only like the single-project `impact` tool.
+
+- **Reclaim stale `fallow impact` stores with `FALLOW_IMPACT_STORE_MAX_AGE_DAYS`.** Set it to a number of days and a recorded run prunes per-project histories that have not been touched in that long (for example, stores left behind by repos you have since deleted). Unset (the default) keeps every store forever; the project you are currently recording is never reclaimed.
+
+### Fixed
+
+- **Concurrent `fallow impact` recordings no longer lose data.** When the pre-commit gate fires in two worktrees of the same repo at once, both runs now serialize their update through an advisory lock instead of overwriting each other, so neither run's record is dropped.
+
 ## [2.96.0] - 2026-06-13
 
 ### Changed

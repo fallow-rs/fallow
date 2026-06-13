@@ -5,19 +5,21 @@ use rmcp::{ErrorData as McpError, ServerHandler, tool, tool_router};
 
 use crate::params::{
     AnalyzeParams, AuditParams, CheckChangedParams, CheckRuntimeCoverageParams, CodeExecuteParams,
-    ExplainParams, FeatureFlagsParams, FindDupesParams, FixParams, HealthParams, ImpactParams,
-    InspectTargetParams, ListBoundariesParams, ProjectInfoParams, SecurityCandidatesParams,
-    TraceCloneParams, TraceDependencyParams, TraceExportParams, TraceFileParams,
+    ExplainParams, FeatureFlagsParams, FindDupesParams, FixParams, HealthParams, ImpactAllParams,
+    ImpactParams, InspectTargetParams, ListBoundariesParams, ProjectInfoParams,
+    SecurityCandidatesParams, TraceCloneParams, TraceDependencyParams, TraceExportParams,
+    TraceFileParams,
 };
 use crate::tools::{
     build_analyze_args, build_audit_args, build_check_changed_args,
     build_check_runtime_coverage_args, build_explain_args, build_feature_flags_args,
     build_find_dupes_args, build_fix_apply_args, build_fix_preview_args,
     build_get_blast_radius_args, build_get_cleanup_candidates_args, build_get_hot_paths_args,
-    build_get_importance_args, build_health_args, build_impact_args, build_list_boundaries_args,
-    build_project_info_args, build_security_candidates_args, build_trace_clone_args,
-    build_trace_dependency_args, build_trace_export_args, build_trace_file_args, execute_code_mode,
-    inspect_target, run_tool, run_tool_with_top_level_warnings,
+    build_get_importance_args, build_health_args, build_impact_all_args, build_impact_args,
+    build_list_boundaries_args, build_project_info_args, build_security_candidates_args,
+    build_trace_clone_args, build_trace_dependency_args, build_trace_export_args,
+    build_trace_file_args, execute_code_mode, inspect_target, run_tool,
+    run_tool_with_top_level_warnings,
 };
 
 #[cfg(test)]
@@ -303,6 +305,18 @@ impl FallowMcp {
     async fn impact(&self, params: Parameters<ImpactParams>) -> Result<CallToolResult, McpError> {
         let args = build_impact_args(&params.0);
         run_tool(&self.binary, "impact", &args).await
+    }
+
+    #[tool(
+        description = "Roll EVERY tracked fallow project on this machine into one cross-repo value report (`fallow impact --all --format json`). Runs NO analysis: it reads the per-project history files in the user's private config dir, answering \"what has fallow done for me across all my repos\". Use this instead of `impact` when the agent wants a portfolio view rather than one repo; use `impact` (with `root`) for a single project. Returns `kind: \"impact-cross-repo\"` with `schema_version` \"1\", `project_count` (stores enumerated), `tracked_count` (projects with recorded history shown as rows), `unreadable_count` (corrupt/newer-schema stores skipped), a `totals` roll-up (resolved/contained/surfacing summed over ALL tracked projects, including repos since deleted from disk), and a `projects[]` array. Each project row carries a hashed `project_key` (never a filesystem path, and the only always-present identifier), an optional human `label` (the repo's directory basename; omitted on rows recorded by older fallow binaries, so fall back to `project_key` when `label` is null/absent), `last_recorded`, and a nested per-project `report`. Privacy: the aggregate exposes NO absolute paths, only the hash key plus the basename label. Projects that are enabled but have no recorded history yet are counted in `project_count` but excluded from `projects[]` rows. `sort` orders rows (`recent` default / `resolved` / `contained` / `name`); `limit` caps the rows returned while `totals` still reflect every tracked project. LOCAL-DEV ONLY: history accrues only on developer machines (fallow never records in CI), so in CI / ephemeral runners this returns zero tracked projects and must NOT be used as a CI metric. Read-only; the mutating enable / disable / default / reset lifecycle is intentionally not exposed over MCP.",
+        annotations(read_only_hint = true, idempotent_hint = true, open_world_hint = true)
+    )]
+    async fn impact_all(
+        &self,
+        params: Parameters<ImpactAllParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let args = build_impact_all_args(&params.0);
+        run_tool(&self.binary, "impact_all", &args).await
     }
 
     #[tool(

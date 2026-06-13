@@ -4,9 +4,10 @@ use crate::tools::{
     build_check_changed_args, build_check_runtime_coverage_args, build_explain_args,
     build_feature_flags_args, build_find_dupes_args, build_fix_apply_args, build_fix_preview_args,
     build_get_blast_radius_args, build_get_cleanup_candidates_args, build_get_hot_paths_args,
-    build_get_importance_args, build_health_args, build_impact_args, build_list_boundaries_args,
-    build_project_info_args, build_security_candidates_args, build_trace_clone_args,
-    build_trace_dependency_args, build_trace_export_args, build_trace_file_args,
+    build_get_importance_args, build_health_args, build_impact_all_args, build_impact_args,
+    build_list_boundaries_args, build_project_info_args, build_security_candidates_args,
+    build_trace_clone_args, build_trace_dependency_args, build_trace_export_args,
+    build_trace_file_args,
 };
 
 /// Parse a validation error body into its `message` field. Arg builders emit
@@ -1507,6 +1508,35 @@ fn impact_args_empty_root_dropped() {
 }
 
 #[test]
+fn impact_all_args_minimal() {
+    let args = build_impact_all_args(&ImpactAllParams::default());
+    assert_eq!(args, ["impact", "--all", "--format", "json", "--quiet"]);
+}
+
+#[test]
+fn impact_all_args_with_sort_and_limit() {
+    let args = build_impact_all_args(&ImpactAllParams {
+        sort: Some("resolved".to_string()),
+        limit: Some(5),
+    });
+    assert_eq!(
+        args,
+        [
+            "impact", "--all", "--format", "json", "--quiet", "--sort", "resolved", "--limit", "5"
+        ]
+    );
+}
+
+#[test]
+fn impact_all_args_empty_sort_dropped() {
+    let args = build_impact_all_args(&ImpactAllParams {
+        sort: Some(String::new()),
+        limit: None,
+    });
+    assert_eq!(args, ["impact", "--all", "--format", "json", "--quiet"]);
+}
+
+#[test]
 fn all_arg_builders_include_format_json_and_quiet() {
     let analyze = build_analyze_args(&AnalyzeParams::default()).unwrap();
     let check_changed = build_check_changed_args(check_changed("main"));
@@ -1571,6 +1601,7 @@ fn all_arg_builders_include_format_json_and_quiet() {
     let check_runtime_coverage =
         build_check_runtime_coverage_args(&check_runtime_coverage("./coverage"));
     let impact = build_impact_args(&ImpactParams::default());
+    let impact_all = build_impact_all_args(&ImpactAllParams::default());
 
     for (name, args) in [
         ("analyze", &analyze),
@@ -1589,6 +1620,7 @@ fn all_arg_builders_include_format_json_and_quiet() {
         ("feature_flags", &feature_flags),
         ("check_runtime_coverage", &check_runtime_coverage),
         ("impact", &impact),
+        ("impact_all", &impact_all),
     ] {
         assert!(
             args.contains(&"--format".to_string()),
@@ -1621,6 +1653,9 @@ fn each_tool_uses_correct_subcommand() {
     );
     assert_eq!(build_health_args(&HealthParams::default())[0], "health");
     assert_eq!(build_impact_args(&ImpactParams::default())[0], "impact");
+    let impact_all = build_impact_all_args(&ImpactAllParams::default());
+    assert_eq!(impact_all[0], "impact");
+    assert_eq!(impact_all[1], "--all");
     assert_eq!(
         build_list_boundaries_args(&ListBoundariesParams::default())[0],
         "list"

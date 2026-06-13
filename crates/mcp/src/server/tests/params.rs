@@ -780,6 +780,21 @@ fn impact_params_ignores_unknown_fields() {
 }
 
 #[test]
+fn impact_all_params_minimal() {
+    let params: ImpactAllParams = serde_json::from_str("{}").unwrap();
+    assert!(params.sort.is_none());
+    assert!(params.limit.is_none());
+}
+
+#[test]
+fn impact_all_params_with_sort_and_limit() {
+    let json = r#"{"sort": "contained", "limit": 3}"#;
+    let params: ImpactAllParams = serde_json::from_str(json).unwrap();
+    assert_eq!(params.sort.as_deref(), Some("contained"));
+    assert_eq!(params.limit, Some(3));
+}
+
+#[test]
 fn find_dupes_params_changed_since_deserialize() {
     let json = r#"{"changed_since": "main"}"#;
     let params: FindDupesParams = serde_json::from_str(json).unwrap();
