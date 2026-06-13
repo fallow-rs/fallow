@@ -803,6 +803,59 @@ fn audit_empty_catalog_group_changed_manifest_is_introduced() {
 }
 
 #[test]
+fn audit_invalid_client_export_is_introduced() {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("app")).unwrap();
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name":"audit-invalid-client-export","private":true,"dependencies":{"next":"15.0.0","react":"19.0.0"}}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("app/page.tsx"),
+        "\"use client\";\nexport default function Page() { return null; }\n",
+    )
+    .unwrap();
+    git(dir, &["init", "-b", "main"]);
+    commit_all(dir, "initial");
+
+    // Introduce a server-only export inside the existing "use client" file.
+    fs::write(
+        dir.join("app/page.tsx"),
+        "\"use client\";\nexport const metadata = { title: \"Home\" };\nexport default function Page() { return null; }\n",
+    )
+    .unwrap();
+
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.to_str().unwrap(),
+        "--base",
+        "HEAD",
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+    ]);
+
+    assert_eq!(
+        output.code, 0,
+        "new warning-level invalid client export should not fail audit. stdout: {}\nstderr: {}",
+        output.stdout, output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(
+        json["dead_code"]["invalid_client_exports"][0]["export_name"].as_str(),
+        Some("metadata")
+    );
+    assert_eq!(
+        json["dead_code"]["invalid_client_exports"][0]["introduced"],
+        true
+    );
+}
+
+#[test]
 fn audit_dependency_location_change_is_introduced() {
     let tmp = TempDir::new().expect("failed to create temp dir");
     let dir = tmp.path();

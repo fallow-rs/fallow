@@ -477,6 +477,10 @@ OUT_POLICY=$(jq '.policy_violations = [{"path": "src/app.ts", "line": 7, "col": 
 assert_contains "$OUT_POLICY" "Policy violations" "policy: shows summary row and section"
 assert_contains "$OUT_POLICY" "team-policy/no-moment" "policy: shows pack/rule identity"
 
+OUT_ICE=$(jq '.invalid_client_exports = [{"path": "src/app.ts", "line": 5, "col": 0, "export_name": "metadata", "directive": "use client", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$CI_JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_ICE" "Invalid client exports" "ice: shows summary row and section"
+assert_contains "$OUT_ICE" "metadata" "ice: shows export name in section"
+
 OUT_CLEAN=$(jq -r -f "$CI_JQ_DIR/summary-check.jq" "$FIXTURES/check-clean.json" 2>&1)
 assert_contains "$OUT_CLEAN" "No issues found" "clean: shows no issues"
 

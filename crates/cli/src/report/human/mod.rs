@@ -148,6 +148,10 @@ fn section_footer_text(title: &str) -> Option<(&'static str, &'static str)> {
             "pnpm `overrides:` entries with an unparsable key or empty value (pnpm install will error)",
             "https://docs.fallow.tools/explanations/dead-code#misconfigured-dependency-overrides",
         )),
+        "Invalid client exports" => Some((
+            "Server-only or route-config exports in a \"use client\" file (Next.js rejects this at build time)",
+            "https://docs.fallow.tools/explanations/dead-code#invalid-client-exports",
+        )),
         t if t.starts_with("Type-only") => Some((
             "Dependencies only used for type imports \u{2014} consider moving to devDependencies",
             "https://docs.fallow.tools/explanations/dead-code#type-only-dependencies",
@@ -177,6 +181,7 @@ fn section_suppress_rule(title: &str) -> Option<&'static str> {
         "Unresolved catalog references" => Some("unresolved-catalog-reference"),
         "Unused dependency overrides" => Some("unused-dependency-override"),
         "Misconfigured dependency overrides" => Some("misconfigured-dependency-override"),
+        "Invalid client exports" => Some("invalid-client-export"),
         _ => None,
     }
 }

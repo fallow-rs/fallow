@@ -977,6 +977,16 @@ impl DeadCodeJsonAnnotator<'_> {
                 )
             }),
         );
+        annotate_issue_array(
+            self.json,
+            "invalid_client_exports",
+            self.results.invalid_client_exports.iter().map(|item| {
+                issue_was_introduced(
+                    &invalid_client_export_key(&item.export, self.root),
+                    self.base,
+                )
+            }),
+        );
     }
 
     fn annotate_graph(&mut self) {

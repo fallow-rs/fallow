@@ -721,6 +721,16 @@ assert_contains "$OUT_POLICY_ANNOTATIONS" "Use date-fns." "policy: annotation ca
 OUT_POLICY_FILTERED=$(jq '.policy_violations = [{"path": "src/app.ts", "line": 7, "col": 2, "pack": "team-policy", "rule_id": "no-moment", "kind": "banned-import", "matched": "moment", "severity": "warn", "actions": []}, {"path": "src/other.ts", "line": 1, "col": 0, "pack": "team-policy", "rule_id": "no-moment", "kind": "banned-import", "matched": "moment", "severity": "warn", "actions": []}]' "$FIXTURES/check.json" | jq --argjson changed '["src/app.ts"]' -f "$JQ_DIR/filter-changed.jq" 2>&1)
 assert_json_value "$OUT_POLICY_FILTERED" '.policy_violations | length' "1" "policy: filter-changed keeps only changed-file findings"
 
+OUT_ICE=$(jq '.invalid_client_exports = [{"path": "src/app.ts", "line": 5, "col": 0, "export_name": "metadata", "directive": "use client", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_ICE" "Invalid client exports" "ice: shows summary row and section"
+assert_contains "$OUT_ICE" "metadata" "ice: shows export name in section"
+
+OUT_ICE_ANN=$(jq '.invalid_client_exports = [{"path": "src/app.ts", "line": 5, "col": 2, "export_name": "metadata", "directive": "use client", "actions": []}]' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/annotations-check.jq" 2>&1)
+assert_contains "$OUT_ICE_ANN" "::warning file=src/app.ts,line=5,col=3,title=Invalid client export::" "ice: warning-severity annotation"
+
+OUT_ICE_FILTERED=$(jq '.invalid_client_exports = [{"path": "src/app.ts", "line": 5, "col": 0, "export_name": "metadata", "directive": "use client", "actions": []}, {"path": "src/other.ts", "line": 3, "col": 0, "export_name": "generateMetadata", "directive": "use client", "actions": []}]' "$FIXTURES/check.json" | jq --argjson changed '["src/app.ts"]' -f "$JQ_DIR/filter-changed.jq" 2>&1)
+assert_json_value "$OUT_ICE_FILTERED" '.invalid_client_exports | length' "1" "ice: filter-changed keeps only changed-file findings"
+
 OUT_CLEAN=$(jq -r -f "$JQ_DIR/summary-check.jq" "$FIXTURES/check-clean.json" 2>&1)
 assert_contains "$OUT_CLEAN" "No issues found" "clean: shows no issues"
 assert_not_contains "$OUT_CLEAN" "WARNING" "clean: no warning"
