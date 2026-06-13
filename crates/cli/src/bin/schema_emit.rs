@@ -35,8 +35,8 @@ use fallow_cli::health_types::{
     UntestedFileFinding, VitalSigns, VitalSignsCounts,
 };
 use fallow_cli::impact::{
-    ContainmentEvent, ImpactCounts, ImpactReport, ImpactReportSchemaVersion, ImpactTrendDirection,
-    ResolutionEvent, TrendSummary,
+    ContainmentEvent, EnabledSource, ImpactCounts, ImpactReport, ImpactReportSchemaVersion,
+    ImpactTrendDirection, ResolutionEvent, TrendSummary,
 };
 use fallow_cli::output_dupes::{
     AttributedCloneGroupFinding, CloneFamilyAction, CloneFamilyActionType, CloneFamilyFinding,
@@ -332,6 +332,7 @@ const DERIVED_DEFINITION_NAMES: &[&str] = &[
     "CoverageAnalyzeOutput",
     "CoverageAnalyzeSchemaVersion",
     "ContainmentEvent",
+    "EnabledSource",
     "ImpactCounts",
     "ImpactReport",
     "ImpactReportSchemaVersion",
@@ -582,6 +583,7 @@ fn register_meta_definitions(generator: &mut schemars::SchemaGenerator) {
 
 fn register_impact_definitions(generator: &mut schemars::SchemaGenerator) {
     let _ = generator.subschema_for::<ImpactCounts>();
+    let _ = generator.subschema_for::<EnabledSource>();
     let _ = generator.subschema_for::<ImpactReportSchemaVersion>();
     let _ = generator.subschema_for::<ImpactTrendDirection>();
     let _ = generator.subschema_for::<ResolutionEvent>();

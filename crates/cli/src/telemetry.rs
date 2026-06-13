@@ -1608,7 +1608,13 @@ fn env_truthy(name: &str) -> bool {
     })
 }
 
-fn config_path() -> Option<PathBuf> {
+/// Fallow's per-user config directory (`<platform-base>/fallow`), or `None`
+/// when no home/config base is resolvable (e.g. a stripped CI environment).
+///
+/// Shared by telemetry (`telemetry.json`) and Fallow Impact (`impact.json` +
+/// the per-project `impact/<key>.json` store), so both surfaces resolve the
+/// same base and never drift.
+pub fn config_dir() -> Option<PathBuf> {
     let base = if cfg!(windows) {
         std::env::var_os("APPDATA").map(PathBuf::from)
     } else if cfg!(target_os = "macos") {
@@ -1620,7 +1626,11 @@ fn config_path() -> Option<PathBuf> {
             .map(PathBuf::from)
             .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
     }?;
-    Some(base.join("fallow").join("telemetry.json"))
+    Some(base.join("fallow"))
+}
+
+fn config_path() -> Option<PathBuf> {
+    Some(config_dir()?.join("telemetry.json"))
 }
 
 fn read_config_from(path: &std::path::Path) -> Result<TelemetryConfig, String> {

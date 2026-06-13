@@ -1058,9 +1058,11 @@ enum Command {
     /// trend since the last recorded run, and how many commits it contained at
     /// the pre-commit gate.
     ///
-    /// Local-only and opt-in: enable with `fallow impact enable`, then let your
-    /// `fallow audit` / pre-commit gate runs build history. Impact never uploads
-    /// anything and never affects exit codes.
+    /// Local-only and opt-in: enable per project with `fallow impact enable`, or
+    /// turn it on everywhere with `fallow impact default on`, then let your
+    /// `fallow audit` / pre-commit gate runs build history. History is stored in
+    /// your user config dir (never written into the repo) and forced off in CI.
+    /// Impact never uploads anything and never affects exit codes.
     Impact {
         #[command(subcommand)]
         subcommand: Option<ImpactCli>,
@@ -1370,8 +1372,28 @@ enum ImpactCli {
     Enable,
     /// Disable Impact tracking (existing history is retained).
     Disable,
+    /// Set the user-global default for new projects (on or off). A per-project
+    /// `enable`/`disable` always wins over this default.
+    Default {
+        /// `on` to record in every project by default, `off` to require an
+        /// explicit per-project `enable`.
+        #[arg(value_enum)]
+        state: ToggleState,
+    },
+    /// Delete this project's stored history (or all projects with `--all`).
+    Reset {
+        /// Delete every project's Impact history, not just this one.
+        #[arg(long)]
+        all: bool,
+    },
     /// Show whether Impact tracking is enabled and how much history exists.
     Status,
+}
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum ToggleState {
+    On,
+    Off,
 }
 
 #[derive(clap::Subcommand)]
@@ -3537,8 +3559,9 @@ fn dispatch_impact(
             if !quiet {
                 if newly {
                     println!(
-                        "Fallow Impact enabled. Each `fallow audit` / pre-commit gate run is \
-                         recorded locally in .fallow/impact.json (gitignored, never uploaded)."
+                        "Fallow Impact enabled for this project. Each `fallow audit` / pre-commit \
+                         gate run is recorded in your user config dir, never written into the \
+                         repo and never uploaded."
                     );
                     println!(
                         "Tip: run `fallow init --hooks` (or add `--gate-marker pre-commit` to \
@@ -3565,13 +3588,66 @@ fn dispatch_impact(
             }
             ExitCode::SUCCESS
         }
-        Some(ImpactCli::Status) | None => render_impact_status(root, output),
+        Some(ImpactCli::Default { state }) => {
+            let on = matches!(state, ToggleState::On);
+            let changed = impact::set_global_default(on);
+            if !quiet {
+                let verb = if on { "on" } else { "off" };
+                let body = if on {
+                    "New projects now record Impact by default. A per-project `fallow impact \
+                     disable` still opts that repo out."
+                } else {
+                    "New projects no longer record by default; run `fallow impact enable` per \
+                     project to opt in."
+                };
+                if changed {
+                    println!("Fallow Impact default set to {verb}. {body}");
+                } else {
+                    println!("Fallow Impact default was already {verb}.");
+                }
+            }
+            ExitCode::SUCCESS
+        }
+        Some(ImpactCli::Reset { all }) => {
+            if all {
+                let removed = impact::reset_all();
+                if !quiet {
+                    println!(
+                        "{}",
+                        if removed {
+                            "Removed all Fallow Impact history."
+                        } else {
+                            "No Fallow Impact history to remove."
+                        }
+                    );
+                }
+            } else {
+                let removed = impact::reset(root);
+                if !quiet {
+                    println!(
+                        "{}",
+                        if removed {
+                            "Removed this project's Fallow Impact history."
+                        } else {
+                            "No Fallow Impact history for this project."
+                        }
+                    );
+                }
+            }
+            ExitCode::SUCCESS
+        }
+        Some(ImpactCli::Status) | None => render_impact_status(root, quiet, output),
     }
 }
 
-fn render_impact_status(root: &std::path::Path, output: fallow_config::OutputFormat) -> ExitCode {
+fn render_impact_status(
+    root: &std::path::Path,
+    quiet: bool,
+    output: fallow_config::OutputFormat,
+) -> ExitCode {
     let store = impact::load(root);
     let report = impact::build_report(&store);
+    let is_human = matches!(output, fallow_config::OutputFormat::Human);
     let rendered = match output {
         fallow_config::OutputFormat::Json => impact::render_json(&report),
         fallow_config::OutputFormat::Markdown => impact::render_markdown(&report),
@@ -3593,6 +3669,16 @@ fn render_impact_status(root: &std::path::Path, output: fallow_config::OutputFor
         }
     };
     println!("{rendered}");
+    // Human-only footer so a user can find / inspect / reset the store and see
+    // which key this project resolved to (the JSON shape stays clean and never
+    // leaks the absolute user-config path).
+    if is_human && !quiet {
+        println!("  Store key: {}", impact::resolved_project_key(root));
+        match impact::resolved_store_path(root) {
+            Some(path) => println!("  Store file: {}", path.display()),
+            None => println!("  Store file: (no user config dir resolved; not persisted)"),
+        }
+    }
     ExitCode::SUCCESS
 }
 

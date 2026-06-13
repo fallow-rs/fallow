@@ -11,7 +11,7 @@ use crate::audit::{AuditSummary, AuditVerdict};
 use crate::report::ci::fingerprint::fingerprint_hash;
 use crate::report::format_display_path;
 
-const STORE_SCHEMA_VERSION: u32 = 3;
+const STORE_SCHEMA_VERSION: u32 = 4;
 
 const MAX_RECORDS: usize = 200;
 
@@ -144,10 +144,15 @@ pub struct ImpactStore {
     pub containment: Vec<ContainmentEvent>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_containment: Option<PendingContainment>,
+    /// Per-finding attribution baseline, namespaced by worktree key (schema v4)
+    /// so two worktrees of one repo (collapsed to a single store) do not prune
+    /// each other's per-file frontier. Inner map is rel-path -> findings.
     #[serde(default)]
-    pub frontier: FxHashMap<String, FileFrontier>,
+    pub frontier: FxHashMap<String, FxHashMap<String, FileFrontier>>,
+    /// Clone-family attribution baseline, namespaced by worktree key (schema
+    /// v4). Inner map is clone fingerprint -> instance paths.
     #[serde(default)]
-    pub clone_frontier: FxHashMap<String, Vec<String>>,
+    pub clone_frontier: FxHashMap<String, FxHashMap<String, Vec<String>>>,
     #[serde(default)]
     pub resolved_total: usize,
     #[serde(default)]
@@ -168,18 +173,192 @@ pub struct ImpactStore {
     pub last_digest_epoch: Option<u64>,
 }
 
-fn store_path(root: &Path) -> PathBuf {
+/// Deserialize-only view of a pre-relocation in-repo store (schema <= 3), whose
+/// `frontier` / `clone_frontier` were FLAT (not worktree-namespaced). Used once
+/// during migration to import a legacy `.fallow/impact.json` into the user
+/// store. Every field carries `#[serde(default)]` so any of v1/v2/v3 reads.
+#[derive(Debug, Default, Deserialize)]
+struct LegacyFlatStore {
+    #[serde(default)]
+    enabled: bool,
+    #[serde(default)]
+    first_recorded: Option<String>,
+    #[serde(default)]
+    records: Vec<ImpactRecord>,
+    #[serde(default)]
+    project_records: Vec<ImpactRecord>,
+    #[serde(default)]
+    containment: Vec<ContainmentEvent>,
+    #[serde(default)]
+    pending_containment: Option<PendingContainment>,
+    #[serde(default)]
+    frontier: FlatFrontier,
+    #[serde(default)]
+    clone_frontier: FlatCloneFrontier,
+    #[serde(default)]
+    resolved_total: usize,
+    #[serde(default)]
+    suppressed_total: usize,
+    #[serde(default)]
+    recent_resolved: Vec<ResolutionEvent>,
+    #[serde(default)]
+    onboarding_declined: bool,
+    #[serde(default)]
+    explicit_decision: bool,
+    #[serde(default)]
+    last_digest_epoch: Option<u64>,
+}
+
+impl LegacyFlatStore {
+    /// Convert into the current (v4) store, wrapping the flat frontier under the
+    /// importing worktree's key.
+    fn into_store(self, worktree_key: &str) -> ImpactStore {
+        let mut frontier: FxHashMap<String, FlatFrontier> = FxHashMap::default();
+        if !self.frontier.is_empty() {
+            frontier.insert(worktree_key.to_owned(), self.frontier);
+        }
+        let mut clone_frontier: FxHashMap<String, FlatCloneFrontier> = FxHashMap::default();
+        if !self.clone_frontier.is_empty() {
+            clone_frontier.insert(worktree_key.to_owned(), self.clone_frontier);
+        }
+        ImpactStore {
+            schema_version: STORE_SCHEMA_VERSION,
+            enabled: self.enabled,
+            first_recorded: self.first_recorded,
+            records: self.records,
+            project_records: self.project_records,
+            containment: self.containment,
+            pending_containment: self.pending_containment,
+            frontier,
+            clone_frontier,
+            resolved_total: self.resolved_total,
+            suppressed_total: self.suppressed_total,
+            recent_resolved: self.recent_resolved,
+            onboarding_declined: self.onboarding_declined,
+            explicit_decision: self.explicit_decision,
+            last_digest_epoch: self.last_digest_epoch,
+        }
+    }
+}
+
+/// Process-global memo of `(project_key, worktree_key)` per analyzed root, so
+/// the git subprocesses that derive them run at most once per root per run
+/// (`fallow audit` is the perf-priority path and `load` is called several
+/// times per invocation).
+static IDENTITY_CACHE: std::sync::OnceLock<std::sync::Mutex<FxHashMap<PathBuf, (String, String)>>> =
+    std::sync::OnceLock::new();
+
+/// Hash a filesystem-path identity into a stable key. On case-insensitive
+/// filesystems (macOS APFS default, Windows) two spellings of one directory map
+/// to the same on-disk location, so fold case before hashing to keep the key
+/// stable across spellings. Linux paths are case-sensitive and left as-is.
+fn hash_path_identity(path: &Path) -> String {
+    let raw = path.to_string_lossy();
+    let normalized = if cfg!(any(target_os = "macos", target_os = "windows")) {
+        raw.to_lowercase()
+    } else {
+        raw.into_owned()
+    };
+    fingerprint_hash(&[normalized.as_str()])
+}
+
+/// The worktree-collapsed repo identity used to KEY the per-project store file.
+/// Every linked worktree of a repo shares one common dir, so they collapse onto
+/// one history. Falls back to the canonicalized root for non-git projects
+/// (predictable; a container mount path that changes between host and container
+/// produces a different key, documented as a known bound).
+fn impact_project_key(root: &Path) -> String {
+    let identity = fallow_core::changed_files::resolve_git_common_dir(root)
+        .ok()
+        .or_else(|| dunce::canonicalize(root).ok())
+        .unwrap_or_else(|| root.to_path_buf());
+    hash_path_identity(&identity)
+}
+
+/// Per-WORKTREE identity. Used only to namespace the attribution frontier
+/// inside the repo-collapsed store, so two worktrees of one repo do not prune
+/// each other's per-file baseline (the frontier is pruned to on-disk files
+/// every run). Falls back to the canonicalized root for non-git projects.
+fn worktree_key(root: &Path) -> String {
+    let identity = fallow_core::changed_files::resolve_git_toplevel(root)
+        .ok()
+        .or_else(|| dunce::canonicalize(root).ok())
+        .unwrap_or_else(|| root.to_path_buf());
+    hash_path_identity(&identity)
+}
+
+/// Resolve (and memoize) the `(project_key, worktree_key)` pair for `root`.
+fn project_identity(root: &Path) -> (String, String) {
+    let cache = IDENTITY_CACHE.get_or_init(|| std::sync::Mutex::new(FxHashMap::default()));
+    if let Ok(map) = cache.lock()
+        && let Some(found) = map.get(root)
+    {
+        return found.clone();
+    }
+    let identity = (impact_project_key(root), worktree_key(root));
+    if let Ok(mut map) = cache.lock() {
+        map.insert(root.to_path_buf(), identity.clone());
+    }
+    identity
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Per-test override of the user config dir, so parallel tests get isolated
+    /// stores (the real config dir is process-global and would collide). Set via
+    /// [`with_test_config_dir`]; unset = fall back to the real config dir.
+    static TEST_CONFIG_DIR: std::cell::RefCell<Option<PathBuf>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Fallow's per-user config dir. Under test it resolves ONLY the per-test
+/// override (or `None` when unset), so a test never reads or writes the real
+/// developer config dir and parallel tests stay isolated.
+fn impact_config_dir() -> Option<PathBuf> {
+    #[cfg(test)]
+    {
+        TEST_CONFIG_DIR.with(|c| c.borrow().clone())
+    }
+    #[cfg(not(test))]
+    {
+        crate::telemetry::config_dir()
+    }
+}
+
+/// Path to the per-project store file in the user's private config dir, or
+/// `None` when no config dir is resolvable (e.g. stripped CI env), in which
+/// case Impact is inert (no persistence). NEVER writes into the analyzed repo.
+fn store_path(root: &Path) -> Option<PathBuf> {
+    let (project_key, _) = project_identity(root);
+    Some(
+        impact_config_dir()?
+            .join("impact")
+            .join(format!("{project_key}.json")),
+    )
+}
+
+/// Path to a project's legacy in-repo store (`<root>/.fallow/impact.json`),
+/// read ONCE for migration into the user store, never written.
+fn legacy_store_path(root: &Path) -> PathBuf {
     root.join(".fallow").join(STORE_FILE)
 }
 
 /// Load the store. Missing or unreadable files fall back to defaults; unreadable
 /// files are warned about rather than silently disabling tracking.
 pub fn load(root: &Path) -> ImpactStore {
-    let path = store_path(root);
-    let Ok(content) = std::fs::read_to_string(&path) else {
+    let Some(path) = store_path(root) else {
         return ImpactStore::default();
     };
-    match serde_json::from_str::<ImpactStore>(&content) {
+    match std::fs::read_to_string(&path) {
+        Ok(content) => parse_store(&content, &path),
+        // No user-store file yet: attempt a one-time import of a legacy in-repo
+        // `.fallow/impact.json` (pre-relocation). Returns default if none.
+        Err(_) => migrate_legacy_store(root),
+    }
+}
+
+fn parse_store(content: &str, path: &Path) -> ImpactStore {
+    match serde_json::from_str::<ImpactStore>(content) {
         Ok(store) => {
             if store.schema_version > STORE_SCHEMA_VERSION {
                 tracing::warn!(
@@ -201,9 +380,12 @@ pub fn load(root: &Path) -> ImpactStore {
     }
 }
 
-/// Persist the store best-effort using atomic replace.
+/// Persist the store best-effort using atomic replace. No-op when no config dir
+/// is resolvable (e.g. stripped CI env). NEVER writes into the analyzed repo.
 fn save(store: &ImpactStore, root: &Path) {
-    let path = store_path(root);
+    let Some(path) = store_path(root) else {
+        return;
+    };
     if let Some(parent) = path.parent()
         && std::fs::create_dir_all(parent).is_err()
     {
@@ -214,7 +396,30 @@ fn save(store: &ImpactStore, root: &Path) {
     }
 }
 
-/// Enable Impact tracking and ensure `.fallow/` is gitignored.
+/// One-time import of a pre-relocation in-repo `.fallow/impact.json` into the
+/// user store. The legacy store had a FLAT frontier (schema <= 3); this reads
+/// it via [`LegacyFlatStore`] and wraps the flat frontier under the current
+/// worktree key. The legacy file is left byte-for-byte untouched (it is no
+/// longer read once the user store exists; re-running finds the user store and
+/// does not re-import). Monorepo note: N subdir stores share one repo key, so
+/// whichever subdir runs first wins (pick-first); the others are not merged.
+fn migrate_legacy_store(root: &Path) -> ImpactStore {
+    let legacy_path = legacy_store_path(root);
+    let Ok(content) = std::fs::read_to_string(&legacy_path) else {
+        return ImpactStore::default();
+    };
+    let Ok(legacy) = serde_json::from_str::<LegacyFlatStore>(&content) else {
+        return ImpactStore::default();
+    };
+    let (_, worktree) = project_identity(root);
+    let store = legacy.into_store(&worktree);
+    save(&store, root);
+    store
+}
+
+/// Enable Impact tracking for THIS project (an explicit per-repo decision that
+/// overrides the user-global default). Writes nothing into the repo: the store
+/// lives in the user config dir.
 pub fn enable(root: &Path) -> bool {
     let mut store = load(root);
     let was_enabled = store.enabled;
@@ -224,26 +429,7 @@ pub fn enable(root: &Path) -> bool {
         store.schema_version = STORE_SCHEMA_VERSION;
     }
     save(&store, root);
-    ensure_fallow_gitignored(root);
     !was_enabled
-}
-
-/// Append `.fallow/` to `.gitignore` if needed.
-fn ensure_fallow_gitignored(root: &Path) {
-    let path = root.join(".gitignore");
-    let existing = std::fs::read_to_string(&path).unwrap_or_default();
-    let already = existing
-        .lines()
-        .any(|line| matches!(line.trim(), ".fallow" | ".fallow/"));
-    if already {
-        return;
-    }
-    let mut contents = existing;
-    if !contents.is_empty() && !contents.ends_with('\n') {
-        contents.push('\n');
-    }
-    contents.push_str(".fallow/\n");
-    let _ = fallow_config::atomic_write(&path, contents.as_bytes());
 }
 
 /// Disable Impact tracking. Retains existing history. Returns whether it was
@@ -282,7 +468,7 @@ const DIGEST_INTERVAL_SECS: u64 = 7 * 24 * 60 * 60;
 /// the emitted step simply defers the digest to the next interval.
 pub fn take_due_digest(root: &Path) -> Option<ImpactDigest> {
     let mut store = load(root);
-    if !store.enabled {
+    if !resolve_enabled(&store).0 {
         return None;
     }
     let containment_count = store.containment.len();
@@ -306,7 +492,8 @@ pub fn take_due_digest(root: &Path) -> Option<ImpactDigest> {
     })
 }
 
-/// Persist that the local user declined the agent onboarding prompt.
+/// Persist that the local user declined the agent onboarding prompt. Writes
+/// only to the user store; nothing is written into the repo.
 pub fn decline_onboarding(root: &Path) -> bool {
     let mut store = load(root);
     let was_declined = store.onboarding_declined;
@@ -315,8 +502,114 @@ pub fn decline_onboarding(root: &Path) -> bool {
         store.schema_version = STORE_SCHEMA_VERSION;
     }
     save(&store, root);
-    ensure_fallow_gitignored(root);
     !was_declined
+}
+
+/// Why Impact tracking is (or is not) active for a project. `Project` = an
+/// explicit per-repo `enable`; `User` = the user-global default with no per-repo
+/// decision; `Default` = off (no per-repo decision and no global default).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "lowercase")]
+pub enum EnabledSource {
+    Project,
+    User,
+    Default,
+}
+
+/// The user-global Impact default, stored at `<config-dir>/fallow/impact.json`
+/// (sibling to `telemetry.json`). A single toggle: when on, new projects record
+/// without a per-repo `enable`. A per-repo explicit decision always wins.
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct GlobalImpactConfig {
+    #[serde(default)]
+    default_enabled: bool,
+}
+
+fn global_config_path() -> Option<PathBuf> {
+    Some(impact_config_dir()?.join(STORE_FILE))
+}
+
+/// Whether the user-global default is on. False when unset or unreadable.
+fn load_global_default() -> bool {
+    let Some(path) = global_config_path() else {
+        return false;
+    };
+    std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|c| serde_json::from_str::<GlobalImpactConfig>(&c).ok())
+        .is_some_and(|c| c.default_enabled)
+}
+
+/// Set the user-global default. Returns whether the value changed.
+pub fn set_global_default(on: bool) -> bool {
+    let was = load_global_default();
+    if let Some(path) = global_config_path() {
+        if let Some(parent) = path.parent()
+            && std::fs::create_dir_all(parent).is_err()
+        {
+            return false;
+        }
+        let config = GlobalImpactConfig {
+            default_enabled: on,
+        };
+        if let Ok(json) = serde_json::to_string_pretty(&config) {
+            let _ = fallow_config::atomic_write(&path, json.as_bytes());
+        }
+    }
+    was != on
+}
+
+/// Resolve whether Impact is active for this project and WHY. Precedence:
+/// per-repo decision (enable/disable) > user-global default > off.
+///
+/// `enabled == true` is itself an explicit project opt-in (somebody ran
+/// `enable` here), so it wins even when `explicit_decision` is unset, which is
+/// the case for stores written before the `explicit_decision` field existed. A
+/// store that is off-but-explicitly-decided (`!enabled && explicit_decision`)
+/// stays off as a Project decision (the user disabled it here). Only a truly
+/// never-asked store (`!enabled && !explicit_decision`) consults the global
+/// default.
+fn resolve_enabled(store: &ImpactStore) -> (bool, EnabledSource) {
+    if store.enabled {
+        return (true, EnabledSource::Project);
+    }
+    if store.explicit_decision {
+        return (false, EnabledSource::Project);
+    }
+    if load_global_default() {
+        return (true, EnabledSource::User);
+    }
+    (false, EnabledSource::Default)
+}
+
+/// The resolved per-project store-file path for `root`, for `status` display
+/// (so a wrong key is debuggable). `None` when no config dir is resolvable.
+#[must_use]
+pub fn resolved_store_path(root: &Path) -> Option<PathBuf> {
+    store_path(root)
+}
+
+/// The resolved (worktree-collapsed) project key for `root`, for display.
+#[must_use]
+pub fn resolved_project_key(root: &Path) -> String {
+    project_identity(root).0
+}
+
+/// Delete THIS project's store file. Returns whether a file was removed.
+pub fn reset(root: &Path) -> bool {
+    store_path(root).is_some_and(|p| std::fs::remove_file(&p).is_ok())
+}
+
+/// Delete the whole per-project impact dir (`<config-dir>/fallow/impact/`).
+/// Does NOT touch the global default toggle (`impact.json`): a data wipe should
+/// not silently re-disable an opt-in the user made. Returns whether the dir was
+/// present and removed.
+pub fn reset_all() -> bool {
+    let Some(dir) = impact_config_dir().map(|d| d.join("impact")) else {
+        return false;
+    };
+    dir.is_dir() && std::fs::remove_dir_all(&dir).is_ok()
 }
 
 /// Record an audit run into the rolling store.
@@ -338,8 +631,15 @@ pub fn record_audit_run(root: &Path, summary: &AuditSummary, record: &AuditRunRe
         timestamp,
         attribution,
     } = record;
+    // Impact is a LOCAL-DEV signal. Never record in CI: a user-global default
+    // baked into a devcontainer/dotfiles image would otherwise start writing
+    // per-project files on every CI run (pre-relocation this was emergent from
+    // a fresh CI checkout having no in-repo store file; now it is explicit).
+    if crate::telemetry::is_ci() {
+        return;
+    }
     let mut store = load(root);
-    if !store.enabled {
+    if !resolve_enabled(&store).0 {
         return;
     }
     store.schema_version = STORE_SCHEMA_VERSION;
@@ -364,7 +664,8 @@ pub fn record_audit_run(root: &Path, summary: &AuditSummary, record: &AuditRunRe
     compact(&mut store);
 
     if let Some(attribution) = attribution {
-        apply_attribution(&mut store, attribution, *git_sha, timestamp);
+        let (_, worktree) = project_identity(root);
+        apply_attribution(&mut store, attribution, &worktree, *git_sha, timestamp);
     }
 
     save(&store, root);
@@ -379,8 +680,11 @@ pub fn record_combined_run(
     timestamp: &str,
     attribution: Option<&AttributionInput<'_>>,
 ) {
+    if crate::telemetry::is_ci() {
+        return;
+    }
     let mut store = load(root);
-    if !store.enabled {
+    if !resolve_enabled(&store).0 {
         return;
     }
     store.schema_version = STORE_SCHEMA_VERSION;
@@ -408,7 +712,8 @@ pub fn record_combined_run(
     }
 
     if let Some(attribution) = attribution {
-        apply_attribution(&mut store, attribution, git_sha, timestamp);
+        let (_, worktree) = project_identity(root);
+        apply_attribution(&mut store, attribution, &worktree, git_sha, timestamp);
     }
 
     save(&store, root);
@@ -489,16 +794,32 @@ fn covered_by(present: &FxHashSet<String>, kind: &str) -> bool {
     present.contains(BLANKET_SUPPRESSION) || present.contains(kind)
 }
 
+/// A single worktree's flat per-file attribution baseline (rel-path -> findings).
+type FlatFrontier = FxHashMap<String, FileFrontier>;
+/// A single worktree's flat clone baseline (fingerprint -> instance paths).
+type FlatCloneFrontier = FxHashMap<String, Vec<String>>;
+
 fn apply_attribution(
     store: &mut ImpactStore,
     input: &AttributionInput<'_>,
+    worktree_key: &str,
     git_sha: Option<&str>,
     timestamp: &str,
 ) {
     let root = input.root;
+    // Pull THIS worktree's baseline out of the (repo-collapsed) store into owned
+    // flat locals. The helpers mutate these locals plus the shared totals on
+    // `store`; because the locals are owned (not borrowed from `store`) there is
+    // no aliasing with the `store.resolved_total` / `recent_resolved` writes.
+    let mut frontier: FlatFrontier = store.frontier.remove(worktree_key).unwrap_or_default();
+    let mut clone_frontier: FlatCloneFrontier = store
+        .clone_frontier
+        .remove(worktree_key)
+        .unwrap_or_default();
+
     let changed: FxHashSet<String> = match input.scope {
         Scope::ChangedFiles(files) => files.iter().map(|p| format_display_path(p, root)).collect(),
-        Scope::WholeProject => whole_project_scope(store, input, root),
+        Scope::WholeProject => whole_project_scope(&frontier, &clone_frontier, input, root),
     };
 
     let mut current_findings: FxHashMap<String, Vec<FrontierFinding>> = FxHashMap::default();
@@ -532,8 +853,7 @@ fn apply_attribution(
 
     let mut appeared_move_keys: FxHashSet<String> = FxHashSet::default();
     for (rel, findings) in &current_findings {
-        let prior_ids: FxHashSet<&str> = store
-            .frontier
+        let prior_ids: FxHashSet<&str> = frontier
             .get(rel)
             .map(|f| f.findings.iter().map(|x| x.id.as_str()).collect())
             .unwrap_or_default();
@@ -548,6 +868,7 @@ fn apply_attribution(
 
     let mut disappearance_input = FileDisappearancesInput {
         store,
+        frontier: &frontier,
         changed: &changed,
         current_findings: &current_findings,
         current_supps: &current_supps,
@@ -556,19 +877,43 @@ fn apply_attribution(
         timestamp,
     };
     classify_file_disappearances(&mut disappearance_input);
-    update_file_frontier(store, &changed, current_findings, current_supps);
-    classify_clone_disappearances(store, input, &changed, git_sha, timestamp);
-    prune_frontier(store, root);
+    update_file_frontier(&mut frontier, &changed, current_findings, current_supps);
+    classify_clone_disappearances(
+        store,
+        &frontier,
+        &mut clone_frontier,
+        input,
+        &changed,
+        git_sha,
+        timestamp,
+    );
+    prune_frontier(&mut frontier, &mut clone_frontier, root);
     bound_recent_resolved(store);
+
+    // Store this worktree's baseline back; drop the worktree key entirely when
+    // empty so deleted/abandoned worktrees do not accumulate.
+    if frontier.is_empty() {
+        store.frontier.remove(worktree_key);
+    } else {
+        store.frontier.insert(worktree_key.to_owned(), frontier);
+    }
+    if clone_frontier.is_empty() {
+        store.clone_frontier.remove(worktree_key);
+    } else {
+        store
+            .clone_frontier
+            .insert(worktree_key.to_owned(), clone_frontier);
+    }
 }
 
 fn whole_project_scope(
-    store: &ImpactStore,
+    frontier: &FlatFrontier,
+    clone_frontier: &FlatCloneFrontier,
     input: &AttributionInput<'_>,
     root: &Path,
 ) -> FxHashSet<String> {
-    let mut set: FxHashSet<String> = store.frontier.keys().cloned().collect();
-    for paths in store.clone_frontier.values() {
+    let mut set: FxHashSet<String> = frontier.keys().cloned().collect();
+    for paths in clone_frontier.values() {
         for p in paths {
             set.insert(p.clone());
         }
@@ -586,6 +931,7 @@ fn whole_project_scope(
 
 struct FileDisappearancesInput<'a> {
     store: &'a mut ImpactStore,
+    frontier: &'a FlatFrontier,
     changed: &'a FxHashSet<String>,
     current_findings: &'a FxHashMap<String, Vec<FrontierFinding>>,
     current_supps: &'a FxHashMap<String, FxHashSet<String>>,
@@ -596,6 +942,7 @@ struct FileDisappearancesInput<'a> {
 
 fn classify_file_disappearances(input: &mut FileDisappearancesInput<'_>) {
     let store = &mut *input.store;
+    let frontier = input.frontier;
     let changed = input.changed;
     let current_findings = input.current_findings;
     let current_supps = input.current_supps;
@@ -604,7 +951,7 @@ fn classify_file_disappearances(input: &mut FileDisappearancesInput<'_>) {
     let timestamp = input.timestamp;
     let empty_supps = FxHashSet::default();
     for rel in changed {
-        let Some(prior) = store.frontier.get(rel) else {
+        let Some(prior) = frontier.get(rel) else {
             continue;
         };
         let now_ids: FxHashSet<&str> = current_findings
@@ -649,7 +996,7 @@ fn classify_file_disappearances(input: &mut FileDisappearancesInput<'_>) {
 }
 
 fn update_file_frontier(
-    store: &mut ImpactStore,
+    frontier: &mut FlatFrontier,
     changed: &FxHashSet<String>,
     mut current_findings: FxHashMap<String, Vec<FrontierFinding>>,
     mut current_supps: FxHashMap<String, FxHashSet<String>>,
@@ -663,9 +1010,9 @@ fn update_file_frontier(
             .collect();
         suppressions.sort_unstable();
         if findings.is_empty() && suppressions.is_empty() {
-            store.frontier.remove(rel);
+            frontier.remove(rel);
         } else {
-            store.frontier.insert(
+            frontier.insert(
                 rel.clone(),
                 FileFrontier {
                     findings,
@@ -678,6 +1025,8 @@ fn update_file_frontier(
 
 fn classify_clone_disappearances(
     store: &mut ImpactStore,
+    frontier: &FlatFrontier,
+    clone_frontier: &mut FlatCloneFrontier,
     input: &AttributionInput<'_>,
     changed: &FxHashSet<String>,
     git_sha: Option<&str>,
@@ -701,7 +1050,7 @@ fn classify_clone_disappearances(
     let dup_suppressed = |paths: &[String]| -> bool {
         paths.iter().any(|p| {
             changed.contains(p)
-                && store.frontier.get(p).is_some_and(|f| {
+                && frontier.get(p).is_some_and(|f| {
                     f.suppressions
                         .iter()
                         .any(|k| k == CODE_DUPLICATION_KIND || k == BLANKET_SUPPRESSION)
@@ -711,8 +1060,7 @@ fn classify_clone_disappearances(
 
     let still_duplicated: FxHashSet<&String> = current.values().flatten().collect();
 
-    let disappeared: Vec<(String, Vec<String>)> = store
-        .clone_frontier
+    let disappeared: Vec<(String, Vec<String>)> = clone_frontier
         .iter()
         .filter(|(fp, paths)| {
             paths.iter().any(|p| changed.contains(p)) && !current.contains_key(*fp)
@@ -721,7 +1069,7 @@ fn classify_clone_disappearances(
         .collect();
 
     for (fp, paths) in disappeared {
-        store.clone_frontier.remove(&fp);
+        clone_frontier.remove(&fp);
         if paths.iter().any(|p| still_duplicated.contains(p)) {
             continue;
         }
@@ -741,15 +1089,17 @@ fn classify_clone_disappearances(
     }
 
     for (fp, paths) in current {
-        store.clone_frontier.insert(fp, paths);
+        clone_frontier.insert(fp, paths);
     }
 }
 
-fn prune_frontier(store: &mut ImpactStore, root: &Path) {
-    store.frontier.retain(|rel, _| root.join(rel).exists());
-    store
-        .clone_frontier
-        .retain(|_, paths| paths.iter().any(|p| root.join(p).exists()));
+fn prune_frontier(
+    frontier: &mut FlatFrontier,
+    clone_frontier: &mut FlatCloneFrontier,
+    root: &Path,
+) {
+    frontier.retain(|rel, _| root.join(rel).exists());
+    clone_frontier.retain(|_, paths| paths.iter().any(|p| root.join(p).exists()));
 }
 
 fn bound_recent_resolved(store: &mut ImpactStore) {
@@ -1053,6 +1403,13 @@ pub struct ImpactReport {
     /// present; bumped only on a breaking change to this report's wire shape.
     pub schema_version: ImpactReportSchemaVersion,
     pub enabled: bool,
+    /// WHY tracking is on or off: `project` (an explicit per-repo enable/disable
+    /// decision), `user` (the user-global default with no per-repo decision), or
+    /// `default` (off, no per-repo decision and no global default). Combine with
+    /// `explicit_decision` to tell a never-asked off-state (`enabled:false`,
+    /// `explicit_decision:false`, offer to enable) from a declined-here one
+    /// (`enabled:false`, `explicit_decision:true`, do not nag).
+    pub enabled_source: EnabledSource,
     pub record_count: usize,
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
@@ -1102,7 +1459,8 @@ pub struct ImpactReport {
     /// "resolution tracking starts from your next run" instead of a bare zero.
     pub attribution_active: bool,
     /// Whether the local agent onboarding prompt has been explicitly declined.
-    /// Stored under `.fallow/` so agents can avoid cross-session nags.
+    /// Stored in the user config dir (per project) so agents avoid cross-session
+    /// nags without writing into the repo.
     pub onboarding_declined: bool,
     /// Whether the user ever made an explicit enable/disable decision for
     /// Impact tracking. `enabled: false` with `explicit_decision: false` means
@@ -1163,9 +1521,11 @@ pub fn build_report(store: &ImpactStore) -> ImpactReport {
         || store.resolved_total > 0
         || store.suppressed_total > 0;
 
+    let (enabled, enabled_source) = resolve_enabled(store);
     ImpactReport {
         schema_version: ImpactReportSchemaVersion::V1,
-        enabled: store.enabled,
+        enabled,
+        enabled_source,
         record_count: store.records.len(),
         meta: None,
         first_recorded: store.first_recorded.clone(),
@@ -1469,6 +1829,45 @@ const fn trend_arrow(direction: ImpactTrendDirection) -> &'static str {
 mod tests {
     use super::*;
 
+    /// Per-test isolation: a fresh user-config dir (so the store never touches
+    /// the real dir and parallel tests do not collide) plus a fresh project
+    /// root. Bind BOTH returned `TempDir`s for the test's lifetime. The store
+    /// for a non-git tempdir root keys on the canonical root, so each test's
+    /// root is its own store.
+    fn test_env() -> (tempfile::TempDir, tempfile::TempDir) {
+        let config = tempfile::tempdir().unwrap();
+        TEST_CONFIG_DIR.with(|c| *c.borrow_mut() = Some(config.path().to_path_buf()));
+        let root = tempfile::tempdir().unwrap();
+        (config, root)
+    }
+
+    /// All frontier rel-paths across every worktree sub-map (tests use one
+    /// root => one worktree key), for the v4 nested-frontier shape.
+    fn frontier_paths(store: &ImpactStore) -> FxHashSet<String> {
+        store
+            .frontier
+            .values()
+            .flat_map(|m| m.keys().cloned())
+            .collect()
+    }
+
+    /// All clone fingerprints across every worktree sub-map.
+    fn clone_fingerprints(store: &ImpactStore) -> FxHashSet<String> {
+        store
+            .clone_frontier
+            .values()
+            .flat_map(|m| m.keys().cloned())
+            .collect()
+    }
+
+    /// Seed raw bytes at the resolved (user-dir) store path, creating parent
+    /// dirs, to exercise the load/parse path against hand-authored JSON.
+    fn seed_store_raw(root: &Path, bytes: &[u8]) {
+        let path = store_path(root).expect("test config dir set");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, bytes).unwrap();
+    }
+
     fn summary(dead: usize, complexity: usize, dupes: usize) -> AuditSummary {
         AuditSummary {
             dead_code_issues: dead,
@@ -1563,7 +1962,7 @@ mod tests {
 
     #[test]
     fn disabled_store_does_not_record() {
-        let dir = tempfile::tempdir().unwrap();
+        let (_config, dir) = test_env();
         let root = dir.path();
         record_v1(
             root,
@@ -1581,7 +1980,7 @@ mod tests {
 
     #[test]
     fn enable_and_disable_record_the_explicit_decision() {
-        let dir = tempfile::tempdir().unwrap();
+        let (_config, dir) = test_env();
         let root = dir.path();
         assert!(!load(root).explicit_decision, "fresh store: never asked");
 
@@ -1595,7 +1994,7 @@ mod tests {
 
     #[test]
     fn due_digest_stamps_and_respects_interval_and_gates() {
-        let dir = tempfile::tempdir().unwrap();
+        let (_config, dir) = test_env();
         let root = dir.path();
 
         // Disabled, or enabled with zero value: never due.
@@ -1630,7 +2029,7 @@ mod tests {
 
     #[test]
     fn decline_onboarding_persists_in_existing_store() {
-        let dir = tempfile::tempdir().unwrap();
+        let (_config, dir) = test_env();
         let root = dir.path();
 
         assert!(decline_onboarding(root));
@@ -1639,14 +2038,15 @@ mod tests {
         let store = load(root);
         assert!(store.onboarding_declined);
         assert_eq!(store.schema_version, STORE_SCHEMA_VERSION);
-        assert!(root.join(".gitignore").exists());
+        // Decline persists in the user store and writes nothing into the repo.
+        assert!(!root.join(".gitignore").exists());
         let report = build_report(&store);
         assert!(report.onboarding_declined);
     }
 
     #[test]
     fn enable_then_record_accrues_history() {
-        let dir = tempfile::tempdir().unwrap();
+        let (_config, dir) = test_env();
         let root = dir.path();
         assert!(enable(root));
         assert!(!enable(root)); // second enable is a no-op-ish (already on)
@@ -1669,22 +2069,25 @@ mod tests {
     }
 
     #[test]
-    fn enable_gitignores_the_store() {
-        let dir = tempfile::tempdir().unwrap();
+    fn enable_writes_nothing_into_the_repo() {
+        let (_config, dir) = test_env();
         let root = dir.path();
         enable(root);
-        let gitignore = std::fs::read_to_string(root.join(".gitignore")).unwrap();
+        // The user-store relocation means enable never touches the repo: no
+        // .gitignore mutation and no in-repo .fallow/ dir.
         assert!(
-            gitignore.lines().any(|l| l.trim() == ".fallow/"),
-            "enable must gitignore .fallow/, got: {gitignore:?}"
+            !root.join(".gitignore").exists(),
+            "enable must not create or modify the repo's .gitignore"
         );
-        enable(root);
-        let gitignore = std::fs::read_to_string(root.join(".gitignore")).unwrap();
-        assert_eq!(
-            gitignore.lines().filter(|l| l.trim() == ".fallow/").count(),
-            1,
-            "re-enabling must not duplicate the .fallow/ entry"
+        assert!(
+            !root.join(".fallow").exists(),
+            "enable must not create an in-repo .fallow/ dir"
         );
+        // The decision IS persisted, in the user store.
+        let store = load(root);
+        assert!(store.enabled);
+        assert!(store.explicit_decision);
+        assert!(resolve_enabled(&store).0);
     }
 
     #[test]
@@ -1763,7 +2166,7 @@ mod tests {
 
     #[test]
     fn containment_blocked_then_cleared_records_one_event() {
-        let dir = tempfile::tempdir().unwrap();
+        let (_config, dir) = test_env();
         let root = dir.path();
         enable(root);
         record_v1(
@@ -1797,7 +2200,7 @@ mod tests {
 
     #[test]
     fn non_gate_run_never_creates_containment() {
-        let dir = tempfile::tempdir().unwrap();
+        let (_config, dir) = test_env();
         let root = dir.path();
         enable(root);
         record_v1(
@@ -1816,10 +2219,9 @@ mod tests {
 
     #[test]
     fn corrupt_store_loads_as_default_no_panic() {
-        let dir = tempfile::tempdir().unwrap();
+        let (_config, dir) = test_env();
         let root = dir.path();
-        std::fs::create_dir_all(root.join(".fallow")).unwrap();
-        std::fs::write(store_path(root), b"{ not valid json ][").unwrap();
+        seed_store_raw(root, b"{ not valid json ][");
         let store = load(root);
         assert!(!store.enabled);
         assert!(store.records.is_empty());
@@ -1920,14 +2322,13 @@ mod tests {
 
     #[test]
     fn future_schema_version_store_loads_without_panic_or_loss() {
-        let dir = tempfile::tempdir().unwrap();
+        let (_config, dir) = test_env();
         let root = dir.path();
-        std::fs::create_dir_all(root.join(".fallow")).unwrap();
         let future = format!(
             "{{\"schema_version\":{},\"enabled\":true,\"records\":[],\"containment\":[]}}",
             STORE_SCHEMA_VERSION + 1
         );
-        std::fs::write(store_path(root), future).unwrap();
+        seed_store_raw(root, future.as_bytes());
         let store = load(root);
         assert_eq!(store.schema_version, STORE_SCHEMA_VERSION + 1);
         assert!(
@@ -1938,7 +2339,7 @@ mod tests {
 
     #[test]
     fn removed_finding_is_credited_as_resolved() {
-        let dir = tempfile::tempdir().unwrap();
+        let (_config, dir) = test_env();
         let root = dir.path();
         enable(root);
         let a = touch(root, "src/a.ts");
@@ -1967,7 +2368,7 @@ mod tests {
 
     #[test]
     fn suppressed_finding_is_not_a_win() {
-        let dir = tempfile::tempdir().unwrap();
+        let (_config, dir) = test_env();
         let root = dir.path();
         enable(root);
         let a = touch(root, "src/a.ts");
@@ -1997,7 +2398,7 @@ mod tests {
 
     #[test]
     fn fix_and_suppress_same_kind_credits_zero_resolved() {
-        let dir = tempfile::tempdir().unwrap();
+        let (_config, dir) = test_env();
         let root = dir.path();
         enable(root);
         let a = touch(root, "src/a.ts");
@@ -2027,7 +2428,7 @@ mod tests {
 
     #[test]
     fn within_file_move_is_not_resolved() {
-        let dir = tempfile::tempdir().unwrap();
+        let (_config, dir) = test_env();
         let root = dir.path();
         enable(root);
         let a = touch(root, "src/a.ts");
@@ -2054,7 +2455,7 @@ mod tests {
 
     #[test]
     fn cross_file_move_in_same_run_is_not_resolved() {
-        let dir = tempfile::tempdir().unwrap();
+        let (_config, dir) = test_env();
         let root = dir.path();
         enable(root);
         let a = touch(root, "src/a.ts");
@@ -2084,7 +2485,7 @@ mod tests {
 
     #[test]
     fn cross_run_move_uncredits_the_prior_resolution() {
-        let dir = tempfile::tempdir().unwrap();
+        let (_config, dir) = test_env();
         let root = dir.path();
         enable(root);
         let a = touch(root, "src/a.ts");
@@ -2124,7 +2525,7 @@ mod tests {
 
     #[test]
     fn resolved_complexity_finding_and_suppressed_complexity() {
-        let dir = tempfile::tempdir().unwrap();
+        let (_config, dir) = test_env();
         let root = dir.path();
         enable(root);
         let a = touch(root, "src/a.ts");
@@ -2156,7 +2557,7 @@ mod tests {
 
     #[test]
     fn resolved_duplication_clone_group() {
-        let dir = tempfile::tempdir().unwrap();
+        let (_config, dir) = test_env();
         let root = dir.path();
         enable(root);
         let a = touch(root, "src/a.ts");
@@ -2174,7 +2575,7 @@ mod tests {
 
     #[test]
     fn blanket_suppression_covers_any_kind() {
-        let dir = tempfile::tempdir().unwrap();
+        let (_config, dir) = test_env();
         let root = dir.path();
         enable(root);
         let a = touch(root, "src/a.ts");
@@ -2199,11 +2600,10 @@ mod tests {
 
     #[test]
     fn v1_store_loads_and_upgrades_to_v2() {
-        let dir = tempfile::tempdir().unwrap();
+        let (_config, dir) = test_env();
         let root = dir.path();
-        std::fs::create_dir_all(root.join(".fallow")).unwrap();
         let v1 = r#"{"schema_version":1,"enabled":true,"first_recorded":"t0","records":[{"timestamp":"t0","version":"2.0.0","verdict":"warn","gate":false,"counts":{"total_issues":1,"dead_code":1,"complexity":0,"duplication":0}}],"containment":[]}"#;
-        std::fs::write(store_path(root), v1).unwrap();
+        seed_store_raw(root, v1.as_bytes());
         let store = load(root);
         assert_eq!(store.schema_version, 1);
         assert!(store.frontier.is_empty());
@@ -2219,7 +2619,7 @@ mod tests {
         );
         let store = load(root);
         assert_eq!(store.schema_version, STORE_SCHEMA_VERSION);
-        assert!(store.frontier.contains_key("src/a.ts"));
+        assert!(frontier_paths(&store).contains("src/a.ts"));
     }
 
     #[test]
@@ -2244,7 +2644,7 @@ mod tests {
 
     #[test]
     fn frontier_prunes_deleted_files() {
-        let dir = tempfile::tempdir().unwrap();
+        let (_config, dir) = test_env();
         let root = dir.path();
         enable(root);
         let a = touch(root, "src/a.ts");
@@ -2256,11 +2656,11 @@ mod tests {
             &[],
             "t0",
         );
-        assert!(load(root).frontier.contains_key("src/a.ts"));
+        assert!(frontier_paths(&load(root)).contains("src/a.ts"));
         std::fs::remove_file(&a).unwrap();
         let b = touch(root, "src/b.ts");
         run(root, &[&b], vec![], vec![], &[], "t1");
-        assert!(!load(root).frontier.contains_key("src/a.ts"));
+        assert!(!frontier_paths(&load(root)).contains("src/a.ts"));
     }
 
     #[test]
@@ -2289,6 +2689,7 @@ mod tests {
         let report = ImpactReport {
             schema_version: ImpactReportSchemaVersion::V1,
             enabled: true,
+            enabled_source: EnabledSource::Project,
             record_count: 2,
             meta: None,
             first_recorded: Some("2026-05-29T10:00:00Z".into()),
@@ -2362,7 +2763,7 @@ mod tests {
 
     #[test]
     fn whole_project_run_does_not_double_credit_after_audit() {
-        let dir = tempfile::tempdir().unwrap();
+        let (_config, dir) = test_env();
         let root = dir.path();
         enable(root);
         let a = touch(root, "src/a.ts");
@@ -2375,7 +2776,7 @@ mod tests {
             &[],
             "t1",
         );
-        assert_eq!(load(root).clone_frontier.len(), 1);
+        assert_eq!(clone_fingerprints(&load(root)).len(), 1);
 
         run(root, &[&a, &b], vec![], vec![], &[], "t2");
         assert_eq!(load(root).resolved_total, 1);
@@ -2391,7 +2792,7 @@ mod tests {
 
     #[test]
     fn whole_project_run_credits_suppressed_not_resolved() {
-        let dir = tempfile::tempdir().unwrap();
+        let (_config, dir) = test_env();
         let root = dir.path();
         enable(root);
         let util = touch(root, "src/util.ts");
@@ -2403,7 +2804,7 @@ mod tests {
             &[],
             "t1",
         );
-        assert_eq!(load(root).frontier.len(), 1);
+        assert_eq!(frontier_paths(&load(root)).len(), 1);
 
         run_wp(root, vec![], vec![], &[supp(&util, "unused-export")], "t2");
         let store = load(root);
@@ -2419,7 +2820,7 @@ mod tests {
 
     #[test]
     fn clone_reshape_three_to_two_not_credited_as_resolved() {
-        let dir = tempfile::tempdir().unwrap();
+        let (_config, dir) = test_env();
         let root = dir.path();
         enable(root);
         let a = touch(root, "src/a.ts");
@@ -2433,7 +2834,7 @@ mod tests {
             &[],
             "t1",
         );
-        assert_eq!(load(root).clone_frontier.len(), 1);
+        assert_eq!(clone_fingerprints(&load(root)).len(), 1);
 
         run_wp(
             root,
@@ -2447,8 +2848,8 @@ mod tests {
             store.resolved_total, 0,
             "clone reshape miscredited as resolved"
         );
-        assert!(store.clone_frontier.contains_key("dup:bbb"));
-        assert!(!store.clone_frontier.contains_key("dup:aaa"));
+        assert!(clone_fingerprints(&store).contains("dup:bbb"));
+        assert!(!clone_fingerprints(&store).contains("dup:aaa"));
     }
 
     fn rcounts(total: usize, dead: usize, complexity: usize, dup: usize) -> ImpactCounts {
@@ -2482,6 +2883,7 @@ mod tests {
         ImpactReport {
             schema_version: ImpactReportSchemaVersion::V1,
             enabled: true,
+            enabled_source: EnabledSource::Project,
             record_count,
             meta: None,
             first_recorded: first_recorded.map(ToOwned::to_owned),
@@ -2586,5 +2988,132 @@ mod tests {
             "project-only md must not show empty state"
         );
         assert!(md.contains("Tracking since 2026-05-30"));
+    }
+
+    #[test]
+    fn resolve_enabled_precedence_table() {
+        let (_config, _dir) = test_env();
+        // enabled-true is an explicit project opt-in regardless of the flag.
+        let on = ImpactStore {
+            enabled: true,
+            ..Default::default()
+        };
+        assert_eq!(resolve_enabled(&on), (true, EnabledSource::Project));
+
+        // explicitly disabled here stays off as a Project decision.
+        let off_explicit = ImpactStore {
+            enabled: false,
+            explicit_decision: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            resolve_enabled(&off_explicit),
+            (false, EnabledSource::Project)
+        );
+
+        // never-asked + no global default => off (Default).
+        let never = ImpactStore::default();
+        assert_eq!(resolve_enabled(&never), (false, EnabledSource::Default));
+
+        // never-asked + global default on => on (User).
+        assert!(set_global_default(true));
+        assert_eq!(resolve_enabled(&never), (true, EnabledSource::User));
+        // a per-repo disable still wins over the global default.
+        assert_eq!(
+            resolve_enabled(&off_explicit),
+            (false, EnabledSource::Project)
+        );
+    }
+
+    #[test]
+    fn global_default_round_trips() {
+        let (_config, _dir) = test_env();
+        assert!(!load_global_default());
+        assert!(set_global_default(true));
+        assert!(load_global_default());
+        assert!(!set_global_default(true)); // unchanged
+        assert!(set_global_default(false));
+        assert!(!load_global_default());
+    }
+
+    #[test]
+    fn global_default_records_without_per_repo_enable() {
+        let (_config, dir) = test_env();
+        let root = dir.path();
+        set_global_default(true);
+        // No `enable(root)` call: the global default alone should activate.
+        record_v1(
+            root,
+            &summary(2, 0, 0),
+            AuditVerdict::Warn,
+            false,
+            None,
+            "2.0.0",
+            "t0",
+        );
+        let report = build_report(&load(root));
+        assert!(report.enabled);
+        assert_eq!(report.enabled_source, EnabledSource::User);
+        assert_eq!(report.record_count, 1);
+    }
+
+    #[test]
+    fn legacy_in_repo_store_is_migrated_on_first_load() {
+        let (_config, dir) = test_env();
+        let root = dir.path();
+        // Seed a pre-relocation v3 store with a FLAT frontier in the repo.
+        let legacy = r#"{"schema_version":3,"enabled":true,"explicit_decision":true,
+            "records":[{"timestamp":"t0","version":"2.0.0","verdict":"warn","gate":false,
+            "counts":{"total_issues":1,"dead_code":1,"complexity":0,"duplication":0}}],
+            "resolved_total":2,
+            "frontier":{"src/a.ts":{"findings":[{"id":"x","kind":"unused-export","symbol":"foo"}],"suppressions":[]}},
+            "containment":[]}"#;
+        std::fs::create_dir_all(root.join(".fallow")).unwrap();
+        std::fs::write(legacy_store_path(root), legacy).unwrap();
+
+        let store = load(root);
+        assert!(store.enabled);
+        assert_eq!(store.schema_version, STORE_SCHEMA_VERSION);
+        assert_eq!(store.records.len(), 1);
+        assert_eq!(store.resolved_total, 2);
+        // The flat frontier was wrapped under the worktree key (nested v4 shape).
+        assert!(frontier_paths(&store).contains("src/a.ts"));
+        // The user store now exists, so a second load does NOT re-import (it
+        // reads the user store directly).
+        assert!(store_path(root).is_some_and(|p| p.exists()));
+        let again = load(root);
+        assert_eq!(again.records.len(), 1);
+    }
+
+    #[test]
+    fn reset_removes_only_this_project() {
+        let (_config, dir) = test_env();
+        let root = dir.path();
+        enable(root);
+        record_v1(
+            root,
+            &summary(1, 0, 0),
+            AuditVerdict::Warn,
+            false,
+            None,
+            "2.0.0",
+            "t0",
+        );
+        assert_eq!(load(root).records.len(), 1);
+        assert!(reset(root));
+        assert!(load(root).records.is_empty());
+        assert!(!reset(root)); // already gone
+    }
+
+    #[test]
+    fn reset_all_clears_dir_but_keeps_global_default() {
+        let (_config, dir) = test_env();
+        let root = dir.path();
+        set_global_default(true);
+        enable(root);
+        assert!(load(root).enabled);
+        assert!(reset_all());
+        // The global default toggle survives a data wipe.
+        assert!(load_global_default());
     }
 }
