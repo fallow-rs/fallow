@@ -624,6 +624,12 @@ export type GroupByMode = ("owner" | "directory" | "package" | "section")
  */
 export type ImpactReportSchemaVersion = "1"
 /**
+ * Why Impact tracking is (or is not) active for a project. `Project` = an
+ * explicit per-repo `enable`; `User` = the user-global default with no per-repo
+ * decision; `Default` = off (no per-repo decision and no global default).
+ */
+export type EnabledSource = ("project" | "user" | "default")
+/**
  * Direction of a count trend between two recorded runs.
  */
 export type ImpactTrendDirection = ("improving" | "declining" | "stable")
@@ -5209,6 +5215,7 @@ misconfigured_dependency_overrides?: MisconfiguredDependencyOverrideFinding[]
 export interface ImpactReport {
 schema_version: ImpactReportSchemaVersion
 enabled: boolean
+enabled_source: EnabledSource
 record_count: number
 _meta?: (Meta | null)
 first_recorded?: (string | null)
@@ -5272,7 +5279,8 @@ recent_resolved: ResolutionEvent[]
 attribution_active: boolean
 /**
  * Whether the local agent onboarding prompt has been explicitly declined.
- * Stored under `.fallow/` so agents can avoid cross-session nags.
+ * Stored in the user config dir (per project) so agents avoid cross-session
+ * nags without writing into the repo.
  */
 onboarding_declined: boolean
 /**

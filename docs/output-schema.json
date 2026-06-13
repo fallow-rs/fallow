@@ -9904,6 +9904,10 @@
         "enabled": {
           "type": "boolean"
         },
+        "enabled_source": {
+          "description": "WHY tracking is on or off: `project` (an explicit per-repo enable/disable\ndecision), `user` (the user-global default with no per-repo decision), or\n`default` (off, no per-repo decision and no global default). Combine with\n`explicit_decision` to tell a never-asked off-state (`enabled:false`,\n`explicit_decision:false`, offer to enable) from a declined-here one\n(`enabled:false`, `explicit_decision:true`, do not nag).",
+          "$ref": "#/definitions/EnabledSource"
+        },
         "record_count": {
           "type": "integer"
         },
@@ -10005,7 +10009,7 @@
         },
         "onboarding_declined": {
           "type": "boolean",
-          "description": "Whether the local agent onboarding prompt has been explicitly declined.\nStored under `.fallow/` so agents can avoid cross-session nags."
+          "description": "Whether the local agent onboarding prompt has been explicitly declined.\nStored in the user config dir (per project) so agents avoid cross-session\nnags without writing into the repo."
         },
         "explicit_decision": {
           "type": "boolean",
@@ -10015,6 +10019,7 @@
       "required": [
         "schema_version",
         "enabled",
+        "enabled_source",
         "record_count",
         "containment_count",
         "recent_containment",
@@ -12176,6 +12181,15 @@
         "cognitive"
       ],
       "description": "Current complexity metrics for a matched threshold override entry."
+    },
+    "EnabledSource": {
+      "type": "string",
+      "enum": [
+        "project",
+        "user",
+        "default"
+      ],
+      "description": "Why Impact tracking is (or is not) active for a project. `Project` = an\nexplicit per-repo `enable`; `User` = the user-global default with no per-repo\ndecision; `Default` = off (no per-repo decision and no global default)."
     }
   }
 }

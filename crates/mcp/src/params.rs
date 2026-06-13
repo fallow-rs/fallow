@@ -741,8 +741,9 @@ pub struct ListBoundariesParams {
 /// Parameters for the `impact` value-report tool.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 pub struct ImpactParams {
-    /// Project root directory whose local `.fallow/impact.json` value report to
-    /// read. Defaults to the current working directory.
+    /// Project root directory whose local value report to read. History is
+    /// stored per-project in the user's private config dir (never inside the
+    /// repo). Defaults to the current working directory.
     pub root: Option<String>,
 }
 
