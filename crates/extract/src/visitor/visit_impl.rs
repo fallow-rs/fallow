@@ -14,11 +14,11 @@ use crate::{
     MemberAccess, ReExportInfo, RequireCallInfo, VisibilityTag,
 };
 use fallow_types::extract::{
-    CalleeUse, ClassHeritageInfo, LocalTypeDeclaration, MisplacedDirectiveSite,
-    PublicSignatureTypeReference, SanitizedSinkArg, SanitizerScope, SecurityControlKind,
-    SecurityControlSite, SecurityUrlShape, SinkArgKind, SinkLiteralValue, SinkObjectProperty,
-    SinkShape, SinkSite, SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason,
-    SkippedSecurityCalleeSite, TaintedBinding,
+    CalleeUse, ClassHeritageInfo, LocalTypeDeclaration, MemberInfo, MemberKind,
+    MisplacedDirectiveSite, PublicSignatureTypeReference, SanitizedSinkArg, SanitizerScope,
+    SecurityControlKind, SecurityControlSite, SecurityUrlShape, SinkArgKind, SinkLiteralValue,
+    SinkObjectProperty, SinkShape, SinkSite, SkippedSecurityCalleeExpressionKind,
+    SkippedSecurityCalleeReason, SkippedSecurityCalleeSite, TaintedBinding,
 };
 
 use crate::asset_url::normalize_asset_url;
@@ -3396,6 +3396,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
             self.record_initialized_variable_bindings(decl, declarator, init);
             self.record_playwright_variable_helpers(declarator, init);
+            self.record_pinia_store(declarator, init);
 
             if let BindingPattern::BindingIdentifier(id) = &declarator.id
                 && let Expression::ObjectExpression(obj) = init
@@ -3537,6 +3538,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.record_arrow_wrapped_dynamic_import(expr);
 
         self.try_record_fluent_chain_access(expr);
+        self.record_pinia_map_helpers(expr);
 
         self.capture_security_call_sites(expr);
 
@@ -4661,6 +4663,124 @@ fn extract_arrow_return_expr<'a, 'b>(
         return Some(&stmt.expression);
     }
     extract_function_body_final_return_expr(&arrow.body)
+}
+
+/// Whether a call's callee is a bare `defineStore` identifier (Pinia). The
+/// harvest is loose here; the analyzer's `pinia` / `@pinia/nuxt` dependency
+/// gate is the activation boundary.
+fn is_define_store_callee(callee: &Expression<'_>) -> bool {
+    matches!(callee, Expression::Identifier(id) if id.name.as_str() == "defineStore")
+}
+
+fn unwrap_paren_expr<'a, 'b>(expr: &'b Expression<'a>) -> &'b Expression<'a> {
+    match expr {
+        Expression::ParenthesizedExpression(paren) => &paren.expression,
+        other => other,
+    }
+}
+
+/// Harvest declared store members from a `defineStore('id', <arg>)` second
+/// argument. Option store: `state` returned-object keys + `getters` keys +
+/// `actions` keys. Setup store: the last return statement's object-literal
+/// keys. Names starting with `$` (Pinia's `$patch` / `$reset` / `$subscribe`
+/// API) are excluded. A setup store whose returned object spreads (`...base`)
+/// abstains (returns `None`), keeping the whole store opaque.
+fn harvest_define_store_members(args: &[Argument<'_>]) -> Option<Vec<MemberInfo>> {
+    let second = args.get(1)?.as_expression()?;
+    match unwrap_paren_expr(second) {
+        Expression::ObjectExpression(obj) => Some(harvest_option_store(obj)),
+        Expression::ArrowFunctionExpression(arrow) => {
+            harvest_setup_return(extract_arrow_return_expr(arrow)?)
+        }
+        Expression::FunctionExpression(func) => harvest_setup_return(
+            extract_function_body_final_return_expr(func.body.as_ref()?)?,
+        ),
+        _ => None,
+    }
+}
+
+fn harvest_option_store(obj: &ObjectExpression<'_>) -> Vec<MemberInfo> {
+    let mut members = Vec::new();
+    for prop in &obj.properties {
+        let ObjectPropertyKind::ObjectProperty(prop) = prop else {
+            continue;
+        };
+        let Some(section) = prop.key.static_name() else {
+            continue;
+        };
+        match section.as_ref() {
+            "state" => {
+                if let Some(state_obj) = state_returned_object(&prop.value) {
+                    collect_store_member_keys(state_obj, &mut members);
+                }
+            }
+            "getters" | "actions" => {
+                if let Expression::ObjectExpression(section_obj) = unwrap_paren_expr(&prop.value) {
+                    collect_store_member_keys(section_obj, &mut members);
+                }
+            }
+            _ => {}
+        }
+    }
+    members
+}
+
+/// The object returned by a Pinia option-store `state` value (an arrow or
+/// function returning an object literal: `state: () => ({ count: 0 })`).
+fn state_returned_object<'a, 'b>(value: &'b Expression<'a>) -> Option<&'b ObjectExpression<'a>> {
+    let returned = match value {
+        Expression::ArrowFunctionExpression(arrow) => extract_arrow_return_expr(arrow)?,
+        Expression::FunctionExpression(func) => {
+            extract_function_body_final_return_expr(func.body.as_ref()?)?
+        }
+        _ => return None,
+    };
+    match unwrap_paren_expr(returned) {
+        Expression::ObjectExpression(obj) => Some(obj),
+        _ => None,
+    }
+}
+
+/// Harvest members from a setup-store return expression. Abstains (returns
+/// `None`) on a spread (`return { ...base, count }`) so the whole store stays
+/// opaque rather than under-counting.
+fn harvest_setup_return(returned: &Expression<'_>) -> Option<Vec<MemberInfo>> {
+    let Expression::ObjectExpression(obj) = unwrap_paren_expr(returned) else {
+        return None;
+    };
+    if obj
+        .properties
+        .iter()
+        .any(|p| matches!(p, ObjectPropertyKind::SpreadProperty(_)))
+    {
+        return None;
+    }
+    let mut members = Vec::new();
+    collect_store_member_keys(obj, &mut members);
+    Some(members)
+}
+
+fn collect_store_member_keys(obj: &ObjectExpression<'_>, members: &mut Vec<MemberInfo>) {
+    for prop in &obj.properties {
+        let ObjectPropertyKind::ObjectProperty(prop) = prop else {
+            continue;
+        };
+        let Some(name) = prop.key.static_name() else {
+            continue;
+        };
+        if name.starts_with('$') {
+            continue;
+        }
+        members.push(MemberInfo {
+            name: name.to_string(),
+            kind: MemberKind::StoreMember,
+            span: prop.key.span(),
+            has_decorator: false,
+            decorator_names: Vec::new(),
+            is_instance_returning_static: false,
+            is_self_returning: false,
+        });
+    }
 }
 
 fn apply_source_return_path(expr: &Expression<'_>, suffixes: &[String]) -> Vec<String> {
@@ -6061,6 +6181,153 @@ fn collect_instanceof_narrowings<'a>(expr: &'a Expression<'a>, out: &mut Vec<(St
 }
 
 impl ModuleInfoExtractor {
+    /// Recognize Pinia `defineStore` declarations and store-consumption shapes.
+    ///
+    /// Declaration: harvest `state` / `getters` / `actions` keys (option store)
+    /// or the last return statement's object-literal keys (setup store) as
+    /// `MemberKind::StoreMember`, keyed by the binding's local name for
+    /// `enrich_store_exports`. Consumption: mark `const s = useFooStore()`
+    /// instances and credit destructure reads (`const { count } = s` /
+    /// `storeToRefs(s)` / `const { count } = useFooStore()`) so a member
+    /// consumed only that way is not falsely flagged.
+    fn record_pinia_store(
+        &mut self,
+        declarator: &VariableDeclarator<'_>,
+        init: &Expression<'_>,
+    ) {
+        // Declaration: const <name> = defineStore('id', <options|setup>)
+        if let BindingPattern::BindingIdentifier(id) = &declarator.id
+            && let Expression::CallExpression(call) = init
+            && is_define_store_callee(&call.callee)
+        {
+            if let Some(members) = harvest_define_store_members(&call.arguments) {
+                self.store_member_decls.insert(id.name.to_string(), members);
+            }
+            return;
+        }
+
+        // Consumption: const s = useFooStore()  (bare store-factory call)
+        if let BindingPattern::BindingIdentifier(id) = &declarator.id
+            && let Expression::CallExpression(call) = init
+            && let Expression::Identifier(callee) = &call.callee
+            && self.is_store_factory_call(callee.name.as_str())
+        {
+            self.binding_target_names
+                .entry(id.name.to_string())
+                .or_insert_with(|| callee.name.to_string());
+            self.store_instance_locals.insert(id.name.to_string());
+            return;
+        }
+
+        // Consumption: destructure forms.
+        let BindingPattern::ObjectPattern(obj_pat) = &declarator.id else {
+            return;
+        };
+        if obj_pat.rest.is_some() {
+            // `const { count, ...rest } = store` is a whole-object use; the
+            // existing rest-destructure path records it. Abstain here.
+            return;
+        }
+
+        match init {
+            Expression::CallExpression(call) => {
+                let Expression::Identifier(callee) = &call.callee else {
+                    return;
+                };
+                if matches!(callee.name.as_str(), "storeToRefs" | "toRefs") {
+                    // const { count } = storeToRefs(s) / toRefs(s): credit on the
+                    // store-instance argument (which resolves to its factory
+                    // export via `binding_target_names`).
+                    if let Some(Argument::Identifier(arg)) = call.arguments.first()
+                        && self.store_instance_locals.contains(arg.name.as_str())
+                    {
+                        self.credit_store_pattern_members(obj_pat, arg.name.as_str());
+                    }
+                } else if self.is_store_factory_call(callee.name.as_str()) {
+                    // const { count, inc } = useFooStore(): credit on the factory
+                    // import directly (the analyzer maps it to the store export).
+                    self.credit_store_pattern_members(obj_pat, callee.name.as_str());
+                }
+            }
+            // const { count } = s: destructure on a store-instance local.
+            Expression::Identifier(ident)
+                if self.store_instance_locals.contains(ident.name.as_str()) =>
+            {
+                self.credit_store_pattern_members(obj_pat, ident.name.as_str());
+            }
+            _ => {}
+        }
+    }
+
+    /// Options-API map helpers (`mapState` / `mapGetters` / `mapActions` /
+    /// `mapWritableState` / `mapStores`) reference store members as string-array
+    /// or object arguments, not `store.member` accesses. v1 does not parse those
+    /// member lists; instead it conservatively marks every identifier
+    /// store-factory argument as a whole-object use, so all of that store's
+    /// members abstain (lose recall) rather than false-flag.
+    fn record_pinia_map_helpers(&mut self, expr: &CallExpression<'_>) {
+        let Expression::Identifier(callee) = &expr.callee else {
+            return;
+        };
+        if !matches!(
+            callee.name.as_str(),
+            "mapState" | "mapGetters" | "mapActions" | "mapWritableState" | "mapStores"
+        ) {
+            return;
+        }
+        for arg in &expr.arguments {
+            if let Argument::Identifier(ident) = arg {
+                self.whole_object_uses.push(ident.name.to_string());
+            }
+        }
+    }
+
+    /// Whether a bare-identifier callee is a Pinia store factory: either an
+    /// imported binding (explicit `import { useFooStore } from ...`) or a name
+    /// following the `use<Name>Store` convention (Nuxt `@pinia/nuxt`
+    /// auto-import). Crediting a non-store import is inert (the analyzer only
+    /// credits a member that actually exists), so this can be permissive
+    /// without risking class/enum member drift.
+    fn is_store_factory_call(&self, name: &str) -> bool {
+        self.imports.iter().any(|i| i.local_name == name)
+            || (name.starts_with("use") && name.ends_with("Store"))
+    }
+
+    /// Emit a `MemberAccess` for each statically-named destructured key against
+    /// `object_name` (the store instance local or factory import). The KEY (the
+    /// store member), not the local alias, is recorded.
+    fn credit_store_pattern_members(&mut self, obj_pat: &ObjectPattern<'_>, object_name: &str) {
+        for prop in &obj_pat.properties {
+            let Some(member) = prop.key.static_name() else {
+                continue;
+            };
+            self.member_accesses.push(MemberAccess {
+                object: object_name.to_string(),
+                member: member.to_string(),
+            });
+        }
+    }
+
+    /// Copy harvested store members onto the matching `ExportInfo`, mirroring
+    /// `enrich_local_class_exports`. Called from both `into_module_info` and
+    /// `merge_into` (SFC `<script>` parity).
+    pub(super) fn enrich_store_exports(&mut self) {
+        if self.store_member_decls.is_empty() {
+            return;
+        }
+        for export in &mut self.exports {
+            if !export.members.is_empty() {
+                continue;
+            }
+            let Some(local_name) = export.local_name.as_deref() else {
+                continue;
+            };
+            if let Some(members) = self.store_member_decls.get(local_name) {
+                export.members = members.clone();
+            }
+        }
+    }
+
     fn risky_regex_fragment_for_expr(&self, expr: &Expression<'_>) -> Option<String> {
         match unwrap_static_expr(expr) {
             Expression::RegExpLiteral(lit) => risky_redos_fragment(&lit.regex.pattern.text),

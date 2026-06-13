@@ -7,7 +7,8 @@ pub use fallow_types::output_dead_code::{
     UnlistedDependencyFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
     UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedDependencyFinding,
     UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
-    UnusedExportFinding, UnusedFileFinding, UnusedOptionalDependencyFinding, UnusedTypeFinding,
+    UnusedExportFinding, UnusedFileFinding, UnusedOptionalDependencyFinding,
+    UnusedStoreMemberFinding, UnusedTypeFinding,
 };
 pub use fallow_types::results::{
     ActiveSuppression, AnalysisResults, BoundaryCallViolation, BoundaryCoverageViolation,

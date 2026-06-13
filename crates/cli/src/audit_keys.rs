@@ -298,6 +298,7 @@ pub(super) fn dead_code_keys(
         unused_optional_dependencies,
         unused_enum_members,
         unused_class_members,
+        unused_store_members,
         unresolved_imports,
         unlisted_dependencies,
         duplicate_exports,
@@ -344,6 +345,7 @@ pub(super) fn dead_code_keys(
     collector.add_unused_optional_dependencies(unused_optional_dependencies);
     collector.add_unused_enum_members(unused_enum_members);
     collector.add_unused_class_members(unused_class_members);
+    collector.add_unused_store_members(unused_store_members);
     collector.add_unresolved_imports(unresolved_imports);
     collector.add_unlisted_dependencies(unlisted_dependencies);
     collector.add_duplicate_exports(duplicate_exports);
@@ -496,6 +498,19 @@ impl<'a> DeadCodeKeyCollector<'a> {
         for item in items {
             self.insert(unused_member_key(
                 "unused-class-member",
+                &item.member,
+                self.root,
+            ));
+        }
+    }
+
+    fn add_unused_store_members(
+        &mut self,
+        items: &[fallow_core::results::UnusedStoreMemberFinding],
+    ) {
+        for item in items {
+            self.insert(unused_member_key(
+                "unused-store-member",
                 &item.member,
                 self.root,
             ));
@@ -700,6 +715,7 @@ pub(super) fn retain_introduced_dead_code(
         unused_optional_dependencies,
         unused_enum_members,
         unused_class_members,
+        unused_store_members,
         unresolved_imports,
         unlisted_dependencies,
         duplicate_exports,
@@ -758,6 +774,8 @@ pub(super) fn retain_introduced_dead_code(
         .retain(|item| keep(unused_member_key("unused-enum-member", &item.member, root)));
     unused_class_members
         .retain(|item| keep(unused_member_key("unused-class-member", &item.member, root)));
+    unused_store_members
+        .retain(|item| keep(unused_member_key("unused-store-member", &item.member, root)));
     unresolved_imports.retain(|item| {
         keep(format!(
             "unresolved-import:{}:{}",
@@ -1120,6 +1138,16 @@ fn annotate_member_json(
         results.unused_class_members.iter().map(|item| {
             issue_was_introduced(
                 &unused_member_key("unused-class-member", &item.member, root),
+                base,
+            )
+        }),
+    );
+    annotate_issue_array(
+        json,
+        "unused_store_members",
+        results.unused_store_members.iter().map(|item| {
+            issue_was_introduced(
+                &unused_member_key("unused-store-member", &item.member, root),
                 base,
             )
         }),
