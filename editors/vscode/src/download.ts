@@ -121,12 +121,21 @@ const httpsGet = (url: string): Promise<string> =>
     });
   });
 
-const httpsDownload = (url: string, dest: string): Promise<void> =>
+export const httpsDownload = (url: string, dest: string): Promise<void> =>
   withRedirects(
     url,
     async (response) =>
       await new Promise<void>((resolve, reject) => {
         const file = fs.createWriteStream(dest);
+        // Guard the readable (response) stream as well: `pipe()` does not forward
+        // a readable's errors to the writable, so a mid-download socket drop would
+        // emit an unhandled `error` on `response` and crash the whole extension
+        // host. Tear down the write stream, drop the partial file, and reject.
+        response.on("error", (err) => {
+          file.destroy();
+          fs.unlink(dest, () => {});
+          reject(err);
+        });
         response.pipe(file);
         file.on("finish", () => {
           file.close();
@@ -275,34 +284,6 @@ export const renameIntoPlace = (tempPath: string, finalPath: string): void => {
 const getSignaturePath = (binaryPath: string): string => `${binaryPath}${SIGNATURE_SUFFIX}`;
 
 const getDigestPath = (binaryPath: string): string => `${binaryPath}${SHA256_SUFFIX}`;
-
-const getManagedBinaryPaths = (dir: string): ReadonlyArray<string> => [
-  path.join(dir, `${LSP_BINARY_NAME}${getExecutableExtension()}`),
-  path.join(dir, `${CLI_BINARY_NAME}${getExecutableExtension()}`),
-];
-
-const purgeManagedBinaries = (dir: string): void => {
-  for (const binaryPath of getManagedBinaryPaths(dir)) {
-    for (const candidate of [binaryPath, getSignaturePath(binaryPath), getDigestPath(binaryPath)]) {
-      try {
-        if (fs.existsSync(candidate)) {
-          fs.unlinkSync(candidate);
-        }
-      } catch {
-        // Best-effort cleanup.
-      }
-    }
-  }
-
-  try {
-    const versionPath = path.join(dir, VERSION_FILE);
-    if (fs.existsSync(versionPath)) {
-      fs.unlinkSync(versionPath);
-    }
-  } catch {
-    // Best-effort cleanup.
-  }
-};
 
 const purgeManagedBinary = (binaryPath: string): void => {
   for (const candidate of [binaryPath, getSignaturePath(binaryPath), getDigestPath(binaryPath)]) {
@@ -473,7 +454,7 @@ const fetchReleaseForExtension = async (): Promise<GithubRelease> => {
   return JSON.parse(releaseJson) as GithubRelease;
 };
 
-const matchesExtensionVersion = (
+export const matchesExtensionVersion = (
   dir: string,
   binaryPath: string,
   label: string,
@@ -498,7 +479,11 @@ const matchesExtensionVersion = (
   outputChannel?.appendLine(
     `Fallow: installed ${label} binary is v${binaryVersion ?? markerVersion ?? "unknown"}, extension is v${extensionVersion}. Re-downloading.`,
   );
-  purgeManagedBinaries(dir);
+  // Purge ONLY the mismatched binary, not the whole managed set. `downloadBinary`
+  // verifies the LSP first, then checks the CLI; purging both here would delete
+  // the already-verified LSP and return its now-stale path. A fresh version
+  // marker is rewritten on the next successful download.
+  purgeManagedBinary(binaryPath);
   return false;
 };
 

@@ -195,6 +195,16 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   context.subscriptions.push({ dispose: () => diagnosticFilter.dispose() });
   registerDiagnosticMuteUi(context, diagnosticFilter);
 
+  // Custom LSP notification handler: update the status bar from LSP data so
+  // results show immediately without waiting for the CLI pass. Passed into
+  // startClient / restartClient so it re-registers on every client instance
+  // (a restart builds a fresh client; a handler bound only to the first client
+  // would stop firing and freeze the status bar after the first restart).
+  const onAnalysisComplete = (params: AnalysisCompleteParams): void => {
+    updateStatusBarFromLsp(params);
+    void vscode.commands.executeCommand("setContext", "fallow.hasAnalyzed", true);
+  };
+
   // Always-visible diagnostics on/off toggle, just right of the audit item.
   // Gated on `fallow.diagnostics.statusBar` (default on) and created/disposed
   // LIVE when the setting toggles, mirroring the audit status-bar handling, so
@@ -814,7 +824,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
       await runFix(context, false);
       // Restart LSP to force fresh analysis. The fix modified files on disk
       // bypassing VS Code's editor, so did_save never fires for those files
-      await restartClient(context, outputChannel, diagnosticFilter);
+      await restartClient(context, outputChannel, diagnosticFilter, onAnalysisComplete);
       // Re-run CLI analysis for tree views
       cliAnalysisRan = await triggerCliAnalysis({ force: true });
     }),
@@ -829,7 +839,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   context.subscriptions.push(
     vscode.commands.registerCommand("fallow.restart", async () => {
       outputChannel.appendLine("Restarting language server...");
-      await restartClient(context, outputChannel, diagnosticFilter);
+      await restartClient(context, outputChannel, diagnosticFilter, onAnalysisComplete);
     }),
   );
 
@@ -964,7 +974,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
 
       if (needsRestart) {
         outputChannel.appendLine("Configuration changed, restarting server...");
-        await restartClient(context, outputChannel, diagnosticFilter);
+        await restartClient(context, outputChannel, diagnosticFilter, onAnalysisComplete);
       }
 
       if (needsReanalysis) {
@@ -1041,21 +1051,18 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     }),
   );
 
-  // Start LSP client
-  const client = await startClient(context, outputChannel, diagnosticFilter);
+  // Start LSP client. The analysis-complete handler is passed INTO startClient
+  // so it is registered on every client instance (including post-restart ones),
+  // not once on the initial client; see client.ts. Otherwise a config-change
+  // restart would freeze the status bar.
+  const client = await startClient(
+    context,
+    outputChannel,
+    diagnosticFilter,
+    onAnalysisComplete,
+  );
   if (client) {
-    context.subscriptions.push({ dispose: () => void stopClient() });
-
-    // Handle custom LSP notification: update status bar from LSP data
-    // so the extension shows results immediately without waiting for CLI
-    const notificationDisposable = client.onNotification(
-      "fallow/analysisComplete",
-      (params: AnalysisCompleteParams) => {
-        updateStatusBarFromLsp(params);
-        void vscode.commands.executeCommand("setContext", "fallow.hasAnalyzed", true);
-      },
-    );
-    context.subscriptions.push(notificationDisposable);
+    context.subscriptions.push({ dispose: () => void stopClient(outputChannel) });
   }
 
   // Opt-in license probe on startup (`fallow.license.refreshOnStartup`,

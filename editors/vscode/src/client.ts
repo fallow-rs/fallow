@@ -32,6 +32,7 @@ import {
 import { showBinarySkewToastOnce } from "./binary-skew.js";
 import { findBinaryInPath, findLocalBinary } from "./binary-utils.js";
 import type { DiagnosticFilter } from "./diagnosticFilter.js";
+import type { AnalysisCompleteParams } from "./statusBar-utils.js";
 import type { DuplicationMode, IssueTypeConfig } from "./types.js";
 import {
   parseDiagnosticCategories,
@@ -41,6 +42,12 @@ import {
 import { downloadBinary, getBinaryVersion, getInstalledBinaryPath } from "./download.js";
 
 let client: LanguageClient | null = null;
+
+// Serializes restarts. Two config changes firing in quick succession would
+// otherwise each pass `stopClient`'s `if (!current)` guard and each spawn a
+// `startClient`, racing two server processes (and double-stopping one client).
+// Chaining every restart onto this queue makes them strictly sequential.
+let restartQueue: Promise<LanguageClient | null> = Promise.resolve(null);
 
 export interface LspInitializationOptions {
   readonly issueTypes: IssueTypeConfig;
@@ -229,6 +236,7 @@ export const startClient = async (
   context: vscode.ExtensionContext,
   outputChannel: vscode.OutputChannel,
   diagnosticFilter?: DiagnosticFilter,
+  onAnalysisComplete?: (params: AnalysisCompleteParams) => void,
 ): Promise<LanguageClient | null> => {
   const binaryPath = await resolveBinaryPath(context, outputChannel);
   if (!binaryPath) {
@@ -294,6 +302,14 @@ export const startClient = async (
     outputChannel.appendLine("Fallow language server started.");
     await loadDiagnosticCategories(nextClient, outputChannel);
     diagnosticFilter?.updateBaselineMutedCategories(getMutedDiagnosticCategories());
+    // Register the analysis-complete notification handler on THIS client, not
+    // once in activate(). A restart builds a fresh client, so a handler bound to
+    // the old client would silently stop firing after the first config-change
+    // restart and freeze the status bar. The disposable is bounded by the
+    // client's own lifetime (it is torn down when the client stops).
+    if (onAnalysisComplete) {
+      nextClient.onNotification("fallow/analysisComplete", onAnalysisComplete);
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     outputChannel.appendLine(`Failed to start language server: ${message}`);
@@ -319,50 +335,71 @@ export const startClient = async (
   return nextClient;
 };
 
-export const stopClient = async (): Promise<void> => {
+export const stopClient = async (outputChannel?: vscode.OutputChannel): Promise<void> => {
   const current = client;
   if (!current) {
     return;
   }
 
-  if (current.state === State.Starting) {
-    let disposable: vscode.Disposable | undefined;
-    try {
-      await Promise.race([
-        new Promise<void>((resolve) => {
-          disposable = current.onDidChangeState((event) => {
-            if (event.newState !== State.Starting) {
-              disposable?.dispose();
-              disposable = undefined;
-              resolve();
-            }
-          });
-        }),
-        new Promise<void>((resolve) => setTimeout(resolve, 2_000)),
-      ]);
-    } finally {
-      disposable?.dispose();
+  try {
+    if (current.state === State.Starting) {
+      // Wait for the in-flight start to settle before stopping: the library
+      // throws "Client is not running" if stop() is called while Starting.
+      // 10s (raised from 2s) covers a slow first parse on a large monorepo; a
+      // start hung past that is a bigger problem than a leaked process.
+      let disposable: vscode.Disposable | undefined;
+      try {
+        await Promise.race([
+          new Promise<void>((resolve) => {
+            disposable = current.onDidChangeState((event) => {
+              if (event.newState !== State.Starting) {
+                disposable?.dispose();
+                disposable = undefined;
+                resolve();
+              }
+            });
+          }),
+          new Promise<void>((resolve) => setTimeout(resolve, 10_000)),
+        ]);
+      } finally {
+        disposable?.dispose();
+      }
     }
-  }
 
-  if (current.state === State.Running) {
-    await current.stop();
-  }
-
-  if (client === current) {
-    client = null;
+    if (current.state === State.Running) {
+      await current.stop();
+    }
+  } catch (err) {
+    // The library's own shutdown can reject (e.g. "Stopping the server timed
+    // out") when the process already died but onConnectionClosed has not fired.
+    // Swallow it: an uncaught rejection here propagates through restartClient,
+    // skips the subsequent startClient, and leaves a stale non-null `client`
+    // (LSP permanently dead, silently). The finally below always clears it.
+    const message = err instanceof Error ? err.message : String(err);
+    outputChannel?.appendLine(`Fallow: error stopping language server: ${message}`);
+  } finally {
+    if (client === current) {
+      client = null;
+    }
   }
 };
 
-export const restartClient = async (
+export const restartClient = (
   context: vscode.ExtensionContext,
   outputChannel: vscode.OutputChannel,
   diagnosticFilter?: DiagnosticFilter,
+  onAnalysisComplete?: (params: AnalysisCompleteParams) => void,
 ): Promise<LanguageClient | null> => {
-  // Detach BEFORE stop so a user toggle that fires during the gap can't
-  // call refresh() against a disposed DiagnosticCollection. startClient
-  // re-attaches once the new client is up.
-  diagnosticFilter?.detachClient();
-  await stopClient();
-  return startClient(context, outputChannel, diagnosticFilter);
+  const doRestart = async (): Promise<LanguageClient | null> => {
+    // Detach BEFORE stop so a user toggle that fires during the gap can't
+    // call refresh() against a disposed DiagnosticCollection. startClient
+    // re-attaches once the new client is up.
+    diagnosticFilter?.detachClient();
+    await stopClient(outputChannel);
+    return startClient(context, outputChannel, diagnosticFilter, onAnalysisComplete);
+  };
+  // Chain onto the queue on BOTH the fulfilled and rejected paths so a prior
+  // restart that somehow rejected cannot deadlock all future restarts.
+  restartQueue = restartQueue.then(doRestart, doRestart);
+  return restartQueue;
 };

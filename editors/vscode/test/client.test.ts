@@ -32,6 +32,7 @@ const mockLanguageClient = vi.hoisted(() => ({
     stop: ReturnType<typeof vi.fn>;
     setTrace: ReturnType<typeof vi.fn>;
     sendRequest: ReturnType<typeof vi.fn>;
+    onNotification: ReturnType<typeof vi.fn>;
     state: number;
     onDidChangeState: ReturnType<typeof vi.fn>;
     emitState: (newState: number) => void;
@@ -61,6 +62,7 @@ vi.mock("vscode-languageclient/node.js", () => ({
     readonly stop = vi.fn(async () => undefined);
     readonly setTrace = vi.fn(async () => undefined);
     readonly sendRequest = vi.fn(async () => mockIssueTypesResponse);
+    readonly onNotification = vi.fn(() => ({ dispose: vi.fn() }));
     readonly onDidChangeState = vi.fn((listener: (event: { newState: number }) => void) => {
       this.stateListeners.push(listener);
       return {
@@ -125,6 +127,7 @@ vi.mock("../src/config.js", () => ({
 import {
   createInitializationOptions,
   loadDiagnosticCategories,
+  restartClient,
   startClient,
   stopClient,
   triggerPullDiagnosticRefresh,
@@ -293,6 +296,60 @@ describe("stopClient", () => {
     await expect(stopped).resolves.toBeUndefined();
     expect(instance!.onDidChangeState).toHaveBeenCalledOnce();
     expect(instance!.stop).toHaveBeenCalledOnce();
+  });
+});
+
+describe("restartClient lifecycle", () => {
+  it("re-registers the analysisComplete handler on the new client", async () => {
+    const out = outputChannel();
+    await startClient({} as never, out as never);
+    const onAnalysisComplete = vi.fn();
+
+    await restartClient({} as never, out as never, undefined, onAnalysisComplete);
+
+    // A restart builds a fresh client; the handler must be registered on it,
+    // not left on the old (now-stopped) client, or the status bar freezes.
+    const fresh = mockLanguageClient.instances[mockLanguageClient.instances.length - 1];
+    expect(fresh!.onNotification).toHaveBeenCalledWith(
+      "fallow/analysisComplete",
+      onAnalysisComplete,
+    );
+  });
+
+  it("recovers when the old client's stop() rejects (no permanently-dead LSP)", async () => {
+    const out = outputChannel();
+    await startClient({} as never, out as never);
+    const first = mockLanguageClient.instances[0];
+    // Simulate the library's shutdown timeout rejecting.
+    first!.stop.mockRejectedValueOnce(new Error("Stopping the server timed out"));
+
+    const restarted = await restartClient({} as never, out as never);
+
+    // The rejection is swallowed, the stale client is cleared in `finally`, and
+    // startClient still runs, so we end with a fresh live client (not a dead one).
+    expect(restarted).not.toBeNull();
+    expect(mockLanguageClient.instances).toHaveLength(2);
+    expect(restarted).toBe(mockLanguageClient.instances[1]);
+  });
+
+  it("serializes concurrent restarts so the prior client is stopped exactly once", async () => {
+    const out = outputChannel();
+    await startClient({} as never, out as never);
+
+    // Two restarts fired without awaiting the first. Without serialization both
+    // would observe the same live client and each call stop() on it.
+    const [a, b] = await Promise.all([
+      restartClient({} as never, out as never),
+      restartClient({} as never, out as never),
+    ]);
+
+    expect(a).not.toBeNull();
+    expect(b).not.toBeNull();
+    // 1 initial + 2 restarts, each stopping only the immediately-prior client once.
+    expect(mockLanguageClient.instances).toHaveLength(3);
+    expect(mockLanguageClient.instances[0]!.stop).toHaveBeenCalledOnce();
+    expect(mockLanguageClient.instances[1]!.stop).toHaveBeenCalledOnce();
+    expect(mockLanguageClient.instances[2]!.stop).not.toHaveBeenCalled();
   });
 });
 

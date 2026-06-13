@@ -62,6 +62,7 @@ import {
   getInstalledBinaryPath,
   getInstalledCliPath,
   getBinaryVersion,
+  matchesExtensionVersion,
   platformTargetFor,
   readVersionMarker,
   releaseApiUrlForVersion,
@@ -111,6 +112,52 @@ describe("writeVersionMarker / readVersionMarker", () => {
   it("returns null for empty marker file", () => {
     mockFiles[versionPath] = "  ";
     expect(readVersionMarker(binDir)).toBeNull();
+  });
+});
+
+describe("matchesExtensionVersion", () => {
+  beforeEach(() => {
+    mockFiles = {};
+    mockExecOutput = "";
+    mockExecError = false;
+  });
+
+  it("purges ONLY the mismatched binary, sparing the verified sibling and the marker", () => {
+    for (const f of [
+      lspPath,
+      lspSigPath,
+      lspDigestPath,
+      cliPath,
+      cliSigPath,
+      cliDigestPath,
+      versionPath,
+    ]) {
+      mockFiles[f] = "x";
+    }
+    // Extension is 2.26.0 (vscode mock); the CLI reports a stale version.
+    mockExecOutput = "fallow 2.25.0\n";
+
+    const ok = matchesExtensionVersion(binDir, cliPath, "CLI");
+
+    expect(ok).toBe(false);
+    // The mismatched CLI binary + its sidecars are removed.
+    expect(cliPath in mockFiles).toBe(false);
+    expect(cliSigPath in mockFiles).toBe(false);
+    expect(cliDigestPath in mockFiles).toBe(false);
+    // The already-verified LSP binary, its sidecars, and the version marker
+    // MUST survive: downloadBinary verifies the LSP first, so purging the whole
+    // set here would delete it and then return its now-deleted path.
+    expect(lspPath in mockFiles).toBe(true);
+    expect(lspSigPath in mockFiles).toBe(true);
+    expect(lspDigestPath in mockFiles).toBe(true);
+    expect(versionPath in mockFiles).toBe(true);
+  });
+
+  it("returns true (no purge) when the binary version matches the extension", () => {
+    mockFiles[cliPath] = "x";
+    mockExecOutput = "fallow 2.26.0\n";
+    expect(matchesExtensionVersion(binDir, cliPath, "CLI")).toBe(true);
+    expect(cliPath in mockFiles).toBe(true);
   });
 });
 
@@ -256,7 +303,7 @@ describe("getInstalledBinaryPath", () => {
     expect(getInstalledBinaryPath(fakeContext)).toBe(lspPath);
   });
 
-  it("returns null and deletes stale binary when marker version differs", () => {
+  it("returns null and deletes ONLY the stale LSP binary (sibling CLI + marker survive)", () => {
     mockFiles[lspPath] = binaryBytes;
     mockFiles[lspSigPath] = signatureBytes;
     mockFiles[cliPath] = binaryBytes;
@@ -264,11 +311,14 @@ describe("getInstalledBinaryPath", () => {
     mockFiles[versionPath] = "2.25.0";
 
     expect(getInstalledBinaryPath(fakeContext)).toBeNull();
+    // The mismatched LSP binary + its sidecar are purged.
     expect(mockFiles[lspPath]).toBeUndefined();
     expect(mockFiles[lspSigPath]).toBeUndefined();
-    expect(mockFiles[cliPath]).toBeUndefined();
-    expect(mockFiles[cliSigPath]).toBeUndefined();
-    expect(mockFiles[versionPath]).toBeUndefined();
+    // Per-binary purge (not whole-set): the CLI binary and the version marker
+    // survive so a CLI check cannot return an already-deleted path.
+    expect(mockFiles[cliPath]).not.toBeUndefined();
+    expect(mockFiles[cliSigPath]).not.toBeUndefined();
+    expect(mockFiles[versionPath]).not.toBeUndefined();
   });
 
   it("falls back to --version when no marker exists", () => {
