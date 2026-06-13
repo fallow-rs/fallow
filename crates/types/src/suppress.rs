@@ -104,6 +104,10 @@ pub enum IssueKind {
     /// project-wide. Cross-graph: the store binding is imported (the module is
     /// reachable) yet a specific member is dead.
     UnusedStoreMember,
+    /// A Vue `inject(KEY)` or Svelte `getContext(KEY)` whose symbol KEY is
+    /// `provide`/`setContext`'d nowhere in the analyzed project. Cross-graph
+    /// dead-half DI link: at runtime the inject returns `undefined`.
+    UnprovidedInject,
 }
 
 impl IssueKind {
@@ -156,6 +160,7 @@ impl IssueKind {
             }
             "misplaced-directive" | "misplaced-directives" => Some(Self::MisplacedDirective),
             "unused-store-member" | "unused-store-members" => Some(Self::UnusedStoreMember),
+            "unprovided-inject" | "unprovided-injects" => Some(Self::UnprovidedInject),
             _ => None,
         }
     }
@@ -197,6 +202,7 @@ impl IssueKind {
             Self::MixedClientServerBarrel => 31,
             Self::MisplacedDirective => 32,
             Self::UnusedStoreMember => 33,
+            Self::UnprovidedInject => 34,
         }
     }
 
@@ -237,6 +243,7 @@ impl IssueKind {
             31 => Some(Self::MixedClientServerBarrel),
             32 => Some(Self::MisplacedDirective),
             33 => Some(Self::UnusedStoreMember),
+            34 => Some(Self::UnprovidedInject),
             _ => None,
         }
     }
@@ -337,6 +344,7 @@ pub const fn issue_kind_to_kebab(kind: IssueKind) -> &'static str {
         IssueKind::MixedClientServerBarrel => "mixed-client-server-barrel",
         IssueKind::MisplacedDirective => "misplaced-directive",
         IssueKind::UnusedStoreMember => "unused-store-member",
+        IssueKind::UnprovidedInject => "unprovided-inject",
     }
 }
 
@@ -577,6 +585,8 @@ pub const KNOWN_ISSUE_KIND_NAMES: &[&str] = &[
     "misplaced-directives",
     "unused-store-member",
     "unused-store-members",
+    "unprovided-inject",
+    "unprovided-injects",
 ];
 
 /// CLI filter flags on `fallow dead-code` that scope output to a single
@@ -596,6 +606,7 @@ pub const DEAD_CODE_FILTER_FLAGS: &[&str] = &[
     "--unused-enum-members",
     "--unused-class-members",
     "--unused-store-members",
+    "--unprovided-injects",
     "--unresolved-imports",
     "--unlisted-deps",
     "--duplicate-exports",
@@ -884,7 +895,11 @@ mod tests {
             IssueKind::from_discriminant(33),
             Some(IssueKind::UnusedStoreMember)
         );
-        assert_eq!(IssueKind::from_discriminant(34), None);
+        assert_eq!(
+            IssueKind::from_discriminant(34),
+            Some(IssueKind::UnprovidedInject)
+        );
+        assert_eq!(IssueKind::from_discriminant(35), None);
         assert_eq!(IssueKind::from_discriminant(u8::MAX), None);
     }
 
@@ -924,6 +939,7 @@ mod tests {
             IssueKind::MixedClientServerBarrel,
             IssueKind::MisplacedDirective,
             IssueKind::UnusedStoreMember,
+            IssueKind::UnprovidedInject,
         ] {
             assert_eq!(
                 IssueKind::from_discriminant(kind.to_discriminant()),
@@ -931,7 +947,7 @@ mod tests {
             );
         }
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(34), None);
+        assert_eq!(IssueKind::from_discriminant(35), None);
     }
 
     #[test]
@@ -970,6 +986,7 @@ mod tests {
             IssueKind::MixedClientServerBarrel,
             IssueKind::MisplacedDirective,
             IssueKind::UnusedStoreMember,
+            IssueKind::UnprovidedInject,
         ];
         let discriminants: Vec<u8> = all_kinds.iter().map(|k| k.to_discriminant()).collect();
         let mut sorted = discriminants.clone();

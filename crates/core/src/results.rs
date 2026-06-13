@@ -7,8 +7,8 @@ pub use fallow_types::output_dead_code::{
     UnlistedDependencyFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
     UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedDependencyFinding,
     UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
-    UnusedExportFinding, UnusedFileFinding, UnusedOptionalDependencyFinding,
-    UnusedStoreMemberFinding, UnusedTypeFinding,
+    UnprovidedInjectFinding, UnusedExportFinding, UnusedFileFinding,
+    UnusedOptionalDependencyFinding, UnusedStoreMemberFinding, UnusedTypeFinding,
 };
 pub use fallow_types::results::{
     ActiveSuppression, AnalysisResults, BoundaryCallViolation, BoundaryCoverageViolation,
@@ -24,9 +24,9 @@ pub use fallow_types::results::{
     SecurityNetworkContext, SecurityReachability, SecuritySeverity, SecurityTaintFlow,
     SecurityUnresolvedCalleeDiagnostic, SecurityZoneCrossing, StaleSuppression, SuppressionOrigin,
     TaintConfidence, TaintEndpoint, TaintPath, TestOnlyDependency, TraceHop, TraceHopRole,
-    TypeOnlyDependency, UnlistedDependency, UnresolvedCatalogReference, UnresolvedImport,
-    UnusedCatalogEntry, UnusedDependency, UnusedDependencyOverride, UnusedExport, UnusedFile,
-    UnusedMember,
+    TypeOnlyDependency, UnlistedDependency, UnprovidedInject, UnresolvedCatalogReference,
+    UnresolvedImport, UnusedCatalogEntry, UnusedDependency, UnusedDependencyOverride, UnusedExport,
+    UnusedFile, UnusedMember,
 };
 
 #[cfg(test)]

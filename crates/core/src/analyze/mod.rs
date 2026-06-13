@@ -15,6 +15,7 @@ mod server_only;
 mod unused_catalog;
 mod unused_deps;
 mod unused_exports;
+mod unprovided_inject;
 mod unused_files;
 mod unused_members;
 mod unused_overrides;
@@ -45,8 +46,8 @@ use fallow_types::output_dead_code::{
     UnlistedDependencyFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
     UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedDependencyFinding,
     UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
-    UnusedExportFinding, UnusedFileFinding, UnusedOptionalDependencyFinding,
-    UnusedStoreMemberFinding, UnusedTypeFinding,
+    UnprovidedInjectFinding, UnusedExportFinding, UnusedFileFinding,
+    UnusedOptionalDependencyFinding, UnusedStoreMemberFinding, UnusedTypeFinding,
 };
 
 use crate::results::{AnalysisResults, CircularDependency, CircularDependencyEdge};
@@ -55,6 +56,7 @@ use crate::suppress::{IssueKind, SuppressionContext};
 use invalid_client_exports::find_invalid_client_exports;
 use misplaced_directive::find_misplaced_directives;
 use mixed_barrel::find_mixed_client_server_barrels;
+use unprovided_inject::find_unprovided_injects;
 use re_export_cycles::find_re_export_cycles;
 #[expect(
     deprecated,
@@ -740,6 +742,17 @@ pub fn find_dead_code_full(
         &line_offsets_by_file,
         &mut results,
     );
+    populate_unprovided_inject_findings(
+        graph,
+        modules,
+        resolved_modules,
+        config,
+        &declared_deps,
+        &public_api_entry_points,
+        &suppressions,
+        &line_offsets_by_file,
+        &mut results,
+    );
 
     results.sort();
 
@@ -830,6 +843,41 @@ fn populate_misplaced_directive_findings(
     )
     .into_iter()
     .map(MisplacedDirectiveFinding::with_actions)
+    .collect();
+}
+
+/// Populate `unprovided_injects` when the rule is enabled. Gated on the project
+/// declaring `vue` / `@vue/runtime-core` / `svelte` inside the detector (see
+/// [`find_unprovided_injects`]).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "mirrors the mixed-client-server-barrel populate site; threading resolved modules + the public-API entry-point set + the gate context is intrinsic"
+)]
+fn populate_unprovided_inject_findings(
+    graph: &ModuleGraph,
+    modules: &[ModuleInfo],
+    resolved_modules: &[ResolvedModule],
+    config: &ResolvedConfig,
+    declared_deps: &FxHashSet<String>,
+    public_api_entry_points: &FxHashSet<FileId>,
+    suppressions: &SuppressionContext<'_>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+    results: &mut AnalysisResults,
+) {
+    if config.rules.unprovided_injects == Severity::Off {
+        return;
+    }
+    results.unprovided_injects = find_unprovided_injects(
+        graph,
+        resolved_modules,
+        modules,
+        declared_deps,
+        public_api_entry_points,
+        suppressions,
+        line_offsets_by_file,
+    )
+    .into_iter()
+    .map(UnprovidedInjectFinding::with_actions)
     .collect();
 }
 

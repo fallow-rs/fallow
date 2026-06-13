@@ -136,6 +136,19 @@ pub struct ModuleInfo {
     /// occurrence. Consumed by the `misplaced-directive` detector. Captured
     /// only by JS/TS extraction.
     pub misplaced_directives: Vec<MisplacedDirectiveSite>,
+    /// Vue `provide`/`inject` and Svelte `setContext`/`getContext` call sites
+    /// keyed by an identifier symbol. Consumed by the `unprovided-inject`
+    /// detector to find an inject/getContext whose key is provided nowhere
+    /// project-wide. Only identifier-keyed sites are recorded (string-literal
+    /// and computed keys abstain). Captured by JS/TS and SFC extraction.
+    pub di_key_sites: Vec<DiKeySite>,
+    /// `true` when this module contains a `provide(...)` / `*.provide(...)` /
+    /// `setContext(...)` call whose key argument is NOT a plain identifier
+    /// (spread, computed, member, loop variable). Such a call can provide an
+    /// unknowable key, so the `unprovided-inject` detector abstains on ALL
+    /// inject findings project-wide when any reachable module sets this flag.
+    /// Mirrors the spread-return whole-object abstain used for Pinia stores.
+    pub has_dynamic_provide: bool,
 }
 
 impl ModuleInfo {
@@ -1006,6 +1019,41 @@ pub struct MisplacedDirectiveSite {
     pub span_start: u32,
 }
 
+/// Which side of a dependency-injection link a call site represents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, bitcode::Encode, bitcode::Decode)]
+pub enum DiRole {
+    /// `provide(KEY, value)` / `app.provide(KEY, value)` / `setContext(KEY, value)`.
+    Provide,
+    /// `inject(KEY)` / `getContext(KEY)`.
+    Inject,
+}
+
+/// Which framework's DI API a call site came from (drives the finding message).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, bitcode::Encode, bitcode::Decode)]
+pub enum DiFramework {
+    /// Vue `provide` / `inject` (from `vue` / `@vue/runtime-core`).
+    Vue,
+    /// Svelte `setContext` / `getContext` (from `svelte`).
+    Svelte,
+}
+
+/// A Vue `provide`/`inject` or Svelte `setContext`/`getContext` call site keyed
+/// by an identifier symbol. The `key_local` is resolved at analyze time through
+/// the consuming module's import/export tables to a canonical defining-site
+/// export key, so a provide and an inject of the same shared symbol unify even
+/// across barrel re-exports. Consumed by the `unprovided-inject` detector.
+#[derive(Debug, Clone, PartialEq, Eq, bitcode::Encode, bitcode::Decode)]
+pub struct DiKeySite {
+    /// The key identifier as written at the call site.
+    pub key_local: String,
+    /// Whether this is a provide or an inject.
+    pub role: DiRole,
+    /// Which framework's API this came from.
+    pub framework: DiFramework,
+    /// Start byte offset of the call expression (anchors the finding).
+    pub span_start: u32,
+}
+
 #[expect(
     clippy::trivially_copy_pass_by_ref,
     reason = "serde serialize_with requires &T"
@@ -1092,7 +1140,7 @@ const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 216);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 840);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 864);
 
 /// A re-export declaration.
 #[derive(Debug, Clone)]

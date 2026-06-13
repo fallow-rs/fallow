@@ -93,6 +93,13 @@ pub struct RulesConfig {
     /// `error` once validated on a codebase.
     #[serde(default, alias = "unused-store-member")]
     pub unused_store_members: Severity,
+    /// Vue `inject(KEY)` / Svelte `getContext(KEY)` whose symbol KEY is
+    /// `provide`/`setContext`'d nowhere in the project (the
+    /// injected-never-provided dead-half). Defaults to `warn`, not `error`:
+    /// a DI key has an open provide surface (plugins, app-level provide) so
+    /// analyzer confidence is lower; warn encodes that without failing CI.
+    #[serde(default, alias = "unprovided-inject")]
+    pub unprovided_injects: Severity,
     #[serde(default, alias = "unresolved-import")]
     pub unresolved_imports: Severity,
     #[serde(default, alias = "unlisted-dependency")]
@@ -188,6 +195,7 @@ impl Default for RulesConfig {
             unused_enum_members: Severity::Error,
             unused_class_members: Severity::Error,
             unused_store_members: Severity::Warn,
+            unprovided_injects: Severity::Warn,
             unresolved_imports: Severity::Error,
             unlisted_dependencies: Severity::Error,
             duplicate_exports: Severity::Error,
@@ -246,6 +254,9 @@ impl RulesConfig {
         }
         if let Some(s) = partial.unused_store_members {
             self.unused_store_members = s;
+        }
+        if let Some(s) = partial.unprovided_injects {
+            self.unprovided_injects = s;
         }
         if let Some(s) = partial.unresolved_imports {
             self.unresolved_imports = s;
@@ -380,6 +391,12 @@ pub struct PartialRulesConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_store_members: Option<Severity>,
+    #[serde(
+        default,
+        alias = "unprovided-inject",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub unprovided_injects: Option<Severity>,
     #[serde(
         default,
         alias = "unresolved-import",
@@ -529,6 +546,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unused-enum-members",
     "unused-class-members",
     "unused-store-members",
+    "unprovided-injects",
     "unresolved-imports",
     "unlisted-dependencies",
     "duplicate-exports",
@@ -562,6 +580,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unused-enum-member",
     "unused-class-member",
     "unused-store-member",
+    "unprovided-inject",
     "unresolved-import",
     "unlisted-dependency",
     "duplicate-export",
@@ -938,7 +957,7 @@ mod tests {
 
     #[test]
     fn known_rule_names_count_matches_struct() {
-        assert_eq!(KNOWN_RULE_NAMES.len(), 64);
+        assert_eq!(KNOWN_RULE_NAMES.len(), 66);
     }
 
     #[test]
@@ -979,8 +998,8 @@ mod tests {
 
         assert_eq!(
             aliases_found.len(),
-            64,
-            "expected 64 source-level alias attrs (32 per struct); got {}: {:?}",
+            66,
+            "expected 66 source-level alias attrs (33 per struct); got {}: {:?}",
             aliases_found.len(),
             aliases_found
         );

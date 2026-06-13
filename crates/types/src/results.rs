@@ -15,11 +15,11 @@ use crate::output_dead_code::{
     InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
     MixedClientServerBarrelFinding, PolicyViolationFinding, PrivateTypeLeakFinding,
     ReExportCycleFinding, TestOnlyDependencyFinding, TypeOnlyDependencyFinding,
-    UnlistedDependencyFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
-    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedDependencyFinding,
-    UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
-    UnusedExportFinding, UnusedFileFinding, UnusedOptionalDependencyFinding,
-    UnusedStoreMemberFinding, UnusedTypeFinding,
+    UnlistedDependencyFinding, UnprovidedInjectFinding, UnresolvedCatalogReferenceFinding,
+    UnresolvedImportFinding, UnusedCatalogEntryFinding, UnusedClassMemberFinding,
+    UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
+    UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
+    UnusedOptionalDependencyFinding, UnusedStoreMemberFinding, UnusedTypeFinding,
 };
 use crate::serde_path;
 use crate::suppress::{IssueKind, closest_known_kind_name};
@@ -220,6 +220,12 @@ pub struct AnalysisResults {
     /// array natively. Default severity is `warn`.
     #[serde(default)]
     pub misplaced_directives: Vec<MisplacedDirectiveFinding>,
+    /// Vue `inject(KEY)` / Svelte `getContext(KEY)` calls whose symbol KEY is
+    /// provided nowhere in the project (the injected-never-provided dead-half).
+    /// Wrapped in [`UnprovidedInjectFinding`] so each entry carries a typed
+    /// `actions` array natively. Default severity is `warn`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unprovided_injects: Vec<UnprovidedInjectFinding>,
     /// Number of suppression entries that matched an issue during analysis.
     /// Human output uses this for the suppression footer; it is skipped in
     /// machine output to avoid changing the public JSON issue contract.
@@ -340,6 +346,7 @@ impl AnalysisResults {
             + self.invalid_client_exports.len()
             + self.mixed_client_server_barrels.len()
             + self.misplaced_directives.len()
+            + self.unprovided_injects.len()
     }
 
     /// Whether any issues were found.
@@ -392,6 +399,7 @@ impl AnalysisResults {
             invalid_client_exports,
             mixed_client_server_barrels,
             misplaced_directives,
+            unprovided_injects,
             suppression_count,
             active_suppressions,
             feature_flags,
@@ -440,6 +448,7 @@ impl AnalysisResults {
         self.mixed_client_server_barrels
             .extend(mixed_client_server_barrels);
         self.misplaced_directives.extend(misplaced_directives);
+        self.unprovided_injects.extend(unprovided_injects);
         self.feature_flags.extend(feature_flags);
         self.security_findings.extend(security_findings);
         self.security_unresolved_edge_files += security_unresolved_edge_files;
@@ -582,6 +591,15 @@ impl AnalysisResults {
                 .then(a.directive_site.line.cmp(&b.directive_site.line))
                 .then(a.directive_site.col.cmp(&b.directive_site.col))
                 .then(a.directive_site.directive.cmp(&b.directive_site.directive))
+        });
+
+        self.unprovided_injects.sort_by(|a, b| {
+            a.inject
+                .path
+                .cmp(&b.inject.path)
+                .then(a.inject.line.cmp(&b.inject.line))
+                .then(a.inject.col.cmp(&b.inject.col))
+                .then(a.inject.key_name.cmp(&b.inject.key_name))
         });
     }
 
@@ -891,6 +909,27 @@ pub struct MisplacedDirective {
     /// 1-based line number of the misplaced directive statement.
     pub line: u32,
     /// 0-based byte column offset of the misplaced directive statement.
+    pub col: u32,
+}
+
+/// A Vue `inject(KEY)` or Svelte `getContext(KEY)` whose symbol KEY is
+/// `provide`/`setContext`'d nowhere in the analyzed project. The key is a
+/// symbol with cross-file identity, so an unmatched key is a real dead-half DI
+/// link: at runtime the inject returns `undefined`, surfaced only at render.
+/// The fix is binary: provide the key somewhere, or remove the dead inject.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnprovidedInject {
+    /// The file carrying the orphan inject / getContext call.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// The injected key identifier as written at the call site.
+    pub key_name: String,
+    /// Which framework's DI API this came from: `"vue"` or `"svelte"`.
+    pub framework: String,
+    /// 1-based line number of the inject / getContext call.
+    pub line: u32,
+    /// 0-based byte column offset of the inject / getContext call.
     pub col: u32,
 }
 

@@ -14,8 +14,9 @@ use crate::{
     MemberAccess, ReExportInfo, RequireCallInfo, VisibilityTag,
 };
 use fallow_types::extract::{
-    CalleeUse, ClassHeritageInfo, LocalTypeDeclaration, MemberInfo, MemberKind,
-    MisplacedDirectiveSite, PublicSignatureTypeReference, SanitizedSinkArg, SanitizerScope,
+    CalleeUse, ClassHeritageInfo, DiFramework, DiKeySite, DiRole, LocalTypeDeclaration, MemberInfo,
+    MemberKind, MisplacedDirectiveSite, PublicSignatureTypeReference, SanitizedSinkArg,
+    SanitizerScope,
     SecurityControlKind, SecurityControlSite, SecurityUrlShape, SinkArgKind, SinkLiteralValue,
     SinkObjectProperty, SinkShape, SinkSite, SkippedSecurityCalleeExpressionKind,
     SkippedSecurityCalleeReason, SkippedSecurityCalleeSite, TaintedBinding,
@@ -3539,6 +3540,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
         self.try_record_fluent_chain_access(expr);
         self.record_pinia_map_helpers(expr);
+        self.record_di_key_site(expr);
 
         self.capture_security_call_sites(expr);
 
@@ -6274,6 +6276,98 @@ impl ModuleInfoExtractor {
         for arg in &expr.arguments {
             if let Argument::Identifier(ident) = arg {
                 self.whole_object_uses.push(ident.name.to_string());
+            }
+        }
+    }
+
+    /// Record Vue `provide`/`inject` and Svelte `setContext`/`getContext` call
+    /// sites keyed by a stable identifier symbol, for the `unprovided-inject`
+    /// detector. The key must be a stable module-level symbol (an import or a
+    /// module-scope const), so a transient nested-scope key (a loop variable /
+    /// function parameter) is treated as unknowable. A `provide`/`setContext`
+    /// with an unknowable key (non-identifier, spread, computed, or a transient
+    /// local) sets `has_dynamic_provide`, which makes the analyze layer abstain
+    /// on ALL inject findings project-wide (it could provide any key, so a
+    /// surviving inject finding might be a false positive). A static
+    /// string-literal key is in a different identity space from a symbol inject
+    /// and is simply ignored. Inject/getContext sites are recorded
+    /// conservatively: only a stable-identifier key is captured; everything
+    /// else abstains.
+    fn record_di_key_site(&mut self, expr: &CallExpression<'_>) {
+        let classified = match &expr.callee {
+            Expression::Identifier(callee) => {
+                let name = callee.name.as_str();
+                if self.nested_scope_shadows(name) {
+                    None
+                } else if name == "provide"
+                    && (self.is_named_import_from(name, "vue", "provide")
+                        || self.is_named_import_from(name, "@vue/runtime-core", "provide"))
+                {
+                    Some((DiFramework::Vue, DiRole::Provide))
+                } else if name == "inject"
+                    && (self.is_named_import_from(name, "vue", "inject")
+                        || self.is_named_import_from(name, "@vue/runtime-core", "inject"))
+                {
+                    Some((DiFramework::Vue, DiRole::Inject))
+                } else if name == "setContext"
+                    && self.is_named_import_from(name, "svelte", "setContext")
+                {
+                    Some((DiFramework::Svelte, DiRole::Provide))
+                } else if name == "getContext"
+                    && self.is_named_import_from(name, "svelte", "getContext")
+                {
+                    Some((DiFramework::Svelte, DiRole::Inject))
+                } else {
+                    None
+                }
+            }
+            // App-level `*.provide(KEY, value)` (e.g. `app.provide` in main.ts).
+            // FN-preferring: no provenance gate, since a captured provide can
+            // only suppress a finding, never create one. Exactly two arguments
+            // separates the Vue app-provide shape from unrelated `.provide`
+            // calls reasonably well.
+            Expression::StaticMemberExpression(member)
+                if member.property.name == "provide" && expr.arguments.len() == 2 =>
+            {
+                Some((DiFramework::Vue, DiRole::Provide))
+            }
+            _ => None,
+        };
+        let Some((framework, role)) = classified else {
+            return;
+        };
+
+        match expr.arguments.first() {
+            Some(Argument::Identifier(ident)) => {
+                let key = ident.name.as_str();
+                if self.nested_scope_shadows(key) {
+                    // Transient nested-scope key (loop variable / parameter):
+                    // unknowable stable identity. A provide of such a key could
+                    // be providing anything, so abstain project-wide.
+                    if role == DiRole::Provide {
+                        self.has_dynamic_provide = true;
+                    }
+                    return;
+                }
+                self.di_key_sites.push(DiKeySite {
+                    key_local: key.to_string(),
+                    role,
+                    framework,
+                    span_start: expr.span.start,
+                });
+            }
+            // Static string key: a different identity space from symbol injects,
+            // so it neither records nor abstains.
+            Some(Argument::StringLiteral(_)) => {}
+            Some(Argument::TemplateLiteral(t)) if t.expressions.is_empty() => {}
+            // No argument: not a usable call.
+            None => {}
+            // Spread / computed / member / call / interpolated key: unknowable.
+            // A provide of an unknowable key forces a project-wide inject abstain.
+            Some(_) => {
+                if role == DiRole::Provide {
+                    self.has_dynamic_provide = true;
+                }
             }
         }
     }

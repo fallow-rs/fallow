@@ -40,8 +40,9 @@ use crate::results::{
     DependencyOverrideSource, DuplicateExport, EmptyCatalogGroup, InvalidClientExport,
     MisconfiguredDependencyOverride, MisplacedDirective, MixedClientServerBarrel, PolicyViolation,
     PrivateTypeLeak, ReExportCycle, ReExportCycleKind, TestOnlyDependency, TypeOnlyDependency,
-    UnlistedDependency, UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry,
-    UnusedDependency, UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedMember,
+    UnlistedDependency, UnprovidedInject, UnresolvedCatalogReference, UnresolvedImport,
+    UnusedCatalogEntry, UnusedDependency, UnusedDependencyOverride, UnusedExport, UnusedFile,
+    UnusedMember,
 };
 
 /// Shared note for the `duplicate-exports` fix action. Mirrors the const used
@@ -839,6 +840,45 @@ impl MisplacedDirectiveFinding {
         })];
         Self {
             directive_site,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for an [`UnprovidedInject`] finding. There is no safe
+/// auto-fix: the fix is binary but judgement-bearing (add a `provide` for the
+/// key, or delete the dead inject). The only action is a line-level suppress.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnprovidedInjectFinding {
+    /// The underlying finding.
+    #[serde(flatten)]
+    pub inject: UnprovidedInject,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl UnprovidedInjectFinding {
+    /// Build the wrapper from a raw [`UnprovidedInject`]. Emits only a
+    /// line-level suppress action: there is no safe auto-fix because the fix
+    /// (provide the key or remove the inject) is a human decision.
+    #[must_use]
+    pub fn with_actions(inject: UnprovidedInject) -> Self {
+        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
+            kind: SuppressLineKind::SuppressLine,
+            auto_fixable: false,
+            description: "Suppress with an inline comment above the line".to_string(),
+            comment: "// fallow-ignore-next-line unprovided-inject".to_string(),
+            scope: None,
+        })];
+        Self {
+            inject,
             actions,
             introduced: None,
         }

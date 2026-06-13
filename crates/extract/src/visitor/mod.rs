@@ -15,7 +15,7 @@ use crate::{
     MemberAccess, MemberInfo, MemberKind, ModuleInfo, ReExportInfo, RequireCallInfo, VisibilityTag,
 };
 use fallow_types::extract::{
-    CalleeUse, ClassHeritageInfo, LocalTypeDeclaration, MisplacedDirectiveSite,
+    CalleeUse, ClassHeritageInfo, DiKeySite, LocalTypeDeclaration, MisplacedDirectiveSite,
     PublicSignatureTypeReference, SanitizedSinkArg, SanitizerScope, SecurityControlSite,
     SinkLiteralValue, SinkSite, SkippedSecurityCalleeSite, TaintedBinding,
 };
@@ -228,6 +228,14 @@ pub(crate) struct ModuleInfoExtractor {
     /// prologue), so the RSC bundler silently ignores them. Captured by
     /// `visit_program` and consumed by the `misplaced-directive` detector.
     pub(crate) misplaced_directives: Vec<MisplacedDirectiveSite>,
+    /// Vue `provide`/`inject` and Svelte `setContext`/`getContext` call sites
+    /// keyed by a stable identifier symbol. Consumed by the `unprovided-inject`
+    /// detector.
+    pub(crate) di_key_sites: Vec<DiKeySite>,
+    /// `true` when a `provide`/`setContext` keyed by an unknowable key (a
+    /// non-identifier, a spread, or a transient nested-scope local) was seen.
+    /// Forces the `unprovided-inject` detector to abstain project-wide.
+    pub(crate) has_dynamic_provide: bool,
     /// Module-scope default, namespace, or require bindings imported from
     /// DOMPurify-compatible packages.
     pub(crate) dompurify_bindings: FxHashSet<String>,
@@ -948,6 +956,8 @@ impl ModuleInfoExtractor {
             security_control_sites: self.security_control_sites,
             callee_uses: self.callee_uses,
             misplaced_directives: self.misplaced_directives,
+            di_key_sites: self.di_key_sites,
+            has_dynamic_provide: self.has_dynamic_provide,
         }
     }
 
@@ -1006,6 +1016,8 @@ impl ModuleInfoExtractor {
             .extend(self.security_control_sites);
         info.callee_uses.extend(self.callee_uses);
         info.misplaced_directives.extend(self.misplaced_directives);
+        info.di_key_sites.extend(self.di_key_sites);
+        info.has_dynamic_provide = info.has_dynamic_provide || self.has_dynamic_provide;
     }
 }
 
