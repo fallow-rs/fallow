@@ -1319,6 +1319,7 @@ fn health_args_with_all_options() {
         changed_since: Some("develop".to_string()),
         complexity: Some(true),
         complexity_breakdown: Some(true),
+        css: None,
         file_scores: Some(true),
         hotspots: Some(true),
         targets: None,

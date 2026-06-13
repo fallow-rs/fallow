@@ -395,6 +395,14 @@ pub struct HealthParams {
     /// Forwards `--complexity-breakdown`. Off by default to keep output lean.
     pub complexity_breakdown: Option<bool>,
 
+    /// Add a structural CSS analytics section (`css_analytics`): specificity
+    /// hotspots, `!important` density, over-complex selectors, deep nesting,
+    /// design-token sprawl (distinct colors / font-sizes / z-indexes), and
+    /// unreferenced custom-property / `@keyframes` cleanup candidates. Forwards
+    /// `--css`. Opt-in because it reads and parses every project stylesheet
+    /// (standard CSS; SCSS is skipped).
+    pub css: Option<bool>,
+
     /// Show only per-file health scores, sorted by risk-aware triage concern:
     /// lower maintainability index and higher CRAP risk first.
     pub file_scores: Option<bool>,

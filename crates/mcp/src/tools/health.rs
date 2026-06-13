@@ -95,6 +95,9 @@ impl HealthArgsBuilder<'_> {
         if self.params.file_scores == Some(true) {
             self.args.push("--file-scores".to_string());
         }
+        if self.params.css == Some(true) {
+            self.args.push("--css".to_string());
+        }
     }
 
     fn push_ownership(&mut self) {

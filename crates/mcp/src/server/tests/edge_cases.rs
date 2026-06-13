@@ -192,6 +192,18 @@ fn health_args_complexity_breakdown_flag() {
 }
 
 #[test]
+fn health_args_css_flag() {
+    let on = build_health_args(&HealthParams {
+        css: Some(true),
+        ..Default::default()
+    });
+    assert!(on.contains(&"--css".to_string()));
+
+    let off = build_health_args(&HealthParams::default());
+    assert!(!off.contains(&"--css".to_string()));
+}
+
+#[test]
 fn health_args_hotspots_flag_only() {
     let params = HealthParams {
         hotspots: Some(true),
@@ -660,6 +672,7 @@ fn health_args_with_all_options_including_targets_and_snapshot() {
         changed_since: Some("develop".to_string()),
         complexity: Some(true),
         complexity_breakdown: Some(true),
+        css: None,
         file_scores: Some(true),
         hotspots: Some(true),
         targets: Some(true),
