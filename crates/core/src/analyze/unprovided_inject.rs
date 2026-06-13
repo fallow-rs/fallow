@@ -137,12 +137,12 @@ pub fn find_unprovided_injects(
             if site.role != DiRole::Inject {
                 continue;
             }
-            let canonical = match resolve_key(resolved, graph, &local_to_export_keys, &site.key_local)
-            {
-                // External: the provide may live inside the package; abstain.
-                KeyResolution::External => continue,
-                KeyResolution::Internal(keys) | KeyResolution::LocalOnly(keys) => keys,
-            };
+            let canonical =
+                match resolve_key(resolved, graph, &local_to_export_keys, &site.key_local) {
+                    // External: the provide may live inside the package; abstain.
+                    KeyResolution::External => continue,
+                    KeyResolution::Internal(keys) | KeyResolution::LocalOnly(keys) => keys,
+                };
             if canonical.is_empty() {
                 continue;
             }
@@ -151,10 +151,9 @@ pub fn find_unprovided_injects(
                 continue;
             }
             // Public-API abstain: the consumer of this package provides the key.
-            if canonical
-                .iter()
-                .any(|key| key_is_public_api(graph, key, public_api_entry_points, &entry_star_targets))
-            {
+            if canonical.iter().any(|key| {
+                key_is_public_api(graph, key, public_api_entry_points, &entry_star_targets)
+            }) {
                 continue;
             }
 
@@ -210,7 +209,10 @@ fn resolve_key(
     if imported_external {
         return KeyResolution::External;
     }
-    KeyResolution::LocalOnly(vec![ExportKey::new(resolved.file_id, key_local.to_string())])
+    KeyResolution::LocalOnly(vec![ExportKey::new(
+        resolved.file_id,
+        key_local.to_string(),
+    )])
 }
 
 /// Whether the key's resolved export is part of this package's public API:

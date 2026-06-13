@@ -6496,10 +6496,7 @@ fn loop_variable_provide_key_sets_dynamic_provide() {
         "a provide keyed by a transient loop variable must set has_dynamic_provide"
     );
     assert!(
-        !info
-            .di_key_sites
-            .iter()
-            .any(|s| s.role == DiRole::Provide),
+        !info.di_key_sites.iter().any(|s| s.role == DiRole::Provide),
         "the loop-variable provide must not record a clean provide site: {:?}",
         info.di_key_sites
     );

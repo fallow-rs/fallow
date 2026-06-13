@@ -16,9 +16,8 @@ use crate::{
 use fallow_types::extract::{
     CalleeUse, ClassHeritageInfo, DiFramework, DiKeySite, DiRole, LocalTypeDeclaration, MemberInfo,
     MemberKind, MisplacedDirectiveSite, PublicSignatureTypeReference, SanitizedSinkArg,
-    SanitizerScope,
-    SecurityControlKind, SecurityControlSite, SecurityUrlShape, SinkArgKind, SinkLiteralValue,
-    SinkObjectProperty, SinkShape, SinkSite, SkippedSecurityCalleeExpressionKind,
+    SanitizerScope, SecurityControlKind, SecurityControlSite, SecurityUrlShape, SinkArgKind,
+    SinkLiteralValue, SinkObjectProperty, SinkShape, SinkSite, SkippedSecurityCalleeExpressionKind,
     SkippedSecurityCalleeReason, SkippedSecurityCalleeSite, TaintedBinding,
 };
 
@@ -6337,20 +6336,17 @@ impl ModuleInfoExtractor {
             return;
         };
 
-        match expr.arguments.first() {
-            Some(Argument::Identifier(ident)) => {
-                let key = ident.name.as_str();
-                if self.nested_scope_shadows(key) {
-                    // Transient nested-scope key (loop variable / parameter):
-                    // unknowable stable identity. A provide of such a key could
-                    // be providing anything, so abstain project-wide.
-                    if role == DiRole::Provide {
-                        self.has_dynamic_provide = true;
-                    }
-                    return;
-                }
+        // No argument: not a usable call.
+        let Some(first) = expr.arguments.first() else {
+            return;
+        };
+        match first {
+            // A stable module-level identifier key (an import or module-scope
+            // const, i.e. not a transient nested-scope local) is the only shape
+            // recorded as a clean DI site.
+            Argument::Identifier(ident) if !self.nested_scope_shadows(ident.name.as_str()) => {
                 self.di_key_sites.push(DiKeySite {
-                    key_local: key.to_string(),
+                    key_local: ident.name.to_string(),
                     role,
                     framework,
                     span_start: expr.span.start,
@@ -6358,13 +6354,13 @@ impl ModuleInfoExtractor {
             }
             // Static string key: a different identity space from symbol injects,
             // so it neither records nor abstains.
-            Some(Argument::StringLiteral(_)) => {}
-            Some(Argument::TemplateLiteral(t)) if t.expressions.is_empty() => {}
-            // No argument: not a usable call.
-            None => {}
-            // Spread / computed / member / call / interpolated key: unknowable.
-            // A provide of an unknowable key forces a project-wide inject abstain.
-            Some(_) => {
+            Argument::StringLiteral(_) => {}
+            Argument::TemplateLiteral(t) if t.expressions.is_empty() => {}
+            // A transient nested-scope identifier (loop variable / parameter), a
+            // spread, a computed/member/call key, or an interpolated template is
+            // unknowable. A provide of such a key could be providing anything, so
+            // it forces a project-wide inject abstain.
+            _ => {
                 if role == DiRole::Provide {
                     self.has_dynamic_provide = true;
                 }

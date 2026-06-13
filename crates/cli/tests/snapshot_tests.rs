@@ -274,8 +274,8 @@ fn sample_results(root: &Path) -> AnalysisResults {
             },
         ),
     );
-    r.unprovided_injects.push(
-        fallow_core::results::UnprovidedInjectFinding::with_actions(
+    r.unprovided_injects
+        .push(fallow_core::results::UnprovidedInjectFinding::with_actions(
             fallow_core::results::UnprovidedInject {
                 path: root.join("src/useTheme.ts"),
                 key_name: "THEME_KEY".to_string(),
@@ -283,8 +283,7 @@ fn sample_results(root: &Path) -> AnalysisResults {
                 line: 5,
                 col: 2,
             },
-        ),
-    );
+        ));
 
     r
 }

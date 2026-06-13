@@ -12,10 +12,10 @@ mod predicates;
 mod re_export_cycles;
 mod security;
 mod server_only;
+mod unprovided_inject;
 mod unused_catalog;
 mod unused_deps;
 mod unused_exports;
-mod unprovided_inject;
 mod unused_files;
 mod unused_members;
 mod unused_overrides;
@@ -43,10 +43,10 @@ use fallow_types::output_dead_code::{
     InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
     MixedClientServerBarrelFinding, PolicyViolationFinding, PrivateTypeLeakFinding,
     ReExportCycleFinding, TestOnlyDependencyFinding, TypeOnlyDependencyFinding,
-    UnlistedDependencyFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
-    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedDependencyFinding,
-    UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
-    UnprovidedInjectFinding, UnusedExportFinding, UnusedFileFinding,
+    UnlistedDependencyFinding, UnprovidedInjectFinding, UnresolvedCatalogReferenceFinding,
+    UnresolvedImportFinding, UnusedCatalogEntryFinding, UnusedClassMemberFinding,
+    UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
+    UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
     UnusedOptionalDependencyFinding, UnusedStoreMemberFinding, UnusedTypeFinding,
 };
 
@@ -56,8 +56,8 @@ use crate::suppress::{IssueKind, SuppressionContext};
 use invalid_client_exports::find_invalid_client_exports;
 use misplaced_directive::find_misplaced_directives;
 use mixed_barrel::find_mixed_client_server_barrels;
-use unprovided_inject::find_unprovided_injects;
 use re_export_cycles::find_re_export_cycles;
+use unprovided_inject::find_unprovided_injects;
 #[expect(
     deprecated,
     reason = "ADR-008 deprecates detector helpers for external callers; core orchestration still calls them internally"

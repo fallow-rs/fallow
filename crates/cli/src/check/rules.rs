@@ -381,8 +381,7 @@ fn has_default_file_scoped_error(
             && !results.unused_class_members.is_empty())
         || (rules.unused_store_members == Severity::Error
             && !results.unused_store_members.is_empty())
-        || (rules.unprovided_injects == Severity::Error
-            && !results.unprovided_injects.is_empty())
+        || (rules.unprovided_injects == Severity::Error && !results.unprovided_injects.is_empty())
         || (rules.unresolved_imports == Severity::Error && !results.unresolved_imports.is_empty())
         || (rules.stale_suppressions == Severity::Error && !results.stale_suppressions.is_empty())
         || (rules.unresolved_catalog_references == Severity::Error

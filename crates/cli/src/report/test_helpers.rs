@@ -4,9 +4,9 @@ use fallow_core::extract::MemberKind;
 use fallow_core::results::*;
 use fallow_types::output_dead_code::{
     BoundaryViolationFinding, CircularDependencyFinding, TestOnlyDependencyFinding,
-    TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnresolvedImportFinding,
-    UnusedClassMemberFinding, UnusedDependencyFinding, UnusedDevDependencyFinding,
-    UnprovidedInjectFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
+    TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
+    UnresolvedImportFinding, UnusedClassMemberFinding, UnusedDependencyFinding,
+    UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
     UnusedOptionalDependencyFinding, UnusedStoreMemberFinding, UnusedTypeFinding,
 };
 
