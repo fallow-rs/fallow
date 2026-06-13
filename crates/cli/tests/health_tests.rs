@@ -2812,3 +2812,47 @@ fn health_css_flag_surfaces_css_analytics() {
     assert_eq!(summary["keyframes_defined"], 2, "summary: {summary}");
     assert_eq!(summary["keyframes_unreferenced"], 1, "summary: {summary}");
 }
+
+#[test]
+fn health_css_flags_unused_scoped_vue_class() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"vue-fixture","version":"1.0.0","dependencies":{"vue":"^3.4.0"}}"#,
+    );
+    write_file(&root.join("src/index.ts"), "export const x = 1;\n");
+    // `.used` is referenced in the template; `.dead` is referenced nowhere.
+    write_file(
+        &root.join("src/App.vue"),
+        "<template><div class=\"used\"></div></template>\n\
+         <style scoped>.used { color: red; } .dead { color: blue; }</style>\n",
+    );
+
+    let out = run_fallow_in_root(
+        "health",
+        root,
+        &[
+            "--css",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let json = parse_json(&out);
+    let css = json
+        .get("css_analytics")
+        .expect("css_analytics present with --css and a scoped-dead class");
+    assert_eq!(
+        css["summary"]["scoped_unused_classes"], 1,
+        "stdout: {}",
+        out.stdout
+    );
+    let scoped = css["scoped_unused"]
+        .as_array()
+        .expect("scoped_unused array");
+    assert_eq!(scoped.len(), 1);
+    assert_eq!(scoped[0]["classes"][0], "dead");
+}

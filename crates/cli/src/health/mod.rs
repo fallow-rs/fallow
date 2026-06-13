@@ -517,10 +517,13 @@ fn compute_css_analytics_report(
     changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
     ws_roots: Option<&[std::path::PathBuf]>,
 ) -> Option<crate::health_types::CssAnalyticsReport> {
-    use crate::health_types::{CssAnalyticsReport, CssAnalyticsSummary, CssFileAnalytics};
+    use crate::health_types::{
+        CssAnalyticsReport, CssAnalyticsSummary, CssFileAnalytics, ScopedUnusedClasses,
+    };
 
     let mut file_reports = Vec::new();
     let mut summary = CssAnalyticsSummary::default();
+    let mut scoped_unused: Vec<ScopedUnusedClasses> = Vec::new();
     // Design-token sprawl is a whole-codebase signal, so distinct values are
     // unioned across every analyzed stylesheet (including ones with no notable
     // rule, which are not listed individually).
@@ -539,7 +542,10 @@ fn compute_css_analytics_report(
 
     for file in files {
         let path = &file.path;
-        if path.extension().and_then(|ext| ext.to_str()) != Some("css") {
+        let extension = path.extension().and_then(|ext| ext.to_str());
+        let is_css = extension == Some("css");
+        let is_sfc = matches!(extension, Some("vue") | Some("svelte"));
+        if !is_css && !is_sfc {
             continue;
         }
         let relative = path.strip_prefix(&config.root).unwrap_or(path);
@@ -559,6 +565,21 @@ fn compute_css_analytics_report(
         let Ok(source) = std::fs::read_to_string(path) else {
             continue;
         };
+
+        if is_sfc {
+            let classes = fallow_core::extract::scoped_unused_classes(&source);
+            if !classes.is_empty() {
+                summary.scoped_unused_classes = summary
+                    .scoped_unused_classes
+                    .saturating_add(u32::try_from(classes.len()).unwrap_or(u32::MAX));
+                scoped_unused.push(ScopedUnusedClasses {
+                    path: relative.to_string_lossy().replace('\\', "/"),
+                    classes,
+                });
+            }
+            continue;
+        }
+
         let Some(analytics) = fallow_core::extract::compute_css_analytics(&source) else {
             continue;
         };
@@ -607,12 +628,14 @@ fn compute_css_analytics_report(
         u32::try_from(defined_keyframes.difference(&referenced_keyframes).count())
             .unwrap_or(u32::MAX);
 
-    if summary.files_analyzed == 0 {
+    if summary.files_analyzed == 0 && scoped_unused.is_empty() {
         return None;
     }
+    scoped_unused.sort_by(|a, b| a.path.cmp(&b.path));
     Some(CssAnalyticsReport {
         files: file_reports,
         summary,
+        scoped_unused,
     })
 }
 

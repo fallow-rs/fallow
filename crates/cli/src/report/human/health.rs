@@ -214,6 +214,25 @@ fn render_css_analytics(lines: &mut Vec<String>, report: &crate::health_types::H
             summary.keyframes_unreferenced,
         ));
     }
+    if !css.scoped_unused.is_empty() {
+        let class_word = if summary.scoped_unused_classes == 1 {
+            "class"
+        } else {
+            "classes"
+        };
+        lines.push(format!(
+            "  {} unused scoped {class_word} in {} Vue SFC{}",
+            summary.scoped_unused_classes,
+            css.scoped_unused.len(),
+            plural(css.scoped_unused.len()),
+        ));
+        for entry in css.scoped_unused.iter().take(5) {
+            lines.push(format!("  {}: {}", entry.path, entry.classes.join(", ")));
+        }
+        if css.scoped_unused.len() > 5 {
+            lines.push("  ... see --format json for all SFCs".dimmed().to_string());
+        }
+    }
 
     let mut notable: Vec<(&str, &fallow_types::extract::CssRuleMetric)> = css
         .files

@@ -17,7 +17,7 @@ pub use fallow_types::extract::{SkippedSecurityCalleeExpressionKind, SkippedSecu
 pub use fallow_extract::{
     compute_css_analytics, extract_astro_frontmatter, extract_css_module_exports,
     extract_mdx_statements, extract_sfc_scripts, is_glimmer_file, is_sfc_file, parse_all_files,
-    parse_from_content, parse_single_file, strip_glimmer_templates,
+    parse_from_content, parse_single_file, scoped_unused_classes, strip_glimmer_templates,
 };
 
 pub use fallow_extract::astro;

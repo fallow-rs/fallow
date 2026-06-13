@@ -87,6 +87,21 @@ pub struct CssAnalyticsReport {
     pub files: Vec<CssFileAnalytics>,
     /// Project-wide CSS aggregates across every analyzed stylesheet.
     pub summary: CssAnalyticsSummary,
+    /// Vue SFCs whose `<style scoped>` defines classes used nowhere else in the
+    /// component (cleanup candidates).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scoped_unused: Vec<ScopedUnusedClasses>,
+}
+
+/// A Vue SFC's `<style scoped>` classes that appear nowhere else in the
+/// component (cleanup candidates).
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ScopedUnusedClasses {
+    /// Project-root-relative, forward-slash path to the SFC.
+    pub path: String,
+    /// The scoped class names with no use elsewhere in the component, sorted.
+    pub classes: Vec<String>,
 }
 
 /// Per-stylesheet CSS analytics.
@@ -136,6 +151,9 @@ pub struct CssAnalyticsSummary {
     /// `animation-name` in any stylesheet (cleanup CANDIDATES; an animation
     /// name can still be applied from JavaScript).
     pub keyframes_unreferenced: u32,
+    /// Total Vue `<style scoped>` classes used nowhere else in their component
+    /// (cleanup candidates), across all SFCs.
+    pub scoped_unused_classes: u32,
 }
 
 /// Result of complexity analysis for reporting.

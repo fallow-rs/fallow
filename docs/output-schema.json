@@ -12347,6 +12347,13 @@
         "summary": {
           "description": "Project-wide CSS aggregates across every analyzed stylesheet.",
           "$ref": "#/definitions/CssAnalyticsSummary"
+        },
+        "scoped_unused": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ScopedUnusedClasses"
+          },
+          "description": "Vue SFCs whose `<style scoped>` defines classes used nowhere else in the\ncomponent (cleanup candidates)."
         }
       },
       "required": [
@@ -12582,6 +12589,10 @@
         "keyframes_unreferenced": {
           "type": "integer",
           "description": "`@keyframes` defined but never referenced via `animation` /\n`animation-name` in any stylesheet (cleanup CANDIDATES; an animation\nname can still be applied from JavaScript)."
+        },
+        "scoped_unused_classes": {
+          "type": "integer",
+          "description": "Total Vue `<style scoped>` classes used nowhere else in their component\n(cleanup candidates), across all SFCs."
         }
       },
       "required": [
@@ -12597,9 +12608,31 @@
         "custom_properties_defined",
         "custom_properties_unreferenced",
         "keyframes_defined",
-        "keyframes_unreferenced"
+        "keyframes_unreferenced",
+        "scoped_unused_classes"
       ],
       "description": "Project-wide CSS analytics aggregates across every analyzed stylesheet\n(including stylesheets with no notable rule, which are not listed\nindividually)."
+    },
+    "ScopedUnusedClasses": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Project-root-relative, forward-slash path to the SFC."
+        },
+        "classes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The scoped class names with no use elsewhere in the component, sorted."
+        }
+      },
+      "required": [
+        "path",
+        "classes"
+      ],
+      "description": "A Vue SFC's `<style scoped>` classes that appear nowhere else in the\ncomponent (cleanup candidates)."
     },
     "EnabledSource": {
       "type": "string",

@@ -30,6 +30,7 @@ pub mod inventory;
 pub mod mdx;
 mod parse;
 pub mod sfc;
+pub mod sfc_css;
 mod sfc_template;
 mod source_map;
 pub mod suppress;
@@ -58,6 +59,7 @@ pub use css_metrics::compute_css_analytics;
 pub use glimmer::{is_glimmer_file, strip_glimmer_templates};
 pub use mdx::extract_mdx_statements;
 pub use sfc::{extract_sfc_scripts, is_sfc_file};
+pub use sfc_css::scoped_unused_classes;
 pub use sfc_template::angular::ANGULAR_TPL_SENTINEL;
 
 #[expect(

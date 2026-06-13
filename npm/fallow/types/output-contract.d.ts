@@ -4622,6 +4622,11 @@ export interface CssAnalyticsReport {
  */
 files: CssFileAnalytics[]
 summary: CssAnalyticsSummary
+/**
+ * Vue SFCs whose `<style scoped>` defines classes used nowhere else in the
+ * component (cleanup candidates).
+ */
+scoped_unused?: ScopedUnusedClasses[]
 }
 /**
  * Per-stylesheet CSS analytics.
@@ -4812,6 +4817,25 @@ keyframes_defined: number
  * name can still be applied from JavaScript).
  */
 keyframes_unreferenced: number
+/**
+ * Total Vue `<style scoped>` classes used nowhere else in their component
+ * (cleanup candidates), across all SFCs.
+ */
+scoped_unused_classes: number
+}
+/**
+ * A Vue SFC's `<style scoped>` classes that appear nowhere else in the
+ * component (cleanup candidates).
+ */
+export interface ScopedUnusedClasses {
+/**
+ * Project-root-relative, forward-slash path to the SFC.
+ */
+path: string
+/**
+ * The scoped class names with no use elsewhere in the component, sorted.
+ */
+classes: string[]
 }
 /**
  * Envelope emitted by `fallow explain <issue-type> --format json`.
