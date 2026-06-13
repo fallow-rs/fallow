@@ -190,10 +190,11 @@ fn render_css_analytics(lines: &mut Vec<String>, report: &crate::health_types::H
         0.0
     };
     lines.push(format!(
-        "  {} stylesheet{} \u{00b7} {} rules \u{00b7} {important_pct:.1}% !important \u{00b7} {} empty \u{00b7} max nesting {}",
+        "  {} stylesheet{} \u{00b7} {} rule{} \u{00b7} {important_pct:.1}% !important \u{00b7} {} empty \u{00b7} max nesting {}",
         summary.files_analyzed,
         plural(summary.files_analyzed as usize),
         summary.total_rules,
+        plural(summary.total_rules as usize),
         summary.empty_rules,
         summary.max_nesting_depth,
     ));
@@ -277,7 +278,11 @@ fn render_css_analytics(lines: &mut Vec<String>, report: &crate::health_types::H
                 m.important_count,
             )
         };
-        key(b.1).cmp(&key(a.1))
+        // Sort by salience descending; tie-break on (path, line) so the human
+        // top-5 stays deterministic when two rules share identical metrics.
+        key(b.1)
+            .cmp(&key(a.1))
+            .then_with(|| (a.0, a.1.line).cmp(&(b.0, b.1.line)))
     });
 
     for (path, rule) in notable.iter().take(5) {
