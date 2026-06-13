@@ -84,6 +84,15 @@ pub struct RulesConfig {
     pub unused_enum_members: Severity,
     #[serde(default, alias = "unused-class-member")]
     pub unused_class_members: Severity,
+    /// Store members (Pinia `state` / `getters` / `actions` key, or a
+    /// setup-store returned key) declared but never accessed by any consumer
+    /// project-wide. Defaults to `warn`, not `error` like the closed-set
+    /// class/enum member rules: a store has an OPEN declaration surface
+    /// (plugins, `$onAction`, dynamic dispatch) so analyzer confidence is
+    /// genuinely lower; warn encodes that without failing CI. Promotable to
+    /// `error` once validated on a codebase.
+    #[serde(default, alias = "unused-store-member")]
+    pub unused_store_members: Severity,
     #[serde(default, alias = "unresolved-import")]
     pub unresolved_imports: Severity,
     #[serde(default, alias = "unlisted-dependency")]
@@ -178,6 +187,7 @@ impl Default for RulesConfig {
             unused_optional_dependencies: Severity::Warn,
             unused_enum_members: Severity::Error,
             unused_class_members: Severity::Error,
+            unused_store_members: Severity::Warn,
             unresolved_imports: Severity::Error,
             unlisted_dependencies: Severity::Error,
             duplicate_exports: Severity::Error,
@@ -233,6 +243,9 @@ impl RulesConfig {
         }
         if let Some(s) = partial.unused_class_members {
             self.unused_class_members = s;
+        }
+        if let Some(s) = partial.unused_store_members {
+            self.unused_store_members = s;
         }
         if let Some(s) = partial.unresolved_imports {
             self.unresolved_imports = s;
@@ -361,6 +374,12 @@ pub struct PartialRulesConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_class_members: Option<Severity>,
+    #[serde(
+        default,
+        alias = "unused-store-member",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub unused_store_members: Option<Severity>,
     #[serde(
         default,
         alias = "unresolved-import",
@@ -509,6 +528,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unused-optional-dependencies",
     "unused-enum-members",
     "unused-class-members",
+    "unused-store-members",
     "unresolved-imports",
     "unlisted-dependencies",
     "duplicate-exports",
@@ -541,6 +561,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unused-optional-dependency",
     "unused-enum-member",
     "unused-class-member",
+    "unused-store-member",
     "unresolved-import",
     "unlisted-dependency",
     "duplicate-export",
@@ -835,6 +856,7 @@ mod tests {
             unused_optional_dependencies: Some(Severity::Off),
             unused_enum_members: Some(Severity::Off),
             unused_class_members: Some(Severity::Off),
+            unused_store_members: Some(Severity::Off),
             unresolved_imports: Some(Severity::Off),
             unlisted_dependencies: Some(Severity::Off),
             duplicate_exports: Some(Severity::Off),
@@ -916,7 +938,7 @@ mod tests {
 
     #[test]
     fn known_rule_names_count_matches_struct() {
-        assert_eq!(KNOWN_RULE_NAMES.len(), 62);
+        assert_eq!(KNOWN_RULE_NAMES.len(), 64);
     }
 
     #[test]
@@ -957,8 +979,8 @@ mod tests {
 
         assert_eq!(
             aliases_found.len(),
-            62,
-            "expected 62 source-level alias attrs (31 per struct); got {}: {:?}",
+            64,
+            "expected 64 source-level alias attrs (32 per struct); got {}: {:?}",
             aliases_found.len(),
             aliases_found
         );

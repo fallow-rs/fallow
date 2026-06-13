@@ -41,6 +41,7 @@ fn severity_for_kind(rules: &RulesConfig, kind: IssueKind) -> Severity {
         IssueKind::UnusedDevDependency => rules.unused_dev_dependencies,
         IssueKind::UnusedEnumMember => rules.unused_enum_members,
         IssueKind::UnusedClassMember => rules.unused_class_members,
+        IssueKind::UnusedStoreMember => rules.unused_store_members,
         IssueKind::UnresolvedImport => rules.unresolved_imports,
         IssueKind::UnlistedDependency => rules.unlisted_dependencies,
         IssueKind::DuplicateExport => rules.duplicate_exports,
@@ -532,6 +533,7 @@ mod tests {
             IssueKind::InvalidClientExport,
             IssueKind::MixedClientServerBarrel,
             IssueKind::MisplacedDirective,
+            IssueKind::UnusedStoreMember,
         ] {
             assert_eq!(
                 IssueKind::from_discriminant(kind.to_discriminant()),
@@ -539,7 +541,7 @@ mod tests {
             );
         }
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(33), None);
+        assert_eq!(IssueKind::from_discriminant(34), None);
     }
 
     #[test]
@@ -779,6 +781,7 @@ mod tests {
             IssueKind::UnusedType,
             IssueKind::UnusedEnumMember,
             IssueKind::UnusedClassMember,
+            IssueKind::UnusedStoreMember,
             IssueKind::UnresolvedImport,
             IssueKind::DuplicateExport,
             IssueKind::CircularDependency,
@@ -794,6 +797,7 @@ mod tests {
             IssueKind::UnusedDevDependency,
             IssueKind::UnusedEnumMember,
             IssueKind::UnusedClassMember,
+            IssueKind::UnusedStoreMember,
             IssueKind::UnresolvedImport,
             IssueKind::UnlistedDependency,
             IssueKind::DuplicateExport,

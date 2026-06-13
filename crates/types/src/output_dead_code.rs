@@ -944,6 +944,50 @@ impl UnusedClassMemberFinding {
     }
 }
 
+/// Wire-shape envelope for an [`UnusedMember`] finding consumed under the
+/// `unused_store_members` key (a Pinia `state` / `getters` / `actions` key, or
+/// a setup-store returned key, declared but never accessed by any consumer
+/// project-wide). Same Rust struct as [`UnusedClassMemberFinding`]. Emits only
+/// a line-level suppress action: there is no safe auto-fix because a store
+/// member can be accessed reflectively (a Pinia plugin, `store.$onAction`, or
+/// dynamic dispatch) in ways syntactic analysis cannot see, so removal is a
+/// behavioral change the user must own.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedStoreMemberFinding {
+    /// The underlying dead-code entry.
+    #[serde(flatten)]
+    pub member: UnusedMember,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl UnusedStoreMemberFinding {
+    /// Build the wrapper from a raw [`UnusedMember`]. Emits only a line-level
+    /// suppress action (no auto-fix: store members can be accessed
+    /// reflectively, so removal is never provably safe).
+    #[must_use]
+    pub fn with_actions(member: UnusedMember) -> Self {
+        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
+            kind: SuppressLineKind::SuppressLine,
+            auto_fixable: false,
+            description: "Suppress with an inline comment above the line".to_string(),
+            comment: "// fallow-ignore-next-line unused-store-member".to_string(),
+            scope: None,
+        })];
+        Self {
+            member,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
 /// Build the `IssueAction` vec for the three `unused_dependencies`,
 /// `unused_dev_dependencies`, `unused_optional_dependencies` views over the
 /// same bare [`UnusedDependency`] struct. Each wrapper differs only in the

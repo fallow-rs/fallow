@@ -967,6 +967,10 @@ pub enum MemberKind {
     ClassProperty,
     /// A member exported from a TypeScript namespace.
     NamespaceMember,
+    /// A member declared by a store object (Pinia `state` / `getters` /
+    /// `actions` key, or a setup-store returned key). Cross-graph dead-member
+    /// detection: a store member never accessed by any consumer project-wide.
+    StoreMember,
 }
 
 /// A static member access expression (e.g., `Status.Active`, `MyClass.create()`).

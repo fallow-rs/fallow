@@ -99,6 +99,11 @@ pub enum IssueKind {
     /// const). It is no longer in the leading prologue, so the RSC bundler
     /// parses it as an ordinary string and silently ignores it.
     MisplacedDirective,
+    /// A store member (Pinia `state` / `getters` / `actions` key, or a
+    /// setup-store returned key) declared but never accessed by any consumer
+    /// project-wide. Cross-graph: the store binding is imported (the module is
+    /// reachable) yet a specific member is dead.
+    UnusedStoreMember,
 }
 
 impl IssueKind {
@@ -150,6 +155,7 @@ impl IssueKind {
                 Some(Self::MixedClientServerBarrel)
             }
             "misplaced-directive" | "misplaced-directives" => Some(Self::MisplacedDirective),
+            "unused-store-member" | "unused-store-members" => Some(Self::UnusedStoreMember),
             _ => None,
         }
     }
@@ -190,6 +196,7 @@ impl IssueKind {
             Self::InvalidClientExport => 30,
             Self::MixedClientServerBarrel => 31,
             Self::MisplacedDirective => 32,
+            Self::UnusedStoreMember => 33,
         }
     }
 
@@ -229,6 +236,7 @@ impl IssueKind {
             30 => Some(Self::InvalidClientExport),
             31 => Some(Self::MixedClientServerBarrel),
             32 => Some(Self::MisplacedDirective),
+            33 => Some(Self::UnusedStoreMember),
             _ => None,
         }
     }
@@ -328,6 +336,7 @@ pub const fn issue_kind_to_kebab(kind: IssueKind) -> &'static str {
         IssueKind::InvalidClientExport => "invalid-client-export",
         IssueKind::MixedClientServerBarrel => "mixed-client-server-barrel",
         IssueKind::MisplacedDirective => "misplaced-directive",
+        IssueKind::UnusedStoreMember => "unused-store-member",
     }
 }
 
@@ -566,6 +575,8 @@ pub const KNOWN_ISSUE_KIND_NAMES: &[&str] = &[
     "mixed-client-server-barrels",
     "misplaced-directive",
     "misplaced-directives",
+    "unused-store-member",
+    "unused-store-members",
 ];
 
 /// CLI filter flags on `fallow dead-code` that scope output to a single
@@ -868,7 +879,11 @@ mod tests {
             IssueKind::from_discriminant(32),
             Some(IssueKind::MisplacedDirective)
         );
-        assert_eq!(IssueKind::from_discriminant(33), None);
+        assert_eq!(
+            IssueKind::from_discriminant(33),
+            Some(IssueKind::UnusedStoreMember)
+        );
+        assert_eq!(IssueKind::from_discriminant(34), None);
         assert_eq!(IssueKind::from_discriminant(u8::MAX), None);
     }
 
@@ -907,6 +922,7 @@ mod tests {
             IssueKind::InvalidClientExport,
             IssueKind::MixedClientServerBarrel,
             IssueKind::MisplacedDirective,
+            IssueKind::UnusedStoreMember,
         ] {
             assert_eq!(
                 IssueKind::from_discriminant(kind.to_discriminant()),
@@ -914,7 +930,7 @@ mod tests {
             );
         }
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(33), None);
+        assert_eq!(IssueKind::from_discriminant(34), None);
     }
 
     #[test]
@@ -952,6 +968,7 @@ mod tests {
             IssueKind::InvalidClientExport,
             IssueKind::MixedClientServerBarrel,
             IssueKind::MisplacedDirective,
+            IssueKind::UnusedStoreMember,
         ];
         let discriminants: Vec<u8> = all_kinds.iter().map(|k| k.to_discriminant()).collect();
         let mut sorted = discriminants.clone();

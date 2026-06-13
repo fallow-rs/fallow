@@ -18,7 +18,8 @@ use crate::output_dead_code::{
     UnlistedDependencyFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
     UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedDependencyFinding,
     UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
-    UnusedExportFinding, UnusedFileFinding, UnusedOptionalDependencyFinding, UnusedTypeFinding,
+    UnusedExportFinding, UnusedFileFinding, UnusedOptionalDependencyFinding,
+    UnusedStoreMemberFinding, UnusedTypeFinding,
 };
 use crate::serde_path;
 use crate::suppress::{IssueKind, closest_known_kind_name};
@@ -102,6 +103,14 @@ pub struct AnalysisResults {
     /// `auto_fixable: false` default to reflect dependency-injection
     /// patterns.
     pub unused_class_members: Vec<UnusedClassMemberFinding>,
+    /// Store members (Pinia `state` / `getters` / `actions` key, or a
+    /// setup-store returned key) declared but never accessed by any consumer
+    /// project-wide. Wrapped in [`UnusedStoreMemberFinding`]: same inner
+    /// [`UnusedMember`] struct as `unused_class_members`, with a
+    /// store-targeted fix description. Cross-graph: the store binding is
+    /// imported (the module is reachable) yet a specific member is dead.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unused_store_members: Vec<UnusedStoreMemberFinding>,
     /// Import specifiers that could not be resolved. Wrapped in
     /// [`UnresolvedImportFinding`] so each entry carries a typed `actions`
     /// array natively.
@@ -310,6 +319,7 @@ impl AnalysisResults {
             + self.unused_optional_dependencies.len()
             + self.unused_enum_members.len()
             + self.unused_class_members.len()
+            + self.unused_store_members.len()
             + self.unresolved_imports.len()
             + self.unlisted_dependencies.len()
             + self.duplicate_exports.len()
@@ -361,6 +371,7 @@ impl AnalysisResults {
             unused_optional_dependencies,
             unused_enum_members,
             unused_class_members,
+            unused_store_members,
             unresolved_imports,
             unlisted_dependencies,
             duplicate_exports,
@@ -402,6 +413,7 @@ impl AnalysisResults {
             .extend(unused_optional_dependencies);
         self.unused_enum_members.extend(unused_enum_members);
         self.unused_class_members.extend(unused_class_members);
+        self.unused_store_members.extend(unused_store_members);
         self.unresolved_imports.extend(unresolved_imports);
         self.unlisted_dependencies.extend(unlisted_dependencies);
         self.duplicate_exports.extend(duplicate_exports);
@@ -520,6 +532,15 @@ impl AnalysisResults {
         });
 
         self.unused_class_members.sort_by(|a, b| {
+            a.member
+                .path
+                .cmp(&b.member.path)
+                .then(a.member.line.cmp(&b.member.line))
+                .then(a.member.parent_name.cmp(&b.member.parent_name))
+                .then(a.member.member_name.cmp(&b.member.member_name))
+        });
+
+        self.unused_store_members.sort_by(|a, b| {
             a.member
                 .path
                 .cmp(&b.member.path)

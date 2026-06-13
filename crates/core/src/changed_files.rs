@@ -411,6 +411,7 @@ pub fn filter_results_by_changed_files(
         unused_optional_dependencies: _unused_optional_dependencies,
         unused_enum_members,
         unused_class_members,
+        unused_store_members,
         unresolved_imports,
         unlisted_dependencies,
         duplicate_exports,
@@ -456,6 +457,7 @@ pub fn filter_results_by_changed_files(
     private_type_leaks.retain(|e| contains_normalized(&cf, &e.leak.path));
     unused_enum_members.retain(|m| contains_normalized(&cf, &m.member.path));
     unused_class_members.retain(|m| contains_normalized(&cf, &m.member.path));
+    unused_store_members.retain(|m| contains_normalized(&cf, &m.member.path));
     unresolved_imports.retain(|i| contains_normalized(&cf, &i.import.path));
 
     unlisted_dependencies.retain(|d| {

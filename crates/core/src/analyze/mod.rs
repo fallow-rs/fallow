@@ -45,7 +45,8 @@ use fallow_types::output_dead_code::{
     UnlistedDependencyFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
     UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedDependencyFinding,
     UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
-    UnusedExportFinding, UnusedFileFinding, UnusedOptionalDependencyFinding, UnusedTypeFinding,
+    UnusedExportFinding, UnusedFileFinding, UnusedOptionalDependencyFinding,
+    UnusedStoreMemberFinding, UnusedTypeFinding,
 };
 
 use crate::results::{AnalysisResults, CircularDependency, CircularDependencyEdge};
@@ -1425,11 +1426,12 @@ fn run_member_detectors(
     let mut results = AnalysisResults::default();
     if config.rules.unused_enum_members == Severity::Off
         && config.rules.unused_class_members == Severity::Off
+        && config.rules.unused_store_members == Severity::Off
     {
         return results;
     }
 
-    let (enum_members, class_members) = find_unused_members_with_public_api_entry_points(
+    let member_results = find_unused_members_with_public_api_entry_points(
         graph,
         resolved_modules,
         modules,
@@ -1440,15 +1442,24 @@ fn run_member_detectors(
         public_api_entry_points,
     );
     if config.rules.unused_enum_members != Severity::Off {
-        results.unused_enum_members = enum_members
+        results.unused_enum_members = member_results
+            .enum_members
             .into_iter()
             .map(UnusedEnumMemberFinding::with_actions)
             .collect();
     }
     if config.rules.unused_class_members != Severity::Off {
-        results.unused_class_members = class_members
+        results.unused_class_members = member_results
+            .class_members
             .into_iter()
             .map(UnusedClassMemberFinding::with_actions)
+            .collect();
+    }
+    if config.rules.unused_store_members != Severity::Off {
+        results.unused_store_members = member_results
+            .store_members
+            .into_iter()
+            .map(UnusedStoreMemberFinding::with_actions)
             .collect();
     }
     results
