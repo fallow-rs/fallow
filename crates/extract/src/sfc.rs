@@ -1185,7 +1185,7 @@ export const foo = 1;
         assert!(asset_refs(r#"<img :src="logo" />"#).is_empty());
         assert!(asset_refs(r#"<img v-bind:src="logo" />"#).is_empty());
         assert!(asset_refs(r#"<img bind:src="logo" />"#).is_empty());
-        assert!(asset_refs(r#"<img src={logo} />"#).is_empty());
+        assert!(asset_refs(r"<img src={logo} />").is_empty());
         assert!(asset_refs(r#"<img data-src="./x.png" />"#).is_empty());
         // Alias-prefixed, root-relative, remote, bare: not plain relative literals.
         assert!(asset_refs(r#"<img src="@/assets/x.png" />"#).is_empty());
