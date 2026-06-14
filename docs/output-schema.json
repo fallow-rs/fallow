@@ -12993,6 +12993,13 @@
             "$ref": "#/definitions/UnresolvedClassReference"
           },
           "description": "Static `class` / `className` tokens in markup that match no CSS class\ndefined anywhere in the project AND are one edit away from a class that\nIS defined (a likely typo or stale rename, with the suggested class). The\nCSS analogue of an unresolved import; the near-miss restriction keeps it\nnear-zero false-positive (Tailwind utilities and third-party classes are\nnot one edit from an authored class). Candidates, never gated: the token\ncould be defined in CSS-in-JS or an external stylesheet the parser never\nsees. Sorted by `(path, line, class)`."
+        },
+        "unreferenced_css_classes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnreferencedCssClass"
+          },
+          "description": "Global CSS classes (defined in a plain `.css`/`.scss` rule) whose literal\nname is referenced by NO in-project markup, static or dynamic (the CSS\nanalogue of an unused export). Heavily gated to stay near-zero-false-\npositive: emitted only when the project is plain-CSS-dominant, the\nstylesheet is locally consumed (not a published design-system surface),\nand the whole project is in scope. Candidates, never gated findings: the\nclass may be used by an HTML email, server template, CMS, or Markdown the\nparser never scans. Sorted by `(path, line, class)`."
         }
       },
       "required": [
@@ -13329,6 +13336,10 @@
           "type": "integer",
           "description": "Static markup class tokens that match no defined CSS class but are one\nedit from a defined class (likely typos / stale renames). Located in\n`unresolved_class_references`. Candidates, never gated."
         },
+        "unreferenced_css_classes": {
+          "type": "integer",
+          "description": "Global CSS classes defined in a stylesheet but referenced by no in-project\nmarkup (located in `unreferenced_css_classes`). Heavily gated cleanup\ncandidates; zero on preprocessor-dominant or partial-scope runs."
+        },
         "notable_truncated_files": {
           "type": "integer",
           "description": "Number of analyzed stylesheets whose per-rule `notable_rules` list was\ntruncated at the per-file cap, so a consumer knows the per-rule detail is\nincomplete without walking every file."
@@ -13361,6 +13372,7 @@
         "unused_property_registrations",
         "unused_layers",
         "unresolved_class_references",
+        "unreferenced_css_classes",
         "notable_truncated_files"
       ],
       "description": "Project-wide CSS analytics aggregates across every analyzed stylesheet\n(including stylesheets with no notable rule, which are not listed\nindividually)."
@@ -13675,6 +13687,37 @@
         "actions"
       ],
       "description": "A static `class` / `className` token in markup that matches no CSS class\ndefined anywhere in the project but is one edit away from a class that IS\ndefined (a likely typo or stale rename). The CSS analogue of an unresolved\nimport. A candidate, never a gated finding: the token could be defined in\nCSS-in-JS or an external stylesheet the parser never sees."
+    },
+    "UnreferencedCssClass": {
+      "type": "object",
+      "properties": {
+        "class": {
+          "type": "string",
+          "description": "The class name (no dot)."
+        },
+        "path": {
+          "type": "string",
+          "description": "Project-root-relative, forward-slash path to the defining stylesheet."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line of the class's first definition."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CssCandidateAction"
+          },
+          "description": "Read-only verification step(s) before removing. Always at least one entry,\nso consumers can iterate `actions` uniformly across every finding type."
+        }
+      },
+      "required": [
+        "class",
+        "path",
+        "line",
+        "actions"
+      ],
+      "description": "A global CSS class defined in a plain `.css`/`.scss` rule whose literal name\nis referenced by no in-project markup (the CSS analogue of an unused export).\nA heavily-gated candidate, never a gated finding: the class may be applied\nfrom an HTML email, server template, CMS, or Markdown the parser never sees."
     }
   }
 }

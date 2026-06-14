@@ -135,6 +135,16 @@ pub struct CssAnalyticsReport {
     /// sees. Sorted by `(path, line, class)`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unresolved_class_references: Vec<UnresolvedClassReference>,
+    /// Global CSS classes (defined in a plain `.css`/`.scss` rule) whose literal
+    /// name is referenced by NO in-project markup, static or dynamic (the CSS
+    /// analogue of an unused export). Heavily gated to stay near-zero-false-
+    /// positive: emitted only when the project is plain-CSS-dominant, the
+    /// stylesheet is locally consumed (not a published design-system surface),
+    /// and the whole project is in scope. Candidates, never gated findings: the
+    /// class may be used by an HTML email, server template, CMS, or Markdown the
+    /// parser never scans. Sorted by `(path, line, class)`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unreferenced_css_classes: Vec<UnreferencedCssClass>,
 }
 
 /// An unused CSS at-rule entity (an `@property` registration with no `var()`
@@ -231,6 +241,24 @@ pub struct UnreferencedKeyframes {
     /// Read-only verification step(s) an agent can run before removing the
     /// candidate. Always at least one entry, so consumers can iterate
     /// `actions` uniformly across every finding type.
+    pub actions: Vec<CssCandidateAction>,
+}
+
+/// A global CSS class defined in a plain `.css`/`.scss` rule whose literal name
+/// is referenced by no in-project markup (the CSS analogue of an unused export).
+/// A heavily-gated candidate, never a gated finding: the class may be applied
+/// from an HTML email, server template, CMS, or Markdown the parser never sees.
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnreferencedCssClass {
+    /// The class name (no dot).
+    pub class: String,
+    /// Project-root-relative, forward-slash path to the defining stylesheet.
+    pub path: String,
+    /// 1-based line of the class's first definition.
+    pub line: u32,
+    /// Read-only verification step(s) before removing. Always at least one entry,
+    /// so consumers can iterate `actions` uniformly across every finding type.
     pub actions: Vec<CssCandidateAction>,
 }
 
@@ -337,6 +365,21 @@ pub enum CssCandidateActionType {
 }
 
 impl CssCandidateAction {
+    /// Verify action for an unreferenced global CSS class: name the surfaces the
+    /// in-project scan does NOT cover (the class could be applied from there) and
+    /// ship a read-only token search to double-check before removing.
+    #[must_use]
+    pub fn verify_unreferenced_class(name: &str) -> Self {
+        Self {
+            kind: CssCandidateActionType::VerifyUnused,
+            auto_fixable: false,
+            description: format!(
+                "Confirm no HTML email, server-rendered template, CMS content, or Markdown applies the \"{name}\" class before removing it (fallow scanned only in-project JS/TS/HTML/Vue/Svelte/Astro markup)."
+            ),
+            command: safe_token_search(name),
+        }
+    }
+
     /// Verify action for an unreferenced `@keyframes`: a read-only token search
     /// for any JavaScript or template reference that applies the animation
     /// (which the CSS-only scan cannot see).
@@ -568,6 +611,10 @@ pub struct CssAnalyticsSummary {
     /// edit from a defined class (likely typos / stale renames). Located in
     /// `unresolved_class_references`. Candidates, never gated.
     pub unresolved_class_references: u32,
+    /// Global CSS classes defined in a stylesheet but referenced by no in-project
+    /// markup (located in `unreferenced_css_classes`). Heavily gated cleanup
+    /// candidates; zero on preprocessor-dominant or partial-scope runs.
+    pub unreferenced_css_classes: u32,
     /// Number of analyzed stylesheets whose per-rule `notable_rules` list was
     /// truncated at the per-file cap, so a consumer knows the per-rule detail is
     /// incomplete without walking every file.

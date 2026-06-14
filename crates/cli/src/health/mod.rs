@@ -1118,6 +1118,213 @@ fn scan_unresolved_class_references(
     out
 }
 
+/// Shortest global class worth reporting as unreferenced. Shorter names are
+/// substring-prone (their literal appears inside many longer strings, so the
+/// substring reference check already keeps them safe) and low-signal.
+const MIN_UNREF_CLASS_LEN: usize = 5;
+
+/// Per-stylesheet located class definitions from STANDALONE `.css`/`.scss` files
+/// (not SFC `<style>` blocks, which are component-scoped and covered by the
+/// scoped-unused check). Returns `(rel_path, [(class, 1-based line)])`, each
+/// class deduped to its first definition. The defined surface for the
+/// unreferenced-global-class candidate.
+fn collect_defined_css_classes_located(
+    files: &[fallow_types::discover::DiscoveredFile],
+    config: &ResolvedConfig,
+    ignore_set: &globset::GlobSet,
+) -> Vec<(String, Vec<(String, u32)>)> {
+    use fallow_types::extract::ExportName;
+    let mut out: Vec<(String, Vec<(String, u32)>)> = Vec::new();
+    for file in files {
+        let path = &file.path;
+        let extension = path.extension().and_then(|ext| ext.to_str());
+        let is_scss = extension == Some("scss");
+        if extension != Some("css") && !is_scss {
+            continue;
+        }
+        let relative = path.strip_prefix(&config.root).unwrap_or(path);
+        if ignore_set.is_match(relative) {
+            continue;
+        }
+        let Ok(source) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        let mut seen: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
+        let mut classes: Vec<(String, u32)> = Vec::new();
+        for export in fallow_core::extract::extract_css_module_exports(&source, is_scss) {
+            let ExportName::Named(name) = export.name else {
+                continue;
+            };
+            if !seen.insert(name.clone()) {
+                continue;
+            }
+            let start = export.span.start as usize;
+            let line = 1 + source
+                .get(..start)
+                .map_or(0, |s| s.bytes().filter(|&b| b == b'\n').count());
+            classes.push((name, u32::try_from(line).unwrap_or(u32::MAX)));
+        }
+        if !classes.is_empty() {
+            out.push((relative.to_string_lossy().replace('\\', "/"), classes));
+        }
+    }
+    out
+}
+
+/// Project-root-relative CSS/SCSS paths published as a package entry
+/// (`style` / `main` / `sass` / `module`, or any string ending in `.css`/`.scss`
+/// anywhere in `exports`). A stylesheet on this list is a public surface
+/// consumed by OTHER repos, so its classes are referenced externally and must
+/// never be flagged unreferenced.
+fn published_css_paths(config: &ResolvedConfig) -> rustc_hash::FxHashSet<String> {
+    let mut published: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
+    let Ok(text) = std::fs::read_to_string(config.root.join("package.json")) else {
+        return published;
+    };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return published;
+    };
+    let normalize = |s: &str| s.trim_start_matches("./").replace('\\', "/");
+    let is_css = |s: &str| {
+        matches!(
+            std::path::Path::new(s)
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(str::to_ascii_lowercase)
+                .as_deref(),
+            Some("css" | "scss")
+        )
+    };
+    for key in ["style", "main", "sass", "module"] {
+        if let Some(s) = json.get(key).and_then(serde_json::Value::as_str)
+            && is_css(s)
+        {
+            published.insert(normalize(s));
+        }
+    }
+    // Walk `exports` (arbitrarily nested) collecting every CSS string value.
+    let mut stack = vec![
+        json.get("exports")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null),
+    ];
+    while let Some(node) = stack.pop() {
+        match node {
+            serde_json::Value::String(s) if is_css(&s) => {
+                published.insert(normalize(&s));
+            }
+            serde_json::Value::Array(items) => stack.extend(items),
+            serde_json::Value::Object(map) => stack.extend(map.into_values()),
+            _ => {}
+        }
+    }
+    published
+}
+
+/// Scan for global CSS classes referenced by NO in-project markup (the CSS
+/// analogue of an unused export). Heavily gated to stay near-zero-false-positive:
+///
+/// - **Partial scope** (`changed_files` / `ws_roots`): abstain. A partial markup
+///   view cannot prove a global class dead.
+/// - **Preprocessor-dominant** (`.scss`/`.sass`/`.less` outnumber plain `.css`):
+///   abstain. The parser cannot expand loops/mixins, so the markup-vs-CSS join
+///   is unreliable.
+/// - **Published surface**: a stylesheet reachable from `package.json` entries,
+///   or whose classes are referenced by zero in-project markup (a design system
+///   consumed elsewhere), abstains entirely.
+/// - **Reference test** (panel gate 1): a class is referenced if it is a whole
+///   static markup token OR a substring of any dynamic-class source, so a class
+///   assembled from a `${...}` / `clsx(...)` fragment is never flagged.
+fn scan_unreferenced_css_classes(
+    files: &[fallow_types::discover::DiscoveredFile],
+    config: &ResolvedConfig,
+    ignore_set: &globset::GlobSet,
+    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
+    ws_roots: Option<&[std::path::PathBuf]>,
+    summary: &mut crate::health_types::CssAnalyticsSummary,
+) -> Vec<crate::health_types::UnreferencedCssClass> {
+    use crate::health_types::{CssCandidateAction, UnreferencedCssClass};
+
+    // Partial scope cannot prove a global class dead.
+    if changed_files.is_some() || ws_roots.is_some() {
+        return Vec::new();
+    }
+    // Preprocessor-dominant projects have an unreliable defined/used join.
+    let (css_files, preprocessor_files) = count_stylesheet_kinds(files, config, ignore_set);
+    if preprocessor_files > css_files {
+        return Vec::new();
+    }
+
+    // Build the in-project markup reference surface: every whole static class
+    // token, plus the raw source of files that construct classes dynamically
+    // (for the substring abstain).
+    let mut static_tokens: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
+    let mut dynamic_corpus = String::new();
+    for file in files {
+        let path = &file.path;
+        let extension = path.extension().and_then(|ext| ext.to_str());
+        if !matches!(
+            extension,
+            Some("jsx" | "tsx" | "html" | "astro" | "vue" | "svelte")
+        ) {
+            continue;
+        }
+        let relative = path.strip_prefix(&config.root).unwrap_or(path);
+        if ignore_set.is_match(relative) {
+            continue;
+        }
+        let Ok(source) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        let scan = fallow_core::extract::scan_markup_class_tokens(&source);
+        for token in scan.static_tokens {
+            static_tokens.insert(token.value);
+        }
+        if scan.has_dynamic {
+            dynamic_corpus.push_str(&source);
+            dynamic_corpus.push('\n');
+        }
+    }
+
+    let referenced =
+        |class: &str| -> bool { static_tokens.contains(class) || dynamic_corpus.contains(class) };
+
+    let published = published_css_paths(config);
+    let located = collect_defined_css_classes_located(files, config, ignore_set);
+
+    let mut out: Vec<UnreferencedCssClass> = Vec::new();
+    for (rel, classes) in located {
+        if published.contains(&rel) {
+            continue;
+        }
+        // In-project-consumption gate: a stylesheet none of whose classes are
+        // referenced locally is a published / external surface, not a pile of
+        // dead classes. Abstain for the whole sheet.
+        if !classes.iter().any(|(c, _)| referenced(c)) {
+            continue;
+        }
+        for (class, line) in classes {
+            if class.len() >= MIN_UNREF_CLASS_LEN && !referenced(&class) {
+                out.push(UnreferencedCssClass {
+                    actions: vec![CssCandidateAction::verify_unreferenced_class(&class)],
+                    class,
+                    path: rel.clone(),
+                    line,
+                });
+            }
+        }
+    }
+
+    out.sort_by(|a, b| {
+        a.path
+            .cmp(&b.path)
+            .then_with(|| a.line.cmp(&b.line))
+            .then_with(|| a.class.cmp(&b.class))
+    });
+    summary.unreferenced_css_classes = saturate_len(out.len());
+    out
+}
+
 fn compute_css_analytics_report(
     files: &[fallow_types::discover::DiscoveredFile],
     config: &ResolvedConfig,
@@ -1240,11 +1447,21 @@ fn compute_css_analytics_report(
         ws_roots,
         &mut summary,
     );
+    // Global classes referenced by no in-project markup (heavily gated).
+    let unreferenced_css_classes = scan_unreferenced_css_classes(
+        files,
+        config,
+        ignore_set,
+        changed_files,
+        ws_roots,
+        &mut summary,
+    );
 
     if summary.files_analyzed == 0
         && scoped_unused.is_empty()
         && tailwind_arbitrary_values.is_empty()
         && unresolved_class_references.is_empty()
+        && unreferenced_css_classes.is_empty()
     {
         return None;
     }
@@ -1259,6 +1476,7 @@ fn compute_css_analytics_report(
         tailwind_arbitrary_values,
         unused_at_rules,
         unresolved_class_references,
+        unreferenced_css_classes,
     })
 }
 

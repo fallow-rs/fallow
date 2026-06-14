@@ -919,7 +919,7 @@ fn write_css_analytics_section(out: &mut String, report: &crate::health_types::H
     );
     let _ = writeln!(
         out,
-        "- Candidates: {} unreferenced + {} undefined @keyframes | {} duplicate blocks | {} scoped-unused classes | {} Tailwind arbitrary values | {} unused @property | {} unused @layer | {} likely class typos",
+        "- Candidates: {} unreferenced + {} undefined @keyframes | {} duplicate blocks | {} scoped-unused classes | {} Tailwind arbitrary values | {} unused @property | {} unused @layer | {} likely class typos | {} unreferenced classes",
         s.keyframes_unreferenced,
         s.keyframes_undefined,
         s.duplicate_declaration_blocks,
@@ -928,6 +928,7 @@ fn write_css_analytics_section(out: &mut String, report: &crate::health_types::H
         s.unused_property_registrations,
         s.unused_layers,
         s.unresolved_class_references,
+        s.unreferenced_css_classes,
     );
     if !css.undefined_keyframes.is_empty() {
         let named: Vec<String> = css
@@ -966,6 +967,19 @@ fn write_css_analytics_section(out: &mut String, report: &crate::health_types::H
         let _ = writeln!(
             out,
             "- Likely class typos (candidates; verify, may be CSS-in-JS or external): {}",
+            named.join(", "),
+        );
+    }
+    if !css.unreferenced_css_classes.is_empty() {
+        let named: Vec<String> = css
+            .unreferenced_css_classes
+            .iter()
+            .take(5)
+            .map(|u| format!("`.{}` ({}:{})", u.class, u.path, u.line))
+            .collect();
+        let _ = writeln!(
+            out,
+            "- Unreferenced global classes (candidates; verify no email / server / CMS / Markdown applies them): {}",
             named.join(", "),
         );
     }

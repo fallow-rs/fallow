@@ -257,6 +257,7 @@ fn render_css_analytics(lines: &mut Vec<String>, report: &crate::health_types::H
     render_css_duplicate_blocks(lines, css);
     render_css_tailwind_arbitrary(lines, css);
     render_css_unresolved_classes(lines, css);
+    render_css_unreferenced_classes(lines, css);
 
     let mut notable: Vec<(&str, &fallow_types::extract::CssRuleMetric)> = css
         .files
@@ -418,6 +419,33 @@ fn render_css_unresolved_classes(
             "  {}:{}: \"{}\" -> did you mean \"{}\"?",
             entry.path, entry.line, entry.class, entry.suggestion,
         ));
+    }
+    if total > 5 {
+        let more = total - 5;
+        lines.push(
+            format!("  ... and {more} more (--format json for full list)")
+                .dimmed()
+                .to_string(),
+        );
+    }
+}
+
+/// Render global CSS classes referenced by no in-project markup, with the
+/// "we did not scan emails / server templates / CMS" disclosure. Up to 5 located.
+fn render_css_unreferenced_classes(
+    lines: &mut Vec<String>,
+    css: &crate::health_types::CssAnalyticsReport,
+) {
+    if css.unreferenced_css_classes.is_empty() {
+        return;
+    }
+    let total = css.unreferenced_css_classes.len();
+    lines.push(format!(
+        "  {total} global CSS class{} referenced by no in-project markup (candidates; verify no email / server template / CMS / Markdown applies them):",
+        if total == 1 { "" } else { "es" },
+    ));
+    for entry in css.unreferenced_css_classes.iter().take(5) {
+        lines.push(format!("  {}:{}: .{}", entry.path, entry.line, entry.class));
     }
     if total > 5 {
         let more = total - 5;

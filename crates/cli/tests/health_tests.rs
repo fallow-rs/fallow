@@ -2956,6 +2956,137 @@ fn health_css_undefined_keyframe_renders_in_human() {
     );
 }
 
+/// Helper: run `fallow health --css --format json` and return the parsed
+/// `css_analytics.unreferenced_css_classes` array (empty when absent).
+fn unreferenced_classes(root: &std::path::Path) -> Vec<serde_json::Value> {
+    let out = run_fallow_in_root(
+        "health",
+        root,
+        &[
+            "--css",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let json = parse_json(&out);
+    json.get("css_analytics")
+        .and_then(|c| c.get("unreferenced_css_classes"))
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default()
+}
+
+#[test]
+fn health_css_flags_unreferenced_global_class() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"unref","version":"1.0.0"}"#,
+    );
+    // The sheet is locally consumed (3 of 4 classes used in markup), so it is not
+    // a published surface; `.legacy-promo-banner` is referenced nowhere.
+    write_file(
+        &root.join("src/app.css"),
+        ".app-header { color: red; }\n.profile-card { padding: 1rem; }\n.nav-link { color: blue; }\n.legacy-promo-banner { display: none; }\n",
+    );
+    write_file(
+        &root.join("src/App.jsx"),
+        "export const C = () => (<div className=\"app-header\"><span className=\"profile-card\"><a className=\"nav-link\">x</a></span></div>);\n",
+    );
+
+    let refs = unreferenced_classes(root);
+    assert_eq!(refs.len(), 1, "only the dead class is flagged: {refs:#?}");
+    assert_eq!(refs[0]["class"], "legacy-promo-banner");
+    assert_eq!(refs[0]["path"], "src/app.css");
+    assert_eq!(refs[0]["line"], 4);
+    let action = &refs[0]["actions"][0];
+    assert_eq!(action["type"], "verify-unused");
+    assert!(
+        action["description"]
+            .as_str()
+            .is_some_and(|d| d.contains("CMS") && d.contains("server")),
+        "verify action names the unscanned surfaces: {action:#?}"
+    );
+}
+
+#[test]
+fn health_css_unreferenced_abstains_on_preprocessor_dominant() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(&root.join("package.json"), r#"{"name":"scssheavy"}"#);
+    write_file(&root.join("src/app.css"), ".used { color: red; }\n");
+    write_file(&root.join("src/a.scss"), ".dead-banner { color: blue; }\n");
+    write_file(&root.join("src/b.scss"), ".other-dead { color: green; }\n");
+    write_file(
+        &root.join("src/App.jsx"),
+        "export const C = () => <div className=\"used\">x</div>;\n",
+    );
+    // 2 scss vs 1 css -> preprocessor-dominant -> abstain entirely.
+    assert!(unreferenced_classes(root).is_empty());
+}
+
+#[test]
+fn health_css_unreferenced_abstains_published_and_dynamic() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    // `dist/lib.css` is a published entry (package.json `style`), so its classes
+    // are consumed externally and must not be flagged.
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"pub","style":"dist/lib.css"}"#,
+    );
+    write_file(
+        &root.join("dist/lib.css"),
+        ".lib-button { color: red; }\n.lib-unused-public { color: blue; }\n",
+    );
+    // `app.css` is locally consumed; `.feature-modal` is only ever assembled
+    // dynamically (substring of a clsx call), so it must NOT be flagged.
+    write_file(
+        &root.join("src/app.css"),
+        ".sidebar { color: red; }\n.feature-modal { color: blue; }\n",
+    );
+    write_file(
+        &root.join("src/App.jsx"),
+        "export const C = ({on}) => <div className={clsx(\"sidebar\", on && \"feature-modal\")}>x</div>;\n",
+    );
+    let refs = unreferenced_classes(root);
+    assert!(
+        !refs.iter().any(|r| r["class"] == "lib-unused-public"),
+        "published-surface class must not be flagged: {refs:#?}"
+    );
+    assert!(
+        !refs.iter().any(|r| r["class"] == "feature-modal"),
+        "dynamically-assembled class (substring of clsx arg) must not be flagged: {refs:#?}"
+    );
+}
+
+#[test]
+fn health_css_unreferenced_renders_in_human() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(&root.join("package.json"), r#"{"name":"unrefhuman"}"#);
+    write_file(
+        &root.join("src/app.css"),
+        ".header-bar { color: red; }\n.orphaned-widget { display: none; }\n",
+    );
+    write_file(
+        &root.join("src/App.jsx"),
+        "export const C = () => <div className=\"header-bar\">x</div>;\n",
+    );
+    let out = run_fallow_in_root("health", root, &["--css", "--max-crap", "10000", "--quiet"]);
+    assert!(
+        out.stdout.contains("referenced by no in-project markup")
+            && out.stdout.contains("orphaned-widget")
+            && out.stdout.contains("CMS"),
+        "human output renders the unreferenced class with the unscanned-surface disclosure: stdout={:?}",
+        out.stdout
+    );
+}
+
 #[test]
 fn health_css_flags_unresolved_class_typo() {
     let dir = tempdir().unwrap();
