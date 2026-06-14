@@ -5,10 +5,11 @@ pub use fallow_types::output_dead_code::{
     MisplacedDirectiveFinding, MixedClientServerBarrelFinding, PolicyViolationFinding,
     PrivateTypeLeakFinding, ReExportCycleFinding, RouteCollisionFinding, TestOnlyDependencyFinding,
     TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
-    UnresolvedCatalogReferenceFinding, UnresolvedImportFinding, UnusedCatalogEntryFinding,
-    UnusedClassMemberFinding, UnusedDependencyFinding, UnusedDependencyOverrideFinding,
-    UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
-    UnusedOptionalDependencyFinding, UnusedStoreMemberFinding, UnusedTypeFinding,
+    UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
+    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedDependencyFinding,
+    UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
+    UnusedExportFinding, UnusedFileFinding, UnusedOptionalDependencyFinding,
+    UnusedStoreMemberFinding, UnusedTypeFinding,
 };
 pub use fallow_types::results::{
     ActiveSuppression, AnalysisResults, BoundaryCallViolation, BoundaryCoverageViolation,

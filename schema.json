@@ -156,6 +156,7 @@
         "unused-class-members": "error",
         "unused-store-members": "warn",
         "unprovided-injects": "warn",
+        "unrendered-components": "warn",
         "unresolved-imports": "error",
         "unlisted-dependencies": "error",
         "duplicate-exports": "error",
@@ -1029,6 +1030,11 @@
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
+        "unrendered-components": {
+          "description": "Vue/Svelte single-file component reachable in the module graph but\nrendered nowhere in the project (the imported-but-never-rendered\ndead-half). Defaults to `warn`, not `error`: a component can be rendered\nreflectively (dynamic `<component :is>`), so analyzer confidence is\nlower; warn encodes that without failing CI.",
+          "$ref": "#/$defs/Severity",
+          "default": "error"
+        },
         "unresolved-imports": {
           "$ref": "#/$defs/Severity",
           "default": "error"
@@ -1644,6 +1650,16 @@
           ]
         },
         "unprovided-injects": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unrendered-components": {
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"

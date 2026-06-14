@@ -1012,6 +1012,42 @@ fn push_unprovided_inject_issues(
     }
 }
 
+fn push_unrendered_component_issues(
+    issues: &mut Vec<CodeClimateIssue>,
+    findings: &[fallow_types::output_dead_code::UnrenderedComponentFinding],
+    root: &Path,
+    severity: Severity,
+) {
+    if findings.is_empty() {
+        return;
+    }
+    let level = severity_to_codeclimate(severity);
+    for entry in findings {
+        let c = &entry.component;
+        let path = cc_path(&c.path, root);
+        let fp = fingerprint_hash(&[
+            "fallow/unrendered-component",
+            &path,
+            &c.line.to_string(),
+            &c.component_name,
+        ]);
+        let line = if c.line > 0 { Some(c.line) } else { None };
+        let message = format!(
+            "component `{}` is reachable but rendered nowhere in this project (render it somewhere or remove it)",
+            c.component_name
+        );
+        issues.push(cc_issue(
+            "fallow/unrendered-component",
+            &message,
+            level,
+            "Bug Risk",
+            &path,
+            line,
+            &fp,
+        ));
+    }
+}
+
 fn push_route_collision_issues(
     issues: &mut Vec<CodeClimateIssue>,
     findings: &[fallow_types::output_dead_code::RouteCollisionFinding],
@@ -1561,6 +1597,12 @@ impl CodeClimateBuilder<'_> {
             &self.results.unprovided_injects,
             self.root,
             self.rules.unprovided_injects,
+        );
+        push_unrendered_component_issues(
+            &mut self.issues,
+            &self.results.unrendered_components,
+            self.root,
+            self.rules.unrendered_components,
         );
         push_route_collision_issues(
             &mut self.issues,

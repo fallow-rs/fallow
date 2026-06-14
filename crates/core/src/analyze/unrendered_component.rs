@@ -39,8 +39,12 @@ use crate::discover::FileId;
 use crate::graph::ModuleGraph;
 use crate::resolve::{ResolvedImport, ResolvedModule};
 use crate::results::UnrenderedComponent;
+use crate::suppress::{IssueKind, SuppressionContext};
 
-use super::unused_members::entry_point_star_re_export_targets;
+/// 1-based line the finding anchors at. An SFC's default export is the file
+/// itself; there is no explicit default-export statement to point at, so the
+/// finding (and its inline suppression) anchors at the file head.
+const COMPONENT_LINE: u32 = 1;
 
 /// Framework a component file belongs to, derived from its extension + the
 /// project's declared dependencies.
@@ -88,6 +92,7 @@ pub fn find_unrendered_components(
     modules: &[ModuleInfo],
     declared_deps: &FxHashSet<String>,
     public_api_entry_points: &FxHashSet<FileId>,
+    suppressions: &SuppressionContext<'_>,
 ) -> Vec<UnrenderedComponent> {
     let vue = declared_deps.contains("vue")
         || declared_deps.contains("@vue/runtime-core")
@@ -135,19 +140,14 @@ pub fn find_unrendered_components(
         }
     }
 
-    // Public-API abstain set: SFCs re-exported from a public entry point, or
-    // reachable through `export *` from one.
-    let mut public_api: FxHashSet<FileId> =
-        entry_point_star_re_export_targets(graph, public_api_entry_points);
-    for entry_id in public_api_entry_points {
-        if let Some(entry) = graph.modules.get(entry_id.0 as usize) {
-            for re in &entry.re_exports {
-                if re.imported_name == "default" {
-                    public_api.insert(re.source_file);
-                }
-            }
-        }
-    }
+    // Public-API abstain set: every SFC reachable through ANY re-export chain
+    // from a non-private package entry point. A component library re-exports its
+    // components for downstream consumers to render, often through MULTI-HOP
+    // barrels (entry -> `export *` -> sub-barrel -> `export { default as X } from
+    // './X.vue'`), so a shallow one-hop check leaves deep leaves wrongly
+    // eligible. Over-abstaining here only suppresses findings (zero-FP), never
+    // creates them.
+    let public_api = public_api_reexported_sfcs(graph, public_api_entry_points);
 
     // Pass 3: emit.
     let mut findings = Vec::new();
@@ -169,19 +169,31 @@ pub fn find_unrendered_components(
         {
             continue;
         }
+        // A component file has no explicit default-export statement; the finding
+        // anchors at the file head (line 1), so honor both a line-1 inline
+        // suppression and a file-level suppression.
+        if suppressions.is_suppressed(
+            module.file_id,
+            COMPONENT_LINE,
+            IssueKind::UnrenderedComponent,
+        ) || suppressions.is_file_suppressed(module.file_id, IssueKind::UnrenderedComponent)
+        {
+            continue;
+        }
 
         let component_name = component_name(&module.path);
+        // Absolute barrel path; serialized workspace-relative by serde_path (like
+        // `path`), so JSON consumers never see a machine-specific absolute path.
         let reachable_via = graph
             .modules
             .get(barrel_id.0 as usize)
-            .map(|b| b.path.to_string_lossy().into_owned())
-            .unwrap_or_default();
+            .map(|b| b.path.clone());
         findings.push(UnrenderedComponent {
             path: module.path.clone(),
             component_name,
             framework: framework.as_str().to_string(),
             reachable_via,
-            line: 1,
+            line: COMPONENT_LINE,
             col: 0,
         });
     }
@@ -282,6 +294,36 @@ fn graph_path(graph: &ModuleGraph, file_id: FileId) -> std::path::PathBuf {
         .get(file_id.0 as usize)
         .map(|m| m.path.clone())
         .unwrap_or_default()
+}
+
+/// Every SFC reachable through ANY re-export chain (any imported name, including
+/// `*`) from a non-private package entry point. Such an SFC is exposed for a
+/// downstream consumer to render, so it is never a project-internal unrendered
+/// component. Walks the full chain (entry -> sub-barrel -> ... -> `.vue` leaf),
+/// not just one hop, and is cycle-safe via the visited set.
+fn public_api_reexported_sfcs(
+    graph: &ModuleGraph,
+    public_api_entry_points: &FxHashSet<FileId>,
+) -> FxHashSet<FileId> {
+    let mut result: FxHashSet<FileId> = FxHashSet::default();
+    let mut visited: FxHashSet<FileId> = FxHashSet::default();
+    let mut stack: Vec<FileId> = public_api_entry_points.iter().copied().collect();
+    while let Some(file_id) = stack.pop() {
+        if !visited.insert(file_id) {
+            continue;
+        }
+        let Some(module) = graph.modules.get(file_id.0 as usize) else {
+            continue;
+        };
+        for re in &module.re_exports {
+            let source = re.source_file;
+            if is_sfc_extension(&graph_path(graph, source)) {
+                result.insert(source);
+            }
+            stack.push(source);
+        }
+    }
+    result
 }
 
 /// The component name: the file stem in PascalCase-as-written (the stem is used

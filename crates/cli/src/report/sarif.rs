@@ -9,9 +9,9 @@ use fallow_core::results::{
     EmptyCatalogGroupFinding, InvalidClientExport, MisconfiguredDependencyOverrideFinding,
     MisplacedDirective, MixedClientServerBarrel, PolicyViolation, PolicyViolationSeverity,
     PrivateTypeLeak, RouteCollision, StaleSuppression, TestOnlyDependency, TypeOnlyDependency,
-    UnlistedDependencyFinding, UnprovidedInject, UnresolvedCatalogReferenceFinding,
-    UnresolvedImport, UnusedCatalogEntryFinding, UnusedDependency, UnusedDependencyOverrideFinding,
-    UnusedExport, UnusedFile, UnusedMember,
+    UnlistedDependencyFinding, UnprovidedInject, UnrenderedComponent,
+    UnresolvedCatalogReferenceFinding, UnresolvedImport, UnusedCatalogEntryFinding,
+    UnusedDependency, UnusedDependencyOverrideFinding, UnusedExport, UnusedFile, UnusedMember,
 };
 use rustc_hash::FxHashMap;
 
@@ -578,6 +578,25 @@ fn sarif_unprovided_inject_fields(
     }
 }
 
+fn sarif_unrendered_component_fields(
+    component: &UnrenderedComponent,
+    root: &Path,
+    level: &'static str,
+) -> SarifFields {
+    SarifFields {
+        rule_id: "fallow/unrendered-component",
+        level,
+        message: format!(
+            "component \"{}\" is reachable but rendered nowhere in this project; render it somewhere or remove it",
+            component.component_name
+        ),
+        uri: relative_uri(&component.path, root),
+        region: Some((component.line, component.col + 1)),
+        source_path: Some(component.path.clone()),
+        properties: None,
+    }
+}
+
 fn sarif_route_collision_fields(
     collision: &RouteCollision,
     root: &Path,
@@ -986,6 +1005,11 @@ fn sarif_graph_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
             rules.unprovided_injects,
         ),
         (
+            "fallow/unrendered-component",
+            "A Vue / Svelte component reachable through a barrel but rendered nowhere in the project",
+            rules.unrendered_components,
+        ),
+        (
             "fallow/route-collision",
             "Two or more Next.js App Router route files resolve to the same URL",
             rules.route_collision,
@@ -1373,6 +1397,18 @@ fn push_graph_sarif_results(
             severity_to_sarif_level(rules.unprovided_injects),
         )
     });
+    push_sarif_results(
+        sarif_results,
+        &results.unrendered_components,
+        snippets,
+        |c| {
+            sarif_unrendered_component_fields(
+                &c.component,
+                root,
+                severity_to_sarif_level(rules.unrendered_components),
+            )
+        },
+    );
     push_sarif_results(sarif_results, &results.route_collisions, snippets, |c| {
         sarif_route_collision_fields(
             &c.collision,
@@ -2149,9 +2185,10 @@ mod tests {
         let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
             .as_array()
             .expect("rules should be an array");
-        assert_eq!(rules.len(), 33);
+        assert_eq!(rules.len(), 34);
 
         let rule_ids: Vec<&str> = rules.iter().map(|r| r["id"].as_str().unwrap()).collect();
+        assert!(rule_ids.contains(&"fallow/unrendered-component"));
         assert!(rule_ids.contains(&"fallow/route-collision"));
         assert!(rule_ids.contains(&"fallow/dynamic-segment-name-conflict"));
         assert!(rule_ids.contains(&"fallow/unused-file"));

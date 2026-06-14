@@ -523,6 +523,35 @@ pub fn push_member_diagnostics(
             }
         }
     }
+
+    for finding in &results.unrendered_components {
+        let c = &finding.component;
+        if let Some(uri) = Uri::from_file_path(&c.path) {
+            let line = c.line.saturating_sub(1);
+            map.entry(uri).or_default().push(Diagnostic {
+                range: Range {
+                    start: Position {
+                        line,
+                        character: c.col,
+                    },
+                    end: Position {
+                        line,
+                        character: c.col + c.component_name.len() as u32,
+                    },
+                },
+                severity: Some(DiagnosticSeverity::HINT),
+                source: Some("fallow".to_string()),
+                code: Some(NumberOrString::String("unrendered-component".to_string())),
+                code_description: doc_link("unrendered-components"),
+                message: format!(
+                    "Component '{}' is reachable but rendered nowhere in this project",
+                    c.component_name
+                ),
+                tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+                ..Default::default()
+            });
+        }
+    }
 }
 
 #[cfg(test)]

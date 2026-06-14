@@ -349,6 +349,11 @@ where
                 .unprovided_injects
                 .push(item.clone());
         }
+        for item in &results.unrendered_components {
+            self.entry_for_path(&item.component.path)
+                .unrendered_components
+                .push(item.clone());
+        }
         for item in &results.stale_suppressions {
             self.entry_for_path(&item.path)
                 .stale_suppressions

@@ -115,6 +115,9 @@ pub enum IssueKind {
     /// different param spellings (`[id]` vs `[slug]`; a dev / runtime error
     /// that `next build` does NOT catch).
     DynamicSegmentNameConflict,
+    /// A component defined in the project that is exported but never rendered
+    /// (no JSX usage) anywhere across the analyzed project.
+    UnrenderedComponent,
 }
 
 impl IssueKind {
@@ -172,6 +175,7 @@ impl IssueKind {
             "dynamic-segment-name-conflict" | "dynamic-segment-name-conflicts" => {
                 Some(Self::DynamicSegmentNameConflict)
             }
+            "unrendered-component" | "unrendered-components" => Some(Self::UnrenderedComponent),
             _ => None,
         }
     }
@@ -216,6 +220,7 @@ impl IssueKind {
             Self::UnprovidedInject => 34,
             Self::RouteCollision => 35,
             Self::DynamicSegmentNameConflict => 36,
+            Self::UnrenderedComponent => 37,
         }
     }
 
@@ -259,6 +264,7 @@ impl IssueKind {
             34 => Some(Self::UnprovidedInject),
             35 => Some(Self::RouteCollision),
             36 => Some(Self::DynamicSegmentNameConflict),
+            37 => Some(Self::UnrenderedComponent),
             _ => None,
         }
     }
@@ -362,6 +368,7 @@ pub const fn issue_kind_to_kebab(kind: IssueKind) -> &'static str {
         IssueKind::UnprovidedInject => "unprovided-inject",
         IssueKind::RouteCollision => "route-collision",
         IssueKind::DynamicSegmentNameConflict => "dynamic-segment-name-conflict",
+        IssueKind::UnrenderedComponent => "unrendered-component",
     }
 }
 
@@ -608,6 +615,8 @@ pub const KNOWN_ISSUE_KIND_NAMES: &[&str] = &[
     "route-collisions",
     "dynamic-segment-name-conflict",
     "dynamic-segment-name-conflicts",
+    "unrendered-component",
+    "unrendered-components",
 ];
 
 /// CLI filter flags on `fallow dead-code` that scope output to a single
@@ -628,6 +637,7 @@ pub const DEAD_CODE_FILTER_FLAGS: &[&str] = &[
     "--unused-class-members",
     "--unused-store-members",
     "--unprovided-injects",
+    "--unrendered-components",
     "--unresolved-imports",
     "--unlisted-deps",
     "--duplicate-exports",
@@ -893,6 +903,14 @@ mod tests {
             IssueKind::parse("dynamic-segment-name-conflicts"),
             Some(IssueKind::DynamicSegmentNameConflict)
         );
+        assert_eq!(
+            IssueKind::parse("unrendered-component"),
+            Some(IssueKind::UnrenderedComponent)
+        );
+        assert_eq!(
+            IssueKind::parse("unrendered-components"),
+            Some(IssueKind::UnrenderedComponent)
+        );
     }
 
     #[test]
@@ -944,7 +962,11 @@ mod tests {
             IssueKind::from_discriminant(36),
             Some(IssueKind::DynamicSegmentNameConflict)
         );
-        assert_eq!(IssueKind::from_discriminant(37), None);
+        assert_eq!(
+            IssueKind::from_discriminant(37),
+            Some(IssueKind::UnrenderedComponent)
+        );
+        assert_eq!(IssueKind::from_discriminant(38), None);
         assert_eq!(IssueKind::from_discriminant(u8::MAX), None);
     }
 
@@ -987,6 +1009,7 @@ mod tests {
             IssueKind::UnprovidedInject,
             IssueKind::RouteCollision,
             IssueKind::DynamicSegmentNameConflict,
+            IssueKind::UnrenderedComponent,
         ] {
             assert_eq!(
                 IssueKind::from_discriminant(kind.to_discriminant()),
@@ -994,7 +1017,7 @@ mod tests {
             );
         }
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(37), None);
+        assert_eq!(IssueKind::from_discriminant(38), None);
     }
 
     #[test]
@@ -1036,6 +1059,7 @@ mod tests {
             IssueKind::UnprovidedInject,
             IssueKind::RouteCollision,
             IssueKind::DynamicSegmentNameConflict,
+            IssueKind::UnrenderedComponent,
         ];
         let discriminants: Vec<u8> = all_kinds.iter().map(|k| k.to_discriminant()).collect();
         let mut sorted = discriminants.clone();

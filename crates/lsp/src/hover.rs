@@ -40,6 +40,10 @@ pub fn build_hover(
         return Some(hover);
     }
 
+    if let Some(hover) = check_unrendered_component(results, file_path, position) {
+        return Some(hover);
+    }
+
     if let Some(hover) = check_unresolved_import(results, file_path, position) {
         return Some(hover);
     }
@@ -398,6 +402,56 @@ fn check_unused_member(
                 }),
             });
         }
+    }
+
+    None
+}
+
+/// Check if the position is on an unrendered Vue/Svelte component anchor.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "component name lengths are bounded by source size"
+)]
+fn check_unrendered_component(
+    results: &AnalysisResults,
+    file_path: &Path,
+    position: Position,
+) -> Option<Hover> {
+    for finding in &results.unrendered_components {
+        let c = &finding.component;
+        if c.path != file_path {
+            continue;
+        }
+        let component_line = c.line.saturating_sub(1);
+        if component_line != position.line {
+            continue;
+        }
+        let end_col = c.col + c.component_name.len() as u32;
+        if position.character < c.col || position.character >= end_col {
+            continue;
+        }
+
+        let value = format!(
+            "**fallow**: Component {} is reachable but rendered nowhere in this project.",
+            format_inline_code(&c.component_name),
+        );
+
+        return Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value,
+            }),
+            range: Some(Range {
+                start: Position {
+                    line: component_line,
+                    character: c.col,
+                },
+                end: Position {
+                    line: component_line,
+                    character: end_col,
+                },
+            }),
+        });
     }
 
     None

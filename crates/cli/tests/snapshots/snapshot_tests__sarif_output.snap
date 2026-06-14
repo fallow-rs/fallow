@@ -339,6 +339,19 @@ expression: redact_sarif_version(&json_str)
               }
             },
             {
+              "id": "fallow/unrendered-component",
+              "shortDescription": {
+                "text": "A Vue / Svelte component is reachable through a barrel but rendered nowhere"
+              },
+              "fullDescription": {
+                "text": "A Vue or Svelte single-file component (the default export of a `.vue` / `.svelte` file) is reachable in the module graph (a barrel re-exports it) but instantiated NOWHERE in the project: no `<Tag>`, no `:is` / `this=` binding, no `components` / `app.component` registration, no `h()` / auto-import use, and no script value-read. It survives unused-file (the barrel keeps it reachable) and unused-export (the re-export counts as a use), yet no file actually renders it. To fix: render the component somewhere, or delete it and drop the dead re-export. Defaults to warn, not error: a component can be rendered reflectively (a dynamic `<component :is>` resolved from a non-literal value), so analyzer confidence is lower. Components that are themselves entry points (route pages, layouts, `App.vue`) and components re-exported from a non-private package entry point are abstained."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unrendered-components",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
               "id": "fallow/route-collision",
               "shortDescription": {
                 "text": "Two or more Next.js App Router route files resolve to the same URL"

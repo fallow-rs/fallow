@@ -77,6 +77,9 @@ pub struct BaselineData {
     /// Unprovided injects, keyed by `file:key_name`.
     #[serde(default)]
     pub unprovided_injects: Vec<String>,
+    /// Unrendered components, keyed by `file:component_name`.
+    #[serde(default)]
+    pub unrendered_components: Vec<String>,
     /// Unresolved imports, keyed by `file:specifier`.
     #[serde(default)]
     pub unresolved_imports: Vec<String>,
@@ -166,6 +169,7 @@ impl BaselineData {
             unused_class_members: member_imports.unused_class_members,
             unused_store_members: member_imports.unused_store_members,
             unprovided_injects: member_imports.unprovided_injects,
+            unrendered_components: member_imports.unrendered_components,
             unresolved_imports: member_imports.unresolved_imports,
             unlisted_dependencies: dependencies.unlisted,
             duplicate_exports: member_imports.duplicate_exports,
@@ -204,6 +208,7 @@ impl BaselineData {
             + self.unused_class_members.len()
             + self.unused_store_members.len()
             + self.unprovided_injects.len()
+            + self.unrendered_components.len()
             + self.unresolved_imports.len()
             + self.unlisted_dependencies.len()
             + self.duplicate_exports.len()
@@ -348,6 +353,7 @@ struct BaselineMemberImportKeys {
     unused_class_members: Vec<String>,
     unused_store_members: Vec<String>,
     unprovided_injects: Vec<String>,
+    unrendered_components: Vec<String>,
     unresolved_imports: Vec<String>,
     duplicate_exports: Vec<String>,
     stale_suppressions: Vec<String>,
@@ -402,6 +408,17 @@ fn baseline_member_import_keys(
                     "{}:{}",
                     relative_path(&f.inject.path, root),
                     f.inject.key_name
+                )
+            })
+            .collect(),
+        unrendered_components: results
+            .unrendered_components
+            .iter()
+            .map(|c| {
+                format!(
+                    "{}:{}",
+                    relative_path(&c.component.path, root),
+                    c.component.component_name
                 )
             })
             .collect(),
@@ -752,6 +769,21 @@ impl BaselineFilterContext<'_> {
                 finding.inject.key_name
             );
             !baseline_unprovided_injects.contains(key.as_str())
+        });
+
+        let baseline_unrendered_components: FxHashSet<&str> = self
+            .baseline
+            .unrendered_components
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.unrendered_components.retain(|finding| {
+            let key = format!(
+                "{}:{}",
+                relative_path(&finding.component.path, self.root),
+                finding.component.component_name
+            );
+            !baseline_unrendered_components.contains(key.as_str())
         });
     }
 
@@ -1919,6 +1951,7 @@ mod tests {
             unused_class_members: vec![],
             unused_store_members: vec![],
             unprovided_injects: vec![],
+            unrendered_components: vec![],
             unresolved_imports: vec![],
             unlisted_dependencies: vec![],
             duplicate_exports: vec![],
@@ -1975,6 +2008,7 @@ mod tests {
             unused_class_members: vec![],
             unused_store_members: vec![],
             unprovided_injects: vec![],
+            unrendered_components: vec![],
             unresolved_imports: vec![],
             unlisted_dependencies: vec![],
             duplicate_exports: vec![],
@@ -2018,6 +2052,7 @@ mod tests {
             unused_class_members: vec![],
             unused_store_members: vec![],
             unprovided_injects: vec![],
+            unrendered_components: vec![],
             unresolved_imports: vec![],
             unlisted_dependencies: vec![],
             duplicate_exports: vec![],

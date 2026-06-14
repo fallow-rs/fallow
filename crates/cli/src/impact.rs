@@ -1410,6 +1410,13 @@ fn collect_unused_symbol_findings(
             Some(f.inject.key_name.clone()),
         );
     }
+    for f in &results.unrendered_components {
+        push(
+            &f.component.path,
+            "unrendered-component",
+            Some(f.component.component_name.clone()),
+        );
+    }
     for f in &results.unresolved_imports {
         push(
             &f.import.path,

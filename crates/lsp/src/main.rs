@@ -62,6 +62,7 @@ struct AnalysisCompleteParams {
     unused_class_members: usize,
     unused_store_members: usize,
     unprovided_injects: usize,
+    unrendered_components: usize,
     unresolved_imports: usize,
     unlisted_dependencies: usize,
     duplicate_exports: usize,
@@ -97,6 +98,7 @@ fn analysis_complete_params(
         unused_class_members: results.unused_class_members.len(),
         unused_store_members: results.unused_store_members.len(),
         unprovided_injects: results.unprovided_injects.len(),
+        unrendered_components: results.unrendered_components.len(),
         unresolved_imports: results.unresolved_imports.len(),
         unlisted_dependencies: results.unlisted_dependencies.len(),
         duplicate_exports: results.duplicate_exports.len(),
@@ -253,6 +255,11 @@ const DIAGNOSTIC_ISSUE_TYPES: &[DiagnosticIssueType] = &[
         config_key: Some("unprovided-injects"),
         code: "unprovided-inject",
         label: "Unprovided Injects",
+    },
+    DiagnosticIssueType {
+        config_key: Some("unrendered-components"),
+        code: "unrendered-component",
+        label: "Unrendered Components",
     },
     DiagnosticIssueType {
         config_key: Some("route-collision"),

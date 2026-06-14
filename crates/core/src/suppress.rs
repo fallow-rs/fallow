@@ -67,6 +67,7 @@ fn severity_for_kind(rules: &RulesConfig, kind: IssueKind) -> Severity {
         IssueKind::MisplacedDirective => rules.misplaced_directive,
         IssueKind::RouteCollision => rules.route_collision,
         IssueKind::DynamicSegmentNameConflict => rules.dynamic_segment_name_conflict,
+        IssueKind::UnrenderedComponent => rules.unrendered_components,
         IssueKind::Complexity | IssueKind::CodeDuplication => Severity::Error,
     }
 }
@@ -540,6 +541,7 @@ mod tests {
             IssueKind::UnprovidedInject,
             IssueKind::RouteCollision,
             IssueKind::DynamicSegmentNameConflict,
+            IssueKind::UnrenderedComponent,
         ] {
             assert_eq!(
                 IssueKind::from_discriminant(kind.to_discriminant()),
@@ -547,7 +549,7 @@ mod tests {
             );
         }
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(37), None);
+        assert_eq!(IssueKind::from_discriminant(38), None);
     }
 
     #[test]
@@ -796,6 +798,7 @@ mod tests {
             IssueKind::InvalidClientExport,
             IssueKind::RouteCollision,
             IssueKind::DynamicSegmentNameConflict,
+            IssueKind::UnrenderedComponent,
         ];
 
         let all_kinds = [
@@ -828,6 +831,7 @@ mod tests {
             IssueKind::InvalidClientExport,
             IssueKind::RouteCollision,
             IssueKind::DynamicSegmentNameConflict,
+            IssueKind::UnrenderedComponent,
         ];
 
         for kind in all_kinds {

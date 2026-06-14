@@ -513,7 +513,7 @@ pub fn filter_results_by_changed_files(
     mixed_client_server_barrels.retain(|b| contains_normalized(&cf, &b.barrel.path));
     misplaced_directives.retain(|d| contains_normalized(&cf, &d.directive_site.path));
     unprovided_injects.retain(|i| contains_normalized(&cf, &i.inject.path));
-    unrendered_components.retain(|c| contains_normalized(&cf, &c.path));
+    unrendered_components.retain(|c| contains_normalized(&cf, &c.component.path));
     route_collisions.retain(|c| contains_normalized(&cf, &c.collision.path));
     dynamic_segment_name_conflicts.retain(|c| contains_normalized(&cf, &c.conflict.path));
 }

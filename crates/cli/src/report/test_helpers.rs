@@ -5,9 +5,10 @@ use fallow_core::results::*;
 use fallow_types::output_dead_code::{
     BoundaryViolationFinding, CircularDependencyFinding, TestOnlyDependencyFinding,
     TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
-    UnresolvedImportFinding, UnusedClassMemberFinding, UnusedDependencyFinding,
-    UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
-    UnusedOptionalDependencyFinding, UnusedStoreMemberFinding, UnusedTypeFinding,
+    UnrenderedComponentFinding, UnresolvedImportFinding, UnusedClassMemberFinding,
+    UnusedDependencyFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
+    UnusedExportFinding, UnusedFileFinding, UnusedOptionalDependencyFinding,
+    UnusedStoreMemberFinding, UnusedTypeFinding,
 };
 
 /// Build an `AnalysisResults` populated with one issue of every type.
@@ -177,6 +178,17 @@ pub fn sample_results(root: &Path) -> AnalysisResults {
             line: 5,
             col: 2,
         }));
+    r.unrendered_components
+        .push(UnrenderedComponentFinding::with_actions(
+            UnrenderedComponent {
+                path: root.join("src/components/Orphan.vue"),
+                component_name: "Orphan".to_string(),
+                framework: "vue".to_string(),
+                reachable_via: Some(root.join("src/components/index.ts")),
+                line: 1,
+                col: 0,
+            },
+        ));
     r.stale_suppressions.push(StaleSuppression {
         path: root.join("src/utils.ts"),
         line: 5,

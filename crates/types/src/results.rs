@@ -16,10 +16,11 @@ use crate::output_dead_code::{
     MisplacedDirectiveFinding, MixedClientServerBarrelFinding, PolicyViolationFinding,
     PrivateTypeLeakFinding, ReExportCycleFinding, RouteCollisionFinding, TestOnlyDependencyFinding,
     TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
-    UnresolvedCatalogReferenceFinding, UnresolvedImportFinding, UnusedCatalogEntryFinding,
-    UnusedClassMemberFinding, UnusedDependencyFinding, UnusedDependencyOverrideFinding,
-    UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
-    UnusedOptionalDependencyFinding, UnusedStoreMemberFinding, UnusedTypeFinding,
+    UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
+    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedDependencyFinding,
+    UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
+    UnusedExportFinding, UnusedFileFinding, UnusedOptionalDependencyFinding,
+    UnusedStoreMemberFinding, UnusedTypeFinding,
 };
 use crate::serde_path;
 use crate::suppress::{IssueKind, closest_known_kind_name};
@@ -227,11 +228,11 @@ pub struct AnalysisResults {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unprovided_injects: Vec<UnprovidedInjectFinding>,
     /// Vue/Svelte single-file components that are reachable but rendered nowhere
-    /// (the imported-but-never-rendered dead-half). Default severity is `warn`.
-    /// (Spike: stored as the bare type; the `*Finding` action wrapper lands in
-    /// the full wiring phase.)
+    /// (the imported-but-never-rendered dead-half). Wrapped in
+    /// [`UnrenderedComponentFinding`] so each entry carries a typed `actions`
+    /// array natively. Default severity is `warn`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub unrendered_components: Vec<UnrenderedComponent>,
+    pub unrendered_components: Vec<UnrenderedComponentFinding>,
     /// Next.js App Router route files that resolve to the same URL within one
     /// app-root (a guaranteed `next build` failure). Wrapped in
     /// [`RouteCollisionFinding`] so each entry carries a typed `actions` array
@@ -631,9 +632,12 @@ impl AnalysisResults {
         });
 
         self.unrendered_components.sort_by(|a, b| {
-            a.path
-                .cmp(&b.path)
-                .then(a.component_name.cmp(&b.component_name))
+            a.component
+                .path
+                .cmp(&b.component.path)
+                .then(a.component.line.cmp(&b.component.line))
+                .then(a.component.col.cmp(&b.component.col))
+                .then(a.component.component_name.cmp(&b.component.component_name))
         });
 
         self.route_collisions.sort_by(|a, b| {
@@ -998,9 +1002,13 @@ pub struct UnrenderedComponent {
     /// Which framework this component belongs to: `"vue"` or `"svelte"`.
     pub framework: String,
     /// A barrel/file that re-exports this component, kept for the remediation
-    /// trace ("reachable via X, rendered nowhere"). Empty when not determinable.
-    #[serde(skip_serializing_if = "String::is_empty")]
-    pub reachable_via: String,
+    /// trace ("reachable via X, rendered nowhere"). Absolute in memory,
+    /// serialized workspace-relative (like `path`); `None` when not determinable.
+    #[serde(
+        serialize_with = "serde_path::serialize_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub reachable_via: Option<PathBuf>,
     /// 1-based line number of the component (the file head; SFCs have no explicit
     /// default-export statement).
     pub line: u32,

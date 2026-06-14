@@ -73,6 +73,17 @@ fn unprovided_inject_key(item: &fallow_core::results::UnprovidedInject, root: &P
     )
 }
 
+fn unrendered_component_key(
+    item: &fallow_core::results::UnrenderedComponent,
+    root: &Path,
+) -> String {
+    format!(
+        "unrendered-component:{}:{}",
+        relative_key_path(&item.path, root),
+        item.component_name
+    )
+}
+
 fn route_collision_key(item: &fallow_core::results::RouteCollision, root: &Path) -> String {
     format!(
         "route-collision:{}:{}",
@@ -347,6 +358,7 @@ pub(super) fn dead_code_keys(
         mixed_client_server_barrels,
         misplaced_directives,
         unprovided_injects,
+        unrendered_components,
         route_collisions,
         dynamic_segment_name_conflicts,
         // Non-finding fields: counts and metadata, not attributable to a key.
@@ -363,7 +375,6 @@ pub(super) fn dead_code_keys(
         // collections; no key needed.
         export_usages: _export_usages,
         entry_point_summary: _entry_point_summary,
-        unrendered_components: _unrendered_components,
     } = results;
 
     let mut collector = DeadCodeKeyCollector::new(root);
@@ -398,6 +409,7 @@ pub(super) fn dead_code_keys(
     collector.add_mixed_client_server_barrels(mixed_client_server_barrels);
     collector.add_misplaced_directives(misplaced_directives);
     collector.add_unprovided_injects(unprovided_injects);
+    collector.add_unrendered_components(unrendered_components);
     collector.add_route_collisions(route_collisions);
     collector.add_dynamic_segment_name_conflicts(dynamic_segment_name_conflicts);
     collector.into_keys()
@@ -494,6 +506,15 @@ impl<'a> DeadCodeKeyCollector<'a> {
     fn add_unprovided_injects(&mut self, items: &[fallow_core::results::UnprovidedInjectFinding]) {
         for item in items {
             self.insert(unprovided_inject_key(&item.inject, self.root));
+        }
+    }
+
+    fn add_unrendered_components(
+        &mut self,
+        items: &[fallow_core::results::UnrenderedComponentFinding],
+    ) {
+        for item in items {
+            self.insert(unrendered_component_key(&item.component, self.root));
         }
     }
 
@@ -792,6 +813,7 @@ pub(super) fn retain_introduced_dead_code(
         mixed_client_server_barrels,
         misplaced_directives,
         unprovided_injects,
+        unrendered_components,
         route_collisions,
         dynamic_segment_name_conflicts,
         // Non-finding fields: counts and metadata, not subject to base-keyed
@@ -810,7 +832,6 @@ pub(super) fn retain_introduced_dead_code(
         // collections; no key needed.
         export_usages: _export_usages,
         entry_point_summary: _entry_point_summary,
-        unrendered_components: _unrendered_components,
     } = results;
 
     // The three "fast path" retains use a direct base-lookup rather than the
@@ -876,6 +897,7 @@ pub(super) fn retain_introduced_dead_code(
         .retain(|item| keep(mixed_client_server_barrel_key(&item.barrel, root)));
     misplaced_directives.retain(|item| keep(misplaced_directive_key(&item.directive_site, root)));
     unprovided_injects.retain(|item| keep(unprovided_inject_key(&item.inject, root)));
+    unrendered_components.retain(|item| keep(unrendered_component_key(&item.component, root)));
     route_collisions.retain(|item| keep(route_collision_key(&item.collision, root)));
     dynamic_segment_name_conflicts
         .retain(|item| keep(dynamic_segment_name_conflict_key(&item.conflict, root)));
@@ -1141,6 +1163,16 @@ impl DeadCodeJsonAnnotator<'_> {
             "unprovided_injects",
             self.results.unprovided_injects.iter().map(|item| {
                 issue_was_introduced(&unprovided_inject_key(&item.inject, self.root), self.base)
+            }),
+        );
+        annotate_issue_array(
+            self.json,
+            "unrendered_components",
+            self.results.unrendered_components.iter().map(|item| {
+                issue_was_introduced(
+                    &unrendered_component_key(&item.component, self.root),
+                    self.base,
+                )
             }),
         );
         annotate_issue_array(

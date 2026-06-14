@@ -1092,6 +1092,13 @@ misplaced_directives?: MisplacedDirectiveFinding[]
  */
 unprovided_injects?: UnprovidedInjectFinding[]
 /**
+ * Vue/Svelte single-file components that are reachable but rendered nowhere
+ * (the imported-but-never-rendered dead-half). Wrapped in
+ * [`UnrenderedComponentFinding`] so each entry carries a typed `actions`
+ * array natively. Default severity is `warn`.
+ */
+unrendered_components?: UnrenderedComponentFinding[]
+/**
  * Next.js App Router route files that resolve to the same URL within one
  * app-root (a guaranteed `next build` failure). Wrapped in
  * [`RouteCollisionFinding`] so each entry carries a typed `actions` array
@@ -1186,6 +1193,10 @@ unused_store_members?: number
  * Vue/Svelte injects whose key is provided nowhere in the project.
  */
 unprovided_injects?: number
+/**
+ * Vue/Svelte components reachable but rendered nowhere in the project.
+ */
+unrendered_components?: number
 /**
  * Imports that could not be resolved against the project's module graph.
  */
@@ -2666,6 +2677,51 @@ framework: string
 line: number
 /**
  * 0-based byte column offset of the inject / getContext call.
+ */
+col: number
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+}
+/**
+ * Wire-shape envelope for an [`UnrenderedComponent`] finding. There is no safe
+ * auto-fix: the fix is binary but judgement-bearing (render the component
+ * somewhere, or delete the dead component). The only action is a line-level
+ * suppress.
+ */
+export interface UnrenderedComponentFinding {
+/**
+ * The component file that is reachable but rendered nowhere.
+ */
+path: string
+/**
+ * The component name (the `.vue`/`.svelte` file stem, PascalCase).
+ */
+component_name: string
+/**
+ * Which framework this component belongs to: `"vue"` or `"svelte"`.
+ */
+framework: string
+/**
+ * A barrel/file that re-exports this component, kept for the remediation
+ * trace ("reachable via X, rendered nowhere"). Absolute in memory,
+ * serialized workspace-relative (like `path`); `None` when not determinable.
+ */
+reachable_via?: (string | null)
+/**
+ * 1-based line number of the component (the file head; SFCs have no explicit
+ * default-export statement).
+ */
+line: number
+/**
+ * 0-based byte column offset.
  */
 col: number
 /**
@@ -5624,6 +5680,13 @@ misplaced_directives?: MisplacedDirectiveFinding[]
  * `actions` array natively. Default severity is `warn`.
  */
 unprovided_injects?: UnprovidedInjectFinding[]
+/**
+ * Vue/Svelte single-file components that are reachable but rendered nowhere
+ * (the imported-but-never-rendered dead-half). Wrapped in
+ * [`UnrenderedComponentFinding`] so each entry carries a typed `actions`
+ * array natively. Default severity is `warn`.
+ */
+unrendered_components?: UnrenderedComponentFinding[]
 /**
  * Next.js App Router route files that resolve to the same URL within one
  * app-root (a guaranteed `next build` failure). Wrapped in

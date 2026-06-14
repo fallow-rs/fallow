@@ -108,6 +108,9 @@ pub struct CheckSummary {
     /// Vue/Svelte injects whose key is provided nowhere in the project.
     #[serde(default)]
     pub unprovided_injects: usize,
+    /// Vue/Svelte components reachable but rendered nowhere in the project.
+    #[serde(default)]
+    pub unrendered_components: usize,
     /// Imports that could not be resolved against the project's module graph.
     pub unresolved_imports: usize,
     /// Dependencies imported but absent from `package.json`.

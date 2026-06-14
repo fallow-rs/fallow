@@ -117,6 +117,7 @@ pub const ISSUE_TYPE_FLAGS: &[(&str, &str)] = &[
     ("unused-class-members", "--unused-class-members"),
     ("unused-store-members", "--unused-store-members"),
     ("unprovided-injects", "--unprovided-injects"),
+    ("unrendered-components", "--unrendered-components"),
     ("unresolved-imports", "--unresolved-imports"),
     ("unlisted-deps", "--unlisted-deps"),
     ("duplicate-exports", "--duplicate-exports"),

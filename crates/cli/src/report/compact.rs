@@ -380,6 +380,14 @@ impl<'a> CompactLineBuilder<'a> {
                 finding.inject.key_name,
             ));
         }
+        for finding in &self.results.unrendered_components {
+            self.lines.push(format!(
+                "unrendered-component:{}:{}:{}",
+                self.rel(&finding.component.path),
+                finding.component.line,
+                finding.component.component_name,
+            ));
+        }
         for finding in &self.results.route_collisions {
             self.lines.push(format!(
                 "route-collision:{}:{} (url {})",
@@ -1173,7 +1181,7 @@ mod tests {
         let results = sample_results(&root);
         let lines = build_compact_lines(&results, &root);
 
-        assert_eq!(lines.len(), 18);
+        assert_eq!(lines.len(), 19);
 
         assert!(lines[0].starts_with("unused-file:"));
         assert!(lines[1].starts_with("unused-export:"));
@@ -1192,6 +1200,7 @@ mod tests {
         assert!(lines[14].starts_with("circular-dependency:"));
         assert!(lines[15].starts_with("boundary-violation:"));
         assert!(lines.iter().any(|l| l.starts_with("unprovided-inject:")));
+        assert!(lines.iter().any(|l| l.starts_with("unrendered-component:")));
     }
 
     #[test]

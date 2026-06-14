@@ -376,6 +376,7 @@ fn check_explain_for_header(line: &str) -> Option<&'static crate::explain::RuleD
             "fallow/mixed-client-server-barrel",
         ),
         ("Unprovided injects", "fallow/unprovided-inject"),
+        ("Unrendered components", "fallow/unrendered-component"),
         ("Misplaced directives", "fallow/misplaced-directive"),
     ];
     let (_, rule_id) = mappings
@@ -1274,6 +1275,7 @@ fn build_policy_section(
         && results.mixed_client_server_barrels.is_empty()
         && results.misplaced_directives.is_empty()
         && results.unprovided_injects.is_empty()
+        && results.unrendered_components.is_empty()
         && results.route_collisions.is_empty()
         && results.dynamic_segment_name_conflicts.is_empty()
     {
@@ -1332,6 +1334,19 @@ fn build_policy_section(
             i.inject.path.as_path()
         },
         format_detail: &format_unprovided_inject,
+    });
+
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.unrendered_components,
+        title: "Unrendered components",
+        level: severity_to_level(rules.unrendered_components),
+        root,
+        max_files: MAX_FLAT_ITEMS,
+        get_path: |c: &fallow_types::output_dead_code::UnrenderedComponentFinding| {
+            c.component.path.as_path()
+        },
+        format_detail: &format_unrendered_component,
     });
 
     build_human_grouped_section(GroupedSectionInput {
@@ -1416,6 +1431,19 @@ fn format_unprovided_inject(
             i.key_name
         )
         .dimmed(),
+    )
+}
+
+fn format_unrendered_component(
+    entry: &fallow_types::output_dead_code::UnrenderedComponentFinding,
+) -> String {
+    let c = &entry.component;
+    format!(
+        "{} {} {}",
+        format!(":{}", c.line).dimmed(),
+        c.component_name.bold(),
+        "is reachable but rendered nowhere in this project (render it somewhere or remove it)"
+            .dimmed(),
     )
 }
 
@@ -2208,6 +2236,9 @@ fn collect_matching_rules(
     for i in &results.unprovided_injects {
         check(&i.inject.path);
     }
+    for c in &results.unrendered_components {
+        check(&c.component.path);
+    }
     for c in &results.route_collisions {
         check(&c.collision.path);
     }
@@ -2483,6 +2514,7 @@ fn build_summary_footer(
     add(results.re_export_cycles.len(), "re-export cycles");
     add(results.boundary_violations.len(), "violations");
     add(results.unprovided_injects.len(), "unprovided injects");
+    add(results.unrendered_components.len(), "unrendered components");
     add(results.stale_suppressions.len(), "stale suppressions");
 
     parts.join(" \u{00b7} ")
@@ -2625,6 +2657,11 @@ fn check_summary_categories(
             "Unprovided injects",
             results.unprovided_injects.len(),
             severity_to_level(rules.unprovided_injects),
+        ),
+        (
+            "Unrendered components",
+            results.unrendered_components.len(),
+            severity_to_level(rules.unrendered_components),
         ),
         (
             "Stale suppressions",

@@ -657,6 +657,13 @@
           },
           "description": "Vue `inject(KEY)` / Svelte `getContext(KEY)` calls whose symbol KEY is\nprovided nowhere in the project (the injected-never-provided dead-half).\nWrapped in [`UnprovidedInjectFinding`] so each entry carries a typed\n`actions` array natively. Default severity is `warn`."
         },
+        "unrendered_components": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnrenderedComponentFinding"
+          },
+          "description": "Vue/Svelte single-file components that are reachable but rendered nowhere\n(the imported-but-never-rendered dead-half). Wrapped in\n[`UnrenderedComponentFinding`] so each entry carries a typed `actions`\narray natively. Default severity is `warn`."
+        },
         "route_collisions": {
           "type": "array",
           "items": {
@@ -1036,6 +1043,13 @@
             "$ref": "#/definitions/UnprovidedInjectFinding"
           },
           "description": "Vue `inject(KEY)` / Svelte `getContext(KEY)` calls whose symbol KEY is\nprovided nowhere in the project (the injected-never-provided dead-half).\nWrapped in [`UnprovidedInjectFinding`] so each entry carries a typed\n`actions` array natively. Default severity is `warn`."
+        },
+        "unrendered_components": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnrenderedComponentFinding"
+          },
+          "description": "Vue/Svelte single-file components that are reachable but rendered nowhere\n(the imported-but-never-rendered dead-half). Wrapped in\n[`UnrenderedComponentFinding`] so each entry carries a typed `actions`\narray natively. Default severity is `warn`."
         },
         "route_collisions": {
           "type": "array",
@@ -4756,6 +4770,10 @@
           "type": "integer",
           "description": "Vue/Svelte injects whose key is provided nowhere in the project."
         },
+        "unrendered_components": {
+          "type": "integer",
+          "description": "Vue/Svelte components reachable but rendered nowhere in the project."
+        },
         "unresolved_imports": {
           "type": "integer",
           "description": "Imports that could not be resolved against the project's module graph."
@@ -5561,6 +5579,13 @@
             "$ref": "#/definitions/UnprovidedInjectFinding"
           },
           "description": "Vue `inject(KEY)` / Svelte `getContext(KEY)` calls whose symbol KEY is\nprovided nowhere in the project (the injected-never-provided dead-half).\nWrapped in [`UnprovidedInjectFinding`] so each entry carries a typed\n`actions` array natively. Default severity is `warn`."
+        },
+        "unrendered_components": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnrenderedComponentFinding"
+          },
+          "description": "Vue/Svelte single-file components that are reachable but rendered nowhere\n(the imported-but-never-rendered dead-half). Wrapped in\n[`UnrenderedComponentFinding`] so each entry carries a typed `actions`\narray natively. Default severity is `warn`."
         },
         "route_collisions": {
           "type": "array",
@@ -12908,6 +12933,65 @@
         "actions"
       ],
       "description": "Wire-shape envelope for a [`DynamicSegmentNameConflict`] finding. The\nconflict is a Next.js dev / runtime error (`next build` does NOT catch it),\nso the primary action is manual guidance (rename the dynamic segments to a\nsingle consistent slug name), with a file-level suppress as escape hatch."
+    },
+    "UnrenderedComponentFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The component file that is reachable but rendered nowhere."
+        },
+        "component_name": {
+          "type": "string",
+          "description": "The component name (the `.vue`/`.svelte` file stem, PascalCase)."
+        },
+        "framework": {
+          "type": "string",
+          "description": "Which framework this component belongs to: `\"vue\"` or `\"svelte\"`."
+        },
+        "reachable_via": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "A barrel/file that re-exports this component, kept for the remediation\ntrace (\"reachable via X, rendered nowhere\"). Absolute in memory,\nserialized workspace-relative (like `path`); `None` when not determinable."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the component (the file head; SFCs have no explicit\ndefault-export statement)."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "path",
+        "component_name",
+        "framework",
+        "line",
+        "col",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for an [`UnrenderedComponent`] finding. There is no safe\nauto-fix: the fix is binary but judgement-bearing (render the component\nsomewhere, or delete the dead component). The only action is a line-level\nsuppress."
     }
   }
 }

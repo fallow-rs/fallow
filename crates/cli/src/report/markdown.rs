@@ -282,6 +282,12 @@ fn push_markdown_graph_sections(
     );
     markdown_section(
         out,
+        &results.unrendered_components,
+        "Unrendered components",
+        |c| format_markdown_unrendered_component(c, rel),
+    );
+    markdown_section(
+        out,
         &results.stale_suppressions,
         "Stale suppressions",
         |s| {
@@ -447,6 +453,18 @@ fn format_markdown_unprovided_inject(
         i.inject.line,
         escape_backticks(&i.inject.key_name),
         escape_backticks(&i.inject.key_name),
+    )]
+}
+
+fn format_markdown_unrendered_component(
+    c: &fallow_core::results::UnrenderedComponentFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    vec![format!(
+        "- `{}`:{} `{}` is reachable but rendered nowhere in this project (render it somewhere or remove it)",
+        rel(&c.component.path),
+        c.component.line,
+        escape_backticks(&c.component.component_name),
     )]
 }
 

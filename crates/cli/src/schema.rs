@@ -223,6 +223,10 @@ fn apply_source_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
             m.filter_flag = Some("--unprovided-injects");
             m.suppress = Some(("unprovided-inject", false));
         }
+        "unrendered-component" => {
+            m.filter_flag = Some("--unrendered-components");
+            m.suppress = Some(("unrendered-component", false));
+        }
         "unresolved-import" => {
             m.filter_flag = Some("--unresolved-imports");
             m.suppress = Some(("unresolved-import", false));

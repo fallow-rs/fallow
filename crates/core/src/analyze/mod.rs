@@ -48,10 +48,11 @@ use fallow_types::output_dead_code::{
     MisplacedDirectiveFinding, MixedClientServerBarrelFinding, PolicyViolationFinding,
     PrivateTypeLeakFinding, ReExportCycleFinding, RouteCollisionFinding, TestOnlyDependencyFinding,
     TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
-    UnresolvedCatalogReferenceFinding, UnresolvedImportFinding, UnusedCatalogEntryFinding,
-    UnusedClassMemberFinding, UnusedDependencyFinding, UnusedDependencyOverrideFinding,
-    UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
-    UnusedOptionalDependencyFinding, UnusedStoreMemberFinding, UnusedTypeFinding,
+    UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
+    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedDependencyFinding,
+    UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
+    UnusedExportFinding, UnusedFileFinding, UnusedOptionalDependencyFinding,
+    UnusedStoreMemberFinding, UnusedTypeFinding,
 };
 
 use crate::results::{AnalysisResults, CircularDependency, CircularDependencyEdge};
@@ -803,8 +804,10 @@ fn populate_framework_specific_findings(
         graph,
         modules,
         resolved_modules,
+        config,
         declared_deps,
         public_api_entry_points,
+        suppressions,
         results,
     );
     populate_nextjs_route_tree_findings(
@@ -939,30 +942,37 @@ fn populate_unprovided_inject_findings(
     .collect();
 }
 
-/// Populate `unrendered_components` (the imported-but-never-rendered spike).
-///
-/// DEFERRED, not shipped: the detector runs and populates `results`, but the
-/// finding is intentionally NOT wired into any output, config, or filter
-/// surface. Hard evidence (11 real Vue/Svelte projects, zero true-positives,
-/// root-caused to ecosystem-rare component barrels) led to parking the feature
-/// rather than shipping the surface; see
-/// `.plans/imported-but-never-rendered-component.md`. The detector + its
-/// integration test are kept green so the spike is resumable.
+/// Populate `unrendered_components` when the rule is enabled. Gated on the
+/// project declaring `vue` / `svelte` inside the detector (see
+/// [`find_unrendered_components`]).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "mirrors the unprovided-inject populate site; threading resolved modules + the public-API entry-point set + the suppression context is intrinsic"
+)]
 fn populate_unrendered_component_findings(
     graph: &ModuleGraph,
     modules: &[ModuleInfo],
     resolved_modules: &[ResolvedModule],
+    config: &ResolvedConfig,
     declared_deps: &FxHashSet<String>,
     public_api_entry_points: &FxHashSet<FileId>,
+    suppressions: &SuppressionContext<'_>,
     results: &mut AnalysisResults,
 ) {
+    if config.rules.unrendered_components == Severity::Off {
+        return;
+    }
     results.unrendered_components = find_unrendered_components(
         graph,
         resolved_modules,
         modules,
         declared_deps,
         public_api_entry_points,
-    );
+        suppressions,
+    )
+    .into_iter()
+    .map(UnrenderedComponentFinding::with_actions)
+    .collect();
 }
 
 /// Populate `route_collisions` when the rule is enabled. Gated on the project
@@ -1960,6 +1970,7 @@ mod tests {
                 unused_class_members: Severity::Off,
                 unused_store_members: Severity::Off,
                 unprovided_injects: Severity::Off,
+                unrendered_components: Severity::Off,
                 unresolved_imports: Severity::Off,
                 unlisted_dependencies: Severity::Off,
                 duplicate_exports: Severity::Off,
