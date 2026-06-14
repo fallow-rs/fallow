@@ -44,6 +44,9 @@ pub fn filter_to_workspaces(
         .unrendered_components
         .retain(|c| any_under(&c.component.path));
     results
+        .unused_component_props
+        .retain(|p| any_under(&p.prop.path));
+    results
         .unresolved_imports
         .retain(|i| any_under(&i.import.path));
 
@@ -398,6 +401,9 @@ pub fn filter_results_by_diff(
     results
         .unrendered_components
         .retain(|c| line_in_diff(&c.component.path, c.component.line));
+    results
+        .unused_component_props
+        .retain(|p| line_in_diff(&p.prop.path, p.prop.line));
     results
         .unresolved_imports
         .retain(|i| line_in_diff(&i.import.path, i.import.line));

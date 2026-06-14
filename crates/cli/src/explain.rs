@@ -316,6 +316,14 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#unrendered-components",
     },
     RuleDef {
+        id: "fallow/unused-component-prop",
+        category: "Dead code",
+        name: "Unused component props",
+        short: "A Vue <script setup> defineProps prop is referenced nowhere in its own component",
+        full: "A Vue `<script setup>` defineProps declared prop that is referenced nowhere in its own component (neither script nor template). vue-tsc / Volar check caller-side prop correctness, not this in-component dead-input direction. Conservative: abstains on `$attrs` fallthrough, whole-object props use, defineExpose, defineModel, and imported prop-type aliases. Default warn; suppress or remove the prop.",
+        docs_path: "explanations/dead-code#unused-component-props",
+    },
+    RuleDef {
         id: "fallow/route-collision",
         category: "Policy",
         name: "Route collision",
@@ -438,6 +446,7 @@ fn dead_code_alias_id(normalized: &str) -> Option<&'static str> {
         "unused-store-members" => Some("fallow/unused-store-member"),
         "unprovided-injects" | "unprovided-inject" => Some("fallow/unprovided-inject"),
         "unrendered-components" | "unrendered-component" => Some("fallow/unrendered-component"),
+        "unused-component-props" | "unused-component-prop" => Some("fallow/unused-component-prop"),
         "unresolved-imports" => Some("fallow/unresolved-import"),
         "unlisted-deps" | "unlisted-dependencies" => Some("fallow/unlisted-dependency"),
         "duplicate-exports" => Some("fallow/duplicate-export"),
@@ -580,6 +589,10 @@ fn member_import_rule_guide(id: &str) -> Option<RuleGuide> {
         "fallow/unrendered-component" => RuleGuide {
             example: "components/Orphan.vue is re-exported from a barrel (export { default as Orphan } from './Orphan.vue') but no template, registration, h() call, or dynamic import ever renders it.",
             how_to_fix: "Render the component where it belongs, or delete it and remove the dead barrel re-export. If it is rendered reflectively (a dynamic <component :is> from a non-literal value), suppress the line with // fallow-ignore-next-line unrendered-component.",
+        },
+        "fallow/unused-component-prop" => RuleGuide {
+            example: "Widget.vue declares defineProps<{ size: string }>() but `size` is referenced nowhere in the component's script or template.",
+            how_to_fix: "Remove the unused prop, or reference it in the script / template. If the prop is part of a deliberately-stable public component API, suppress the line with // fallow-ignore-next-line unused-component-prop.",
         },
         "fallow/unresolved-import" => RuleGuide {
             example: "src/app.ts imports ./routes/admin, but no matching file exists after extension and index resolution.",
@@ -2248,7 +2261,7 @@ mod tests {
 
     #[test]
     fn check_rules_count() {
-        assert_eq!(CHECK_RULES.len(), 34);
+        assert_eq!(CHECK_RULES.len(), 35);
     }
 
     #[test]

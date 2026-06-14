@@ -1112,6 +1112,13 @@ route_collisions?: RouteCollisionFinding[]
  * carries a typed `actions` array natively. Default severity is `warn`.
  */
 dynamic_segment_name_conflicts?: DynamicSegmentNameConflictFinding[]
+/**
+ * Vue `<script setup>` `defineProps` props referenced nowhere in their own
+ * SFC (neither `<script>` nor `<template>`). Wrapped in
+ * [`UnusedComponentPropFinding`] so each entry carries a typed `actions`
+ * array natively. Default severity is `warn`.
+ */
+unused_component_props?: UnusedComponentPropFinding[]
 baseline_deltas?: (BaselineDeltas | null)
 baseline?: (BaselineMatch | null)
 regression?: (RegressionResult | null)
@@ -1197,6 +1204,10 @@ unprovided_injects?: number
  * Vue/Svelte components reachable but rendered nowhere in the project.
  */
 unrendered_components?: number
+/**
+ * Vue `<script setup>` props referenced nowhere inside their own SFC.
+ */
+unused_component_props?: number
 /**
  * Imports that could not be resolved against the project's module graph.
  */
@@ -2810,6 +2821,44 @@ conflicting_paths: string[]
 line: number
 /**
  * 0-based byte column offset (file-level finding, always 0).
+ */
+col: number
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+}
+/**
+ * Wire-shape envelope for an [`UnusedComponentProp`] finding. There is no safe
+ * auto-fix: removing a declared prop is judgement-bearing (the prop may be part
+ * of a deliberately-stable public component API). The only action is a
+ * line-level suppress at the prop declaration.
+ */
+export interface UnusedComponentPropFinding {
+/**
+ * The `.vue` SFC declaring the unused prop.
+ */
+path: string
+/**
+ * The component name (the `.vue` file stem).
+ */
+component_name: string
+/**
+ * The declared prop name that is never referenced.
+ */
+prop_name: string
+/**
+ * 1-based line number of the prop declaration.
+ */
+line: number
+/**
+ * 0-based byte column offset of the prop declaration.
  */
 col: number
 /**
@@ -5701,6 +5750,13 @@ route_collisions?: RouteCollisionFinding[]
  * carries a typed `actions` array natively. Default severity is `warn`.
  */
 dynamic_segment_name_conflicts?: DynamicSegmentNameConflictFinding[]
+/**
+ * Vue `<script setup>` `defineProps` props referenced nowhere in their own
+ * SFC (neither `<script>` nor `<template>`). Wrapped in
+ * [`UnusedComponentPropFinding`] so each entry carries a typed `actions`
+ * array natively. Default severity is `warn`.
+ */
+unused_component_props?: UnusedComponentPropFinding[]
 }
 /**
  * The rendered impact report, derived purely from the store (no analysis run).

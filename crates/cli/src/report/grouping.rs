@@ -354,6 +354,11 @@ where
                 .unrendered_components
                 .push(item.clone());
         }
+        for item in &results.unused_component_props {
+            self.entry_for_path(&item.prop.path)
+                .unused_component_props
+                .push(item.clone());
+        }
         for item in &results.stale_suppressions {
             self.entry_for_path(&item.path)
                 .stale_suppressions

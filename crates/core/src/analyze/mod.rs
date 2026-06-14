@@ -50,10 +50,10 @@ use fallow_types::output_dead_code::{
     PrivateTypeLeakFinding, ReExportCycleFinding, RouteCollisionFinding, TestOnlyDependencyFinding,
     TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
     UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
-    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedDependencyFinding,
-    UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
-    UnusedExportFinding, UnusedFileFinding, UnusedOptionalDependencyFinding,
-    UnusedStoreMemberFinding, UnusedTypeFinding,
+    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentPropFinding,
+    UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
+    UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
+    UnusedOptionalDependencyFinding, UnusedStoreMemberFinding, UnusedTypeFinding,
 };
 
 use crate::results::{AnalysisResults, CircularDependency, CircularDependencyEdge};
@@ -815,6 +815,7 @@ fn populate_framework_specific_findings(
     populate_unused_component_prop_findings(
         graph,
         modules,
+        config,
         declared_deps,
         line_offsets_by_file,
         results,
@@ -984,30 +985,25 @@ fn populate_unrendered_component_findings(
     .collect();
 }
 
-/// Populate `unused_component_props` (spike: ungated by config, runs always).
-/// Gated on the project declaring `vue` / `@vue/runtime-core` / `nuxt` inside the
-/// detector. Emits a `FALLOW_DEBUG_PROPS`-gated stderr trace per finding plus a
-/// count line so the corpus probe can be inspected without machine output.
+/// Populate `unused_component_props` when the rule is enabled. Gated on the
+/// project declaring `vue` / `@vue/runtime-core` / `nuxt` inside the detector
+/// (see [`find_unused_component_props`]).
 fn populate_unused_component_prop_findings(
     graph: &ModuleGraph,
     modules: &[ModuleInfo],
+    config: &ResolvedConfig,
     declared_deps: &FxHashSet<String>,
     line_offsets_by_file: &LineOffsetsMap<'_>,
     results: &mut AnalysisResults,
 ) {
-    let findings = find_unused_component_props(graph, modules, declared_deps, line_offsets_by_file);
-    if std::env::var_os("FALLOW_DEBUG_PROPS").is_some() {
-        for finding in &findings {
-            eprintln!(
-                "PROP-DBG {} {} (line {})",
-                finding.path.display(),
-                finding.prop_name,
-                finding.line
-            );
-        }
-        eprintln!("PROP-DBG count={}", findings.len());
+    if config.rules.unused_component_props == Severity::Off {
+        return;
     }
-    results.unused_component_props = findings;
+    results.unused_component_props =
+        find_unused_component_props(graph, modules, declared_deps, line_offsets_by_file)
+            .into_iter()
+            .map(UnusedComponentPropFinding::with_actions)
+            .collect();
 }
 
 /// Populate `route_collisions` when the rule is enabled. Gated on the project
@@ -2006,6 +2002,7 @@ mod tests {
                 unused_store_members: Severity::Off,
                 unprovided_injects: Severity::Off,
                 unrendered_components: Severity::Off,
+                unused_component_props: Severity::Off,
                 unresolved_imports: Severity::Off,
                 unlisted_dependencies: Severity::Off,
                 duplicate_exports: Severity::Off,

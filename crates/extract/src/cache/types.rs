@@ -377,7 +377,11 @@ use crate::MemberKind;
 /// `has_props_attrs_fallthrough` / `has_define_expose` / `has_define_model` /
 /// `has_unharvestable_props` abstain flags, so a warm cache from 157 would
 /// report zero unused-component-prop findings.
-pub(super) const CACHE_VERSION: u32 = 158;
+///
+/// Bumped to 159 because `ComponentProp` gained a `local` field (the destructure
+/// alias for a renamed prop), changing the cached wire shape; a warm 158 cache
+/// would bitcode-misread it.
+pub(super) const CACHE_VERSION: u32 = 159;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

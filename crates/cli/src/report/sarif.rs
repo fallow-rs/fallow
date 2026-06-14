@@ -11,7 +11,8 @@ use fallow_core::results::{
     PrivateTypeLeak, RouteCollision, StaleSuppression, TestOnlyDependency, TypeOnlyDependency,
     UnlistedDependencyFinding, UnprovidedInject, UnrenderedComponent,
     UnresolvedCatalogReferenceFinding, UnresolvedImport, UnusedCatalogEntryFinding,
-    UnusedDependency, UnusedDependencyOverrideFinding, UnusedExport, UnusedFile, UnusedMember,
+    UnusedComponentProp, UnusedDependency, UnusedDependencyOverrideFinding, UnusedExport,
+    UnusedFile, UnusedMember,
 };
 use rustc_hash::FxHashMap;
 
@@ -597,6 +598,25 @@ fn sarif_unrendered_component_fields(
     }
 }
 
+fn sarif_unused_component_prop_fields(
+    prop: &UnusedComponentProp,
+    root: &Path,
+    level: &'static str,
+) -> SarifFields {
+    SarifFields {
+        rule_id: "fallow/unused-component-prop",
+        level,
+        message: format!(
+            "prop \"{}\" is declared but referenced nowhere inside component \"{}\"; remove it or use it",
+            prop.prop_name, prop.component_name
+        ),
+        uri: relative_uri(&prop.path, root),
+        region: Some((prop.line, prop.col + 1)),
+        source_path: Some(prop.path.clone()),
+        properties: None,
+    }
+}
+
 fn sarif_route_collision_fields(
     collision: &RouteCollision,
     root: &Path,
@@ -1010,6 +1030,11 @@ fn sarif_graph_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
             rules.unrendered_components,
         ),
         (
+            "fallow/unused-component-prop",
+            "A Vue <script setup> defineProps prop referenced nowhere inside its own component",
+            rules.unused_component_props,
+        ),
+        (
             "fallow/route-collision",
             "Two or more Next.js App Router route files resolve to the same URL",
             rules.route_collision,
@@ -1406,6 +1431,18 @@ fn push_graph_sarif_results(
                 &c.component,
                 root,
                 severity_to_sarif_level(rules.unrendered_components),
+            )
+        },
+    );
+    push_sarif_results(
+        sarif_results,
+        &results.unused_component_props,
+        snippets,
+        |p| {
+            sarif_unused_component_prop_fields(
+                &p.prop,
+                root,
+                severity_to_sarif_level(rules.unused_component_props),
             )
         },
     );
@@ -2185,10 +2222,11 @@ mod tests {
         let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
             .as_array()
             .expect("rules should be an array");
-        assert_eq!(rules.len(), 34);
+        assert_eq!(rules.len(), 35);
 
         let rule_ids: Vec<&str> = rules.iter().map(|r| r["id"].as_str().unwrap()).collect();
         assert!(rule_ids.contains(&"fallow/unrendered-component"));
+        assert!(rule_ids.contains(&"fallow/unused-component-prop"));
         assert!(rule_ids.contains(&"fallow/route-collision"));
         assert!(rule_ids.contains(&"fallow/dynamic-segment-name-conflict"));
         assert!(rule_ids.contains(&"fallow/unused-file"));

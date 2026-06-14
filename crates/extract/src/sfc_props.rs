@@ -16,13 +16,13 @@
 
 use oxc_ast::ast::*;
 use oxc_semantic::SemanticBuilder;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_types::extract::ComponentProp;
 
 /// Result of harvesting `defineProps` from a `<script setup>` program.
 #[derive(Debug, Default)]
-pub(crate) struct DefinePropsHarvest {
+pub struct DefinePropsHarvest {
     /// Declared props with their span and `used_in_script` flag. The
     /// `used_in_template` flag is left `false` here and set in `apply_template_usage`.
     pub props: Vec<ComponentProp>,
@@ -43,7 +43,7 @@ pub(crate) struct DefinePropsHarvest {
 /// Harvest `defineProps` declared props and abstain flags from a `<script setup>`
 /// program. The byte spans returned are RELATIVE to the script body; the caller
 /// remaps them onto the SFC source.
-pub(crate) fn harvest_define_props(program: &Program<'_>) -> DefinePropsHarvest {
+pub fn harvest_define_props(program: &Program<'_>) -> DefinePropsHarvest {
     let mut harvest = DefinePropsHarvest::default();
 
     // A pass over top-level statements: find the defineProps call, its return
@@ -51,6 +51,8 @@ pub(crate) fn harvest_define_props(program: &Program<'_>) -> DefinePropsHarvest 
     // resolved-reference credit), and defineExpose / defineModel presence.
     let mut props_return_binding: Option<String> = None;
     let mut destructured_locals: FxHashSet<String> = FxHashSet::default();
+    // prop name -> local binding name (for `const { name: alias } = defineProps()`).
+    let mut prop_aliases: FxHashMap<String, String> = FxHashMap::default();
     let mut prop_names: Vec<(String, u32)> = Vec::new();
 
     for stmt in &program.body {
@@ -75,6 +77,7 @@ pub(crate) fn harvest_define_props(program: &Program<'_>) -> DefinePropsHarvest 
                         &declarator.id,
                         &mut props_return_binding,
                         &mut destructured_locals,
+                        &mut prop_aliases,
                         &mut harvest,
                     );
                 }
@@ -102,10 +105,10 @@ pub(crate) fn harvest_define_props(program: &Program<'_>) -> DefinePropsHarvest 
     // Script usage: resolved references for destructured locals, plus member
     // accesses `props.<name>` against the return binding.
     let used_locals = resolve_used_locals(program, &destructured_locals);
-    let (member_used, props_used_whole) = props_return_binding
-        .as_deref()
-        .map(|binding| collect_prop_binding_usage(program, binding))
-        .unwrap_or((FxHashSet::default(), false));
+    let (member_used, props_used_whole) = props_return_binding.as_deref().map_or_else(
+        || (FxHashSet::default(), false),
+        |binding| collect_prop_binding_usage(program, binding),
+    );
 
     // Whole-object use of the props binding (`toRefs(props)`, `{ ...props }`,
     // `someFn(props)`, `return props`) consumes every prop opaquely, the
@@ -115,9 +118,17 @@ pub(crate) fn harvest_define_props(program: &Program<'_>) -> DefinePropsHarvest 
     }
 
     for (name, span_start) in prop_names {
-        let used_in_script = used_locals.contains(&name) || member_used.contains(&name);
+        // A renamed prop (`const { name: alias } = defineProps()`) is read through
+        // its local alias; default the local to the prop name (shorthand
+        // destructure, or the non-destructure `props.name` / template `name` form).
+        let local = prop_aliases
+            .get(&name)
+            .cloned()
+            .unwrap_or_else(|| name.clone());
+        let used_in_script = used_locals.contains(&local) || member_used.contains(&name);
         harvest.props.push(ComponentProp {
             name,
+            local,
             span_start,
             used_in_script,
             used_in_template: false,
@@ -253,6 +264,7 @@ fn bind_define_props_target(
     id: &BindingPattern<'_>,
     props_return_binding: &mut Option<String>,
     destructured_locals: &mut FxHashSet<String>,
+    prop_aliases: &mut FxHashMap<String, String>,
     harvest: &mut DefinePropsHarvest,
 ) {
     match id {
@@ -266,6 +278,11 @@ fn bind_define_props_target(
                 // identifier either way.
                 if let Some(local) = binding_local_name(&prop.value) {
                     destructured_locals.insert(local.to_string());
+                    // Map the declared prop name to its local for `{ name: alias }`;
+                    // shorthand `{ name }` maps name -> name.
+                    if let Some(prop_name) = property_key_name(&prop.key) {
+                        prop_aliases.insert(prop_name, local.to_string());
+                    }
                 }
             }
             // A rest element (`const { ...rest } = defineProps()`) can carry any

@@ -1048,6 +1048,42 @@ fn push_unrendered_component_issues(
     }
 }
 
+fn push_unused_component_prop_issues(
+    issues: &mut Vec<CodeClimateIssue>,
+    findings: &[fallow_types::output_dead_code::UnusedComponentPropFinding],
+    root: &Path,
+    severity: Severity,
+) {
+    if findings.is_empty() {
+        return;
+    }
+    let level = severity_to_codeclimate(severity);
+    for entry in findings {
+        let p = &entry.prop;
+        let path = cc_path(&p.path, root);
+        let fp = fingerprint_hash(&[
+            "fallow/unused-component-prop",
+            &path,
+            &p.line.to_string(),
+            &p.prop_name,
+        ]);
+        let line = if p.line > 0 { Some(p.line) } else { None };
+        let message = format!(
+            "prop `{}` is declared but referenced nowhere in component `{}` (remove it or use it)",
+            p.prop_name, p.component_name
+        );
+        issues.push(cc_issue(
+            "fallow/unused-component-prop",
+            &message,
+            level,
+            "Bug Risk",
+            &path,
+            line,
+            &fp,
+        ));
+    }
+}
+
 fn push_route_collision_issues(
     issues: &mut Vec<CodeClimateIssue>,
     findings: &[fallow_types::output_dead_code::RouteCollisionFinding],
@@ -1603,6 +1639,12 @@ impl CodeClimateBuilder<'_> {
             &self.results.unrendered_components,
             self.root,
             self.rules.unrendered_components,
+        );
+        push_unused_component_prop_issues(
+            &mut self.issues,
+            &self.results.unused_component_props,
+            self.root,
+            self.rules.unused_component_props,
         );
         push_route_collision_issues(
             &mut self.issues,

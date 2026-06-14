@@ -288,6 +288,12 @@ fn push_markdown_graph_sections(
     );
     markdown_section(
         out,
+        &results.unused_component_props,
+        "Unused component props",
+        |p| format_markdown_unused_component_prop(p, rel),
+    );
+    markdown_section(
+        out,
         &results.stale_suppressions,
         "Stale suppressions",
         |s| {
@@ -465,6 +471,18 @@ fn format_markdown_unrendered_component(
         rel(&c.component.path),
         c.component.line,
         escape_backticks(&c.component.component_name),
+    )]
+}
+
+fn format_markdown_unused_component_prop(
+    p: &fallow_core::results::UnusedComponentPropFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    vec![format!(
+        "- `{}`:{} `{}` is declared but referenced nowhere in this component (remove it or use it)",
+        rel(&p.prop.path),
+        p.prop.line,
+        escape_backticks(&p.prop.prop_name),
     )]
 }
 

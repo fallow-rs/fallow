@@ -552,6 +552,35 @@ pub fn push_member_diagnostics(
             });
         }
     }
+
+    for finding in &results.unused_component_props {
+        let p = &finding.prop;
+        if let Some(uri) = Uri::from_file_path(&p.path) {
+            let line = p.line.saturating_sub(1);
+            map.entry(uri).or_default().push(Diagnostic {
+                range: Range {
+                    start: Position {
+                        line,
+                        character: p.col,
+                    },
+                    end: Position {
+                        line,
+                        character: p.col + p.prop_name.len() as u32,
+                    },
+                },
+                severity: Some(DiagnosticSeverity::HINT),
+                source: Some("fallow".to_string()),
+                code: Some(NumberOrString::String("unused-component-prop".to_string())),
+                code_description: doc_link("unused-component-props"),
+                message: format!(
+                    "Prop '{}' is declared but referenced nowhere in this component",
+                    p.prop_name
+                ),
+                tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+                ..Default::default()
+            });
+        }
+    }
 }
 
 #[cfg(test)]

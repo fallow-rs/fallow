@@ -61,6 +61,11 @@ fn cache_roundtrip() {
         misplaced_directives: Vec::new(),
         di_key_sites: Vec::new(),
         has_dynamic_provide: false,
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
     };
 
     store.insert(std::path::Path::new("test.ts"), cached);
@@ -280,6 +285,11 @@ fn incremental_cache_prune_stale_entries() {
         misplaced_directives: Vec::new(),
         di_key_sites: Vec::new(),
         has_dynamic_provide: false,
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
     };
 
     store.insert(std::path::Path::new("/project/existing.ts"), make_module());

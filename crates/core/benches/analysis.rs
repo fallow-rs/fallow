@@ -644,6 +644,11 @@ fn bench_cache_round_trip(c: &mut Criterion) {
         di_key_sites: Vec::new(),
         has_dynamic_provide: false,
         referenced_import_bindings: Vec::new(),
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
     };
 
     c.bench_function("cache_round_trip", |b| {

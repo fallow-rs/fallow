@@ -1417,6 +1417,13 @@ fn collect_unused_symbol_findings(
             Some(f.component.component_name.clone()),
         );
     }
+    for f in &results.unused_component_props {
+        push(
+            &f.prop.path,
+            "unused-component-prop",
+            Some(f.prop.prop_name.clone()),
+        );
+    }
     for f in &results.unresolved_imports {
         push(
             &f.import.path,

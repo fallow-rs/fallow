@@ -111,6 +111,9 @@ pub struct CheckSummary {
     /// Vue/Svelte components reachable but rendered nowhere in the project.
     #[serde(default)]
     pub unrendered_components: usize,
+    /// Vue `<script setup>` props referenced nowhere inside their own SFC.
+    #[serde(default)]
+    pub unused_component_props: usize,
     /// Imports that could not be resolved against the project's module graph.
     pub unresolved_imports: usize,
     /// Dependencies imported but absent from `package.json`.

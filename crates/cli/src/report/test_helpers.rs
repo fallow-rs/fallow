@@ -6,9 +6,9 @@ use fallow_types::output_dead_code::{
     BoundaryViolationFinding, CircularDependencyFinding, TestOnlyDependencyFinding,
     TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
     UnrenderedComponentFinding, UnresolvedImportFinding, UnusedClassMemberFinding,
-    UnusedDependencyFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
-    UnusedExportFinding, UnusedFileFinding, UnusedOptionalDependencyFinding,
-    UnusedStoreMemberFinding, UnusedTypeFinding,
+    UnusedComponentPropFinding, UnusedDependencyFinding, UnusedDevDependencyFinding,
+    UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
+    UnusedOptionalDependencyFinding, UnusedStoreMemberFinding, UnusedTypeFinding,
 };
 
 /// Build an `AnalysisResults` populated with one issue of every type.
@@ -187,6 +187,16 @@ pub fn sample_results(root: &Path) -> AnalysisResults {
                 reachable_via: Some(root.join("src/components/index.ts")),
                 line: 1,
                 col: 0,
+            },
+        ));
+    r.unused_component_props
+        .push(UnusedComponentPropFinding::with_actions(
+            UnusedComponentProp {
+                path: root.join("src/components/Widget.vue"),
+                component_name: "Widget".to_string(),
+                prop_name: "unusedSize".to_string(),
+                line: 4,
+                col: 2,
             },
         ));
     r.stale_suppressions.push(StaleSuppression {

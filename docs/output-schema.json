@@ -678,6 +678,13 @@
           },
           "description": "Sibling Next.js dynamic route segments at one tree position using\ndifferent param spellings (a dev / runtime error; `next build` does NOT\ncatch it). Wrapped in [`DynamicSegmentNameConflictFinding`] so each entry\ncarries a typed `actions` array natively. Default severity is `warn`."
         },
+        "unused_component_props": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedComponentPropFinding"
+          },
+          "description": "Vue `<script setup>` `defineProps` props referenced nowhere in their own\nSFC (neither `<script>` nor `<template>`). Wrapped in\n[`UnusedComponentPropFinding`] so each entry carries a typed `actions`\narray natively. Default severity is `warn`."
+        },
         "baseline_deltas": {
           "anyOf": [
             {
@@ -1064,6 +1071,13 @@
             "$ref": "#/definitions/DynamicSegmentNameConflictFinding"
           },
           "description": "Sibling Next.js dynamic route segments at one tree position using\ndifferent param spellings (a dev / runtime error; `next build` does NOT\ncatch it). Wrapped in [`DynamicSegmentNameConflictFinding`] so each entry\ncarries a typed `actions` array natively. Default severity is `warn`."
+        },
+        "unused_component_props": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedComponentPropFinding"
+          },
+          "description": "Vue `<script setup>` `defineProps` props referenced nowhere in their own\nSFC (neither `<script>` nor `<template>`). Wrapped in\n[`UnusedComponentPropFinding`] so each entry carries a typed `actions`\narray natively. Default severity is `warn`."
         }
       },
       "required": [
@@ -4774,6 +4788,10 @@
           "type": "integer",
           "description": "Vue/Svelte components reachable but rendered nowhere in the project."
         },
+        "unused_component_props": {
+          "type": "integer",
+          "description": "Vue `<script setup>` props referenced nowhere inside their own SFC."
+        },
         "unresolved_imports": {
           "type": "integer",
           "description": "Imports that could not be resolved against the project's module graph."
@@ -5600,6 +5618,13 @@
             "$ref": "#/definitions/DynamicSegmentNameConflictFinding"
           },
           "description": "Sibling Next.js dynamic route segments at one tree position using\ndifferent param spellings (a dev / runtime error; `next build` does NOT\ncatch it). Wrapped in [`DynamicSegmentNameConflictFinding`] so each entry\ncarries a typed `actions` array natively. Default severity is `warn`."
+        },
+        "unused_component_props": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedComponentPropFinding"
+          },
+          "description": "Vue `<script setup>` `defineProps` props referenced nowhere in their own\nSFC (neither `<script>` nor `<template>`). Wrapped in\n[`UnusedComponentPropFinding`] so each entry carries a typed `actions`\narray natively. Default severity is `warn`."
         }
       },
       "required": [
@@ -12992,6 +13017,58 @@
         "actions"
       ],
       "description": "Wire-shape envelope for an [`UnrenderedComponent`] finding. There is no safe\nauto-fix: the fix is binary but judgement-bearing (render the component\nsomewhere, or delete the dead component). The only action is a line-level\nsuppress."
+    },
+    "UnusedComponentPropFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The `.vue` SFC declaring the unused prop."
+        },
+        "component_name": {
+          "type": "string",
+          "description": "The component name (the `.vue` file stem)."
+        },
+        "prop_name": {
+          "type": "string",
+          "description": "The declared prop name that is never referenced."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the prop declaration."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset of the prop declaration."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "path",
+        "component_name",
+        "prop_name",
+        "line",
+        "col",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for an [`UnusedComponentProp`] finding. There is no safe\nauto-fix: removing a declared prop is judgement-bearing (the prop may be part\nof a deliberately-stable public component API). The only action is a\nline-level suppress at the prop declaration."
     }
   }
 }

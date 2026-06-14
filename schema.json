@@ -157,6 +157,7 @@
         "unused-store-members": "warn",
         "unprovided-injects": "warn",
         "unrendered-components": "warn",
+        "unused-component-props": "warn",
         "unresolved-imports": "error",
         "unlisted-dependencies": "error",
         "duplicate-exports": "error",
@@ -1035,6 +1036,11 @@
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
+        "unused-component-props": {
+          "description": "Vue `<script setup>` `defineProps` declared prop referenced nowhere\ninside its own single-file component (neither `<script>` nor\n`<template>`). The single-file dead-input direction. Defaults to `warn`,\nnot `error`: a prop can be part of a deliberately-stable public component\nAPI, so analyzer confidence is lower; warn encodes that without failing\nCI.",
+          "$ref": "#/$defs/Severity",
+          "default": "error"
+        },
         "unresolved-imports": {
           "$ref": "#/$defs/Severity",
           "default": "error"
@@ -1660,6 +1666,16 @@
           ]
         },
         "unrendered-components": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unused-component-props": {
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"

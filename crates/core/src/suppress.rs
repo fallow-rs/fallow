@@ -68,6 +68,7 @@ fn severity_for_kind(rules: &RulesConfig, kind: IssueKind) -> Severity {
         IssueKind::RouteCollision => rules.route_collision,
         IssueKind::DynamicSegmentNameConflict => rules.dynamic_segment_name_conflict,
         IssueKind::UnrenderedComponent => rules.unrendered_components,
+        IssueKind::UnusedComponentProp => rules.unused_component_props,
         IssueKind::Complexity | IssueKind::CodeDuplication => Severity::Error,
     }
 }
@@ -542,6 +543,7 @@ mod tests {
             IssueKind::RouteCollision,
             IssueKind::DynamicSegmentNameConflict,
             IssueKind::UnrenderedComponent,
+            IssueKind::UnusedComponentProp,
         ] {
             assert_eq!(
                 IssueKind::from_discriminant(kind.to_discriminant()),
@@ -549,7 +551,7 @@ mod tests {
             );
         }
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(38), None);
+        assert_eq!(IssueKind::from_discriminant(39), None);
     }
 
     #[test]

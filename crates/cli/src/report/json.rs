@@ -279,6 +279,7 @@ fn build_check_summary(results: &AnalysisResults) -> CheckSummary {
         misplaced_directives: results.misplaced_directives.len(),
         unprovided_injects: results.unprovided_injects.len(),
         unrendered_components: results.unrendered_components.len(),
+        unused_component_props: results.unused_component_props.len(),
         route_collisions: results.route_collisions.len(),
         dynamic_segment_name_conflicts: results.dynamic_segment_name_conflicts.len(),
     }

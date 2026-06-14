@@ -34,6 +34,7 @@ pub struct IssueFilters {
     pub unused_store_members: bool,
     pub unprovided_injects: bool,
     pub unrendered_components: bool,
+    pub unused_component_props: bool,
     pub unresolved_imports: bool,
     pub unlisted_deps: bool,
     pub duplicate_exports: bool,
@@ -66,6 +67,7 @@ impl IssueFilters {
             || self.unused_store_members
             || self.unprovided_injects
             || self.unrendered_components
+            || self.unused_component_props
             || self.unresolved_imports
             || self.unlisted_deps
             || self.duplicate_exports
@@ -131,6 +133,9 @@ impl IssueFilters {
         }
         if !self.unrendered_components {
             results.unrendered_components.clear();
+        }
+        if !self.unused_component_props {
+            results.unused_component_props.clear();
         }
         if !self.unresolved_imports {
             results.unresolved_imports.clear();
@@ -824,6 +829,7 @@ mod tests {
             unused_store_members: false,
             unprovided_injects: false,
             unrendered_components: false,
+            unused_component_props: false,
             unresolved_imports: false,
             unlisted_deps: false,
             duplicate_exports: false,
@@ -1248,6 +1254,7 @@ mod tests {
             unused_store_members: true,
             unprovided_injects: true,
             unrendered_components: true,
+            unused_component_props: true,
             unresolved_imports: true,
             unlisted_deps: true,
             duplicate_exports: true,

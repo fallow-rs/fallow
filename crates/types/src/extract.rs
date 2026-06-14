@@ -1106,6 +1106,11 @@ pub struct DiKeySite {
 pub struct ComponentProp {
     /// The declared prop name.
     pub name: String,
+    /// The template/script-visible local binding name: the destructure alias for
+    /// `const { name: alias } = defineProps()`, otherwise the prop name itself.
+    /// A renamed prop is read through this local, so usage must be checked against
+    /// it, not the declared name.
+    pub local: String,
     /// Start byte offset of the prop declaration (anchors the finding).
     pub span_start: u32,
     /// Whether this prop is referenced in the component's `<script>` (a

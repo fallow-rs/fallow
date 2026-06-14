@@ -84,6 +84,17 @@ fn unrendered_component_key(
     )
 }
 
+fn unused_component_prop_key(
+    item: &fallow_core::results::UnusedComponentProp,
+    root: &Path,
+) -> String {
+    format!(
+        "unused-component-prop:{}:{}",
+        relative_key_path(&item.path, root),
+        item.prop_name
+    )
+}
+
 fn route_collision_key(item: &fallow_core::results::RouteCollision, root: &Path) -> String {
     format!(
         "route-collision:{}:{}",
@@ -359,10 +370,9 @@ pub(super) fn dead_code_keys(
         misplaced_directives,
         unprovided_injects,
         unrendered_components,
+        unused_component_props,
         route_collisions,
         dynamic_segment_name_conflicts,
-        // Spike: no audit-key representation yet (full wiring is post-validation).
-        unused_component_props: _unused_component_props,
         // Non-finding fields: counts and metadata, not attributable to a key.
         suppression_count: _suppression_count,
         active_suppressions: _active_suppressions,
@@ -412,6 +422,7 @@ pub(super) fn dead_code_keys(
     collector.add_misplaced_directives(misplaced_directives);
     collector.add_unprovided_injects(unprovided_injects);
     collector.add_unrendered_components(unrendered_components);
+    collector.add_unused_component_props(unused_component_props);
     collector.add_route_collisions(route_collisions);
     collector.add_dynamic_segment_name_conflicts(dynamic_segment_name_conflicts);
     collector.into_keys()
@@ -517,6 +528,15 @@ impl<'a> DeadCodeKeyCollector<'a> {
     ) {
         for item in items {
             self.insert(unrendered_component_key(&item.component, self.root));
+        }
+    }
+
+    fn add_unused_component_props(
+        &mut self,
+        items: &[fallow_core::results::UnusedComponentPropFinding],
+    ) {
+        for item in items {
+            self.insert(unused_component_prop_key(&item.prop, self.root));
         }
     }
 
@@ -816,10 +836,9 @@ pub(super) fn retain_introduced_dead_code(
         misplaced_directives,
         unprovided_injects,
         unrendered_components,
+        unused_component_props,
         route_collisions,
         dynamic_segment_name_conflicts,
-        // Spike: no audit-key representation yet (full wiring is post-validation).
-        unused_component_props: _unused_component_props,
         // Non-finding fields: counts and metadata, not subject to base-keyed
         // filtering.
         suppression_count: _suppression_count,
@@ -902,6 +921,7 @@ pub(super) fn retain_introduced_dead_code(
     misplaced_directives.retain(|item| keep(misplaced_directive_key(&item.directive_site, root)));
     unprovided_injects.retain(|item| keep(unprovided_inject_key(&item.inject, root)));
     unrendered_components.retain(|item| keep(unrendered_component_key(&item.component, root)));
+    unused_component_props.retain(|item| keep(unused_component_prop_key(&item.prop, root)));
     route_collisions.retain(|item| keep(route_collision_key(&item.collision, root)));
     dynamic_segment_name_conflicts
         .retain(|item| keep(dynamic_segment_name_conflict_key(&item.conflict, root)));
@@ -1177,6 +1197,13 @@ impl DeadCodeJsonAnnotator<'_> {
                     &unrendered_component_key(&item.component, self.root),
                     self.base,
                 )
+            }),
+        );
+        annotate_issue_array(
+            self.json,
+            "unused_component_props",
+            self.results.unused_component_props.iter().map(|item| {
+                issue_was_introduced(&unused_component_prop_key(&item.prop, self.root), self.base)
             }),
         );
         annotate_issue_array(

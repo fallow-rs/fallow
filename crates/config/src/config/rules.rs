@@ -107,6 +107,14 @@ pub struct RulesConfig {
     /// lower; warn encodes that without failing CI.
     #[serde(default, alias = "unrendered-component")]
     pub unrendered_components: Severity,
+    /// Vue `<script setup>` `defineProps` declared prop referenced nowhere
+    /// inside its own single-file component (neither `<script>` nor
+    /// `<template>`). The single-file dead-input direction. Defaults to `warn`,
+    /// not `error`: a prop can be part of a deliberately-stable public component
+    /// API, so analyzer confidence is lower; warn encodes that without failing
+    /// CI.
+    #[serde(default, alias = "unused-component-prop")]
+    pub unused_component_props: Severity,
     #[serde(default, alias = "unresolved-import")]
     pub unresolved_imports: Severity,
     #[serde(default, alias = "unlisted-dependency")]
@@ -224,6 +232,7 @@ impl Default for RulesConfig {
             unused_store_members: Severity::Warn,
             unprovided_injects: Severity::Warn,
             unrendered_components: Severity::Warn,
+            unused_component_props: Severity::Warn,
             unresolved_imports: Severity::Error,
             unlisted_dependencies: Severity::Error,
             duplicate_exports: Severity::Error,
@@ -290,6 +299,9 @@ impl RulesConfig {
         }
         if let Some(s) = partial.unrendered_components {
             self.unrendered_components = s;
+        }
+        if let Some(s) = partial.unused_component_props {
+            self.unused_component_props = s;
         }
         if let Some(s) = partial.unresolved_imports {
             self.unresolved_imports = s;
@@ -442,6 +454,12 @@ pub struct PartialRulesConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub unrendered_components: Option<Severity>,
+    #[serde(
+        default,
+        alias = "unused-component-prop",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub unused_component_props: Option<Severity>,
     #[serde(
         default,
         alias = "unresolved-import",
@@ -605,6 +623,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unused-store-members",
     "unprovided-injects",
     "unrendered-components",
+    "unused-component-props",
     "unresolved-imports",
     "unlisted-dependencies",
     "duplicate-exports",
@@ -642,6 +661,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unused-store-member",
     "unprovided-inject",
     "unrendered-component",
+    "unused-component-prop",
     "unresolved-import",
     "unlisted-dependency",
     "duplicate-export",
@@ -941,6 +961,7 @@ mod tests {
             unused_store_members: Some(Severity::Off),
             unprovided_injects: Some(Severity::Off),
             unrendered_components: Some(Severity::Off),
+            unused_component_props: Some(Severity::Off),
             unresolved_imports: Some(Severity::Off),
             unlisted_dependencies: Some(Severity::Off),
             duplicate_exports: Some(Severity::Off),
@@ -982,6 +1003,7 @@ mod tests {
         assert_eq!(rules.mixed_client_server_barrel, Severity::Off);
         assert_eq!(rules.misplaced_directive, Severity::Off);
         assert_eq!(rules.unrendered_components, Severity::Off);
+        assert_eq!(rules.unused_component_props, Severity::Off);
         assert_eq!(rules.route_collision, Severity::Off);
         assert_eq!(rules.dynamic_segment_name_conflict, Severity::Off);
     }
@@ -1027,7 +1049,7 @@ mod tests {
 
     #[test]
     fn known_rule_names_count_matches_struct() {
-        assert_eq!(KNOWN_RULE_NAMES.len(), 72);
+        assert_eq!(KNOWN_RULE_NAMES.len(), 74);
     }
 
     #[test]
@@ -1068,8 +1090,8 @@ mod tests {
 
         assert_eq!(
             aliases_found.len(),
-            72,
-            "expected 72 source-level alias attrs (36 per struct); got {}: {:?}",
+            74,
+            "expected 74 source-level alias attrs (37 per struct); got {}: {:?}",
             aliases_found.len(),
             aliases_found
         );

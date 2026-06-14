@@ -352,6 +352,19 @@ expression: redact_sarif_version(&json_str)
               }
             },
             {
+              "id": "fallow/unused-component-prop",
+              "shortDescription": {
+                "text": "A Vue <script setup> defineProps prop is referenced nowhere in its own component"
+              },
+              "fullDescription": {
+                "text": "A Vue `<script setup>` defineProps declared prop that is referenced nowhere in its own component (neither script nor template). vue-tsc / Volar check caller-side prop correctness, not this in-component dead-input direction. Conservative: abstains on `$attrs` fallthrough, whole-object props use, defineExpose, defineModel, and imported prop-type aliases. Default warn; suppress or remove the prop."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-component-props",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
               "id": "fallow/route-collision",
               "shortDescription": {
                 "text": "Two or more Next.js App Router route files resolve to the same URL"

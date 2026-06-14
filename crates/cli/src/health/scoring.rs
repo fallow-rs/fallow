@@ -1893,6 +1893,11 @@ mod tests {
             di_key_sites: Vec::new(),
             has_dynamic_provide: false,
             referenced_import_bindings: Vec::new(),
+            component_props: Vec::new(),
+            has_props_attrs_fallthrough: false,
+            has_define_expose: false,
+            has_define_model: false,
+            has_unharvestable_props: false,
         };
 
         let (cyc, cog, funcs, lines) = aggregate_complexity(&module);
@@ -1945,6 +1950,11 @@ mod tests {
             di_key_sites: Vec::new(),
             has_dynamic_provide: false,
             referenced_import_bindings: Vec::new(),
+            component_props: Vec::new(),
+            has_props_attrs_fallthrough: false,
+            has_define_expose: false,
+            has_define_model: false,
+            has_unharvestable_props: false,
             line_offsets: vec![0, 10, 20, 30, 40], // 5 lines
             complexity: vec![fallow_types::extract::FunctionComplexity {
                 name: "doStuff".into(),
@@ -2009,6 +2019,11 @@ mod tests {
             di_key_sites: Vec::new(),
             has_dynamic_provide: false,
             referenced_import_bindings: Vec::new(),
+            component_props: Vec::new(),
+            has_props_attrs_fallthrough: false,
+            has_define_expose: false,
+            has_define_model: false,
+            has_unharvestable_props: false,
             line_offsets: vec![0, 10, 20], // 3 lines
             complexity: vec![
                 fallow_types::extract::FunctionComplexity {
@@ -2292,6 +2307,11 @@ mod tests {
             di_key_sites: Vec::new(),
             has_dynamic_provide: false,
             referenced_import_bindings: Vec::new(),
+            component_props: Vec::new(),
+            has_props_attrs_fallthrough: false,
+            has_define_expose: false,
+            has_define_model: false,
+            has_unharvestable_props: false,
         }
     }
 

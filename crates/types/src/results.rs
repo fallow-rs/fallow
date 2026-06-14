@@ -17,10 +17,10 @@ use crate::output_dead_code::{
     PrivateTypeLeakFinding, ReExportCycleFinding, RouteCollisionFinding, TestOnlyDependencyFinding,
     TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
     UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
-    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedDependencyFinding,
-    UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
-    UnusedExportFinding, UnusedFileFinding, UnusedOptionalDependencyFinding,
-    UnusedStoreMemberFinding, UnusedTypeFinding,
+    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentPropFinding,
+    UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
+    UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
+    UnusedOptionalDependencyFinding, UnusedStoreMemberFinding, UnusedTypeFinding,
 };
 use crate::serde_path;
 use crate::suppress::{IssueKind, closest_known_kind_name};
@@ -246,11 +246,11 @@ pub struct AnalysisResults {
     #[serde(default)]
     pub dynamic_segment_name_conflicts: Vec<DynamicSegmentNameConflictFinding>,
     /// Vue `<script setup>` `defineProps` props referenced nowhere in their own
-    /// SFC (neither `<script>` nor `<template>`). Spike: a bare
-    /// [`UnusedComponentProp`] vec (no `*Finding` wrapper yet); full output
-    /// wiring lands after corpus validation. Default severity will be `warn`.
-    #[serde(default)]
-    pub unused_component_props: Vec<UnusedComponentProp>,
+    /// SFC (neither `<script>` nor `<template>`). Wrapped in
+    /// [`UnusedComponentPropFinding`] so each entry carries a typed `actions`
+    /// array natively. Default severity is `warn`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unused_component_props: Vec<UnusedComponentPropFinding>,
     /// Number of suppression entries that matched an issue during analysis.
     /// Human output uses this for the suppression footer; it is skipped in
     /// machine output to avoid changing the public JSON issue contract.
@@ -664,10 +664,11 @@ impl AnalysisResults {
         });
 
         self.unused_component_props.sort_by(|a, b| {
-            a.path
-                .cmp(&b.path)
-                .then(a.line.cmp(&b.line))
-                .then(a.prop_name.cmp(&b.prop_name))
+            a.prop
+                .path
+                .cmp(&b.prop.path)
+                .then(a.prop.line.cmp(&b.prop.line))
+                .then(a.prop.prop_name.cmp(&b.prop.prop_name))
         });
     }
 

@@ -1276,6 +1276,7 @@ fn build_policy_section(
         && results.misplaced_directives.is_empty()
         && results.unprovided_injects.is_empty()
         && results.unrendered_components.is_empty()
+        && results.unused_component_props.is_empty()
         && results.route_collisions.is_empty()
         && results.dynamic_segment_name_conflicts.is_empty()
     {
@@ -1347,6 +1348,19 @@ fn build_policy_section(
             c.component.path.as_path()
         },
         format_detail: &format_unrendered_component,
+    });
+
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.unused_component_props,
+        title: "Unused component props",
+        level: severity_to_level(rules.unused_component_props),
+        root,
+        max_files: MAX_FLAT_ITEMS,
+        get_path: |p: &fallow_types::output_dead_code::UnusedComponentPropFinding| {
+            p.prop.path.as_path()
+        },
+        format_detail: &format_unused_component_prop,
     });
 
     build_human_grouped_section(GroupedSectionInput {
@@ -1444,6 +1458,18 @@ fn format_unrendered_component(
         c.component_name.bold(),
         "is reachable but rendered nowhere in this project (render it somewhere or remove it)"
             .dimmed(),
+    )
+}
+
+fn format_unused_component_prop(
+    entry: &fallow_types::output_dead_code::UnusedComponentPropFinding,
+) -> String {
+    let p = &entry.prop;
+    format!(
+        "{} {} {}",
+        format!(":{}", p.line).dimmed(),
+        p.prop_name.bold(),
+        "is declared but referenced nowhere in this component (remove it or use it)".dimmed(),
     )
 }
 
@@ -2239,6 +2265,9 @@ fn collect_matching_rules(
     for c in &results.unrendered_components {
         check(&c.component.path);
     }
+    for p in &results.unused_component_props {
+        check(&p.prop.path);
+    }
     for c in &results.route_collisions {
         check(&c.collision.path);
     }
@@ -2515,6 +2544,10 @@ fn build_summary_footer(
     add(results.boundary_violations.len(), "violations");
     add(results.unprovided_injects.len(), "unprovided injects");
     add(results.unrendered_components.len(), "unrendered components");
+    add(
+        results.unused_component_props.len(),
+        "unused component props",
+    );
     add(results.stale_suppressions.len(), "stale suppressions");
 
     parts.join(" \u{00b7} ")
@@ -2662,6 +2695,11 @@ fn check_summary_categories(
             "Unrendered components",
             results.unrendered_components.len(),
             severity_to_level(rules.unrendered_components),
+        ),
+        (
+            "Unused component props",
+            results.unused_component_props.len(),
+            severity_to_level(rules.unused_component_props),
         ),
         (
             "Stale suppressions",

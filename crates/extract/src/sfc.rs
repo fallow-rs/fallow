@@ -441,10 +441,6 @@ fn empty_sfc_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleI
     }
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "SFC script merge threads template-visibility state, props binding, and complexity flags"
-)]
 fn merge_script_into_module(
     kind: SfcKind,
     script: &SfcScript,
@@ -692,12 +688,12 @@ fn apply_template_usage(
         template_visible_imports.clone()
     } else {
         let mut set = template_visible_imports.clone();
-        set.extend(
-            combined
-                .component_props
-                .iter()
-                .map(|prop| prop.name.clone()),
-        );
+        for prop in &combined.component_props {
+            // Credit both the declared name (Vue exposes props by name in the
+            // template) and the destructure local (a renamed prop is used via it).
+            set.insert(prop.name.clone());
+            set.insert(prop.local.clone());
+        }
         // Vue's implicit `$props` whole-props object is always available in a
         // template; credit `$props.<name>` member accesses too.
         set.insert("$props".to_string());
@@ -730,11 +726,28 @@ fn apply_template_usage(
             .collect();
         for prop in &mut combined.component_props {
             if template_usage.used_bindings.contains(&prop.name)
+                || template_usage.used_bindings.contains(&prop.local)
                 || member_used.contains(prop.name.as_str())
             {
                 prop.used_in_template = true;
             }
         }
+    }
+
+    // A custom-named `defineProps` return spread as a whole object in the template
+    // (`const myProps = defineProps(); <Child v-bind="myProps" />`) consumes every
+    // prop opaquely; the literal `props`/`$props`/`$attrs` regex misses a custom
+    // name. The scanner records a bare `v-bind="myProps"` value as a used binding
+    // (not a whole-object use), so a bare reference to the return binding in either
+    // set means abstain on the whole file.
+    if let Some(binding) = props_return_binding
+        && (template_usage.used_bindings.contains(binding)
+            || template_usage
+                .whole_object_uses
+                .iter()
+                .any(|used| used == binding))
+    {
+        combined.has_props_attrs_fallthrough = true;
     }
 
     combined

@@ -118,6 +118,10 @@ pub enum IssueKind {
     /// A component defined in the project that is exported but never rendered
     /// (no JSX usage) anywhere across the analyzed project.
     UnrenderedComponent,
+    /// A Vue `<script setup>` `defineProps` declared prop that is referenced
+    /// NOWHERE inside its own single-file component (neither `<script>` nor
+    /// `<template>`). Single-file dead-input direction.
+    UnusedComponentProp,
 }
 
 impl IssueKind {
@@ -176,6 +180,7 @@ impl IssueKind {
                 Some(Self::DynamicSegmentNameConflict)
             }
             "unrendered-component" | "unrendered-components" => Some(Self::UnrenderedComponent),
+            "unused-component-prop" | "unused-component-props" => Some(Self::UnusedComponentProp),
             _ => None,
         }
     }
@@ -221,6 +226,7 @@ impl IssueKind {
             Self::RouteCollision => 35,
             Self::DynamicSegmentNameConflict => 36,
             Self::UnrenderedComponent => 37,
+            Self::UnusedComponentProp => 38,
         }
     }
 
@@ -265,6 +271,7 @@ impl IssueKind {
             35 => Some(Self::RouteCollision),
             36 => Some(Self::DynamicSegmentNameConflict),
             37 => Some(Self::UnrenderedComponent),
+            38 => Some(Self::UnusedComponentProp),
             _ => None,
         }
     }
@@ -369,6 +376,7 @@ pub const fn issue_kind_to_kebab(kind: IssueKind) -> &'static str {
         IssueKind::RouteCollision => "route-collision",
         IssueKind::DynamicSegmentNameConflict => "dynamic-segment-name-conflict",
         IssueKind::UnrenderedComponent => "unrendered-component",
+        IssueKind::UnusedComponentProp => "unused-component-prop",
     }
 }
 
@@ -617,6 +625,8 @@ pub const KNOWN_ISSUE_KIND_NAMES: &[&str] = &[
     "dynamic-segment-name-conflicts",
     "unrendered-component",
     "unrendered-components",
+    "unused-component-prop",
+    "unused-component-props",
 ];
 
 /// CLI filter flags on `fallow dead-code` that scope output to a single
@@ -638,6 +648,7 @@ pub const DEAD_CODE_FILTER_FLAGS: &[&str] = &[
     "--unused-store-members",
     "--unprovided-injects",
     "--unrendered-components",
+    "--unused-component-props",
     "--unresolved-imports",
     "--unlisted-deps",
     "--duplicate-exports",
@@ -911,6 +922,14 @@ mod tests {
             IssueKind::parse("unrendered-components"),
             Some(IssueKind::UnrenderedComponent)
         );
+        assert_eq!(
+            IssueKind::parse("unused-component-prop"),
+            Some(IssueKind::UnusedComponentProp)
+        );
+        assert_eq!(
+            IssueKind::parse("unused-component-props"),
+            Some(IssueKind::UnusedComponentProp)
+        );
     }
 
     #[test]
@@ -966,7 +985,11 @@ mod tests {
             IssueKind::from_discriminant(37),
             Some(IssueKind::UnrenderedComponent)
         );
-        assert_eq!(IssueKind::from_discriminant(38), None);
+        assert_eq!(
+            IssueKind::from_discriminant(38),
+            Some(IssueKind::UnusedComponentProp)
+        );
+        assert_eq!(IssueKind::from_discriminant(39), None);
         assert_eq!(IssueKind::from_discriminant(u8::MAX), None);
     }
 
@@ -1010,6 +1033,7 @@ mod tests {
             IssueKind::RouteCollision,
             IssueKind::DynamicSegmentNameConflict,
             IssueKind::UnrenderedComponent,
+            IssueKind::UnusedComponentProp,
         ] {
             assert_eq!(
                 IssueKind::from_discriminant(kind.to_discriminant()),
@@ -1017,7 +1041,7 @@ mod tests {
             );
         }
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(38), None);
+        assert_eq!(IssueKind::from_discriminant(39), None);
     }
 
     #[test]
@@ -1060,6 +1084,7 @@ mod tests {
             IssueKind::RouteCollision,
             IssueKind::DynamicSegmentNameConflict,
             IssueKind::UnrenderedComponent,
+            IssueKind::UnusedComponentProp,
         ];
         let discriminants: Vec<u8> = all_kinds.iter().map(|k| k.to_discriminant()).collect();
         let mut sorted = discriminants.clone();
