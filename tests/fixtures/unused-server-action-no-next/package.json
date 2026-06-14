@@ -1,0 +1,7 @@
+{
+  "name": "unused-server-action-no-next",
+  "main": "index.ts",
+  "dependencies": {
+    "react": "^18.0.0"
+  }
+}

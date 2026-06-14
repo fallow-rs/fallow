@@ -162,6 +162,8 @@ mod unused_component_emits;
 mod unused_component_props;
 #[path = "integration_test/unused_enum_members.rs"]
 mod unused_enum_members;
+#[path = "integration_test/unused_server_actions.rs"]
+mod unused_server_actions;
 #[path = "integration_test/unused_store_members.rs"]
 mod unused_store_members;
 #[path = "integration_test/web_components.rs"]
