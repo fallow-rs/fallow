@@ -784,18 +784,30 @@ impl CssTokenSets {
         summary: &mut crate::health_types::CssAnalyticsSummary,
     ) -> Vec<crate::health_types::UnusedFontFace> {
         use crate::health_types::{CssCandidateAction, UnusedFontFace};
-        let out: Vec<UnusedFontFace> = locate_keyframe_diff(
-            &self.defined_font_faces,
-            &self.referenced_font_families,
-            &self.font_face_definers,
-        )
-        .into_iter()
-        .map(|(family, path)| UnusedFontFace {
-            actions: vec![CssCandidateAction::verify_unused_font_face(&family)],
-            family,
-            path,
-        })
-        .collect();
+        // CSS font-family names are case-insensitive (CSS Fonts Level 4 4.2.1),
+        // unlike `@keyframes` custom-ident names (case-sensitive, via
+        // `locate_keyframe_diff`), so match case-insensitively while keeping the
+        // declared casing for both display and the verify command.
+        let referenced_lower: rustc_hash::FxHashSet<String> = self
+            .referenced_font_families
+            .iter()
+            .map(|family| family.to_ascii_lowercase())
+            .collect();
+        let mut out: Vec<UnusedFontFace> = self
+            .defined_font_faces
+            .iter()
+            .filter(|family| !referenced_lower.contains(&family.to_ascii_lowercase()))
+            .map(|family| UnusedFontFace {
+                actions: vec![CssCandidateAction::verify_unused_font_face(family)],
+                path: self
+                    .font_face_definers
+                    .get(family)
+                    .cloned()
+                    .unwrap_or_default(),
+                family: family.clone(),
+            })
+            .collect();
+        out.sort_by(|a, b| (&a.path, &a.family).cmp(&(&b.path, &b.family)));
         summary.unused_font_faces = saturate_len(out.len());
         out
     }
@@ -1168,8 +1180,13 @@ fn font_families_referenced_in_source(
     config: &ResolvedConfig,
     ignore_set: &globset::GlobSet,
 ) -> rustc_hash::FxHashSet<String> {
-    let mut pending: rustc_hash::FxHashSet<&str> =
-        candidates.iter().map(|c| c.family.as_str()).collect();
+    // `(original-case family, lowercase family)`; the lowercase form drives the
+    // substring test because CSS font-family names are case-insensitive, while the
+    // original case is what gets returned for the caller's retain.
+    let mut pending: Vec<(String, String)> = candidates
+        .iter()
+        .map(|c| (c.family.clone(), c.family.to_ascii_lowercase()))
+        .collect();
     let mut found: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
     for file in files {
         if pending.is_empty() {
@@ -1205,9 +1222,10 @@ fn font_families_referenced_in_source(
         let Ok(source) = std::fs::read_to_string(path) else {
             continue;
         };
-        pending.retain(|family| {
-            if source.contains(*family) {
-                found.insert((*family).to_owned());
+        let source_lower = source.to_ascii_lowercase();
+        pending.retain(|(family, family_lower)| {
+            if source_lower.contains(family_lower.as_str()) {
+                found.insert(family.clone());
                 false
             } else {
                 true

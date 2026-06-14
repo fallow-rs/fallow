@@ -3176,6 +3176,51 @@ fn health_css_unused_font_face_abstains_when_used_outside_css() {
 }
 
 #[test]
+fn health_css_unused_font_face_matches_family_case_insensitively() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(&root.join("package.json"), r#"{"name":"casefont"}"#);
+    // CSS font-family names are case-insensitive: `BrandFont` declared with one
+    // casing and applied with another (`brandfont`) is LIVE and must not flag.
+    // The declared casing is preserved for display, so only the genuinely-dead
+    // `GhostFont` (no reference at any casing) is reported.
+    write_file(
+        &root.join("src/fonts.css"),
+        "@font-face { font-family: \"BrandFont\"; src: url(./b.woff2); }\n@font-face { font-family: \"GhostFont\"; src: url(./g.woff2); }\n.title { font-family: brandfont, sans-serif; }\n",
+    );
+    write_file(
+        &root.join("src/App.jsx"),
+        "export const C = () => <h1 className=\"title\">x</h1>;\n",
+    );
+
+    let css = parse_json(&run_fallow_in_root(
+        "health",
+        root,
+        &[
+            "--css",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    ));
+    let analytics = css
+        .get("css_analytics")
+        .expect("css_analytics present with --css");
+    assert_eq!(analytics["summary"]["unused_font_faces"], 1);
+    let ff = analytics["unused_font_faces"]
+        .as_array()
+        .expect("unused_font_faces located list");
+    assert_eq!(ff.len(), 1, "only the truly dead font is flagged: {ff:#?}");
+    assert_eq!(ff[0]["family"], "GhostFont");
+    assert!(
+        !ff.iter().any(|f| f["family"] == "BrandFont"),
+        "a font applied with different casing must not be flagged: {ff:#?}"
+    );
+}
+
+#[test]
 fn health_css_flags_unresolved_class_typo() {
     let dir = tempdir().unwrap();
     let root = dir.path();
