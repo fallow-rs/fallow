@@ -177,7 +177,7 @@ pub struct ModuleInfo {
     /// `true` when `defineProps` was called with an unharvestable argument (a
     /// type-reference type argument such as `defineProps<Props>()` whose names
     /// require cross-file type resolution). The detector abstains on the whole
-    /// file so a prop is never mis-flagged.
+    /// file so a prop is never falsely flagged.
     pub has_unharvestable_props: bool,
     /// Vue `<script setup>` `defineEmits` declared events. Consumed by the
     /// `unused-component-emit` detector to flag an event emitted nowhere in its
@@ -186,7 +186,7 @@ pub struct ModuleInfo {
     /// `true` when `defineEmits` was called with an unharvestable argument (a
     /// type-reference type argument such as `defineEmits<MyEmits>()`, a
     /// non-literal runtime form, or an unbound `defineEmits([...])`). The
-    /// detector abstains on the whole file so an emit is never mis-flagged.
+    /// detector abstains on the whole file so an emit is never falsely flagged.
     pub has_unharvestable_emits: bool,
     /// `true` when an `emit(<nonLiteral>)` call was seen (the emitted event name
     /// cannot be known statically). The detector abstains on the whole file.
