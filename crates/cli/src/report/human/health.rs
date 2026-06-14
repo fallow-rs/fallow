@@ -256,6 +256,7 @@ fn render_css_analytics(lines: &mut Vec<String>, report: &crate::health_types::H
     }
     render_css_duplicate_blocks(lines, css);
     render_css_tailwind_arbitrary(lines, css);
+    render_css_unresolved_classes(lines, css);
 
     let mut notable: Vec<(&str, &fallow_types::extract::CssRuleMetric)> = css
         .files
@@ -396,6 +397,36 @@ fn render_css_unused_at_rules(
         "unused @layer",
         "declared but never populated",
     );
+}
+
+/// Render likely class-name typos: static markup class tokens one edit from a
+/// defined CSS class, with the suggested class. Up to 5 located entries.
+fn render_css_unresolved_classes(
+    lines: &mut Vec<String>,
+    css: &crate::health_types::CssAnalyticsReport,
+) {
+    if css.unresolved_class_references.is_empty() {
+        return;
+    }
+    let total = css.unresolved_class_references.len();
+    lines.push(format!(
+        "  {total} likely class typo{} (candidates; verify, may be defined in CSS-in-JS or an external stylesheet):",
+        plural(total),
+    ));
+    for entry in css.unresolved_class_references.iter().take(5) {
+        lines.push(format!(
+            "  {}:{}: \"{}\" -> did you mean \"{}\"?",
+            entry.path, entry.line, entry.class, entry.suggestion,
+        ));
+    }
+    if total > 5 {
+        let more = total - 5;
+        lines.push(
+            format!("  ... and {more} more (--format json for full list)")
+                .dimmed()
+                .to_string(),
+        );
+    }
 }
 
 /// Render the value-sprawl lines: colors / font-sizes / z-indexes always, plus a

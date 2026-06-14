@@ -125,6 +125,16 @@ pub struct CssAnalyticsReport {
     /// can be populated via `@import layer()`). Located by first definition.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unused_at_rules: Vec<UnusedAtRule>,
+    /// Static `class` / `className` tokens in markup that match no CSS class
+    /// defined anywhere in the project AND are one edit away from a class that
+    /// IS defined (a likely typo or stale rename, with the suggested class). The
+    /// CSS analogue of an unresolved import; the near-miss restriction keeps it
+    /// near-zero false-positive (Tailwind utilities and third-party classes are
+    /// not one edit from an authored class). Candidates, never gated: the token
+    /// could be defined in CSS-in-JS or an external stylesheet the parser never
+    /// sees. Sorted by `(path, line, class)`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unresolved_class_references: Vec<UnresolvedClassReference>,
 }
 
 /// An unused CSS at-rule entity (an `@property` registration with no `var()`
@@ -239,6 +249,28 @@ pub struct UndefinedKeyframes {
     /// Read-only verification step(s) an agent can run before fixing the
     /// reference. Always at least one entry, so consumers can iterate `actions`
     /// uniformly across every finding type.
+    pub actions: Vec<CssCandidateAction>,
+}
+
+/// A static `class` / `className` token in markup that matches no CSS class
+/// defined anywhere in the project but is one edit away from a class that IS
+/// defined (a likely typo or stale rename). The CSS analogue of an unresolved
+/// import. A candidate, never a gated finding: the token could be defined in
+/// CSS-in-JS or an external stylesheet the parser never sees.
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnresolvedClassReference {
+    /// The static class token referenced in markup (no dot).
+    pub class: String,
+    /// The defined CSS class one edit away: the likely intended class.
+    pub suggestion: String,
+    /// Project-root-relative, forward-slash path to the markup file.
+    pub path: String,
+    /// 1-based line of the `class` / `className` attribute.
+    pub line: u32,
+    /// Read-only verification step(s) before fixing the reference. Always at
+    /// least one entry, so consumers can iterate `actions` uniformly across
+    /// every finding type.
     pub actions: Vec<CssCandidateAction>,
 }
 
@@ -395,6 +427,22 @@ impl CssCandidateAction {
         }
     }
 
+    /// Verify action for a markup class token that matches no defined CSS class
+    /// but is one edit from a class that is defined: surface the suggestion and a
+    /// read-only token search so the residual risk (a class defined in CSS-in-JS
+    /// or an external stylesheet) can be ruled out before fixing the typo.
+    #[must_use]
+    pub fn verify_unresolved_class(class: &str, suggestion: &str) -> Self {
+        Self {
+            kind: CssCandidateActionType::VerifyUndefined,
+            auto_fixable: false,
+            description: format!(
+                "\"{class}\" matches no CSS class; did you mean \"{suggestion}\"? Confirm \"{class}\" is not defined in CSS-in-JS or an external stylesheet before fixing the reference."
+            ),
+            command: safe_token_search(class),
+        }
+    }
+
     /// Verify action for a Vue SFC's unused scoped classes. The component-scoped
     /// scan already covers every static use, so the only residual risk is a
     /// class assembled from a dynamic string; that is a manual check, so the
@@ -516,6 +564,10 @@ pub struct CssAnalyticsSummary {
     /// Cascade layers declared but never populated by a block (located in
     /// `unused_at_rules`). Cleanup candidates.
     pub unused_layers: u32,
+    /// Static markup class tokens that match no defined CSS class but are one
+    /// edit from a defined class (likely typos / stale renames). Located in
+    /// `unresolved_class_references`. Candidates, never gated.
+    pub unresolved_class_references: u32,
     /// Number of analyzed stylesheets whose per-rule `notable_rules` list was
     /// truncated at the per-file cap, so a consumer knows the per-rule detail is
     /// incomplete without walking every file.

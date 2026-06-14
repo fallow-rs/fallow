@@ -4833,6 +4833,17 @@ tailwind_arbitrary_values?: TailwindArbitraryValue[]
  * can be populated via `@import layer()`). Located by first definition.
  */
 unused_at_rules?: UnusedAtRule[]
+/**
+ * Static `class` / `className` tokens in markup that match no CSS class
+ * defined anywhere in the project AND are one edit away from a class that
+ * IS defined (a likely typo or stale rename, with the suggested class). The
+ * CSS analogue of an unresolved import; the near-miss restriction keeps it
+ * near-zero false-positive (Tailwind utilities and third-party classes are
+ * not one edit from an authored class). Candidates, never gated: the token
+ * could be defined in CSS-in-JS or an external stylesheet the parser never
+ * sees. Sorted by `(path, line, class)`.
+ */
+unresolved_class_references?: UnresolvedClassReference[]
 }
 /**
  * Per-stylesheet CSS analytics.
@@ -5118,6 +5129,12 @@ unused_property_registrations: number
  */
 unused_layers: number
 /**
+ * Static markup class tokens that match no defined CSS class but are one
+ * edit from a defined class (likely typos / stale renames). Located in
+ * `unresolved_class_references`. Candidates, never gated.
+ */
+unresolved_class_references: number
+/**
  * Number of analyzed stylesheets whose per-rule `notable_rules` list was
  * truncated at the per-file cap, so a consumer knows the per-rule detail is
  * incomplete without walking every file.
@@ -5306,6 +5323,37 @@ name: string
 path: string
 /**
  * Read-only verification step(s) before removal (parity with other findings).
+ */
+actions: CssCandidateAction[]
+}
+/**
+ * A static `class` / `className` token in markup that matches no CSS class
+ * defined anywhere in the project but is one edit away from a class that IS
+ * defined (a likely typo or stale rename). The CSS analogue of an unresolved
+ * import. A candidate, never a gated finding: the token could be defined in
+ * CSS-in-JS or an external stylesheet the parser never sees.
+ */
+export interface UnresolvedClassReference {
+/**
+ * The static class token referenced in markup (no dot).
+ */
+class: string
+/**
+ * The defined CSS class one edit away: the likely intended class.
+ */
+suggestion: string
+/**
+ * Project-root-relative, forward-slash path to the markup file.
+ */
+path: string
+/**
+ * 1-based line of the `class` / `className` attribute.
+ */
+line: number
+/**
+ * Read-only verification step(s) before fixing the reference. Always at
+ * least one entry, so consumers can iterate `actions` uniformly across
+ * every finding type.
  */
 actions: CssCandidateAction[]
 }

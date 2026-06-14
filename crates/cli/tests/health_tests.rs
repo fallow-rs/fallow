@@ -2957,6 +2957,149 @@ fn health_css_undefined_keyframe_renders_in_human() {
 }
 
 #[test]
+fn health_css_flags_unresolved_class_typo() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"css-class-typo","version":"1.0.0"}"#,
+    );
+    // `card-title` and `btn-primary` are authored CSS classes.
+    write_file(
+        &root.join("src/styles.css"),
+        ".card-title { color: red; }\n.btn-primary { color: blue; }\n",
+    );
+    // `card-tite` is a one-edit typo of `card-title` (flag + suggest).
+    // `btn-primary` matches a definition (NOT flagged).
+    // `flex` is a Tailwind utility, not one edit from any class (NOT flagged).
+    // `xy` is too short to typo-check (NOT flagged).
+    write_file(
+        &root.join("src/App.jsx"),
+        "export const C = () => (\n  <div className=\"card-tite flex\">\n    <span className=\"btn-primary xy\">ok</span>\n  </div>\n);\n",
+    );
+
+    let out = run_fallow_in_root(
+        "health",
+        root,
+        &[
+            "--css",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let json = parse_json(&out);
+    let css = json
+        .get("css_analytics")
+        .expect("css_analytics present with --css");
+    assert_eq!(css["summary"]["unresolved_class_references"], 1);
+
+    let refs = css["unresolved_class_references"]
+        .as_array()
+        .expect("unresolved_class_references located list");
+    assert_eq!(refs.len(), 1, "only the typo is flagged: {refs:#?}");
+    assert_eq!(refs[0]["class"], "card-tite");
+    assert_eq!(refs[0]["suggestion"], "card-title");
+    assert_eq!(refs[0]["path"], "src/App.jsx");
+    assert!(
+        !refs.iter().any(|r| r["class"] == "btn-primary"),
+        "a correctly-spelled class must not be flagged: {refs:#?}"
+    );
+    assert!(
+        !refs
+            .iter()
+            .any(|r| r["class"] == "flex" || r["class"] == "xy"),
+        "Tailwind utilities and short tokens must not be flagged: {refs:#?}"
+    );
+
+    let actions = refs[0]["actions"]
+        .as_array()
+        .expect("unresolved class actions array");
+    assert_eq!(actions[0]["type"], "verify-undefined");
+    assert_eq!(actions[0]["auto_fixable"], false);
+    assert!(
+        actions[0]["command"]
+            .as_str()
+            .is_some_and(|c| c.contains("card-tite")),
+        "verify action carries a read-only token search: {actions:#?}"
+    );
+}
+
+#[test]
+fn health_css_no_unresolved_class_without_authored_css() {
+    // A project with no authored CSS classes (Tailwind-only) emits no typo
+    // candidates: with an empty target set every token would look unresolved,
+    // so the feature abstains entirely.
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"tw-only","version":"1.0.0","dependencies":{"tailwindcss":"4"}}"#,
+    );
+    write_file(
+        &root.join("src/App.jsx"),
+        "export const C = () => <div className=\"flex items-center gap-4\">x</div>;\n",
+    );
+
+    let out = run_fallow_in_root(
+        "health",
+        root,
+        &[
+            "--css",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let json = parse_json(&out);
+    if let Some(css) = json.get("css_analytics") {
+        assert_eq!(
+            css["summary"]["unresolved_class_references"], 0,
+            "no authored CSS -> no typo candidates: {css}"
+        );
+        assert!(
+            css.get("unresolved_class_references").is_none()
+                || css["unresolved_class_references"]
+                    .as_array()
+                    .is_some_and(std::vec::Vec::is_empty),
+            "no authored CSS -> empty list"
+        );
+    }
+}
+
+#[test]
+fn health_css_unresolved_class_renders_in_human() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"css-class-typo-human","version":"1.0.0"}"#,
+    );
+    write_file(
+        &root.join("src/styles.css"),
+        ".sidebar-nav { color: red; }\n",
+    );
+    write_file(
+        &root.join("src/App.jsx"),
+        "export const C = () => <nav className=\"sidebar-nev\">x</nav>;\n",
+    );
+
+    let out = run_fallow_in_root("health", root, &["--css", "--max-crap", "10000", "--quiet"]);
+    assert!(
+        out.stdout.contains("likely class typo")
+            && out.stdout.contains("sidebar-nev")
+            && out.stdout.contains("did you mean")
+            && out.stdout.contains("sidebar-nav"),
+        "human output renders the typo with a suggestion: stdout={:?}",
+        out.stdout
+    );
+}
+
+#[test]
 fn health_css_flags_duplicate_declaration_blocks() {
     let dir = tempdir().unwrap();
     let root = dir.path();

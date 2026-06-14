@@ -891,6 +891,187 @@ fn scan_markup_tailwind_arbitrary_values(
     out
 }
 
+/// Shortest authored CSS class that can be a credible typo target. Below this a
+/// one-edit near miss is too likely to be coincidence (`btn` vs `btm`).
+const MIN_DEFINED_CLASS_LEN: usize = 5;
+/// Shortest markup token worth typo-checking, for the same reason.
+const MIN_TOKEN_LEN: usize = 4;
+
+/// Collect every authored CSS class name defined anywhere in the project (plain
+/// and module `.css`/`.scss`, plus SFC `<style>` blocks of any scoping). The set
+/// is the typo-suggestion target for [`scan_unresolved_class_references`], so it
+/// is NOT narrowed by `changed_files` / `ws_roots`: a class defined in an
+/// unchanged file must still count as defined, or a markup token referencing it
+/// would false-positive as unresolved. Only the ignore filter applies.
+fn collect_defined_css_classes(
+    files: &[fallow_types::discover::DiscoveredFile],
+    config: &ResolvedConfig,
+    ignore_set: &globset::GlobSet,
+) -> rustc_hash::FxHashSet<String> {
+    use fallow_types::extract::ExportName;
+    let mut defined: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
+    for file in files {
+        let path = &file.path;
+        let extension = path.extension().and_then(|ext| ext.to_str());
+        let is_scss = extension == Some("scss");
+        let is_css = extension == Some("css") || is_scss;
+        let is_sfc = matches!(extension, Some("vue") | Some("svelte"));
+        if !is_css && !is_sfc {
+            continue;
+        }
+        let relative = path.strip_prefix(&config.root).unwrap_or(path);
+        if ignore_set.is_match(relative) {
+            continue;
+        }
+        let Ok(source) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        let css_source = if is_sfc {
+            match fallow_core::extract::sfc_virtual_stylesheet(&source) {
+                Some(virtual_css) => std::borrow::Cow::Owned(virtual_css),
+                None => continue,
+            }
+        } else {
+            std::borrow::Cow::Borrowed(source.as_str())
+        };
+        for export in fallow_core::extract::extract_css_module_exports(&css_source, is_scss) {
+            if let ExportName::Named(name) = export.name {
+                defined.insert(name);
+            }
+        }
+    }
+    defined
+}
+
+/// Find the best one-edit typo suggestion for a markup token among the defined
+/// classes, using a length-bucketed index so only classes of length `len-1`,
+/// `len`, `len+1` are compared. Returns the lexicographically smallest defined
+/// class at edit distance one (deterministic), or `None`.
+fn best_class_suggestion<'a>(
+    token: &str,
+    by_len: &'a rustc_hash::FxHashMap<usize, Vec<&'a str>>,
+) -> Option<&'a str> {
+    let len = token.len();
+    let mut best: Option<&str> = None;
+    for candidate_len in [len.wrapping_sub(1), len, len + 1] {
+        let Some(bucket) = by_len.get(&candidate_len) else {
+            continue;
+        };
+        for &defined in bucket {
+            if defined.len() < MIN_DEFINED_CLASS_LEN {
+                continue;
+            }
+            if fallow_core::extract::is_edit_distance_one(token, defined)
+                && best.is_none_or(|current| defined < current)
+            {
+                best = Some(defined);
+            }
+        }
+    }
+    best
+}
+
+/// True when a markup class token is Tailwind-flavored (a variant prefix `:`,
+/// an opacity `/`, or an arbitrary-value bracket), so it is not an authored CSS
+/// class and never a typo candidate.
+fn is_tailwind_shaped(token: &str) -> bool {
+    token.contains([':', '/', '[', ']'])
+}
+
+/// Scan markup for static `class` / `className` tokens that match no defined CSS
+/// class but are one edit from a defined class (a likely typo / stale rename).
+/// The defined set is the full project; markup honors the ignore / changed /
+/// workspace filters (a typo is local). Near-zero false-positive by the near-miss
+/// restriction: Tailwind utilities and third-party classes are not one edit from
+/// an authored class. Candidates, never gated.
+fn scan_unresolved_class_references(
+    files: &[fallow_types::discover::DiscoveredFile],
+    config: &ResolvedConfig,
+    ignore_set: &globset::GlobSet,
+    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
+    ws_roots: Option<&[std::path::PathBuf]>,
+    summary: &mut crate::health_types::CssAnalyticsSummary,
+) -> Vec<crate::health_types::UnresolvedClassReference> {
+    use crate::health_types::{CssCandidateAction, UnresolvedClassReference};
+
+    let defined = collect_defined_css_classes(files, config, ignore_set);
+    if defined.is_empty() {
+        return Vec::new();
+    }
+    // Length-bucketed index over the typo-target classes for O(1)-ish near-miss.
+    let mut by_len: rustc_hash::FxHashMap<usize, Vec<&str>> = rustc_hash::FxHashMap::default();
+    for class in &defined {
+        if class.len() >= MIN_DEFINED_CLASS_LEN {
+            by_len.entry(class.len()).or_default().push(class.as_str());
+        }
+    }
+
+    let mut out: Vec<UnresolvedClassReference> = Vec::new();
+    let mut seen: rustc_hash::FxHashSet<(String, u32, String)> = rustc_hash::FxHashSet::default();
+    for file in files {
+        let path = &file.path;
+        let extension = path.extension().and_then(|ext| ext.to_str());
+        if !matches!(
+            extension,
+            Some("jsx" | "tsx" | "html" | "astro" | "vue" | "svelte")
+        ) {
+            continue;
+        }
+        let relative = path.strip_prefix(&config.root).unwrap_or(path);
+        if ignore_set.is_match(relative) {
+            continue;
+        }
+        if let Some(changed) = changed_files
+            && !changed.contains(path)
+        {
+            continue;
+        }
+        if let Some(roots) = ws_roots
+            && !roots.iter().any(|root| path.starts_with(root))
+        {
+            continue;
+        }
+        let Ok(source) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        let rel = relative.to_string_lossy().replace('\\', "/");
+        for token in fallow_core::extract::scan_markup_class_tokens(&source).static_tokens {
+            if token.value.len() < MIN_TOKEN_LEN
+                || is_tailwind_shaped(&token.value)
+                || defined.contains(&token.value)
+            {
+                continue;
+            }
+            let Some(suggestion) = best_class_suggestion(&token.value, &by_len) else {
+                continue;
+            };
+            let key = (rel.clone(), token.line, token.value.clone());
+            if !seen.insert(key) {
+                continue;
+            }
+            out.push(UnresolvedClassReference {
+                actions: vec![CssCandidateAction::verify_unresolved_class(
+                    &token.value,
+                    suggestion,
+                )],
+                class: token.value,
+                suggestion: suggestion.to_owned(),
+                path: rel.clone(),
+                line: token.line,
+            });
+        }
+    }
+
+    out.sort_by(|a, b| {
+        a.path
+            .cmp(&b.path)
+            .then_with(|| a.line.cmp(&b.line))
+            .then_with(|| a.class.cmp(&b.class))
+    });
+    summary.unresolved_class_references = saturate_len(out.len());
+    out
+}
+
 fn compute_css_analytics_report(
     files: &[fallow_types::discover::DiscoveredFile],
     config: &ResolvedConfig,
@@ -1004,10 +1185,20 @@ fn compute_css_analytics_report(
         ws_roots,
         &mut summary,
     );
+    // Static markup class tokens one edit from a defined class (likely typos).
+    let unresolved_class_references = scan_unresolved_class_references(
+        files,
+        config,
+        ignore_set,
+        changed_files,
+        ws_roots,
+        &mut summary,
+    );
 
     if summary.files_analyzed == 0
         && scoped_unused.is_empty()
         && tailwind_arbitrary_values.is_empty()
+        && unresolved_class_references.is_empty()
     {
         return None;
     }
@@ -1021,6 +1212,7 @@ fn compute_css_analytics_report(
         duplicate_declaration_blocks,
         tailwind_arbitrary_values,
         unused_at_rules,
+        unresolved_class_references,
     })
 }
 
