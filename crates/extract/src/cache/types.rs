@@ -363,7 +363,14 @@ use crate::MemberKind;
 /// Bumped to 156 because SFC markup asset references (`<img src="./logo.png">`,
 /// `<source>`, `<video poster>`) now emit `SideEffect` imports, so a warm cache
 /// from 155 would miss the new `unresolved-import` findings on missing assets.
-pub(super) const CACHE_VERSION: u32 = 156;
+///
+/// Bumped to 157 because the Vue `<template>` body extractor now matches the
+/// root `</template>` with nesting depth tracking instead of the first
+/// `</template>`. A Vue SFC whose root template contains a nested `<template
+/// #slot>` no longer has its body truncated, so component tags rendered after
+/// the first nested slot are now credited; a warm cache from 156 would carry the
+/// truncated template-usage set and false-flag those components / their imports.
+pub(super) const CACHE_VERSION: u32 = 157;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

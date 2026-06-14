@@ -11,11 +11,15 @@ use super::shared::{
     merge_statement_usage_with_bound_targets, parse_tag_attrs,
 };
 
-static TEMPLATE_BLOCK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    crate::static_regex(
-        r#"(?is)<template\b(?:[^>"']|"[^"]*"|'[^']*')*>(?P<body>[\s\S]*?)</template>"#,
-    )
-});
+/// Matches a `<template ...>` OPENING tag only (quote-aware over the attribute
+/// list). The matching `</template>` is located separately by
+/// [`find_template_body_end`] with nesting depth tracking, because a Vue SFC
+/// root `<template>` commonly contains nested `<template #slot>` elements and a
+/// non-greedy `</template>` body capture would truncate the body at the FIRST
+/// nested close, dropping every component rendered after it (issue: false
+/// `unused-export` on `<template #slot>` + later `<Component>`).
+static TEMPLATE_OPEN_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r#"(?is)<template\b(?:[^>"']|"[^"]*"|'[^']*')*>"#));
 
 static VUE_FOR_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| crate::static_regex(r"(?is)^(?P<binding>.+?)\s+(?:in|of)\s+(?P<source>.+)$"));
@@ -39,28 +43,98 @@ pub(super) fn collect_template_usage_with_bound_targets(
         .collect();
 
     let mut usage = TemplateUsage::default();
-    for cap in TEMPLATE_BLOCK_RE.captures_iter(source) {
-        let Some(template_match) = cap.get(0) else {
+    // Cursor past the last fully-consumed root template body, so nested
+    // `<template>` opens (which `TEMPLATE_OPEN_RE` also matches) are skipped
+    // rather than rescanned as separate roots.
+    let mut scan_from = 0usize;
+    for open in TEMPLATE_OPEN_RE.find_iter(source) {
+        if open.start() < scan_from {
             continue;
-        };
+        }
         if comment_ranges
             .iter()
-            .any(|&(start, end)| template_match.start() >= start && template_match.start() < end)
+            .any(|&(start, end)| open.start() >= start && open.start() < end)
         {
             continue;
         }
-        let Some(body_match) = cap.name("body") else {
+        // `<template/>` self-closing: no body.
+        if open.as_str().trim_end().ends_with("/>") {
+            continue;
+        }
+        let body_start = open.end();
+        let Some(body_end) = find_template_body_end(source, body_start) else {
             continue;
         };
         usage.merge(scan_template_body(
-            body_match.as_str(),
-            body_match.start(),
+            &source[body_start..body_end],
+            body_start,
             imported_bindings,
             bound_targets,
         ));
+        scan_from = body_end;
     }
 
     usage
+}
+
+/// Locate the `</template>` that closes the root template whose body starts at
+/// `body_start`, counting nested `<template>` opens so a slot template's close
+/// does not terminate the root body early. Returns the byte index of the `<` of
+/// the matching `</template>`, or `None` if the markup is unbalanced.
+fn find_template_body_end(source: &str, body_start: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let mut index = body_start;
+    let mut depth: usize = 1;
+    while index < bytes.len() {
+        // Byte-slice comparisons throughout: the fallback `index += 1` can land
+        // inside a multi-byte UTF-8 char (e.g. CJK text in a template), so string
+        // slicing here would panic on a non-char-boundary index.
+        if bytes[index..].starts_with(b"<!--") {
+            if let Some(rel) = source[index + 4..].find("-->") {
+                index += 4 + rel + 3;
+                continue;
+            }
+            // Unclosed comment (malformed markup): treat the `<` as ordinary
+            // text and keep scanning rather than bailing, so a valid root
+            // `</template>` later in the body is still found and the file's
+            // component renders stay credited.
+            index += 1;
+            continue;
+        }
+        if bytes[index] == b'<'
+            && let Some((tag, next_index)) = scan_html_tag(source, index)
+        {
+            let trimmed = tag.trim();
+            if trimmed.eq_ignore_ascii_case("</template>") {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(index);
+                }
+            } else if is_template_open_tag(trimmed) && !trimmed.trim_end().ends_with("/>") {
+                depth += 1;
+            }
+            index = next_index;
+            continue;
+        }
+        index += 1;
+    }
+    None
+}
+
+/// Whether `tag` (a full `<...>` tag string) is a `<template ...>` opening tag
+/// (case-insensitive), guarding against `<templatefoo>` via a boundary check.
+fn is_template_open_tag(tag: &str) -> bool {
+    let Some(rest) = tag.strip_prefix('<') else {
+        return false;
+    };
+    let Some(after) = rest.get(..8) else {
+        return false;
+    };
+    after.eq_ignore_ascii_case("template")
+        && rest[8..]
+            .chars()
+            .next()
+            .is_none_or(|c| c.is_whitespace() || c == '>' || c == '/')
 }
 
 fn scan_template_body(
@@ -467,6 +541,50 @@ mod tests {
         );
 
         assert!(usage.used_bindings.contains("formatDate"));
+    }
+
+    #[test]
+    fn nested_slot_template_does_not_truncate_root_body() {
+        // A `<template #slot>` inside a component must NOT terminate the root
+        // template body at its `</template>`; components rendered AFTER it stay
+        // credited. Regression for the non-greedy `</template>` body capture.
+        let usage = collect_template_usage(
+            "<template><Header><template #logo>x</template></Header><Content /></template>",
+            &imported(&["Header", "Content"]),
+        );
+
+        assert!(usage.used_bindings.contains("Header"));
+        assert!(
+            usage.used_bindings.contains("Content"),
+            "component after a nested slot template must still be credited"
+        );
+    }
+
+    #[test]
+    fn multibyte_text_before_nested_template_does_not_panic() {
+        // Depth-aware body scanning must use byte-safe slicing: CJK text between
+        // tags must not cause a non-char-boundary panic, and the trailing
+        // component must still be credited.
+        let usage = collect_template_usage(
+            "<template><Header>住所<template #logo>都市</template></Header><Content />住所</template>",
+            &imported(&["Header", "Content"]),
+        );
+        assert!(usage.used_bindings.contains("Header"));
+        assert!(usage.used_bindings.contains("Content"));
+    }
+
+    #[test]
+    fn deeply_nested_slot_templates_credit_trailing_components() {
+        let usage = collect_template_usage(
+            "<template><A><template #a><B><template #b>y</template></B></template></A><C /><D /></template>",
+            &imported(&["A", "B", "C", "D"]),
+        );
+        for name in ["A", "B", "C", "D"] {
+            assert!(
+                usage.used_bindings.contains(name),
+                "{name} should be credited across nested slot templates"
+            );
+        }
     }
 
     #[test]
