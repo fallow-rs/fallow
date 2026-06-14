@@ -148,6 +148,8 @@ mod suppression_comments;
 mod test_only_deps;
 #[path = "integration_test/type_only_deps.rs"]
 mod type_only_deps;
+#[path = "integration_test/sfc_template_assets.rs"]
+mod sfc_template_assets;
 #[path = "integration_test/unprovided_injects.rs"]
 mod unprovided_injects;
 #[path = "integration_test/unused_enum_members.rs"]

@@ -81,6 +81,62 @@ static STYLE_BLOCK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
     )
 });
 
+/// Static asset references in SFC markup: `<img src="./logo.png">`,
+/// `<source src="...">`, `<video poster="...">`, etc.
+///
+/// Scoped to genuine asset elements (`img` / `source` / `video` / `audio` /
+/// `track` / `embed`) so a custom component's `src` PROP (`<MyImage src="./x">`)
+/// is never misread as an asset edge. ONLY plain relative literals (`./` or
+/// `../`) are captured: dynamic bindings (`:src`, `v-bind:src`, `bind:src`,
+/// `src={...}`, `data-src`), alias-prefixed (`@/`), root-relative (`/foo`),
+/// remote, interpolated (`{{ }}` / `{ }`), and query/hash-suffixed values are
+/// all skipped (the value class excludes `{`, `?`, `#`, whitespace, and angle
+/// brackets, and the alternation anchors on a leading `./` or `../`). A
+/// captured ref becomes a `SideEffect` import; an existing asset resolves to
+/// `ExternalFile` (no finding) and a genuinely-missing one surfaces as
+/// `unresolved-import` on the trusted resolver path.
+static TEMPLATE_ASSET_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    crate::static_regex(
+        r#"(?si)<(?:img|source|video|audio|track|embed)\b(?:[^>"']|"[^"]*"|'[^']*')*?\s(?:src|poster)\s*=\s*(?:"((?:\./|\.\./)[^"<>{}?#\s]*)"|'((?:\./|\.\./)[^'<>{}?#\s]*)')"#,
+    )
+});
+
+/// Mask `<script>` / `<style>` blocks and HTML comments to equal-length spaces
+/// so a markup-region scan (asset refs) sees only the template, while byte
+/// offsets still map 1:1 into the original source for line/col reporting.
+fn mask_non_markup_regions(source: &str) -> String {
+    let mut masked = source.to_string();
+    for re in [&*SCRIPT_BLOCK_RE, &*STYLE_BLOCK_RE, &*HTML_COMMENT_RE] {
+        masked = re
+            .replace_all(&masked, |caps: &regex::Captures<'_>| {
+                " ".repeat(caps[0].len())
+            })
+            .into_owned();
+    }
+    masked
+}
+
+/// Collect static relative asset references from SFC markup as
+/// `(normalized_specifier, value_span)` pairs. See [`TEMPLATE_ASSET_RE`].
+fn collect_template_asset_refs(source: &str) -> Vec<(String, Span)> {
+    let masked = mask_non_markup_regions(source);
+    let mut refs = Vec::new();
+    for caps in TEMPLATE_ASSET_RE.captures_iter(&masked) {
+        let Some(value) = caps.get(1).or_else(|| caps.get(2)) else {
+            continue;
+        };
+        let raw = value.as_str();
+        if raw.is_empty() {
+            continue;
+        }
+        refs.push((
+            normalize_asset_url(raw),
+            Span::new(value.start() as u32, value.end() as u32),
+        ));
+    }
+    refs
+}
+
 /// An extracted `<script>` block from a Vue or Svelte SFC.
 pub struct SfcScript {
     /// The script body text.
@@ -275,6 +331,22 @@ pub(crate) fn parse_sfc_to_module(
         &template_visible_bound_targets,
         &mut combined,
     );
+
+    // Static relative asset references in markup (`<img src="./logo.png">`)
+    // become SideEffect imports so a genuinely-missing asset surfaces as
+    // `unresolved-import` (existing assets resolve to `ExternalFile`, no finding).
+    for (specifier, span) in collect_template_asset_refs(source) {
+        combined.imports.push(ImportInfo {
+            source: specifier,
+            imported_name: ImportedName::SideEffect,
+            local_name: String::new(),
+            is_type_only: false,
+            from_style: false,
+            span,
+            source_span: span,
+        });
+    }
+
     combined.unused_import_bindings.sort_unstable();
     combined.unused_import_bindings.dedup();
     combined.type_referenced_import_bindings.sort_unstable();
@@ -1081,6 +1153,80 @@ export const foo = 1;
         assert!(
             !info.imports.iter().any(|i| i.source.contains("skipped")),
             "postcss body should not be scanned for @import directives"
+        );
+    }
+
+    fn asset_refs(source: &str) -> Vec<String> {
+        super::collect_template_asset_refs(source)
+            .into_iter()
+            .map(|(s, _)| s)
+            .collect()
+    }
+
+    #[test]
+    fn captures_static_relative_template_asset_refs() {
+        assert_eq!(
+            asset_refs(r#"<template><img src="./logo.png" /></template>"#),
+            vec!["./logo.png".to_string()]
+        );
+        assert_eq!(
+            asset_refs(r#"<source src="../media/clip.mp4">"#),
+            vec!["../media/clip.mp4".to_string()]
+        );
+        assert_eq!(
+            asset_refs(r#"<video poster="./thumb.jpg"></video>"#),
+            vec!["./thumb.jpg".to_string()]
+        );
+    }
+
+    #[test]
+    fn skips_dynamic_alias_root_remote_and_query_asset_refs() {
+        // Dynamic bindings (Vue `:src`, `v-bind:src`, Svelte `bind:src` / `src={}`).
+        assert!(asset_refs(r#"<img :src="logo" />"#).is_empty());
+        assert!(asset_refs(r#"<img v-bind:src="logo" />"#).is_empty());
+        assert!(asset_refs(r#"<img bind:src="logo" />"#).is_empty());
+        assert!(asset_refs(r#"<img src={logo} />"#).is_empty());
+        assert!(asset_refs(r#"<img data-src="./x.png" />"#).is_empty());
+        // Alias-prefixed, root-relative, remote, bare: not plain relative literals.
+        assert!(asset_refs(r#"<img src="@/assets/x.png" />"#).is_empty());
+        assert!(asset_refs(r#"<img src="/logo.png" />"#).is_empty());
+        assert!(asset_refs(r#"<img src="https://cdn/x.png" />"#).is_empty());
+        // Query / hash suffix abstains (the resolver cannot verify them).
+        assert!(asset_refs(r#"<img src="./x.png?inline" />"#).is_empty());
+        // Interpolated value abstains.
+        assert!(asset_refs(r#"<img src="{{ logo }}" />"#).is_empty());
+    }
+
+    #[test]
+    fn skips_custom_component_src_prop() {
+        // A custom component's `src` PROP must never be read as an asset edge.
+        assert!(asset_refs(r#"<MyImage src="./x.png" />"#).is_empty());
+        assert!(asset_refs(r#"<AppIcon src="../icons/y.svg" />"#).is_empty());
+    }
+
+    #[test]
+    fn skips_asset_refs_inside_script_style_and_comments() {
+        // Masked regions must not contribute asset refs.
+        assert!(asset_refs(r#"<script>const x = "<img src='./a.png'>"</script>"#).is_empty());
+        assert!(asset_refs(r#"<style>/* <img src="./b.png"> */ .x{}</style>"#).is_empty());
+        assert!(asset_refs(r#"<!-- <img src="./c.png" /> -->"#).is_empty());
+    }
+
+    #[test]
+    fn parse_sfc_emits_template_asset_as_side_effect_import() {
+        let info = parse_sfc_to_module(
+            FileId(0),
+            Path::new("Hero.vue"),
+            r#"<template><img src="./hero.png" /></template><script>let x=1</script>"#,
+            0,
+            false,
+        );
+        assert!(
+            info.imports.iter().any(|i| i.source == "./hero.png"
+                && matches!(i.imported_name, ImportedName::SideEffect)
+                && !i.from_style),
+            "template <img src> should seed a SideEffect import: {:?}",
+            info.imports
         );
     }
 }

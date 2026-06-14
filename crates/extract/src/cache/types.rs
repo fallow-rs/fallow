@@ -359,7 +359,11 @@ use crate::MemberKind;
 /// Bumped to 155 because `di_key_sites` now drops keys bound to a module-scope
 /// string-literal const (string identity, not a symbol), so a warm cache from
 /// 154 would carry those dropped sites and false-flag a string-keyed inject.
-pub(super) const CACHE_VERSION: u32 = 155;
+///
+/// Bumped to 156 because SFC markup asset references (`<img src="./logo.png">`,
+/// `<source>`, `<video poster>`) now emit `SideEffect` imports, so a warm cache
+/// from 155 would miss the new `unresolved-import` findings on missing assets.
+pub(super) const CACHE_VERSION: u32 = 156;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
