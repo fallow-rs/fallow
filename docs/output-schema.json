@@ -692,6 +692,13 @@
           },
           "description": "Vue `<script setup>` `defineEmits` events emitted nowhere in their own SFC\n(no `emit('<name>')` call). Wrapped in [`UnusedComponentEmitFinding`] so\neach entry carries a typed `actions` array natively. Default severity is\n`warn`."
         },
+        "unused_server_actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedServerActionFinding"
+          },
+          "description": "Next.js Server Actions (exports of `\"use server\"` files) that no code in\nthe project references. Reclassified out of `unused_exports` for\n`\"use server\"` files. Wrapped in [`UnusedServerActionFinding`] so each\nentry carries a typed `actions` array natively. Default severity is\n`warn`."
+        },
         "baseline_deltas": {
           "anyOf": [
             {
@@ -1092,6 +1099,13 @@
             "$ref": "#/definitions/UnusedComponentEmitFinding"
           },
           "description": "Vue `<script setup>` `defineEmits` events emitted nowhere in their own SFC\n(no `emit('<name>')` call). Wrapped in [`UnusedComponentEmitFinding`] so\neach entry carries a typed `actions` array natively. Default severity is\n`warn`."
+        },
+        "unused_server_actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedServerActionFinding"
+          },
+          "description": "Next.js Server Actions (exports of `\"use server\"` files) that no code in\nthe project references. Reclassified out of `unused_exports` for\n`\"use server\"` files. Wrapped in [`UnusedServerActionFinding`] so each\nentry carries a typed `actions` array natively. Default severity is\n`warn`."
         }
       },
       "required": [
@@ -4810,6 +4824,10 @@
           "type": "integer",
           "description": "Vue `<script setup>` emits emitted nowhere inside their own SFC."
         },
+        "unused_server_actions": {
+          "type": "integer",
+          "description": "Next.js Server Actions (exports of `\"use server\"` files) referenced by no\ncode in the project."
+        },
         "unresolved_imports": {
           "type": "integer",
           "description": "Imports that could not be resolved against the project's module graph."
@@ -5650,6 +5668,13 @@
             "$ref": "#/definitions/UnusedComponentEmitFinding"
           },
           "description": "Vue `<script setup>` `defineEmits` events emitted nowhere in their own SFC\n(no `emit('<name>')` call). Wrapped in [`UnusedComponentEmitFinding`] so\neach entry carries a typed `actions` array natively. Default severity is\n`warn`."
+        },
+        "unused_server_actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedServerActionFinding"
+          },
+          "description": "Next.js Server Actions (exports of `\"use server\"` files) that no code in\nthe project references. Reclassified out of `unused_exports` for\n`\"use server\"` files. Wrapped in [`UnusedServerActionFinding`] so each\nentry carries a typed `actions` array natively. Default severity is\n`warn`."
         }
       },
       "required": [
@@ -13146,6 +13171,53 @@
         "actions"
       ],
       "description": "Wire-shape envelope for an [`UnusedComponentEmit`] finding. There is no safe\nauto-fix: removing a declared emit is judgement-bearing (the event may be\npart of a deliberately-stable public component API). The only action is a\nline-level suppress at the emit declaration."
+    },
+    "UnusedServerActionFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The `\"use server\"` file that exports the unreferenced action."
+        },
+        "action_name": {
+          "type": "string",
+          "description": "The exported action name as written, or `\"default\"` for a default export."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the export."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset of the export."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "path",
+        "action_name",
+        "line",
+        "col",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for an [`UnusedServerAction`] finding. There is no safe\nauto-fix: the fix is binary but judgement-bearing (wire the action up to a\nconsumer, or delete it). The only action is a line-level suppress."
     }
   }
 }

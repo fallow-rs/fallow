@@ -1126,6 +1126,14 @@ unused_component_props?: UnusedComponentPropFinding[]
  * `warn`.
  */
 unused_component_emits?: UnusedComponentEmitFinding[]
+/**
+ * Next.js Server Actions (exports of `"use server"` files) that no code in
+ * the project references. Reclassified out of `unused_exports` for
+ * `"use server"` files. Wrapped in [`UnusedServerActionFinding`] so each
+ * entry carries a typed `actions` array natively. Default severity is
+ * `warn`.
+ */
+unused_server_actions?: UnusedServerActionFinding[]
 baseline_deltas?: (BaselineDeltas | null)
 baseline?: (BaselineMatch | null)
 regression?: (RegressionResult | null)
@@ -1219,6 +1227,11 @@ unused_component_props?: number
  * Vue `<script setup>` emits emitted nowhere inside their own SFC.
  */
 unused_component_emits?: number
+/**
+ * Next.js Server Actions (exports of `"use server"` files) referenced by no
+ * code in the project.
+ */
+unused_server_actions?: number
 /**
  * Imports that could not be resolved against the project's module graph.
  */
@@ -2908,6 +2921,39 @@ emit_name: string
 line: number
 /**
  * 0-based byte column offset of the emit declaration.
+ */
+col: number
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+}
+/**
+ * Wire-shape envelope for an [`UnusedServerAction`] finding. There is no safe
+ * auto-fix: the fix is binary but judgement-bearing (wire the action up to a
+ * consumer, or delete it). The only action is a line-level suppress.
+ */
+export interface UnusedServerActionFinding {
+/**
+ * The `"use server"` file that exports the unreferenced action.
+ */
+path: string
+/**
+ * The exported action name as written, or `"default"` for a default export.
+ */
+action_name: string
+/**
+ * 1-based line number of the export.
+ */
+line: number
+/**
+ * 0-based byte column offset of the export.
  */
 col: number
 /**
@@ -5813,6 +5859,14 @@ unused_component_props?: UnusedComponentPropFinding[]
  * `warn`.
  */
 unused_component_emits?: UnusedComponentEmitFinding[]
+/**
+ * Next.js Server Actions (exports of `"use server"` files) that no code in
+ * the project references. Reclassified out of `unused_exports` for
+ * `"use server"` files. Wrapped in [`UnusedServerActionFinding`] so each
+ * entry carries a typed `actions` array natively. Default severity is
+ * `warn`.
+ */
+unused_server_actions?: UnusedServerActionFinding[]
 }
 /**
  * The rendered impact report, derived purely from the store (no analysis run).
