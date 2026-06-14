@@ -166,6 +166,67 @@ pub fn is_edit_distance_one(a: &str, b: &str) -> bool {
     true
 }
 
+/// True when `defined` is a likely TYPO target for `token`: exactly one edit
+/// apart AND that edit is a believable mistake, not a deliberate naming
+/// variation. This is stricter than [`is_edit_distance_one`] because real
+/// codebases are full of one-edit class pairs that are NOT typos:
+///
+/// - **Numeric-scale families** (`col-lg-6` vs `col-lg-4`, `display-4` vs
+///   `display-5`, `gap-2` vs `gap-3`): adjacent members of a Bootstrap /
+///   utility scale differ by one digit but are distinct intentional classes.
+///   Any edit whose changed / inserted / deleted character is an ASCII digit is
+///   rejected.
+/// - **Singular/plural pairs** (`button` vs `buttons`): a single trailing `s`
+///   is a morphological variant, not a typo. Rejected.
+///
+/// Real typos (`card-tite` vs `card-title`, `sidebar-nev` vs `sidebar-nav`) are
+/// alphabetic edits and pass. Caught by real-world smoke on Bootstrap, where the
+/// bare near-miss produced 117 false positives, all numeric-scale or plural.
+#[must_use]
+pub fn is_typo_edit(token: &str, defined: &str) -> bool {
+    let (tb, db) = (token.as_bytes(), defined.as_bytes());
+    let (lt, ld) = (tb.len(), db.len());
+    if lt == ld {
+        // Substitution: find the single differing index; reject if a digit is on
+        // either side (a numeric-scale value, not a typo).
+        let mut diff = None;
+        for i in 0..lt {
+            if tb[i] != db[i] {
+                if diff.is_some() {
+                    return false;
+                }
+                diff = Some(i);
+            }
+        }
+        return diff.is_some_and(|i| !tb[i].is_ascii_digit() && !db[i].is_ascii_digit());
+    }
+    if lt.abs_diff(ld) != 1 {
+        return false;
+    }
+    let (short, long) = if lt < ld { (tb, db) } else { (db, tb) };
+    // Singular/plural: the longer is the shorter plus a trailing `s`.
+    if long.last() == Some(&b's') && short == &long[..long.len() - 1] {
+        return false;
+    }
+    // Locate the single inserted / deleted character.
+    let (mut i, mut j, mut skipped) = (0usize, 0usize, false);
+    let mut edit_byte = *long.last().unwrap_or(&0);
+    while i < short.len() && j < long.len() {
+        if short[i] == long[j] {
+            i += 1;
+        } else {
+            if skipped {
+                return false;
+            }
+            skipped = true;
+            edit_byte = long[j];
+        }
+        j += 1;
+    }
+    // Reject a digit insertion/deletion (numeric-scale variant, not a typo).
+    !edit_byte.is_ascii_digit()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -244,5 +305,31 @@ mod tests {
         assert!(is_edit_distance_one("nav", "navs")); // append
         assert!(!is_edit_distance_one("nav", "navxs")); // distance two
         assert!(!is_edit_distance_one("nav", "xyz")); // unrelated
+    }
+
+    #[test]
+    fn typo_edit_accepts_real_alphabetic_typos() {
+        assert!(is_typo_edit("card-tite", "card-title")); // missing letter
+        assert!(is_typo_edit("sidebar-nev", "sidebar-nav")); // wrong letter
+        assert!(is_typo_edit("widget-labl", "widget-label")); // dropped letter (not plural)
+        assert!(is_typo_edit("headar", "header")); // one letter substitution
+    }
+
+    #[test]
+    fn typo_edit_rejects_numeric_scale_families() {
+        // Adjacent Bootstrap / utility scale members are one digit apart but are
+        // distinct intentional classes, never typos.
+        assert!(!is_typo_edit("col-lg-6", "col-lg-4")); // digit substitution
+        assert!(!is_typo_edit("display-4", "display-5"));
+        assert!(!is_typo_edit("gap-2", "gap-3"));
+        assert!(!is_typo_edit("display-4", "display-")); // digit deletion
+        assert!(!is_typo_edit("z-10", "z-50")); // digit substitution
+    }
+
+    #[test]
+    fn typo_edit_rejects_singular_plural() {
+        assert!(!is_typo_edit("button", "buttons"));
+        assert!(!is_typo_edit("buttons", "button"));
+        assert!(!is_typo_edit("card", "cards"));
     }
 }

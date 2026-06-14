@@ -59,7 +59,7 @@ pub use fallow_types::extract::{
 pub use astro::extract_astro_frontmatter;
 pub use css::extract_css_module_exports;
 pub use css_classes::{
-    MarkupClassScan, MarkupClassToken, is_edit_distance_one, scan_markup_class_tokens,
+    MarkupClassScan, MarkupClassToken, is_edit_distance_one, is_typo_edit, scan_markup_class_tokens,
 };
 pub use css_metrics::compute_css_analytics;
 pub use glimmer::{is_glimmer_file, strip_glimmer_templates};

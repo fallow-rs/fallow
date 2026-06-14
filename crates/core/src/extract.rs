@@ -17,8 +17,8 @@ pub use fallow_types::extract::{SkippedSecurityCalleeExpressionKind, SkippedSecu
 pub use fallow_extract::{
     MarkupClassScan, MarkupClassToken, TailwindArbitraryUse, compute_css_analytics,
     extract_astro_frontmatter, extract_css_module_exports, extract_mdx_statements,
-    extract_sfc_scripts, is_edit_distance_one, is_glimmer_file, is_sfc_file, parse_all_files,
-    parse_from_content, parse_single_file, scan_markup_class_tokens,
+    extract_sfc_scripts, is_edit_distance_one, is_glimmer_file, is_sfc_file, is_typo_edit,
+    parse_all_files, parse_from_content, parse_single_file, scan_markup_class_tokens,
     scan_tailwind_arbitrary_values, scoped_unused_classes, sfc_virtual_stylesheet,
     strip_glimmer_templates,
 };

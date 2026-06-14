@@ -892,10 +892,41 @@ fn scan_markup_tailwind_arbitrary_values(
 }
 
 /// Shortest authored CSS class that can be a credible typo target. Below this a
-/// one-edit near miss is too likely to be coincidence (`btn` vs `btm`).
-const MIN_DEFINED_CLASS_LEN: usize = 5;
-/// Shortest markup token worth typo-checking, for the same reason.
-const MIN_TOKEN_LEN: usize = 4;
+/// one-edit near miss is too likely to be a coincidental collision between two
+/// short real words (`catch` vs `match`, `list` vs `last`) rather than a typo.
+/// Real component-class typos are compound / hyphenated and comfortably longer.
+/// (Real-world smoke on Svelte: `catch` vs `match` in test fixtures.)
+const MIN_DEFINED_CLASS_LEN: usize = 6;
+/// Shortest markup token worth typo-checking, for the same reason. One below the
+/// defined floor, since a one-edit pair differs in length by at most one.
+const MIN_TOKEN_LEN: usize = 5;
+
+/// Count plain-CSS vs preprocessor (`.scss`/`.sass`/`.less`) stylesheet files in
+/// the project (ignore-filtered). Used to abstain from class-typo detection when
+/// preprocessors dominate, because the parser cannot expand their loops/mixins,
+/// so the defined-class set is unreliable.
+fn count_stylesheet_kinds(
+    files: &[fallow_types::discover::DiscoveredFile],
+    config: &ResolvedConfig,
+    ignore_set: &globset::GlobSet,
+) -> (usize, usize) {
+    let mut css = 0usize;
+    let mut preprocessor = 0usize;
+    for file in files {
+        let path = &file.path;
+        let kind = match path.extension().and_then(|ext| ext.to_str()) {
+            Some("css") => &mut css,
+            Some("scss" | "sass" | "less") => &mut preprocessor,
+            _ => continue,
+        };
+        let relative = path.strip_prefix(&config.root).unwrap_or(path);
+        if ignore_set.is_match(relative) {
+            continue;
+        }
+        *kind += 1;
+    }
+    (css, preprocessor)
+}
 
 /// Collect every authored CSS class name defined anywhere in the project (plain
 /// and module `.css`/`.scss`, plus SFC `<style>` blocks of any scoping). The set
@@ -961,7 +992,7 @@ fn best_class_suggestion<'a>(
             if defined.len() < MIN_DEFINED_CLASS_LEN {
                 continue;
             }
-            if fallow_core::extract::is_edit_distance_one(token, defined)
+            if fallow_core::extract::is_typo_edit(token, defined)
                 && best.is_none_or(|current| defined < current)
             {
                 best = Some(defined);
@@ -994,14 +1025,29 @@ fn scan_unresolved_class_references(
 ) -> Vec<crate::health_types::UnresolvedClassReference> {
     use crate::health_types::{CssCandidateAction, UnresolvedClassReference};
 
+    // Abstain on preprocessor-dominant projects. lightningcss parses `.scss` /
+    // `.sass` / `.less` source textually but cannot expand loops / mixins, so a
+    // generated class (`.bg-#{$color}`, `.col-#{$i}`) is invisible to the defined
+    // set. On a SCSS framework like Bootstrap that makes a real, used class
+    // (`bg-white`) look unresolved and false-positive as a typo of a parsed
+    // sibling. When preprocessor stylesheets outnumber plain CSS, the defined set
+    // is too incomplete to trust, so emit nothing (real-world smoke: Bootstrap).
+    let (css_files, preprocessor_files) = count_stylesheet_kinds(files, config, ignore_set);
+    if preprocessor_files > css_files {
+        return Vec::new();
+    }
+
     let defined = collect_defined_css_classes(files, config, ignore_set);
     if defined.is_empty() {
         return Vec::new();
     }
     // Length-bucketed index over the typo-target classes for O(1)-ish near-miss.
+    // Drop names ending in `-` / `_`: those are SCSS interpolation artifacts
+    // (`.display-#{$i}` parsed by lightningcss as a partial `display-`), never a
+    // real typo target.
     let mut by_len: rustc_hash::FxHashMap<usize, Vec<&str>> = rustc_hash::FxHashMap::default();
     for class in &defined {
-        if class.len() >= MIN_DEFINED_CLASS_LEN {
+        if class.len() >= MIN_DEFINED_CLASS_LEN && !class.ends_with('-') && !class.ends_with('_') {
             by_len.entry(class.len()).or_default().push(class.as_str());
         }
     }

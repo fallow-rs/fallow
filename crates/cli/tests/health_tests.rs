@@ -3072,6 +3072,56 @@ fn health_css_no_unresolved_class_without_authored_css() {
 }
 
 #[test]
+fn health_css_unresolved_abstains_on_preprocessor_dominant() {
+    // When .scss/.sass/.less files outnumber plain .css, the parser cannot
+    // expand preprocessor loops/mixins, so the defined-class set is unreliable
+    // (a generated class looks unresolved). The feature abstains entirely, even
+    // when a token would otherwise be a near-miss. Caught by real-world smoke on
+    // Bootstrap (a SCSS framework), where the bare near-miss produced 117 FPs.
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"scss-heavy","version":"1.0.0"}"#,
+    );
+    write_file(&root.join("src/a.css"), ".sidebar-nav { color: red; }\n");
+    write_file(
+        &root.join("src/b.scss"),
+        "$x: 1;\n.thing { color: blue; }\n",
+    );
+    write_file(
+        &root.join("src/c.scss"),
+        "$y: 2;\n.other { color: green; }\n",
+    );
+    // `sidebar-nev` is one edit from the defined `.sidebar-nav`, but the project
+    // is preprocessor-dominant (2 scss vs 1 css), so nothing is flagged.
+    write_file(
+        &root.join("src/App.jsx"),
+        "export const C = () => <nav className=\"sidebar-nev\">x</nav>;\n",
+    );
+
+    let out = run_fallow_in_root(
+        "health",
+        root,
+        &[
+            "--css",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let json = parse_json(&out);
+    if let Some(css) = json.get("css_analytics") {
+        assert_eq!(
+            css["summary"]["unresolved_class_references"], 0,
+            "preprocessor-dominant project must abstain: {css}"
+        );
+    }
+}
+
+#[test]
 fn health_css_unresolved_class_renders_in_human() {
     let dir = tempdir().unwrap();
     let root = dir.path();
