@@ -273,6 +273,7 @@ mod tests {
             misplaced_directives: Vec::new(),
             di_key_sites: Vec::new(),
             has_dynamic_provide: false,
+            referenced_import_bindings: Vec::new(),
         }
     }
 }

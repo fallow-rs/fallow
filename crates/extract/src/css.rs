@@ -420,6 +420,7 @@ pub(crate) fn parse_css_to_module(
         misplaced_directives: Vec::new(),
         di_key_sites: Vec::new(),
         has_dynamic_provide: false,
+        referenced_import_bindings: Vec::new(),
     }
 }
 

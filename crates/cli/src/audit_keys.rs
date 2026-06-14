@@ -363,6 +363,7 @@ pub(super) fn dead_code_keys(
         // collections; no key needed.
         export_usages: _export_usages,
         entry_point_summary: _entry_point_summary,
+        unrendered_components: _unrendered_components,
     } = results;
 
     let mut collector = DeadCodeKeyCollector::new(root);
@@ -809,6 +810,7 @@ pub(super) fn retain_introduced_dead_code(
         // collections; no key needed.
         export_usages: _export_usages,
         entry_point_summary: _entry_point_summary,
+        unrendered_components: _unrendered_components,
     } = results;
 
     // The three "fast path" retains use a direct base-lookup rather than the

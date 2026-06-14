@@ -226,6 +226,12 @@ pub struct AnalysisResults {
     /// `actions` array natively. Default severity is `warn`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unprovided_injects: Vec<UnprovidedInjectFinding>,
+    /// Vue/Svelte single-file components that are reachable but rendered nowhere
+    /// (the imported-but-never-rendered dead-half). Default severity is `warn`.
+    /// (Spike: stored as the bare type; the `*Finding` action wrapper lands in
+    /// the full wiring phase.)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unrendered_components: Vec<UnrenderedComponent>,
     /// Next.js App Router route files that resolve to the same URL within one
     /// app-root (a guaranteed `next build` failure). Wrapped in
     /// [`RouteCollisionFinding`] so each entry carries a typed `actions` array
@@ -359,6 +365,7 @@ impl AnalysisResults {
             + self.mixed_client_server_barrels.len()
             + self.misplaced_directives.len()
             + self.unprovided_injects.len()
+            + self.unrendered_components.len()
             + self.route_collisions.len()
             + self.dynamic_segment_name_conflicts.len()
     }
@@ -414,6 +421,7 @@ impl AnalysisResults {
             mixed_client_server_barrels,
             misplaced_directives,
             unprovided_injects,
+            unrendered_components,
             route_collisions,
             dynamic_segment_name_conflicts,
             suppression_count,
@@ -465,6 +473,7 @@ impl AnalysisResults {
             .extend(mixed_client_server_barrels);
         self.misplaced_directives.extend(misplaced_directives);
         self.unprovided_injects.extend(unprovided_injects);
+        self.unrendered_components.extend(unrendered_components);
         self.route_collisions.extend(route_collisions);
         self.dynamic_segment_name_conflicts
             .extend(dynamic_segment_name_conflicts);
@@ -619,6 +628,12 @@ impl AnalysisResults {
                 .then(a.inject.line.cmp(&b.inject.line))
                 .then(a.inject.col.cmp(&b.inject.col))
                 .then(a.inject.key_name.cmp(&b.inject.key_name))
+        });
+
+        self.unrendered_components.sort_by(|a, b| {
+            a.path
+                .cmp(&b.path)
+                .then(a.component_name.cmp(&b.component_name))
         });
 
         self.route_collisions.sort_by(|a, b| {
@@ -963,6 +978,33 @@ pub struct UnprovidedInject {
     /// 1-based line number of the inject / getContext call.
     pub line: u32,
     /// 0-based byte column offset of the inject / getContext call.
+    pub col: u32,
+}
+
+/// A Vue/Svelte single-file component (the default export of a `.vue`/`.svelte`
+/// file) that is reachable in the module graph but rendered NOWHERE in the
+/// project: no `<Tag>`, no `:is`/`this=` binding, no `components`/`app.component`
+/// registration, no `h()`/auto-import use, and no script value-read. It survives
+/// `unused-file` (a barrel re-export keeps it reachable) and `unused-export`
+/// (the re-export counts as a use), yet no file actually instantiates it.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnrenderedComponent {
+    /// The component file that is reachable but rendered nowhere.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// The component name (the `.vue`/`.svelte` file stem, PascalCase).
+    pub component_name: String,
+    /// Which framework this component belongs to: `"vue"` or `"svelte"`.
+    pub framework: String,
+    /// A barrel/file that re-exports this component, kept for the remediation
+    /// trace ("reachable via X, rendered nowhere"). Empty when not determinable.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub reachable_via: String,
+    /// 1-based line number of the component (the file head; SFCs have no explicit
+    /// default-export statement).
+    pub line: u32,
+    /// 0-based byte column offset.
     pub col: u32,
 }
 

@@ -504,6 +504,9 @@ pub fn cached_to_module_opts(
         misplaced_directives: cached.misplaced_directives.clone(),
         di_key_sites: cached.di_key_sites.clone(),
         has_dynamic_provide: cached.has_dynamic_provide,
+        // Derived in `release_resolution_payload` from `imports` + `unused_import_bindings`
+        // (both cached); never persisted, so the cache-load path leaves it empty.
+        referenced_import_bindings: Vec::new(),
     }
 }
 

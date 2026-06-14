@@ -2701,6 +2701,7 @@ export function choose(value: number): string {
                 ),
             ],
             unprovided_injects: vec![],
+            unrendered_components: vec![],
             route_collisions: vec![fallow_core::results::RouteCollisionFinding::with_actions(
                 fallow_core::results::RouteCollision {
                     path: "/app/(a)/about/page.tsx".into(),

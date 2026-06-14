@@ -643,6 +643,7 @@ fn bench_cache_round_trip(c: &mut Criterion) {
         misplaced_directives: Vec::new(),
         di_key_sites: Vec::new(),
         has_dynamic_provide: false,
+        referenced_import_bindings: Vec::new(),
     };
 
     c.bench_function("cache_round_trip", |b| {

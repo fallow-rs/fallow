@@ -888,6 +888,7 @@ mod tests {
             misplaced_directives: vec![],
             di_key_sites: Vec::new(),
             has_dynamic_provide: false,
+            referenced_import_bindings: Vec::new(),
         }
     }
 

@@ -154,6 +154,8 @@ mod test_only_deps;
 mod type_only_deps;
 #[path = "integration_test/unprovided_injects.rs"]
 mod unprovided_injects;
+#[path = "integration_test/unrendered_components.rs"]
+mod unrendered_components;
 #[path = "integration_test/unused_enum_members.rs"]
 mod unused_enum_members;
 #[path = "integration_test/unused_store_members.rs"]

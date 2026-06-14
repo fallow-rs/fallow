@@ -149,6 +149,16 @@ pub struct ModuleInfo {
     /// inject findings project-wide when any reachable module sets this flag.
     /// Mirrors the spread-return whole-object abstain used for Pinia stores.
     pub has_dynamic_provide: bool,
+    /// Local names of import bindings that ARE referenced somewhere in this file
+    /// (script value/type position OR template/markup). The complement of
+    /// `unused_import_bindings` among `imports`. Derived in
+    /// `release_resolution_payload` (where both `imports` and
+    /// `unused_import_bindings` are still present) so it survives the release and
+    /// is readable by the analyze layer; it is never cached (recomputed on every
+    /// cache load). Consumed by the `unrendered-component` detector to credit a
+    /// Vue/Svelte SFC that some file actually imports-and-uses, distinguishing it
+    /// from a component reachable only through a barrel re-export.
+    pub referenced_import_bindings: Vec<String>,
 }
 
 impl ModuleInfo {
@@ -158,6 +168,19 @@ impl ModuleInfo {
     /// and hash drift checks, while dropping vectors that otherwise duplicate
     /// data owned by `ResolvedModule` or already credited into the module graph.
     pub fn release_resolution_payload(&mut self) {
+        // Derive the referenced-binding set BEFORE releasing `unused_import_bindings`:
+        // the analyze-layer `unrendered-component` detector needs "which imports are
+        // actually used" but runs after this release, so capture the compact
+        // complement here. Skip empty local names (side-effect imports).
+        self.referenced_import_bindings = self
+            .imports
+            .iter()
+            .map(|import| import.local_name.clone())
+            .filter(|name| !name.is_empty() && !self.unused_import_bindings.contains(name))
+            .collect();
+        self.referenced_import_bindings.sort_unstable();
+        self.referenced_import_bindings.dedup();
+
         Self::release_vec(&mut self.dynamic_imports);
         Self::release_vec(&mut self.require_calls);
         Self::release_vec(&mut self.package_path_references);
@@ -1140,7 +1163,7 @@ const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 216);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 864);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 888);
 
 /// A re-export declaration.
 #[derive(Debug, Clone)]
@@ -1244,6 +1267,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "exhaustive field-by-field construction + release assertions for every ModuleInfo field"
+    )]
     fn release_resolution_payload_drops_copied_vectors_only() {
         let mut module = ModuleInfo {
             file_id: FileId(7),
@@ -1363,6 +1390,7 @@ mod tests {
             misplaced_directives: Vec::new(),
             di_key_sites: Vec::new(),
             has_dynamic_provide: false,
+            referenced_import_bindings: Vec::new(),
         };
 
         module.release_resolution_payload();
@@ -1394,6 +1422,10 @@ mod tests {
         assert_released!(module.value_referenced_import_bindings);
         assert_released!(module.namespace_object_aliases);
         assert_released!(module.auto_import_candidates);
+        assert_eq!(
+            module.referenced_import_bindings,
+            vec!["childProcess".to_string()]
+        );
     }
 
     #[test]

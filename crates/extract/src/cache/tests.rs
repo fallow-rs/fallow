@@ -316,6 +316,7 @@ fn module_to_cached_roundtrip_named_export() {
         misplaced_directives: Vec::new(),
         di_key_sites: Vec::new(),
         has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -397,6 +398,7 @@ fn module_to_cached_roundtrip_side_effect_used_export() {
         misplaced_directives: Vec::new(),
         di_key_sites: Vec::new(),
         has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -463,6 +465,7 @@ fn module_to_cached_roundtrip_default_export() {
         misplaced_directives: Vec::new(),
         di_key_sites: Vec::new(),
         has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -552,6 +555,7 @@ fn module_to_cached_roundtrip_imports() {
         misplaced_directives: Vec::new(),
         di_key_sites: Vec::new(),
         has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -625,6 +629,7 @@ fn module_to_cached_roundtrip_re_exports() {
         misplaced_directives: Vec::new(),
         di_key_sites: Vec::new(),
         has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -696,6 +701,7 @@ fn module_to_cached_roundtrip_dynamic_imports() {
         misplaced_directives: Vec::new(),
         di_key_sites: Vec::new(),
         has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -796,6 +802,7 @@ fn module_to_cached_roundtrip_members() {
         misplaced_directives: Vec::new(),
         di_key_sites: Vec::new(),
         has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1010,6 +1017,7 @@ fn module_to_cached_roundtrip_type_only_import() {
         misplaced_directives: Vec::new(),
         di_key_sites: Vec::new(),
         has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1497,6 +1505,7 @@ fn module_to_cached_stores_mtime_and_size() {
         misplaced_directives: Vec::new(),
         di_key_sites: Vec::new(),
         has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
     };
 
     let cached = module_to_cached(&module, 12345, 6789);
@@ -1549,6 +1558,7 @@ fn module_to_cached_roundtrip_line_offsets() {
         misplaced_directives: Vec::new(),
         di_key_sites: Vec::new(),
         has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
     };
     let cached = module_to_cached(&module, 0, 0);
     let restored = cached_to_module(&cached, FileId(0));
@@ -1606,6 +1616,7 @@ fn module_to_cached_roundtrip_suppressions_with_kinds() {
         misplaced_directives: Vec::new(),
         di_key_sites: Vec::new(),
         has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1689,6 +1700,7 @@ fn module_to_cached_roundtrip_unknown_suppression_kinds() {
         misplaced_directives: Vec::new(),
         di_key_sites: Vec::new(),
         has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1759,6 +1771,7 @@ fn module_to_cached_roundtrip_visibility() {
         misplaced_directives: Vec::new(),
         di_key_sites: Vec::new(),
         has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1820,6 +1833,7 @@ fn module_to_cached_roundtrip_visibility_internal() {
         misplaced_directives: Vec::new(),
         di_key_sites: Vec::new(),
         has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1881,6 +1895,7 @@ fn module_to_cached_roundtrip_visibility_beta() {
         misplaced_directives: Vec::new(),
         di_key_sites: Vec::new(),
         has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1942,6 +1957,7 @@ fn module_to_cached_roundtrip_visibility_alpha() {
         misplaced_directives: Vec::new(),
         di_key_sites: Vec::new(),
         has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -2005,6 +2021,7 @@ fn module_to_cached_roundtrip_dynamic_import_patterns() {
         misplaced_directives: Vec::new(),
         di_key_sites: Vec::new(),
         has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -2066,6 +2083,7 @@ fn module_to_cached_roundtrip_unused_import_bindings() {
         misplaced_directives: Vec::new(),
         di_key_sites: Vec::new(),
         has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -2154,6 +2172,7 @@ fn module_to_cached_roundtrip_complexity() {
         misplaced_directives: Vec::new(),
         di_key_sites: Vec::new(),
         has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -2219,6 +2238,7 @@ fn module_to_cached_roundtrip_require_with_destructured() {
         misplaced_directives: Vec::new(),
         di_key_sites: Vec::new(),
         has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -2283,6 +2303,7 @@ fn module_to_cached_roundtrip_dynamic_import_with_local() {
         misplaced_directives: Vec::new(),
         di_key_sites: Vec::new(),
         has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -2346,6 +2367,7 @@ fn module_to_cached_roundtrip_source_span() {
         misplaced_directives: Vec::new(),
         di_key_sites: Vec::new(),
         has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -2416,6 +2438,7 @@ fn module_to_cached_roundtrip_member_decorators() {
         misplaced_directives: Vec::new(),
         di_key_sites: Vec::new(),
         has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
     };
 
     let cached = module_to_cached(&module, 0, 0);

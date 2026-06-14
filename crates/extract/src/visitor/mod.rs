@@ -964,6 +964,8 @@ impl ModuleInfoExtractor {
             misplaced_directives: self.misplaced_directives,
             di_key_sites: self.di_key_sites,
             has_dynamic_provide: self.has_dynamic_provide,
+            // Populated in `release_resolution_payload`; empty at construction.
+            referenced_import_bindings: Vec::new(),
         }
     }
 

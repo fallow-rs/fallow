@@ -16,6 +16,7 @@ mod route_tree;
 mod security;
 mod server_only;
 mod unprovided_inject;
+mod unrendered_component;
 mod unused_catalog;
 mod unused_deps;
 mod unused_exports;
@@ -63,6 +64,7 @@ use mixed_barrel::find_mixed_client_server_barrels;
 use re_export_cycles::find_re_export_cycles;
 use route_collision::find_route_collisions;
 use unprovided_inject::find_unprovided_injects;
+use unrendered_component::find_unrendered_components;
 #[expect(
     deprecated,
     reason = "ADR-008 deprecates detector helpers for external callers; core orchestration still calls them internally"
@@ -719,57 +721,100 @@ pub fn find_dead_code_full(
 
     populate_pnpm_catalog_findings(config, workspaces, &mut results);
     populate_pnpm_override_findings(config, workspaces, &mut results);
-    populate_invalid_client_export_findings(
-        graph,
-        modules,
-        config,
-        &declared_deps,
-        &suppressions,
-        &line_offsets_by_file,
-        &mut results,
-    );
-    populate_mixed_client_server_barrel_findings(
+    populate_framework_specific_findings(
         graph,
         modules,
         resolved_modules,
         config,
-        &declared_deps,
-        &suppressions,
-        &line_offsets_by_file,
-        &mut results,
-    );
-    populate_misplaced_directive_findings(
-        graph,
-        modules,
-        config,
-        &declared_deps,
-        &suppressions,
-        &line_offsets_by_file,
-        &mut results,
-    );
-    populate_unprovided_inject_findings(
-        graph,
-        modules,
-        resolved_modules,
-        config,
+        workspaces,
         &declared_deps,
         &public_api_entry_points,
         &suppressions,
         &line_offsets_by_file,
         &mut results,
     );
-    populate_nextjs_route_tree_findings(
-        graph,
-        config,
-        workspaces,
-        &declared_deps,
-        &suppressions,
-        &mut results,
-    );
 
     results.sort();
 
     results
+}
+
+/// Run the framework-convention detectors that share the resolved-graph and
+/// dep-gate context: Next.js RSC directives, Vue/Svelte DI and components, and
+/// the App Router route tree. Extracted from `find_dead_code_full` to keep that
+/// orchestrator under the unit-size ceiling; each callee is individually
+/// rule-gated.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "threads the shared resolved-graph + dep-gate context to a fixed set of framework detectors"
+)]
+fn populate_framework_specific_findings(
+    graph: &ModuleGraph,
+    modules: &[ModuleInfo],
+    resolved_modules: &[ResolvedModule],
+    config: &ResolvedConfig,
+    workspaces: &[fallow_config::WorkspaceInfo],
+    declared_deps: &FxHashSet<String>,
+    public_api_entry_points: &FxHashSet<FileId>,
+    suppressions: &SuppressionContext<'_>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+    results: &mut AnalysisResults,
+) {
+    populate_invalid_client_export_findings(
+        graph,
+        modules,
+        config,
+        declared_deps,
+        suppressions,
+        line_offsets_by_file,
+        results,
+    );
+    populate_mixed_client_server_barrel_findings(
+        graph,
+        modules,
+        resolved_modules,
+        config,
+        declared_deps,
+        suppressions,
+        line_offsets_by_file,
+        results,
+    );
+    populate_misplaced_directive_findings(
+        graph,
+        modules,
+        config,
+        declared_deps,
+        suppressions,
+        line_offsets_by_file,
+        results,
+    );
+    populate_unprovided_inject_findings(
+        graph,
+        modules,
+        resolved_modules,
+        config,
+        declared_deps,
+        public_api_entry_points,
+        suppressions,
+        line_offsets_by_file,
+        results,
+    );
+    populate_unrendered_component_findings(
+        graph,
+        modules,
+        resolved_modules,
+        declared_deps,
+        public_api_entry_points,
+        results,
+    );
+    populate_nextjs_route_tree_findings(
+        graph,
+        config,
+        workspaces,
+        declared_deps,
+        suppressions,
+        results,
+    );
 }
 
 /// Populate `invalid_client_exports` when the rule is enabled. Gated on the
@@ -892,6 +937,32 @@ fn populate_unprovided_inject_findings(
     .into_iter()
     .map(UnprovidedInjectFinding::with_actions)
     .collect();
+}
+
+/// Populate `unrendered_components` (the imported-but-never-rendered spike).
+///
+/// DEFERRED, not shipped: the detector runs and populates `results`, but the
+/// finding is intentionally NOT wired into any output, config, or filter
+/// surface. Hard evidence (11 real Vue/Svelte projects, zero true-positives,
+/// root-caused to ecosystem-rare component barrels) led to parking the feature
+/// rather than shipping the surface; see
+/// `.plans/imported-but-never-rendered-component.md`. The detector + its
+/// integration test are kept green so the spike is resumable.
+fn populate_unrendered_component_findings(
+    graph: &ModuleGraph,
+    modules: &[ModuleInfo],
+    resolved_modules: &[ResolvedModule],
+    declared_deps: &FxHashSet<String>,
+    public_api_entry_points: &FxHashSet<FileId>,
+    results: &mut AnalysisResults,
+) {
+    results.unrendered_components = find_unrendered_components(
+        graph,
+        resolved_modules,
+        modules,
+        declared_deps,
+        public_api_entry_points,
+    );
 }
 
 /// Populate `route_collisions` when the rule is enabled. Gated on the project
@@ -2143,6 +2214,7 @@ mod tests {
                 misplaced_directives: Vec::new(),
                 di_key_sites: Vec::new(),
                 has_dynamic_provide: false,
+                referenced_import_bindings: Vec::new(),
             }];
 
             let rules = RulesConfig {
