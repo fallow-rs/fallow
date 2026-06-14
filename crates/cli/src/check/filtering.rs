@@ -50,6 +50,9 @@ pub fn filter_to_workspaces(
         .unused_component_emits
         .retain(|e| any_under(&e.emit.path));
     results
+        .unused_server_actions
+        .retain(|a| any_under(&a.action.path));
+    results
         .unresolved_imports
         .retain(|i| any_under(&i.import.path));
 
@@ -410,6 +413,9 @@ pub fn filter_results_by_diff(
     results
         .unused_component_emits
         .retain(|e| line_in_diff(&e.emit.path, e.emit.line));
+    results
+        .unused_server_actions
+        .retain(|a| line_in_diff(&a.action.path, a.action.line));
     results
         .unresolved_imports
         .retain(|i| line_in_diff(&i.import.path, i.import.line));

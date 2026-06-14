@@ -122,6 +122,15 @@ pub struct RulesConfig {
     /// lower; warn encodes that without failing CI.
     #[serde(default, alias = "unused-component-emit")]
     pub unused_component_emits: Severity,
+    /// Next.js Server Action (an export of a `"use server"` file) referenced by
+    /// no code in the project: no import-and-call, no `action={fn}` binding, no
+    /// `<form action={fn}>`. Cross-graph dead-export direction, reclassified out
+    /// of `unused-export` for `"use server"` files. Defaults to `warn`, not
+    /// `error`: the rule is new and false-negative-preferring, and reflective
+    /// action-dispatch shapes can hide a real consumer; warn encodes that
+    /// without failing CI until corpus-validated.
+    #[serde(default, alias = "unused-server-action")]
+    pub unused_server_actions: Severity,
     #[serde(default, alias = "unresolved-import")]
     pub unresolved_imports: Severity,
     #[serde(default, alias = "unlisted-dependency")]
@@ -241,6 +250,7 @@ impl Default for RulesConfig {
             unrendered_components: Severity::Warn,
             unused_component_props: Severity::Warn,
             unused_component_emits: Severity::Warn,
+            unused_server_actions: Severity::Warn,
             unresolved_imports: Severity::Error,
             unlisted_dependencies: Severity::Error,
             duplicate_exports: Severity::Error,
@@ -313,6 +323,9 @@ impl RulesConfig {
         }
         if let Some(s) = partial.unused_component_emits {
             self.unused_component_emits = s;
+        }
+        if let Some(s) = partial.unused_server_actions {
+            self.unused_server_actions = s;
         }
         if let Some(s) = partial.unresolved_imports {
             self.unresolved_imports = s;
@@ -479,6 +492,12 @@ pub struct PartialRulesConfig {
     pub unused_component_emits: Option<Severity>,
     #[serde(
         default,
+        alias = "unused-server-action",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub unused_server_actions: Option<Severity>,
+    #[serde(
+        default,
         alias = "unresolved-import",
         skip_serializing_if = "Option::is_none"
     )]
@@ -642,6 +661,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unrendered-components",
     "unused-component-props",
     "unused-component-emits",
+    "unused-server-actions",
     "unresolved-imports",
     "unlisted-dependencies",
     "duplicate-exports",
@@ -681,6 +701,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unrendered-component",
     "unused-component-prop",
     "unused-component-emit",
+    "unused-server-action",
     "unresolved-import",
     "unlisted-dependency",
     "duplicate-export",
@@ -982,6 +1003,7 @@ mod tests {
             unrendered_components: Some(Severity::Off),
             unused_component_props: Some(Severity::Off),
             unused_component_emits: Some(Severity::Off),
+            unused_server_actions: Some(Severity::Off),
             unresolved_imports: Some(Severity::Off),
             unlisted_dependencies: Some(Severity::Off),
             duplicate_exports: Some(Severity::Off),
@@ -1070,7 +1092,7 @@ mod tests {
 
     #[test]
     fn known_rule_names_count_matches_struct() {
-        assert_eq!(KNOWN_RULE_NAMES.len(), 76);
+        assert_eq!(KNOWN_RULE_NAMES.len(), 78);
     }
 
     #[test]
@@ -1111,8 +1133,8 @@ mod tests {
 
         assert_eq!(
             aliases_found.len(),
-            76,
-            "expected 76 source-level alias attrs (38 per struct); got {}: {:?}",
+            78,
+            "expected 78 source-level alias attrs (39 per struct); got {}: {:?}",
             aliases_found.len(),
             aliases_found
         );

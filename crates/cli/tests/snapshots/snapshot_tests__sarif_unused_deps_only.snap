@@ -378,6 +378,19 @@ expression: redact_sarif_version(&json_str)
               }
             },
             {
+              "id": "fallow/unused-server-action",
+              "shortDescription": {
+                "text": "A Next.js Server Action exported from a \"use server\" file is referenced by no code in the project"
+              },
+              "fullDescription": {
+                "text": "A Next.js Server Action (an export of a `\"use server\"` file) that no code in the project references: no import-and-call, no `action={fn}` JSX binding, no `<form action={fn}>`. This is the cross-graph \"declared but zero consumers\" direction, reclassified out of `unused-export` for `\"use server\"` files so the finding carries the action-specific signal. eslint-plugin-next is single-file and cannot see cross-file usage. It does NOT mean the endpoint is unreachable: Next.js still registers a generated action id, so it stays POST-able; it means no project code references it (likely forgotten or dead, and a candidate for removal to shrink surface area). Default warn; wire the action to a consumer or remove it. The check runs only when the project declares `next`."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-server-actions",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
               "id": "fallow/route-collision",
               "shortDescription": {
                 "text": "Two or more Next.js App Router route files resolve to the same URL"

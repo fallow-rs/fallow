@@ -9,7 +9,8 @@ pub use fallow_types::output_dead_code::{
     UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentEmitFinding,
     UnusedComponentPropFinding, UnusedDependencyFinding, UnusedDependencyOverrideFinding,
     UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
-    UnusedOptionalDependencyFinding, UnusedStoreMemberFinding, UnusedTypeFinding,
+    UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
+    UnusedTypeFinding,
 };
 pub use fallow_types::results::{
     ActiveSuppression, AnalysisResults, BoundaryCallViolation, BoundaryCoverageViolation,
@@ -28,7 +29,7 @@ pub use fallow_types::results::{
     TraceHopRole, TypeOnlyDependency, UnlistedDependency, UnprovidedInject, UnrenderedComponent,
     UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry, UnusedComponentEmit,
     UnusedComponentProp, UnusedDependency, UnusedDependencyOverride, UnusedExport, UnusedFile,
-    UnusedMember,
+    UnusedMember, UnusedServerAction,
 };
 
 #[cfg(test)]

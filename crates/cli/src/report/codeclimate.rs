@@ -1120,6 +1120,42 @@ fn push_unused_component_emit_issues(
     }
 }
 
+fn push_unused_server_action_issues(
+    issues: &mut Vec<CodeClimateIssue>,
+    findings: &[fallow_types::output_dead_code::UnusedServerActionFinding],
+    root: &Path,
+    severity: Severity,
+) {
+    if findings.is_empty() {
+        return;
+    }
+    let level = severity_to_codeclimate(severity);
+    for entry in findings {
+        let a = &entry.action;
+        let path = cc_path(&a.path, root);
+        let fp = fingerprint_hash(&[
+            "fallow/unused-server-action",
+            &path,
+            &a.line.to_string(),
+            &a.action_name,
+        ]);
+        let line = if a.line > 0 { Some(a.line) } else { None };
+        let message = format!(
+            "server action `{}` is exported from a \"use server\" file but no code in this project references it (wire it to a consumer or remove it)",
+            a.action_name
+        );
+        issues.push(cc_issue(
+            "fallow/unused-server-action",
+            &message,
+            level,
+            "Bug Risk",
+            &path,
+            line,
+            &fp,
+        ));
+    }
+}
+
 fn push_route_collision_issues(
     issues: &mut Vec<CodeClimateIssue>,
     findings: &[fallow_types::output_dead_code::RouteCollisionFinding],
@@ -1687,6 +1723,12 @@ impl CodeClimateBuilder<'_> {
             &self.results.unused_component_emits,
             self.root,
             self.rules.unused_component_emits,
+        );
+        push_unused_server_action_issues(
+            &mut self.issues,
+            &self.results.unused_server_actions,
+            self.root,
+            self.rules.unused_server_actions,
         );
         push_route_collision_issues(
             &mut self.issues,

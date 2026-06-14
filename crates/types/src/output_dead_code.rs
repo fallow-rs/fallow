@@ -43,7 +43,7 @@ use crate::results::{
     RouteCollision, TestOnlyDependency, TypeOnlyDependency, UnlistedDependency, UnprovidedInject,
     UnrenderedComponent, UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry,
     UnusedComponentEmit, UnusedComponentProp, UnusedDependency, UnusedDependencyOverride,
-    UnusedExport, UnusedFile, UnusedMember,
+    UnusedExport, UnusedFile, UnusedMember, UnusedServerAction,
 };
 
 /// Shared note for the `duplicate-exports` fix action. Mirrors the const used
@@ -924,6 +924,45 @@ impl UnprovidedInjectFinding {
         })];
         Self {
             inject,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for an [`UnusedServerAction`] finding. There is no safe
+/// auto-fix: the fix is binary but judgement-bearing (wire the action up to a
+/// consumer, or delete it). The only action is a line-level suppress.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedServerActionFinding {
+    /// The underlying finding.
+    #[serde(flatten)]
+    pub action: UnusedServerAction,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl UnusedServerActionFinding {
+    /// Build the wrapper from a raw [`UnusedServerAction`]. Emits only a
+    /// line-level suppress action: there is no safe auto-fix because the fix
+    /// (wire the action to a consumer or remove it) is a human decision.
+    #[must_use]
+    pub fn with_actions(action: UnusedServerAction) -> Self {
+        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
+            kind: SuppressLineKind::SuppressLine,
+            auto_fixable: false,
+            description: "Suppress with an inline comment above the line".to_string(),
+            comment: "// fallow-ignore-next-line unused-server-action".to_string(),
+            scope: None,
+        })];
+        Self {
+            action,
             actions,
             introduced: None,
         }

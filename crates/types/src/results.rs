@@ -20,7 +20,8 @@ use crate::output_dead_code::{
     UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentEmitFinding,
     UnusedComponentPropFinding, UnusedDependencyFinding, UnusedDependencyOverrideFinding,
     UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
-    UnusedOptionalDependencyFinding, UnusedStoreMemberFinding, UnusedTypeFinding,
+    UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
+    UnusedTypeFinding,
 };
 use crate::serde_path;
 use crate::suppress::{IssueKind, closest_known_kind_name};
@@ -257,6 +258,13 @@ pub struct AnalysisResults {
     /// `warn`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unused_component_emits: Vec<UnusedComponentEmitFinding>,
+    /// Next.js Server Actions (exports of `"use server"` files) that no code in
+    /// the project references. Reclassified out of `unused_exports` for
+    /// `"use server"` files. Wrapped in [`UnusedServerActionFinding`] so each
+    /// entry carries a typed `actions` array natively. Default severity is
+    /// `warn`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unused_server_actions: Vec<UnusedServerActionFinding>,
     /// Number of suppression entries that matched an issue during analysis.
     /// Human output uses this for the suppression footer; it is skipped in
     /// machine output to avoid changing the public JSON issue contract.
@@ -383,6 +391,7 @@ impl AnalysisResults {
             + self.dynamic_segment_name_conflicts.len()
             + self.unused_component_props.len()
             + self.unused_component_emits.len()
+            + self.unused_server_actions.len()
     }
 
     /// Whether any issues were found.
@@ -441,6 +450,7 @@ impl AnalysisResults {
             dynamic_segment_name_conflicts,
             unused_component_props,
             unused_component_emits,
+            unused_server_actions,
             suppression_count,
             active_suppressions,
             feature_flags,
@@ -496,6 +506,7 @@ impl AnalysisResults {
             .extend(dynamic_segment_name_conflicts);
         self.unused_component_props.extend(unused_component_props);
         self.unused_component_emits.extend(unused_component_emits);
+        self.unused_server_actions.extend(unused_server_actions);
         self.feature_flags.extend(feature_flags);
         self.security_findings.extend(security_findings);
         self.security_unresolved_edge_files += security_unresolved_edge_files;
@@ -686,6 +697,15 @@ impl AnalysisResults {
                 .cmp(&b.emit.path)
                 .then(a.emit.line.cmp(&b.emit.line))
                 .then(a.emit.emit_name.cmp(&b.emit.emit_name))
+        });
+
+        self.unused_server_actions.sort_by(|a, b| {
+            a.action
+                .path
+                .cmp(&b.action.path)
+                .then(a.action.line.cmp(&b.action.line))
+                .then(a.action.col.cmp(&b.action.col))
+                .then(a.action.action_name.cmp(&b.action.action_name))
         });
     }
 
@@ -1016,6 +1036,28 @@ pub struct UnprovidedInject {
     /// 1-based line number of the inject / getContext call.
     pub line: u32,
     /// 0-based byte column offset of the inject / getContext call.
+    pub col: u32,
+}
+
+/// A Next.js Server Action (an export of a `"use server"` file) that no code in
+/// the analyzed project references: no import-and-call, no `action={fn}` JSX
+/// binding, no `<form action={fn}>`. This is the cross-graph "declared but zero
+/// consumers" direction, reclassified out of `unused-export` for `"use server"`
+/// files so the finding carries the action-specific signal. It does NOT mean the
+/// endpoint is unreachable: Next still registers the action id, so it stays
+/// POST-able. It means no project code calls it (likely forgotten / dead, and a
+/// candidate for removal to shrink surface area).
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedServerAction {
+    /// The `"use server"` file that exports the unreferenced action.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// The exported action name as written, or `"default"` for a default export.
+    pub action_name: String,
+    /// 1-based line number of the export.
+    pub line: u32,
+    /// 0-based byte column offset of the export.
     pub col: u32,
 }
 

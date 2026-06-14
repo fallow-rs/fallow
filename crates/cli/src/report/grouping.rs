@@ -364,6 +364,11 @@ where
                 .unused_component_emits
                 .push(item.clone());
         }
+        for item in &results.unused_server_actions {
+            self.entry_for_path(&item.action.path)
+                .unused_server_actions
+                .push(item.clone());
+        }
         for item in &results.stale_suppressions {
             self.entry_for_path(&item.path)
                 .stale_suppressions

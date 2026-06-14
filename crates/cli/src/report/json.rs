@@ -281,6 +281,7 @@ fn build_check_summary(results: &AnalysisResults) -> CheckSummary {
         unrendered_components: results.unrendered_components.len(),
         unused_component_props: results.unused_component_props.len(),
         unused_component_emits: results.unused_component_emits.len(),
+        unused_server_actions: results.unused_server_actions.len(),
         route_collisions: results.route_collisions.len(),
         dynamic_segment_name_conflicts: results.dynamic_segment_name_conflicts.len(),
     }
@@ -499,6 +500,7 @@ fn suppression_kind_rank(kind: &str) -> usize {
         "complexity" => 14,
         "unprovided-inject" => 15,
         "unrendered-component" => 16,
+        "unused-server-action" => 17,
         _ => usize::MAX,
     }
 }

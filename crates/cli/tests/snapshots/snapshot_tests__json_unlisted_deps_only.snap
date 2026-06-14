@@ -22,6 +22,7 @@ expression: redact_version(&json_str)
     "unrendered_components": 0,
     "unused_component_props": 0,
     "unused_component_emits": 0,
+    "unused_server_actions": 0,
     "unresolved_imports": 0,
     "unlisted_dependencies": 1,
     "duplicate_exports": 0,

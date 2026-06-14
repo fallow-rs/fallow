@@ -8,7 +8,8 @@ use fallow_types::output_dead_code::{
     UnrenderedComponentFinding, UnresolvedImportFinding, UnusedClassMemberFinding,
     UnusedComponentEmitFinding, UnusedComponentPropFinding, UnusedDependencyFinding,
     UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
-    UnusedOptionalDependencyFinding, UnusedStoreMemberFinding, UnusedTypeFinding,
+    UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
+    UnusedTypeFinding,
 };
 
 /// Build an `AnalysisResults` populated with one issue of every type.
@@ -207,6 +208,15 @@ pub fn sample_results(root: &Path) -> AnalysisResults {
                 emit_name: "unusedClose".to_string(),
                 line: 5,
                 col: 2,
+            },
+        ));
+    r.unused_server_actions
+        .push(UnusedServerActionFinding::with_actions(
+            UnusedServerAction {
+                path: root.join("src/app/actions.ts"),
+                action_name: "submitForm".to_string(),
+                line: 3,
+                col: 0,
             },
         ));
     r.stale_suppressions.push(StaleSuppression {

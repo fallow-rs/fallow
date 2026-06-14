@@ -117,6 +117,10 @@ pub struct CheckSummary {
     /// Vue `<script setup>` emits emitted nowhere inside their own SFC.
     #[serde(default)]
     pub unused_component_emits: usize,
+    /// Next.js Server Actions (exports of `"use server"` files) referenced by no
+    /// code in the project.
+    #[serde(default)]
+    pub unused_server_actions: usize,
     /// Imports that could not be resolved against the project's module graph.
     pub unresolved_imports: usize,
     /// Dependencies imported but absent from `package.json`.

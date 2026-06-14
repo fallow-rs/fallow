@@ -25,6 +25,7 @@ mod unused_exports;
 mod unused_files;
 mod unused_members;
 mod unused_overrides;
+mod unused_server_action;
 
 #[cfg(test)]
 pub(crate) use unused_deps::matches_virtual_prefix;
@@ -108,6 +109,7 @@ use unused_overrides::{
     find_misconfigured_dependency_overrides, find_unused_dependency_overrides,
     gather_pnpm_override_state,
 };
+use unused_server_action::reclassify_unused_server_actions;
 
 /// Pre-computed line offset tables indexed by `FileId`, built during parse and
 /// carried through the cache. Eliminates redundant file reads during analysis.
@@ -695,6 +697,19 @@ pub fn find_dead_code_full(
     });
 
     filter_public_workspace_results(config, workspaces, &mut results);
+
+    // Reclassify the server-action subset of unused exports BEFORE stale
+    // detection so a `// fallow-ignore-next-line unused-server-action` marker is
+    // recorded as consumed. Gate-off keeps the findings as plain unused-exports.
+    if config.rules.unused_server_actions != Severity::Off {
+        reclassify_unused_server_actions(
+            graph,
+            modules,
+            &declared_deps,
+            &suppressions,
+            &mut results,
+        );
+    }
 
     let request_receivers = config
         .security
@@ -2035,6 +2050,7 @@ mod tests {
                 unrendered_components: Severity::Off,
                 unused_component_props: Severity::Off,
                 unused_component_emits: Severity::Off,
+                unused_server_actions: Severity::Off,
                 unresolved_imports: Severity::Off,
                 unlisted_dependencies: Severity::Off,
                 duplicate_exports: Severity::Off,

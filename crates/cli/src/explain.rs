@@ -332,6 +332,14 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#unused-component-emits",
     },
     RuleDef {
+        id: "fallow/unused-server-action",
+        category: "Dead code",
+        name: "Unused server actions",
+        short: "A Next.js Server Action exported from a \"use server\" file is referenced by no code in the project",
+        full: "A Next.js Server Action (an export of a `\"use server\"` file) that no code in the project references: no import-and-call, no `action={fn}` JSX binding, no `<form action={fn}>`. This is the cross-graph \"declared but zero consumers\" direction, reclassified out of `unused-export` for `\"use server\"` files so the finding carries the action-specific signal. eslint-plugin-next is single-file and cannot see cross-file usage. It does NOT mean the endpoint is unreachable: Next.js still registers a generated action id, so it stays POST-able; it means no project code references it (likely forgotten or dead, and a candidate for removal to shrink surface area). Default warn; wire the action to a consumer or remove it. The check runs only when the project declares `next`.",
+        docs_path: "explanations/dead-code#unused-server-actions",
+    },
+    RuleDef {
         id: "fallow/route-collision",
         category: "Policy",
         name: "Route collision",
@@ -456,6 +464,7 @@ fn dead_code_alias_id(normalized: &str) -> Option<&'static str> {
         "unrendered-components" | "unrendered-component" => Some("fallow/unrendered-component"),
         "unused-component-props" | "unused-component-prop" => Some("fallow/unused-component-prop"),
         "unused-component-emits" | "unused-component-emit" => Some("fallow/unused-component-emit"),
+        "unused-server-actions" | "unused-server-action" => Some("fallow/unused-server-action"),
         "unresolved-imports" => Some("fallow/unresolved-import"),
         "unlisted-deps" | "unlisted-dependencies" => Some("fallow/unlisted-dependency"),
         "duplicate-exports" => Some("fallow/duplicate-export"),
@@ -606,6 +615,10 @@ fn member_import_rule_guide(id: &str) -> Option<RuleGuide> {
         "fallow/unused-component-emit" => RuleGuide {
             example: "Widget.vue declares defineEmits<{ close: [] }>() but `emit('close')` is called nowhere in the component's script.",
             how_to_fix: "Remove the unused emit, or emit it in the script. If the emit is part of a deliberately-stable public component API, suppress the line with // fallow-ignore-next-line unused-component-emit.",
+        },
+        "fallow/unused-server-action" => RuleGuide {
+            example: "app/actions.ts has \"use server\" and exports submitForm, but no component imports it, binds it via action={submitForm}, or uses it in <form action={submitForm}>.",
+            how_to_fix: "Wire the action to a consumer (an import-and-call, an action={fn} binding, or a <form action={fn}>), or remove it. If it is invoked reflectively (an action registry dispatching by id, or a non-JS caller), suppress the line with // fallow-ignore-next-line unused-server-action.",
         },
         "fallow/unresolved-import" => RuleGuide {
             example: "src/app.ts imports ./routes/admin, but no matching file exists after extension and index resolution.",
@@ -2274,7 +2287,7 @@ mod tests {
 
     #[test]
     fn check_rules_count() {
-        assert_eq!(CHECK_RULES.len(), 36);
+        assert_eq!(CHECK_RULES.len(), 37);
     }
 
     #[test]

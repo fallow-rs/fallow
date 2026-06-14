@@ -1278,6 +1278,7 @@ fn build_policy_section(
         && results.unrendered_components.is_empty()
         && results.unused_component_props.is_empty()
         && results.unused_component_emits.is_empty()
+        && results.unused_server_actions.is_empty()
         && results.route_collisions.is_empty()
         && results.dynamic_segment_name_conflicts.is_empty()
     {
@@ -1375,6 +1376,19 @@ fn build_policy_section(
             e.emit.path.as_path()
         },
         format_detail: &format_unused_component_emit,
+    });
+
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.unused_server_actions,
+        title: "Unused server actions",
+        level: severity_to_level(rules.unused_server_actions),
+        root,
+        max_files: MAX_FLAT_ITEMS,
+        get_path: |a: &fallow_types::output_dead_code::UnusedServerActionFinding| {
+            a.action.path.as_path()
+        },
+        format_detail: &format_unused_server_action,
     });
 
     build_human_grouped_section(GroupedSectionInput {
@@ -1496,6 +1510,18 @@ fn format_unused_component_emit(
         format!(":{}", e.line).dimmed(),
         e.emit_name.bold(),
         "is declared but emitted nowhere in this component (remove it or emit it)".dimmed(),
+    )
+}
+
+fn format_unused_server_action(
+    entry: &fallow_types::output_dead_code::UnusedServerActionFinding,
+) -> String {
+    let a = &entry.action;
+    format!(
+        "{} {} {}",
+        format!(":{}", a.line).dimmed(),
+        a.action_name.bold(),
+        "is exported from a \"use server\" file but no code in this project references it".dimmed(),
     )
 }
 
@@ -2297,6 +2323,9 @@ fn collect_matching_rules(
     for e in &results.unused_component_emits {
         check(&e.emit.path);
     }
+    for a in &results.unused_server_actions {
+        check(&a.action.path);
+    }
     for c in &results.route_collisions {
         check(&c.collision.path);
     }
@@ -2581,6 +2610,7 @@ fn build_summary_footer(
         results.unused_component_emits.len(),
         "unused component emits",
     );
+    add(results.unused_server_actions.len(), "unused server actions");
     add(results.stale_suppressions.len(), "stale suppressions");
 
     parts.join(" \u{00b7} ")
@@ -2738,6 +2768,11 @@ fn check_summary_categories(
             "Unused component emits",
             results.unused_component_emits.len(),
             severity_to_level(rules.unused_component_emits),
+        ),
+        (
+            "Unused server actions",
+            results.unused_server_actions.len(),
+            severity_to_level(rules.unused_server_actions),
         ),
         (
             "Stale suppressions",

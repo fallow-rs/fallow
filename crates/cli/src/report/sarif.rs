@@ -12,7 +12,7 @@ use fallow_core::results::{
     UnlistedDependencyFinding, UnprovidedInject, UnrenderedComponent,
     UnresolvedCatalogReferenceFinding, UnresolvedImport, UnusedCatalogEntryFinding,
     UnusedComponentEmit, UnusedComponentProp, UnusedDependency, UnusedDependencyOverrideFinding,
-    UnusedExport, UnusedFile, UnusedMember,
+    UnusedExport, UnusedFile, UnusedMember, UnusedServerAction,
 };
 use rustc_hash::FxHashMap;
 
@@ -636,6 +636,25 @@ fn sarif_unused_component_emit_fields(
     }
 }
 
+fn sarif_unused_server_action_fields(
+    action: &UnusedServerAction,
+    root: &Path,
+    level: &'static str,
+) -> SarifFields {
+    SarifFields {
+        rule_id: "fallow/unused-server-action",
+        level,
+        message: format!(
+            "server action \"{}\" is exported from a \"use server\" file but no code in this project references it; wire it to a consumer or remove it",
+            action.action_name
+        ),
+        uri: relative_uri(&action.path, root),
+        region: Some((action.line, action.col + 1)),
+        source_path: Some(action.path.clone()),
+        properties: None,
+    }
+}
+
 fn sarif_route_collision_fields(
     collision: &RouteCollision,
     root: &Path,
@@ -1059,6 +1078,11 @@ fn sarif_graph_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
             rules.unused_component_emits,
         ),
         (
+            "fallow/unused-server-action",
+            "A Next.js Server Action exported from a \"use server\" file that no code in the project references",
+            rules.unused_server_actions,
+        ),
+        (
             "fallow/route-collision",
             "Two or more Next.js App Router route files resolve to the same URL",
             rules.route_collision,
@@ -1374,6 +1398,18 @@ fn push_component_contract_sarif_results(
                 &e.emit,
                 root,
                 severity_to_sarif_level(rules.unused_component_emits),
+            )
+        },
+    );
+    push_sarif_results(
+        sarif_results,
+        &results.unused_server_actions,
+        snippets,
+        |a| {
+            sarif_unused_server_action_fields(
+                &a.action,
+                root,
+                severity_to_sarif_level(rules.unused_server_actions),
             )
         },
     );
@@ -2271,12 +2307,13 @@ mod tests {
         let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
             .as_array()
             .expect("rules should be an array");
-        assert_eq!(rules.len(), 36);
+        assert_eq!(rules.len(), 37);
 
         let rule_ids: Vec<&str> = rules.iter().map(|r| r["id"].as_str().unwrap()).collect();
         assert!(rule_ids.contains(&"fallow/unrendered-component"));
         assert!(rule_ids.contains(&"fallow/unused-component-prop"));
         assert!(rule_ids.contains(&"fallow/unused-component-emit"));
+        assert!(rule_ids.contains(&"fallow/unused-server-action"));
         assert!(rule_ids.contains(&"fallow/route-collision"));
         assert!(rule_ids.contains(&"fallow/dynamic-segment-name-conflict"));
         assert!(rule_ids.contains(&"fallow/unused-file"));

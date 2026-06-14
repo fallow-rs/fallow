@@ -610,6 +610,48 @@ pub fn push_member_diagnostics(
             });
         }
     }
+
+    push_unused_server_action_diagnostics(map, results);
+}
+
+/// Push HINT diagnostics for unused Next.js server actions (exports of a
+/// `"use server"` file referenced by no code in the project).
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "action name lengths are bounded by source size"
+)]
+fn push_unused_server_action_diagnostics(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+) {
+    for finding in &results.unused_server_actions {
+        let a = &finding.action;
+        if let Some(uri) = Uri::from_file_path(&a.path) {
+            let line = a.line.saturating_sub(1);
+            map.entry(uri).or_default().push(Diagnostic {
+                range: Range {
+                    start: Position {
+                        line,
+                        character: a.col,
+                    },
+                    end: Position {
+                        line,
+                        character: a.col + a.action_name.len() as u32,
+                    },
+                },
+                severity: Some(DiagnosticSeverity::HINT),
+                source: Some("fallow".to_string()),
+                code: Some(NumberOrString::String("unused-server-action".to_string())),
+                code_description: doc_link("unused-server-actions"),
+                message: format!(
+                    "Server action '{}' is exported from a \"use server\" file but no code in this project references it",
+                    a.action_name
+                ),
+                tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+                ..Default::default()
+            });
+        }
+    }
 }
 
 #[cfg(test)]

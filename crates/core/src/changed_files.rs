@@ -442,6 +442,7 @@ pub fn filter_results_by_changed_files(
         dynamic_segment_name_conflicts,
         unused_component_props,
         unused_component_emits,
+        unused_server_actions,
         // Non-finding fields: counts and metadata, not issue collections.
         suppression_count: _suppression_count,
         active_suppressions: _active_suppressions,
@@ -520,6 +521,7 @@ pub fn filter_results_by_changed_files(
     dynamic_segment_name_conflicts.retain(|c| contains_normalized(&cf, &c.conflict.path));
     unused_component_props.retain(|p| contains_normalized(&cf, &p.prop.path));
     unused_component_emits.retain(|e| contains_normalized(&cf, &e.emit.path));
+    unused_server_actions.retain(|a| contains_normalized(&cf, &a.action.path));
 }
 
 /// Pre-normalise a `changed_files` set through `dunce::simplified` so each

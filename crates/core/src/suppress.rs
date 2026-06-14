@@ -70,6 +70,7 @@ fn severity_for_kind(rules: &RulesConfig, kind: IssueKind) -> Severity {
         IssueKind::UnrenderedComponent => rules.unrendered_components,
         IssueKind::UnusedComponentProp => rules.unused_component_props,
         IssueKind::UnusedComponentEmit => rules.unused_component_emits,
+        IssueKind::UnusedServerAction => rules.unused_server_actions,
         IssueKind::Complexity | IssueKind::CodeDuplication => Severity::Error,
     }
 }
@@ -546,6 +547,7 @@ mod tests {
             IssueKind::UnrenderedComponent,
             IssueKind::UnusedComponentProp,
             IssueKind::UnusedComponentEmit,
+            IssueKind::UnusedServerAction,
         ] {
             assert_eq!(
                 IssueKind::from_discriminant(kind.to_discriminant()),
@@ -553,7 +555,7 @@ mod tests {
             );
         }
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(40), None);
+        assert_eq!(IssueKind::from_discriminant(41), None);
     }
 
     #[test]
@@ -803,6 +805,7 @@ mod tests {
             IssueKind::RouteCollision,
             IssueKind::DynamicSegmentNameConflict,
             IssueKind::UnrenderedComponent,
+            IssueKind::UnusedServerAction,
         ];
 
         let all_kinds = [
@@ -836,6 +839,7 @@ mod tests {
             IssueKind::RouteCollision,
             IssueKind::DynamicSegmentNameConflict,
             IssueKind::UnrenderedComponent,
+            IssueKind::UnusedServerAction,
         ];
 
         for kind in all_kinds {

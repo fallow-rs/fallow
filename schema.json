@@ -159,6 +159,7 @@
         "unrendered-components": "warn",
         "unused-component-props": "warn",
         "unused-component-emits": "warn",
+        "unused-server-actions": "warn",
         "unresolved-imports": "error",
         "unlisted-dependencies": "error",
         "duplicate-exports": "error",
@@ -1047,6 +1048,11 @@
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
+        "unused-server-actions": {
+          "description": "Next.js Server Action (an export of a `\"use server\"` file) referenced by\nno code in the project: no import-and-call, no `action={fn}` binding, no\n`<form action={fn}>`. Cross-graph dead-export direction, reclassified out\nof `unused-export` for `\"use server\"` files. Defaults to `warn`, not\n`error`: the rule is new and false-negative-preferring, and reflective\naction-dispatch shapes can hide a real consumer; warn encodes that\nwithout failing CI until corpus-validated.",
+          "$ref": "#/$defs/Severity",
+          "default": "error"
+        },
         "unresolved-imports": {
           "$ref": "#/$defs/Severity",
           "default": "error"
@@ -1692,6 +1698,16 @@
           ]
         },
         "unused-component-emits": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unused-server-actions": {
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"

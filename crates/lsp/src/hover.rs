@@ -52,6 +52,10 @@ pub fn build_hover(
         return Some(hover);
     }
 
+    if let Some(hover) = check_unused_server_action(results, file_path, position) {
+        return Some(hover);
+    }
+
     if let Some(hover) = check_unresolved_import(results, file_path, position) {
         return Some(hover);
     }
@@ -556,6 +560,56 @@ fn check_unused_component_emit(
                 },
                 end: Position {
                     line: emit_line,
+                    character: end_col,
+                },
+            }),
+        });
+    }
+
+    None
+}
+
+/// Check if the position is on an unused Next.js server action.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "action name lengths are bounded by source size"
+)]
+fn check_unused_server_action(
+    results: &AnalysisResults,
+    file_path: &Path,
+    position: Position,
+) -> Option<Hover> {
+    for finding in &results.unused_server_actions {
+        let a = &finding.action;
+        if a.path != file_path {
+            continue;
+        }
+        let action_line = a.line.saturating_sub(1);
+        if action_line != position.line {
+            continue;
+        }
+        let end_col = a.col + a.action_name.len() as u32;
+        if position.character < a.col || position.character >= end_col {
+            continue;
+        }
+
+        let value = format!(
+            "**fallow**: Server action {} is exported from a \"use server\" file but no code in this project references it.",
+            format_inline_code(&a.action_name),
+        );
+
+        return Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value,
+            }),
+            range: Some(Range {
+                start: Position {
+                    line: action_line,
+                    character: a.col,
+                },
+                end: Position {
+                    line: action_line,
                     character: end_col,
                 },
             }),

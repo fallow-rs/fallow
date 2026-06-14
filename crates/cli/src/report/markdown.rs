@@ -300,6 +300,12 @@ fn push_markdown_graph_sections(
     );
     markdown_section(
         out,
+        &results.unused_server_actions,
+        "Unused server actions",
+        |a| format_markdown_unused_server_action(a, rel),
+    );
+    markdown_section(
+        out,
         &results.stale_suppressions,
         "Stale suppressions",
         |s| {
@@ -501,6 +507,18 @@ fn format_markdown_unused_component_emit(
         rel(&e.emit.path),
         e.emit.line,
         escape_backticks(&e.emit.emit_name),
+    )]
+}
+
+fn format_markdown_unused_server_action(
+    a: &fallow_core::results::UnusedServerActionFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    vec![format!(
+        "- `{}`:{} `{}` is exported from a \"use server\" file but no code in this project references it",
+        rel(&a.action.path),
+        a.action.line,
+        escape_backticks(&a.action.action_name),
     )]
 }
 
