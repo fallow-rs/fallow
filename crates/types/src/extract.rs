@@ -789,6 +789,13 @@ pub struct CssAnalytics {
     /// A layer declared but never populated (and not imported into) is a
     /// cleanup candidate.
     pub populated_layers: Vec<String>,
+    /// Distinct font families DECLARED by an `@font-face` rule in the stylesheet,
+    /// sorted. A declared family referenced by no `font-family` anywhere is a
+    /// dead web-font payload (cleanup candidate).
+    pub defined_font_faces: Vec<String>,
+    /// Distinct font families REFERENCED via `font-family` / `font` in the
+    /// stylesheet, sorted (generic keywords like `serif` excluded).
+    pub referenced_font_families: Vec<String>,
     /// Per-rule declaration-block fingerprints for rules at or above the minimum
     /// block size, used to detect duplicate declaration blocks across the
     /// project. Internal staging consumed by the health layer; never serialized

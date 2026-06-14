@@ -258,6 +258,7 @@ fn render_css_analytics(lines: &mut Vec<String>, report: &crate::health_types::H
     render_css_tailwind_arbitrary(lines, css);
     render_css_unresolved_classes(lines, css);
     render_css_unreferenced_classes(lines, css);
+    render_css_unused_font_faces(lines, css);
 
     let mut notable: Vec<(&str, &fallow_types::extract::CssRuleMetric)> = css
         .files
@@ -446,6 +447,33 @@ fn render_css_unreferenced_classes(
     ));
     for entry in css.unreferenced_css_classes.iter().take(5) {
         lines.push(format!("  {}:{}: .{}", entry.path, entry.line, entry.class));
+    }
+    if total > 5 {
+        let more = total - 5;
+        lines.push(
+            format!("  ... and {more} more (--format json for full list)")
+                .dimmed()
+                .to_string(),
+        );
+    }
+}
+
+/// Render `@font-face` families declared but never applied (dead web-font
+/// payload), with the residual inline-style / JS caveat. Up to 5 located.
+fn render_css_unused_font_faces(
+    lines: &mut Vec<String>,
+    css: &crate::health_types::CssAnalyticsReport,
+) {
+    if css.unused_font_faces.is_empty() {
+        return;
+    }
+    let total = css.unused_font_faces.len();
+    lines.push(format!(
+        "  {total} unused @font-face{} (declared but applied by no font-family; candidates, may be set from JS/inline):",
+        plural(total),
+    ));
+    for entry in css.unused_font_faces.iter().take(5) {
+        lines.push(format!("  {}: {}", entry.path, entry.family));
     }
     if total > 5 {
         let more = total - 5;

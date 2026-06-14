@@ -4855,6 +4855,14 @@ unresolved_class_references?: UnresolvedClassReference[]
  * parser never scans. Sorted by `(path, line, class)`.
  */
 unreferenced_css_classes?: UnreferencedCssClass[]
+/**
+ * `@font-face` families declared in a stylesheet but referenced by no
+ * `font-family` anywhere in the project: a dead web-font payload (the font
+ * file is downloaded but never applied). Located at the declaring
+ * stylesheet. Cleanup candidates: the family could be applied from inline
+ * styles or set via JavaScript. Sorted by `(path, family)`.
+ */
+unused_font_faces?: UnusedFontFace[]
 }
 /**
  * Per-stylesheet CSS analytics.
@@ -4962,6 +4970,17 @@ declared_layers: string[]
  * cleanup candidate.
  */
 populated_layers: string[]
+/**
+ * Distinct font families DECLARED by an `@font-face` rule in the stylesheet,
+ * sorted. A declared family referenced by no `font-family` anywhere is a
+ * dead web-font payload (cleanup candidate).
+ */
+defined_font_faces: string[]
+/**
+ * Distinct font families REFERENCED via `font-family` / `font` in the
+ * stylesheet, sorted (generic keywords like `serif` excluded).
+ */
+referenced_font_families: string[]
 }
 /**
  * Structural CSS metrics for a single style rule, computed from the parsed CSS
@@ -5151,6 +5170,11 @@ unresolved_class_references: number
  * candidates; zero on preprocessor-dominant or partial-scope runs.
  */
 unreferenced_css_classes: number
+/**
+ * `@font-face` families declared but referenced by no `font-family` anywhere
+ * (located in `unused_font_faces`). Dead web-font cleanup candidates.
+ */
+unused_font_faces: number
 /**
  * Number of analyzed stylesheets whose per-rule `notable_rules` list was
  * truncated at the per-file cap, so a consumer knows the per-rule detail is
@@ -5393,6 +5417,26 @@ path: string
  * 1-based line of the class's first definition.
  */
 line: number
+/**
+ * Read-only verification step(s) before removing. Always at least one entry,
+ * so consumers can iterate `actions` uniformly across every finding type.
+ */
+actions: CssCandidateAction[]
+}
+/**
+ * An `@font-face` family declared in a stylesheet but referenced by no
+ * `font-family` anywhere in the project: a dead web-font payload. A cleanup
+ * candidate (the family could be applied from inline styles or JavaScript).
+ */
+export interface UnusedFontFace {
+/**
+ * The declared font family name (quotes stripped).
+ */
+family: string
+/**
+ * Project-root-relative, forward-slash path to the declaring stylesheet.
+ */
+path: string
 /**
  * Read-only verification step(s) before removing. Always at least one entry,
  * so consumers can iterate `actions` uniformly across every finding type.

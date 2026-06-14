@@ -3088,6 +3088,94 @@ fn health_css_unreferenced_renders_in_human() {
 }
 
 #[test]
+fn health_css_flags_unused_font_face() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(&root.join("package.json"), r#"{"name":"deadfont"}"#);
+    // `DeadFont` is declared + downloaded but applied by nothing; `LiveFont` is
+    // declared AND applied via `.title`.
+    write_file(
+        &root.join("src/fonts.css"),
+        "@font-face { font-family: \"DeadFont\"; src: url(./dead.woff2); }\n@font-face { font-family: \"LiveFont\"; src: url(./live.woff2); }\n.title { font-family: LiveFont, sans-serif; }\n",
+    );
+    write_file(
+        &root.join("src/App.jsx"),
+        "export const C = () => <h1 className=\"title\">x</h1>;\n",
+    );
+
+    let out = run_fallow_in_root(
+        "health",
+        root,
+        &[
+            "--css",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let json = parse_json(&out);
+    let css = json
+        .get("css_analytics")
+        .expect("css_analytics present with --css");
+    assert_eq!(css["summary"]["unused_font_faces"], 1);
+    let ff = css["unused_font_faces"]
+        .as_array()
+        .expect("unused_font_faces located list");
+    assert_eq!(ff.len(), 1, "only the dead font is flagged: {ff:#?}");
+    assert_eq!(ff[0]["family"], "DeadFont");
+    assert_eq!(ff[0]["path"], "src/fonts.css");
+    assert!(
+        !ff.iter().any(|f| f["family"] == "LiveFont"),
+        "an applied @font-face must not be flagged: {ff:#?}"
+    );
+    assert_eq!(ff[0]["actions"][0]["type"], "verify-unused");
+}
+
+#[test]
+fn health_css_unused_font_face_abstains_when_used_outside_css() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(&root.join("package.json"), r#"{"name":"jsfont"}"#);
+    // `CanvasFont` is declared in CSS but applied only from JavaScript (a canvas
+    // `fontFamily` assignment), which the CSS-only scan cannot see. The source
+    // substring check must keep it out of the dead set.
+    write_file(
+        &root.join("src/fonts.css"),
+        "@font-face { font-family: \"CanvasFont\"; src: url(./c.woff2); }\n.x { color: red; }\n",
+    );
+    write_file(
+        &root.join("src/canvas.ts"),
+        "export const setup = (ctx: CanvasRenderingContext2D) => { ctx.font = '16px CanvasFont'; };\n",
+    );
+    write_file(&root.join("src/App.jsx"), "export const C = () => null;\n");
+
+    let css = parse_json(&run_fallow_in_root(
+        "health",
+        root,
+        &[
+            "--css",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    ));
+    let count = css
+        .get("css_analytics")
+        .and_then(|c| c.get("summary"))
+        .and_then(|s| s.get("unused_font_faces"))
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    assert_eq!(
+        count, 0,
+        "a font applied from JS must not be flagged: {css}"
+    );
+}
+
+#[test]
 fn health_css_flags_unresolved_class_typo() {
     let dir = tempdir().unwrap();
     let root = dir.path();

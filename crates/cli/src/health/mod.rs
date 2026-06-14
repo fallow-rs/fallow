@@ -539,6 +539,11 @@ struct CssTokenSets {
     populated_layers: rustc_hash::FxHashSet<String>,
     property_registrars: rustc_hash::FxHashMap<String, String>,
     layer_declarers: rustc_hash::FxHashMap<String, String>,
+    /// `@font-face`-declared families + referenced font families for cross-file
+    /// dead-web-font detection, with the first declaring file per family.
+    defined_font_faces: rustc_hash::FxHashSet<String>,
+    referenced_font_families: rustc_hash::FxHashSet<String>,
+    font_face_definers: rustc_hash::FxHashMap<String, String>,
 }
 
 impl CssTokenSets {
@@ -630,6 +635,15 @@ impl CssTokenSets {
             self.registered_custom_props.insert(name.clone());
             self.property_registrars
                 .entry(name.clone())
+                .or_insert_with(|| rel.to_owned());
+        }
+        for family in &analytics.referenced_font_families {
+            self.referenced_font_families.insert(family.clone());
+        }
+        for family in &analytics.defined_font_faces {
+            self.defined_font_faces.insert(family.clone());
+            self.font_face_definers
+                .entry(family.clone())
                 .or_insert_with(|| rel.to_owned());
         }
         for name in &analytics.populated_layers {
@@ -760,6 +774,30 @@ impl CssTokenSets {
         })
         .collect();
         (unreferenced_keyframes, undefined_keyframes)
+    }
+
+    /// `@font-face`-declared families referenced by no `font-family` anywhere in
+    /// the project: a dead web-font payload. Located at the declaring stylesheet,
+    /// set the summary count.
+    fn unused_font_faces(
+        &self,
+        summary: &mut crate::health_types::CssAnalyticsSummary,
+    ) -> Vec<crate::health_types::UnusedFontFace> {
+        use crate::health_types::{CssCandidateAction, UnusedFontFace};
+        let out: Vec<UnusedFontFace> = locate_keyframe_diff(
+            &self.defined_font_faces,
+            &self.referenced_font_families,
+            &self.font_face_definers,
+        )
+        .into_iter()
+        .map(|(family, path)| UnusedFontFace {
+            actions: vec![CssCandidateAction::verify_unused_font_face(&family)],
+            family,
+            path,
+        })
+        .collect();
+        summary.unused_font_faces = saturate_len(out.len());
+        out
     }
 }
 
@@ -1118,6 +1156,67 @@ fn scan_unresolved_class_references(
     out
 }
 
+/// Of the candidate unused `@font-face` families, the subset whose name appears
+/// as a substring in some non-CSS source file (`.scss`/`.sass`/`.less`, JS/TS,
+/// or markup). Such a family is applied somewhere the CSS-only scan cannot see
+/// (a `.scss` theme, a canvas/JS `fontFamily` assignment, an inline style), so it
+/// is NOT dead. The plain `.css` surface is already covered by the CSS
+/// `font-family` reference set, so it is skipped here.
+fn font_families_referenced_in_source(
+    candidates: &[crate::health_types::UnusedFontFace],
+    files: &[fallow_types::discover::DiscoveredFile],
+    config: &ResolvedConfig,
+    ignore_set: &globset::GlobSet,
+) -> rustc_hash::FxHashSet<String> {
+    let mut pending: rustc_hash::FxHashSet<&str> =
+        candidates.iter().map(|c| c.family.as_str()).collect();
+    let mut found: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
+    for file in files {
+        if pending.is_empty() {
+            break;
+        }
+        let path = &file.path;
+        let extension = path.extension().and_then(|ext| ext.to_str());
+        if !matches!(
+            extension,
+            Some(
+                "scss"
+                    | "sass"
+                    | "less"
+                    | "js"
+                    | "jsx"
+                    | "ts"
+                    | "tsx"
+                    | "mjs"
+                    | "cjs"
+                    | "vue"
+                    | "svelte"
+                    | "astro"
+                    | "html"
+                    | "mdx"
+            )
+        ) {
+            continue;
+        }
+        let relative = path.strip_prefix(&config.root).unwrap_or(path);
+        if ignore_set.is_match(relative) {
+            continue;
+        }
+        let Ok(source) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        pending.retain(|family| {
+            if source.contains(*family) {
+                found.insert((*family).to_owned());
+                false
+            } else {
+                true
+            }
+        });
+    }
+    found
+}
+
 /// Shortest global class worth reporting as unreferenced. Shorter names are
 /// substring-prone (their literal appears inside many longer strings, so the
 /// substring reference check already keeps them safe) and low-signal.
@@ -1429,6 +1528,18 @@ fn compute_css_analytics_report(
     let (unreferenced_keyframes, undefined_keyframes) = tokens.finalize(&mut summary);
     let duplicate_declaration_blocks = tokens.group_duplicate_blocks(&mut summary);
     let unused_at_rules = tokens.group_unused_at_rules(&mut summary);
+    let mut unused_font_faces = tokens.unused_font_faces(&mut summary);
+    // The CSS-only set difference cannot see a font family applied from
+    // JavaScript / canvas (Excalidraw) or referenced from a `.scss`/`.sass`
+    // theme the parser never reads (reveal.js). Drop any candidate whose family
+    // name appears as a substring in ANY non-CSS source file, so only a font
+    // declared and used nowhere at all survives. (Real-world smoke.)
+    if !unused_font_faces.is_empty() {
+        let referenced =
+            font_families_referenced_in_source(&unused_font_faces, files, config, ignore_set);
+        unused_font_faces.retain(|ff| !referenced.contains(&ff.family));
+        summary.unused_font_faces = saturate_len(unused_font_faces.len());
+    }
     // Markup arbitrary-value scan (gated on the project using Tailwind).
     let tailwind_arbitrary_values = scan_markup_tailwind_arbitrary_values(
         files,
@@ -1462,6 +1573,7 @@ fn compute_css_analytics_report(
         && tailwind_arbitrary_values.is_empty()
         && unresolved_class_references.is_empty()
         && unreferenced_css_classes.is_empty()
+        && unused_font_faces.is_empty()
     {
         return None;
     }
@@ -1477,6 +1589,7 @@ fn compute_css_analytics_report(
         unused_at_rules,
         unresolved_class_references,
         unreferenced_css_classes,
+        unused_font_faces,
     })
 }
 

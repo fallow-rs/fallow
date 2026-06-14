@@ -919,7 +919,7 @@ fn write_css_analytics_section(out: &mut String, report: &crate::health_types::H
     );
     let _ = writeln!(
         out,
-        "- Candidates: {} unreferenced + {} undefined @keyframes | {} duplicate blocks | {} scoped-unused classes | {} Tailwind arbitrary values | {} unused @property | {} unused @layer | {} likely class typos | {} unreferenced classes",
+        "- Candidates: {} unreferenced + {} undefined @keyframes | {} duplicate blocks | {} scoped-unused classes | {} Tailwind arbitrary values | {} unused @property | {} unused @layer | {} likely class typos | {} unreferenced classes | {} unused @font-face",
         s.keyframes_unreferenced,
         s.keyframes_undefined,
         s.duplicate_declaration_blocks,
@@ -929,6 +929,7 @@ fn write_css_analytics_section(out: &mut String, report: &crate::health_types::H
         s.unused_layers,
         s.unresolved_class_references,
         s.unreferenced_css_classes,
+        s.unused_font_faces,
     );
     if !css.undefined_keyframes.is_empty() {
         let named: Vec<String> = css
@@ -980,6 +981,19 @@ fn write_css_analytics_section(out: &mut String, report: &crate::health_types::H
         let _ = writeln!(
             out,
             "- Unreferenced global classes (candidates; verify no email / server / CMS / Markdown applies them): {}",
+            named.join(", "),
+        );
+    }
+    if !css.unused_font_faces.is_empty() {
+        let named: Vec<String> = css
+            .unused_font_faces
+            .iter()
+            .take(5)
+            .map(|u| format!("`{}` ({})", u.family, u.path))
+            .collect();
+        let _ = writeln!(
+            out,
+            "- Unused @font-face (dead web-font; candidates, may be set from JS/inline): {}",
             named.join(", "),
         );
     }

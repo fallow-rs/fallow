@@ -13000,6 +13000,13 @@
             "$ref": "#/definitions/UnreferencedCssClass"
           },
           "description": "Global CSS classes (defined in a plain `.css`/`.scss` rule) whose literal\nname is referenced by NO in-project markup, static or dynamic (the CSS\nanalogue of an unused export). Heavily gated to stay near-zero-false-\npositive: emitted only when the project is plain-CSS-dominant, the\nstylesheet is locally consumed (not a published design-system surface),\nand the whole project is in scope. Candidates, never gated findings: the\nclass may be used by an HTML email, server template, CMS, or Markdown the\nparser never scans. Sorted by `(path, line, class)`."
+        },
+        "unused_font_faces": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedFontFace"
+          },
+          "description": "`@font-face` families declared in a stylesheet but referenced by no\n`font-family` anywhere in the project: a dead web-font payload (the font\nfile is downloaded but never applied). Located at the declaring\nstylesheet. Cleanup candidates: the family could be applied from inline\nstyles or set via JavaScript. Sorted by `(path, family)`."
         }
       },
       "required": [
@@ -13150,6 +13157,20 @@
             "type": "string"
           },
           "description": "Distinct cascade layers POPULATED by a named `@layer a { }` block, sorted.\nA layer declared but never populated (and not imported into) is a\ncleanup candidate."
+        },
+        "defined_font_faces": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Distinct font families DECLARED by an `@font-face` rule in the stylesheet,\nsorted. A declared family referenced by no `font-family` anywhere is a\ndead web-font payload (cleanup candidate)."
+        },
+        "referenced_font_families": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Distinct font families REFERENCED via `font-family` / `font` in the\nstylesheet, sorted (generic keywords like `serif` excluded)."
         }
       },
       "required": [
@@ -13172,7 +13193,9 @@
         "referenced_keyframes",
         "registered_custom_properties",
         "declared_layers",
-        "populated_layers"
+        "populated_layers",
+        "defined_font_faces",
+        "referenced_font_families"
       ],
       "description": "Stylesheet-level structural CSS analytics, computed from the parsed CSS\nsyntax tree. Feeds `fallow health` penalty weights and located findings,\nnever a standalone CSS score."
     },
@@ -13340,6 +13363,10 @@
           "type": "integer",
           "description": "Global CSS classes defined in a stylesheet but referenced by no in-project\nmarkup (located in `unreferenced_css_classes`). Heavily gated cleanup\ncandidates; zero on preprocessor-dominant or partial-scope runs."
         },
+        "unused_font_faces": {
+          "type": "integer",
+          "description": "`@font-face` families declared but referenced by no `font-family` anywhere\n(located in `unused_font_faces`). Dead web-font cleanup candidates."
+        },
         "notable_truncated_files": {
           "type": "integer",
           "description": "Number of analyzed stylesheets whose per-rule `notable_rules` list was\ntruncated at the per-file cap, so a consumer knows the per-rule detail is\nincomplete without walking every file."
@@ -13373,6 +13400,7 @@
         "unused_layers",
         "unresolved_class_references",
         "unreferenced_css_classes",
+        "unused_font_faces",
         "notable_truncated_files"
       ],
       "description": "Project-wide CSS analytics aggregates across every analyzed stylesheet\n(including stylesheets with no notable rule, which are not listed\nindividually)."
@@ -13718,6 +13746,32 @@
         "actions"
       ],
       "description": "A global CSS class defined in a plain `.css`/`.scss` rule whose literal name\nis referenced by no in-project markup (the CSS analogue of an unused export).\nA heavily-gated candidate, never a gated finding: the class may be applied\nfrom an HTML email, server template, CMS, or Markdown the parser never sees."
+    },
+    "UnusedFontFace": {
+      "type": "object",
+      "properties": {
+        "family": {
+          "type": "string",
+          "description": "The declared font family name (quotes stripped)."
+        },
+        "path": {
+          "type": "string",
+          "description": "Project-root-relative, forward-slash path to the declaring stylesheet."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CssCandidateAction"
+          },
+          "description": "Read-only verification step(s) before removing. Always at least one entry,\nso consumers can iterate `actions` uniformly across every finding type."
+        }
+      },
+      "required": [
+        "family",
+        "path",
+        "actions"
+      ],
+      "description": "An `@font-face` family declared in a stylesheet but referenced by no\n`font-family` anywhere in the project: a dead web-font payload. A cleanup\ncandidate (the family could be applied from inline styles or JavaScript)."
     }
   }
 }

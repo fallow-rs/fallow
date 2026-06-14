@@ -145,6 +145,13 @@ pub struct CssAnalyticsReport {
     /// parser never scans. Sorted by `(path, line, class)`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unreferenced_css_classes: Vec<UnreferencedCssClass>,
+    /// `@font-face` families declared in a stylesheet but referenced by no
+    /// `font-family` anywhere in the project: a dead web-font payload (the font
+    /// file is downloaded but never applied). Located at the declaring
+    /// stylesheet. Cleanup candidates: the family could be applied from inline
+    /// styles or set via JavaScript. Sorted by `(path, family)`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unused_font_faces: Vec<UnusedFontFace>,
 }
 
 /// An unused CSS at-rule entity (an `@property` registration with no `var()`
@@ -241,6 +248,21 @@ pub struct UnreferencedKeyframes {
     /// Read-only verification step(s) an agent can run before removing the
     /// candidate. Always at least one entry, so consumers can iterate
     /// `actions` uniformly across every finding type.
+    pub actions: Vec<CssCandidateAction>,
+}
+
+/// An `@font-face` family declared in a stylesheet but referenced by no
+/// `font-family` anywhere in the project: a dead web-font payload. A cleanup
+/// candidate (the family could be applied from inline styles or JavaScript).
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedFontFace {
+    /// The declared font family name (quotes stripped).
+    pub family: String,
+    /// Project-root-relative, forward-slash path to the declaring stylesheet.
+    pub path: String,
+    /// Read-only verification step(s) before removing. Always at least one entry,
+    /// so consumers can iterate `actions` uniformly across every finding type.
     pub actions: Vec<CssCandidateAction>,
 }
 
@@ -365,6 +387,21 @@ pub enum CssCandidateActionType {
 }
 
 impl CssCandidateAction {
+    /// Verify action for an unused `@font-face` family: a read-only token search
+    /// for any inline-style or JavaScript application of the family before
+    /// removing the dead web-font.
+    #[must_use]
+    pub fn verify_unused_font_face(family: &str) -> Self {
+        Self {
+            kind: CssCandidateActionType::VerifyUnused,
+            auto_fixable: false,
+            description: format!(
+                "Confirm the \"{family}\" font family is not applied from an inline style or JavaScript before removing the @font-face and its font files."
+            ),
+            command: safe_token_search(family),
+        }
+    }
+
     /// Verify action for an unreferenced global CSS class: name the surfaces the
     /// in-project scan does NOT cover (the class could be applied from there) and
     /// ship a read-only token search to double-check before removing.
@@ -615,6 +652,9 @@ pub struct CssAnalyticsSummary {
     /// markup (located in `unreferenced_css_classes`). Heavily gated cleanup
     /// candidates; zero on preprocessor-dominant or partial-scope runs.
     pub unreferenced_css_classes: u32,
+    /// `@font-face` families declared but referenced by no `font-family` anywhere
+    /// (located in `unused_font_faces`). Dead web-font cleanup candidates.
+    pub unused_font_faces: u32,
     /// Number of analyzed stylesheets whose per-rule `notable_rules` list was
     /// truncated at the per-file cap, so a consumer knows the per-rule detail is
     /// incomplete without walking every file.
