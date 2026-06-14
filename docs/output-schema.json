@@ -1229,6 +1229,17 @@
           ],
           "description": "Audit breadcrumb explaining systemic action-array adjustments. Present\nonly when at least one adjustment was made (e.g., health finding\nsuppression hints omitted because a baseline is active). When --group-by\nis active, each entry of `groups` may carry its own `actions_meta`\ndescribing the same omission so per-group consumers do not need to walk\nback to the report root."
         },
+        "css_analytics": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CssAnalyticsReport"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Structural CSS analytics (specificity hotspots, `!important` density,\nover-complex selectors, deep nesting). Present only with `--css`."
+        },
         "grouped_by": {
           "anyOf": [
             {
@@ -2165,6 +2176,17 @@
             }
           ],
           "description": "Audit breadcrumb explaining systemic action-array adjustments. Present\nonly when at least one adjustment was made (e.g., health finding\nsuppression hints omitted because a baseline is active). When --group-by\nis active, each entry of `groups` may carry its own `actions_meta`\ndescribing the same omission so per-group consumers do not need to walk\nback to the report root."
+        },
+        "css_analytics": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CssAnalyticsReport"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Structural CSS analytics (specificity hotspots, `!important` density,\nover-complex selectors, deep nesting). Present only with `--css`."
         }
       },
       "required": [
@@ -12908,6 +12930,703 @@
         "actions"
       ],
       "description": "Wire-shape envelope for a [`DynamicSegmentNameConflict`] finding. The\nconflict is a Next.js dev / runtime error (`next build` does NOT catch it),\nso the primary action is manual guidance (rename the dynamic segments to a\nsingle consistent slug name), with a file-level suppress as escape hatch."
+    },
+    "CssAnalyticsReport": {
+      "type": "object",
+      "properties": {
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CssFileAnalytics"
+          },
+          "description": "Stylesheets with at least one structurally notable rule, in scan order."
+        },
+        "summary": {
+          "description": "Project-wide CSS aggregates across every analyzed stylesheet.",
+          "$ref": "#/definitions/CssAnalyticsSummary"
+        },
+        "scoped_unused": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ScopedUnusedClasses"
+          },
+          "description": "Vue SFCs whose `<style scoped>` defines classes used nowhere else in the\ncomponent (cleanup candidates)."
+        },
+        "unreferenced_keyframes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnreferencedKeyframes"
+          },
+          "description": "`@keyframes` defined but referenced via no `animation` / `animation-name`\nin any stylesheet, with the stylesheet that defines them (cleanup\ncandidates; an animation name can still be applied from JavaScript).\nThe \"defined-but-unused\" direction."
+        },
+        "undefined_keyframes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UndefinedKeyframes"
+          },
+          "description": "Animation references (`animation` / `animation-name`) to a `@keyframes`\nname that is defined in NO stylesheet anywhere in the project, with the\nfirst stylesheet that references them. The \"used-but-undefined\" direction\n(the inverse of `unreferenced_keyframes`): usually a typo or a removed\nanimation, occasionally a `@keyframes` defined in CSS-in-JS (which the\nCSS parser never sees). Conservative candidates, never gated findings."
+        },
+        "duplicate_declaration_blocks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CssDuplicateBlock"
+          },
+          "description": "Groups of style rules across the project that share an identical\ndeclaration block (4+ declarations, sorted and `!important`-aware),\ngrouped by content: copy-paste consolidation candidates (fallow's\nduplication signal applied to CSS). Sorted by estimated savings\ndescending."
+        },
+        "tailwind_arbitrary_values": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TailwindArbitraryValue"
+          },
+          "description": "Tailwind arbitrary-value utilities (`w-[13px]`, `bg-[#abc]`) found in\nmarkup, which hardcode a one-off value instead of a configured scale\ntoken (design-token bypass). Present only when the project uses Tailwind.\nSorted by use count descending. Candidates, not findings: an arbitrary\nvalue is sometimes the right call."
+        },
+        "unused_at_rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedAtRule"
+          },
+          "description": "Unused CSS at-rule entities: an `@property` registered but never read via\n`var()` in any stylesheet, or an `@layer` declared but never populated by\na block. Cleanup candidates (an `@property` can be read from JS; a layer\ncan be populated via `@import layer()`). Located by first definition."
+        }
+      },
+      "required": [
+        "files",
+        "summary"
+      ],
+      "description": "Structural CSS analytics surfaced by `fallow health --css`."
+    },
+    "CssFileAnalytics": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Project-root-relative, forward-slash path."
+        },
+        "analytics": {
+          "description": "The stylesheet's structural metrics.",
+          "$ref": "#/definitions/CssAnalytics"
+        }
+      },
+      "required": [
+        "path",
+        "analytics"
+      ],
+      "description": "Per-stylesheet CSS analytics."
+    },
+    "CssAnalytics": {
+      "type": "object",
+      "properties": {
+        "total_declarations": {
+          "type": "integer",
+          "description": "Total declarations across every style rule (normal plus `!important`)."
+        },
+        "important_declarations": {
+          "type": "integer",
+          "description": "Total `!important` declarations across every style rule."
+        },
+        "rule_count": {
+          "type": "integer",
+          "description": "Number of style rules."
+        },
+        "empty_rule_count": {
+          "type": "integer",
+          "description": "Number of style rules with no declarations."
+        },
+        "max_nesting_depth": {
+          "type": "integer",
+          "description": "Deepest style-rule nesting depth observed (0 = no nesting)."
+        },
+        "notable_rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CssRuleMetric"
+          },
+          "description": "Rules that crossed the structural floor, in source order. Bounded; see\n[`Self::notable_truncated`]. The scalar aggregates above always reflect\nthe full stylesheet regardless of truncation."
+        },
+        "notable_truncated": {
+          "type": "boolean",
+          "description": "`true` when more rules crossed the structural floor than `notable_rules`\nretains (compiled utility CSS can emit thousands of `!important` rules),\nso consumers can note that per-rule findings were capped."
+        },
+        "colors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Distinct color values in the stylesheet, in their authored form, sorted.\nDistinct notations of the same color (`red` vs `#f00`) count separately,\nsince inconsistent notation is itself a design-token-sprawl signal."
+        },
+        "font_sizes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Distinct `font-size` declaration values in the stylesheet, sorted."
+        },
+        "z_indexes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Distinct `z-index` declaration values in the stylesheet, sorted."
+        },
+        "box_shadows": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Distinct `box-shadow` declaration values in the stylesheet, sorted. A\nhigh count signals an uncontrolled shadow scale (design-token sprawl)."
+        },
+        "border_radii": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Distinct `border-radius` declaration values in the stylesheet, sorted."
+        },
+        "line_heights": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Distinct `line-height` declaration values in the stylesheet, sorted."
+        },
+        "defined_custom_properties": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Distinct custom properties (`--x`) DEFINED in the stylesheet, sorted."
+        },
+        "referenced_custom_properties": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Distinct custom properties REFERENCED via `var()` in the stylesheet."
+        },
+        "defined_keyframes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Distinct `@keyframes` names DEFINED in the stylesheet, sorted."
+        },
+        "referenced_keyframes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Distinct `@keyframes` names REFERENCED via `animation` / `animation-name`."
+        },
+        "registered_custom_properties": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Distinct custom properties REGISTERED via an `@property` rule, sorted."
+        },
+        "declared_layers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Distinct cascade layers DECLARED (via `@layer a, b;` statements or named\n`@layer a { }` blocks), sorted."
+        },
+        "populated_layers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Distinct cascade layers POPULATED by a named `@layer a { }` block, sorted.\nA layer declared but never populated (and not imported into) is a\ncleanup candidate."
+        }
+      },
+      "required": [
+        "total_declarations",
+        "important_declarations",
+        "rule_count",
+        "empty_rule_count",
+        "max_nesting_depth",
+        "notable_rules",
+        "notable_truncated",
+        "colors",
+        "font_sizes",
+        "z_indexes",
+        "box_shadows",
+        "border_radii",
+        "line_heights",
+        "defined_custom_properties",
+        "referenced_custom_properties",
+        "defined_keyframes",
+        "referenced_keyframes",
+        "registered_custom_properties",
+        "declared_layers",
+        "populated_layers"
+      ],
+      "description": "Stylesheet-level structural CSS analytics, computed from the parsed CSS\nsyntax tree. Feeds `fallow health` penalty weights and located findings,\nnever a standalone CSS score."
+    },
+    "CssRuleMetric": {
+      "type": "object",
+      "properties": {
+        "line": {
+          "type": "integer",
+          "description": "1-based line of the rule's first selector."
+        },
+        "col": {
+          "type": "integer",
+          "description": "1-based column of the rule's first selector."
+        },
+        "specificity_a": {
+          "type": "integer",
+          "description": "Specificity component `a` (id selectors), max across the rule's selectors."
+        },
+        "specificity_b": {
+          "type": "integer",
+          "description": "Specificity component `b` (class / attribute / pseudo-class selectors)."
+        },
+        "specificity_c": {
+          "type": "integer",
+          "description": "Specificity component `c` (type / pseudo-element selectors)."
+        },
+        "complexity": {
+          "type": "integer",
+          "description": "Largest selector component count across the rule's selector list."
+        },
+        "declaration_count": {
+          "type": "integer",
+          "description": "Declaration count in the rule (normal plus `!important`)."
+        },
+        "important_count": {
+          "type": "integer",
+          "description": "`!important` declaration count in the rule."
+        },
+        "nesting_depth": {
+          "type": "integer",
+          "description": "Style-rule nesting depth (0 = top level)."
+        }
+      },
+      "required": [
+        "line",
+        "col",
+        "specificity_a",
+        "specificity_b",
+        "specificity_c",
+        "complexity",
+        "declaration_count",
+        "important_count",
+        "nesting_depth"
+      ],
+      "description": "Structural CSS metrics for a single style rule, computed from the parsed CSS\nsyntax tree. A rule is recorded only when it crosses a structural floor (an\nid selector, a complex selector, a `!important` declaration, or deep\nnesting), so the vector stays bounded on normal stylesheets.\n\nNot persisted in the extraction cache: `fallow health` computes these\non demand from the CSS source, so there is no `bitcode` derive."
+    },
+    "CssAnalyticsSummary": {
+      "type": "object",
+      "properties": {
+        "files_analyzed": {
+          "type": "integer",
+          "description": "Stylesheets analyzed (standard CSS only; SCSS is skipped)."
+        },
+        "total_rules": {
+          "type": "integer",
+          "description": "Total style rules across analyzed stylesheets."
+        },
+        "total_declarations": {
+          "type": "integer",
+          "description": "Total declarations across analyzed stylesheets."
+        },
+        "important_declarations": {
+          "type": "integer",
+          "description": "Total `!important` declarations across analyzed stylesheets."
+        },
+        "empty_rules": {
+          "type": "integer",
+          "description": "Total empty style rules across analyzed stylesheets."
+        },
+        "max_nesting_depth": {
+          "type": "integer",
+          "description": "Deepest style-rule nesting depth observed across analyzed stylesheets."
+        },
+        "unique_colors": {
+          "type": "integer",
+          "description": "Distinct color values (authored form) across the whole codebase. A high\ncount signals an uncontrolled palette (design-token sprawl)."
+        },
+        "unique_font_sizes": {
+          "type": "integer",
+          "description": "Distinct `font-size` values across the whole codebase."
+        },
+        "unique_z_indexes": {
+          "type": "integer",
+          "description": "Distinct `z-index` values across the whole codebase."
+        },
+        "unique_box_shadows": {
+          "type": "integer",
+          "description": "Distinct `box-shadow` values across the whole codebase (shadow-scale sprawl)."
+        },
+        "unique_border_radii": {
+          "type": "integer",
+          "description": "Distinct `border-radius` values across the whole codebase (radius-scale sprawl)."
+        },
+        "unique_line_heights": {
+          "type": "integer",
+          "description": "Distinct `line-height` values across the whole codebase (type-scale sprawl)."
+        },
+        "custom_properties_defined": {
+          "type": "integer",
+          "description": "Distinct custom properties (`--x`) defined anywhere in the codebase."
+        },
+        "custom_properties_unreferenced": {
+          "type": "integer",
+          "description": "Custom properties defined but never referenced via `var()` in any\nstylesheet (the defined-but-unused direction). These are cleanup\nCANDIDATES, not confirmed dead: a property may still be read or set from\nJavaScript or inline HTML styles."
+        },
+        "custom_properties_undefined": {
+          "type": "integer",
+          "description": "Distinct custom properties referenced via `var()` that are defined in no\nstylesheet anywhere (the used-but-undefined direction). A COUNT only, not\na located list: a `var(--x)` with no CSS definition is extremely common\nin JavaScript-driven theming and design-token libraries, so locating\nthese would be net-noise. The count is an architecture signal (how much\nof the `var()` surface is resolved outside CSS), not a finding."
+        },
+        "keyframes_defined": {
+          "type": "integer",
+          "description": "Distinct `@keyframes` defined anywhere in the codebase."
+        },
+        "keyframes_unreferenced": {
+          "type": "integer",
+          "description": "`@keyframes` defined but never referenced via `animation` /\n`animation-name` in any stylesheet (the defined-but-unused direction;\ncleanup CANDIDATES; an animation name can still be applied from\nJavaScript)."
+        },
+        "keyframes_undefined": {
+          "type": "integer",
+          "description": "Distinct animation names referenced via `animation` / `animation-name`\nthat resolve to no `@keyframes` definition anywhere (the used-but-\nundefined direction). Located in `undefined_keyframes`; usually a typo or\na removed animation."
+        },
+        "scoped_unused_classes": {
+          "type": "integer",
+          "description": "Total Vue `<style scoped>` classes used nowhere else in their component\n(cleanup candidates), across all SFCs."
+        },
+        "duplicate_declaration_blocks": {
+          "type": "integer",
+          "description": "Number of distinct declaration blocks (4+ declarations) that appear in\ntwo or more rules across the project (copy-paste consolidation\ncandidates). Located in `duplicate_declaration_blocks`."
+        },
+        "duplicate_declarations_total": {
+          "type": "integer",
+          "description": "Total declarations removable by consolidating every duplicate block:\nthe sum of `(occurrence_count - 1) * declaration_count` across groups."
+        },
+        "tailwind_arbitrary_values": {
+          "type": "integer",
+          "description": "Distinct Tailwind arbitrary-value tokens used in markup (design-token\nbypass). Zero when the project does not use Tailwind. Located in\n`tailwind_arbitrary_values`."
+        },
+        "tailwind_arbitrary_value_uses": {
+          "type": "integer",
+          "description": "Total Tailwind arbitrary-value occurrences across markup."
+        },
+        "unused_property_registrations": {
+          "type": "integer",
+          "description": "`@property` registrations never referenced via `var()` in any stylesheet\n(located in `unused_at_rules`). Cleanup candidates."
+        },
+        "unused_layers": {
+          "type": "integer",
+          "description": "Cascade layers declared but never populated by a block (located in\n`unused_at_rules`). Cleanup candidates."
+        },
+        "notable_truncated_files": {
+          "type": "integer",
+          "description": "Number of analyzed stylesheets whose per-rule `notable_rules` list was\ntruncated at the per-file cap, so a consumer knows the per-rule detail is\nincomplete without walking every file."
+        }
+      },
+      "required": [
+        "files_analyzed",
+        "total_rules",
+        "total_declarations",
+        "important_declarations",
+        "empty_rules",
+        "max_nesting_depth",
+        "unique_colors",
+        "unique_font_sizes",
+        "unique_z_indexes",
+        "unique_box_shadows",
+        "unique_border_radii",
+        "unique_line_heights",
+        "custom_properties_defined",
+        "custom_properties_unreferenced",
+        "custom_properties_undefined",
+        "keyframes_defined",
+        "keyframes_unreferenced",
+        "keyframes_undefined",
+        "scoped_unused_classes",
+        "duplicate_declaration_blocks",
+        "duplicate_declarations_total",
+        "tailwind_arbitrary_values",
+        "tailwind_arbitrary_value_uses",
+        "unused_property_registrations",
+        "unused_layers",
+        "notable_truncated_files"
+      ],
+      "description": "Project-wide CSS analytics aggregates across every analyzed stylesheet\n(including stylesheets with no notable rule, which are not listed\nindividually)."
+    },
+    "ScopedUnusedClasses": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Project-root-relative, forward-slash path to the SFC."
+        },
+        "classes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The scoped class names with no use elsewhere in the component, sorted."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CssCandidateAction"
+          },
+          "description": "Read-only verification step(s) an agent can run before removing the\ncandidate. Always at least one entry, so consumers can iterate\n`actions` uniformly across every finding type."
+        }
+      },
+      "required": [
+        "path",
+        "classes",
+        "actions"
+      ],
+      "description": "A Vue SFC's `<style scoped>` classes that appear nowhere else in the\ncomponent (cleanup candidates)."
+    },
+    "CssCandidateAction": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "Action type identifier (`verify-unused`).",
+          "$ref": "#/definitions/CssCandidateActionType"
+        },
+        "auto_fixable": {
+          "type": "boolean",
+          "description": "Always `false`: CSS candidates are never auto-fixed (`fallow fix` does\nnot touch them) because the residual consumer may live outside CSS."
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of what to confirm before removing."
+        },
+        "command": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "A runnable, read-only, placeholder-free token search that surfaces any\nout-of-CSS use of the candidate. Absent when no shell-safe command can\nbe built (e.g. the residual risk is a dynamic string binding that a\nsingle search cannot probe), in which case `description` is the guide."
+        }
+      },
+      "required": [
+        "type",
+        "auto_fixable",
+        "description"
+      ],
+      "description": "A read-only verification step attached to a CSS cleanup candidate.\n\nCSS candidates (unreferenced `@keyframes`, unused scoped classes) are never\nauto-removed: an animation name can still be applied from JavaScript, and a\nclass can be assembled from a dynamic string binding. The action gives an\nagent a machine-readable next step, mirroring the `actions` array carried by\nevery other health finding, plus an optional runnable probe to confirm the\ncandidate is genuinely unused before deleting it."
+    },
+    "CssCandidateActionType": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "verify-unused",
+          "description": "Confirm the candidate has no JavaScript / HTML / dynamic consumer\nbefore removing it (the defined-but-unused candidates)."
+        },
+        {
+          "type": "string",
+          "const": "verify-undefined",
+          "description": "Confirm the referenced name is genuinely undefined (not defined in\nCSS-in-JS the parser cannot see) before treating it as a typo (the\nused-but-undefined candidates)."
+        },
+        {
+          "type": "string",
+          "const": "consolidate",
+          "description": "Extract the shared declaration block into one rule and reference it from\neach occurrence (the duplicate-declaration-block candidates)."
+        },
+        {
+          "type": "string",
+          "const": "replace-with-token",
+          "description": "Replace a Tailwind arbitrary value with a configured scale token, or\nconfirm the one-off is intentional (the arbitrary-value candidates)."
+        }
+      ],
+      "description": "Discriminant for [`CssCandidateAction::kind`]."
+    },
+    "UnreferencedKeyframes": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The `@keyframes` name."
+        },
+        "path": {
+          "type": "string",
+          "description": "Project-root-relative, forward-slash path to the stylesheet that defines it."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CssCandidateAction"
+          },
+          "description": "Read-only verification step(s) an agent can run before removing the\ncandidate. Always at least one entry, so consumers can iterate\n`actions` uniformly across every finding type."
+        }
+      },
+      "required": [
+        "name",
+        "path",
+        "actions"
+      ],
+      "description": "A `@keyframes` defined in a stylesheet but referenced by no animation in any\nstylesheet (cleanup candidate)."
+    },
+    "UndefinedKeyframes": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The referenced `@keyframes` name that resolves to no definition."
+        },
+        "path": {
+          "type": "string",
+          "description": "Project-root-relative, forward-slash path to the first stylesheet that\nreferences it."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CssCandidateAction"
+          },
+          "description": "Read-only verification step(s) an agent can run before fixing the\nreference. Always at least one entry, so consumers can iterate `actions`\nuniformly across every finding type."
+        }
+      },
+      "required": [
+        "name",
+        "path",
+        "actions"
+      ],
+      "description": "An animation reference (`animation` / `animation-name`) to a `@keyframes`\nname that is defined in no stylesheet anywhere in the project (the\n\"used-but-undefined\" direction). Usually a typo or a removed animation;\noccasionally a `@keyframes` defined in CSS-in-JS the CSS parser never sees."
+    },
+    "CssDuplicateBlock": {
+      "type": "object",
+      "properties": {
+        "declaration_count": {
+          "type": "integer",
+          "description": "Declarations in the shared block."
+        },
+        "occurrence_count": {
+          "type": "integer",
+          "description": "Number of rules that share the block (always >= 2)."
+        },
+        "estimated_savings": {
+          "type": "integer",
+          "description": "Declarations removable by extracting the block into one shared rule:\n`(occurrence_count - 1) * declaration_count`."
+        },
+        "occurrences": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CssBlockOccurrence"
+          },
+          "description": "The rules sharing the block, sorted by `(path, line)`."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CssCandidateAction"
+          },
+          "description": "Read-only guidance step(s), so consumers can iterate `actions`\nuniformly across every finding type. Always at least one entry."
+        }
+      },
+      "required": [
+        "declaration_count",
+        "occurrence_count",
+        "estimated_savings",
+        "occurrences",
+        "actions"
+      ],
+      "description": "A group of style rules across the project that share an identical declaration\nblock: a copy-paste consolidation candidate (fallow's duplication signal\napplied to CSS). Only blocks of 4+ declarations appearing in 2+ rules are\nreported, so the signal stays a strong copy-paste indicator rather than\nflagging legitimately-repeated small blocks."
+    },
+    "CssBlockOccurrence": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Project-root-relative, forward-slash path to the stylesheet."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line of the rule's first selector."
+        }
+      },
+      "required": [
+        "path",
+        "line"
+      ],
+      "description": "One occurrence of a duplicate declaration block."
+    },
+    "TailwindArbitraryValue": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": "string",
+          "description": "The `prefix-[value]` token (e.g. `w-[13px]`). Variant prefixes are\nstripped, so `hover:w-[13px]` and `w-[13px]` aggregate under `w-[13px]`."
+        },
+        "count": {
+          "type": "integer",
+          "description": "Total occurrences across all scanned markup files."
+        },
+        "path": {
+          "type": "string",
+          "description": "Project-root-relative, forward-slash path to the first file using it."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line of the first occurrence."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CssCandidateAction"
+          },
+          "description": "Read-only action(s): a find-all-occurrences search so the token can be\nreplaced with a scale token. Always at least one entry, so consumers can\niterate `actions` uniformly across every finding type."
+        }
+      },
+      "required": [
+        "value",
+        "count",
+        "path",
+        "line",
+        "actions"
+      ],
+      "description": "A distinct Tailwind arbitrary-value utility token used in markup, with its\ntotal use count and first location (a design-token-bypass candidate)."
+    },
+    "UnusedAtRule": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "Which kind of at-rule entity is unused.",
+          "$ref": "#/definitions/UnusedAtRuleKind"
+        },
+        "name": {
+          "type": "string",
+          "description": "The entity name (`--x` for `@property`, the layer name for `@layer`)."
+        },
+        "path": {
+          "type": "string",
+          "description": "Project-root-relative, forward-slash path to the first defining stylesheet."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CssCandidateAction"
+          },
+          "description": "Read-only verification step(s) before removal (parity with other findings)."
+        }
+      },
+      "required": [
+        "type",
+        "name",
+        "path",
+        "actions"
+      ],
+      "description": "An unused CSS at-rule entity (an `@property` registration with no `var()`\nreference, or an `@layer` declaration never populated), located by its first\ndefinition. A cleanup candidate, never a gated finding."
+    },
+    "UnusedAtRuleKind": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "property-registration",
+          "description": "An `@property --x { }` registered but never referenced via `var()`."
+        },
+        {
+          "type": "string",
+          "const": "layer",
+          "description": "An `@layer a` declared (in a statement or named block) but never\npopulated by a `@layer a { }` block."
+        }
+      ],
+      "description": "Discriminant for [`UnusedAtRule::kind`]."
     }
   }
 }
