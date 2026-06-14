@@ -183,13 +183,18 @@ pub struct RulesConfig {
     /// Two or more Next.js App Router route files that resolve to the same URL
     /// within one app-root. Next.js fails the build ("You cannot have two
     /// parallel pages that resolve to the same path"); fallow catches it
-    /// statically and names every colliding file. Defaults to `warn`.
-    #[serde(default = "Severity::default_warn", alias = "route-collisions")]
+    /// statically and names every colliding file. Defaults to `error`: the
+    /// project already fails `next build`, so flagging it as an error aligns
+    /// fallow's exit code with the build it mirrors.
+    #[serde(default, alias = "route-collisions")]
     pub route_collision: Severity,
     /// Sibling Next.js dynamic route segments at one tree position using
-    /// different param spellings (`[id]` vs `[slug]`). Next.js fails the build
-    /// ("You cannot use different slug names for the same dynamic path");
-    /// fallow catches it statically. Defaults to `warn`.
+    /// different param spellings (`[id]` vs `[slug]`). Next.js throws "You
+    /// cannot use different slug names for the same dynamic path" at dev and
+    /// production runtime when the position is hit; `next build` does NOT catch
+    /// it (the build succeeds), so CI passes while the route crashes on its
+    /// first request. fallow catches it statically. Defaults to `warn` for now
+    /// (graduates to `error` in a later release once field-proven).
     #[serde(
         default = "Severity::default_warn",
         alias = "dynamic-segment-name-conflicts"
@@ -233,7 +238,7 @@ impl Default for RulesConfig {
             invalid_client_export: Severity::Warn,
             mixed_client_server_barrel: Severity::Warn,
             misplaced_directive: Severity::Warn,
-            route_collision: Severity::Warn,
+            route_collision: Severity::Error,
             dynamic_segment_name_conflict: Severity::Warn,
         }
     }

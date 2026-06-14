@@ -178,7 +178,7 @@
         "invalid-client-export": "warn",
         "mixed-client-server-barrel": "warn",
         "misplaced-directive": "warn",
-        "route-collision": "warn",
+        "route-collision": "error",
         "dynamic-segment-name-conflict": "warn"
       }
     },
@@ -1124,12 +1124,12 @@
           "default": "warn"
         },
         "route-collision": {
-          "description": "Two or more Next.js App Router route files that resolve to the same URL\nwithin one app-root. Next.js fails the build (\"You cannot have two\nparallel pages that resolve to the same path\"); fallow catches it\nstatically and names every colliding file. Defaults to `warn`.",
+          "description": "Two or more Next.js App Router route files that resolve to the same URL\nwithin one app-root. Next.js fails the build (\"You cannot have two\nparallel pages that resolve to the same path\"); fallow catches it\nstatically and names every colliding file. Defaults to `error`: the\nproject already fails `next build`, so flagging it as an error aligns\nfallow's exit code with the build it mirrors.",
           "$ref": "#/$defs/Severity",
-          "default": "warn"
+          "default": "error"
         },
         "dynamic-segment-name-conflict": {
-          "description": "Sibling Next.js dynamic route segments at one tree position using\ndifferent param spellings (`[id]` vs `[slug]`). Next.js fails the build\n(\"You cannot use different slug names for the same dynamic path\");\nfallow catches it statically. Defaults to `warn`.",
+          "description": "Sibling Next.js dynamic route segments at one tree position using\ndifferent param spellings (`[id]` vs `[slug]`). Next.js throws \"You\ncannot use different slug names for the same dynamic path\" at dev and\nproduction runtime when the position is hit; `next build` does NOT catch\nit (the build succeeds), so CI passes while the route crashes on its\nfirst request. fallow catches it statically. Defaults to `warn` for now\n(graduates to `error` in a later release once field-proven).",
           "$ref": "#/$defs/Severity",
           "default": "warn"
         }

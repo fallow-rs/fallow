@@ -348,7 +348,7 @@ expression: redact_sarif_version(&json_str)
               },
               "helpUri": "https://docs.fallow.tools/explanations/dead-code#route-collisions",
               "defaultConfiguration": {
-                "level": "warning"
+                "level": "error"
               }
             },
             {

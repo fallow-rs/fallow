@@ -182,6 +182,43 @@ fn monorepo_two_apps_sharing_url_do_not_collide() {
 }
 
 #[test]
+fn gate_arms_when_next_is_declared_only_in_a_sub_app() {
+    // The `next` dep lives ONLY in examples/next-demo (a workspace), NOT the
+    // root package.json, and a sibling packages/ui declares no `next`. The
+    // route-tree gate unions declared deps across every workspace manifest
+    // (collect_declared_dependency_names), so the rule must still arm and the
+    // demo app's [id] vs [slug] conflict must fire. This pins the cohort note:
+    // a monorepo whose Next dep is confined to a bundled demo/example app is
+    // still in scope. The finding anchors to the demo app, never packages/ui.
+    let config = fixture_config("nextjs-route-tree-monorepo-subapp");
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let blog: Vec<&fallow_core::results::DynamicSegmentNameConflictFinding> = results
+        .dynamic_segment_name_conflicts
+        .iter()
+        .filter(|c| c.conflict.position == "/blog")
+        .collect();
+
+    assert_eq!(
+        blog.len(),
+        2,
+        "next declared only in a sub-app must still arm the rule: {:?}",
+        results
+            .dynamic_segment_name_conflicts
+            .iter()
+            .map(|c| (norm(&c.conflict.path), c.conflict.position.clone()))
+            .collect::<Vec<_>>()
+    );
+    for finding in &blog {
+        assert!(
+            norm(&finding.conflict.path).contains("examples/next-demo/"),
+            "conflict must anchor to the demo app, not a sibling package: {}",
+            norm(&finding.conflict.path)
+        );
+    }
+}
+
+#[test]
 fn no_findings_when_next_is_absent() {
     let config = fixture_config("nextjs-route-tree-no-next");
     let results = fallow_core::analyze(&config).expect("analysis should succeed");

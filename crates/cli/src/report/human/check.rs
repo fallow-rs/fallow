@@ -1441,9 +1441,11 @@ fn format_dynamic_segment_name_conflict(
     format!(
         "{}",
         format!(
-            "conflicting dynamic segments at {} ({})",
-            c.position,
-            c.conflicting_segments.join(" vs ")
+            "crashes at runtime: different slug names ({}) at the same dynamic path {}; \
+             next build passes but the route fails on its first request (rename to one \
+             consistent slug)",
+            c.conflicting_segments.join(" vs "),
+            c.position
         )
         .dimmed(),
     )
