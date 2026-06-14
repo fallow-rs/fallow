@@ -152,6 +152,49 @@ pub struct CssAnalyticsReport {
     /// styles or set via JavaScript. Sorted by `(path, family)`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unused_font_faces: Vec<UnusedFontFace>,
+    /// The project authors `font-size` values in several units (`px`, `rem`,
+    /// `em`, `%`), with a per-unit distinct-value count: a type-scale
+    /// inconsistency smell (mixing `px` and `rem` for type works against
+    /// user-zoom accessibility). Present only above a conservative floor.
+    /// Advisory candidate, never gated: the spread can be intentional (fixed
+    /// chrome in `px`, body type in `rem`).
+    ///
+    /// Color-notation mixing (hex vs rgb vs hsl) is deliberately NOT surfaced:
+    /// the CSS parser canonicalizes every legacy sRGB notation to hex before
+    /// fallow sees the value, so the authored distinction is already gone and
+    /// cannot be recovered without a separate raw-token pass.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_size_unit_mix: Option<CssNotationConsistency>,
+}
+
+/// A design-token notation-consistency candidate: the distinct notations used
+/// across the codebase for one value axis (today, length units on `font-size`),
+/// with a per-notation distinct-value count. Emitted only above a floor, since
+/// mixing notations for one axis is a "no single source of truth" smell.
+/// Advisory: the action is "standardize on one notation", not a single search.
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CssNotationConsistency {
+    /// The value axis these notations describe, e.g. `"Colors"` or
+    /// `"Font sizes"`.
+    pub axis: String,
+    /// Per-notation distinct-value counts, sorted by count descending then
+    /// notation name (so the dominant notation is first and ties are stable).
+    pub notations: Vec<CssNotationCount>,
+    /// Read-only guidance step(s), so consumers can iterate `actions` uniformly
+    /// across every candidate type. Always at least one entry.
+    pub actions: Vec<CssCandidateAction>,
+}
+
+/// One notation bucket and the count of distinct values authored in it.
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CssNotationCount {
+    /// The notation family, e.g. `"hex"`, `"rgb"`, `"hsl"`, `"modern"`, `"px"`,
+    /// `"rem"`, `"em"`, `"%"`.
+    pub notation: String,
+    /// Distinct values authored in this notation across the codebase.
+    pub count: u32,
 }
 
 /// An unused CSS at-rule entity (an `@property` registration with no `var()`
@@ -384,6 +427,9 @@ pub enum CssCandidateActionType {
     /// Replace a Tailwind arbitrary value with a configured scale token, or
     /// confirm the one-off is intentional (the arbitrary-value candidates).
     ReplaceWithToken,
+    /// Standardize an inconsistent value axis on a single notation (the
+    /// color-format / length-unit mixing candidates).
+    Standardize,
 }
 
 impl CssCandidateAction {
@@ -445,6 +491,23 @@ impl CssCandidateAction {
                 "Confirm \"{name}\" is not a @keyframes defined in CSS-in-JS (styled-components, Emotion, vanilla-extract) before treating the animation reference as a typo."
             ),
             command: safe_token_search(name),
+        }
+    }
+
+    /// Guidance action for a mixed value axis (colors authored in several
+    /// notations, or font sizes in several units): standardize on the single
+    /// dominant notation. No command (this is a project-wide refactor, and the
+    /// per-notation breakdown already quantifies the spread); the residual
+    /// judgment is whether the spread is an intentional migration in progress.
+    #[must_use]
+    pub fn standardize_notation(axis: &str, dominant: &str) -> Self {
+        Self {
+            kind: CssCandidateActionType::Standardize,
+            auto_fixable: false,
+            description: format!(
+                "{axis} are authored in several notations; standardize on one ({dominant} is the most common) so the scale is a single source of truth, unless this is an intentional migration in progress."
+            ),
+            command: None,
         }
     }
 
@@ -655,6 +718,10 @@ pub struct CssAnalyticsSummary {
     /// `@font-face` families declared but referenced by no `font-family` anywhere
     /// (located in `unused_font_faces`). Dead web-font cleanup candidates.
     pub unused_font_faces: u32,
+    /// Number of distinct `font-size` units (`px` / `rem` / `em` / `%`) authored
+    /// across the codebase. Mixing units is a type-scale consistency smell,
+    /// broken out in `font_size_unit_mix`.
+    pub font_size_units_used: u32,
     /// Number of analyzed stylesheets whose per-rule `notable_rules` list was
     /// truncated at the per-file cap, so a consumer knows the per-rule detail is
     /// incomplete without walking every file.

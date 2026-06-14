@@ -3221,6 +3221,82 @@ fn health_css_unused_font_face_matches_family_case_insensitively() {
 }
 
 #[test]
+fn health_css_flags_font_size_unit_mix_above_floor() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(&root.join("package.json"), r#"{"name":"unitmix"}"#);
+    // A type scale split across px and rem, above the floor (>= 6 distinct sizes,
+    // 2 units): the unit-mix candidate fires with a per-unit breakdown.
+    write_file(
+        &root.join("src/type.css"),
+        ".a{font-size:12px}.b{font-size:14px}.c{font-size:16px}.d{font-size:1rem}.e{font-size:1.25rem}.f{font-size:1.5rem}\n",
+    );
+    write_file(&root.join("src/App.jsx"), "export const C = () => null;\n");
+
+    let css = parse_json(&run_fallow_in_root(
+        "health",
+        root,
+        &[
+            "--css",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    ));
+    let analytics = css
+        .get("css_analytics")
+        .expect("css_analytics present with --css");
+    assert_eq!(analytics["summary"]["font_size_units_used"], 2);
+    let mix = analytics
+        .get("font_size_unit_mix")
+        .expect("font_size_unit_mix candidate present above the floor");
+    let notations = mix["notations"].as_array().expect("notations array");
+    assert_eq!(notations.len(), 2, "px + rem: {mix:#?}");
+    let units: Vec<&str> = notations
+        .iter()
+        .filter_map(|n| n["notation"].as_str())
+        .collect();
+    assert!(units.contains(&"px") && units.contains(&"rem"), "{units:?}");
+    assert_eq!(mix["actions"][0]["type"], "standardize");
+}
+
+#[test]
+fn health_css_font_size_unit_mix_abstains_below_floor() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(&root.join("package.json"), r#"{"name":"smallscale"}"#);
+    // Two units but only three distinct sizes: below the floor, so no candidate
+    // (a tiny stylesheet is not yet a type scale).
+    write_file(
+        &root.join("src/type.css"),
+        ".a{font-size:12px}.b{font-size:1rem}.c{font-size:1.5rem}\n",
+    );
+    write_file(&root.join("src/App.jsx"), "export const C = () => null;\n");
+
+    let css = parse_json(&run_fallow_in_root(
+        "health",
+        root,
+        &[
+            "--css",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    ));
+    let analytics = css
+        .get("css_analytics")
+        .expect("css_analytics present with --css");
+    assert!(
+        analytics.get("font_size_unit_mix").is_none(),
+        "below floor: no unit-mix candidate: {analytics}"
+    );
+}
+
+#[test]
 fn health_css_flags_unresolved_class_typo() {
     let dir = tempdir().unwrap();
     let root = dir.path();

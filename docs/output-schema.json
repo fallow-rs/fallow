@@ -13007,6 +13007,17 @@
             "$ref": "#/definitions/UnusedFontFace"
           },
           "description": "`@font-face` families declared in a stylesheet but referenced by no\n`font-family` anywhere in the project: a dead web-font payload (the font\nfile is downloaded but never applied). Located at the declaring\nstylesheet. Cleanup candidates: the family could be applied from inline\nstyles or set via JavaScript. Sorted by `(path, family)`."
+        },
+        "font_size_unit_mix": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CssNotationConsistency"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The project authors `font-size` values in several units (`px`, `rem`,\n`em`, `%`), with a per-unit distinct-value count: a type-scale\ninconsistency smell (mixing `px` and `rem` for type works against\nuser-zoom accessibility). Present only above a conservative floor.\nAdvisory candidate, never gated: the spread can be intentional (fixed\nchrome in `px`, body type in `rem`).\n\nColor-notation mixing (hex vs rgb vs hsl) is deliberately NOT surfaced:\nthe CSS parser canonicalizes every legacy sRGB notation to hex before\nfallow sees the value, so the authored distinction is already gone and\ncannot be recovered without a separate raw-token pass."
         }
       },
       "required": [
@@ -13367,6 +13378,10 @@
           "type": "integer",
           "description": "`@font-face` families declared but referenced by no `font-family` anywhere\n(located in `unused_font_faces`). Dead web-font cleanup candidates."
         },
+        "font_size_units_used": {
+          "type": "integer",
+          "description": "Number of distinct `font-size` units (`px` / `rem` / `em` / `%`) authored\nacross the codebase. Mixing units is a type-scale consistency smell,\nbroken out in `font_size_unit_mix`."
+        },
         "notable_truncated_files": {
           "type": "integer",
           "description": "Number of analyzed stylesheets whose per-rule `notable_rules` list was\ntruncated at the per-file cap, so a consumer knows the per-rule detail is\nincomplete without walking every file."
@@ -13401,6 +13416,7 @@
         "unresolved_class_references",
         "unreferenced_css_classes",
         "unused_font_faces",
+        "font_size_units_used",
         "notable_truncated_files"
       ],
       "description": "Project-wide CSS analytics aggregates across every analyzed stylesheet\n(including stylesheets with no notable rule, which are not listed\nindividually)."
@@ -13485,6 +13501,11 @@
           "type": "string",
           "const": "replace-with-token",
           "description": "Replace a Tailwind arbitrary value with a configured scale token, or\nconfirm the one-off is intentional (the arbitrary-value candidates)."
+        },
+        {
+          "type": "string",
+          "const": "standardize",
+          "description": "Standardize an inconsistent value axis on a single notation (the\ncolor-format / length-unit mixing candidates)."
         }
       ],
       "description": "Discriminant for [`CssCandidateAction::kind`]."
@@ -13772,6 +13793,53 @@
         "actions"
       ],
       "description": "An `@font-face` family declared in a stylesheet but referenced by no\n`font-family` anywhere in the project: a dead web-font payload. A cleanup\ncandidate (the family could be applied from inline styles or JavaScript)."
+    },
+    "CssNotationConsistency": {
+      "type": "object",
+      "properties": {
+        "axis": {
+          "type": "string",
+          "description": "The value axis these notations describe, e.g. `\"Colors\"` or\n`\"Font sizes\"`."
+        },
+        "notations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CssNotationCount"
+          },
+          "description": "Per-notation distinct-value counts, sorted by count descending then\nnotation name (so the dominant notation is first and ties are stable)."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CssCandidateAction"
+          },
+          "description": "Read-only guidance step(s), so consumers can iterate `actions` uniformly\nacross every candidate type. Always at least one entry."
+        }
+      },
+      "required": [
+        "axis",
+        "notations",
+        "actions"
+      ],
+      "description": "A design-token notation-consistency candidate: the distinct notations used\nacross the codebase for one value axis (today, length units on `font-size`),\nwith a per-notation distinct-value count. Emitted only above a floor, since\nmixing notations for one axis is a \"no single source of truth\" smell.\nAdvisory: the action is \"standardize on one notation\", not a single search."
+    },
+    "CssNotationCount": {
+      "type": "object",
+      "properties": {
+        "notation": {
+          "type": "string",
+          "description": "The notation family, e.g. `\"hex\"`, `\"rgb\"`, `\"hsl\"`, `\"modern\"`, `\"px\"`,\n`\"rem\"`, `\"em\"`, `\"%\"`."
+        },
+        "count": {
+          "type": "integer",
+          "description": "Distinct values authored in this notation across the codebase."
+        }
+      },
+      "required": [
+        "notation",
+        "count"
+      ],
+      "description": "One notation bucket and the count of distinct values authored in it."
     }
   }
 }

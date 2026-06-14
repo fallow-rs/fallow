@@ -811,6 +811,101 @@ impl CssTokenSets {
         summary.unused_font_faces = saturate_len(out.len());
         out
     }
+
+    /// Group the distinct `font-size` values by length unit (`px`/`rem`/`em`/`%`/
+    /// `pt`/other), set the `font_size_units_used` count, and, when the project
+    /// mixes two or more units across enough distinct sizes, return a
+    /// consistency candidate (mixing `px` and `rem` for type works against
+    /// user-zoom accessibility). Advisory only, never gated.
+    fn font_size_unit_mix(
+        &self,
+        summary: &mut crate::health_types::CssAnalyticsSummary,
+    ) -> Option<crate::health_types::CssNotationConsistency> {
+        use crate::health_types::{CssCandidateAction, CssNotationConsistency, CssNotationCount};
+
+        let mut counts: rustc_hash::FxHashMap<&'static str, u32> = rustc_hash::FxHashMap::default();
+        for value in &self.font_sizes {
+            if let Some(unit) = classify_font_size_unit(value) {
+                *counts.entry(unit).or_insert(0) += 1;
+            }
+        }
+        summary.font_size_units_used = saturate_len(counts.len());
+
+        // Conservative floor: at least two distinct units AND enough classified
+        // sizes that the project plainly has a type scale (so a tiny stylesheet
+        // with one px and one rem does not trip it). Smoke-tunable.
+        let total: u32 = counts.values().copied().sum();
+        if counts.len() < 2 || total < MIN_FONT_SIZE_UNIT_MIX {
+            return None;
+        }
+        let mut notations: Vec<CssNotationCount> = counts
+            .into_iter()
+            .map(|(notation, count)| CssNotationCount {
+                notation: notation.to_owned(),
+                count,
+            })
+            .collect();
+        // Dominant unit first; tie-break on the unit name for deterministic output.
+        notations.sort_by(|a, b| {
+            b.count
+                .cmp(&a.count)
+                .then_with(|| a.notation.cmp(&b.notation))
+        });
+        let dominant = notations
+            .first()
+            .map(|n| n.notation.clone())
+            .unwrap_or_default();
+        Some(CssNotationConsistency {
+            actions: vec![CssCandidateAction::standardize_notation(
+                "Font sizes",
+                &dominant,
+            )],
+            axis: "Font sizes".to_owned(),
+            notations,
+        })
+    }
+}
+
+/// Fewest distinct unit-classified `font-size` values before a unit-mix candidate
+/// is worth surfacing. Below this the project does not yet have a type scale, so
+/// a px/rem split is noise rather than an inconsistency.
+const MIN_FONT_SIZE_UNIT_MIX: u32 = 6;
+
+/// Classify a `font-size` value's length unit for the unit-consistency
+/// candidate. Returns `None` for function values (`clamp()` / `calc()` /
+/// `min()` / `max()` / `var()`) and bare keywords (`medium`, `larger`,
+/// `inherit`), which carry no single comparable unit. Unit names are lowercased;
+/// recognized type units map to a stable label, anything else to `"other"`.
+fn classify_font_size_unit(value: &str) -> Option<&'static str> {
+    let v = value.trim();
+    if v.is_empty() || v.contains('(') {
+        return None;
+    }
+    if let Some(stripped) = v.strip_suffix('%') {
+        // A bare `%` font-size is `<number>%`; reject anything else (defensive).
+        return stripped
+            .chars()
+            .all(|c| c.is_ascii_digit() || c == '.')
+            .then_some("%");
+    }
+    let unit_start = v.find(|c: char| c.is_ascii_alphabetic())?;
+    let (number, unit) = v.split_at(unit_start);
+    // A dimension is `<number><unit>`; a leading non-numeric prefix means a
+    // keyword (e.g. `medium`), which has no unit.
+    if number.is_empty()
+        || !number
+            .chars()
+            .all(|c| c.is_ascii_digit() || c == '.' || c == '-' || c == '+')
+    {
+        return None;
+    }
+    match unit.to_ascii_lowercase().as_str() {
+        "px" => Some("px"),
+        "rem" => Some("rem"),
+        "em" => Some("em"),
+        "pt" => Some("pt"),
+        _ => Some("other"),
+    }
 }
 
 /// Build the sorted `(name, path)` set difference `present - absent`, locating
@@ -1546,6 +1641,7 @@ fn compute_css_analytics_report(
     let (unreferenced_keyframes, undefined_keyframes) = tokens.finalize(&mut summary);
     let duplicate_declaration_blocks = tokens.group_duplicate_blocks(&mut summary);
     let unused_at_rules = tokens.group_unused_at_rules(&mut summary);
+    let font_size_unit_mix = tokens.font_size_unit_mix(&mut summary);
     let mut unused_font_faces = tokens.unused_font_faces(&mut summary);
     // The CSS-only set difference cannot see a font family applied from
     // JavaScript / canvas (Excalidraw) or referenced from a `.scss`/`.sass`
@@ -1608,6 +1704,7 @@ fn compute_css_analytics_report(
         unresolved_class_references,
         unreferenced_css_classes,
         unused_font_faces,
+        font_size_unit_mix,
     })
 }
 

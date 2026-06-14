@@ -566,7 +566,7 @@ export type TrendDirection = ("improving" | "declining" | "stable")
 /**
  * Discriminant for [`CssCandidateAction::kind`].
  */
-export type CssCandidateActionType = ("verify-unused" | "verify-undefined" | "consolidate" | "replace-with-token")
+export type CssCandidateActionType = ("verify-unused" | "verify-undefined" | "consolidate" | "replace-with-token" | "standardize")
 /**
  * Discriminant for [`UnusedAtRule::kind`].
  */
@@ -4863,6 +4863,20 @@ unreferenced_css_classes?: UnreferencedCssClass[]
  * styles or set via JavaScript. Sorted by `(path, family)`.
  */
 unused_font_faces?: UnusedFontFace[]
+/**
+ * The project authors `font-size` values in several units (`px`, `rem`,
+ * `em`, `%`), with a per-unit distinct-value count: a type-scale
+ * inconsistency smell (mixing `px` and `rem` for type works against
+ * user-zoom accessibility). Present only above a conservative floor.
+ * Advisory candidate, never gated: the spread can be intentional (fixed
+ * chrome in `px`, body type in `rem`).
+ *
+ * Color-notation mixing (hex vs rgb vs hsl) is deliberately NOT surfaced:
+ * the CSS parser canonicalizes every legacy sRGB notation to hex before
+ * fallow sees the value, so the authored distinction is already gone and
+ * cannot be recovered without a separate raw-token pass.
+ */
+font_size_unit_mix?: (CssNotationConsistency | null)
 }
 /**
  * Per-stylesheet CSS analytics.
@@ -5176,6 +5190,12 @@ unreferenced_css_classes: number
  */
 unused_font_faces: number
 /**
+ * Number of distinct `font-size` units (`px` / `rem` / `em` / `%`) authored
+ * across the codebase. Mixing units is a type-scale consistency smell,
+ * broken out in `font_size_unit_mix`.
+ */
+font_size_units_used: number
+/**
  * Number of analyzed stylesheets whose per-rule `notable_rules` list was
  * truncated at the per-file cap, so a consumer knows the per-rule detail is
  * incomplete without walking every file.
@@ -5442,6 +5462,44 @@ path: string
  * so consumers can iterate `actions` uniformly across every finding type.
  */
 actions: CssCandidateAction[]
+}
+/**
+ * A design-token notation-consistency candidate: the distinct notations used
+ * across the codebase for one value axis (today, length units on `font-size`),
+ * with a per-notation distinct-value count. Emitted only above a floor, since
+ * mixing notations for one axis is a "no single source of truth" smell.
+ * Advisory: the action is "standardize on one notation", not a single search.
+ */
+export interface CssNotationConsistency {
+/**
+ * The value axis these notations describe, e.g. `"Colors"` or
+ * `"Font sizes"`.
+ */
+axis: string
+/**
+ * Per-notation distinct-value counts, sorted by count descending then
+ * notation name (so the dominant notation is first and ties are stable).
+ */
+notations: CssNotationCount[]
+/**
+ * Read-only guidance step(s), so consumers can iterate `actions` uniformly
+ * across every candidate type. Always at least one entry.
+ */
+actions: CssCandidateAction[]
+}
+/**
+ * One notation bucket and the count of distinct values authored in it.
+ */
+export interface CssNotationCount {
+/**
+ * The notation family, e.g. `"hex"`, `"rgb"`, `"hsl"`, `"modern"`, `"px"`,
+ * `"rem"`, `"em"`, `"%"`.
+ */
+notation: string
+/**
+ * Distinct values authored in this notation across the codebase.
+ */
+count: number
 }
 /**
  * Envelope emitted by `fallow explain <issue-type> --format json`.

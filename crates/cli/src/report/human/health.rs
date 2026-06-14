@@ -259,6 +259,7 @@ fn render_css_analytics(lines: &mut Vec<String>, report: &crate::health_types::H
     render_css_unresolved_classes(lines, css);
     render_css_unreferenced_classes(lines, css);
     render_css_unused_font_faces(lines, css);
+    render_css_font_size_unit_mix(lines, css);
 
     let mut notable: Vec<(&str, &fallow_types::extract::CssRuleMetric)> = css
         .files
@@ -483,6 +484,28 @@ fn render_css_unused_font_faces(
                 .to_string(),
         );
     }
+}
+
+/// Render the font-size unit-mix candidate: the project authors its type scale
+/// in several length units (a px/rem accessibility smell), with the per-unit
+/// distinct-value breakdown. Advisory; one line plus the breakdown.
+fn render_css_font_size_unit_mix(
+    lines: &mut Vec<String>,
+    css: &crate::health_types::CssAnalyticsReport,
+) {
+    let Some(mix) = &css.font_size_unit_mix else {
+        return;
+    };
+    let breakdown = mix
+        .notations
+        .iter()
+        .map(|n| format!("{} {}", n.count, n.notation))
+        .collect::<Vec<_>>()
+        .join(", ");
+    lines.push(format!(
+        "  font sizes mix {} units ({breakdown}; candidate, standardize unless intentional)",
+        mix.notations.len(),
+    ));
 }
 
 /// Render the value-sprawl lines: colors / font-sizes / z-indexes always, plus a

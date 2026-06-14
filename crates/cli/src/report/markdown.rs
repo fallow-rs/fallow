@@ -997,6 +997,19 @@ fn write_css_analytics_section(out: &mut String, report: &crate::health_types::H
             named.join(", "),
         );
     }
+    if let Some(mix) = &css.font_size_unit_mix {
+        let breakdown: Vec<String> = mix
+            .notations
+            .iter()
+            .map(|n| format!("{} {}", n.count, n.notation))
+            .collect();
+        let _ = writeln!(
+            out,
+            "- Font sizes mix {} units (candidate, standardize unless intentional): {}",
+            mix.notations.len(),
+            breakdown.join(", "),
+        );
+    }
     out.push('\n');
 }
 
