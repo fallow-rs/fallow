@@ -95,6 +95,17 @@ fn unused_component_prop_key(
     )
 }
 
+fn unused_component_emit_key(
+    item: &fallow_core::results::UnusedComponentEmit,
+    root: &Path,
+) -> String {
+    format!(
+        "unused-component-emit:{}:{}",
+        relative_key_path(&item.path, root),
+        item.emit_name
+    )
+}
+
 fn route_collision_key(item: &fallow_core::results::RouteCollision, root: &Path) -> String {
     format!(
         "route-collision:{}:{}",
@@ -371,6 +382,7 @@ pub(super) fn dead_code_keys(
         unprovided_injects,
         unrendered_components,
         unused_component_props,
+        unused_component_emits,
         route_collisions,
         dynamic_segment_name_conflicts,
         // Non-finding fields: counts and metadata, not attributable to a key.
@@ -423,6 +435,7 @@ pub(super) fn dead_code_keys(
     collector.add_unprovided_injects(unprovided_injects);
     collector.add_unrendered_components(unrendered_components);
     collector.add_unused_component_props(unused_component_props);
+    collector.add_unused_component_emits(unused_component_emits);
     collector.add_route_collisions(route_collisions);
     collector.add_dynamic_segment_name_conflicts(dynamic_segment_name_conflicts);
     collector.into_keys()
@@ -537,6 +550,15 @@ impl<'a> DeadCodeKeyCollector<'a> {
     ) {
         for item in items {
             self.insert(unused_component_prop_key(&item.prop, self.root));
+        }
+    }
+
+    fn add_unused_component_emits(
+        &mut self,
+        items: &[fallow_core::results::UnusedComponentEmitFinding],
+    ) {
+        for item in items {
+            self.insert(unused_component_emit_key(&item.emit, self.root));
         }
     }
 
@@ -837,6 +859,7 @@ pub(super) fn retain_introduced_dead_code(
         unprovided_injects,
         unrendered_components,
         unused_component_props,
+        unused_component_emits,
         route_collisions,
         dynamic_segment_name_conflicts,
         // Non-finding fields: counts and metadata, not subject to base-keyed
@@ -922,6 +945,7 @@ pub(super) fn retain_introduced_dead_code(
     unprovided_injects.retain(|item| keep(unprovided_inject_key(&item.inject, root)));
     unrendered_components.retain(|item| keep(unrendered_component_key(&item.component, root)));
     unused_component_props.retain(|item| keep(unused_component_prop_key(&item.prop, root)));
+    unused_component_emits.retain(|item| keep(unused_component_emit_key(&item.emit, root)));
     route_collisions.retain(|item| keep(route_collision_key(&item.collision, root)));
     dynamic_segment_name_conflicts
         .retain(|item| keep(dynamic_segment_name_conflict_key(&item.conflict, root)));
@@ -1204,6 +1228,13 @@ impl DeadCodeJsonAnnotator<'_> {
             "unused_component_props",
             self.results.unused_component_props.iter().map(|item| {
                 issue_was_introduced(&unused_component_prop_key(&item.prop, self.root), self.base)
+            }),
+        );
+        annotate_issue_array(
+            self.json,
+            "unused_component_emits",
+            self.results.unused_component_emits.iter().map(|item| {
+                issue_was_introduced(&unused_component_emit_key(&item.emit, self.root), self.base)
             }),
         );
         annotate_issue_array(

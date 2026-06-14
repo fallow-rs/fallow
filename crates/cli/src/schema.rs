@@ -231,6 +231,10 @@ fn apply_source_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
             m.filter_flag = Some("--unused-component-props");
             m.suppress = Some(("unused-component-prop", false));
         }
+        "unused-component-emit" => {
+            m.filter_flag = Some("--unused-component-emits");
+            m.suppress = Some(("unused-component-emit", false));
+        }
         "unresolved-import" => {
             m.filter_flag = Some("--unresolved-imports");
             m.suppress = Some(("unresolved-import", false));

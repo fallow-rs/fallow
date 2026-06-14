@@ -381,7 +381,13 @@ use crate::MemberKind;
 /// Bumped to 159 because `ComponentProp` gained a `local` field (the destructure
 /// alias for a renamed prop), changing the cached wire shape; a warm 158 cache
 /// would bitcode-misread it.
-pub(super) const CACHE_VERSION: u32 = 159;
+///
+/// Bumped to 160 for the `unused-component-emit` detector: Vue `<script setup>`
+/// extraction now records `defineEmits` declared events on `component_emits`
+/// (with `used`) plus the `has_unharvestable_emits` / `has_dynamic_emit` /
+/// `has_emit_whole_object_use` abstain flags, so a warm cache from 159 would
+/// report zero unused-component-emit findings.
+pub(super) const CACHE_VERSION: u32 = 160;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -428,7 +434,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 912);
+assert_cached_type_size!(CachedModule, 936);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 56);
@@ -581,6 +587,17 @@ pub struct CachedModule {
     /// Whether `defineProps` had an unharvestable type-reference argument.
     /// Round-trips for the abstain.
     pub has_unharvestable_props: bool,
+    /// Vue `<script setup>` `defineEmits` declared events. Round-trips so the
+    /// `unused-component-emit` detector sees them on warm-cache loads.
+    pub component_emits: Vec<fallow_types::extract::ComponentEmit>,
+    /// Whether `defineEmits` had an unharvestable argument. Round-trips for the
+    /// abstain.
+    pub has_unharvestable_emits: bool,
+    /// Whether an `emit(<nonLiteral>)` call was seen. Round-trips for the abstain.
+    pub has_dynamic_emit: bool,
+    /// Whether the emit binding was used as a whole value. Round-trips for the
+    /// abstain.
+    pub has_emit_whole_object_use: bool,
 }
 
 /// Cached namespace-object alias.

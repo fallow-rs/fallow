@@ -280,6 +280,7 @@ fn build_check_summary(results: &AnalysisResults) -> CheckSummary {
         unprovided_injects: results.unprovided_injects.len(),
         unrendered_components: results.unrendered_components.len(),
         unused_component_props: results.unused_component_props.len(),
+        unused_component_emits: results.unused_component_emits.len(),
         route_collisions: results.route_collisions.len(),
         dynamic_segment_name_conflicts: results.dynamic_segment_name_conflicts.len(),
     }

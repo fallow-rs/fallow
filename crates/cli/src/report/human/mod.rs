@@ -176,6 +176,10 @@ fn section_footer_text(title: &str) -> Option<(&'static str, &'static str)> {
             "A Vue <script setup> defineProps prop referenced nowhere inside its own component (remove it or use it)",
             "https://docs.fallow.tools/explanations/dead-code#unused-component-props",
         )),
+        "Unused component emits" => Some((
+            "A Vue <script setup> defineEmits event emitted nowhere inside its own component (remove it or emit it)",
+            "https://docs.fallow.tools/explanations/dead-code#unused-component-emits",
+        )),
         t if t.starts_with("Type-only") => Some((
             "Dependencies only used for type imports \u{2014} consider moving to devDependencies",
             "https://docs.fallow.tools/explanations/dead-code#type-only-dependencies",
@@ -212,6 +216,7 @@ fn section_suppress_rule(title: &str) -> Option<&'static str> {
         "Unprovided injects" => Some("unprovided-injects"),
         "Unrendered components" => Some("unrendered-components"),
         "Unused component props" => Some("unused-component-props"),
+        "Unused component emits" => Some("unused-component-emits"),
         _ => None,
     }
 }

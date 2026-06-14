@@ -1277,6 +1277,7 @@ fn build_policy_section(
         && results.unprovided_injects.is_empty()
         && results.unrendered_components.is_empty()
         && results.unused_component_props.is_empty()
+        && results.unused_component_emits.is_empty()
         && results.route_collisions.is_empty()
         && results.dynamic_segment_name_conflicts.is_empty()
     {
@@ -1361,6 +1362,19 @@ fn build_policy_section(
             p.prop.path.as_path()
         },
         format_detail: &format_unused_component_prop,
+    });
+
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.unused_component_emits,
+        title: "Unused component emits",
+        level: severity_to_level(rules.unused_component_emits),
+        root,
+        max_files: MAX_FLAT_ITEMS,
+        get_path: |e: &fallow_types::output_dead_code::UnusedComponentEmitFinding| {
+            e.emit.path.as_path()
+        },
+        format_detail: &format_unused_component_emit,
     });
 
     build_human_grouped_section(GroupedSectionInput {
@@ -1470,6 +1484,18 @@ fn format_unused_component_prop(
         format!(":{}", p.line).dimmed(),
         p.prop_name.bold(),
         "is declared but referenced nowhere in this component (remove it or use it)".dimmed(),
+    )
+}
+
+fn format_unused_component_emit(
+    entry: &fallow_types::output_dead_code::UnusedComponentEmitFinding,
+) -> String {
+    let e = &entry.emit;
+    format!(
+        "{} {} {}",
+        format!(":{}", e.line).dimmed(),
+        e.emit_name.bold(),
+        "is declared but emitted nowhere in this component (remove it or emit it)".dimmed(),
     )
 }
 
@@ -2268,6 +2294,9 @@ fn collect_matching_rules(
     for p in &results.unused_component_props {
         check(&p.prop.path);
     }
+    for e in &results.unused_component_emits {
+        check(&e.emit.path);
+    }
     for c in &results.route_collisions {
         check(&c.collision.path);
     }
@@ -2548,6 +2577,10 @@ fn build_summary_footer(
         results.unused_component_props.len(),
         "unused component props",
     );
+    add(
+        results.unused_component_emits.len(),
+        "unused component emits",
+    );
     add(results.stale_suppressions.len(), "stale suppressions");
 
     parts.join(" \u{00b7} ")
@@ -2700,6 +2733,11 @@ fn check_summary_categories(
             "Unused component props",
             results.unused_component_props.len(),
             severity_to_level(rules.unused_component_props),
+        ),
+        (
+            "Unused component emits",
+            results.unused_component_emits.len(),
+            severity_to_level(rules.unused_component_emits),
         ),
         (
             "Stale suppressions",

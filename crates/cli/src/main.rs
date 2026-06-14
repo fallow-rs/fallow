@@ -482,6 +482,10 @@ enum Command {
         #[arg(long)]
         unused_component_props: bool,
 
+        /// Only report unused component emits
+        #[arg(long)]
+        unused_component_emits: bool,
+
         /// Only report unresolved imports
         #[arg(long)]
         unresolved_imports: bool,
@@ -3166,6 +3170,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             unprovided_injects,
             unrendered_components,
             unused_component_props,
+            unused_component_emits,
             unresolved_imports,
             unlisted_deps,
             duplicate_exports,
@@ -3200,6 +3205,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
                     unprovided_injects,
                     unrendered_components,
                     unused_component_props,
+                    unused_component_emits,
                     unresolved_imports,
                     unlisted_deps,
                     duplicate_exports,

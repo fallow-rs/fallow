@@ -581,6 +581,35 @@ pub fn push_member_diagnostics(
             });
         }
     }
+
+    for finding in &results.unused_component_emits {
+        let e = &finding.emit;
+        if let Some(uri) = Uri::from_file_path(&e.path) {
+            let line = e.line.saturating_sub(1);
+            map.entry(uri).or_default().push(Diagnostic {
+                range: Range {
+                    start: Position {
+                        line,
+                        character: e.col,
+                    },
+                    end: Position {
+                        line,
+                        character: e.col + e.emit_name.len() as u32,
+                    },
+                },
+                severity: Some(DiagnosticSeverity::HINT),
+                source: Some("fallow".to_string()),
+                code: Some(NumberOrString::String("unused-component-emit".to_string())),
+                code_description: doc_link("unused-component-emits"),
+                message: format!(
+                    "Emit '{}' is declared but emitted nowhere in this component",
+                    e.emit_name
+                ),
+                tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+                ..Default::default()
+            });
+        }
+    }
 }
 
 #[cfg(test)]

@@ -294,6 +294,12 @@ fn push_markdown_graph_sections(
     );
     markdown_section(
         out,
+        &results.unused_component_emits,
+        "Unused component emits",
+        |e| format_markdown_unused_component_emit(e, rel),
+    );
+    markdown_section(
+        out,
         &results.stale_suppressions,
         "Stale suppressions",
         |s| {
@@ -483,6 +489,18 @@ fn format_markdown_unused_component_prop(
         rel(&p.prop.path),
         p.prop.line,
         escape_backticks(&p.prop.prop_name),
+    )]
+}
+
+fn format_markdown_unused_component_emit(
+    e: &fallow_core::results::UnusedComponentEmitFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    vec![format!(
+        "- `{}`:{} `{}` is declared but emitted nowhere in this component (remove it or emit it)",
+        rel(&e.emit.path),
+        e.emit.line,
+        escape_backticks(&e.emit.emit_name),
     )]
 }
 

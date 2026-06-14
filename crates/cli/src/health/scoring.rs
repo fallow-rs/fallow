@@ -1898,6 +1898,10 @@ mod tests {
             has_define_expose: false,
             has_define_model: false,
             has_unharvestable_props: false,
+            component_emits: Vec::new(),
+            has_unharvestable_emits: false,
+            has_dynamic_emit: false,
+            has_emit_whole_object_use: false,
         };
 
         let (cyc, cog, funcs, lines) = aggregate_complexity(&module);
@@ -1955,6 +1959,10 @@ mod tests {
             has_define_expose: false,
             has_define_model: false,
             has_unharvestable_props: false,
+            component_emits: Vec::new(),
+            has_unharvestable_emits: false,
+            has_dynamic_emit: false,
+            has_emit_whole_object_use: false,
             line_offsets: vec![0, 10, 20, 30, 40], // 5 lines
             complexity: vec![fallow_types::extract::FunctionComplexity {
                 name: "doStuff".into(),
@@ -2024,6 +2032,10 @@ mod tests {
             has_define_expose: false,
             has_define_model: false,
             has_unharvestable_props: false,
+            component_emits: Vec::new(),
+            has_unharvestable_emits: false,
+            has_dynamic_emit: false,
+            has_emit_whole_object_use: false,
             line_offsets: vec![0, 10, 20], // 3 lines
             complexity: vec![
                 fallow_types::extract::FunctionComplexity {
@@ -2312,6 +2324,10 @@ mod tests {
             has_define_expose: false,
             has_define_model: false,
             has_unharvestable_props: false,
+            component_emits: Vec::new(),
+            has_unharvestable_emits: false,
+            has_dynamic_emit: false,
+            has_emit_whole_object_use: false,
         }
     }
 

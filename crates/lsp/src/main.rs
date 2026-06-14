@@ -64,6 +64,7 @@ struct AnalysisCompleteParams {
     unprovided_injects: usize,
     unrendered_components: usize,
     unused_component_props: usize,
+    unused_component_emits: usize,
     unresolved_imports: usize,
     unlisted_dependencies: usize,
     duplicate_exports: usize,
@@ -101,6 +102,7 @@ fn analysis_complete_params(
         unprovided_injects: results.unprovided_injects.len(),
         unrendered_components: results.unrendered_components.len(),
         unused_component_props: results.unused_component_props.len(),
+        unused_component_emits: results.unused_component_emits.len(),
         unresolved_imports: results.unresolved_imports.len(),
         unlisted_dependencies: results.unlisted_dependencies.len(),
         duplicate_exports: results.duplicate_exports.len(),
@@ -267,6 +269,11 @@ const DIAGNOSTIC_ISSUE_TYPES: &[DiagnosticIssueType] = &[
         config_key: Some("unused-component-props"),
         code: "unused-component-prop",
         label: "Unused Component Props",
+    },
+    DiagnosticIssueType {
+        config_key: Some("unused-component-emits"),
+        code: "unused-component-emit",
+        label: "Unused Component Emits",
     },
     DiagnosticIssueType {
         config_key: Some("route-collision"),
@@ -2717,6 +2724,7 @@ export function choose(value: number): string {
             unprovided_injects: vec![],
             unrendered_components: vec![],
             unused_component_props: vec![],
+            unused_component_emits: vec![],
             route_collisions: vec![fallow_core::results::RouteCollisionFinding::with_actions(
                 fallow_core::results::RouteCollision {
                     path: "/app/(a)/about/page.tsx".into(),

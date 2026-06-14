@@ -714,6 +714,7 @@ mod tests {
             unprovided_injects: 0,
             unrendered_components: 0,
             unused_component_props: 0,
+            unused_component_emits: 0,
             unresolved_imports: 1,
             unlisted_dependencies: 0,
             duplicate_exports: 1,

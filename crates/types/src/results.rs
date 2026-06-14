@@ -17,9 +17,9 @@ use crate::output_dead_code::{
     PrivateTypeLeakFinding, ReExportCycleFinding, RouteCollisionFinding, TestOnlyDependencyFinding,
     TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
     UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
-    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentPropFinding,
-    UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
-    UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
+    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentEmitFinding,
+    UnusedComponentPropFinding, UnusedDependencyFinding, UnusedDependencyOverrideFinding,
+    UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
     UnusedOptionalDependencyFinding, UnusedStoreMemberFinding, UnusedTypeFinding,
 };
 use crate::serde_path;
@@ -251,6 +251,12 @@ pub struct AnalysisResults {
     /// array natively. Default severity is `warn`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unused_component_props: Vec<UnusedComponentPropFinding>,
+    /// Vue `<script setup>` `defineEmits` events emitted nowhere in their own SFC
+    /// (no `emit('<name>')` call). Wrapped in [`UnusedComponentEmitFinding`] so
+    /// each entry carries a typed `actions` array natively. Default severity is
+    /// `warn`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unused_component_emits: Vec<UnusedComponentEmitFinding>,
     /// Number of suppression entries that matched an issue during analysis.
     /// Human output uses this for the suppression footer; it is skipped in
     /// machine output to avoid changing the public JSON issue contract.
@@ -376,6 +382,7 @@ impl AnalysisResults {
             + self.route_collisions.len()
             + self.dynamic_segment_name_conflicts.len()
             + self.unused_component_props.len()
+            + self.unused_component_emits.len()
     }
 
     /// Whether any issues were found.
@@ -433,6 +440,7 @@ impl AnalysisResults {
             route_collisions,
             dynamic_segment_name_conflicts,
             unused_component_props,
+            unused_component_emits,
             suppression_count,
             active_suppressions,
             feature_flags,
@@ -487,6 +495,7 @@ impl AnalysisResults {
         self.dynamic_segment_name_conflicts
             .extend(dynamic_segment_name_conflicts);
         self.unused_component_props.extend(unused_component_props);
+        self.unused_component_emits.extend(unused_component_emits);
         self.feature_flags.extend(feature_flags);
         self.security_findings.extend(security_findings);
         self.security_unresolved_edge_files += security_unresolved_edge_files;
@@ -669,6 +678,14 @@ impl AnalysisResults {
                 .cmp(&b.prop.path)
                 .then(a.prop.line.cmp(&b.prop.line))
                 .then(a.prop.prop_name.cmp(&b.prop.prop_name))
+        });
+
+        self.unused_component_emits.sort_by(|a, b| {
+            a.emit
+                .path
+                .cmp(&b.emit.path)
+                .then(a.emit.line.cmp(&b.emit.line))
+                .then(a.emit.emit_name.cmp(&b.emit.emit_name))
         });
     }
 
@@ -1050,6 +1067,26 @@ pub struct UnusedComponentProp {
     /// 1-based line number of the prop declaration.
     pub line: u32,
     /// 0-based byte column offset of the prop declaration.
+    pub col: u32,
+}
+
+/// A Vue `<script setup>` `defineEmits` declared event that is EMITTED nowhere
+/// inside its own single-file component (no `emit('<name>')` call). Single-file
+/// finding, zero-FP doctrine: the whole file abstains on any
+/// unharvestable / dynamic-emit / whole-object-use / `defineModel` signal.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedComponentEmit {
+    /// The `.vue` SFC declaring the unused emit.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// The component name (the `.vue` file stem).
+    pub component_name: String,
+    /// The declared emit event name that is never emitted.
+    pub emit_name: String,
+    /// 1-based line number of the emit declaration.
+    pub line: u32,
+    /// 0-based byte column offset of the emit declaration.
     pub col: u32,
 }
 

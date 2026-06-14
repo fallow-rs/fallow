@@ -18,7 +18,7 @@ use oxc_ast::ast::*;
 use oxc_semantic::SemanticBuilder;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_types::extract::ComponentProp;
+use fallow_types::extract::{ComponentEmit, ComponentProp};
 
 /// Result of harvesting `defineProps` from a `<script setup>` program.
 #[derive(Debug, Default)]
@@ -357,6 +357,261 @@ impl<'a> oxc_ast_visit::Visit<'a> for PropBindingVisitor<'a> {
     fn visit_identifier_reference(&mut self, ident: &IdentifierReference<'a>) {
         // Any bare reference to the props binding that is NOT a `props.<member>`
         // object (those are short-circuited above) is a whole-object use.
+        if ident.name.as_str() == self.binding {
+            self.used_whole = true;
+        }
+    }
+}
+
+/// Result of harvesting `defineEmits` from a `<script setup>` program for the
+/// `unused-component-emit` detector. Mirrors [`DefinePropsHarvest`].
+#[derive(Debug, Default)]
+pub struct DefineEmitsHarvest {
+    /// Declared emit events with their span and `used` flag. An event is `used`
+    /// when the bound emit name is called as `emit('<name>')` somewhere in the
+    /// program.
+    pub emits: Vec<ComponentEmit>,
+    /// `defineEmits` had a type-reference type argument (`defineEmits<MyEmits>()`)
+    /// or another non-literal form, so the event names are unharvestable.
+    pub has_unharvestable_emits: bool,
+    /// An `emit(<nonLiteral>)` call was seen: the emitted event cannot be known,
+    /// so the detector abstains on the whole file.
+    pub has_dynamic_emit: bool,
+    /// The emit binding was used as a WHOLE value (passed to a function,
+    /// returned, or spread), which can emit any event opaquely. Abstain.
+    pub has_emit_whole_object_use: bool,
+    /// The `defineEmits` return binding name (`const emit = defineEmits(...)`),
+    /// used by the template scanner to credit `<emit>('<name>')` calls in the
+    /// template. `None` when no harvestable bound emit exists.
+    pub emit_binding: Option<String>,
+}
+
+/// Harvest `defineEmits` declared event names, abstain flags, and per-event
+/// `used` status from a `<script setup>` program. The byte spans returned are
+/// RELATIVE to the script body; the caller remaps them onto the SFC source.
+///
+/// Three declaration forms are harvested:
+/// 1. Type tuple-call: `defineEmits<{ (e: 'foo'): void; (e: 'bar', n: number): void }>()`.
+/// 2. Type object (Vue 3.3+): `defineEmits<{ foo: [x: string]; bar: [] }>()`.
+/// 3. Runtime array: `defineEmits(['foo', 'bar'])`.
+///
+/// A type-reference type argument or any non-literal form sets
+/// `has_unharvestable_emits` (abstain). The `defineEmits` return MUST be bound to
+/// a name (`const emit = defineEmits(...)`) for usage to be trackable; a bare
+/// unbound `defineEmits([...])` sets `has_unharvestable_emits` (the component
+/// cannot emit, usage is untrackable, so abstain).
+pub fn harvest_define_emits(program: &Program<'_>) -> DefineEmitsHarvest {
+    let mut harvest = DefineEmitsHarvest::default();
+
+    let mut emit_return_binding: Option<String> = None;
+    let mut emit_names: Vec<(String, u32)> = Vec::new();
+
+    for stmt in &program.body {
+        match stmt {
+            Statement::VariableDeclaration(decl) => {
+                for declarator in &decl.declarations {
+                    let Some(init) = &declarator.init else {
+                        continue;
+                    };
+                    let Some(call) = unwrap_define_emits_call(init) else {
+                        continue;
+                    };
+                    if emit_names.is_empty() && !harvest.has_unharvestable_emits {
+                        collect_define_emits_names(call, &mut emit_names, &mut harvest);
+                    }
+                    // The return must bind to a plain identifier to be trackable.
+                    if let BindingPattern::BindingIdentifier(ident) = &declarator.id {
+                        emit_return_binding = Some(ident.name.to_string());
+                    } else {
+                        // A destructured / non-identifier binding hides the emit
+                        // function name: usage untrackable, abstain.
+                        harvest.has_unharvestable_emits = true;
+                    }
+                }
+            }
+            Statement::ExpressionStatement(expr_stmt) => {
+                // Bare `defineEmits(...)` with no binding: the component cannot
+                // emit through a name we can track. Abstain.
+                if let Some(call) = unwrap_define_emits_call(&expr_stmt.expression) {
+                    if emit_names.is_empty() && !harvest.has_unharvestable_emits {
+                        collect_define_emits_names(call, &mut emit_names, &mut harvest);
+                    }
+                    harvest.has_unharvestable_emits = true;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if emit_names.is_empty() {
+        return harvest;
+    }
+
+    // Without a bound emit name, every declared event is untrackable. Abstain.
+    let Some(binding) = emit_return_binding else {
+        harvest.has_unharvestable_emits = true;
+        return harvest;
+    };
+
+    let mut visitor = EmitBindingVisitor {
+        binding: &binding,
+        emitted: FxHashSet::default(),
+        has_dynamic_emit: false,
+        used_whole: false,
+    };
+    oxc_ast_visit::Visit::visit_program(&mut visitor, program);
+    if visitor.has_dynamic_emit {
+        harvest.has_dynamic_emit = true;
+    }
+    if visitor.used_whole {
+        harvest.has_emit_whole_object_use = true;
+    }
+
+    for (name, span_start) in emit_names {
+        let used = visitor.emitted.contains(&name);
+        harvest.emits.push(ComponentEmit {
+            name,
+            span_start,
+            used,
+        });
+    }
+
+    harvest.emit_binding = Some(binding);
+    harvest
+}
+
+/// Unwrap an expression to the inner `defineEmits(...)` call. Returns `None` for
+/// anything else.
+fn unwrap_define_emits_call<'a, 'b>(expr: &'b Expression<'a>) -> Option<&'b CallExpression<'a>> {
+    let Expression::CallExpression(call) = expr else {
+        return None;
+    };
+    let callee_name = simple_callee_name(&call.callee)?;
+    if callee_name == "defineEmits" {
+        return Some(call);
+    }
+    None
+}
+
+/// Collect emit event names from a `defineEmits(...)` call: the type tuple-call
+/// signatures, the type object-literal property names, or the runtime
+/// string-literal array elements. A type reference or non-literal form sets
+/// `has_unharvestable_emits` and harvests nothing.
+fn collect_define_emits_names(
+    call: &CallExpression<'_>,
+    emit_names: &mut Vec<(String, u32)>,
+    harvest: &mut DefineEmitsHarvest,
+) {
+    // Inline TS form: `defineEmits<{ ... }>()`.
+    if let Some(type_args) = &call.type_arguments {
+        if let Some(first) = type_args.params.first() {
+            match first {
+                TSType::TSTypeLiteral(lit) => {
+                    for member in &lit.members {
+                        match member {
+                            // Tuple-call form: `(e: 'foo'): void`. The first
+                            // parameter's string-literal type is the event name.
+                            TSSignature::TSCallSignatureDeclaration(sig) => {
+                                if let Some((name, span_start)) = call_signature_event_name(sig) {
+                                    emit_names.push((name, span_start));
+                                } else {
+                                    harvest.has_unharvestable_emits = true;
+                                }
+                            }
+                            // Object form (Vue 3.3+): `foo: [x: string]`. The
+                            // property name is the event name.
+                            TSSignature::TSPropertySignature(sig) => {
+                                if let Some(name) = property_key_name(&sig.key) {
+                                    emit_names.push((name, sig.span.start));
+                                }
+                            }
+                            _ => harvest.has_unharvestable_emits = true,
+                        }
+                    }
+                }
+                // A type reference (`defineEmits<MyEmits>()`) or any non-literal
+                // type argument: names require cross-file resolution. Abstain.
+                _ => harvest.has_unharvestable_emits = true,
+            }
+        }
+        return;
+    }
+
+    // Runtime array form: `defineEmits(['foo', 'bar'])`.
+    if let Some(first) = call.arguments.first().and_then(|arg| arg.as_expression()) {
+        match first {
+            Expression::ArrayExpression(arr) => {
+                for element in &arr.elements {
+                    if let ArrayExpressionElement::StringLiteral(lit) = element {
+                        emit_names.push((lit.value.to_string(), lit.span.start));
+                    } else if !matches!(element, ArrayExpressionElement::Elision(_)) {
+                        harvest.has_unharvestable_emits = true;
+                    }
+                }
+            }
+            // A non-array runtime argument (an object validator, an identifier,
+            // a call): unharvestable in v1. Abstain.
+            _ => harvest.has_unharvestable_emits = true,
+        }
+    }
+}
+
+/// The first parameter's string-literal type from a `TSCallSignatureDeclaration`
+/// member (`(e: 'foo'): void`), with the signature's start as the span anchor.
+fn call_signature_event_name(sig: &TSCallSignatureDeclaration<'_>) -> Option<(String, u32)> {
+    let first = sig.params.items.first()?;
+    let type_annotation = first.type_annotation.as_deref()?;
+    if let TSType::TSLiteralType(lit) = &type_annotation.type_annotation
+        && let TSLiteral::StringLiteral(str_lit) = &lit.literal
+    {
+        return Some((str_lit.value.to_string(), sig.span.start));
+    }
+    None
+}
+
+/// Inspect every use of the `defineEmits` return binding: collect the event names
+/// emitted via `<binding>('<name>')`, report a dynamic `<binding>(<nonLiteral>)`
+/// emit (event unknowable), and report whether the binding is ever used as a
+/// WHOLE value (passed / returned / spread), all of which force a whole-file
+/// abstain.
+struct EmitBindingVisitor<'a> {
+    binding: &'a str,
+    emitted: FxHashSet<String>,
+    has_dynamic_emit: bool,
+    used_whole: bool,
+}
+
+impl<'a> oxc_ast_visit::Visit<'a> for EmitBindingVisitor<'a> {
+    fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+        // `emit('event')` / `emit('event', payload)`: the bound emit name called
+        // with a string-literal first argument credits that event as used.
+        if let Expression::Identifier(ident) = &call.callee
+            && ident.name.as_str() == self.binding
+        {
+            match call.arguments.first().and_then(|arg| arg.as_expression()) {
+                Some(Expression::StringLiteral(lit)) => {
+                    self.emitted.insert(lit.value.to_string());
+                }
+                // `emit(someVar)` / `emit(\`x\`)` / `emit()`: the event cannot be
+                // known statically. Abstain on the whole file.
+                _ => self.has_dynamic_emit = true,
+            }
+            // Walk the ARGUMENTS (a payload may use the binding elsewhere) but
+            // not re-classify the callee identifier as a whole-object use.
+            for arg in &call.arguments {
+                if let Some(expr) = arg.as_expression() {
+                    self.visit_expression(expr);
+                }
+            }
+            return;
+        }
+        oxc_ast_visit::walk::walk_call_expression(self, call);
+    }
+
+    fn visit_identifier_reference(&mut self, ident: &IdentifierReference<'a>) {
+        // Any bare reference to the emit binding that is NOT the callee of an
+        // `emit(...)` call (short-circuited above) is a whole-value use: the
+        // emit function flowed somewhere opaque. Abstain.
         if ident.name.as_str() == self.binding {
             self.used_whole = true;
         }

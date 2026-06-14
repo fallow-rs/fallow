@@ -114,6 +114,9 @@ pub struct CheckSummary {
     /// Vue `<script setup>` props referenced nowhere inside their own SFC.
     #[serde(default)]
     pub unused_component_props: usize,
+    /// Vue `<script setup>` emits emitted nowhere inside their own SFC.
+    #[serde(default)]
+    pub unused_component_emits: usize,
     /// Imports that could not be resolved against the project's module graph.
     pub unresolved_imports: usize,
     /// Dependencies imported but absent from `package.json`.

@@ -365,6 +365,19 @@ expression: redact_sarif_version(&json_str)
               }
             },
             {
+              "id": "fallow/unused-component-emit",
+              "shortDescription": {
+                "text": "A Vue <script setup> defineEmits event is emitted nowhere in its own component"
+              },
+              "fullDescription": {
+                "text": "A Vue `<script setup>` defineEmits declared event that is emitted nowhere in its own component (no `emit('<name>')` call). vue-tsc / Volar check caller-side emit correctness, not this in-component dead-output direction. Conservative: abstains on `$attrs` fallthrough, whole-object emit use, defineExpose, defineModel, and imported emit-type aliases. Default warn; suppress or remove the emit."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-component-emits",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
               "id": "fallow/route-collision",
               "shortDescription": {
                 "text": "Two or more Next.js App Router route files resolve to the same URL"

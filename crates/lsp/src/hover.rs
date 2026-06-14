@@ -48,6 +48,10 @@ pub fn build_hover(
         return Some(hover);
     }
 
+    if let Some(hover) = check_unused_component_emit(results, file_path, position) {
+        return Some(hover);
+    }
+
     if let Some(hover) = check_unresolved_import(results, file_path, position) {
         return Some(hover);
     }
@@ -502,6 +506,56 @@ fn check_unused_component_prop(
                 },
                 end: Position {
                     line: prop_line,
+                    character: end_col,
+                },
+            }),
+        });
+    }
+
+    None
+}
+
+/// Check if the position is on an unused Vue component emit anchor.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "emit name lengths are bounded by source size"
+)]
+fn check_unused_component_emit(
+    results: &AnalysisResults,
+    file_path: &Path,
+    position: Position,
+) -> Option<Hover> {
+    for finding in &results.unused_component_emits {
+        let e = &finding.emit;
+        if e.path != file_path {
+            continue;
+        }
+        let emit_line = e.line.saturating_sub(1);
+        if emit_line != position.line {
+            continue;
+        }
+        let end_col = e.col + e.emit_name.len() as u32;
+        if position.character < e.col || position.character >= end_col {
+            continue;
+        }
+
+        let value = format!(
+            "**fallow**: Emit {} is declared but emitted nowhere in this component.",
+            format_inline_code(&e.emit_name),
+        );
+
+        return Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value,
+            }),
+            range: Some(Range {
+                start: Position {
+                    line: emit_line,
+                    character: e.col,
+                },
+                end: Position {
+                    line: emit_line,
                     character: end_col,
                 },
             }),

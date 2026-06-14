@@ -11,8 +11,8 @@ use fallow_core::results::{
     PrivateTypeLeak, RouteCollision, StaleSuppression, TestOnlyDependency, TypeOnlyDependency,
     UnlistedDependencyFinding, UnprovidedInject, UnrenderedComponent,
     UnresolvedCatalogReferenceFinding, UnresolvedImport, UnusedCatalogEntryFinding,
-    UnusedComponentProp, UnusedDependency, UnusedDependencyOverrideFinding, UnusedExport,
-    UnusedFile, UnusedMember,
+    UnusedComponentEmit, UnusedComponentProp, UnusedDependency, UnusedDependencyOverrideFinding,
+    UnusedExport, UnusedFile, UnusedMember,
 };
 use rustc_hash::FxHashMap;
 
@@ -617,6 +617,25 @@ fn sarif_unused_component_prop_fields(
     }
 }
 
+fn sarif_unused_component_emit_fields(
+    emit: &UnusedComponentEmit,
+    root: &Path,
+    level: &'static str,
+) -> SarifFields {
+    SarifFields {
+        rule_id: "fallow/unused-component-emit",
+        level,
+        message: format!(
+            "emit \"{}\" is declared but emitted nowhere inside component \"{}\"; remove it or emit it",
+            emit.emit_name, emit.component_name
+        ),
+        uri: relative_uri(&emit.path, root),
+        region: Some((emit.line, emit.col + 1)),
+        source_path: Some(emit.path.clone()),
+        properties: None,
+    }
+}
+
 fn sarif_route_collision_fields(
     collision: &RouteCollision,
     root: &Path,
@@ -1035,6 +1054,11 @@ fn sarif_graph_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
             rules.unused_component_props,
         ),
         (
+            "fallow/unused-component-emit",
+            "A Vue <script setup> defineEmits event emitted nowhere inside its own component",
+            rules.unused_component_emits,
+        ),
+        (
             "fallow/route-collision",
             "Two or more Next.js App Router route files resolve to the same URL",
             rules.route_collision,
@@ -1319,6 +1343,42 @@ fn push_misc_sarif_results(
     }
 }
 
+/// Push the component-contract SARIF results (`unused-component-prop` and
+/// `unused-component-emit`). Extracted from `push_graph_sarif_results` to keep
+/// that function under the unit-size lint.
+fn push_component_contract_sarif_results(
+    sarif_results: &mut Vec<serde_json::Value>,
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+    snippets: &mut SourceSnippetCache,
+) {
+    push_sarif_results(
+        sarif_results,
+        &results.unused_component_props,
+        snippets,
+        |p| {
+            sarif_unused_component_prop_fields(
+                &p.prop,
+                root,
+                severity_to_sarif_level(rules.unused_component_props),
+            )
+        },
+    );
+    push_sarif_results(
+        sarif_results,
+        &results.unused_component_emits,
+        snippets,
+        |e| {
+            sarif_unused_component_emit_fields(
+                &e.emit,
+                root,
+                severity_to_sarif_level(rules.unused_component_emits),
+            )
+        },
+    );
+}
+
 fn push_graph_sarif_results(
     sarif_results: &mut Vec<serde_json::Value>,
     results: &AnalysisResults,
@@ -1434,18 +1494,7 @@ fn push_graph_sarif_results(
             )
         },
     );
-    push_sarif_results(
-        sarif_results,
-        &results.unused_component_props,
-        snippets,
-        |p| {
-            sarif_unused_component_prop_fields(
-                &p.prop,
-                root,
-                severity_to_sarif_level(rules.unused_component_props),
-            )
-        },
-    );
+    push_component_contract_sarif_results(sarif_results, results, root, rules, snippets);
     push_sarif_results(sarif_results, &results.route_collisions, snippets, |c| {
         sarif_route_collision_fields(
             &c.collision,
@@ -2222,11 +2271,12 @@ mod tests {
         let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
             .as_array()
             .expect("rules should be an array");
-        assert_eq!(rules.len(), 35);
+        assert_eq!(rules.len(), 36);
 
         let rule_ids: Vec<&str> = rules.iter().map(|r| r["id"].as_str().unwrap()).collect();
         assert!(rule_ids.contains(&"fallow/unrendered-component"));
         assert!(rule_ids.contains(&"fallow/unused-component-prop"));
+        assert!(rule_ids.contains(&"fallow/unused-component-emit"));
         assert!(rule_ids.contains(&"fallow/route-collision"));
         assert!(rule_ids.contains(&"fallow/dynamic-segment-name-conflict"));
         assert!(rule_ids.contains(&"fallow/unused-file"));

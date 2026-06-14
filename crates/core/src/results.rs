@@ -6,9 +6,9 @@ pub use fallow_types::output_dead_code::{
     PrivateTypeLeakFinding, ReExportCycleFinding, RouteCollisionFinding, TestOnlyDependencyFinding,
     TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
     UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
-    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentPropFinding,
-    UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
-    UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
+    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentEmitFinding,
+    UnusedComponentPropFinding, UnusedDependencyFinding, UnusedDependencyOverrideFinding,
+    UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
     UnusedOptionalDependencyFinding, UnusedStoreMemberFinding, UnusedTypeFinding,
 };
 pub use fallow_types::results::{
@@ -26,8 +26,9 @@ pub use fallow_types::results::{
     SecurityTaintFlow, SecurityUnresolvedCalleeDiagnostic, SecurityZoneCrossing, StaleSuppression,
     SuppressionOrigin, TaintConfidence, TaintEndpoint, TaintPath, TestOnlyDependency, TraceHop,
     TraceHopRole, TypeOnlyDependency, UnlistedDependency, UnprovidedInject, UnrenderedComponent,
-    UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry, UnusedComponentProp,
-    UnusedDependency, UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedMember,
+    UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry, UnusedComponentEmit,
+    UnusedComponentProp, UnusedDependency, UnusedDependencyOverride, UnusedExport, UnusedFile,
+    UnusedMember,
 };
 
 #[cfg(test)]

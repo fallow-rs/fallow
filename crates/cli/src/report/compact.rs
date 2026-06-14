@@ -396,6 +396,14 @@ impl<'a> CompactLineBuilder<'a> {
                 finding.prop.prop_name,
             ));
         }
+        for finding in &self.results.unused_component_emits {
+            self.lines.push(format!(
+                "unused-component-emit:{}:{}:{}",
+                self.rel(&finding.emit.path),
+                finding.emit.line,
+                finding.emit.emit_name,
+            ));
+        }
         for finding in &self.results.route_collisions {
             self.lines.push(format!(
                 "route-collision:{}:{} (url {})",
@@ -1189,7 +1197,7 @@ mod tests {
         let results = sample_results(&root);
         let lines = build_compact_lines(&results, &root);
 
-        assert_eq!(lines.len(), 20);
+        assert_eq!(lines.len(), 21);
 
         assert!(lines[0].starts_with("unused-file:"));
         assert!(lines[1].starts_with("unused-export:"));
@@ -1213,6 +1221,11 @@ mod tests {
             lines
                 .iter()
                 .any(|l| l.starts_with("unused-component-prop:"))
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.starts_with("unused-component-emit:"))
         );
     }
 

@@ -156,6 +156,8 @@ mod type_only_deps;
 mod unprovided_injects;
 #[path = "integration_test/unrendered_components.rs"]
 mod unrendered_components;
+#[path = "integration_test/unused_component_emits.rs"]
+mod unused_component_emits;
 #[path = "integration_test/unused_component_props.rs"]
 mod unused_component_props;
 #[path = "integration_test/unused_enum_members.rs"]

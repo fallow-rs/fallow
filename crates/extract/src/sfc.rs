@@ -79,6 +79,18 @@ static HTML_COMMENT_RE: LazyLock<regex::Regex> =
 static PROPS_ATTRS_SPREAD_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| crate::static_regex(r#"v-bind\s*=\s*["'](?:\$attrs|\$props|props)["']"#));
 
+/// Matches an emit-style call in template markup: a callee identifier (or
+/// `$emit`) followed by `(` and its first argument. Group 1 is the callee name
+/// (filtered against the harvested emit binding / `$emit` by the caller), groups
+/// 2 and 3 are a string-literal first arg (single- or double-quoted: the event
+/// name, credited as used), and group 4 is the first non-space character of a
+/// NON-literal first arg (a dynamic emit, whose event name is unknowable, forcing
+/// a whole-file abstain). Event names allow kebab and namespaced forms
+/// (`update:modelValue`, `my-event`). The Rust `regex` crate has no
+/// backreferences, so the two quote styles are separate alternatives.
+static TEMPLATE_EMIT_CALL_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r#"([\w$]+)\s*\(\s*(?:'([\w:-]*)'|"([\w:-]*)"|(\S))"#));
+
 /// Regex to extract `<style>` block content from Vue/Svelte SFCs.
 /// Mirrors `SCRIPT_BLOCK_RE`: handles `>` inside quoted attribute values and
 /// captures the body so `@import` / `@use` / `@forward` directives can be parsed.
@@ -316,6 +328,7 @@ pub(crate) fn parse_sfc_to_module(
     let mut template_visible_imports: FxHashSet<String> = FxHashSet::default();
     let mut template_visible_bound_targets: FxHashMap<String, String> = FxHashMap::default();
     let mut props_return_binding: Option<String> = None;
+    let mut emit_return_binding: Option<String> = None;
 
     for script in &scripts {
         merge_script_into_module(
@@ -325,6 +338,7 @@ pub(crate) fn parse_sfc_to_module(
             &mut template_visible_imports,
             &mut template_visible_bound_targets,
             &mut props_return_binding,
+            &mut emit_return_binding,
             need_complexity,
         );
     }
@@ -351,6 +365,13 @@ pub(crate) fn parse_sfc_to_module(
         props_return_binding.as_deref(),
         &mut combined,
     );
+
+    // Credit `<emit_binding>('event')` / `$emit('event')` calls in the template
+    // (`@click="emit('close')"`), which the script-only emit usage walk cannot
+    // see. A dynamic template emit (`$emit(someVar)`) abstains the whole file.
+    if kind == SfcKind::Vue && !combined.component_emits.is_empty() {
+        apply_template_emit_usage(source, emit_return_binding.as_deref(), &mut combined);
+    }
 
     // Static relative asset references in markup (`<img src="./logo.png">`)
     // become SideEffect imports so a genuinely-missing asset surfaces as
@@ -438,9 +459,17 @@ fn empty_sfc_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleI
         has_define_expose: false,
         has_define_model: false,
         has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "threads SFC script context plus the prop and emit template-credit return bindings into the per-script merge"
+)]
 fn merge_script_into_module(
     kind: SfcKind,
     script: &SfcScript,
@@ -448,6 +477,7 @@ fn merge_script_into_module(
     template_visible_imports: &mut FxHashSet<String>,
     template_visible_bound_targets: &mut FxHashMap<String, String>,
     props_return_binding: &mut Option<String>,
+    emit_return_binding: &mut Option<String>,
     need_complexity: bool,
 ) {
     if kind == SfcKind::Vue
@@ -533,6 +563,27 @@ fn merge_script_into_module(
         for mut prop in harvest.props {
             prop.span_start += script.byte_offset as u32;
             combined.component_props.push(prop);
+        }
+
+        // `defineEmits` harvesting for `unused-component-emit`. Same span remap.
+        // `defineModel` creates implicit `update:x` emits, so a file with
+        // `defineModel` must abstain emits too (reuse the props-side flag).
+        let emit_harvest = crate::sfc_props::harvest_define_emits(&parser_return.program);
+        if emit_harvest.has_unharvestable_emits {
+            combined.has_unharvestable_emits = true;
+        }
+        if emit_harvest.has_dynamic_emit {
+            combined.has_dynamic_emit = true;
+        }
+        if emit_harvest.has_emit_whole_object_use {
+            combined.has_emit_whole_object_use = true;
+        }
+        if let Some(binding) = emit_harvest.emit_binding {
+            *emit_return_binding = Some(binding);
+        }
+        for mut emit in emit_harvest.emits {
+            emit.span_start += script.byte_offset as u32;
+            combined.component_emits.push(emit);
         }
     }
 
@@ -767,6 +818,65 @@ fn apply_template_usage(
         names.sort_unstable();
         combined.auto_import_candidates.extend(names);
         combined.auto_import_candidates.dedup();
+    }
+}
+
+/// Credit emit events fired from the `<template>` (`@click="emit('close')"`,
+/// `@click="$emit('remove')"`, `:close="{ onClick: () => emit('close') }"`),
+/// which the script-only emit usage walk in `harvest_define_emits` cannot see.
+///
+/// Scans the template-only region (scripts/styles/comments masked) for
+/// [`TEMPLATE_EMIT_CALL_RE`]: a call whose callee is the harvested emit binding
+/// (`emit` / `emits` / whatever it was bound to) or the implicit `$emit` (always
+/// available in a Vue template regardless of `<script setup>` binding). A
+/// string-literal first arg credits the matching `ComponentEmit` as used; a
+/// non-literal first arg (a variable / template-literal) is a dynamic template
+/// emit whose event is unknowable, so the whole file abstains (`has_dynamic_emit`)
+/// to preserve the zero-FP doctrine.
+///
+/// Over-crediting is the safe direction (it only suppresses a finding), so a
+/// liberal raw-source scan is intentional here. The scan is byte-safe: the regex
+/// runs over the `&str` template and only reads captured-group text, never
+/// slicing at arbitrary byte offsets.
+fn apply_template_emit_usage(
+    source: &str,
+    emit_return_binding: Option<&str>,
+    combined: &mut ModuleInfo,
+) {
+    let masked = mask_non_markup_regions(source);
+    let mut used: FxHashSet<String> = FxHashSet::default();
+    let mut dynamic = false;
+
+    for caps in TEMPLATE_EMIT_CALL_RE.captures_iter(&masked) {
+        let Some(callee) = caps.get(1) else {
+            continue;
+        };
+        let callee = callee.as_str();
+        let is_emit_call =
+            callee == "$emit" || emit_return_binding.is_some_and(|binding| callee == binding);
+        if !is_emit_call {
+            continue;
+        }
+        if let Some(event) = caps.get(2).or_else(|| caps.get(3)) {
+            // String-literal first arg (single- or double-quoted): the event
+            // name. Credit it as used.
+            used.insert(event.as_str().to_string());
+        } else if caps.get(4).is_some() {
+            // Non-literal first arg (`$emit(someVar)`, `emit(\`x\`)`): the event
+            // cannot be known. Abstain on the whole file.
+            dynamic = true;
+        }
+    }
+
+    if dynamic {
+        combined.has_dynamic_emit = true;
+    }
+    if !used.is_empty() {
+        for emit in &mut combined.component_emits {
+            if used.contains(&emit.name) {
+                emit.used = true;
+            }
+        }
     }
 }
 

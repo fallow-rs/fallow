@@ -179,6 +179,22 @@ pub struct ModuleInfo {
     /// require cross-file type resolution). The detector abstains on the whole
     /// file so a prop is never mis-flagged.
     pub has_unharvestable_props: bool,
+    /// Vue `<script setup>` `defineEmits` declared events. Consumed by the
+    /// `unused-component-emit` detector to flag an event emitted nowhere in its
+    /// own SFC. Each entry carries `used`.
+    pub component_emits: Vec<ComponentEmit>,
+    /// `true` when `defineEmits` was called with an unharvestable argument (a
+    /// type-reference type argument such as `defineEmits<MyEmits>()`, a
+    /// non-literal runtime form, or an unbound `defineEmits([...])`). The
+    /// detector abstains on the whole file so an emit is never mis-flagged.
+    pub has_unharvestable_emits: bool,
+    /// `true` when an `emit(<nonLiteral>)` call was seen (the emitted event name
+    /// cannot be known statically). The detector abstains on the whole file.
+    pub has_dynamic_emit: bool,
+    /// `true` when the `defineEmits` return binding was used as a WHOLE value
+    /// (passed to a function, returned, or spread), which can emit any event
+    /// opaquely. The detector abstains on the whole file.
+    pub has_emit_whole_object_use: bool,
 }
 
 impl ModuleInfo {
@@ -1122,6 +1138,23 @@ pub struct ComponentProp {
     pub used_in_template: bool,
 }
 
+/// A Vue `<script setup>` `defineEmits` declared event, harvested from the type
+/// tuple-call form (`defineEmits<{ (e: 'foo'): void }>()`), the type object form
+/// (`defineEmits<{ foo: [x: string] }>()`), or the runtime array form
+/// (`defineEmits(['foo'])`). `used` is set during extraction when the bound emit
+/// name is called as `emit('<name>')`. The `unused-component-emit` detector flags
+/// an event where `used` is false. See `harvest_define_emits` in `sfc_props.rs`.
+#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode, PartialEq, Eq)]
+pub struct ComponentEmit {
+    /// The declared emit event name.
+    pub name: String,
+    /// Start byte offset of the emit declaration (anchors the finding).
+    pub span_start: u32,
+    /// Whether this event is emitted via `emit('<name>')` somewhere in the
+    /// component's `<script>`.
+    pub used: bool,
+}
+
 #[expect(
     clippy::trivially_copy_pass_by_ref,
     reason = "serde serialize_with requires &T"
@@ -1208,7 +1241,7 @@ const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 216);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 912);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 944);
 
 /// A re-export declaration.
 #[derive(Debug, Clone)]
@@ -1441,6 +1474,10 @@ mod tests {
             has_define_expose: false,
             has_define_model: false,
             has_unharvestable_props: false,
+            component_emits: Vec::new(),
+            has_unharvestable_emits: false,
+            has_dynamic_emit: false,
+            has_emit_whole_object_use: false,
         };
 
         module.release_resolution_payload();

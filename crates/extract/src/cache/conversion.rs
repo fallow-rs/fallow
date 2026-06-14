@@ -512,6 +512,10 @@ pub fn cached_to_module_opts(
         has_define_expose: cached.has_define_expose,
         has_define_model: cached.has_define_model,
         has_unharvestable_props: cached.has_unharvestable_props,
+        component_emits: cached.component_emits.clone(),
+        has_unharvestable_emits: cached.has_unharvestable_emits,
+        has_dynamic_emit: cached.has_dynamic_emit,
+        has_emit_whole_object_use: cached.has_emit_whole_object_use,
     }
 }
 
@@ -581,5 +585,9 @@ pub fn module_to_cached(
         has_define_expose: module.has_define_expose,
         has_define_model: module.has_define_model,
         has_unharvestable_props: module.has_unharvestable_props,
+        component_emits: module.component_emits.clone(),
+        has_unharvestable_emits: module.has_unharvestable_emits,
+        has_dynamic_emit: module.has_dynamic_emit,
+        has_emit_whole_object_use: module.has_emit_whole_object_use,
     }
 }

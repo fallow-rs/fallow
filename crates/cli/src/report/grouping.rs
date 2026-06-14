@@ -359,6 +359,11 @@ where
                 .unused_component_props
                 .push(item.clone());
         }
+        for item in &results.unused_component_emits {
+            self.entry_for_path(&item.emit.path)
+                .unused_component_emits
+                .push(item.clone());
+        }
         for item in &results.stale_suppressions {
             self.entry_for_path(&item.path)
                 .stale_suppressions

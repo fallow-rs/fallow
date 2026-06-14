@@ -1119,6 +1119,13 @@ dynamic_segment_name_conflicts?: DynamicSegmentNameConflictFinding[]
  * array natively. Default severity is `warn`.
  */
 unused_component_props?: UnusedComponentPropFinding[]
+/**
+ * Vue `<script setup>` `defineEmits` events emitted nowhere in their own SFC
+ * (no `emit('<name>')` call). Wrapped in [`UnusedComponentEmitFinding`] so
+ * each entry carries a typed `actions` array natively. Default severity is
+ * `warn`.
+ */
+unused_component_emits?: UnusedComponentEmitFinding[]
 baseline_deltas?: (BaselineDeltas | null)
 baseline?: (BaselineMatch | null)
 regression?: (RegressionResult | null)
@@ -1208,6 +1215,10 @@ unrendered_components?: number
  * Vue `<script setup>` props referenced nowhere inside their own SFC.
  */
 unused_component_props?: number
+/**
+ * Vue `<script setup>` emits emitted nowhere inside their own SFC.
+ */
+unused_component_emits?: number
 /**
  * Imports that could not be resolved against the project's module graph.
  */
@@ -2859,6 +2870,44 @@ prop_name: string
 line: number
 /**
  * 0-based byte column offset of the prop declaration.
+ */
+col: number
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+}
+/**
+ * Wire-shape envelope for an [`UnusedComponentEmit`] finding. There is no safe
+ * auto-fix: removing a declared emit is judgement-bearing (the event may be
+ * part of a deliberately-stable public component API). The only action is a
+ * line-level suppress at the emit declaration.
+ */
+export interface UnusedComponentEmitFinding {
+/**
+ * The `.vue` SFC declaring the unused emit.
+ */
+path: string
+/**
+ * The component name (the `.vue` file stem).
+ */
+component_name: string
+/**
+ * The declared emit event name that is never emitted.
+ */
+emit_name: string
+/**
+ * 1-based line number of the emit declaration.
+ */
+line: number
+/**
+ * 0-based byte column offset of the emit declaration.
  */
 col: number
 /**
@@ -5757,6 +5806,13 @@ dynamic_segment_name_conflicts?: DynamicSegmentNameConflictFinding[]
  * array natively. Default severity is `warn`.
  */
 unused_component_props?: UnusedComponentPropFinding[]
+/**
+ * Vue `<script setup>` `defineEmits` events emitted nowhere in their own SFC
+ * (no `emit('<name>')` call). Wrapped in [`UnusedComponentEmitFinding`] so
+ * each entry carries a typed `actions` array natively. Default severity is
+ * `warn`.
+ */
+unused_component_emits?: UnusedComponentEmitFinding[]
 }
 /**
  * The rendered impact report, derived purely from the store (no analysis run).

@@ -324,6 +324,14 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#unused-component-props",
     },
     RuleDef {
+        id: "fallow/unused-component-emit",
+        category: "Dead code",
+        name: "Unused component emits",
+        short: "A Vue <script setup> defineEmits event is emitted nowhere in its own component",
+        full: "A Vue `<script setup>` defineEmits declared event that is emitted nowhere in its own component (no `emit('<name>')` call). vue-tsc / Volar check caller-side emit correctness, not this in-component dead-output direction. Conservative: abstains on `$attrs` fallthrough, whole-object emit use, defineExpose, defineModel, and imported emit-type aliases. Default warn; suppress or remove the emit.",
+        docs_path: "explanations/dead-code#unused-component-emits",
+    },
+    RuleDef {
         id: "fallow/route-collision",
         category: "Policy",
         name: "Route collision",
@@ -447,6 +455,7 @@ fn dead_code_alias_id(normalized: &str) -> Option<&'static str> {
         "unprovided-injects" | "unprovided-inject" => Some("fallow/unprovided-inject"),
         "unrendered-components" | "unrendered-component" => Some("fallow/unrendered-component"),
         "unused-component-props" | "unused-component-prop" => Some("fallow/unused-component-prop"),
+        "unused-component-emits" | "unused-component-emit" => Some("fallow/unused-component-emit"),
         "unresolved-imports" => Some("fallow/unresolved-import"),
         "unlisted-deps" | "unlisted-dependencies" => Some("fallow/unlisted-dependency"),
         "duplicate-exports" => Some("fallow/duplicate-export"),
@@ -593,6 +602,10 @@ fn member_import_rule_guide(id: &str) -> Option<RuleGuide> {
         "fallow/unused-component-prop" => RuleGuide {
             example: "Widget.vue declares defineProps<{ size: string }>() but `size` is referenced nowhere in the component's script or template.",
             how_to_fix: "Remove the unused prop, or reference it in the script / template. If the prop is part of a deliberately-stable public component API, suppress the line with // fallow-ignore-next-line unused-component-prop.",
+        },
+        "fallow/unused-component-emit" => RuleGuide {
+            example: "Widget.vue declares defineEmits<{ close: [] }>() but `emit('close')` is called nowhere in the component's script.",
+            how_to_fix: "Remove the unused emit, or emit it in the script. If the emit is part of a deliberately-stable public component API, suppress the line with // fallow-ignore-next-line unused-component-emit.",
         },
         "fallow/unresolved-import" => RuleGuide {
             example: "src/app.ts imports ./routes/admin, but no matching file exists after extension and index resolution.",
@@ -2261,7 +2274,7 @@ mod tests {
 
     #[test]
     fn check_rules_count() {
-        assert_eq!(CHECK_RULES.len(), 35);
+        assert_eq!(CHECK_RULES.len(), 36);
     }
 
     #[test]

@@ -158,6 +158,7 @@
         "unprovided-injects": "warn",
         "unrendered-components": "warn",
         "unused-component-props": "warn",
+        "unused-component-emits": "warn",
         "unresolved-imports": "error",
         "unlisted-dependencies": "error",
         "duplicate-exports": "error",
@@ -1041,6 +1042,11 @@
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
+        "unused-component-emits": {
+          "description": "Vue `<script setup>` `defineEmits` declared event emitted nowhere inside\nits own single-file component (no `emit('<name>')` call). The single-file\ndead-input direction. Defaults to `warn`, not `error`: an emit can be part\nof a deliberately-stable public component API, so analyzer confidence is\nlower; warn encodes that without failing CI.",
+          "$ref": "#/$defs/Severity",
+          "default": "error"
+        },
         "unresolved-imports": {
           "$ref": "#/$defs/Severity",
           "default": "error"
@@ -1676,6 +1682,16 @@
           ]
         },
         "unused-component-props": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unused-component-emits": {
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"

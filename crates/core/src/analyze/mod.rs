@@ -18,6 +18,7 @@ mod server_only;
 mod unprovided_inject;
 mod unrendered_component;
 mod unused_catalog;
+mod unused_component_emit;
 mod unused_component_prop;
 mod unused_deps;
 mod unused_exports;
@@ -50,9 +51,9 @@ use fallow_types::output_dead_code::{
     PrivateTypeLeakFinding, ReExportCycleFinding, RouteCollisionFinding, TestOnlyDependencyFinding,
     TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
     UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
-    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentPropFinding,
-    UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
-    UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
+    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentEmitFinding,
+    UnusedComponentPropFinding, UnusedDependencyFinding, UnusedDependencyOverrideFinding,
+    UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
     UnusedOptionalDependencyFinding, UnusedStoreMemberFinding, UnusedTypeFinding,
 };
 
@@ -75,6 +76,7 @@ use unused_catalog::{
     find_empty_catalog_groups, find_unresolved_catalog_references, find_unused_catalog_entries,
     gather_pnpm_catalog_state,
 };
+use unused_component_emit::find_unused_component_emits;
 use unused_component_prop::find_unused_component_props;
 #[expect(
     deprecated,
@@ -820,6 +822,14 @@ fn populate_framework_specific_findings(
         line_offsets_by_file,
         results,
     );
+    populate_unused_component_emit_findings(
+        graph,
+        modules,
+        config,
+        declared_deps,
+        line_offsets_by_file,
+        results,
+    );
     populate_nextjs_route_tree_findings(
         graph,
         config,
@@ -1003,6 +1013,27 @@ fn populate_unused_component_prop_findings(
         find_unused_component_props(graph, modules, declared_deps, line_offsets_by_file)
             .into_iter()
             .map(UnusedComponentPropFinding::with_actions)
+            .collect();
+}
+
+/// Populate `unused_component_emits` when the rule is enabled. Gated on the
+/// project declaring `vue` / `@vue/runtime-core` / `nuxt` inside the detector
+/// (see [`find_unused_component_emits`]).
+fn populate_unused_component_emit_findings(
+    graph: &ModuleGraph,
+    modules: &[ModuleInfo],
+    config: &ResolvedConfig,
+    declared_deps: &FxHashSet<String>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+    results: &mut AnalysisResults,
+) {
+    if config.rules.unused_component_emits == Severity::Off {
+        return;
+    }
+    results.unused_component_emits =
+        find_unused_component_emits(graph, modules, declared_deps, line_offsets_by_file)
+            .into_iter()
+            .map(UnusedComponentEmitFinding::with_actions)
             .collect();
 }
 
@@ -2003,6 +2034,7 @@ mod tests {
                 unprovided_injects: Severity::Off,
                 unrendered_components: Severity::Off,
                 unused_component_props: Severity::Off,
+                unused_component_emits: Severity::Off,
                 unresolved_imports: Severity::Off,
                 unlisted_dependencies: Severity::Off,
                 duplicate_exports: Severity::Off,
@@ -2263,6 +2295,10 @@ mod tests {
                 has_define_expose: false,
                 has_define_model: false,
                 has_unharvestable_props: false,
+                component_emits: Vec::new(),
+                has_unharvestable_emits: false,
+                has_dynamic_emit: false,
+                has_emit_whole_object_use: false,
             }];
 
             let rules = RulesConfig {

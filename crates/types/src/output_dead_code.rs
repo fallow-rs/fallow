@@ -42,8 +42,8 @@ use crate::results::{
     MixedClientServerBarrel, PolicyViolation, PrivateTypeLeak, ReExportCycle, ReExportCycleKind,
     RouteCollision, TestOnlyDependency, TypeOnlyDependency, UnlistedDependency, UnprovidedInject,
     UnrenderedComponent, UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry,
-    UnusedComponentProp, UnusedDependency, UnusedDependencyOverride, UnusedExport, UnusedFile,
-    UnusedMember,
+    UnusedComponentEmit, UnusedComponentProp, UnusedDependency, UnusedDependencyOverride,
+    UnusedExport, UnusedFile, UnusedMember,
 };
 
 /// Shared note for the `duplicate-exports` fix action. Mirrors the const used
@@ -1004,6 +1004,46 @@ impl UnusedComponentPropFinding {
         })];
         Self {
             prop,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for an [`UnusedComponentEmit`] finding. There is no safe
+/// auto-fix: removing a declared emit is judgement-bearing (the event may be
+/// part of a deliberately-stable public component API). The only action is a
+/// line-level suppress at the emit declaration.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedComponentEmitFinding {
+    /// The underlying finding.
+    #[serde(flatten)]
+    pub emit: UnusedComponentEmit,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl UnusedComponentEmitFinding {
+    /// Build the wrapper from a raw [`UnusedComponentEmit`]. Emits only a
+    /// line-level suppress action: there is no safe auto-fix because removing an
+    /// emit is a human decision (it may be part of a stable component API).
+    #[must_use]
+    pub fn with_actions(emit: UnusedComponentEmit) -> Self {
+        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
+            kind: SuppressLineKind::SuppressLine,
+            auto_fixable: false,
+            description: "Suppress with an inline comment above the line".to_string(),
+            comment: "// fallow-ignore-next-line unused-component-emit".to_string(),
+            scope: None,
+        })];
+        Self {
+            emit,
             actions,
             introduced: None,
         }
