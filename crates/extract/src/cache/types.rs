@@ -387,7 +387,15 @@ use crate::MemberKind;
 /// (with `used`) plus the `has_unharvestable_emits` / `has_dynamic_emit` /
 /// `has_emit_whole_object_use` abstain flags, so a warm cache from 159 would
 /// report zero unused-component-emit findings.
-pub(super) const CACHE_VERSION: u32 = 160;
+///
+/// Bumped to 161 for the `unused-server-action` detector: the suppression token
+/// `unused-server-action` is now a known `IssueKind` (discriminant 40). A warm
+/// cache from 160 stored that marker in `unknown_suppression_kinds` (it was an
+/// unrecognized token then), so reading it would leave a suppressed action
+/// unsuppressed (false `unused-server-action` finding) AND report the consumed
+/// marker as a stale suppression. Invalidating the cache forces a re-parse that
+/// routes the token to `suppressions` with the now-known discriminant.
+pub(super) const CACHE_VERSION: u32 = 161;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
