@@ -119,6 +119,14 @@ const AUDIT_SAVE_LANGUAGES: ReadonlySet<string> = new Set([
 /** Debounce window (ms) for coalescing rapid saves into a single audit run. */
 const AUDIT_SAVE_DEBOUNCE_MS = 600;
 
+/**
+ * workspaceState flag: the "all findings are hidden" startup nudge was already
+ * shown for this workspace. Set when the prompt appears, cleared whenever the
+ * filter leaves the fully-muted state, so each distinct hide-all episode is
+ * nudged exactly once instead of on every window reload.
+ */
+const MUTED_ALL_NUDGE_KEY = "fallow.mutedAllNudgeShown.v1";
+
 let outputChannel: vscode.OutputChannel;
 let lastCheckResult: FallowCheckResult | null = null;
 let lastDupesResult: FallowDupesResult | null = null;
@@ -209,14 +217,16 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   });
   registerDiagnosticMuteUi(context, diagnosticFilter);
 
-  // One-time-per-activation nudge: when EVERY Fallow finding is hidden (the
-  // "Hide All" toggle), users who reinstalled often don't realize the mute
-  // state persisted in workspaceState (it survives uninstall and deleting the
-  // `.fallow` folder), so it looks like findings vanished for good. Surface a
-  // single dismissible prompt wired to the escape-hatch command so a
-  // stuck-muted workspace is recoverable without knowing the command name.
-  if (diagnosticFilter.isMutedAll()) {
+  // Once-ever nudge: when EVERY Fallow finding is hidden (the "Hide All"
+  // toggle), users who reinstalled often don't realize the mute state persisted
+  // in workspaceState (it survives uninstall and deleting the `.fallow` folder),
+  // so it looks like findings vanished for good. Surface a single dismissible
+  // prompt wired to the escape-hatch command so a stuck-muted workspace is
+  // recoverable without knowing the command name. Gated by a persisted flag so
+  // an intentional muter is told once, not nagged on every window reload.
+  if (diagnosticFilter.isMutedAll() && !context.workspaceState.get(MUTED_ALL_NUDGE_KEY)) {
     void (async () => {
+      await context.workspaceState.update(MUTED_ALL_NUDGE_KEY, true);
       const choice = await vscode.window.showInformationMessage(
         "Fallow findings are hidden in this workspace (Hide All is on). CI and the CLI still report everything.",
         "Show all findings",
@@ -226,6 +236,15 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
       }
     })();
   }
+  // Re-arm the nudge once findings are no longer fully hidden, so a future
+  // hide-all episode prompts again rather than staying silent forever.
+  context.subscriptions.push(
+    diagnosticFilter.onDidChange((state) => {
+      if (!state.mutedAll && context.workspaceState.get(MUTED_ALL_NUDGE_KEY)) {
+        void context.workspaceState.update(MUTED_ALL_NUDGE_KEY, undefined);
+      }
+    }),
+  );
 
   // Custom LSP notification handler: update the status bar from LSP data so
   // results show immediately without waiting for the CLI pass. Passed into
