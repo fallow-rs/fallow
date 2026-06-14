@@ -26,8 +26,8 @@ pub use fallow_types::results::{
     SecurityTaintFlow, SecurityUnresolvedCalleeDiagnostic, SecurityZoneCrossing, StaleSuppression,
     SuppressionOrigin, TaintConfidence, TaintEndpoint, TaintPath, TestOnlyDependency, TraceHop,
     TraceHopRole, TypeOnlyDependency, UnlistedDependency, UnprovidedInject, UnrenderedComponent,
-    UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry, UnusedDependency,
-    UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedMember,
+    UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry, UnusedComponentProp,
+    UnusedDependency, UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedMember,
 };
 
 #[cfg(test)]

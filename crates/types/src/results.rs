@@ -245,6 +245,12 @@ pub struct AnalysisResults {
     /// carries a typed `actions` array natively. Default severity is `warn`.
     #[serde(default)]
     pub dynamic_segment_name_conflicts: Vec<DynamicSegmentNameConflictFinding>,
+    /// Vue `<script setup>` `defineProps` props referenced nowhere in their own
+    /// SFC (neither `<script>` nor `<template>`). Spike: a bare
+    /// [`UnusedComponentProp`] vec (no `*Finding` wrapper yet); full output
+    /// wiring lands after corpus validation. Default severity will be `warn`.
+    #[serde(default)]
+    pub unused_component_props: Vec<UnusedComponentProp>,
     /// Number of suppression entries that matched an issue during analysis.
     /// Human output uses this for the suppression footer; it is skipped in
     /// machine output to avoid changing the public JSON issue contract.
@@ -369,6 +375,7 @@ impl AnalysisResults {
             + self.unrendered_components.len()
             + self.route_collisions.len()
             + self.dynamic_segment_name_conflicts.len()
+            + self.unused_component_props.len()
     }
 
     /// Whether any issues were found.
@@ -425,6 +432,7 @@ impl AnalysisResults {
             unrendered_components,
             route_collisions,
             dynamic_segment_name_conflicts,
+            unused_component_props,
             suppression_count,
             active_suppressions,
             feature_flags,
@@ -478,6 +486,7 @@ impl AnalysisResults {
         self.route_collisions.extend(route_collisions);
         self.dynamic_segment_name_conflicts
             .extend(dynamic_segment_name_conflicts);
+        self.unused_component_props.extend(unused_component_props);
         self.feature_flags.extend(feature_flags);
         self.security_findings.extend(security_findings);
         self.security_unresolved_edge_files += security_unresolved_edge_files;
@@ -652,6 +661,13 @@ impl AnalysisResults {
                 .path
                 .cmp(&b.conflict.path)
                 .then(a.conflict.position.cmp(&b.conflict.position))
+        });
+
+        self.unused_component_props.sort_by(|a, b| {
+            a.path
+                .cmp(&b.path)
+                .then(a.line.cmp(&b.line))
+                .then(a.prop_name.cmp(&b.prop_name))
         });
     }
 
@@ -1013,6 +1029,26 @@ pub struct UnrenderedComponent {
     /// default-export statement).
     pub line: u32,
     /// 0-based byte column offset.
+    pub col: u32,
+}
+
+/// A Vue `<script setup>` `defineProps` declared prop that is referenced NOWHERE
+/// inside its own single-file component (neither `<script>` nor `<template>`).
+/// Single-file finding, zero-FP doctrine: the whole file abstains on any
+/// fallthrough / expose / model / unharvestable-type signal.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedComponentProp {
+    /// The `.vue` SFC declaring the unused prop.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// The component name (the `.vue` file stem).
+    pub component_name: String,
+    /// The declared prop name that is never referenced.
+    pub prop_name: String,
+    /// 1-based line number of the prop declaration.
+    pub line: u32,
+    /// 0-based byte column offset of the prop declaration.
     pub col: u32,
 }
 

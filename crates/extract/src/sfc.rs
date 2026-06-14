@@ -72,6 +72,13 @@ static SVELTE_GENERICS_ATTR_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
 static HTML_COMMENT_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| crate::static_regex(r"(?s)<!--.*?-->"));
 
+/// Regex to detect a whole-object prop/attr spread in a Vue template:
+/// `v-bind="$attrs"`, `v-bind="$props"`, or `v-bind="props"` (with single or
+/// double quotes). A bound prop may be consumed indirectly, so the
+/// `unused-component-prop` detector abstains on the whole file when this matches.
+static PROPS_ATTRS_SPREAD_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r#"v-bind\s*=\s*["'](?:\$attrs|\$props|props)["']"#));
+
 /// Regex to extract `<style>` block content from Vue/Svelte SFCs.
 /// Mirrors `SCRIPT_BLOCK_RE`: handles `>` inside quoted attribute values and
 /// captures the body so `@import` / `@use` / `@forward` directives can be parsed.
@@ -308,6 +315,7 @@ pub(crate) fn parse_sfc_to_module(
     let mut combined = empty_sfc_module(file_id, source, content_hash);
     let mut template_visible_imports: FxHashSet<String> = FxHashSet::default();
     let mut template_visible_bound_targets: FxHashMap<String, String> = FxHashMap::default();
+    let mut props_return_binding: Option<String> = None;
 
     for script in &scripts {
         merge_script_into_module(
@@ -316,6 +324,7 @@ pub(crate) fn parse_sfc_to_module(
             &mut combined,
             &mut template_visible_imports,
             &mut template_visible_bound_targets,
+            &mut props_return_binding,
             need_complexity,
         );
     }
@@ -324,11 +333,22 @@ pub(crate) fn parse_sfc_to_module(
         merge_style_into_module(style, &mut combined);
     }
 
+    // Whole-object prop/attr spread in the template (`v-bind="$attrs"`,
+    // `v-bind="$props"`, `v-bind="props"`) can consume a prop indirectly, so the
+    // `unused-component-prop` detector must abstain on the whole file.
+    if kind == SfcKind::Vue
+        && !combined.component_props.is_empty()
+        && PROPS_ATTRS_SPREAD_RE.is_match(source)
+    {
+        combined.has_props_attrs_fallthrough = true;
+    }
+
     apply_template_usage(
         kind,
         source,
         &template_visible_imports,
         &template_visible_bound_targets,
+        props_return_binding.as_deref(),
         &mut combined,
     );
 
@@ -413,15 +433,25 @@ fn empty_sfc_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleI
         di_key_sites: Vec::new(),
         has_dynamic_provide: false,
         referenced_import_bindings: Vec::new(),
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "SFC script merge threads template-visibility state, props binding, and complexity flags"
+)]
 fn merge_script_into_module(
     kind: SfcKind,
     script: &SfcScript,
     combined: &mut ModuleInfo,
     template_visible_imports: &mut FxHashSet<String>,
     template_visible_bound_targets: &mut FxHashMap<String, String>,
+    props_return_binding: &mut Option<String>,
     need_complexity: bool,
 ) {
     if kind == SfcKind::Vue
@@ -482,6 +512,32 @@ fn merge_script_into_module(
             &parser_return.program,
             &combined.line_offsets,
         ));
+    }
+
+    // Vue `<script setup>` `defineProps` harvesting for `unused-component-prop`.
+    // Spans returned by the harvest are relative to the script body; remap onto
+    // the SFC source via the script byte offset.
+    if kind == SfcKind::Vue && script.is_setup {
+        let harvest = crate::sfc_props::harvest_define_props(&parser_return.program);
+        if harvest.has_unharvestable_props {
+            combined.has_unharvestable_props = true;
+        }
+        if harvest.has_props_attrs_fallthrough {
+            combined.has_props_attrs_fallthrough = true;
+        }
+        if harvest.has_define_expose {
+            combined.has_define_expose = true;
+        }
+        if harvest.has_define_model {
+            combined.has_define_model = true;
+        }
+        if let Some(binding) = harvest.props_return_binding {
+            *props_return_binding = Some(binding);
+        }
+        for mut prop in harvest.props {
+            prop.span_start += script.byte_offset as u32;
+            combined.component_props.push(prop);
+        }
     }
 
     if is_template_visible_script(kind, script) {
@@ -623,14 +679,64 @@ fn apply_template_usage(
     source: &str,
     template_visible_imports: &FxHashSet<String>,
     template_visible_bound_targets: &FxHashMap<String, String>,
+    props_return_binding: Option<&str>,
     combined: &mut ModuleInfo,
 ) {
+    // Props are NOT imports, so the template scanner does not credit them by
+    // default. Thread the harvested prop names (and the `defineProps` return
+    // binding, so `props.<name>` template member accesses are emitted) in as an
+    // additional credited set alongside `template_visible_imports`. Crediting a
+    // prop name against an import is inert (no import binding shares the name),
+    // so the unused-import retain is unaffected.
+    let credited: FxHashSet<String> = if combined.component_props.is_empty() {
+        template_visible_imports.clone()
+    } else {
+        let mut set = template_visible_imports.clone();
+        set.extend(
+            combined
+                .component_props
+                .iter()
+                .map(|prop| prop.name.clone()),
+        );
+        // Vue's implicit `$props` whole-props object is always available in a
+        // template; credit `$props.<name>` member accesses too.
+        set.insert("$props".to_string());
+        if let Some(binding) = props_return_binding {
+            set.insert(binding.to_string());
+        }
+        set
+    };
+
     let template_usage = collect_template_usage_with_bound_targets(
         kind,
         source,
-        template_visible_imports,
+        &credited,
         template_visible_bound_targets,
     );
+
+    // A template reference credits `used_in_template`: either a bare prop name in
+    // `used_bindings` (destructured prop form, or template uses the bare name) OR
+    // a `<props>.<name>` / `$props.<name>` member access (the
+    // `const props = defineProps()` form and Vue's implicit `$props`).
+    if !combined.component_props.is_empty() {
+        let member_used: FxHashSet<&str> = template_usage
+            .member_accesses
+            .iter()
+            .filter(|access| {
+                access.object == "$props"
+                    || props_return_binding.is_some_and(|binding| access.object == binding)
+            })
+            .map(|access| access.member.as_str())
+            .collect();
+        for prop in &mut combined.component_props {
+            if template_usage.used_bindings.contains(&prop.name)
+                || member_used.contains(prop.name.as_str())
+            {
+                prop.used_in_template = true;
+            }
+        }
+    }
+
     combined
         .unused_import_bindings
         .retain(|binding| !template_usage.used_bindings.contains(binding));

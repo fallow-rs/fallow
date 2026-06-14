@@ -966,6 +966,11 @@ impl ModuleInfoExtractor {
             has_dynamic_provide: self.has_dynamic_provide,
             // Populated in `release_resolution_payload`; empty at construction.
             referenced_import_bindings: Vec::new(),
+            component_props: Vec::new(),
+            has_props_attrs_fallthrough: false,
+            has_define_expose: false,
+            has_define_model: false,
+            has_unharvestable_props: false,
         }
     }
 

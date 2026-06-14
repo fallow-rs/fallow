@@ -159,6 +159,26 @@ pub struct ModuleInfo {
     /// Vue/Svelte SFC that some file actually imports-and-uses, distinguishing it
     /// from a component reachable only through a barrel re-export.
     pub referenced_import_bindings: Vec<String>,
+    /// Vue `<script setup>` `defineProps` declared props. Consumed by the
+    /// `unused-component-prop` detector to flag a prop referenced nowhere in its
+    /// own SFC. Each entry carries `used_in_script` / `used_in_template`.
+    pub component_props: Vec<ComponentProp>,
+    /// `true` when the template spreads the whole props/attrs object
+    /// (`v-bind="$attrs"` / `v-bind="$props"` / `v-bind="props"`) or the
+    /// `defineProps` return is destructured with a rest element. Either form can
+    /// consume a prop indirectly, so the detector abstains on the whole file.
+    pub has_props_attrs_fallthrough: bool,
+    /// `true` when the SFC calls `defineExpose(...)`. A prop may be re-exposed,
+    /// so the detector conservatively abstains on the whole file.
+    pub has_define_expose: bool,
+    /// `true` when the SFC calls `defineModel(...)`. Two-way model props are out
+    /// of scope for v1, so the detector abstains on the whole file.
+    pub has_define_model: bool,
+    /// `true` when `defineProps` was called with an unharvestable argument (a
+    /// type-reference type argument such as `defineProps<Props>()` whose names
+    /// require cross-file type resolution). The detector abstains on the whole
+    /// file so a prop is never mis-flagged.
+    pub has_unharvestable_props: bool,
 }
 
 impl ModuleInfo {
@@ -1077,6 +1097,26 @@ pub struct DiKeySite {
     pub span_start: u32,
 }
 
+/// A Vue `<script setup>` `defineProps` declared prop, harvested from the
+/// runtime object form (`defineProps({ foo: {...} })`) or the inline TS literal
+/// form (`defineProps<{ foo: T }>()`). `used_in_script` / `used_in_template`
+/// are set during extraction; the `unused-component-prop` detector flags a prop
+/// where neither is true. See `harvest_define_props` in `sfc.rs`.
+#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode)]
+pub struct ComponentProp {
+    /// The declared prop name.
+    pub name: String,
+    /// Start byte offset of the prop declaration (anchors the finding).
+    pub span_start: u32,
+    /// Whether this prop is referenced in the component's `<script>` (a
+    /// destructured local binding with a resolved reference, or a `props.<name>`
+    /// member access).
+    pub used_in_script: bool,
+    /// Whether this prop name is referenced in the component's `<template>`.
+    /// Set by `apply_template_usage` when the template scanner credits the name.
+    pub used_in_template: bool,
+}
+
 #[expect(
     clippy::trivially_copy_pass_by_ref,
     reason = "serde serialize_with requires &T"
@@ -1163,7 +1203,7 @@ const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 216);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 888);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 912);
 
 /// A re-export declaration.
 #[derive(Debug, Clone)]
@@ -1391,6 +1431,11 @@ mod tests {
             di_key_sites: Vec::new(),
             has_dynamic_provide: false,
             referenced_import_bindings: Vec::new(),
+            component_props: Vec::new(),
+            has_props_attrs_fallthrough: false,
+            has_define_expose: false,
+            has_define_model: false,
+            has_unharvestable_props: false,
         };
 
         module.release_resolution_payload();

@@ -29,6 +29,7 @@ pub mod inventory;
 pub mod mdx;
 mod parse;
 pub mod sfc;
+mod sfc_props;
 mod sfc_template;
 mod source_map;
 pub mod suppress;

@@ -116,6 +116,11 @@ pub(crate) fn parse_graphql_to_module(
         di_key_sites: Vec::new(),
         has_dynamic_provide: false,
         referenced_import_bindings: Vec::new(),
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
     }
 }
 

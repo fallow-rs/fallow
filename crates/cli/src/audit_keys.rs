@@ -361,6 +361,8 @@ pub(super) fn dead_code_keys(
         unrendered_components,
         route_collisions,
         dynamic_segment_name_conflicts,
+        // Spike: no audit-key representation yet (full wiring is post-validation).
+        unused_component_props: _unused_component_props,
         // Non-finding fields: counts and metadata, not attributable to a key.
         suppression_count: _suppression_count,
         active_suppressions: _active_suppressions,
@@ -816,6 +818,8 @@ pub(super) fn retain_introduced_dead_code(
         unrendered_components,
         route_collisions,
         dynamic_segment_name_conflicts,
+        // Spike: no audit-key representation yet (full wiring is post-validation).
+        unused_component_props: _unused_component_props,
         // Non-finding fields: counts and metadata, not subject to base-keyed
         // filtering.
         suppression_count: _suppression_count,

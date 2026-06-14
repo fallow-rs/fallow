@@ -370,7 +370,14 @@ use crate::MemberKind;
 /// #slot>` no longer has its body truncated, so component tags rendered after
 /// the first nested slot are now credited; a warm cache from 156 would carry the
 /// truncated template-usage set and false-flag those components / their imports.
-pub(super) const CACHE_VERSION: u32 = 157;
+///
+/// Bumped to 158 for the `unused-component-prop` detector: Vue `<script setup>`
+/// extraction now records `defineProps` declared props on `component_props`
+/// (with `used_in_script` / `used_in_template`) plus the
+/// `has_props_attrs_fallthrough` / `has_define_expose` / `has_define_model` /
+/// `has_unharvestable_props` abstain flags, so a warm cache from 157 would
+/// report zero unused-component-prop findings.
+pub(super) const CACHE_VERSION: u32 = 158;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -417,7 +424,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 880);
+assert_cached_type_size!(CachedModule, 912);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 56);
@@ -557,6 +564,19 @@ pub struct CachedModule {
     /// Whether the module had an unknowable-key provide. Round-trips so the
     /// `unprovided-inject` project-wide abstain holds on warm-cache loads.
     pub has_dynamic_provide: bool,
+    /// Vue `<script setup>` `defineProps` declared props. Round-trips so the
+    /// `unused-component-prop` detector sees them on warm-cache loads.
+    pub component_props: Vec<fallow_types::extract::ComponentProp>,
+    /// Whether the template spreads `$attrs`/`$props`/`props` or the
+    /// `defineProps` return is rest-destructured. Round-trips for the abstain.
+    pub has_props_attrs_fallthrough: bool,
+    /// Whether the SFC calls `defineExpose(...)`. Round-trips for the abstain.
+    pub has_define_expose: bool,
+    /// Whether the SFC calls `defineModel(...)`. Round-trips for the abstain.
+    pub has_define_model: bool,
+    /// Whether `defineProps` had an unharvestable type-reference argument.
+    /// Round-trips for the abstain.
+    pub has_unharvestable_props: bool,
 }
 
 /// Cached namespace-object alias.

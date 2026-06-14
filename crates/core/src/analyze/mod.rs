@@ -18,6 +18,7 @@ mod server_only;
 mod unprovided_inject;
 mod unrendered_component;
 mod unused_catalog;
+mod unused_component_prop;
 mod unused_deps;
 mod unused_exports;
 mod unused_files;
@@ -74,6 +75,7 @@ use unused_catalog::{
     find_empty_catalog_groups, find_unresolved_catalog_references, find_unused_catalog_entries,
     gather_pnpm_catalog_state,
 };
+use unused_component_prop::find_unused_component_props;
 #[expect(
     deprecated,
     reason = "ADR-008 deprecates detector helpers for external callers; core orchestration still calls them internally"
@@ -810,6 +812,13 @@ fn populate_framework_specific_findings(
         suppressions,
         results,
     );
+    populate_unused_component_prop_findings(
+        graph,
+        modules,
+        declared_deps,
+        line_offsets_by_file,
+        results,
+    );
     populate_nextjs_route_tree_findings(
         graph,
         config,
@@ -973,6 +982,32 @@ fn populate_unrendered_component_findings(
     .into_iter()
     .map(UnrenderedComponentFinding::with_actions)
     .collect();
+}
+
+/// Populate `unused_component_props` (spike: ungated by config, runs always).
+/// Gated on the project declaring `vue` / `@vue/runtime-core` / `nuxt` inside the
+/// detector. Emits a `FALLOW_DEBUG_PROPS`-gated stderr trace per finding plus a
+/// count line so the corpus probe can be inspected without machine output.
+fn populate_unused_component_prop_findings(
+    graph: &ModuleGraph,
+    modules: &[ModuleInfo],
+    declared_deps: &FxHashSet<String>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+    results: &mut AnalysisResults,
+) {
+    let findings = find_unused_component_props(graph, modules, declared_deps, line_offsets_by_file);
+    if std::env::var_os("FALLOW_DEBUG_PROPS").is_some() {
+        for finding in &findings {
+            eprintln!(
+                "PROP-DBG {} {} (line {})",
+                finding.path.display(),
+                finding.prop_name,
+                finding.line
+            );
+        }
+        eprintln!("PROP-DBG count={}", findings.len());
+    }
+    results.unused_component_props = findings;
 }
 
 /// Populate `route_collisions` when the rule is enabled. Gated on the project
@@ -2226,6 +2261,11 @@ mod tests {
                 di_key_sites: Vec::new(),
                 has_dynamic_provide: false,
                 referenced_import_bindings: Vec::new(),
+                component_props: Vec::new(),
+                has_props_attrs_fallthrough: false,
+                has_define_expose: false,
+                has_define_model: false,
+                has_unharvestable_props: false,
             }];
 
             let rules = RulesConfig {

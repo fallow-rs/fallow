@@ -440,6 +440,7 @@ pub fn filter_results_by_changed_files(
         unrendered_components,
         route_collisions,
         dynamic_segment_name_conflicts,
+        unused_component_props,
         // Non-finding fields: counts and metadata, not issue collections.
         suppression_count: _suppression_count,
         active_suppressions: _active_suppressions,
@@ -516,6 +517,7 @@ pub fn filter_results_by_changed_files(
     unrendered_components.retain(|c| contains_normalized(&cf, &c.component.path));
     route_collisions.retain(|c| contains_normalized(&cf, &c.collision.path));
     dynamic_segment_name_conflicts.retain(|c| contains_normalized(&cf, &c.conflict.path));
+    unused_component_props.retain(|p| contains_normalized(&cf, &p.path));
 }
 
 /// Pre-normalise a `changed_files` set through `dunce::simplified` so each
