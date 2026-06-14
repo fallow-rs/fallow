@@ -611,6 +611,83 @@ pub fn push_unprovided_inject_diagnostics(
     }
 }
 
+/// Push `route-collision` diagnostics. File-level findings anchored at line 1;
+/// the finding's `path` is the absolute graph-node path, so the URI is built
+/// directly with no `root.join`.
+pub fn push_route_collision_diagnostics(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+) {
+    for finding in &results.route_collisions {
+        let Some(uri) = Uri::from_file_path(&finding.collision.path) else {
+            continue;
+        };
+        let message = format!(
+            "Route file resolves to '{}', also owned by {} other file(s); Next.js fails the build because a URL can have only one owner",
+            finding.collision.url,
+            finding.collision.conflicting_paths.len()
+        );
+        map.entry(uri).or_default().push(Diagnostic {
+            range: Range {
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: 0,
+                    character: u32::MAX,
+                },
+            },
+            severity: Some(DiagnosticSeverity::WARNING),
+            source: Some("fallow".to_string()),
+            code: Some(NumberOrString::String("route-collision".to_string())),
+            code_description: doc_link("route-collisions"),
+            message,
+            related_information: None,
+            ..Default::default()
+        });
+    }
+}
+
+/// Push `dynamic-segment-name-conflict` diagnostics. File-level findings
+/// anchored at line 1; absolute `path`, so the URI is built directly.
+pub fn push_dynamic_segment_name_conflict_diagnostics(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+) {
+    for finding in &results.dynamic_segment_name_conflicts {
+        let Some(uri) = Uri::from_file_path(&finding.conflict.path) else {
+            continue;
+        };
+        let message = format!(
+            "Dynamic segments at '{}' use different slug names ({}); Next.js requires one consistent name per dynamic path",
+            finding.conflict.position,
+            finding.conflict.conflicting_segments.join(", ")
+        );
+        map.entry(uri).or_default().push(Diagnostic {
+            range: Range {
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: 0,
+                    character: u32::MAX,
+                },
+            },
+            severity: Some(DiagnosticSeverity::WARNING),
+            source: Some("fallow".to_string()),
+            code: Some(NumberOrString::String(
+                "dynamic-segment-name-conflict".to_string(),
+            )),
+            code_description: doc_link("dynamic-segment-name-conflicts"),
+            message,
+            related_information: None,
+            ..Default::default()
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;

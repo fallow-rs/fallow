@@ -38,7 +38,9 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
     "misconfigured_dependency_overrides": 1,
     "invalid_client_exports": 1,
     "mixed_client_server_barrels": 1,
-    "misplaced_directives": 0
+    "misplaced_directives": 0,
+    "route_collisions": 0,
+    "dynamic_segment_name_conflicts": 0
   },
   "unused_files": [
     {
@@ -683,6 +685,8 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
       ]
     }
   ],
+  "route_collisions": [],
+  "dynamic_segment_name_conflicts": [],
   "next_steps": [
     {
       "id": "trace-unused-export",

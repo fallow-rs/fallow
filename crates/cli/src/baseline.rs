@@ -136,6 +136,12 @@ pub struct BaselineData {
     /// `path:line:directive`.
     #[serde(default)]
     pub misplaced_directives: Vec<String>,
+    /// Next.js route collisions, keyed by `path:url`.
+    #[serde(default)]
+    pub route_collisions: Vec<String>,
+    /// Next.js dynamic-segment name conflicts, keyed by `path:position`.
+    #[serde(default)]
+    pub dynamic_segment_name_conflicts: Vec<String>,
 }
 
 impl BaselineData {
@@ -178,6 +184,8 @@ impl BaselineData {
             invalid_client_exports: file_exports.invalid_client_exports,
             mixed_client_server_barrels: file_exports.mixed_client_server_barrels,
             misplaced_directives: file_exports.misplaced_directives,
+            route_collisions: file_exports.route_collisions,
+            dynamic_segment_name_conflicts: file_exports.dynamic_segment_name_conflicts,
         }
     }
 
@@ -214,6 +222,8 @@ impl BaselineData {
             + self.invalid_client_exports.len()
             + self.mixed_client_server_barrels.len()
             + self.misplaced_directives.len()
+            + self.route_collisions.len()
+            + self.dynamic_segment_name_conflicts.len()
     }
 }
 
@@ -225,6 +235,8 @@ struct BaselineFileExportKeys {
     invalid_client_exports: Vec<String>,
     mixed_client_server_barrels: Vec<String>,
     misplaced_directives: Vec<String>,
+    route_collisions: Vec<String>,
+    dynamic_segment_name_conflicts: Vec<String>,
 }
 
 fn baseline_file_export_keys(
@@ -303,6 +315,28 @@ fn baseline_file_export_keys(
                     relative_path(&d.directive_site.path, root),
                     d.directive_site.line,
                     d.directive_site.directive
+                )
+            })
+            .collect(),
+        route_collisions: results
+            .route_collisions
+            .iter()
+            .map(|c| {
+                format!(
+                    "{}:{}",
+                    relative_path(&c.collision.path, root),
+                    c.collision.url
+                )
+            })
+            .collect(),
+        dynamic_segment_name_conflicts: results
+            .dynamic_segment_name_conflicts
+            .iter()
+            .map(|c| {
+                format!(
+                    "{}:{}",
+                    relative_path(&c.conflict.path, root),
+                    c.conflict.position
                 )
             })
             .collect(),
@@ -825,6 +859,8 @@ impl BaselineFilterContext<'_> {
         self.filter_invalid_client_exports(results);
         self.filter_mixed_client_server_barrels(results);
         self.filter_misplaced_directives(results);
+        self.filter_route_collisions(results);
+        self.filter_dynamic_segment_name_conflicts(results);
     }
 
     fn filter_invalid_client_exports(&self, results: &mut fallow_core::results::AnalysisResults) {
@@ -880,6 +916,43 @@ impl BaselineFilterContext<'_> {
                 finding.directive_site.directive
             );
             !baseline_directives.contains(key.as_str())
+        });
+    }
+
+    fn filter_route_collisions(&self, results: &mut fallow_core::results::AnalysisResults) {
+        let baseline_collisions: FxHashSet<&str> = self
+            .baseline
+            .route_collisions
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.route_collisions.retain(|finding| {
+            let key = format!(
+                "{}:{}",
+                relative_path(&finding.collision.path, self.root),
+                finding.collision.url
+            );
+            !baseline_collisions.contains(key.as_str())
+        });
+    }
+
+    fn filter_dynamic_segment_name_conflicts(
+        &self,
+        results: &mut fallow_core::results::AnalysisResults,
+    ) {
+        let baseline_conflicts: FxHashSet<&str> = self
+            .baseline
+            .dynamic_segment_name_conflicts
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.dynamic_segment_name_conflicts.retain(|finding| {
+            let key = format!(
+                "{}:{}",
+                relative_path(&finding.conflict.path, self.root),
+                finding.conflict.position
+            );
+            !baseline_conflicts.contains(key.as_str())
         });
     }
 
@@ -1864,6 +1937,8 @@ mod tests {
             invalid_client_exports: vec![],
             mixed_client_server_barrels: vec![],
             misplaced_directives: vec![],
+            route_collisions: vec![],
+            dynamic_segment_name_conflicts: vec![],
         };
         let results = AnalysisResults {
             unused_files: vec![
@@ -1918,6 +1993,8 @@ mod tests {
             invalid_client_exports: vec![],
             mixed_client_server_barrels: vec![],
             misplaced_directives: vec![],
+            route_collisions: vec![],
+            dynamic_segment_name_conflicts: vec![],
         };
         let results = make_results();
         let filtered = filter_new_issues(results, &baseline, Path::new(""));
@@ -1959,6 +2036,8 @@ mod tests {
             invalid_client_exports: vec![],
             mixed_client_server_barrels: vec![],
             misplaced_directives: vec![],
+            route_collisions: vec![],
+            dynamic_segment_name_conflicts: vec![],
         };
         let results = AnalysisResults {
             unused_exports: vec![

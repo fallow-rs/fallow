@@ -67,6 +67,12 @@ def filter_check:
   (if .misplaced_directives then
     .misplaced_directives |= map(select(.path | in_changed))
   else . end) |
+  (if .route_collisions then
+    .route_collisions |= map(select(.path | in_changed))
+  else . end) |
+  (if .dynamic_segment_name_conflicts then
+    .dynamic_segment_name_conflicts |= map(select(.path | in_changed))
+  else . end) |
   # Recalculate total_issues from filtered arrays
   (if .total_issues != null then
     .total_issues = (
@@ -98,7 +104,9 @@ def filter_check:
       (.misconfigured_dependency_overrides // [] | length) +
       (.invalid_client_exports // [] | length) +
       (.mixed_client_server_barrels // [] | length) +
-      (.misplaced_directives // [] | length)
+      (.misplaced_directives // [] | length) +
+      (.route_collisions // [] | length) +
+      (.dynamic_segment_name_conflicts // [] | length)
     )
   else . end);
 

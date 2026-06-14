@@ -162,6 +162,14 @@ pub struct CheckSummary {
     /// expression statements after a non-directive statement.
     #[serde(default)]
     pub misplaced_directives: usize,
+    /// Next.js App Router route files that resolve to the same URL within one
+    /// app-root.
+    #[serde(default)]
+    pub route_collisions: usize,
+    /// Sibling Next.js dynamic route segments at one position using different
+    /// param spellings.
+    #[serde(default)]
+    pub dynamic_segment_name_conflicts: usize,
 }
 
 /// Per-category delta comparison against a saved baseline. Only present in

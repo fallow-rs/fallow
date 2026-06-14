@@ -65,6 +65,8 @@ fn severity_for_kind(rules: &RulesConfig, kind: IssueKind) -> Severity {
         IssueKind::InvalidClientExport => rules.invalid_client_export,
         IssueKind::MixedClientServerBarrel => rules.mixed_client_server_barrel,
         IssueKind::MisplacedDirective => rules.misplaced_directive,
+        IssueKind::RouteCollision => rules.route_collision,
+        IssueKind::DynamicSegmentNameConflict => rules.dynamic_segment_name_conflict,
         IssueKind::Complexity | IssueKind::CodeDuplication => Severity::Error,
     }
 }
@@ -536,6 +538,8 @@ mod tests {
             IssueKind::MisplacedDirective,
             IssueKind::UnusedStoreMember,
             IssueKind::UnprovidedInject,
+            IssueKind::RouteCollision,
+            IssueKind::DynamicSegmentNameConflict,
         ] {
             assert_eq!(
                 IssueKind::from_discriminant(kind.to_discriminant()),
@@ -543,7 +547,7 @@ mod tests {
             );
         }
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(35), None);
+        assert_eq!(IssueKind::from_discriminant(37), None);
     }
 
     #[test]
@@ -790,6 +794,8 @@ mod tests {
             IssueKind::CircularDependency,
             IssueKind::BoundaryViolation,
             IssueKind::InvalidClientExport,
+            IssueKind::RouteCollision,
+            IssueKind::DynamicSegmentNameConflict,
         ];
 
         let all_kinds = [
@@ -820,6 +826,8 @@ mod tests {
             IssueKind::UnusedDependencyOverride,
             IssueKind::MisconfiguredDependencyOverride,
             IssueKind::InvalidClientExport,
+            IssueKind::RouteCollision,
+            IssueKind::DynamicSegmentNameConflict,
         ];
 
         for kind in all_kinds {

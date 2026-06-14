@@ -37,12 +37,12 @@ use crate::output::{
 };
 use crate::results::{
     BoundaryCallViolation, BoundaryCoverageViolation, BoundaryViolation, CircularDependency,
-    DependencyOverrideSource, DuplicateExport, EmptyCatalogGroup, InvalidClientExport,
-    MisconfiguredDependencyOverride, MisplacedDirective, MixedClientServerBarrel, PolicyViolation,
-    PrivateTypeLeak, ReExportCycle, ReExportCycleKind, TestOnlyDependency, TypeOnlyDependency,
-    UnlistedDependency, UnprovidedInject, UnresolvedCatalogReference, UnresolvedImport,
-    UnusedCatalogEntry, UnusedDependency, UnusedDependencyOverride, UnusedExport, UnusedFile,
-    UnusedMember,
+    DependencyOverrideSource, DuplicateExport, DynamicSegmentNameConflict, EmptyCatalogGroup,
+    InvalidClientExport, MisconfiguredDependencyOverride, MisplacedDirective,
+    MixedClientServerBarrel, PolicyViolation, PrivateTypeLeak, ReExportCycle, ReExportCycleKind,
+    RouteCollision, TestOnlyDependency, TypeOnlyDependency, UnlistedDependency, UnprovidedInject,
+    UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry, UnusedDependency,
+    UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedMember,
 };
 
 /// Shared note for the `duplicate-exports` fix action. Mirrors the const used
@@ -923,6 +923,125 @@ impl UnprovidedInjectFinding {
         })];
         Self {
             inject,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for a [`RouteCollision`] finding. A route collision is a
+/// guaranteed `next build` failure, so the PRIMARY action is manual guidance
+/// (move or merge one of the colliding files), NOT a suppress: suppressing a
+/// build error never makes the build pass. A file-level suppress is offered as
+/// an escape hatch only.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct RouteCollisionFinding {
+    /// The underlying route-collision entry.
+    #[serde(flatten)]
+    pub collision: RouteCollision,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl RouteCollisionFinding {
+    /// Build the wrapper from a raw [`RouteCollision`]. The primary action is
+    /// manual guidance because suppressing a guaranteed build error is never
+    /// the right fix; a file-level suppress is the escape hatch only.
+    #[must_use]
+    pub fn with_actions(collision: RouteCollision) -> Self {
+        let actions = vec![
+            IssueAction::Fix(FixAction {
+                kind: FixActionType::ResolveRouteCollision,
+                auto_fixable: false,
+                description: "Two or more files resolve to the same URL. Move or merge one so \
+                              each URL has a single owner. Route groups `(name)` and parallel \
+                              slots `@name` are the only legal same-URL shapes."
+                    .to_string(),
+                note: Some(
+                    "Next.js fails the build with \"You cannot have two parallel pages that \
+                     resolve to the same path\". See the sibling `conflicting_paths` array for \
+                     the other files that own this URL."
+                        .to_string(),
+                ),
+                available_in_catalogs: None,
+                suggested_target: None,
+            }),
+            IssueAction::SuppressFile(SuppressFileAction {
+                kind: SuppressFileKind::SuppressFile,
+                auto_fixable: false,
+                description: "Escape hatch only: a file-level suppress silences the finding but \
+                              does NOT make `next build` pass. Prefer moving or merging a file."
+                    .to_string(),
+                comment: "// fallow-ignore-file route-collision".to_string(),
+            }),
+        ];
+        Self {
+            collision,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for a [`DynamicSegmentNameConflict`] finding. The
+/// conflict is a Next.js dev / runtime error (`next build` does NOT catch it),
+/// so the primary action is manual guidance (rename the dynamic segments to a
+/// single consistent slug name), with a file-level suppress as escape hatch.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct DynamicSegmentNameConflictFinding {
+    /// The underlying dynamic-segment-name-conflict entry.
+    #[serde(flatten)]
+    pub conflict: DynamicSegmentNameConflict,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl DynamicSegmentNameConflictFinding {
+    /// Build the wrapper from a raw [`DynamicSegmentNameConflict`]. Manual
+    /// guidance primary action; file-level suppress escape hatch only.
+    #[must_use]
+    pub fn with_actions(conflict: DynamicSegmentNameConflict) -> Self {
+        let actions = vec![
+            IssueAction::Fix(FixAction {
+                kind: FixActionType::ResolveDynamicSegmentNameConflict,
+                auto_fixable: false,
+                description: "Sibling dynamic segments at the same position use different param \
+                              names. Rename them to one consistent slug name (e.g. pick `[id]` \
+                              or `[slug]` for both)."
+                    .to_string(),
+                note: Some(
+                    "Next.js throws \"You cannot use different slug names for the same dynamic \
+                     path\" at dev / runtime when the position is hit; `next build` does not \
+                     catch it. See the sibling `conflicting_segments` array."
+                        .to_string(),
+                ),
+                available_in_catalogs: None,
+                suggested_target: None,
+            }),
+            IssueAction::SuppressFile(SuppressFileAction {
+                kind: SuppressFileKind::SuppressFile,
+                auto_fixable: false,
+                description: "Escape hatch only: a file-level suppress silences the finding but \
+                              does NOT stop Next.js from throwing at dev / runtime. Prefer \
+                              renaming the segments."
+                    .to_string(),
+                comment: "// fallow-ignore-file dynamic-segment-name-conflict".to_string(),
+            }),
+        ];
+        Self {
+            conflict,
             actions,
             introduced: None,
         }
@@ -1902,6 +2021,10 @@ mod position_0_invariants {
                 FixActionType::MoveToServerModule => "move-to-server-module",
                 FixActionType::SplitMixedBarrel => "split-mixed-barrel",
                 FixActionType::HoistDirective => "hoist-directive",
+                FixActionType::ResolveRouteCollision => "resolve-route-collision",
+                FixActionType::ResolveDynamicSegmentNameConflict => {
+                    "resolve-dynamic-segment-name-conflict"
+                }
             },
             IssueAction::SuppressLine(_) => "suppress-line",
             IssueAction::SuppressFile(_) => "suppress-file",

@@ -118,6 +118,14 @@ pub fn filter_to_workspaces(
     results
         .misplaced_directives
         .retain(|d| any_under(&d.directive_site.path));
+
+    results
+        .route_collisions
+        .retain(|c| any_under(&c.collision.path));
+
+    results
+        .dynamic_segment_name_conflicts
+        .retain(|c| any_under(&c.conflict.path));
 }
 
 /// Resolve `--workspace <patterns...>` to a set of workspace roots, or exit with
@@ -454,6 +462,14 @@ pub fn filter_results_by_diff(
     results
         .misplaced_directives
         .retain(|d| line_in_diff(&d.directive_site.path, d.directive_site.line));
+
+    results
+        .route_collisions
+        .retain(|c| line_in_diff(&c.collision.path, c.collision.line));
+
+    results
+        .dynamic_segment_name_conflicts
+        .retain(|c| line_in_diff(&c.conflict.path, c.conflict.line));
 }
 
 /// Strict gate predicate for `fallow security --gate new` (issue #886): retain a

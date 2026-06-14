@@ -307,6 +307,22 @@ pub const CHECK_RULES: &[RuleDef] = &[
         full: "A Vue `inject(KEY)` or Svelte `getContext(KEY)` reads a dependency-injection key (an imported or module-local symbol) that no matching `provide(KEY)` / `setContext(KEY)` supplies anywhere in the project. The read resolves to undefined at runtime, surfaced only at render. To fix: add a matching provider for the key, or remove the dead inject. Defaults to warn, not error: a provider may live outside the analyzed graph (an app-level provide registered elsewhere, a plugin, a host application). String-literal keys and keys imported from a package are abstained.",
         docs_path: "explanations/dead-code#unprovided-injects",
     },
+    RuleDef {
+        id: "fallow/route-collision",
+        category: "Policy",
+        name: "Route collision",
+        short: "Two or more Next.js App Router route files resolve to the same URL",
+        full: "Two or more App Router route files (a `page` or a `route` handler) resolve to the SAME URL within one app-root. Route groups `(name)` and parallel slots `@name` do not change the URL, so `app/(marketing)/about/page.tsx` and `app/(shop)/about/page.tsx` both own `/about`. Next.js fails the build (\"You cannot have two parallel pages that resolve to the same path\") because a URL can have at most one owner, whether a Page or a Route Handler. fallow surfaces every colliding file at once; the build error names only one. Buckets are scoped per app-root (per workspace package), so a monorepo with several independent Next apps sharing a path is not flagged. Files under a private `_folder` or an intercepting marker `(.)`/`(..)`/`(...)` are excluded. There is no safe auto-fix: move or merge one of the files so each URL has a single owner. The check runs only when the project declares `next`.",
+        docs_path: "explanations/dead-code#route-collisions",
+    },
+    RuleDef {
+        id: "fallow/dynamic-segment-name-conflict",
+        category: "Policy",
+        name: "Dynamic segment name conflict",
+        short: "Sibling Next.js dynamic route segments use different slug names at the same position",
+        full: "Two or more sibling dynamic route segments at the same App Router tree position use different param spellings (`[id]` vs `[slug]`, or a catch-all `[...x]` vs an optional catch-all `[[...x]]`). Next.js throws \"You cannot use different slug names for the same dynamic path\" at dev and production runtime when the position is hit, because one position must resolve to a single param name. `next build` does NOT catch this (the build succeeds), so CI passes while the route crashes on its first request; fallow's static catch closes that gap. Route groups are transparent to the position and parallel slots fork it, so only genuinely-sibling segments conflict. To fix: rename the dynamic segments at the position to one consistent slug name. The check runs only when the project declares `next`.",
+        docs_path: "explanations/dead-code#dynamic-segment-name-conflicts",
+    },
 ];
 
 /// Look up a rule definition by its SARIF rule ID across all rule sets.
@@ -2219,7 +2235,7 @@ mod tests {
 
     #[test]
     fn check_rules_count() {
-        assert_eq!(CHECK_RULES.len(), 31);
+        assert_eq!(CHECK_RULES.len(), 33);
     }
 
     #[test]

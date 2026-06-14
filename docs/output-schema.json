@@ -657,6 +657,20 @@
           },
           "description": "Vue `inject(KEY)` / Svelte `getContext(KEY)` calls whose symbol KEY is\nprovided nowhere in the project (the injected-never-provided dead-half).\nWrapped in [`UnprovidedInjectFinding`] so each entry carries a typed\n`actions` array natively. Default severity is `warn`."
         },
+        "route_collisions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/RouteCollisionFinding"
+          },
+          "description": "Next.js App Router route files that resolve to the same URL within one\napp-root (a guaranteed `next build` failure). Wrapped in\n[`RouteCollisionFinding`] so each entry carries a typed `actions` array\nnatively. One finding per colliding file. Default severity is `warn`."
+        },
+        "dynamic_segment_name_conflicts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DynamicSegmentNameConflictFinding"
+          },
+          "description": "Sibling Next.js dynamic route segments at one tree position using\ndifferent param spellings (a dev / runtime error; `next build` does NOT\ncatch it). Wrapped in [`DynamicSegmentNameConflictFinding`] so each entry\ncarries a typed `actions` array natively. Default severity is `warn`."
+        },
         "baseline_deltas": {
           "anyOf": [
             {
@@ -1022,6 +1036,20 @@
             "$ref": "#/definitions/UnprovidedInjectFinding"
           },
           "description": "Vue `inject(KEY)` / Svelte `getContext(KEY)` calls whose symbol KEY is\nprovided nowhere in the project (the injected-never-provided dead-half).\nWrapped in [`UnprovidedInjectFinding`] so each entry carries a typed\n`actions` array natively. Default severity is `warn`."
+        },
+        "route_collisions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/RouteCollisionFinding"
+          },
+          "description": "Next.js App Router route files that resolve to the same URL within one\napp-root (a guaranteed `next build` failure). Wrapped in\n[`RouteCollisionFinding`] so each entry carries a typed `actions` array\nnatively. One finding per colliding file. Default severity is `warn`."
+        },
+        "dynamic_segment_name_conflicts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DynamicSegmentNameConflictFinding"
+          },
+          "description": "Sibling Next.js dynamic route segments at one tree position using\ndifferent param spellings (a dev / runtime error; `next build` does NOT\ncatch it). Wrapped in [`DynamicSegmentNameConflictFinding`] so each entry\ncarries a typed `actions` array natively. Default severity is `warn`."
         }
       },
       "required": [
@@ -4807,6 +4835,14 @@
         "misplaced_directives": {
           "type": "integer",
           "description": "Misplaced `\"use client\"` / `\"use server\"` directives written as\nexpression statements after a non-directive statement."
+        },
+        "route_collisions": {
+          "type": "integer",
+          "description": "Next.js App Router route files that resolve to the same URL within one\napp-root."
+        },
+        "dynamic_segment_name_conflicts": {
+          "type": "integer",
+          "description": "Sibling Next.js dynamic route segments at one position using different\nparam spellings."
         }
       },
       "required": [
@@ -5525,6 +5561,20 @@
             "$ref": "#/definitions/UnprovidedInjectFinding"
           },
           "description": "Vue `inject(KEY)` / Svelte `getContext(KEY)` calls whose symbol KEY is\nprovided nowhere in the project (the injected-never-provided dead-half).\nWrapped in [`UnprovidedInjectFinding`] so each entry carries a typed\n`actions` array natively. Default severity is `warn`."
+        },
+        "route_collisions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/RouteCollisionFinding"
+          },
+          "description": "Next.js App Router route files that resolve to the same URL within one\napp-root (a guaranteed `next build` failure). Wrapped in\n[`RouteCollisionFinding`] so each entry carries a typed `actions` array\nnatively. One finding per colliding file. Default severity is `warn`."
+        },
+        "dynamic_segment_name_conflicts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DynamicSegmentNameConflictFinding"
+          },
+          "description": "Sibling Next.js dynamic route segments at one tree position using\ndifferent param spellings (a dev / runtime error; `next build` does NOT\ncatch it). Wrapped in [`DynamicSegmentNameConflictFinding`] so each entry\ncarries a typed `actions` array natively. Default severity is `warn`."
         }
       },
       "required": [
@@ -6005,6 +6055,16 @@
           "type": "string",
           "const": "hoist-directive",
           "description": "Hoist a misplaced `\"use client\"` / `\"use server\"` directive to the\nleading prologue of the file (manual; used by misplaced-directive\nfindings)."
+        },
+        {
+          "type": "string",
+          "const": "resolve-route-collision",
+          "description": "Resolve a Next.js App Router route collision by moving or merging one of\nthe files that own the same URL (manual; suppressing a guaranteed build\nerror is never the right fix, so this is the primary action)."
+        },
+        {
+          "type": "string",
+          "const": "resolve-dynamic-segment-name-conflict",
+          "description": "Resolve a Next.js dynamic-segment name conflict by renaming the dynamic\nsegments at the conflicting position to a single consistent slug name\n(manual)."
         }
       ],
       "description": "Discriminant string for [`FixAction`]. Kebab-case per the JSON output\ncontract."
@@ -12730,6 +12790,124 @@
         "actions"
       ],
       "description": "Wire-shape envelope for an [`UnprovidedInject`] finding. There is no safe\nauto-fix: the fix is binary but judgement-bearing (add a `provide` for the\nkey, or delete the dead inject). The only action is a line-level suppress."
+    },
+    "RouteCollisionFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "This colliding route file (a `page` or `route` leaf)."
+        },
+        "url": {
+          "type": "string",
+          "description": "The URL pathname this file resolves to within its app-root, after\nstripping route groups `(x)` and parallel-slot `@slot` prefixes (e.g.\n`/about`, `/api/health`, `/blog/:slug`)."
+        },
+        "conflicting_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The other route files that resolve to the same URL within the same\napp-root. Path-sorted for stable output / fingerprints."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number (file-level finding, always 1)."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset (file-level finding, always 0)."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "path",
+        "url",
+        "conflicting_paths",
+        "line",
+        "col",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for a [`RouteCollision`] finding. A route collision is a\nguaranteed `next build` failure, so the PRIMARY action is manual guidance\n(move or merge one of the colliding files), NOT a suppress: suppressing a\nbuild error never makes the build pass. A file-level suppress is offered as\nan escape hatch only."
+    },
+    "DynamicSegmentNameConflictFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "This route file living under one of the conflicting dynamic segments."
+        },
+        "position": {
+          "type": "string",
+          "description": "The tree position (parent URL after group/slot normalization) where the\ndynamic segments conflict, e.g. `/shop` for `/shop/[id]` vs\n`/shop/[slug]`. The app-root prefix is stripped."
+        },
+        "conflicting_segments": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The distinct conflicting dynamic-segment spellings at this position, as\nwritten (e.g. `[\"[id]\", \"[slug]\"]`). Sorted for stable output."
+        },
+        "conflicting_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The other route files at the same position under a conflicting dynamic\nsegment. Path-sorted for stable output / fingerprints."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number (file-level finding, always 1)."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset (file-level finding, always 0)."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "path",
+        "position",
+        "conflicting_segments",
+        "conflicting_paths",
+        "line",
+        "col",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for a [`DynamicSegmentNameConflict`] finding. The\nconflict is a Next.js dev / runtime error (`next build` does NOT catch it),\nso the primary action is manual guidance (rename the dynamic segments to a\nsingle consistent slug name), with a file-level suppress as escape hatch."
     }
   }
 }

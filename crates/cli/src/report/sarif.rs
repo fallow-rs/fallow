@@ -5,12 +5,13 @@ use fallow_config::{RulesConfig, Severity};
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::{
     AnalysisResults, BoundaryCallViolation, BoundaryCoverageViolation, BoundaryViolation,
-    CircularDependency, DuplicateExportFinding, EmptyCatalogGroupFinding, InvalidClientExport,
-    MisconfiguredDependencyOverrideFinding, MisplacedDirective, MixedClientServerBarrel,
-    PolicyViolation, PolicyViolationSeverity, PrivateTypeLeak, StaleSuppression,
-    TestOnlyDependency, TypeOnlyDependency, UnlistedDependencyFinding, UnprovidedInject,
-    UnresolvedCatalogReferenceFinding, UnresolvedImport, UnusedCatalogEntryFinding,
-    UnusedDependency, UnusedDependencyOverrideFinding, UnusedExport, UnusedFile, UnusedMember,
+    CircularDependency, DuplicateExportFinding, DynamicSegmentNameConflict,
+    EmptyCatalogGroupFinding, InvalidClientExport, MisconfiguredDependencyOverrideFinding,
+    MisplacedDirective, MixedClientServerBarrel, PolicyViolation, PolicyViolationSeverity,
+    PrivateTypeLeak, RouteCollision, StaleSuppression, TestOnlyDependency, TypeOnlyDependency,
+    UnlistedDependencyFinding, UnprovidedInject, UnresolvedCatalogReferenceFinding,
+    UnresolvedImport, UnusedCatalogEntryFinding, UnusedDependency, UnusedDependencyOverrideFinding,
+    UnusedExport, UnusedFile, UnusedMember,
 };
 use rustc_hash::FxHashMap;
 
@@ -577,6 +578,46 @@ fn sarif_unprovided_inject_fields(
     }
 }
 
+fn sarif_route_collision_fields(
+    collision: &RouteCollision,
+    root: &Path,
+    level: &'static str,
+) -> SarifFields {
+    SarifFields {
+        rule_id: "fallow/route-collision",
+        level,
+        message: format!(
+            "Route file resolves to '{}', which is also owned by {} other file(s); Next.js fails the build because a URL can have only one owner",
+            collision.url,
+            collision.conflicting_paths.len()
+        ),
+        uri: relative_uri(&collision.path, root),
+        region: Some((collision.line, collision.col + 1)),
+        source_path: Some(collision.path.clone()),
+        properties: None,
+    }
+}
+
+fn sarif_dynamic_segment_name_conflict_fields(
+    conflict: &DynamicSegmentNameConflict,
+    root: &Path,
+    level: &'static str,
+) -> SarifFields {
+    SarifFields {
+        rule_id: "fallow/dynamic-segment-name-conflict",
+        level,
+        message: format!(
+            "Dynamic segments at '{}' use different slug names ({}); Next.js requires one consistent name per dynamic path",
+            conflict.position,
+            conflict.conflicting_segments.join(", ")
+        ),
+        uri: relative_uri(&conflict.path, root),
+        region: Some((conflict.line, conflict.col + 1)),
+        source_path: Some(conflict.path.clone()),
+        properties: None,
+    }
+}
+
 fn sarif_stale_suppression_fields(
     suppression: &StaleSuppression,
     root: &Path,
@@ -943,6 +984,16 @@ fn sarif_graph_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
             "fallow/unprovided-inject",
             "A Vue inject / Svelte getContext whose key is provided nowhere in the project",
             rules.unprovided_injects,
+        ),
+        (
+            "fallow/route-collision",
+            "Two or more Next.js App Router route files resolve to the same URL",
+            rules.route_collision,
+        ),
+        (
+            "fallow/dynamic-segment-name-conflict",
+            "Sibling Next.js dynamic route segments use different slug names at the same position",
+            rules.dynamic_segment_name_conflict,
         ),
         (
             "fallow/stale-suppression",
@@ -1322,6 +1373,25 @@ fn push_graph_sarif_results(
             severity_to_sarif_level(rules.unprovided_injects),
         )
     });
+    push_sarif_results(sarif_results, &results.route_collisions, snippets, |c| {
+        sarif_route_collision_fields(
+            &c.collision,
+            root,
+            severity_to_sarif_level(rules.route_collision),
+        )
+    });
+    push_sarif_results(
+        sarif_results,
+        &results.dynamic_segment_name_conflicts,
+        snippets,
+        |c| {
+            sarif_dynamic_segment_name_conflict_fields(
+                &c.conflict,
+                root,
+                severity_to_sarif_level(rules.dynamic_segment_name_conflict),
+            )
+        },
+    );
     push_sarif_results(sarif_results, &results.stale_suppressions, snippets, |s| {
         sarif_stale_suppression_fields(s, root, severity_to_sarif_level(rules.stale_suppressions))
     });
@@ -2079,9 +2149,11 @@ mod tests {
         let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
             .as_array()
             .expect("rules should be an array");
-        assert_eq!(rules.len(), 31);
+        assert_eq!(rules.len(), 33);
 
         let rule_ids: Vec<&str> = rules.iter().map(|r| r["id"].as_str().unwrap()).collect();
+        assert!(rule_ids.contains(&"fallow/route-collision"));
+        assert!(rule_ids.contains(&"fallow/dynamic-segment-name-conflict"));
         assert!(rule_ids.contains(&"fallow/unused-file"));
         assert!(rule_ids.contains(&"fallow/unused-export"));
         assert!(rule_ids.contains(&"fallow/unused-type"));

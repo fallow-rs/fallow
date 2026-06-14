@@ -265,6 +265,15 @@ fn push_markdown_graph_sections(
         "Misplaced directives",
         |d| format_markdown_misplaced_directive(d, rel),
     );
+    markdown_section(out, &results.route_collisions, "Route collisions", |c| {
+        format_markdown_route_collision(c, rel)
+    });
+    markdown_section(
+        out,
+        &results.dynamic_segment_name_conflicts,
+        "Dynamic segment conflicts",
+        |c| format_markdown_dynamic_segment_name_conflict(c, rel),
+    );
     markdown_section(
         out,
         &results.unprovided_injects,
@@ -438,6 +447,30 @@ fn format_markdown_unprovided_inject(
         i.inject.line,
         escape_backticks(&i.inject.key_name),
         escape_backticks(&i.inject.key_name),
+    )]
+}
+
+fn format_markdown_route_collision(
+    c: &fallow_core::results::RouteCollisionFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    vec![format!(
+        "- `{}` resolves to `{}` (shared with {} other route file(s))",
+        rel(&c.collision.path),
+        c.collision.url,
+        c.collision.conflicting_paths.len(),
+    )]
+}
+
+fn format_markdown_dynamic_segment_name_conflict(
+    c: &fallow_core::results::DynamicSegmentNameConflictFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    vec![format!(
+        "- `{}` conflicting dynamic segments at `{}` ({})",
+        rel(&c.conflict.path),
+        c.conflict.position,
+        c.conflict.conflicting_segments.join(" vs "),
     )]
 }
 

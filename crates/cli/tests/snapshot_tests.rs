@@ -752,6 +752,8 @@ fn sarif_mixed_severity_snapshot() {
         invalid_client_export: fallow_config::Severity::Warn,
         mixed_client_server_barrel: fallow_config::Severity::Warn,
         misplaced_directive: fallow_config::Severity::Warn,
+        route_collision: fallow_config::Severity::Warn,
+        dynamic_segment_name_conflict: fallow_config::Severity::Warn,
     };
     let sarif = build_sarif(&results, &root, &rules);
     let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");
@@ -1619,6 +1621,8 @@ fn codeclimate_mixed_severity_snapshot() {
         invalid_client_export: fallow_config::Severity::Warn,
         mixed_client_server_barrel: fallow_config::Severity::Warn,
         misplaced_directive: fallow_config::Severity::Warn,
+        route_collision: fallow_config::Severity::Warn,
+        dynamic_segment_name_conflict: fallow_config::Severity::Warn,
     };
     let cc = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");

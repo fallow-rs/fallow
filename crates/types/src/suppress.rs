@@ -108,6 +108,13 @@ pub enum IssueKind {
     /// `provide`/`setContext`'d nowhere in the analyzed project. Cross-graph
     /// dead-half DI link: at runtime the inject returns `undefined`.
     UnprovidedInject,
+    /// Two or more Next.js App Router route files that resolve to the same URL
+    /// within one app-root (a guaranteed `next build` failure).
+    RouteCollision,
+    /// Sibling Next.js dynamic route segments at one tree position using
+    /// different param spellings (`[id]` vs `[slug]`; a dev / runtime error
+    /// that `next build` does NOT catch).
+    DynamicSegmentNameConflict,
 }
 
 impl IssueKind {
@@ -161,6 +168,10 @@ impl IssueKind {
             "misplaced-directive" | "misplaced-directives" => Some(Self::MisplacedDirective),
             "unused-store-member" | "unused-store-members" => Some(Self::UnusedStoreMember),
             "unprovided-inject" | "unprovided-injects" => Some(Self::UnprovidedInject),
+            "route-collision" | "route-collisions" => Some(Self::RouteCollision),
+            "dynamic-segment-name-conflict" | "dynamic-segment-name-conflicts" => {
+                Some(Self::DynamicSegmentNameConflict)
+            }
             _ => None,
         }
     }
@@ -203,6 +214,8 @@ impl IssueKind {
             Self::MisplacedDirective => 32,
             Self::UnusedStoreMember => 33,
             Self::UnprovidedInject => 34,
+            Self::RouteCollision => 35,
+            Self::DynamicSegmentNameConflict => 36,
         }
     }
 
@@ -244,6 +257,8 @@ impl IssueKind {
             32 => Some(Self::MisplacedDirective),
             33 => Some(Self::UnusedStoreMember),
             34 => Some(Self::UnprovidedInject),
+            35 => Some(Self::RouteCollision),
+            36 => Some(Self::DynamicSegmentNameConflict),
             _ => None,
         }
     }
@@ -345,6 +360,8 @@ pub const fn issue_kind_to_kebab(kind: IssueKind) -> &'static str {
         IssueKind::MisplacedDirective => "misplaced-directive",
         IssueKind::UnusedStoreMember => "unused-store-member",
         IssueKind::UnprovidedInject => "unprovided-inject",
+        IssueKind::RouteCollision => "route-collision",
+        IssueKind::DynamicSegmentNameConflict => "dynamic-segment-name-conflict",
     }
 }
 
@@ -587,6 +604,10 @@ pub const KNOWN_ISSUE_KIND_NAMES: &[&str] = &[
     "unused-store-members",
     "unprovided-inject",
     "unprovided-injects",
+    "route-collision",
+    "route-collisions",
+    "dynamic-segment-name-conflict",
+    "dynamic-segment-name-conflicts",
 ];
 
 /// CLI filter flags on `fallow dead-code` that scope output to a single
@@ -856,6 +877,22 @@ mod tests {
             IssueKind::parse("misplaced-directives"),
             Some(IssueKind::MisplacedDirective)
         );
+        assert_eq!(
+            IssueKind::parse("route-collision"),
+            Some(IssueKind::RouteCollision)
+        );
+        assert_eq!(
+            IssueKind::parse("route-collisions"),
+            Some(IssueKind::RouteCollision)
+        );
+        assert_eq!(
+            IssueKind::parse("dynamic-segment-name-conflict"),
+            Some(IssueKind::DynamicSegmentNameConflict)
+        );
+        assert_eq!(
+            IssueKind::parse("dynamic-segment-name-conflicts"),
+            Some(IssueKind::DynamicSegmentNameConflict)
+        );
     }
 
     #[test]
@@ -899,7 +936,15 @@ mod tests {
             IssueKind::from_discriminant(34),
             Some(IssueKind::UnprovidedInject)
         );
-        assert_eq!(IssueKind::from_discriminant(35), None);
+        assert_eq!(
+            IssueKind::from_discriminant(35),
+            Some(IssueKind::RouteCollision)
+        );
+        assert_eq!(
+            IssueKind::from_discriminant(36),
+            Some(IssueKind::DynamicSegmentNameConflict)
+        );
+        assert_eq!(IssueKind::from_discriminant(37), None);
         assert_eq!(IssueKind::from_discriminant(u8::MAX), None);
     }
 
@@ -940,6 +985,8 @@ mod tests {
             IssueKind::MisplacedDirective,
             IssueKind::UnusedStoreMember,
             IssueKind::UnprovidedInject,
+            IssueKind::RouteCollision,
+            IssueKind::DynamicSegmentNameConflict,
         ] {
             assert_eq!(
                 IssueKind::from_discriminant(kind.to_discriminant()),
@@ -947,7 +994,7 @@ mod tests {
             );
         }
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(35), None);
+        assert_eq!(IssueKind::from_discriminant(37), None);
     }
 
     #[test]
@@ -987,6 +1034,8 @@ mod tests {
             IssueKind::MisplacedDirective,
             IssueKind::UnusedStoreMember,
             IssueKind::UnprovidedInject,
+            IssueKind::RouteCollision,
+            IssueKind::DynamicSegmentNameConflict,
         ];
         let discriminants: Vec<u8> = all_kinds.iter().map(|k| k.to_discriminant()).collect();
         let mut sorted = discriminants.clone();

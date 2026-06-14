@@ -106,6 +106,8 @@ mod invalid_client_exports;
 mod misplaced_directive;
 #[path = "integration_test/mixed_client_server_barrel.rs"]
 mod mixed_client_server_barrel;
+#[path = "integration_test/nextjs_route_tree.rs"]
+mod nextjs_route_tree;
 #[path = "integration_test/policy_violations.rs"]
 mod policy_violations;
 #[path = "integration_test/private_type_leaks.rs"]

@@ -380,6 +380,23 @@ impl<'a> CompactLineBuilder<'a> {
                 finding.inject.key_name,
             ));
         }
+        for finding in &self.results.route_collisions {
+            self.lines.push(format!(
+                "route-collision:{}:{} (url {})",
+                self.rel(&finding.collision.path),
+                finding.collision.line,
+                finding.collision.url,
+            ));
+        }
+        for finding in &self.results.dynamic_segment_name_conflicts {
+            self.lines.push(format!(
+                "dynamic-segment-name-conflict:{}:{} ({} at {})",
+                self.rel(&finding.conflict.path),
+                finding.conflict.line,
+                finding.conflict.conflicting_segments.join(" vs "),
+                finding.conflict.position,
+            ));
+        }
         for suppression in &self.results.stale_suppressions {
             self.lines
                 .push(compact_stale_suppression_line(suppression, self.root));

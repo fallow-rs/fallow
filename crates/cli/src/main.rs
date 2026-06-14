@@ -3213,6 +3213,11 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
                     // field exists for the same parity reason. The rule still runs
                     // and reports by default.
                     misplaced_directives: false,
+                    // No dedicated `--route-collisions` / `--dynamic-segment-name
+                    // -conflicts` filter flags yet; the fields exist for the same
+                    // parity reason. The rules still run and report by default.
+                    route_collisions: false,
+                    dynamic_segment_name_conflicts: false,
                 },
                 trace_opts: TraceOptions {
                     trace_export: trace,

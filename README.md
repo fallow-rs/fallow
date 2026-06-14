@@ -181,7 +181,7 @@ Clone families and duplicated implementation patterns that increase maintenance 
 
 ### Architecture
 
-Circular dependencies, boundary violations across layers and modules, re-export chains, and other dependency-graph issues. Zero-config presets for bulletproof, layered, hexagonal, and feature-sliced architectures. Framework correctness checks catch Next.js `"use client"` files that export a server-only or route-segment config name (such as `metadata`, `revalidate`, or a route HTTP method) before the build does. They also flag barrels that re-export both client and server-only modules, and `"use client"` / `"use server"` directives placed below an import where the bundler silently ignores them.
+Circular dependencies, boundary violations across layers and modules, re-export chains, and other dependency-graph issues. Zero-config presets for bulletproof, layered, hexagonal, and feature-sliced architectures. Framework correctness checks catch Next.js `"use client"` files that export a server-only or route-segment config name (such as `metadata`, `revalidate`, or a route HTTP method) before the build does. They also flag barrels that re-export both client and server-only modules, and `"use client"` / `"use server"` directives placed below an import where the bundler silently ignores them. Whole-project App Router checks catch route collisions (two files resolving to the same URL across route groups, a `next build` failure) and dynamic-segment name conflicts (`[id]` vs `[slug]` at the same position), scoped per app-root so monorepos with multiple Next apps are not false-flagged.
 
 ### Dependency hygiene
 

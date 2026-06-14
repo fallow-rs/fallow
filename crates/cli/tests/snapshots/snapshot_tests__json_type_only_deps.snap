@@ -38,7 +38,9 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
     "misconfigured_dependency_overrides": 0,
     "invalid_client_exports": 0,
     "mixed_client_server_barrels": 0,
-    "misplaced_directives": 0
+    "misplaced_directives": 0,
+    "route_collisions": 0,
+    "dynamic_segment_name_conflicts": 0
   },
   "unused_files": [],
   "unused_exports": [],
@@ -111,5 +113,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
   "misconfigured_dependency_overrides": [],
   "invalid_client_exports": [],
   "mixed_client_server_barrels": [],
-  "misplaced_directives": []
+  "misplaced_directives": [],
+  "route_collisions": [],
+  "dynamic_segment_name_conflicts": []
 }

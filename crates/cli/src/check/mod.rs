@@ -49,6 +49,8 @@ pub struct IssueFilters {
     pub invalid_client_exports: bool,
     pub mixed_client_server_barrels: bool,
     pub misplaced_directives: bool,
+    pub route_collisions: bool,
+    pub dynamic_segment_name_conflicts: bool,
 }
 
 impl IssueFilters {
@@ -78,6 +80,8 @@ impl IssueFilters {
             || self.invalid_client_exports
             || self.mixed_client_server_barrels
             || self.misplaced_directives
+            || self.route_collisions
+            || self.dynamic_segment_name_conflicts
     }
 
     /// Enable off-by-default issue types when explicitly requested as filters.
@@ -172,6 +176,12 @@ impl IssueFilters {
         }
         if !self.misplaced_directives {
             results.misplaced_directives.clear();
+        }
+        if !self.route_collisions {
+            results.route_collisions.clear();
+        }
+        if !self.dynamic_segment_name_conflicts {
+            results.dynamic_segment_name_conflicts.clear();
         }
     }
 }
@@ -824,6 +834,8 @@ mod tests {
             invalid_client_exports: false,
             mixed_client_server_barrels: false,
             misplaced_directives: false,
+            route_collisions: false,
+            dynamic_segment_name_conflicts: false,
         }
     }
 
@@ -1245,6 +1257,8 @@ mod tests {
             invalid_client_exports: true,
             mixed_client_server_barrels: true,
             misplaced_directives: true,
+            route_collisions: true,
+            dynamic_segment_name_conflicts: true,
         };
         let total_before = results.total_issues();
         f.apply(&mut results);

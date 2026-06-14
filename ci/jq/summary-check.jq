@@ -54,6 +54,8 @@ else
     table_row("Invalid client exports"; "invalid_client_exports"; "invalid-client-exports"),
     table_row("Mixed client/server barrels"; "mixed_client_server_barrels"; "mixed-client-server-barrels"),
     table_row("Misplaced directives"; "misplaced_directives"; "misplaced-directives"),
+    table_row("Route collisions"; "route_collisions"; "route-collisions"),
+    table_row("Dynamic segment conflicts"; "dynamic_segment_name_conflicts"; "dynamic-segment-name-conflicts"),
     table_row("Type-only dependencies"; "type_only_dependencies"; "type-only-dependencies"),
     table_row("Test-only dependencies"; "test_only_dependencies"; "test-only-dependencies"),
     table_row("Stale suppressions"; "stale_suppressions"; "stale-suppressions"),
@@ -130,6 +132,12 @@ else
   section("Misplaced directives"; "misplaced_directives";
     "`\"use client\"` / `\"use server\"` directives written after a non-directive statement, so the RSC bundler ignores them. Move the directive to the top of the file.\n\n| File | Directive |\n|------|-----------|\n";
     "| `\(.path):\(.line)` | `\"\(.directive)\"` |") +
+  section("Route collisions"; "route_collisions";
+    "Next.js App Router route files that resolve to the same URL within one app-root. Next.js fails the build because a URL can have only one owner.\n\n| File | URL |\n|------|-----|\n";
+    "| `\(.path)` | `\(.url)` |") +
+  section("Dynamic segment conflicts"; "dynamic_segment_name_conflicts";
+    "Sibling Next.js dynamic route segments at one position using different slug names. Next.js requires one consistent name per dynamic path.\n\n| File | Position | Segments |\n|------|----------|----------|\n";
+    "| `\(.path)` | `\(.position)` | `\(.conflicting_segments | join(", "))` |") +
   section("Type-only dependencies"; "type_only_dependencies";
     "Dependencies only used for type imports \u2014 consider moving to `devDependencies`.\n\n| Package |\n|---------|\n";
     "| `\(.package_name)` |") +

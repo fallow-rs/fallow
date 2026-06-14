@@ -541,6 +541,11 @@ fn to_issue_filters(filters: &DeadCodeFilters) -> IssueFilters {
         // No programmatic filter for misplaced-directives yet; the rule runs and
         // reports by default. Field exists for clear-parity only.
         misplaced_directives: false,
+        // No programmatic filter for route-collisions / dynamic-segment-name
+        // -conflicts yet; the rules run and report by default. Fields exist for
+        // clear-parity only.
+        route_collisions: false,
+        dynamic_segment_name_conflicts: false,
     }
 }
 

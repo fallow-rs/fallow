@@ -339,6 +339,32 @@ expression: redact_sarif_version(&json_str)
               }
             },
             {
+              "id": "fallow/route-collision",
+              "shortDescription": {
+                "text": "Two or more Next.js App Router route files resolve to the same URL"
+              },
+              "fullDescription": {
+                "text": "Two or more App Router route files (a `page` or a `route` handler) resolve to the SAME URL within one app-root. Route groups `(name)` and parallel slots `@name` do not change the URL, so `app/(marketing)/about/page.tsx` and `app/(shop)/about/page.tsx` both own `/about`. Next.js fails the build (\"You cannot have two parallel pages that resolve to the same path\") because a URL can have at most one owner, whether a Page or a Route Handler. fallow surfaces every colliding file at once; the build error names only one. Buckets are scoped per app-root (per workspace package), so a monorepo with several independent Next apps sharing a path is not flagged. Files under a private `_folder` or an intercepting marker `(.)`/`(..)`/`(...)` are excluded. There is no safe auto-fix: move or merge one of the files so each URL has a single owner. The check runs only when the project declares `next`."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#route-collisions",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "fallow/dynamic-segment-name-conflict",
+              "shortDescription": {
+                "text": "Sibling Next.js dynamic route segments use different slug names at the same position"
+              },
+              "fullDescription": {
+                "text": "Two or more sibling dynamic route segments at the same App Router tree position use different param spellings (`[id]` vs `[slug]`, or a catch-all `[...x]` vs an optional catch-all `[[...x]]`). Next.js throws \"You cannot use different slug names for the same dynamic path\" at dev and production runtime when the position is hit, because one position must resolve to a single param name. `next build` does NOT catch this (the build succeeds), so CI passes while the route crashes on its first request; fallow's static catch closes that gap. Route groups are transparent to the position and parallel slots fork it, so only genuinely-sibling segments conflict. To fix: rename the dynamic segments at the position to one consistent slug name. The check runs only when the project declares `next`."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#dynamic-segment-name-conflicts",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
               "id": "fallow/stale-suppression",
               "shortDescription": {
                 "text": "Suppression comment or tag no longer matches any issue"

@@ -255,6 +255,16 @@ const DIAGNOSTIC_ISSUE_TYPES: &[DiagnosticIssueType] = &[
         label: "Unprovided Injects",
     },
     DiagnosticIssueType {
+        config_key: Some("route-collision"),
+        code: "route-collision",
+        label: "Route Collisions",
+    },
+    DiagnosticIssueType {
+        config_key: Some("dynamic-segment-name-conflict"),
+        code: "dynamic-segment-name-conflict",
+        label: "Dynamic Segment Conflicts",
+    },
+    DiagnosticIssueType {
         config_key: Some("stale-suppressions"),
         code: "stale-suppression",
         label: "Stale Suppressions",
@@ -2691,6 +2701,27 @@ export function choose(value: number): string {
                 ),
             ],
             unprovided_injects: vec![],
+            route_collisions: vec![fallow_core::results::RouteCollisionFinding::with_actions(
+                fallow_core::results::RouteCollision {
+                    path: "/app/(a)/about/page.tsx".into(),
+                    url: "/about".to_string(),
+                    conflicting_paths: vec!["/app/(b)/about/page.tsx".into()],
+                    line: 1,
+                    col: 0,
+                },
+            )],
+            dynamic_segment_name_conflicts: vec![
+                fallow_core::results::DynamicSegmentNameConflictFinding::with_actions(
+                    fallow_core::results::DynamicSegmentNameConflict {
+                        path: "/app/shop/[id]/page.tsx".into(),
+                        position: "/shop".to_string(),
+                        conflicting_segments: vec!["[id]".to_string(), "[slug]".to_string()],
+                        conflicting_paths: vec!["/app/shop/[slug]/edit/page.tsx".into()],
+                        line: 1,
+                        col: 0,
+                    },
+                ),
+            ],
             suppression_count: 1,
             active_suppressions: Vec::new(),
             feature_flags: vec![fallow_core::results::FeatureFlag {

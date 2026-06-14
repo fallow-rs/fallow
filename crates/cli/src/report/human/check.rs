@@ -1274,6 +1274,8 @@ fn build_policy_section(
         && results.mixed_client_server_barrels.is_empty()
         && results.misplaced_directives.is_empty()
         && results.unprovided_injects.is_empty()
+        && results.route_collisions.is_empty()
+        && results.dynamic_segment_name_conflicts.is_empty()
     {
         return;
     }
@@ -1331,6 +1333,32 @@ fn build_policy_section(
         },
         format_detail: &format_unprovided_inject,
     });
+
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.route_collisions,
+        title: "Route collisions",
+        level: severity_to_level(rules.route_collision),
+        root,
+        max_files: MAX_FLAT_ITEMS,
+        get_path: |c: &fallow_types::output_dead_code::RouteCollisionFinding| {
+            c.collision.path.as_path()
+        },
+        format_detail: &format_route_collision,
+    });
+
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.dynamic_segment_name_conflicts,
+        title: "Dynamic segment conflicts",
+        level: severity_to_level(rules.dynamic_segment_name_conflict),
+        root,
+        max_files: MAX_FLAT_ITEMS,
+        get_path: |c: &fallow_types::output_dead_code::DynamicSegmentNameConflictFinding| {
+            c.conflict.path.as_path()
+        },
+        format_detail: &format_dynamic_segment_name_conflict,
+    });
 }
 
 fn format_invalid_client_export(
@@ -1386,6 +1414,36 @@ fn format_unprovided_inject(
         format!(
             "has no matching provide({}) in this project; at runtime it returns undefined (provide the key or remove this inject)",
             i.key_name
+        )
+        .dimmed(),
+    )
+}
+
+fn format_route_collision(entry: &fallow_types::output_dead_code::RouteCollisionFinding) -> String {
+    let c = &entry.collision;
+    let others = c.conflicting_paths.len();
+    let plural = if others == 1 { "" } else { "s" };
+    format!(
+        "{}",
+        format!(
+            "resolves to {} (shared with {others} other route file{plural}; route groups and \
+             slots do not change the URL)",
+            c.url
+        )
+        .dimmed(),
+    )
+}
+
+fn format_dynamic_segment_name_conflict(
+    entry: &fallow_types::output_dead_code::DynamicSegmentNameConflictFinding,
+) -> String {
+    let c = &entry.conflict;
+    format!(
+        "{}",
+        format!(
+            "conflicting dynamic segments at {} ({})",
+            c.position,
+            c.conflicting_segments.join(" vs ")
         )
         .dimmed(),
     )
@@ -2147,6 +2205,12 @@ fn collect_matching_rules(
     }
     for i in &results.unprovided_injects {
         check(&i.inject.path);
+    }
+    for c in &results.route_collisions {
+        check(&c.collision.path);
+    }
+    for c in &results.dynamic_segment_name_conflicts {
+        check(&c.conflict.path);
     }
     for s in &results.stale_suppressions {
         check(&s.path);

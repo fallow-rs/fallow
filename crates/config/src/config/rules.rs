@@ -180,6 +180,21 @@ pub struct RulesConfig {
     /// `warn`.
     #[serde(default = "Severity::default_warn", alias = "misplaced-directives")]
     pub misplaced_directive: Severity,
+    /// Two or more Next.js App Router route files that resolve to the same URL
+    /// within one app-root. Next.js fails the build ("You cannot have two
+    /// parallel pages that resolve to the same path"); fallow catches it
+    /// statically and names every colliding file. Defaults to `warn`.
+    #[serde(default = "Severity::default_warn", alias = "route-collisions")]
+    pub route_collision: Severity,
+    /// Sibling Next.js dynamic route segments at one tree position using
+    /// different param spellings (`[id]` vs `[slug]`). Next.js fails the build
+    /// ("You cannot use different slug names for the same dynamic path");
+    /// fallow catches it statically. Defaults to `warn`.
+    #[serde(
+        default = "Severity::default_warn",
+        alias = "dynamic-segment-name-conflicts"
+    )]
+    pub dynamic_segment_name_conflict: Severity,
 }
 
 impl Default for RulesConfig {
@@ -218,6 +233,8 @@ impl Default for RulesConfig {
             invalid_client_export: Severity::Warn,
             mixed_client_server_barrel: Severity::Warn,
             misplaced_directive: Severity::Warn,
+            route_collision: Severity::Warn,
+            dynamic_segment_name_conflict: Severity::Warn,
         }
     }
 }
@@ -323,6 +340,12 @@ impl RulesConfig {
         }
         if let Some(s) = partial.misplaced_directive {
             self.misplaced_directive = s;
+        }
+        if let Some(s) = partial.route_collision {
+            self.route_collision = s;
+        }
+        if let Some(s) = partial.dynamic_segment_name_conflict {
+            self.dynamic_segment_name_conflict = s;
         }
     }
 }
@@ -523,6 +546,18 @@ pub struct PartialRulesConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub misplaced_directive: Option<Severity>,
+    #[serde(
+        default,
+        alias = "route-collisions",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub route_collision: Option<Severity>,
+    #[serde(
+        default,
+        alias = "dynamic-segment-name-conflicts",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub dynamic_segment_name_conflict: Option<Severity>,
 }
 
 /// Every rule name accepted by `RulesConfig` deserialization, in kebab-case.
@@ -570,6 +605,8 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "invalid-client-export",
     "mixed-client-server-barrel",
     "misplaced-directive",
+    "route-collision",
+    "dynamic-segment-name-conflict",
     "unused-file",
     "unused-export",
     "unused-type",
@@ -602,6 +639,8 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "invalid-client-exports",
     "mixed-client-server-barrels",
     "misplaced-directives",
+    "route-collisions",
+    "dynamic-segment-name-conflicts",
 ];
 
 /// Find the closest known rule name to `input` when it is plausibly a typo.
@@ -899,6 +938,8 @@ mod tests {
             invalid_client_export: Some(Severity::Off),
             mixed_client_server_barrel: Some(Severity::Off),
             misplaced_directive: Some(Severity::Off),
+            route_collision: Some(Severity::Off),
+            dynamic_segment_name_conflict: Some(Severity::Off),
         };
         rules.apply_partial(&partial);
         assert_eq!(rules.unused_files, Severity::Off);
@@ -915,6 +956,8 @@ mod tests {
         assert_eq!(rules.invalid_client_export, Severity::Off);
         assert_eq!(rules.mixed_client_server_barrel, Severity::Off);
         assert_eq!(rules.misplaced_directive, Severity::Off);
+        assert_eq!(rules.route_collision, Severity::Off);
+        assert_eq!(rules.dynamic_segment_name_conflict, Severity::Off);
     }
 
     #[test]
@@ -958,7 +1001,7 @@ mod tests {
 
     #[test]
     fn known_rule_names_count_matches_struct() {
-        assert_eq!(KNOWN_RULE_NAMES.len(), 66);
+        assert_eq!(KNOWN_RULE_NAMES.len(), 70);
     }
 
     #[test]
@@ -999,8 +1042,8 @@ mod tests {
 
         assert_eq!(
             aliases_found.len(),
-            66,
-            "expected 66 source-level alias attrs (33 per struct); got {}: {:?}",
+            70,
+            "expected 70 source-level alias attrs (35 per struct); got {}: {:?}",
             aliases_found.len(),
             aliases_found
         );

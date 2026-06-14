@@ -194,6 +194,14 @@ pub enum FixActionType {
     /// leading prologue of the file (manual; used by misplaced-directive
     /// findings).
     HoistDirective,
+    /// Resolve a Next.js App Router route collision by moving or merging one of
+    /// the files that own the same URL (manual; suppressing a guaranteed build
+    /// error is never the right fix, so this is the primary action).
+    ResolveRouteCollision,
+    /// Resolve a Next.js dynamic-segment name conflict by renaming the dynamic
+    /// segments at the conflicting position to a single consistent slug name
+    /// (manual).
+    ResolveDynamicSegmentNameConflict,
 }
 
 /// Inline-comment suppression for a single finding line.
