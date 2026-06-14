@@ -68,9 +68,7 @@ import type {
   WorkspacesOutput,
 } from "./types.js";
 
-export const findCliBinary = async (
-  context: vscode.ExtensionContext,
-): Promise<string | null> => {
+export const findCliBinary = async (context: vscode.ExtensionContext): Promise<string | null> => {
   const lspPath = getLspPath();
   if (lspPath) {
     const dir = path.dirname(lspPath);

@@ -119,6 +119,14 @@ const AUDIT_SAVE_LANGUAGES: ReadonlySet<string> = new Set([
 /** Debounce window (ms) for coalescing rapid saves into a single audit run. */
 const AUDIT_SAVE_DEBOUNCE_MS = 600;
 
+/**
+ * workspaceState flag: the "all findings are hidden" startup nudge was already
+ * shown for this workspace. Set when the prompt appears, cleared whenever the
+ * filter leaves the fully-muted state, so each distinct hide-all episode is
+ * nudged exactly once instead of on every window reload.
+ */
+const MUTED_ALL_NUDGE_KEY = "fallow.mutedAllNudgeShown.v1";
+
 let outputChannel: vscode.OutputChannel;
 let lastCheckResult: FallowCheckResult | null = null;
 let lastDupesResult: FallowDupesResult | null = null;
@@ -208,6 +216,35 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     },
   });
   registerDiagnosticMuteUi(context, diagnosticFilter);
+
+  // Once-ever nudge: when EVERY Fallow finding is hidden (the "Hide All"
+  // toggle), users who reinstalled often don't realize the mute state persisted
+  // in workspaceState (it survives uninstall and deleting the `.fallow` folder),
+  // so it looks like findings vanished for good. Surface a single dismissible
+  // prompt wired to the escape-hatch command so a stuck-muted workspace is
+  // recoverable without knowing the command name. Gated by a persisted flag so
+  // an intentional muter is told once, not nagged on every window reload.
+  if (diagnosticFilter.isMutedAll() && !context.workspaceState.get(MUTED_ALL_NUDGE_KEY)) {
+    void (async () => {
+      await context.workspaceState.update(MUTED_ALL_NUDGE_KEY, true);
+      const choice = await vscode.window.showInformationMessage(
+        "Fallow findings are hidden in this workspace (Hide All is on). CI and the CLI still report everything.",
+        "Show all findings",
+      );
+      if (choice === "Show all findings") {
+        await vscode.commands.executeCommand("fallow.resetDiagnosticFilters");
+      }
+    })();
+  }
+  // Re-arm the nudge once findings are no longer fully hidden, so a future
+  // hide-all episode prompts again rather than staying silent forever.
+  context.subscriptions.push(
+    diagnosticFilter.onDidChange((state) => {
+      if (!state.mutedAll && context.workspaceState.get(MUTED_ALL_NUDGE_KEY)) {
+        void context.workspaceState.update(MUTED_ALL_NUDGE_KEY, undefined);
+      }
+    }),
+  );
 
   // Custom LSP notification handler: update the status bar from LSP data so
   // results show immediately without waiting for the CLI pass. Passed into
@@ -883,6 +920,24 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand("fallow.resetDiagnosticFilters", async () => {
+      // Escape hatch for a stuck-hidden workspace. Mute state lives in
+      // workspaceState, so it survives uninstall/reinstall and deleting the
+      // `.fallow` folder; the only in-editor way out is to clear it here. The
+      // restart then re-opens every document, reproducing the close-and-reopen
+      // workaround for all open files at once, which is the path proven to
+      // re-render hidden findings (discussion #287).
+      diagnosticFilter.clearAllMutes();
+      diagnosticFilter.setMutedAll(false);
+      outputChannel.appendLine(
+        "Cleared Fallow diagnostic filters; restarting language server to re-render findings...",
+      );
+      await restartClient(context, outputChannel, diagnosticFilter, onAnalysisComplete);
+      void vscode.window.setStatusBarMessage("Fallow: showing all findings", 4000);
+    }),
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand("fallow.showOutput", () => {
       outputChannel.show();
     }),
@@ -1094,12 +1149,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   // so it is registered on every client instance (including post-restart ones),
   // not once on the initial client; see client.ts. Otherwise a config-change
   // restart would freeze the status bar.
-  const client = await startClient(
-    context,
-    outputChannel,
-    diagnosticFilter,
-    onAnalysisComplete,
-  );
+  const client = await startClient(context, outputChannel, diagnosticFilter, onAnalysisComplete);
   if (client) {
     context.subscriptions.push({ dispose: () => void stopClient(outputChannel) });
   }

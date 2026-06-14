@@ -59,6 +59,8 @@ fn cache_roundtrip() {
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
         misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
     };
 
     store.insert(std::path::Path::new("test.ts"), cached);
@@ -276,6 +278,8 @@ fn incremental_cache_prune_stale_entries() {
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
         misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
     };
 
     store.insert(std::path::Path::new("/project/existing.ts"), make_module());

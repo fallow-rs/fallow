@@ -60,6 +60,10 @@ def dependency_action(pkg):
     "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Mixed client/server barrel::This barrel re-exports both a \"use client\" module ('\(.client_origin | san)') and a server-only module ('\(.server_origin | san)'); one import drags the other's directive across the boundary.\(nl)\(nl)Split the barrel so client and server-only modules are re-exported from separate entry points."),
   (.misplaced_directives[]? |
     "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Misplaced directive::Directive \"\(.directive | san)\" is not in the leading position, so the RSC bundler ignores it.\(nl)\(nl)Move the directive to the very top of the file, above every import."),
+  (.route_collisions[]? |
+    "::warning file=\(.path | san),title=Route collision::This route file resolves to '\(.url | san)', also owned by \(.conflicting_paths | length) other file(s). Next.js fails the build because a URL can have only one owner.\(nl)\(nl)Move or merge one of the colliding files; route groups and parallel slots do not change the URL."),
+  (.dynamic_segment_name_conflicts[]? |
+    "::warning file=\(.path | san),title=Dynamic segment conflict::Dynamic segments at '\(.position | san)' use different slug names (\(.conflicting_segments | join(", ") | san)). Next.js requires one consistent name per dynamic path.\(nl)\(nl)Rename the dynamic segments at this position to a single slug name."),
   (.type_only_dependencies[]? |
     "::warning file=\(.path | san)\(if .line > 0 then ",line=\(.line)" else "" end),title=Type-only dependency::Package '\(.package_name | san)' is only used via type imports.\(nl)\(nl)Move it from dependencies to devDependencies to reduce production bundle size."),
   (.stale_suppressions[]? |

@@ -172,7 +172,7 @@ export type IssueAction = (FixAction | SuppressLineAction | SuppressFileAction |
  * Discriminant string for [`FixAction`]. Kebab-case per the JSON output
  * contract.
  */
-export type FixActionType = ("remove-export" | "delete-file" | "remove-dependency" | "move-dependency" | "remove-enum-member" | "remove-class-member" | "resolve-import" | "install-dependency" | "remove-duplicate" | "move-to-dev" | "refactor-cycle" | "refactor-re-export-cycle" | "refactor-boundary" | "export-type" | "remove-catalog-entry" | "remove-empty-catalog-group" | "update-catalog-reference" | "add-catalog-entry" | "remove-catalog-reference" | "remove-dependency-override" | "fix-dependency-override" | "resolve-policy-violation")
+export type FixActionType = ("remove-export" | "delete-file" | "remove-dependency" | "move-dependency" | "remove-enum-member" | "remove-class-member" | "resolve-import" | "install-dependency" | "remove-duplicate" | "move-to-dev" | "refactor-cycle" | "refactor-re-export-cycle" | "refactor-boundary" | "export-type" | "remove-catalog-entry" | "remove-empty-catalog-group" | "update-catalog-reference" | "add-catalog-entry" | "remove-catalog-reference" | "remove-dependency-override" | "fix-dependency-override" | "resolve-policy-violation" | "move-to-server-module" | "split-mixed-barrel" | "hoist-directive" | "resolve-route-collision" | "resolve-dynamic-segment-name-conflict")
 /**
  * Singleton discriminant for [`SuppressLineAction`].
  */
@@ -1092,6 +1092,27 @@ mixed_client_server_barrels?: MixedClientServerBarrelFinding[]
  * array natively. Default severity is `warn`.
  */
 misplaced_directives?: MisplacedDirectiveFinding[]
+/**
+ * Vue `inject(KEY)` / Svelte `getContext(KEY)` calls whose symbol KEY is
+ * provided nowhere in the project (the injected-never-provided dead-half).
+ * Wrapped in [`UnprovidedInjectFinding`] so each entry carries a typed
+ * `actions` array natively. Default severity is `warn`.
+ */
+unprovided_injects?: UnprovidedInjectFinding[]
+/**
+ * Next.js App Router route files that resolve to the same URL within one
+ * app-root (a guaranteed `next build` failure). Wrapped in
+ * [`RouteCollisionFinding`] so each entry carries a typed `actions` array
+ * natively. One finding per colliding file. Default severity is `warn`.
+ */
+route_collisions?: RouteCollisionFinding[]
+/**
+ * Sibling Next.js dynamic route segments at one tree position using
+ * different param spellings (a dev / runtime error; `next build` does NOT
+ * catch it). Wrapped in [`DynamicSegmentNameConflictFinding`] so each entry
+ * carries a typed `actions` array natively. Default severity is `warn`.
+ */
+dynamic_segment_name_conflicts?: DynamicSegmentNameConflictFinding[]
 baseline_deltas?: (BaselineDeltas | null)
 baseline?: (BaselineMatch | null)
 regression?: (RegressionResult | null)
@@ -1169,6 +1190,10 @@ unused_class_members: number
  * Unused store members.
  */
 unused_store_members?: number
+/**
+ * Vue/Svelte injects whose key is provided nowhere in the project.
+ */
+unprovided_injects?: number
 /**
  * Imports that could not be resolved against the project's module graph.
  */
@@ -1256,6 +1281,16 @@ mixed_client_server_barrels?: number
  * expression statements after a non-directive statement.
  */
 misplaced_directives?: number
+/**
+ * Next.js App Router route files that resolve to the same URL within one
+ * app-root.
+ */
+route_collisions?: number
+/**
+ * Sibling Next.js dynamic route segments at one position using different
+ * param spellings.
+ */
+dynamic_segment_name_conflicts?: number
 }
 /**
  * Wire-shape envelope for an [`UnusedFile`] finding. The bare finding
@@ -2501,9 +2536,8 @@ introduced?: (AuditIntroduced | null)
  * Wire-shape envelope for an [`InvalidClientExport`] finding. There is no safe
  * auto-fix: the export itself may be a legitimate client-component value
  * export that happens to collide with a Next.js server-only name, so removing
- * it could break the component. The only action is a line-level suppress
- * (mirroring how a non-auto-fixable finding builds actions); the real fix is
- * for the author to move the server-only export to a non-client module.
+ * it could break the component. Actions are a manual `move-to-server-module`
+ * fix (the real remediation) plus a line-level suppress.
  */
 export interface InvalidClientExportFinding {
 /**
@@ -2542,9 +2576,9 @@ introduced?: (AuditIntroduced | null)
 /**
  * Wire-shape envelope for a [`MixedClientServerBarrel`] finding. There is no
  * safe auto-fix: splitting a barrel into separate client and server modules is
- * a human decision (the barrel may intentionally aggregate both surfaces). The
- * only action is a line-level suppress; the real fix is for the author to stop
- * re-exporting client and server-only modules from the same barrel.
+ * a human decision (the barrel may intentionally aggregate both surfaces).
+ * Actions are a manual `split-mixed-barrel` fix (the real remediation) plus a
+ * line-level suppress.
  */
 export interface MixedClientServerBarrelFinding {
 /**
@@ -2584,8 +2618,8 @@ introduced?: (AuditIntroduced | null)
  * Wire-shape envelope for a [`MisplacedDirective`] finding. There is no safe
  * auto-fix: moving a directive to the leading prologue is a small but
  * judgement-bearing edit (the author may have intended the file to be a
- * server module after all). The only action is a line-level suppress; the
- * real fix is to hoist the directive to the very top of the file.
+ * server module after all). Actions are a manual `hoist-directive` fix (the
+ * real remediation) plus a line-level suppress.
  */
 export interface MisplacedDirectiveFinding {
 /**
@@ -2603,6 +2637,131 @@ directive: string
 line: number
 /**
  * 0-based byte column offset of the misplaced directive statement.
+ */
+col: number
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+}
+/**
+ * Wire-shape envelope for an [`UnprovidedInject`] finding. There is no safe
+ * auto-fix: the fix is binary but judgement-bearing (add a `provide` for the
+ * key, or delete the dead inject). The only action is a line-level suppress.
+ */
+export interface UnprovidedInjectFinding {
+/**
+ * The file carrying the orphan inject / getContext call.
+ */
+path: string
+/**
+ * The injected key identifier as written at the call site.
+ */
+key_name: string
+/**
+ * Which framework's DI API this came from: `"vue"` or `"svelte"`.
+ */
+framework: string
+/**
+ * 1-based line number of the inject / getContext call.
+ */
+line: number
+/**
+ * 0-based byte column offset of the inject / getContext call.
+ */
+col: number
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+}
+/**
+ * Wire-shape envelope for a [`RouteCollision`] finding. A route collision is a
+ * guaranteed `next build` failure, so the PRIMARY action is manual guidance
+ * (move or merge one of the colliding files), NOT a suppress: suppressing a
+ * build error never makes the build pass. A file-level suppress is offered as
+ * an escape hatch only.
+ */
+export interface RouteCollisionFinding {
+/**
+ * This colliding route file (a `page` or `route` leaf).
+ */
+path: string
+/**
+ * The URL pathname this file resolves to within its app-root, after
+ * stripping route groups `(x)` and parallel-slot `@slot` prefixes (e.g.
+ * `/about`, `/api/health`, `/blog/:slug`).
+ */
+url: string
+/**
+ * The other route files that resolve to the same URL within the same
+ * app-root. Path-sorted for stable output / fingerprints.
+ */
+conflicting_paths: string[]
+/**
+ * 1-based line number (file-level finding, always 1).
+ */
+line: number
+/**
+ * 0-based byte column offset (file-level finding, always 0).
+ */
+col: number
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+}
+/**
+ * Wire-shape envelope for a [`DynamicSegmentNameConflict`] finding. The
+ * conflict is a Next.js dev / runtime error (`next build` does NOT catch it),
+ * so the primary action is manual guidance (rename the dynamic segments to a
+ * single consistent slug name), with a file-level suppress as escape hatch.
+ */
+export interface DynamicSegmentNameConflictFinding {
+/**
+ * This route file living under one of the conflicting dynamic segments.
+ */
+path: string
+/**
+ * The tree position (parent URL after group/slot normalization) where the
+ * dynamic segments conflict, e.g. `/shop` for `/shop/[id]` vs
+ * `/shop/[slug]`. The app-root prefix is stripped.
+ */
+position: string
+/**
+ * The distinct conflicting dynamic-segment spellings at this position, as
+ * written (e.g. `["[id]", "[slug]"]`). Sorted for stable output.
+ */
+conflicting_segments: string[]
+/**
+ * The other route files at the same position under a conflicting dynamic
+ * segment. Path-sorted for stable output / fingerprints.
+ */
+conflicting_paths: string[]
+/**
+ * 1-based line number (file-level finding, always 1).
+ */
+line: number
+/**
+ * 0-based byte column offset (file-level finding, always 0).
  */
 col: number
 /**
@@ -6005,6 +6164,27 @@ mixed_client_server_barrels?: MixedClientServerBarrelFinding[]
  * array natively. Default severity is `warn`.
  */
 misplaced_directives?: MisplacedDirectiveFinding[]
+/**
+ * Vue `inject(KEY)` / Svelte `getContext(KEY)` calls whose symbol KEY is
+ * provided nowhere in the project (the injected-never-provided dead-half).
+ * Wrapped in [`UnprovidedInjectFinding`] so each entry carries a typed
+ * `actions` array natively. Default severity is `warn`.
+ */
+unprovided_injects?: UnprovidedInjectFinding[]
+/**
+ * Next.js App Router route files that resolve to the same URL within one
+ * app-root (a guaranteed `next build` failure). Wrapped in
+ * [`RouteCollisionFinding`] so each entry carries a typed `actions` array
+ * natively. One finding per colliding file. Default severity is `warn`.
+ */
+route_collisions?: RouteCollisionFinding[]
+/**
+ * Sibling Next.js dynamic route segments at one tree position using
+ * different param spellings (a dev / runtime error; `next build` does NOT
+ * catch it). Wrapped in [`DynamicSegmentNameConflictFinding`] so each entry
+ * carries a typed `actions` array natively. Default severity is `warn`.
+ */
+dynamic_segment_name_conflicts?: DynamicSegmentNameConflictFinding[]
 }
 /**
  * The rendered impact report, derived purely from the store (no analysis run).

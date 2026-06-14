@@ -299,6 +299,30 @@ pub const CHECK_RULES: &[RuleDef] = &[
         full: "A `\"use client\"` or `\"use server\"` directive string appears as an expression statement after a non-directive statement (an `import`, a `const`). React Server Components bundlers only honor a directive in the leading prologue, before any other statement; once any statement precedes it the string is parsed as an ordinary expression and SILENTLY IGNORED. The intended client/server boundary never takes effect, so the file is treated as a server module. To fix: move the directive to the very top of the file, above every import. The check runs only when the project declares `next`.",
         docs_path: "explanations/dead-code#misplaced-directives",
     },
+    RuleDef {
+        id: "fallow/unprovided-inject",
+        category: "Dead code",
+        name: "Unprovided injects",
+        short: "inject() / getContext() reads a key that no provide() / setContext() supplies",
+        full: "A Vue `inject(KEY)` or Svelte `getContext(KEY)` reads a dependency-injection key (an imported or module-local symbol) that no matching `provide(KEY)` / `setContext(KEY)` supplies anywhere in the project. The read resolves to undefined at runtime, surfaced only at render. To fix: add a matching provider for the key, or remove the dead inject. Defaults to warn, not error: a provider may live outside the analyzed graph (an app-level provide registered elsewhere, a plugin, a host application). String-literal keys and keys imported from a package are abstained.",
+        docs_path: "explanations/dead-code#unprovided-injects",
+    },
+    RuleDef {
+        id: "fallow/route-collision",
+        category: "Policy",
+        name: "Route collision",
+        short: "Two or more Next.js App Router route files resolve to the same URL",
+        full: "Two or more App Router route files (a `page` or a `route` handler) resolve to the SAME URL within one app-root. Route groups `(name)` and parallel slots `@name` do not change the URL, so `app/(marketing)/about/page.tsx` and `app/(shop)/about/page.tsx` both own `/about`. Next.js fails the build (\"You cannot have two parallel pages that resolve to the same path\") because a URL can have at most one owner, whether a Page or a Route Handler. fallow surfaces every colliding file at once; the build error names only one. Buckets are scoped per app-root (per workspace package), so a monorepo with several independent Next apps sharing a path is not flagged. Files under a private `_folder` or an intercepting marker `(.)`/`(..)`/`(...)` are excluded. There is no safe auto-fix: move or merge one of the files so each URL has a single owner. The check runs only when the project declares `next`.",
+        docs_path: "explanations/dead-code#route-collisions",
+    },
+    RuleDef {
+        id: "fallow/dynamic-segment-name-conflict",
+        category: "Policy",
+        name: "Dynamic segment name conflict",
+        short: "Sibling Next.js dynamic route segments use different slug names at the same position",
+        full: "Two or more sibling dynamic route segments at the same App Router tree position use different param spellings (`[id]` vs `[slug]`, or a catch-all `[...x]` vs an optional catch-all `[[...x]]`). Next.js throws \"You cannot use different slug names for the same dynamic path\" at dev and production runtime when the position is hit, because one position must resolve to a single param name. `next build` does NOT catch this (the build succeeds), so CI passes while the route crashes on its first request; fallow's static catch closes that gap. Route groups are transparent to the position and parallel slots fork it, so only genuinely-sibling segments conflict. To fix: rename the dynamic segments at the position to one consistent slug name. The check runs only when the project declares `next`.",
+        docs_path: "explanations/dead-code#dynamic-segment-name-conflicts",
+    },
 ];
 
 /// Look up a rule definition by its SARIF rule ID across all rule sets.
@@ -404,6 +428,7 @@ fn dead_code_alias_id(normalized: &str) -> Option<&'static str> {
         "unused-enum-members" => Some("fallow/unused-enum-member"),
         "unused-class-members" => Some("fallow/unused-class-member"),
         "unused-store-members" => Some("fallow/unused-store-member"),
+        "unprovided-injects" | "unprovided-inject" => Some("fallow/unprovided-inject"),
         "unresolved-imports" => Some("fallow/unresolved-import"),
         "unlisted-deps" | "unlisted-dependencies" => Some("fallow/unlisted-dependency"),
         "duplicate-exports" => Some("fallow/duplicate-export"),
@@ -538,6 +563,10 @@ fn member_import_rule_guide(id: &str) -> Option<RuleGuide> {
         "fallow/unused-store-member" => RuleGuide {
             example: "useCartStore declares a discountTotal getter that no component, composable, or other store ever reads.",
             how_to_fix: "Remove the unused state property, getter, or action. If it is consumed reflectively (a Pinia plugin, $onAction, or dynamic dispatch), suppress the line with // fallow-ignore-next-line unused-store-member.",
+        },
+        "fallow/unprovided-inject" => RuleGuide {
+            example: "A component calls inject(ThemeKey) (Vue) or getContext(ThemeKey) (Svelte) with an imported symbol key, but no provide(ThemeKey) / setContext(ThemeKey) exists anywhere in the project.",
+            how_to_fix: "Add a matching provide() / setContext() for the key, or remove the dead inject() / getContext(). If a provider lives outside the analyzed graph (an app-level provide registered elsewhere, a plugin, a host app), suppress the line with // fallow-ignore-next-line unprovided-inject.",
         },
         "fallow/unresolved-import" => RuleGuide {
             example: "src/app.ts imports ./routes/admin, but no matching file exists after extension and index resolution.",
@@ -2206,7 +2235,7 @@ mod tests {
 
     #[test]
     fn check_rules_count() {
-        assert_eq!(CHECK_RULES.len(), 30);
+        assert_eq!(CHECK_RULES.len(), 33);
     }
 
     #[test]

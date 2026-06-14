@@ -106,6 +106,12 @@ fn apply_file_override_rules(
             .unused_store_members
             != Severity::Off
     });
+    results.unprovided_injects.retain(|f| {
+        config
+            .resolve_rules_for_path(&f.inject.path)
+            .unprovided_injects
+            != Severity::Off
+    });
     results.unresolved_imports.retain(|i| {
         config
             .resolve_rules_for_path(&i.import.path)
@@ -157,6 +163,18 @@ fn apply_file_override_rules(
             .misplaced_directive
             != Severity::Off
     });
+    results.route_collisions.retain(|c| {
+        config
+            .resolve_rules_for_path(&c.collision.path)
+            .route_collision
+            != Severity::Off
+    });
+    results.dynamic_segment_name_conflicts.retain(|c| {
+        config
+            .resolve_rules_for_path(&c.conflict.path)
+            .dynamic_segment_name_conflict
+            != Severity::Off
+    });
     results.circular_dependencies.retain(|c| {
         c.cycle
             .files
@@ -187,6 +205,9 @@ fn apply_base_file_rules(results: &mut fallow_core::results::AnalysisResults, ru
     if rules.unused_store_members == Severity::Off {
         results.unused_store_members.clear();
     }
+    if rules.unprovided_injects == Severity::Off {
+        results.unprovided_injects.clear();
+    }
     if rules.unresolved_imports == Severity::Off {
         results.unresolved_imports.clear();
     }
@@ -201,6 +222,12 @@ fn apply_base_file_rules(results: &mut fallow_core::results::AnalysisResults, ru
     }
     if rules.misplaced_directive == Severity::Off {
         results.misplaced_directives.clear();
+    }
+    if rules.route_collision == Severity::Off {
+        results.route_collisions.clear();
+    }
+    if rules.dynamic_segment_name_conflict == Severity::Off {
+        results.dynamic_segment_name_conflicts.clear();
     }
 }
 
@@ -294,6 +321,12 @@ fn has_override_file_scoped_error(
                 .unused_store_members
                 == Severity::Error
         })
+        || results.unprovided_injects.iter().any(|f| {
+            config
+                .resolve_rules_for_path(&f.inject.path)
+                .unprovided_injects
+                == Severity::Error
+        })
         || results.unresolved_imports.iter().any(|i| {
             config
                 .resolve_rules_for_path(&i.import.path)
@@ -351,6 +384,18 @@ fn has_override_file_scoped_error(
                 .misplaced_directive
                 == Severity::Error
         })
+        || results.route_collisions.iter().any(|c| {
+            config
+                .resolve_rules_for_path(&c.collision.path)
+                .route_collision
+                == Severity::Error
+        })
+        || results.dynamic_segment_name_conflicts.iter().any(|c| {
+            config
+                .resolve_rules_for_path(&c.conflict.path)
+                .dynamic_segment_name_conflict
+                == Severity::Error
+        })
 }
 
 fn has_default_file_scoped_error(
@@ -366,6 +411,7 @@ fn has_default_file_scoped_error(
             && !results.unused_class_members.is_empty())
         || (rules.unused_store_members == Severity::Error
             && !results.unused_store_members.is_empty())
+        || (rules.unprovided_injects == Severity::Error && !results.unprovided_injects.is_empty())
         || (rules.unresolved_imports == Severity::Error && !results.unresolved_imports.is_empty())
         || (rules.stale_suppressions == Severity::Error && !results.stale_suppressions.is_empty())
         || (rules.unresolved_catalog_references == Severity::Error
@@ -378,6 +424,9 @@ fn has_default_file_scoped_error(
             && !results.mixed_client_server_barrels.is_empty())
         || (rules.misplaced_directive == Severity::Error
             && !results.misplaced_directives.is_empty())
+        || (rules.route_collision == Severity::Error && !results.route_collisions.is_empty())
+        || (rules.dynamic_segment_name_conflict == Severity::Error
+            && !results.dynamic_segment_name_conflicts.is_empty())
 }
 
 fn has_project_level_error(
@@ -460,6 +509,9 @@ pub fn promote_warns_to_errors(rules: &mut RulesConfig) {
     if rules.unused_store_members == Severity::Warn {
         rules.unused_store_members = Severity::Error;
     }
+    if rules.unprovided_injects == Severity::Warn {
+        rules.unprovided_injects = Severity::Error;
+    }
     if rules.unresolved_imports == Severity::Warn {
         rules.unresolved_imports = Severity::Error;
     }
@@ -516,6 +568,12 @@ pub fn promote_warns_to_errors(rules: &mut RulesConfig) {
     }
     if rules.misplaced_directive == Severity::Warn {
         rules.misplaced_directive = Severity::Error;
+    }
+    if rules.route_collision == Severity::Warn {
+        rules.route_collision = Severity::Error;
+    }
+    if rules.dynamic_segment_name_conflict == Severity::Warn {
+        rules.dynamic_segment_name_conflict = Severity::Error;
     }
 }
 
@@ -747,6 +805,7 @@ mod tests {
             unused_enum_members: Severity::Off,
             unused_class_members: Severity::Off,
             unused_store_members: Severity::Off,
+            unprovided_injects: Severity::Off,
             unresolved_imports: Severity::Off,
             unlisted_dependencies: Severity::Off,
             duplicate_exports: Severity::Off,
@@ -769,6 +828,8 @@ mod tests {
             invalid_client_export: Severity::Warn,
             mixed_client_server_barrel: Severity::Warn,
             misplaced_directive: Severity::Warn,
+            route_collision: Severity::Warn,
+            dynamic_segment_name_conflict: Severity::Warn,
         };
         let config = config_with_rules(rules);
         apply_rules(&mut results, &config);
@@ -869,6 +930,7 @@ mod tests {
             unused_enum_members: Severity::Warn,
             unused_class_members: Severity::Warn,
             unused_store_members: Severity::Warn,
+            unprovided_injects: Severity::Warn,
             unresolved_imports: Severity::Warn,
             unlisted_dependencies: Severity::Warn,
             duplicate_exports: Severity::Warn,
@@ -891,6 +953,8 @@ mod tests {
             invalid_client_export: Severity::Warn,
             mixed_client_server_barrel: Severity::Warn,
             misplaced_directive: Severity::Warn,
+            route_collision: Severity::Warn,
+            dynamic_segment_name_conflict: Severity::Warn,
         };
         assert!(!has_error_severity_issues(&results, &rules, None));
     }
@@ -914,6 +978,7 @@ mod tests {
             unused_enum_members: Severity::Warn,
             unused_class_members: Severity::Warn,
             unused_store_members: Severity::Warn,
+            unprovided_injects: Severity::Warn,
             unresolved_imports: Severity::Warn,
             unlisted_dependencies: Severity::Warn,
             duplicate_exports: Severity::Warn,
@@ -936,6 +1001,8 @@ mod tests {
             invalid_client_export: Severity::Warn,
             mixed_client_server_barrel: Severity::Warn,
             misplaced_directive: Severity::Warn,
+            route_collision: Severity::Warn,
+            dynamic_segment_name_conflict: Severity::Warn,
         };
         assert!(!has_error_severity_issues(&results, &rules, None));
 
@@ -1380,6 +1447,7 @@ mod tests {
             unused_enum_members: Severity::Warn,
             unused_class_members: Severity::Warn,
             unused_store_members: Severity::Warn,
+            unprovided_injects: Severity::Warn,
             unresolved_imports: Severity::Warn,
             unlisted_dependencies: Severity::Warn,
             duplicate_exports: Severity::Warn,
@@ -1402,6 +1470,8 @@ mod tests {
             invalid_client_export: Severity::Warn,
             mixed_client_server_barrel: Severity::Warn,
             misplaced_directive: Severity::Warn,
+            route_collision: Severity::Warn,
+            dynamic_segment_name_conflict: Severity::Warn,
         };
         promote_warns_to_errors(&mut rules);
 
@@ -1438,6 +1508,7 @@ mod tests {
             unused_enum_members: Severity::Off,
             unused_class_members: Severity::Off,
             unused_store_members: Severity::Off,
+            unprovided_injects: Severity::Off,
             unresolved_imports: Severity::Off,
             unlisted_dependencies: Severity::Off,
             duplicate_exports: Severity::Off,
@@ -1460,6 +1531,8 @@ mod tests {
             invalid_client_export: Severity::Warn,
             mixed_client_server_barrel: Severity::Warn,
             misplaced_directive: Severity::Warn,
+            route_collision: Severity::Warn,
+            dynamic_segment_name_conflict: Severity::Warn,
         };
         promote_warns_to_errors(&mut rules);
 

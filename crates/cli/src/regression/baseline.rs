@@ -711,6 +711,7 @@ mod tests {
             unused_enum_members: 1,
             unused_class_members: 0,
             unused_store_members: 0,
+            unprovided_injects: 0,
             unresolved_imports: 1,
             unlisted_dependencies: 0,
             duplicate_exports: 1,

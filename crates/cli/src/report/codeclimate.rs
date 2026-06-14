@@ -976,6 +976,106 @@ fn push_misplaced_directive_issues(
     }
 }
 
+fn push_unprovided_inject_issues(
+    issues: &mut Vec<CodeClimateIssue>,
+    findings: &[fallow_types::output_dead_code::UnprovidedInjectFinding],
+    root: &Path,
+    severity: Severity,
+) {
+    if findings.is_empty() {
+        return;
+    }
+    let level = severity_to_codeclimate(severity);
+    for entry in findings {
+        let i = &entry.inject;
+        let path = cc_path(&i.path, root);
+        let fp = fingerprint_hash(&[
+            "fallow/unprovided-inject",
+            &path,
+            &i.line.to_string(),
+            &i.key_name,
+        ]);
+        let line = if i.line > 0 { Some(i.line) } else { None };
+        let message = format!(
+            "inject(`{}`) has no matching provide(`{}`) in this project; at runtime it returns undefined (provide the key or remove this inject)",
+            i.key_name, i.key_name
+        );
+        issues.push(cc_issue(
+            "fallow/unprovided-inject",
+            &message,
+            level,
+            "Bug Risk",
+            &path,
+            line,
+            &fp,
+        ));
+    }
+}
+
+fn push_route_collision_issues(
+    issues: &mut Vec<CodeClimateIssue>,
+    findings: &[fallow_types::output_dead_code::RouteCollisionFinding],
+    root: &Path,
+    severity: Severity,
+) {
+    if findings.is_empty() {
+        return;
+    }
+    let level = severity_to_codeclimate(severity);
+    for entry in findings {
+        let c = &entry.collision;
+        let path = cc_path(&c.path, root);
+        let fp = fingerprint_hash(&["fallow/route-collision", &path, &c.url]);
+        let line = if c.line > 0 { Some(c.line) } else { None };
+        let message = format!(
+            "Route file resolves to `{}`, also owned by {} other file(s); Next.js fails the build because a URL can have only one owner",
+            c.url,
+            c.conflicting_paths.len()
+        );
+        issues.push(cc_issue(
+            "fallow/route-collision",
+            &message,
+            level,
+            "Bug Risk",
+            &path,
+            line,
+            &fp,
+        ));
+    }
+}
+
+fn push_dynamic_segment_name_conflict_issues(
+    issues: &mut Vec<CodeClimateIssue>,
+    findings: &[fallow_types::output_dead_code::DynamicSegmentNameConflictFinding],
+    root: &Path,
+    severity: Severity,
+) {
+    if findings.is_empty() {
+        return;
+    }
+    let level = severity_to_codeclimate(severity);
+    for entry in findings {
+        let c = &entry.conflict;
+        let path = cc_path(&c.path, root);
+        let fp = fingerprint_hash(&["fallow/dynamic-segment-name-conflict", &path, &c.position]);
+        let line = if c.line > 0 { Some(c.line) } else { None };
+        let message = format!(
+            "Dynamic segments at `{}` use different slug names ({}); Next.js requires one consistent name per dynamic path",
+            c.position,
+            c.conflicting_segments.join(", ")
+        );
+        issues.push(cc_issue(
+            "fallow/dynamic-segment-name-conflict",
+            &message,
+            level,
+            "Bug Risk",
+            &path,
+            line,
+            &fp,
+        ));
+    }
+}
+
 fn push_stale_suppression_issues(
     issues: &mut Vec<CodeClimateIssue>,
     suppressions: &[fallow_core::results::StaleSuppression],
@@ -1455,6 +1555,24 @@ impl CodeClimateBuilder<'_> {
             &self.results.misplaced_directives,
             self.root,
             self.rules.misplaced_directive,
+        );
+        push_unprovided_inject_issues(
+            &mut self.issues,
+            &self.results.unprovided_injects,
+            self.root,
+            self.rules.unprovided_injects,
+        );
+        push_route_collision_issues(
+            &mut self.issues,
+            &self.results.route_collisions,
+            self.root,
+            self.rules.route_collision,
+        );
+        push_dynamic_segment_name_conflict_issues(
+            &mut self.issues,
+            &self.results.dynamic_segment_name_conflicts,
+            self.root,
+            self.rules.dynamic_segment_name_conflict,
         );
     }
 

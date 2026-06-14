@@ -572,6 +572,122 @@ pub fn push_misplaced_directive_diagnostics(
     }
 }
 
+/// Push diagnostics for `inject(KEY)` / `getContext(KEY)` calls that have no
+/// matching `provide(KEY)` ancestor. Fixed `WARNING` severity (the rule's
+/// default), code `unprovided-inject`. Paths are absolute internally, so the
+/// URI is built directly (no `root.join`).
+pub fn push_unprovided_inject_diagnostics(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+) {
+    for finding in &results.unprovided_injects {
+        let Some(uri) = Uri::from_file_path(&finding.inject.path) else {
+            continue;
+        };
+        let line = finding.inject.line.saturating_sub(1);
+        let message = format!(
+            "inject(`{}`) has no matching provide(`{}`); at runtime it returns undefined",
+            finding.inject.key_name, finding.inject.key_name
+        );
+        map.entry(uri).or_default().push(Diagnostic {
+            range: Range {
+                start: Position {
+                    line,
+                    character: finding.inject.col,
+                },
+                end: Position {
+                    line,
+                    character: u32::MAX,
+                },
+            },
+            severity: Some(DiagnosticSeverity::WARNING),
+            source: Some("fallow".to_string()),
+            code: Some(NumberOrString::String("unprovided-inject".to_string())),
+            code_description: doc_link("unprovided-injects"),
+            message,
+            related_information: None,
+            ..Default::default()
+        });
+    }
+}
+
+/// Push `route-collision` diagnostics. File-level findings anchored at line 1;
+/// the finding's `path` is the absolute graph-node path, so the URI is built
+/// directly with no `root.join`.
+pub fn push_route_collision_diagnostics(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+) {
+    for finding in &results.route_collisions {
+        let Some(uri) = Uri::from_file_path(&finding.collision.path) else {
+            continue;
+        };
+        let message = format!(
+            "Route file resolves to '{}', also owned by {} other file(s); Next.js fails the build because a URL can have only one owner",
+            finding.collision.url,
+            finding.collision.conflicting_paths.len()
+        );
+        map.entry(uri).or_default().push(Diagnostic {
+            range: Range {
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: 0,
+                    character: u32::MAX,
+                },
+            },
+            severity: Some(DiagnosticSeverity::WARNING),
+            source: Some("fallow".to_string()),
+            code: Some(NumberOrString::String("route-collision".to_string())),
+            code_description: doc_link("route-collisions"),
+            message,
+            related_information: None,
+            ..Default::default()
+        });
+    }
+}
+
+/// Push `dynamic-segment-name-conflict` diagnostics. File-level findings
+/// anchored at line 1; absolute `path`, so the URI is built directly.
+pub fn push_dynamic_segment_name_conflict_diagnostics(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+) {
+    for finding in &results.dynamic_segment_name_conflicts {
+        let Some(uri) = Uri::from_file_path(&finding.conflict.path) else {
+            continue;
+        };
+        let message = format!(
+            "Dynamic segments at '{}' use different slug names ({}); Next.js requires one consistent name per dynamic path",
+            finding.conflict.position,
+            finding.conflict.conflicting_segments.join(", ")
+        );
+        map.entry(uri).or_default().push(Diagnostic {
+            range: Range {
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: 0,
+                    character: u32::MAX,
+                },
+            },
+            severity: Some(DiagnosticSeverity::WARNING),
+            source: Some("fallow".to_string()),
+            code: Some(NumberOrString::String(
+                "dynamic-segment-name-conflict".to_string(),
+            )),
+            code_description: doc_link("dynamic-segment-name-conflicts"),
+            message,
+            related_information: None,
+            ..Default::default()
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;

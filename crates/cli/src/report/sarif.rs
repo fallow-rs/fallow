@@ -5,12 +5,13 @@ use fallow_config::{RulesConfig, Severity};
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::{
     AnalysisResults, BoundaryCallViolation, BoundaryCoverageViolation, BoundaryViolation,
-    CircularDependency, DuplicateExportFinding, EmptyCatalogGroupFinding, InvalidClientExport,
-    MisconfiguredDependencyOverrideFinding, MisplacedDirective, MixedClientServerBarrel,
-    PolicyViolation, PolicyViolationSeverity, PrivateTypeLeak, StaleSuppression,
-    TestOnlyDependency, TypeOnlyDependency, UnlistedDependencyFinding,
-    UnresolvedCatalogReferenceFinding, UnresolvedImport, UnusedCatalogEntryFinding,
-    UnusedDependency, UnusedDependencyOverrideFinding, UnusedExport, UnusedFile, UnusedMember,
+    CircularDependency, DuplicateExportFinding, DynamicSegmentNameConflict,
+    EmptyCatalogGroupFinding, InvalidClientExport, MisconfiguredDependencyOverrideFinding,
+    MisplacedDirective, MixedClientServerBarrel, PolicyViolation, PolicyViolationSeverity,
+    PrivateTypeLeak, RouteCollision, StaleSuppression, TestOnlyDependency, TypeOnlyDependency,
+    UnlistedDependencyFinding, UnprovidedInject, UnresolvedCatalogReferenceFinding,
+    UnresolvedImport, UnusedCatalogEntryFinding, UnusedDependency, UnusedDependencyOverrideFinding,
+    UnusedExport, UnusedFile, UnusedMember,
 };
 use rustc_hash::FxHashMap;
 
@@ -558,6 +559,65 @@ fn sarif_misplaced_directive_fields(
     }
 }
 
+fn sarif_unprovided_inject_fields(
+    inject: &UnprovidedInject,
+    root: &Path,
+    level: &'static str,
+) -> SarifFields {
+    SarifFields {
+        rule_id: "fallow/unprovided-inject",
+        level,
+        message: format!(
+            "inject(\"{}\") has no matching provide(\"{}\") in this project; at runtime it returns undefined; provide the key or remove this inject",
+            inject.key_name, inject.key_name
+        ),
+        uri: relative_uri(&inject.path, root),
+        region: Some((inject.line, inject.col + 1)),
+        source_path: Some(inject.path.clone()),
+        properties: None,
+    }
+}
+
+fn sarif_route_collision_fields(
+    collision: &RouteCollision,
+    root: &Path,
+    level: &'static str,
+) -> SarifFields {
+    SarifFields {
+        rule_id: "fallow/route-collision",
+        level,
+        message: format!(
+            "Route file resolves to '{}', which is also owned by {} other file(s); Next.js fails the build because a URL can have only one owner",
+            collision.url,
+            collision.conflicting_paths.len()
+        ),
+        uri: relative_uri(&collision.path, root),
+        region: Some((collision.line, collision.col + 1)),
+        source_path: Some(collision.path.clone()),
+        properties: None,
+    }
+}
+
+fn sarif_dynamic_segment_name_conflict_fields(
+    conflict: &DynamicSegmentNameConflict,
+    root: &Path,
+    level: &'static str,
+) -> SarifFields {
+    SarifFields {
+        rule_id: "fallow/dynamic-segment-name-conflict",
+        level,
+        message: format!(
+            "Dynamic segments at '{}' use different slug names ({}); Next.js requires one consistent name per dynamic path",
+            conflict.position,
+            conflict.conflicting_segments.join(", ")
+        ),
+        uri: relative_uri(&conflict.path, root),
+        region: Some((conflict.line, conflict.col + 1)),
+        source_path: Some(conflict.path.clone()),
+        properties: None,
+    }
+}
+
 fn sarif_stale_suppression_fields(
     suppression: &StaleSuppression,
     root: &Path,
@@ -907,7 +967,7 @@ fn sarif_graph_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
         ),
         (
             "fallow/invalid-client-export",
-            "\"use client\" file exports a Next.js server-only / route-config name",
+            "\"use client\" file exports a server-only / route-config name",
             rules.invalid_client_export,
         ),
         (
@@ -919,6 +979,21 @@ fn sarif_graph_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
             "fallow/misplaced-directive",
             "\"use client\" / \"use server\" directive is not in the leading position and is ignored",
             rules.misplaced_directive,
+        ),
+        (
+            "fallow/unprovided-inject",
+            "A Vue inject / Svelte getContext whose key is provided nowhere in the project",
+            rules.unprovided_injects,
+        ),
+        (
+            "fallow/route-collision",
+            "Two or more Next.js App Router route files resolve to the same URL",
+            rules.route_collision,
+        ),
+        (
+            "fallow/dynamic-segment-name-conflict",
+            "Sibling Next.js dynamic route segments use different slug names at the same position",
+            rules.dynamic_segment_name_conflict,
         ),
         (
             "fallow/stale-suppression",
@@ -1288,6 +1363,32 @@ fn push_graph_sarif_results(
                 &d.directive_site,
                 root,
                 severity_to_sarif_level(rules.misplaced_directive),
+            )
+        },
+    );
+    push_sarif_results(sarif_results, &results.unprovided_injects, snippets, |i| {
+        sarif_unprovided_inject_fields(
+            &i.inject,
+            root,
+            severity_to_sarif_level(rules.unprovided_injects),
+        )
+    });
+    push_sarif_results(sarif_results, &results.route_collisions, snippets, |c| {
+        sarif_route_collision_fields(
+            &c.collision,
+            root,
+            severity_to_sarif_level(rules.route_collision),
+        )
+    });
+    push_sarif_results(
+        sarif_results,
+        &results.dynamic_segment_name_conflicts,
+        snippets,
+        |c| {
+            sarif_dynamic_segment_name_conflict_fields(
+                &c.conflict,
+                root,
+                severity_to_sarif_level(rules.dynamic_segment_name_conflict),
             )
         },
     );
@@ -2048,9 +2149,11 @@ mod tests {
         let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
             .as_array()
             .expect("rules should be an array");
-        assert_eq!(rules.len(), 30);
+        assert_eq!(rules.len(), 33);
 
         let rule_ids: Vec<&str> = rules.iter().map(|r| r["id"].as_str().unwrap()).collect();
+        assert!(rule_ids.contains(&"fallow/route-collision"));
+        assert!(rule_ids.contains(&"fallow/dynamic-segment-name-conflict"));
         assert!(rule_ids.contains(&"fallow/unused-file"));
         assert!(rule_ids.contains(&"fallow/unused-export"));
         assert!(rule_ids.contains(&"fallow/unused-type"));
@@ -2080,6 +2183,7 @@ mod tests {
         assert!(rule_ids.contains(&"fallow/invalid-client-export"));
         assert!(rule_ids.contains(&"fallow/mixed-client-server-barrel"));
         assert!(rule_ids.contains(&"fallow/misplaced-directive"));
+        assert!(rule_ids.contains(&"fallow/unprovided-inject"));
     }
 
     #[test]
@@ -2289,6 +2393,7 @@ mod tests {
         assert!(rule_ids.contains(&"fallow/unresolved-import"));
         assert!(rule_ids.contains(&"fallow/unlisted-dependency"));
         assert!(rule_ids.contains(&"fallow/duplicate-export"));
+        assert!(rule_ids.contains(&"fallow/unprovided-inject"));
     }
 
     #[test]

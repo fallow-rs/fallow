@@ -61,6 +61,7 @@ struct AnalysisCompleteParams {
     unused_enum_members: usize,
     unused_class_members: usize,
     unused_store_members: usize,
+    unprovided_injects: usize,
     unresolved_imports: usize,
     unlisted_dependencies: usize,
     duplicate_exports: usize,
@@ -95,6 +96,7 @@ fn analysis_complete_params(
         unused_enum_members: results.unused_enum_members.len(),
         unused_class_members: results.unused_class_members.len(),
         unused_store_members: results.unused_store_members.len(),
+        unprovided_injects: results.unprovided_injects.len(),
         unresolved_imports: results.unresolved_imports.len(),
         unlisted_dependencies: results.unlisted_dependencies.len(),
         duplicate_exports: results.duplicate_exports.len(),
@@ -246,6 +248,21 @@ const DIAGNOSTIC_ISSUE_TYPES: &[DiagnosticIssueType] = &[
         config_key: Some("misplaced-directive"),
         code: "misplaced-directive",
         label: "Misplaced Directives",
+    },
+    DiagnosticIssueType {
+        config_key: Some("unprovided-injects"),
+        code: "unprovided-inject",
+        label: "Unprovided Injects",
+    },
+    DiagnosticIssueType {
+        config_key: Some("route-collision"),
+        code: "route-collision",
+        label: "Route Collisions",
+    },
+    DiagnosticIssueType {
+        config_key: Some("dynamic-segment-name-conflict"),
+        code: "dynamic-segment-name-conflict",
+        label: "Dynamic Segment Conflicts",
     },
     DiagnosticIssueType {
         config_key: Some("stale-suppressions"),
@@ -1045,6 +1062,31 @@ impl FallowLspServer {
         Ok(diagnostic_issue_types())
     }
 
+    /// Re-drive `workspace/diagnostic/refresh` on demand.
+    ///
+    /// The editor's mute toggle changes only the client-side diagnostic filter
+    /// (no server round-trip), so open-file pull diagnostics never re-render
+    /// until the next edit. The client-side re-pull (`triggerPullDiagnosticRefresh`)
+    /// is gated per document by `getProvider(document)`, which can silently
+    /// match nothing; the server-driven refresh fires every registered provider
+    /// via `getAllProviders()`, the SAME path proven to re-render after analysis
+    /// and on `did_open`. Routing the un-hide through here makes revealing
+    /// findings reliable, not best-effort (discussion #287).
+    ///
+    /// No-op for push-only clients: without pull diagnostics the editor
+    /// re-publishes the push collection from its own cache, so a
+    /// `workspace/diagnostic/refresh` would do nothing useful.
+    #[expect(
+        clippy::unused_async,
+        reason = "tower-lsp-server custom_method handlers are async methods"
+    )]
+    async fn refresh_diagnostics(&self) -> Result<()> {
+        if self.client_pulls.load(Ordering::SeqCst) {
+            self.spawn_diagnostic_refresh();
+        }
+        Ok(())
+    }
+
     /// Resolve the canonical git toplevel for `root`, populating the cache
     /// on first call. Returns `None` if the workspace is not in a git
     /// repository or git is unavailable; callers should fall back to
@@ -1420,6 +1462,10 @@ async fn main() {
 
     let (service, socket) = LspService::build(FallowLspServer::new)
         .custom_method("fallow/issueTypes", FallowLspServer::issue_types)
+        .custom_method(
+            "fallow/refreshDiagnostics",
+            FallowLspServer::refresh_diagnostics,
+        )
         .finish();
 
     Server::new(stdin, stdout, socket).serve(service).await;
@@ -1794,6 +1840,45 @@ mod tests {
                 .any(|v| v["code"] == json!("test-only-dependency")
                     && v["label"] == json!("Test-Only Dependencies")),
             "response should include every diagnostic code emitted by fallow-lsp"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn fallow_refresh_diagnostics_request_is_served() {
+        let (mut service, _) = LspService::build(FallowLspServer::new)
+            .custom_method(
+                "fallow/refreshDiagnostics",
+                FallowLspServer::refresh_diagnostics,
+            )
+            .finish();
+
+        let initialize = Request::build("initialize")
+            .params(json!({"capabilities": {}}))
+            .id(1)
+            .finish();
+        let response = service
+            .ready()
+            .await
+            .expect("service should be ready")
+            .call(initialize)
+            .await
+            .expect("initialize request should be handled")
+            .expect("initialize request should return a response");
+        assert!(response.is_ok());
+
+        let refresh = Request::build("fallow/refreshDiagnostics").id(2).finish();
+        let response = service
+            .ready()
+            .await
+            .expect("service should be ready")
+            .call(refresh)
+            .await
+            .expect("custom request should be handled")
+            .expect("custom request should return a response");
+
+        assert!(
+            response.is_ok(),
+            "fallow/refreshDiagnostics must not return method_not_found"
         );
     }
 
@@ -2611,6 +2696,28 @@ export function choose(value: number): string {
                         path: "/app/widget.tsx".into(),
                         directive: "use client".to_string(),
                         line: 24,
+                        col: 0,
+                    },
+                ),
+            ],
+            unprovided_injects: vec![],
+            route_collisions: vec![fallow_core::results::RouteCollisionFinding::with_actions(
+                fallow_core::results::RouteCollision {
+                    path: "/app/(a)/about/page.tsx".into(),
+                    url: "/about".to_string(),
+                    conflicting_paths: vec!["/app/(b)/about/page.tsx".into()],
+                    line: 1,
+                    col: 0,
+                },
+            )],
+            dynamic_segment_name_conflicts: vec![
+                fallow_core::results::DynamicSegmentNameConflictFinding::with_actions(
+                    fallow_core::results::DynamicSegmentNameConflict {
+                        path: "/app/shop/[id]/page.tsx".into(),
+                        position: "/shop".to_string(),
+                        conflicting_segments: vec!["[id]".to_string(), "[slug]".to_string()],
+                        conflicting_paths: vec!["/app/shop/[slug]/edit/page.tsx".into()],
+                        line: 1,
                         col: 0,
                     },
                 ),

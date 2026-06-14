@@ -32,6 +32,7 @@ pub struct IssueFilters {
     pub unused_enum_members: bool,
     pub unused_class_members: bool,
     pub unused_store_members: bool,
+    pub unprovided_injects: bool,
     pub unresolved_imports: bool,
     pub unlisted_deps: bool,
     pub duplicate_exports: bool,
@@ -48,6 +49,8 @@ pub struct IssueFilters {
     pub invalid_client_exports: bool,
     pub mixed_client_server_barrels: bool,
     pub misplaced_directives: bool,
+    pub route_collisions: bool,
+    pub dynamic_segment_name_conflicts: bool,
 }
 
 impl IssueFilters {
@@ -60,6 +63,7 @@ impl IssueFilters {
             || self.unused_enum_members
             || self.unused_class_members
             || self.unused_store_members
+            || self.unprovided_injects
             || self.unresolved_imports
             || self.unlisted_deps
             || self.duplicate_exports
@@ -76,6 +80,8 @@ impl IssueFilters {
             || self.invalid_client_exports
             || self.mixed_client_server_barrels
             || self.misplaced_directives
+            || self.route_collisions
+            || self.dynamic_segment_name_conflicts
     }
 
     /// Enable off-by-default issue types when explicitly requested as filters.
@@ -117,6 +123,9 @@ impl IssueFilters {
         }
         if !self.unused_store_members {
             results.unused_store_members.clear();
+        }
+        if !self.unprovided_injects {
+            results.unprovided_injects.clear();
         }
         if !self.unresolved_imports {
             results.unresolved_imports.clear();
@@ -167,6 +176,12 @@ impl IssueFilters {
         }
         if !self.misplaced_directives {
             results.misplaced_directives.clear();
+        }
+        if !self.route_collisions {
+            results.route_collisions.clear();
+        }
+        if !self.dynamic_segment_name_conflicts {
+            results.dynamic_segment_name_conflicts.clear();
         }
     }
 }
@@ -802,6 +817,7 @@ mod tests {
             unused_enum_members: false,
             unused_class_members: false,
             unused_store_members: false,
+            unprovided_injects: false,
             unresolved_imports: false,
             unlisted_deps: false,
             duplicate_exports: false,
@@ -818,6 +834,8 @@ mod tests {
             invalid_client_exports: false,
             mixed_client_server_barrels: false,
             misplaced_directives: false,
+            route_collisions: false,
+            dynamic_segment_name_conflicts: false,
         }
     }
 
@@ -1222,6 +1240,7 @@ mod tests {
             unused_enum_members: true,
             unused_class_members: true,
             unused_store_members: true,
+            unprovided_injects: true,
             unresolved_imports: true,
             unlisted_deps: true,
             duplicate_exports: true,
@@ -1238,6 +1257,8 @@ mod tests {
             invalid_client_exports: true,
             mixed_client_server_barrels: true,
             misplaced_directives: true,
+            route_collisions: true,
+            dynamic_segment_name_conflicts: true,
         };
         let total_before = results.total_issues();
         f.apply(&mut results);

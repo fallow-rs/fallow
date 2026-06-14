@@ -74,6 +74,9 @@ pub struct BaselineData {
     /// Unused store members, keyed by `file:parent.member`.
     #[serde(default)]
     pub unused_store_members: Vec<String>,
+    /// Unprovided injects, keyed by `file:key_name`.
+    #[serde(default)]
+    pub unprovided_injects: Vec<String>,
     /// Unresolved imports, keyed by `file:specifier`.
     #[serde(default)]
     pub unresolved_imports: Vec<String>,
@@ -133,6 +136,12 @@ pub struct BaselineData {
     /// `path:line:directive`.
     #[serde(default)]
     pub misplaced_directives: Vec<String>,
+    /// Next.js route collisions, keyed by `path:url`.
+    #[serde(default)]
+    pub route_collisions: Vec<String>,
+    /// Next.js dynamic-segment name conflicts, keyed by `path:position`.
+    #[serde(default)]
+    pub dynamic_segment_name_conflicts: Vec<String>,
 }
 
 impl BaselineData {
@@ -156,6 +165,7 @@ impl BaselineData {
             unused_enum_members: member_imports.unused_enum_members,
             unused_class_members: member_imports.unused_class_members,
             unused_store_members: member_imports.unused_store_members,
+            unprovided_injects: member_imports.unprovided_injects,
             unresolved_imports: member_imports.unresolved_imports,
             unlisted_dependencies: dependencies.unlisted,
             duplicate_exports: member_imports.duplicate_exports,
@@ -174,6 +184,8 @@ impl BaselineData {
             invalid_client_exports: file_exports.invalid_client_exports,
             mixed_client_server_barrels: file_exports.mixed_client_server_barrels,
             misplaced_directives: file_exports.misplaced_directives,
+            route_collisions: file_exports.route_collisions,
+            dynamic_segment_name_conflicts: file_exports.dynamic_segment_name_conflicts,
         }
     }
 
@@ -191,6 +203,7 @@ impl BaselineData {
             + self.unused_enum_members.len()
             + self.unused_class_members.len()
             + self.unused_store_members.len()
+            + self.unprovided_injects.len()
             + self.unresolved_imports.len()
             + self.unlisted_dependencies.len()
             + self.duplicate_exports.len()
@@ -209,6 +222,8 @@ impl BaselineData {
             + self.invalid_client_exports.len()
             + self.mixed_client_server_barrels.len()
             + self.misplaced_directives.len()
+            + self.route_collisions.len()
+            + self.dynamic_segment_name_conflicts.len()
     }
 }
 
@@ -220,6 +235,8 @@ struct BaselineFileExportKeys {
     invalid_client_exports: Vec<String>,
     mixed_client_server_barrels: Vec<String>,
     misplaced_directives: Vec<String>,
+    route_collisions: Vec<String>,
+    dynamic_segment_name_conflicts: Vec<String>,
 }
 
 fn baseline_file_export_keys(
@@ -301,6 +318,28 @@ fn baseline_file_export_keys(
                 )
             })
             .collect(),
+        route_collisions: results
+            .route_collisions
+            .iter()
+            .map(|c| {
+                format!(
+                    "{}:{}",
+                    relative_path(&c.collision.path, root),
+                    c.collision.url
+                )
+            })
+            .collect(),
+        dynamic_segment_name_conflicts: results
+            .dynamic_segment_name_conflicts
+            .iter()
+            .map(|c| {
+                format!(
+                    "{}:{}",
+                    relative_path(&c.conflict.path, root),
+                    c.conflict.position
+                )
+            })
+            .collect(),
     }
 }
 
@@ -308,6 +347,7 @@ struct BaselineMemberImportKeys {
     unused_enum_members: Vec<String>,
     unused_class_members: Vec<String>,
     unused_store_members: Vec<String>,
+    unprovided_injects: Vec<String>,
     unresolved_imports: Vec<String>,
     duplicate_exports: Vec<String>,
     stale_suppressions: Vec<String>,
@@ -351,6 +391,17 @@ fn baseline_member_import_keys(
                     relative_path(&m.member.path, root),
                     m.member.parent_name,
                     m.member.member_name
+                )
+            })
+            .collect(),
+        unprovided_injects: results
+            .unprovided_injects
+            .iter()
+            .map(|f| {
+                format!(
+                    "{}:{}",
+                    relative_path(&f.inject.path, root),
+                    f.inject.key_name
                 )
             })
             .collect(),
@@ -687,6 +738,21 @@ impl BaselineFilterContext<'_> {
             );
             !baseline_store_members.contains(key.as_str())
         });
+
+        let baseline_unprovided_injects: FxHashSet<&str> = self
+            .baseline
+            .unprovided_injects
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.unprovided_injects.retain(|finding| {
+            let key = format!(
+                "{}:{}",
+                relative_path(&finding.inject.path, self.root),
+                finding.inject.key_name
+            );
+            !baseline_unprovided_injects.contains(key.as_str())
+        });
     }
 
     fn filter_unresolved_and_exports(&self, results: &mut fallow_core::results::AnalysisResults) {
@@ -793,6 +859,8 @@ impl BaselineFilterContext<'_> {
         self.filter_invalid_client_exports(results);
         self.filter_mixed_client_server_barrels(results);
         self.filter_misplaced_directives(results);
+        self.filter_route_collisions(results);
+        self.filter_dynamic_segment_name_conflicts(results);
     }
 
     fn filter_invalid_client_exports(&self, results: &mut fallow_core::results::AnalysisResults) {
@@ -848,6 +916,43 @@ impl BaselineFilterContext<'_> {
                 finding.directive_site.directive
             );
             !baseline_directives.contains(key.as_str())
+        });
+    }
+
+    fn filter_route_collisions(&self, results: &mut fallow_core::results::AnalysisResults) {
+        let baseline_collisions: FxHashSet<&str> = self
+            .baseline
+            .route_collisions
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.route_collisions.retain(|finding| {
+            let key = format!(
+                "{}:{}",
+                relative_path(&finding.collision.path, self.root),
+                finding.collision.url
+            );
+            !baseline_collisions.contains(key.as_str())
+        });
+    }
+
+    fn filter_dynamic_segment_name_conflicts(
+        &self,
+        results: &mut fallow_core::results::AnalysisResults,
+    ) {
+        let baseline_conflicts: FxHashSet<&str> = self
+            .baseline
+            .dynamic_segment_name_conflicts
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.dynamic_segment_name_conflicts.retain(|finding| {
+            let key = format!(
+                "{}:{}",
+                relative_path(&finding.conflict.path, self.root),
+                finding.conflict.position
+            );
+            !baseline_conflicts.contains(key.as_str())
         });
     }
 
@@ -1813,6 +1918,7 @@ mod tests {
             unused_enum_members: vec![],
             unused_class_members: vec![],
             unused_store_members: vec![],
+            unprovided_injects: vec![],
             unresolved_imports: vec![],
             unlisted_dependencies: vec![],
             duplicate_exports: vec![],
@@ -1831,6 +1937,8 @@ mod tests {
             invalid_client_exports: vec![],
             mixed_client_server_barrels: vec![],
             misplaced_directives: vec![],
+            route_collisions: vec![],
+            dynamic_segment_name_conflicts: vec![],
         };
         let results = AnalysisResults {
             unused_files: vec![
@@ -1866,6 +1974,7 @@ mod tests {
             unused_enum_members: vec![],
             unused_class_members: vec![],
             unused_store_members: vec![],
+            unprovided_injects: vec![],
             unresolved_imports: vec![],
             unlisted_dependencies: vec![],
             duplicate_exports: vec![],
@@ -1884,6 +1993,8 @@ mod tests {
             invalid_client_exports: vec![],
             mixed_client_server_barrels: vec![],
             misplaced_directives: vec![],
+            route_collisions: vec![],
+            dynamic_segment_name_conflicts: vec![],
         };
         let results = make_results();
         let filtered = filter_new_issues(results, &baseline, Path::new(""));
@@ -1906,6 +2017,7 @@ mod tests {
             unused_enum_members: vec![],
             unused_class_members: vec![],
             unused_store_members: vec![],
+            unprovided_injects: vec![],
             unresolved_imports: vec![],
             unlisted_dependencies: vec![],
             duplicate_exports: vec![],
@@ -1924,6 +2036,8 @@ mod tests {
             invalid_client_exports: vec![],
             mixed_client_server_barrels: vec![],
             misplaced_directives: vec![],
+            route_collisions: vec![],
+            dynamic_segment_name_conflicts: vec![],
         };
         let results = AnalysisResults {
             unused_exports: vec![

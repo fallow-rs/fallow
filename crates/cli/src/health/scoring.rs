@@ -1890,6 +1890,8 @@ mod tests {
             security_control_sites: Vec::new(),
             callee_uses: Vec::new(),
             misplaced_directives: Vec::new(),
+            di_key_sites: Vec::new(),
+            has_dynamic_provide: false,
         };
 
         let (cyc, cog, funcs, lines) = aggregate_complexity(&module);
@@ -1939,6 +1941,8 @@ mod tests {
             security_control_sites: Vec::new(),
             callee_uses: Vec::new(),
             misplaced_directives: Vec::new(),
+            di_key_sites: Vec::new(),
+            has_dynamic_provide: false,
             line_offsets: vec![0, 10, 20, 30, 40], // 5 lines
             complexity: vec![fallow_types::extract::FunctionComplexity {
                 name: "doStuff".into(),
@@ -2000,6 +2004,8 @@ mod tests {
             security_control_sites: Vec::new(),
             callee_uses: Vec::new(),
             misplaced_directives: Vec::new(),
+            di_key_sites: Vec::new(),
+            has_dynamic_provide: false,
             line_offsets: vec![0, 10, 20], // 3 lines
             complexity: vec![
                 fallow_types::extract::FunctionComplexity {
@@ -2280,6 +2286,8 @@ mod tests {
             security_control_sites: Vec::new(),
             callee_uses: Vec::new(),
             misplaced_directives: Vec::new(),
+            di_key_sites: Vec::new(),
+            has_dynamic_provide: false,
         }
     }
 

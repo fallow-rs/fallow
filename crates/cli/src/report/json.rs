@@ -277,6 +277,9 @@ fn build_check_summary(results: &AnalysisResults) -> CheckSummary {
         invalid_client_exports: results.invalid_client_exports.len(),
         mixed_client_server_barrels: results.mixed_client_server_barrels.len(),
         misplaced_directives: results.misplaced_directives.len(),
+        unprovided_injects: results.unprovided_injects.len(),
+        route_collisions: results.route_collisions.len(),
+        dynamic_segment_name_conflicts: results.dynamic_segment_name_conflicts.len(),
     }
 }
 
@@ -491,6 +494,7 @@ fn suppression_kind_rank(kind: &str) -> usize {
         "boundary-violation" => 12,
         "code-duplication" => 13,
         "complexity" => 14,
+        "unprovided-inject" => 15,
         _ => usize::MAX,
     }
 }

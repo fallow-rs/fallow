@@ -42,6 +42,7 @@ fn severity_for_kind(rules: &RulesConfig, kind: IssueKind) -> Severity {
         IssueKind::UnusedEnumMember => rules.unused_enum_members,
         IssueKind::UnusedClassMember => rules.unused_class_members,
         IssueKind::UnusedStoreMember => rules.unused_store_members,
+        IssueKind::UnprovidedInject => rules.unprovided_injects,
         IssueKind::UnresolvedImport => rules.unresolved_imports,
         IssueKind::UnlistedDependency => rules.unlisted_dependencies,
         IssueKind::DuplicateExport => rules.duplicate_exports,
@@ -64,6 +65,8 @@ fn severity_for_kind(rules: &RulesConfig, kind: IssueKind) -> Severity {
         IssueKind::InvalidClientExport => rules.invalid_client_export,
         IssueKind::MixedClientServerBarrel => rules.mixed_client_server_barrel,
         IssueKind::MisplacedDirective => rules.misplaced_directive,
+        IssueKind::RouteCollision => rules.route_collision,
+        IssueKind::DynamicSegmentNameConflict => rules.dynamic_segment_name_conflict,
         IssueKind::Complexity | IssueKind::CodeDuplication => Severity::Error,
     }
 }
@@ -534,6 +537,9 @@ mod tests {
             IssueKind::MixedClientServerBarrel,
             IssueKind::MisplacedDirective,
             IssueKind::UnusedStoreMember,
+            IssueKind::UnprovidedInject,
+            IssueKind::RouteCollision,
+            IssueKind::DynamicSegmentNameConflict,
         ] {
             assert_eq!(
                 IssueKind::from_discriminant(kind.to_discriminant()),
@@ -541,7 +547,7 @@ mod tests {
             );
         }
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(34), None);
+        assert_eq!(IssueKind::from_discriminant(37), None);
     }
 
     #[test]
@@ -782,11 +788,14 @@ mod tests {
             IssueKind::UnusedEnumMember,
             IssueKind::UnusedClassMember,
             IssueKind::UnusedStoreMember,
+            IssueKind::UnprovidedInject,
             IssueKind::UnresolvedImport,
             IssueKind::DuplicateExport,
             IssueKind::CircularDependency,
             IssueKind::BoundaryViolation,
             IssueKind::InvalidClientExport,
+            IssueKind::RouteCollision,
+            IssueKind::DynamicSegmentNameConflict,
         ];
 
         let all_kinds = [
@@ -798,6 +807,7 @@ mod tests {
             IssueKind::UnusedEnumMember,
             IssueKind::UnusedClassMember,
             IssueKind::UnusedStoreMember,
+            IssueKind::UnprovidedInject,
             IssueKind::UnresolvedImport,
             IssueKind::UnlistedDependency,
             IssueKind::DuplicateExport,
@@ -816,6 +826,8 @@ mod tests {
             IssueKind::UnusedDependencyOverride,
             IssueKind::MisconfiguredDependencyOverride,
             IssueKind::InvalidClientExport,
+            IssueKind::RouteCollision,
+            IssueKind::DynamicSegmentNameConflict,
         ];
 
         for kind in all_kinds {

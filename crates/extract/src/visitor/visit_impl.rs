@@ -14,10 +14,10 @@ use crate::{
     MemberAccess, ReExportInfo, RequireCallInfo, VisibilityTag,
 };
 use fallow_types::extract::{
-    CalleeUse, ClassHeritageInfo, LocalTypeDeclaration, MemberInfo, MemberKind,
-    MisplacedDirectiveSite, PublicSignatureTypeReference, SanitizedSinkArg, SanitizerScope,
-    SecurityControlKind, SecurityControlSite, SecurityUrlShape, SinkArgKind, SinkLiteralValue,
-    SinkObjectProperty, SinkShape, SinkSite, SkippedSecurityCalleeExpressionKind,
+    CalleeUse, ClassHeritageInfo, DiFramework, DiKeySite, DiRole, LocalTypeDeclaration, MemberInfo,
+    MemberKind, MisplacedDirectiveSite, PublicSignatureTypeReference, SanitizedSinkArg,
+    SanitizerScope, SecurityControlKind, SecurityControlSite, SecurityUrlShape, SinkArgKind,
+    SinkLiteralValue, SinkObjectProperty, SinkShape, SinkSite, SkippedSecurityCalleeExpressionKind,
     SkippedSecurityCalleeReason, SkippedSecurityCalleeSite, TaintedBinding,
 };
 
@@ -2246,6 +2246,7 @@ impl ModuleInfoExtractor {
             }
             self.record_current_module_file_path_binding(id.name.as_str(), init);
             self.record_injection_token(id.name.as_str(), init);
+            self.record_di_string_key_const(id.name.as_str(), decl, init);
             self.record_child_process_fork_target_binding(id.name.as_str(), init);
             self.record_tainted_source_binding(id.name.as_str(), init);
             self.record_tainted_helper_call_binding(id.name.as_str(), init);
@@ -2885,11 +2886,13 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 // Detect MISPLACED `"use client"` / `"use server"`
                 // directives. oxc places honored leading-prologue directives in
                 // `program.directives` (handled above), so any string-literal
-                // expression statement here is by definition NOT in the leading
-                // position: a non-directive statement (an import, a const)
-                // preceded it and the RSC bundler parses the string as an
-                // ordinary expression, silently ignoring it. Match ONLY the two
-                // RSC directive strings; a stray `"use strict"` is harmless.
+                // expression statement reaching `program.body` is by definition
+                // NOT in the leading position: some non-string-literal statement
+                // (an import, a const, a function call, anything that is not part
+                // of the directive prologue) preceded it, so the RSC bundler
+                // parses the string as an ordinary expression and silently
+                // ignores it. Match ONLY the two RSC directive strings; a stray
+                // `"use strict"` is harmless.
                 Statement::ExpressionStatement(stmt) => {
                     if let Expression::StringLiteral(lit) = &stmt.expression {
                         let is_server = match lit.value.as_str() {
@@ -3539,6 +3542,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
         self.try_record_fluent_chain_access(expr);
         self.record_pinia_map_helpers(expr);
+        self.record_di_key_site(expr);
 
         self.capture_security_call_sites(expr);
 
@@ -6278,6 +6282,120 @@ impl ModuleInfoExtractor {
         }
     }
 
+    /// Record Vue `provide`/`inject` and Svelte `setContext`/`getContext` call
+    /// sites keyed by a stable identifier symbol, for the `unprovided-inject`
+    /// detector. The key must be a stable module-level symbol (an import or a
+    /// module-scope const), so a transient nested-scope key (a loop variable /
+    /// function parameter) is treated as unknowable. A `provide`/`setContext`
+    /// with an unknowable key (non-identifier, spread, computed, or a transient
+    /// local) sets `has_dynamic_provide`, which makes the analyze layer abstain
+    /// on ALL inject findings project-wide (it could provide any key, so a
+    /// surviving inject finding might be a false positive). A static
+    /// string-literal key is in a different identity space from a symbol inject
+    /// and is simply ignored. Inject/getContext sites are recorded
+    /// conservatively: only a stable-identifier key is captured; everything
+    /// else abstains.
+    fn record_di_key_site(&mut self, expr: &CallExpression<'_>) {
+        let classified = match &expr.callee {
+            Expression::Identifier(callee) => {
+                let name = callee.name.as_str();
+                if self.nested_scope_shadows(name) {
+                    None
+                } else if name == "provide"
+                    && (self.is_named_import_from(name, "vue", "provide")
+                        || self.is_named_import_from(name, "@vue/runtime-core", "provide"))
+                {
+                    Some((DiFramework::Vue, DiRole::Provide))
+                } else if name == "inject"
+                    && (self.is_named_import_from(name, "vue", "inject")
+                        || self.is_named_import_from(name, "@vue/runtime-core", "inject"))
+                {
+                    Some((DiFramework::Vue, DiRole::Inject))
+                } else if name == "setContext"
+                    && self.is_named_import_from(name, "svelte", "setContext")
+                {
+                    Some((DiFramework::Svelte, DiRole::Provide))
+                } else if name == "getContext"
+                    && self.is_named_import_from(name, "svelte", "getContext")
+                {
+                    Some((DiFramework::Svelte, DiRole::Inject))
+                } else {
+                    None
+                }
+            }
+            // App-level `*.provide(KEY, value)` (e.g. `app.provide` in main.ts).
+            // FN-preferring: no provenance gate, since a captured provide can
+            // only suppress a finding, never create one. Exactly two arguments
+            // separates the Vue app-provide shape from unrelated `.provide`
+            // calls reasonably well.
+            Expression::StaticMemberExpression(member)
+                if member.property.name == "provide" && expr.arguments.len() == 2 =>
+            {
+                Some((DiFramework::Vue, DiRole::Provide))
+            }
+            _ => None,
+        };
+        let Some((framework, role)) = classified else {
+            return;
+        };
+
+        // No argument: not a usable call.
+        let Some(first) = expr.arguments.first() else {
+            return;
+        };
+        match first {
+            // A stable module-level identifier key (an import or module-scope
+            // const, i.e. not a transient nested-scope local) is the only shape
+            // recorded as a clean DI site.
+            Argument::Identifier(ident) if !self.nested_scope_shadows(ident.name.as_str()) => {
+                self.di_key_sites.push(DiKeySite {
+                    key_local: ident.name.to_string(),
+                    role,
+                    framework,
+                    span_start: expr.span.start,
+                });
+            }
+            // Static string key: a different identity space from symbol injects,
+            // so it neither records nor abstains.
+            Argument::StringLiteral(_) => {}
+            Argument::TemplateLiteral(t) if t.expressions.is_empty() => {}
+            // A transient nested-scope identifier (loop variable / parameter), a
+            // spread, a computed/member/call key, or an interpolated template is
+            // unknowable. A provide of such a key could be providing anything, so
+            // it forces a project-wide inject abstain.
+            _ => {
+                if role == DiRole::Provide {
+                    self.has_dynamic_provide = true;
+                }
+            }
+        }
+    }
+
+    /// Track a module-scope `const NAME = "literal"` so the `unprovided-inject`
+    /// detector treats an inject/provide keyed by `NAME` as a string-keyed DI
+    /// link (string identity), not a symbol. Catches the `const KEY =
+    /// "jsonforms"; inject(KEY)` shape where the provider supplies the literal
+    /// string (commonly inside a package), which is NOT a dead inject. The
+    /// matching `di_key_sites` are dropped in `finalize_di_key_sites`.
+    fn record_di_string_key_const(
+        &mut self,
+        name: &str,
+        decl: &VariableDeclaration<'_>,
+        init: &Expression<'_>,
+    ) {
+        if decl.kind != VariableDeclarationKind::Const || !self.is_module_scope() {
+            return;
+        }
+        let is_string_literal = match init {
+            Expression::StringLiteral(_) => true,
+            Expression::TemplateLiteral(t) => t.expressions.is_empty(),
+            _ => false,
+        };
+        if is_string_literal {
+            self.string_keyed_di_consts.insert(name.to_string());
+        }
+    }
+
     /// Whether a bare-identifier callee is a Pinia store factory: either an
     /// imported binding (explicit `import { useFooStore } from ...`) or a name
     /// following the `use<Name>Store` convention (Nuxt `@pinia/nuxt`
@@ -6322,6 +6440,21 @@ impl ModuleInfoExtractor {
                 export.members = members.clone();
             }
         }
+    }
+
+    /// Drop `di_key_sites` whose key is a module-scope const bound to a string
+    /// literal (string identity, abstain). Run at finalize so a const declared
+    /// after the inject/provide call (a forward reference into a function body)
+    /// is still resolved. See [`Self::record_di_string_key_const`].
+    pub(super) fn finalize_di_key_sites(&mut self) {
+        if self.string_keyed_di_consts.is_empty() {
+            return;
+        }
+        let sites = std::mem::take(&mut self.di_key_sites);
+        self.di_key_sites = sites
+            .into_iter()
+            .filter(|site| !self.string_keyed_di_consts.contains(&site.key_local))
+            .collect();
     }
 
     fn risky_regex_fragment_for_expr(&self, expr: &Expression<'_>) -> Option<String> {

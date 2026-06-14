@@ -886,6 +886,8 @@ mod tests {
             security_control_sites: vec![],
             callee_uses: vec![],
             misplaced_directives: vec![],
+            di_key_sites: Vec::new(),
+            has_dynamic_provide: false,
         }
     }
 

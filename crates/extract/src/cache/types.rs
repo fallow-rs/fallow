@@ -351,11 +351,24 @@ use crate::MemberKind;
 /// `misplaced_directives`, so warm caches written before the bump would report
 /// zero misplaced-directive findings.
 ///
-/// Bumped to 154 for #550: CSS Module class extraction now derives its class set
+/// Bumped to 154 for the `unprovided-inject` detector: JS/TS and SFC extraction
+/// now record Vue `provide`/`inject` and Svelte `setContext`/`getContext` call
+/// sites on `di_key_sites` plus a `has_dynamic_provide` flag, so warm caches
+/// written before the bump would report zero unprovided-inject findings.
+///
+/// Bumped to 155 because `di_key_sites` now drops keys bound to a module-scope
+/// string-literal const (string identity, not a symbol), so a warm cache from
+/// 154 would carry those dropped sites and false-flag a string-keyed inject.
+///
+/// Bumped to 156 because SFC markup asset references (`<img src="./logo.png">`,
+/// `<source>`, `<video poster>`) now emit `SideEffect` imports, so a warm cache
+/// from 155 would miss the new `unresolved-import` findings on missing assets.
+///
+/// Bumped to 157 for #550: CSS Module class extraction now derives its class set
 /// from a real CSS AST (lightningcss) for standard CSS, so warm caches written
 /// by the regex-only extractor can differ on escaped class names and malformed
 /// at-rule preludes.
-pub(super) const CACHE_VERSION: u32 = 154;
+pub(super) const CACHE_VERSION: u32 = 157;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -402,7 +415,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 856);
+assert_cached_type_size!(CachedModule, 880);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 56);
@@ -535,6 +548,13 @@ pub struct CachedModule {
     /// Round-trips so the `misplaced-directive` detector sees them on
     /// warm-cache loads.
     pub misplaced_directives: Vec<fallow_types::extract::MisplacedDirectiveSite>,
+    /// Vue `provide`/`inject` and Svelte `setContext`/`getContext` key sites.
+    /// Round-trips so the `unprovided-inject` detector sees them on warm-cache
+    /// loads.
+    pub di_key_sites: Vec<fallow_types::extract::DiKeySite>,
+    /// Whether the module had an unknowable-key provide. Round-trips so the
+    /// `unprovided-inject` project-wide abstain holds on warm-cache loads.
+    pub has_dynamic_provide: bool,
 }
 
 /// Cached namespace-object alias.

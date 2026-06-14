@@ -11,15 +11,15 @@ use crate::extract::{
 use crate::output::IssueAction;
 use crate::output_dead_code::{
     BoundaryCallViolationFinding, BoundaryCoverageViolationFinding, BoundaryViolationFinding,
-    CircularDependencyFinding, DuplicateExportFinding, EmptyCatalogGroupFinding,
-    InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
-    MixedClientServerBarrelFinding, PolicyViolationFinding, PrivateTypeLeakFinding,
-    ReExportCycleFinding, TestOnlyDependencyFinding, TypeOnlyDependencyFinding,
-    UnlistedDependencyFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
-    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedDependencyFinding,
-    UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
-    UnusedExportFinding, UnusedFileFinding, UnusedOptionalDependencyFinding,
-    UnusedStoreMemberFinding, UnusedTypeFinding,
+    CircularDependencyFinding, DuplicateExportFinding, DynamicSegmentNameConflictFinding,
+    EmptyCatalogGroupFinding, InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding,
+    MisplacedDirectiveFinding, MixedClientServerBarrelFinding, PolicyViolationFinding,
+    PrivateTypeLeakFinding, ReExportCycleFinding, RouteCollisionFinding, TestOnlyDependencyFinding,
+    TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
+    UnresolvedCatalogReferenceFinding, UnresolvedImportFinding, UnusedCatalogEntryFinding,
+    UnusedClassMemberFinding, UnusedDependencyFinding, UnusedDependencyOverrideFinding,
+    UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
+    UnusedOptionalDependencyFinding, UnusedStoreMemberFinding, UnusedTypeFinding,
 };
 use crate::serde_path;
 use crate::suppress::{IssueKind, closest_known_kind_name};
@@ -220,6 +220,24 @@ pub struct AnalysisResults {
     /// array natively. Default severity is `warn`.
     #[serde(default)]
     pub misplaced_directives: Vec<MisplacedDirectiveFinding>,
+    /// Vue `inject(KEY)` / Svelte `getContext(KEY)` calls whose symbol KEY is
+    /// provided nowhere in the project (the injected-never-provided dead-half).
+    /// Wrapped in [`UnprovidedInjectFinding`] so each entry carries a typed
+    /// `actions` array natively. Default severity is `warn`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unprovided_injects: Vec<UnprovidedInjectFinding>,
+    /// Next.js App Router route files that resolve to the same URL within one
+    /// app-root (a guaranteed `next build` failure). Wrapped in
+    /// [`RouteCollisionFinding`] so each entry carries a typed `actions` array
+    /// natively. One finding per colliding file. Default severity is `warn`.
+    #[serde(default)]
+    pub route_collisions: Vec<RouteCollisionFinding>,
+    /// Sibling Next.js dynamic route segments at one tree position using
+    /// different param spellings (a dev / runtime error; `next build` does NOT
+    /// catch it). Wrapped in [`DynamicSegmentNameConflictFinding`] so each entry
+    /// carries a typed `actions` array natively. Default severity is `warn`.
+    #[serde(default)]
+    pub dynamic_segment_name_conflicts: Vec<DynamicSegmentNameConflictFinding>,
     /// Number of suppression entries that matched an issue during analysis.
     /// Human output uses this for the suppression footer; it is skipped in
     /// machine output to avoid changing the public JSON issue contract.
@@ -340,6 +358,9 @@ impl AnalysisResults {
             + self.invalid_client_exports.len()
             + self.mixed_client_server_barrels.len()
             + self.misplaced_directives.len()
+            + self.unprovided_injects.len()
+            + self.route_collisions.len()
+            + self.dynamic_segment_name_conflicts.len()
     }
 
     /// Whether any issues were found.
@@ -392,6 +413,9 @@ impl AnalysisResults {
             invalid_client_exports,
             mixed_client_server_barrels,
             misplaced_directives,
+            unprovided_injects,
+            route_collisions,
+            dynamic_segment_name_conflicts,
             suppression_count,
             active_suppressions,
             feature_flags,
@@ -440,6 +464,10 @@ impl AnalysisResults {
         self.mixed_client_server_barrels
             .extend(mixed_client_server_barrels);
         self.misplaced_directives.extend(misplaced_directives);
+        self.unprovided_injects.extend(unprovided_injects);
+        self.route_collisions.extend(route_collisions);
+        self.dynamic_segment_name_conflicts
+            .extend(dynamic_segment_name_conflicts);
         self.feature_flags.extend(feature_flags);
         self.security_findings.extend(security_findings);
         self.security_unresolved_edge_files += security_unresolved_edge_files;
@@ -582,6 +610,29 @@ impl AnalysisResults {
                 .then(a.directive_site.line.cmp(&b.directive_site.line))
                 .then(a.directive_site.col.cmp(&b.directive_site.col))
                 .then(a.directive_site.directive.cmp(&b.directive_site.directive))
+        });
+
+        self.unprovided_injects.sort_by(|a, b| {
+            a.inject
+                .path
+                .cmp(&b.inject.path)
+                .then(a.inject.line.cmp(&b.inject.line))
+                .then(a.inject.col.cmp(&b.inject.col))
+                .then(a.inject.key_name.cmp(&b.inject.key_name))
+        });
+
+        self.route_collisions.sort_by(|a, b| {
+            a.collision
+                .path
+                .cmp(&b.collision.path)
+                .then(a.collision.url.cmp(&b.collision.url))
+        });
+
+        self.dynamic_segment_name_conflicts.sort_by(|a, b| {
+            a.conflict
+                .path
+                .cmp(&b.conflict.path)
+                .then(a.conflict.position.cmp(&b.conflict.position))
         });
     }
 
@@ -891,6 +942,82 @@ pub struct MisplacedDirective {
     /// 1-based line number of the misplaced directive statement.
     pub line: u32,
     /// 0-based byte column offset of the misplaced directive statement.
+    pub col: u32,
+}
+
+/// A Vue `inject(KEY)` or Svelte `getContext(KEY)` whose symbol KEY is
+/// `provide`/`setContext`'d nowhere in the analyzed project. The key is a
+/// symbol with cross-file identity, so an unmatched key is a real dead-half DI
+/// link: at runtime the inject returns `undefined`, surfaced only at render.
+/// The fix is binary: provide the key somewhere, or remove the dead inject.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnprovidedInject {
+    /// The file carrying the orphan inject / getContext call.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// The injected key identifier as written at the call site.
+    pub key_name: String,
+    /// Which framework's DI API this came from: `"vue"` or `"svelte"`.
+    pub framework: String,
+    /// 1-based line number of the inject / getContext call.
+    pub line: u32,
+    /// 0-based byte column offset of the inject / getContext call.
+    pub col: u32,
+}
+
+/// Two or more Next.js App Router route files that resolve to the SAME URL
+/// within one app-root. Next.js fails the build ("You cannot have two parallel
+/// pages that resolve to the same path"); fallow catches it statically and
+/// names every colliding file at once. One finding is emitted per colliding
+/// file; `conflicting_paths` lists the sibling files that share the URL.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct RouteCollision {
+    /// This colliding route file (a `page` or `route` leaf).
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// The URL pathname this file resolves to within its app-root, after
+    /// stripping route groups `(x)` and parallel-slot `@slot` prefixes (e.g.
+    /// `/about`, `/api/health`, `/blog/:slug`).
+    pub url: String,
+    /// The other route files that resolve to the same URL within the same
+    /// app-root. Path-sorted for stable output / fingerprints.
+    #[serde(serialize_with = "serde_path::serialize_vec")]
+    pub conflicting_paths: Vec<PathBuf>,
+    /// 1-based line number (file-level finding, always 1).
+    pub line: u32,
+    /// 0-based byte column offset (file-level finding, always 0).
+    pub col: u32,
+}
+
+/// Two or more sibling dynamic route segments at the SAME App Router tree
+/// position using different param spellings (`[id]` vs `[slug]`, or `[...x]`
+/// vs `[[...x]]`). Next.js throws "You cannot use different slug names for the
+/// same dynamic path" at dev / production RUNTIME when the position is hit;
+/// `next build` does NOT catch it, so fallow's static catch surfaces a route
+/// that would otherwise pass CI and crash at request time. One finding is
+/// emitted per involved file.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct DynamicSegmentNameConflict {
+    /// This route file living under one of the conflicting dynamic segments.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// The tree position (parent URL after group/slot normalization) where the
+    /// dynamic segments conflict, e.g. `/shop` for `/shop/[id]` vs
+    /// `/shop/[slug]`. The app-root prefix is stripped.
+    pub position: String,
+    /// The distinct conflicting dynamic-segment spellings at this position, as
+    /// written (e.g. `["[id]", "[slug]"]`). Sorted for stable output.
+    pub conflicting_segments: Vec<String>,
+    /// The other route files at the same position under a conflicting dynamic
+    /// segment. Path-sorted for stable output / fingerprints.
+    #[serde(serialize_with = "serde_path::serialize_vec")]
+    pub conflicting_paths: Vec<PathBuf>,
+    /// 1-based line number (file-level finding, always 1).
+    pub line: u32,
+    /// 0-based byte column offset (file-level finding, always 0).
     pub col: u32,
 }
 

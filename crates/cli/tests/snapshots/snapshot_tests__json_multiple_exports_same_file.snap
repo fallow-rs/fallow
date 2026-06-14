@@ -18,6 +18,7 @@ expression: redact_version(&json_str)
     "unused_enum_members": 0,
     "unused_class_members": 0,
     "unused_store_members": 0,
+    "unprovided_injects": 0,
     "unresolved_imports": 0,
     "unlisted_dependencies": 0,
     "duplicate_exports": 0,
@@ -37,7 +38,9 @@ expression: redact_version(&json_str)
     "misconfigured_dependency_overrides": 0,
     "invalid_client_exports": 0,
     "mixed_client_server_barrels": 0,
-    "misplaced_directives": 0
+    "misplaced_directives": 0,
+    "route_collisions": 0,
+    "dynamic_segment_name_conflicts": 0
   },
   "unused_files": [],
   "unused_exports": [
@@ -135,6 +138,8 @@ expression: redact_version(&json_str)
   "invalid_client_exports": [],
   "mixed_client_server_barrels": [],
   "misplaced_directives": [],
+  "route_collisions": [],
+  "dynamic_segment_name_conflicts": [],
   "next_steps": [
     {
       "id": "trace-unused-export",

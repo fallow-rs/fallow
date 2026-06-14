@@ -65,6 +65,33 @@ fn misplaced_directive_key(item: &fallow_core::results::MisplacedDirective, root
     )
 }
 
+fn unprovided_inject_key(item: &fallow_core::results::UnprovidedInject, root: &Path) -> String {
+    format!(
+        "unprovided-inject:{}:{}",
+        relative_key_path(&item.path, root),
+        item.key_name
+    )
+}
+
+fn route_collision_key(item: &fallow_core::results::RouteCollision, root: &Path) -> String {
+    format!(
+        "route-collision:{}:{}",
+        relative_key_path(&item.path, root),
+        item.url
+    )
+}
+
+fn dynamic_segment_name_conflict_key(
+    item: &fallow_core::results::DynamicSegmentNameConflict,
+    root: &Path,
+) -> String {
+    format!(
+        "dynamic-segment-name-conflict:{}:{}",
+        relative_key_path(&item.path, root),
+        item.position
+    )
+}
+
 fn unlisted_dependency_key(item: &fallow_core::results::UnlistedDependency, root: &Path) -> String {
     let mut sites = item
         .imported_from
@@ -319,6 +346,9 @@ pub(super) fn dead_code_keys(
         invalid_client_exports,
         mixed_client_server_barrels,
         misplaced_directives,
+        unprovided_injects,
+        route_collisions,
+        dynamic_segment_name_conflicts,
         // Non-finding fields: counts and metadata, not attributable to a key.
         suppression_count: _suppression_count,
         active_suppressions: _active_suppressions,
@@ -366,6 +396,9 @@ pub(super) fn dead_code_keys(
     collector.add_invalid_client_exports(invalid_client_exports);
     collector.add_mixed_client_server_barrels(mixed_client_server_barrels);
     collector.add_misplaced_directives(misplaced_directives);
+    collector.add_unprovided_injects(unprovided_injects);
+    collector.add_route_collisions(route_collisions);
+    collector.add_dynamic_segment_name_conflicts(dynamic_segment_name_conflicts);
     collector.into_keys()
 }
 
@@ -454,6 +487,27 @@ impl<'a> DeadCodeKeyCollector<'a> {
     ) {
         for item in items {
             self.insert(misplaced_directive_key(&item.directive_site, self.root));
+        }
+    }
+
+    fn add_unprovided_injects(&mut self, items: &[fallow_core::results::UnprovidedInjectFinding]) {
+        for item in items {
+            self.insert(unprovided_inject_key(&item.inject, self.root));
+        }
+    }
+
+    fn add_route_collisions(&mut self, items: &[fallow_core::results::RouteCollisionFinding]) {
+        for item in items {
+            self.insert(route_collision_key(&item.collision, self.root));
+        }
+    }
+
+    fn add_dynamic_segment_name_conflicts(
+        &mut self,
+        items: &[fallow_core::results::DynamicSegmentNameConflictFinding],
+    ) {
+        for item in items {
+            self.insert(dynamic_segment_name_conflict_key(&item.conflict, self.root));
         }
     }
 
@@ -736,6 +790,9 @@ pub(super) fn retain_introduced_dead_code(
         invalid_client_exports,
         mixed_client_server_barrels,
         misplaced_directives,
+        unprovided_injects,
+        route_collisions,
+        dynamic_segment_name_conflicts,
         // Non-finding fields: counts and metadata, not subject to base-keyed
         // filtering.
         suppression_count: _suppression_count,
@@ -816,6 +873,10 @@ pub(super) fn retain_introduced_dead_code(
     mixed_client_server_barrels
         .retain(|item| keep(mixed_client_server_barrel_key(&item.barrel, root)));
     misplaced_directives.retain(|item| keep(misplaced_directive_key(&item.directive_site, root)));
+    unprovided_injects.retain(|item| keep(unprovided_inject_key(&item.inject, root)));
+    route_collisions.retain(|item| keep(route_collision_key(&item.collision, root)));
+    dynamic_segment_name_conflicts
+        .retain(|item| keep(dynamic_segment_name_conflict_key(&item.conflict, root)));
 }
 
 fn introduced_dead_code_keys(
@@ -1072,6 +1133,33 @@ impl DeadCodeJsonAnnotator<'_> {
                     self.base,
                 )
             }),
+        );
+        annotate_issue_array(
+            self.json,
+            "unprovided_injects",
+            self.results.unprovided_injects.iter().map(|item| {
+                issue_was_introduced(&unprovided_inject_key(&item.inject, self.root), self.base)
+            }),
+        );
+        annotate_issue_array(
+            self.json,
+            "route_collisions",
+            self.results.route_collisions.iter().map(|item| {
+                issue_was_introduced(&route_collision_key(&item.collision, self.root), self.base)
+            }),
+        );
+        annotate_issue_array(
+            self.json,
+            "dynamic_segment_name_conflicts",
+            self.results
+                .dynamic_segment_name_conflicts
+                .iter()
+                .map(|item| {
+                    issue_was_introduced(
+                        &dynamic_segment_name_conflict_key(&item.conflict, self.root),
+                        self.base,
+                    )
+                }),
         );
     }
 

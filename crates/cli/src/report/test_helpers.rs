@@ -4,9 +4,9 @@ use fallow_core::extract::MemberKind;
 use fallow_core::results::*;
 use fallow_types::output_dead_code::{
     BoundaryViolationFinding, CircularDependencyFinding, TestOnlyDependencyFinding,
-    TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnresolvedImportFinding,
-    UnusedClassMemberFinding, UnusedDependencyFinding, UnusedDevDependencyFinding,
-    UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
+    TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
+    UnresolvedImportFinding, UnusedClassMemberFinding, UnusedDependencyFinding,
+    UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
     UnusedOptionalDependencyFinding, UnusedStoreMemberFinding, UnusedTypeFinding,
 };
 
@@ -168,6 +168,14 @@ pub fn sample_results(root: &Path) -> AnalysisResults {
             import_specifier: "src/db/query.ts".to_string(),
             line: 2,
             col: 0,
+        }));
+    r.unprovided_injects
+        .push(UnprovidedInjectFinding::with_actions(UnprovidedInject {
+            path: root.join("src/useTheme.ts"),
+            key_name: "THEME_KEY".to_string(),
+            framework: "vue".to_string(),
+            line: 5,
+            col: 2,
         }));
     r.stale_suppressions.push(StaleSuppression {
         path: root.join("src/utils.ts"),

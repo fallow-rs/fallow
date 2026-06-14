@@ -7,8 +7,8 @@ use crate::tests::parse_ts as parse;
 use crate::{ImportedName, MemberKind};
 use fallow_types::discover::FileId;
 use fallow_types::extract::{
-    SecurityControlKind, SecurityUrlShape, SinkArgKind, SinkLiteralValue, SinkShape,
-    SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason,
+    DiFramework, DiRole, SecurityControlKind, SecurityUrlShape, SinkArgKind, SinkLiteralValue,
+    SinkShape, SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason,
 };
 use helpers::regex_pattern_to_suffix;
 
@@ -6351,5 +6351,212 @@ fn misplaced_use_strict_is_out_of_scope() {
         info.misplaced_directives.is_empty(),
         "a misplaced \"use strict\" is harmless and out of scope: {:?}",
         info.misplaced_directives
+    );
+}
+
+fn di_sites(info: &crate::ModuleInfo) -> Vec<(String, DiRole, DiFramework)> {
+    info.di_key_sites
+        .iter()
+        .map(|s| (s.key_local.clone(), s.role, s.framework))
+        .collect()
+}
+
+#[test]
+fn records_vue_provide_and_inject_identifier_keys() {
+    let info = parse(
+        r"
+        import { provide, inject } from 'vue'
+        import { KEY } from './keys'
+        export function setup() {
+          provide(KEY, 1)
+          const x = inject(KEY)
+          return x
+        }
+        ",
+    );
+    let sites = di_sites(&info);
+    assert!(
+        sites.contains(&("KEY".to_string(), DiRole::Provide, DiFramework::Vue)),
+        "provide(KEY) should record a Vue provide site: {sites:?}"
+    );
+    assert!(
+        sites.contains(&("KEY".to_string(), DiRole::Inject, DiFramework::Vue)),
+        "inject(KEY) should record a Vue inject site: {sites:?}"
+    );
+    assert!(!info.has_dynamic_provide);
+}
+
+#[test]
+fn records_app_level_provide_member_call() {
+    let info = parse(
+        r"
+        import { GLOBAL_KEY } from './keys'
+        const app = createApp()
+        app.provide(GLOBAL_KEY, 1)
+        ",
+    );
+    let sites = di_sites(&info);
+    assert!(
+        sites.contains(&("GLOBAL_KEY".to_string(), DiRole::Provide, DiFramework::Vue)),
+        "app.provide(GLOBAL_KEY, value) should record a provide site without a provenance gate: {sites:?}"
+    );
+}
+
+#[test]
+fn records_svelte_set_and_get_context() {
+    let info = parse(
+        r"
+        import { setContext, getContext } from 'svelte'
+        import { CTX } from './keys'
+        export function init() {
+          setContext(CTX, {})
+          return getContext(CTX)
+        }
+        ",
+    );
+    let sites = di_sites(&info);
+    assert!(
+        sites.contains(&("CTX".to_string(), DiRole::Provide, DiFramework::Svelte)),
+        "setContext(CTX) should record a Svelte provide site: {sites:?}"
+    );
+    assert!(
+        sites.contains(&("CTX".to_string(), DiRole::Inject, DiFramework::Svelte)),
+        "getContext(CTX) should record a Svelte inject site: {sites:?}"
+    );
+}
+
+#[test]
+fn string_literal_di_key_is_not_recorded() {
+    let info = parse(
+        r"
+        import { provide, inject } from 'vue'
+        export function setup() {
+          provide('strKey', 1)
+          return inject('strKey')
+        }
+        ",
+    );
+    assert!(
+        info.di_key_sites.is_empty(),
+        "string-literal DI keys are a different identity space and must not be recorded: {:?}",
+        info.di_key_sites
+    );
+    assert!(!info.has_dynamic_provide);
+}
+
+#[test]
+fn shadowed_provide_callee_is_not_a_vue_provide() {
+    let info = parse(
+        r"
+        import { KEY } from './keys'
+        export function setup() {
+          function provide(_k: symbol, _v: number) {}
+          provide(KEY, 1)
+        }
+        ",
+    );
+    assert!(
+        info.di_key_sites.is_empty(),
+        "a local provide() shadowing the Vue import must not be recorded: {:?}",
+        info.di_key_sites
+    );
+}
+
+#[test]
+fn provide_from_non_vue_source_is_not_recorded() {
+    let info = parse(
+        r"
+        import { provide } from './my-di'
+        import { KEY } from './keys'
+        export function setup() {
+          provide(KEY, 1)
+        }
+        ",
+    );
+    assert!(
+        info.di_key_sites.is_empty(),
+        "provide() not imported from vue must not be recorded: {:?}",
+        info.di_key_sites
+    );
+}
+
+#[test]
+fn loop_variable_provide_key_sets_dynamic_provide() {
+    let info = parse(
+        r"
+        import { provide } from 'vue'
+        import { A_KEY } from './keys'
+        export function setup(extra: symbol[]) {
+          [A_KEY, ...extra].forEach((k) => provide(k, 1))
+        }
+        ",
+    );
+    assert!(
+        info.has_dynamic_provide,
+        "a provide keyed by a transient loop variable must set has_dynamic_provide"
+    );
+    assert!(
+        !info.di_key_sites.iter().any(|s| s.role == DiRole::Provide),
+        "the loop-variable provide must not record a clean provide site: {:?}",
+        info.di_key_sites
+    );
+}
+
+#[test]
+fn spread_provide_key_sets_dynamic_provide() {
+    let info = parse(
+        r"
+        import { provide } from 'vue'
+        const pair: [symbol, number] = [Symbol(), 1]
+        export function setup() {
+          provide(...pair)
+        }
+        ",
+    );
+    assert!(
+        info.has_dynamic_provide,
+        "a spread provide argument must set has_dynamic_provide"
+    );
+}
+
+#[test]
+fn string_bound_const_di_key_is_dropped() {
+    // A module-scope const bound to a string literal has STRING identity, not a
+    // symbol: a provider supplying the literal (often inside a package) matches
+    // it, so the inject must abstain. The const may be declared after the call.
+    let info = parse(
+        r#"
+        import { inject } from 'vue'
+        export function setup() {
+          return inject(JSONFORMS_KEY)
+        }
+        const JSONFORMS_KEY = "jsonforms"
+        "#,
+    );
+    assert!(
+        info.di_key_sites.is_empty(),
+        "an inject keyed by a string-bound const must be dropped (string identity): {:?}",
+        info.di_key_sites
+    );
+}
+
+#[test]
+fn symbol_bound_const_di_key_is_kept() {
+    // A const bound to Symbol() keeps symbol identity and is recorded.
+    let info = parse(
+        r"
+        import { inject } from 'vue'
+        const KEY = Symbol('k')
+        export function setup() {
+          return inject(KEY)
+        }
+        ",
+    );
+    assert!(
+        info.di_key_sites
+            .iter()
+            .any(|s| s.key_local == "KEY" && s.role == DiRole::Inject),
+        "an inject keyed by a Symbol()-bound const must be recorded: {:?}",
+        info.di_key_sites
     );
 }

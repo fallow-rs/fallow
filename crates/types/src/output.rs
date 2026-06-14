@@ -183,6 +183,25 @@ pub enum FixActionType {
     /// Replace a banned call or banned import flagged by a rule-pack rule
     /// (manual; the rule's message usually names the sanctioned alternative).
     ResolvePolicyViolation,
+    /// Move a server-only export out of a `"use client"` file into a
+    /// non-client module (manual; used by invalid-client-export findings).
+    MoveToServerModule,
+    /// Split a barrel that re-exports both client and server-only modules
+    /// into separate client and server barrels (manual; used by
+    /// mixed-client-server-barrel findings).
+    SplitMixedBarrel,
+    /// Hoist a misplaced `"use client"` / `"use server"` directive to the
+    /// leading prologue of the file (manual; used by misplaced-directive
+    /// findings).
+    HoistDirective,
+    /// Resolve a Next.js App Router route collision by moving or merging one of
+    /// the files that own the same URL (manual; suppressing a guaranteed build
+    /// error is never the right fix, so this is the primary action).
+    ResolveRouteCollision,
+    /// Resolve a Next.js dynamic-segment name conflict by renaming the dynamic
+    /// segments at the conflicting position to a single consistent slug name
+    /// (manual).
+    ResolveDynamicSegmentNameConflict,
 }
 
 /// Inline-comment suppression for a single finding line.

@@ -375,6 +375,8 @@ fn check_explain_for_header(line: &str) -> Option<&'static crate::explain::RuleD
             "Mixed client/server barrels",
             "fallow/mixed-client-server-barrel",
         ),
+        ("Unprovided injects", "fallow/unprovided-inject"),
+        ("Misplaced directives", "fallow/misplaced-directive"),
     ];
     let (_, rule_id) = mappings
         .iter()
@@ -1271,6 +1273,9 @@ fn build_policy_section(
         && results.invalid_client_exports.is_empty()
         && results.mixed_client_server_barrels.is_empty()
         && results.misplaced_directives.is_empty()
+        && results.unprovided_injects.is_empty()
+        && results.route_collisions.is_empty()
+        && results.dynamic_segment_name_conflicts.is_empty()
     {
         return;
     }
@@ -1315,6 +1320,45 @@ fn build_policy_section(
         },
         format_detail: &format_misplaced_directive,
     });
+
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.unprovided_injects,
+        title: "Unprovided injects",
+        level: severity_to_level(rules.unprovided_injects),
+        root,
+        max_files: MAX_FLAT_ITEMS,
+        get_path: |i: &fallow_types::output_dead_code::UnprovidedInjectFinding| {
+            i.inject.path.as_path()
+        },
+        format_detail: &format_unprovided_inject,
+    });
+
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.route_collisions,
+        title: "Route collisions",
+        level: severity_to_level(rules.route_collision),
+        root,
+        max_files: MAX_FLAT_ITEMS,
+        get_path: |c: &fallow_types::output_dead_code::RouteCollisionFinding| {
+            c.collision.path.as_path()
+        },
+        format_detail: &format_route_collision,
+    });
+
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.dynamic_segment_name_conflicts,
+        title: "Dynamic segment conflicts",
+        level: severity_to_level(rules.dynamic_segment_name_conflict),
+        root,
+        max_files: MAX_FLAT_ITEMS,
+        get_path: |c: &fallow_types::output_dead_code::DynamicSegmentNameConflictFinding| {
+            c.conflict.path.as_path()
+        },
+        format_detail: &format_dynamic_segment_name_conflict,
+    });
 }
 
 fn format_invalid_client_export(
@@ -1354,6 +1398,52 @@ fn format_misplaced_directive(
         format!(
             "\"{}\" is not in the leading position and is ignored",
             d.directive
+        )
+        .dimmed(),
+    )
+}
+
+fn format_unprovided_inject(
+    entry: &fallow_types::output_dead_code::UnprovidedInjectFinding,
+) -> String {
+    let i = &entry.inject;
+    format!(
+        "{} {} {}",
+        format!(":{}", i.line).dimmed(),
+        i.key_name.bold(),
+        format!(
+            "has no matching provide({}) in this project; at runtime it returns undefined (provide the key or remove this inject)",
+            i.key_name
+        )
+        .dimmed(),
+    )
+}
+
+fn format_route_collision(entry: &fallow_types::output_dead_code::RouteCollisionFinding) -> String {
+    let c = &entry.collision;
+    let others = c.conflicting_paths.len();
+    let plural = if others == 1 { "" } else { "s" };
+    format!(
+        "{}",
+        format!(
+            "resolves to {} (shared with {others} other route file{plural}; route groups and \
+             slots do not change the URL)",
+            c.url
+        )
+        .dimmed(),
+    )
+}
+
+fn format_dynamic_segment_name_conflict(
+    entry: &fallow_types::output_dead_code::DynamicSegmentNameConflictFinding,
+) -> String {
+    let c = &entry.conflict;
+    format!(
+        "{}",
+        format!(
+            "conflicting dynamic segments at {} ({})",
+            c.position,
+            c.conflicting_segments.join(" vs ")
         )
         .dimmed(),
     )
@@ -2107,8 +2197,20 @@ fn collect_matching_rules(
     for e in &results.invalid_client_exports {
         check(&e.export.path);
     }
+    for b in &results.mixed_client_server_barrels {
+        check(&b.barrel.path);
+    }
     for d in &results.misplaced_directives {
         check(&d.directive_site.path);
+    }
+    for i in &results.unprovided_injects {
+        check(&i.inject.path);
+    }
+    for c in &results.route_collisions {
+        check(&c.collision.path);
+    }
+    for c in &results.dynamic_segment_name_conflicts {
+        check(&c.conflict.path);
     }
     for s in &results.stale_suppressions {
         check(&s.path);
@@ -2378,6 +2480,7 @@ fn build_summary_footer(
     add(results.circular_dependencies.len(), "circular dependencies");
     add(results.re_export_cycles.len(), "re-export cycles");
     add(results.boundary_violations.len(), "violations");
+    add(results.unprovided_injects.len(), "unprovided injects");
     add(results.stale_suppressions.len(), "stale suppressions");
 
     parts.join(" \u{00b7} ")
@@ -2517,6 +2620,11 @@ fn check_summary_categories(
             severity_to_level(rules.boundary_violation),
         ),
         (
+            "Unprovided injects",
+            results.unprovided_injects.len(),
+            severity_to_level(rules.unprovided_injects),
+        ),
+        (
             "Stale suppressions",
             results.stale_suppressions.len(),
             severity_to_level(rules.stale_suppressions),
@@ -2577,6 +2685,37 @@ mod tests {
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);
         assert!(lines.is_empty());
+    }
+
+    #[test]
+    fn collect_matching_rules_routes_mixed_client_server_barrels() {
+        // A file whose ONLY finding is a mixed-client-server-barrel must still
+        // surface its CODEOWNERS rule in the `--group-by owner` "matched by"
+        // header. Reverting the `mixed_client_server_barrels` loop in
+        // `collect_matching_rules` makes this assertion fail (empty rules),
+        // pinning the fix that was previously missing alongside the sibling
+        // invalid-client-export / misplaced-directive loops.
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .mixed_client_server_barrels
+            .push(MixedClientServerBarrelFinding::with_actions(
+                MixedClientServerBarrel {
+                    path: root.join("src/index.ts"),
+                    client_origin: "./Button".to_string(),
+                    server_origin: "./fetchUser".to_string(),
+                    line: 2,
+                    col: 0,
+                },
+            ));
+        let resolver = OwnershipResolver::Owner(
+            crate::codeowners::CodeOwners::parse("/src/ @frontend\n").unwrap(),
+        );
+        let matched = collect_matching_rules(&results, &root, &resolver);
+        assert!(
+            matched.iter().any(|r| r.contains("src")),
+            "mixed-barrel path must route through the ownership resolver, got: {matched:?}"
+        );
     }
 
     #[test]

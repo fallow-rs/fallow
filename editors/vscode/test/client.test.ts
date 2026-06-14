@@ -138,6 +138,7 @@ import * as vscode from "vscode";
 import {
   createInitializationOptions,
   loadDiagnosticCategories,
+  requestServerDiagnosticRefresh,
   restartClient,
   startClient,
   stopClient,
@@ -434,5 +435,23 @@ describe("triggerPullDiagnosticRefresh", () => {
 
     expect(() => triggerPullDiagnosticRefresh({ getFeature } as never)).not.toThrow();
     expect(getProvider).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("requestServerDiagnosticRefresh", () => {
+  it("sends the fallow/refreshDiagnostics request", async () => {
+    const sendRequest = vi.fn(async () => undefined);
+    await requestServerDiagnosticRefresh({ sendRequest } as never);
+    expect(sendRequest).toHaveBeenCalledWith("fallow/refreshDiagnostics");
+  });
+
+  it("swallows MethodNotFound from older servers without the handler", async () => {
+    const sendRequest = vi.fn(async () => {
+      throw new Error("Unhandled method fallow/refreshDiagnostics");
+    });
+    await expect(
+      requestServerDiagnosticRefresh({ sendRequest } as never),
+    ).resolves.toBeUndefined();
+    expect(sendRequest).toHaveBeenCalledWith("fallow/refreshDiagnostics");
   });
 });

@@ -106,6 +106,8 @@ mod invalid_client_exports;
 mod misplaced_directive;
 #[path = "integration_test/mixed_client_server_barrel.rs"]
 mod mixed_client_server_barrel;
+#[path = "integration_test/nextjs_route_tree.rs"]
+mod nextjs_route_tree;
 #[path = "integration_test/policy_violations.rs"]
 mod policy_violations;
 #[path = "integration_test/private_type_leaks.rs"]
@@ -140,6 +142,8 @@ mod security_secret_to_network;
 mod security_taint_confidence;
 #[path = "integration_test/security_template_xss_sinks.rs"]
 mod security_template_xss_sinks;
+#[path = "integration_test/sfc_template_assets.rs"]
+mod sfc_template_assets;
 #[path = "integration_test/stale_suppressions.rs"]
 mod stale_suppressions;
 #[path = "integration_test/suppression_comments.rs"]
@@ -148,6 +152,8 @@ mod suppression_comments;
 mod test_only_deps;
 #[path = "integration_test/type_only_deps.rs"]
 mod type_only_deps;
+#[path = "integration_test/unprovided_injects.rs"]
+mod unprovided_injects;
 #[path = "integration_test/unused_enum_members.rs"]
 mod unused_enum_members;
 #[path = "integration_test/unused_store_members.rs"]

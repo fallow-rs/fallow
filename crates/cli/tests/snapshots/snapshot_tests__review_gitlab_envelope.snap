@@ -3,10 +3,10 @@ source: crates/cli/tests/snapshot_tests.rs
 expression: json_str
 ---
 {
-  "body": "### Fallow dead-code report\n\n23 inline findings selected for GitLab review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: b3fec9b6c89ba216 -->",
+  "body": "### Fallow dead-code report\n\n24 inline findings selected for GitLab review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 3ad34d0c6a956d1d -->",
   "summary": {
-    "body": "### Fallow dead-code report\n\n23 inline findings selected for GitLab review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: b3fec9b6c89ba216 -->",
-    "fingerprint": "b3fec9b6c89ba216"
+    "body": "### Fallow dead-code report\n\n24 inline findings selected for GitLab review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 3ad34d0c6a956d1d -->",
+    "fingerprint": "3ad34d0c6a956d1d"
   },
   "comments": [
     {
@@ -228,6 +228,16 @@ expression: json_str
         "new_line": 30
       },
       "fingerprint": "cc6a09c8dc227321"
+    },
+    {
+      "body": "**warn** `fallow/unprovided-inject`: inject\\(\\`THEME\\_KEY\\`\\) has no matching provide\\(\\`THEME\\_KEY\\`\\) in this project; at runtime it returns undefined \\(provide the key or remove this inject\\)\n\n<!-- fallow-fingerprint:v2: 82ebf4620cc2bba5 -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "src/useTheme.ts",
+        "new_path": "src/useTheme.ts",
+        "new_line": 5
+      },
+      "fingerprint": "82ebf4620cc2bba5"
     },
     {
       "body": "**error** `fallow/unused-export`: Export 'helperFn' is never imported by other modules\n\n<!-- fallow-fingerprint:v2: ebe2360218821412 -->",

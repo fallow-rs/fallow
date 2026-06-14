@@ -200,18 +200,19 @@ export const loadDiagnosticCategories = async (
   }
 };
 
+/** Custom request that asks fallow-lsp to re-drive `workspace/diagnostic/refresh`. */
+const REFRESH_DIAGNOSTICS_METHOD = "fallow/refreshDiagnostics";
+
 /**
- * Force VS Code to re-pull `textDocument/diagnostic` for every open document.
+ * Force VS Code to re-pull `textDocument/diagnostic` for every open document
+ * by firing each open document's pull provider directly.
  *
- * Firing a pull provider's `onDidChangeDiagnosticsEmitter` re-pulls all open
- * documents the provider matches, the same path the server's
- * `workspace/diagnostic/refresh` drives. The `DiagnosticFilter` needs this on
- * every mute toggle because a toggle changes only the client-side filter
- * (no server round-trip), and open-file diagnostics arrive via the LSP 3.17
- * pull path, owned by vscode-languageclient rather than the push
- * `DiagnosticCollection` the filter re-publishes directly. Without the re-pull,
- * undoing "hide all findings" leaves open files stuck hidden until the next
- * edit (regression from enabling pull diagnostics in VS Code).
+ * This is the client-side fast path / fallback for older servers. It is gated
+ * per document by `getProvider(document)`, which matches the document against
+ * the pull registration's `documentSelector`; if that match returns nothing
+ * (selector skew, a provider registered without our selector, timing) the fire
+ * is silently a no-op and the un-hide does not re-render. `requestServerRefresh`
+ * covers that gap by routing through the server's `getAllProviders()` path.
  *
  * No-op when the pull feature is not registered (push-only server, or pull not
  * yet initialized) or when no open document matches the fallow selector.
@@ -234,6 +235,30 @@ export const triggerPullDiagnosticRefresh = (lspClient: LanguageClient): void =>
       fired.add(provider);
       provider.onDidChangeDiagnosticsEmitter.fire();
     }
+  }
+};
+
+/**
+ * Ask fallow-lsp to re-send `workspace/diagnostic/refresh`.
+ *
+ * The server handler fires EVERY registered pull provider via
+ * `getAllProviders()`, the same mechanism it uses after analysis and on
+ * `document open` (the latter is the close-and-reopen workaround users fall
+ * back to). Unlike the client-side `triggerPullDiagnosticRefresh`, this is not
+ * gated by a per-document `getProvider(document)` selector match, so it
+ * re-renders open-file squiggles reliably when a mute toggle is undone
+ * (discussion #287).
+ *
+ * Fire-and-forget: older fallow-lsp binaries do not implement the request and
+ * reply `MethodNotFound`; the local re-pull above already ran, so the rejection
+ * is swallowed.
+ */
+export const requestServerDiagnosticRefresh = async (lspClient: LanguageClient): Promise<void> => {
+  try {
+    await lspClient.sendRequest(REFRESH_DIAGNOSTICS_METHOD);
+  } catch {
+    // Older server without the handler (MethodNotFound), or a client that is
+    // shutting down. The client-side re-pull is the fallback.
   }
 };
 
@@ -334,7 +359,14 @@ export const startClient = async (
     get diagnostics() {
       return nextClient.diagnostics;
     },
-    refreshPullDiagnostics: () => triggerPullDiagnosticRefresh(nextClient),
+    refreshPullDiagnostics: () => {
+      // Fire the local providers first (fast, covers older servers), then ask
+      // the server to re-drive `workspace/diagnostic/refresh` so the un-hide
+      // re-renders open files even when the per-document `getProvider` match
+      // above fired nothing (discussion #287).
+      triggerPullDiagnosticRefresh(nextClient);
+      void requestServerDiagnosticRefresh(nextClient);
+    },
   });
 
   return nextClient;

@@ -164,6 +164,10 @@ fn section_footer_text(title: &str) -> Option<(&'static str, &'static str)> {
             "A \"use client\" / \"use server\" directive sits below an import, so the RSC bundler ignores it (move it above every import)",
             "https://docs.fallow.tools/explanations/dead-code#misplaced-directives",
         )),
+        "Unprovided injects" => Some((
+            "A Vue inject / Svelte getContext whose key is provided nowhere in the project, so at runtime it returns undefined",
+            "https://docs.fallow.tools/explanations/dead-code#unprovided-injects",
+        )),
         t if t.starts_with("Type-only") => Some((
             "Dependencies only used for type imports \u{2014} consider moving to devDependencies",
             "https://docs.fallow.tools/explanations/dead-code#type-only-dependencies",
@@ -197,6 +201,7 @@ fn section_suppress_rule(title: &str) -> Option<&'static str> {
         "Invalid client exports" => Some("invalid-client-export"),
         "Mixed client/server barrels" => Some("mixed-client-server-barrel"),
         "Misplaced directives" => Some("misplaced-directive"),
+        "Unprovided injects" => Some("unprovided-injects"),
         _ => None,
     }
 }

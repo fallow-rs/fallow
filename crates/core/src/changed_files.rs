@@ -436,6 +436,9 @@ pub fn filter_results_by_changed_files(
         invalid_client_exports,
         mixed_client_server_barrels,
         misplaced_directives,
+        unprovided_injects,
+        route_collisions,
+        dynamic_segment_name_conflicts,
         // Non-finding fields: counts and metadata, not issue collections.
         suppression_count: _suppression_count,
         active_suppressions: _active_suppressions,
@@ -508,6 +511,9 @@ pub fn filter_results_by_changed_files(
     invalid_client_exports.retain(|e| contains_normalized(&cf, &e.export.path));
     mixed_client_server_barrels.retain(|b| contains_normalized(&cf, &b.barrel.path));
     misplaced_directives.retain(|d| contains_normalized(&cf, &d.directive_site.path));
+    unprovided_injects.retain(|i| contains_normalized(&cf, &i.inject.path));
+    route_collisions.retain(|c| contains_normalized(&cf, &c.collision.path));
+    dynamic_segment_name_conflicts.retain(|c| contains_normalized(&cf, &c.conflict.path));
 }
 
 /// Pre-normalise a `changed_files` set through `dunce::simplified` so each

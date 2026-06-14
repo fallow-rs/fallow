@@ -1,0 +1,1 @@
+{ "name": "unprovided-inject-svelte-fixture", "version": "1.0.0", "dependencies": { "svelte": "^5.0.0" } }

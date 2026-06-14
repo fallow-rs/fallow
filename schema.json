@@ -155,6 +155,7 @@
         "unused-enum-members": "error",
         "unused-class-members": "error",
         "unused-store-members": "warn",
+        "unprovided-injects": "warn",
         "unresolved-imports": "error",
         "unlisted-dependencies": "error",
         "duplicate-exports": "error",
@@ -176,7 +177,9 @@
         "policy-violation": "warn",
         "invalid-client-export": "warn",
         "mixed-client-server-barrel": "warn",
-        "misplaced-directive": "warn"
+        "misplaced-directive": "warn",
+        "route-collision": "warn",
+        "dynamic-segment-name-conflict": "warn"
       }
     },
     "boundaries": {
@@ -1021,6 +1024,11 @@
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
+        "unprovided-injects": {
+          "description": "Vue `inject(KEY)` / Svelte `getContext(KEY)` whose symbol KEY is\n`provide`/`setContext`'d nowhere in the project (the\ninjected-never-provided dead-half). Defaults to `warn`, not `error`:\na DI key has an open provide surface (plugins, app-level provide) so\nanalyzer confidence is lower; warn encodes that without failing CI.",
+          "$ref": "#/$defs/Severity",
+          "default": "error"
+        },
         "unresolved-imports": {
           "$ref": "#/$defs/Severity",
           "default": "error"
@@ -1112,6 +1120,16 @@
         },
         "misplaced-directive": {
           "description": "A `\"use client\"` / `\"use server\"` directive written as an expression\nstatement after a non-directive statement (an import, a const), so the\nRSC bundler parses it as an ordinary string and silently ignores it.\nThe intended client/server boundary never takes effect. Defaults to\n`warn`.",
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
+        },
+        "route-collision": {
+          "description": "Two or more Next.js App Router route files that resolve to the same URL\nwithin one app-root. Next.js fails the build (\"You cannot have two\nparallel pages that resolve to the same path\"); fallow catches it\nstatically and names every colliding file. Defaults to `warn`.",
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
+        },
+        "dynamic-segment-name-conflict": {
+          "description": "Sibling Next.js dynamic route segments at one tree position using\ndifferent param spellings (`[id]` vs `[slug]`). Next.js fails the build\n(\"You cannot use different slug names for the same dynamic path\");\nfallow catches it statically. Defaults to `warn`.",
           "$ref": "#/$defs/Severity",
           "default": "warn"
         }
@@ -1625,6 +1643,16 @@
             }
           ]
         },
+        "unprovided-injects": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "unresolved-imports": {
           "anyOf": [
             {
@@ -1836,6 +1864,26 @@
           ]
         },
         "misplaced-directive": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "route-collision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dynamic-segment-name-conflict": {
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"

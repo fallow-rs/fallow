@@ -274,6 +274,16 @@ fn sample_results(root: &Path) -> AnalysisResults {
             },
         ),
     );
+    r.unprovided_injects
+        .push(fallow_core::results::UnprovidedInjectFinding::with_actions(
+            fallow_core::results::UnprovidedInject {
+                path: root.join("src/useTheme.ts"),
+                key_name: "THEME_KEY".to_string(),
+                framework: "vue".to_string(),
+                line: 5,
+                col: 2,
+            },
+        ));
 
     r
 }
@@ -719,6 +729,7 @@ fn sarif_mixed_severity_snapshot() {
         unused_enum_members: fallow_config::Severity::Warn,
         unused_class_members: fallow_config::Severity::Warn,
         unused_store_members: fallow_config::Severity::Warn,
+        unprovided_injects: fallow_config::Severity::Warn,
         unresolved_imports: fallow_config::Severity::Error,
         unlisted_dependencies: fallow_config::Severity::Error,
         duplicate_exports: fallow_config::Severity::Warn,
@@ -741,6 +752,8 @@ fn sarif_mixed_severity_snapshot() {
         invalid_client_export: fallow_config::Severity::Warn,
         mixed_client_server_barrel: fallow_config::Severity::Warn,
         misplaced_directive: fallow_config::Severity::Warn,
+        route_collision: fallow_config::Severity::Warn,
+        dynamic_segment_name_conflict: fallow_config::Severity::Warn,
     };
     let sarif = build_sarif(&results, &root, &rules);
     let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");
@@ -1585,6 +1598,7 @@ fn codeclimate_mixed_severity_snapshot() {
         unused_enum_members: fallow_config::Severity::Warn,
         unused_class_members: fallow_config::Severity::Warn,
         unused_store_members: fallow_config::Severity::Warn,
+        unprovided_injects: fallow_config::Severity::Warn,
         unresolved_imports: fallow_config::Severity::Error,
         unlisted_dependencies: fallow_config::Severity::Error,
         duplicate_exports: fallow_config::Severity::Warn,
@@ -1607,6 +1621,8 @@ fn codeclimate_mixed_severity_snapshot() {
         invalid_client_export: fallow_config::Severity::Warn,
         mixed_client_server_barrel: fallow_config::Severity::Warn,
         misplaced_directive: fallow_config::Severity::Warn,
+        route_collision: fallow_config::Severity::Warn,
+        dynamic_segment_name_conflict: fallow_config::Severity::Warn,
     };
     let cc = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");

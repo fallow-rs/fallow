@@ -345,13 +345,13 @@ impl IgnoreDecoratorSet {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct ExportKey {
-    file_id: FileId,
-    export_name: String,
+pub(super) struct ExportKey {
+    pub(super) file_id: FileId,
+    pub(super) export_name: String,
 }
 
 impl ExportKey {
-    fn new(file_id: FileId, export_name: impl Into<String>) -> Self {
+    pub(super) fn new(file_id: FileId, export_name: impl Into<String>) -> Self {
         Self {
             file_id,
             export_name: export_name.into(),
@@ -378,7 +378,9 @@ fn push_local_export_key<'a>(
     }
 }
 
-fn build_local_to_export_keys(resolved: &ResolvedModule) -> FxHashMap<&str, Vec<ExportKey>> {
+pub(super) fn build_local_to_export_keys(
+    resolved: &ResolvedModule,
+) -> FxHashMap<&str, Vec<ExportKey>> {
     let mut local_to_export_keys = FxHashMap::default();
 
     for import in resolved.all_resolved_imports() {
@@ -412,7 +414,7 @@ fn build_local_to_export_keys(resolved: &ResolvedModule) -> FxHashMap<&str, Vec<
 ///
 /// Prefers real re-export edges over barrel stubs and handles renamed or
 /// star re-exports.
-fn walk_re_export_origins(
+pub(super) fn walk_re_export_origins(
     graph: &ModuleGraph,
     start_file: FileId,
     start_name: &str,
@@ -506,7 +508,7 @@ fn push_export_key(keys: &mut Vec<ExportKey>, key: ExportKey) {
     }
 }
 
-fn export_key_with_origins(graph: &ModuleGraph, key: &ExportKey) -> Vec<ExportKey> {
+pub(super) fn export_key_with_origins(graph: &ModuleGraph, key: &ExportKey) -> Vec<ExportKey> {
     let mut keys = Vec::new();
     push_export_key(&mut keys, key.clone());
     for origin in walk_re_export_origins(graph, key.file_id, key.export_name.as_str()) {
@@ -849,7 +851,7 @@ impl<'a> AngularTemplateChainContext<'a, '_> {
     }
 }
 
-fn entry_point_star_re_export_targets(
+pub(super) fn entry_point_star_re_export_targets(
     graph: &ModuleGraph,
     public_api_entry_points: &FxHashSet<FileId>,
 ) -> FxHashSet<FileId> {
@@ -893,7 +895,7 @@ fn export_has_class_members(export: &crate::graph::ExportSymbol) -> bool {
     })
 }
 
-fn export_has_entry_point_re_export_reference(
+pub(super) fn export_has_entry_point_re_export_reference(
     graph: &ModuleGraph,
     export: &crate::graph::ExportSymbol,
     public_api_entry_points: &FxHashSet<FileId>,
@@ -2344,6 +2346,8 @@ mod tests {
             security_control_sites: Vec::new(),
             callee_uses: Vec::new(),
             misplaced_directives: Vec::new(),
+            di_key_sites: Vec::new(),
+            has_dynamic_provide: false,
         }
     }
 
