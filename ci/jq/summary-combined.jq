@@ -52,7 +52,7 @@ def prod_hot_path_label($n):
   (if prod_hot_paths_touched then "hot path\(if $n == 1 then "" else "s" end) touched" else "hot path\(if $n == 1 then "" else "s" end)" end);
 
 (count(.check; "total_issues")) as $check |
-(count(.dupes.stats; "clone_groups")) as $dupes |
+((.dupes.clone_groups // []) | length) as $dupes |
 (count(.health.summary; "functions_above_threshold")) as $complex |
 (($complex) + (prod_failing_findings | length)) as $health |
 (prod_failing_findings | length) as $prod_failing |

@@ -590,6 +590,27 @@ ARGS=$(cat "$ANALYZE_TMP/work/fallow-analysis-args.sh")
 assert_contains "$ARGS" "--coverage coverage/coverage-final.json" "analyze: forwards coverage to default combined command"
 assert_contains "$ARGS" "--coverage-root /ci/workspace" "analyze: forwards coverage-root to default combined command"
 
+cat > "$ANALYZE_TMP/bin/fallow" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *"--help"*)
+    printf '%s\n' 'Usage: fallow dead-code --sarif-file <PATH>'
+    ;;
+  *)
+    printf '%s\n' '{"check":{"total_issues":0},"dupes":{"clone_groups":[],"clone_families":[],"stats":{"clone_groups":2,"clone_instances":5,"files_with_clones":4,"duplicated_lines":59,"duplication_percentage":0.16}},"health":{"summary":{"functions_above_threshold":0},"runtime_coverage":{"findings":[]}}}'
+    ;;
+esac
+SH
+chmod +x "$ANALYZE_TMP/bin/fallow"
+cd "$ANALYZE_TMP/work" && rm -f "$ANALYZE_TMP/output"
+OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
+  INPUT_ROOT="." INPUT_COMMAND="" INPUT_FORMAT="json" \
+  bash "$DIR/../scripts/analyze.sh" 2>&1) || true
+cd "$DIR"
+ISSUES=$(grep '^issues=' "$ANALYZE_TMP/output" | cut -d= -f2)
+[ "$ISSUES" = "0" ] && pass "analyze: combined empty dupes groups ignore nonzero stats" || fail "analyze: combined empty dupes groups" "expected 0, got '$ISSUES'"
+assert_not_contains "$OUT" "Fallow found 2 issues" "analyze: combined empty dupes groups do not fail"
+
 # Issue #735: generated artifacts can be moved out of the workspace root.
 cat > "$ANALYZE_TMP/bin/fallow" <<'SH'
 #!/usr/bin/env bash
@@ -958,6 +979,11 @@ assert_contains "$OUT" "Across 2 files" "dupes: footer reports file count"
 assert_contains "$OUT" "2 groups · 66 lines" "dupes: header carries group count and total lines"
 assert_not_contains "$OUT" "| [Duplicated lines]" "dupes: old metric table is gone"
 assert_not_contains "$OUT" "| Files with clones | 2 |" "dupes: old files-with-clones row is gone"
+
+OUT_EMPTY_DUPES=$(jq '.dupes.clone_groups = [] | .dupes.clone_families = [] | .dupes.stats.clone_groups = 2 | .dupes.stats.clone_instances = 5 | .dupes.stats.files_with_clones = 4 | .dupes.stats.duplicated_lines = 59 | .dupes.stats.duplication_percentage = 0.16' "$FIXTURES/combined-clean.json" | jq -r -f "$JQ_DIR/summary-combined.jq" 2>&1)
+assert_contains "$OUT_EMPTY_DUPES" "No issues found" "combined: empty dupes groups keep clean summary"
+assert_contains "$OUT_EMPTY_DUPES" "No duplication" "combined: empty dupes groups render no duplication"
+assert_not_contains "$OUT_EMPTY_DUPES" "2 groups" "combined: nonzero dupes stats do not render actionable groups"
 
 # Linkified cells engage when GH_REPO + PR_HEAD_SHA are set
 OUT_LINKED=$(GH_REPO="fallow-rs/fallow" PR_HEAD_SHA="abcdef1234567890" jq -r -f "$JQ_DIR/summary-combined.jq" "$FIXTURES/combined.json" 2>&1)

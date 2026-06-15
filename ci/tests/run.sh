@@ -621,6 +621,11 @@ assert_contains "$OUT" "Across 2 files" "dupes: footer reports file count"
 assert_contains "$OUT" "2 groups · 66 lines" "dupes: header carries group count and total lines"
 assert_not_contains "$OUT" "| [Duplicated lines]" "dupes: old metric table is gone"
 
+OUT_EMPTY_DUPES_GL=$(jq '.dupes.clone_groups = [] | .dupes.clone_families = [] | .dupes.stats.clone_groups = 2 | .dupes.stats.clone_instances = 5 | .dupes.stats.files_with_clones = 4 | .dupes.stats.duplicated_lines = 59 | .dupes.stats.duplication_percentage = 0.16' "$FIXTURES/combined-clean.json" | jq -r -f "$CI_JQ_DIR/summary-combined.jq" 2>&1)
+assert_contains "$OUT_EMPTY_DUPES_GL" "No issues found" "combined: empty dupes groups keep clean GitLab summary"
+assert_contains "$OUT_EMPTY_DUPES_GL" "No duplication" "combined: empty dupes groups render no GitLab duplication"
+assert_not_contains "$OUT_EMPTY_DUPES_GL" "2 groups" "combined: nonzero dupes stats do not render GitLab actionable groups"
+
 # Linkified cells engage when CI_PROJECT_URL + CI_COMMIT_SHA are set; GitLab fragment is #L<start>-<end> (single L)
 OUT_LINKED_GL=$(CI_PROJECT_URL="https://gitlab.com/foo/bar" CI_COMMIT_SHA="deadbeef" jq -r -f "$CI_JQ_DIR/summary-combined.jq" "$FIXTURES/combined.json" 2>&1)
 assert_contains "$OUT_LINKED_GL" "https://gitlab.com/foo/bar/-/blob/deadbeef/src/helpers/content-parser.ts#L27-50" "dupes: file_link engages with GitLab env vars"
@@ -811,6 +816,7 @@ assert_contains "$(cat "$CI_YAML")" "FALLOW_COMMENT" "has FALLOW_COMMENT variabl
 assert_contains "$(cat "$CI_YAML")" "FALLOW_SUMMARY_SCOPE" "has FALLOW_SUMMARY_SCOPE variable"
 assert_contains "$(cat "$CI_YAML")" "FALLOW_CODEQUALITY" "has FALLOW_CODEQUALITY variable"
 assert_contains "$(cat "$CI_YAML")" "FALLOW_SECURITY_GATE" "has FALLOW_SECURITY_GATE variable"
+assert_contains "$(cat "$CI_YAML")" '((.dupes.clone_groups // []) | length)' "combined issues use actionable dupes groups"
 assert_contains "$(cat "$CI_YAML")" "project_fallow_spec" "reads package.json fallow pin"
 assert_contains "$(cat "$CI_YAML")" "is_safe_version_spec" "validates fallow install spec"
 assert_contains "$(cat "$CI_YAML")" "FALLOW_INSTALL_DRY_RUN" "supports install dry-run testing"
