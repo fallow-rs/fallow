@@ -1608,3 +1608,38 @@ let { data } = $props();
         info.member_accesses
     );
 }
+
+#[test]
+fn sveltekit_page_store_data_key_recovered_in_script_and_template() {
+    // unused-load-data-key Primitive C cross-context contract: a SvelteKit global
+    // page-store `data` read recovers the nested `page.data.<key>` member access in
+    // BOTH the component `<script>` (Svelte 5 `$app/state`) and the markup
+    // (`{$page.data.X}` Svelte 4 store / `{page.data.X}` Svelte 5 rune). The script
+    // side already emitted the dotted object via the visitor's recursive
+    // member-name builder; this locks that contract and the template recovery.
+    let info = parse_sfc(
+        r#"
+<script lang="ts">
+import { page } from '$app/state';
+const id = page.data.session;
+</script>
+<h1>{page.data.title}</h1>
+"#,
+        "src/lib/Header.svelte",
+    );
+
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "page.data" && a.member == "session"),
+        "script `page.data.session` should be recorded, got: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "page.data" && a.member == "title"),
+        "template `page.data.title` should be recovered, got: {:?}",
+        info.member_accesses
+    );
+}

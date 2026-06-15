@@ -405,6 +405,23 @@ fn remap_object_name(
         }
         return Some(stripped.to_string());
     }
+    // unused-load-data-key Primitive C: the SvelteKit global page store read in a
+    // template, `$page.data.KEY` (Svelte 4 `$app/stores`) or `page.data.KEY`
+    // (Svelte 5 `$app/state`), arrives here as the dotted member object
+    // `$page.data` / `page.data` (the object of the outer `.KEY` access). The
+    // root-only logic above remaps `$page`/`page` but drops the `.data` suffix,
+    // so the consumed key is lost. Recover the canonical `page.data` object (the
+    // `$`-stripped form, matching how the root branch normalizes `$page` -> `page`)
+    // so the cross-file detector can see the project-wide `page.data.<key>`
+    // consumer channel. Scoped to the `page` store's `data` member only (gated on
+    // the Svelte dollar-ref path) to stay byte-identical for every other dotted
+    // template member object; `$page.url.pathname` etc. still map root-only.
+    if allow_dollar_prefixed_refs
+        && (name == "page.data" || name == "$page.data")
+        && unresolved_names.contains("page")
+    {
+        return Some("page.data".to_string());
+    }
     None
 }
 
@@ -537,5 +554,91 @@ mod tests {
         assert_eq!(usage.member_accesses.len(), 1);
         assert_eq!(usage.member_accesses[0].object, "page");
         assert_eq!(usage.member_accesses[0].member, "url");
+    }
+
+    // unused-load-data-key Primitive C: the SvelteKit global page store read in a
+    // template recovers the nested `page.data.<key>` member access.
+
+    #[test]
+    fn svelte4_page_store_data_key_recovers_nested_member() {
+        let usage = analyze_template_snippet(
+            "$page.data.user",
+            TemplateSnippetKind::Expression,
+            &bindings(&["page"]),
+            &[],
+            true,
+        );
+
+        assert!(
+            usage
+                .member_accesses
+                .iter()
+                .any(|a| a.object == "page.data" && a.member == "user"),
+            "`$page.data.user` should recover `page.data.user`, got: {:?}",
+            usage.member_accesses
+        );
+    }
+
+    #[test]
+    fn svelte5_page_state_data_key_recovers_nested_member() {
+        let usage = analyze_template_snippet(
+            "page.data.session",
+            TemplateSnippetKind::Expression,
+            &bindings(&["page"]),
+            &[],
+            true,
+        );
+
+        assert!(
+            usage
+                .member_accesses
+                .iter()
+                .any(|a| a.object == "page.data" && a.member == "session"),
+            "`page.data.session` should recover `page.data.session`, got: {:?}",
+            usage.member_accesses
+        );
+    }
+
+    #[test]
+    fn page_store_non_data_member_stays_root_only() {
+        // `$page.url.pathname` must keep mapping to root `page.url` -> `{page, url}`;
+        // only the `data` channel recovers the nested key. Regression guard for the
+        // existing store-ref behavior.
+        let usage = analyze_template_snippet(
+            "$page.url.pathname",
+            TemplateSnippetKind::Expression,
+            &bindings(&["page"]),
+            &[],
+            true,
+        );
+
+        assert!(
+            !usage.member_accesses.iter().any(|a| a.object == "page.url"),
+            "`$page.url` must not recover a nested member, got: {:?}",
+            usage.member_accesses
+        );
+    }
+
+    #[test]
+    fn page_data_nested_recovery_is_svelte_only() {
+        // Vue templates pass allow_dollar_prefixed_refs=false; the `page` store is
+        // SvelteKit-specific, so `page.data.x` must NOT recover the nested member
+        // in a Vue context (root `{page, data}` is still credited).
+        let usage = analyze_template_snippet(
+            "page.data.x",
+            TemplateSnippetKind::Expression,
+            &bindings(&["page"]),
+            &[],
+            false,
+        );
+
+        assert!(
+            !usage
+                .member_accesses
+                .iter()
+                .any(|a| a.object == "page.data"),
+            "Vue context must not recover `page.data`, got: {:?}",
+            usage.member_accesses
+        );
     }
 }

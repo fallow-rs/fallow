@@ -400,7 +400,13 @@ use crate::MemberKind;
 /// reads emit `data.<key>` member accesses. A warm cache from 162 lacks those
 /// template-side accesses, so the cross-file load-data-key join would miss keys
 /// consumed only in markup.
-pub(super) const CACHE_VERSION: u32 = 163;
+///
+/// Bumped to 164 for `unused-load-data-key` Primitive C: a SvelteKit global
+/// page-store read in a template (`{$page.data.KEY}` / `{page.data.KEY}`) now
+/// recovers the nested `page.data.<key>` member access (the template scanner
+/// previously dropped the key, keeping only `page.data`). A warm cache from 163
+/// lacks those project-wide global-store accesses.
+pub(super) const CACHE_VERSION: u32 = 164;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
