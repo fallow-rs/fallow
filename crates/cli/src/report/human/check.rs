@@ -703,6 +703,16 @@ fn build_unused_code_section(
         format_detail: &format_private_type_leak,
     });
 
+    build_unused_member_sections(lines, results, root, rules, max_grouped_files);
+}
+
+fn build_unused_member_sections(
+    lines: &mut Vec<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+    max_grouped_files: usize,
+) {
     build_human_grouped_section(GroupedSectionInput {
         lines,
         items: &results.unused_enum_members,
