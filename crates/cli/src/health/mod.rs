@@ -851,10 +851,8 @@ impl CssTokenSets {
                 .cmp(&a.count)
                 .then_with(|| a.notation.cmp(&b.notation))
         });
-        let dominant = notations
-            .first()
-            .map(|n| n.notation.clone())
-            .unwrap_or_default();
+        // Safe: the floor guard above guarantees at least two notations.
+        let dominant = notations[0].notation.clone();
         Some(CssNotationConsistency {
             actions: vec![CssCandidateAction::standardize_notation(
                 "Font sizes",
