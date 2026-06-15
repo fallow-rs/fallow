@@ -9,8 +9,8 @@
 #   action/jq/summary-check.jq      (all)   GitHub dead-code summary table
 #   action/jq/summary-combined.jq   (all)   GitHub combined Code-issues breakdown
 #   action/jq/summary-audit.jq      (all)   GitHub audit dead_code_rows
-#   action/jq/annotations-check.jq  (subset) GitHub ::warning annotations
-#   action/jq/filter-changed.jq     (subset) per-changed-file filter + recount
+#   action/jq/annotations-check.jq  (all)   GitHub ::warning annotations
+#   action/jq/filter-changed.jq     (all)   per-changed-file filter + recount
 #   ci/jq/summary-check.jq          (all)   GitLab dead-code summary table
 #   ci/jq/summary-combined.jq       (all)   GitLab combined Code-issues breakdown
 #   ci/jq/summary-audit.jq          (all)   GitLab audit dead_code_rows

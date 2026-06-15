@@ -244,6 +244,11 @@ const DEAD_CODE_WIRING = {
     category: "unused-catalog-entries",
     finding: { path: "pnpm-workspace.yaml", line: 2, catalog_name: "default", entry_name: "react", actions: [] },
   },
+  "empty-catalog-group": {
+    field: "empty_catalog_groups",
+    category: "empty-catalog-groups",
+    finding: { path: "pnpm-workspace.yaml", line: 2, catalog_name: "react17", actions: [] },
+  },
   "unresolved-catalog-reference": {
     field: "unresolved_catalog_references",
     category: "unresolved-catalog-references",

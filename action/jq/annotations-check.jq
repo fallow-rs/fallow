@@ -76,6 +76,8 @@ def dependency_action(pkg):
     "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Unprovided inject::\(.framework | san) inject for key '\(.key_name | san)' has no matching provider in the project.\(nl)\(nl)Add a provide/setContext for this key, or remove the dead inject."),
   (.type_only_dependencies[]? |
     "::warning file=\(.path | san)\(if .line > 0 then ",line=\(.line)" else "" end),title=Type-only dependency::Package '\(.package_name | san)' is only used via type imports.\(nl)\(nl)Move it from dependencies to devDependencies to reduce production bundle size."),
+  (.test_only_dependencies[]? |
+    "::warning file=\(.path | san)\(if .line > 0 then ",line=\(.line)" else "" end),title=Test-only dependency::Package '\(.package_name | san)' is only imported from test or config files.\(nl)\(nl)Move it from dependencies to devDependencies to reduce production bundle size."),
   (.stale_suppressions[]? |
     if .origin.type == "jsdoc_tag" then
       "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Stale @expected-unused::The @expected-unused tag on '\(.origin.export_name | san)' is stale because the export is now used.\(nl)\(nl)Remove the @expected-unused tag."

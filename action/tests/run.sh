@@ -2080,10 +2080,8 @@ GUARD_DIR="$DIR"
 assert_issuekind_summary_coverage "github summary-check"    "$JQ_DIR/summary-check.jq"
 assert_issuekind_summary_coverage "github summary-combined" "$JQ_DIR/summary-combined.jq"
 assert_issuekind_summary_coverage "github summary-audit"    "$JQ_DIR/summary-audit.jq"
-assert_issuekind_summary_coverage "github annotations-check" "$JQ_DIR/annotations-check.jq" \
-  "allow:test-only-dependency"
-assert_issuekind_summary_coverage "github filter-changed"   "$JQ_DIR/filter-changed.jq" \
-  "allow:test-only-dependency"
+assert_issuekind_summary_coverage "github annotations-check" "$JQ_DIR/annotations-check.jq"
+assert_issuekind_summary_coverage "github filter-changed"   "$JQ_DIR/filter-changed.jq"
 
 # --- Summary ---
 

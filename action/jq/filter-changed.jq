@@ -8,8 +8,8 @@ def in_changed: . as $path | $changed | any(. == $path);
 
 # Filter dead-code (check) results and recalculate total_issues.
 # Dependency-level issues (unused_dependencies, unused_dev_dependencies, unused_optional_dependencies,
-# type_only_dependencies) are intentionally NOT filtered — they are project-wide concerns not
-# attributable to individual changed files. They are still included in total_issues.
+# type_only_dependencies, test_only_dependencies) are intentionally NOT filtered: they are
+# project-wide concerns not attributable to individual changed files. They are still counted in total_issues.
 def filter_check:
   (if .unused_files         then .unused_files         |= map(select(.path | in_changed))      else . end) |
   (if .unused_exports       then .unused_exports       |= map(select(.path | in_changed))      else . end) |
@@ -114,6 +114,7 @@ def filter_check:
       (.boundary_call_violations // [] | length) +
       (.policy_violations // [] | length) +
       (.type_only_dependencies // [] | length) +
+      (.test_only_dependencies // [] | length) +
       (.stale_suppressions // [] | length) +
       (.unused_catalog_entries // [] | length) +
       (.empty_catalog_groups // [] | length) +
