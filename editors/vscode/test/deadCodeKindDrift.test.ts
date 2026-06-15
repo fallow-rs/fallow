@@ -124,6 +124,11 @@ const DEAD_CODE_WIRING = {
     category: "unused-server-action",
     finding: { ...loc, action_name: "submit", actions: [] },
   },
+  "unused-load-data-key": {
+    field: "unused_load_data_keys",
+    category: "unused-load-data-keys",
+    finding: { path: "src/routes/+page.ts", line: 2, col: 0, key_name: "posts", actions: [] },
+  },
   "unused-component-prop": {
     field: "unused_component_props",
     category: "unused-component-prop",

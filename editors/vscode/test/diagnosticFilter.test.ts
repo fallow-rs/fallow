@@ -775,6 +775,7 @@ describe("DIAGNOSTIC_CATEGORIES", () => {
       "unused-class-member",
       "unused-store-member",
       "unused-server-action",
+      "unused-load-data-key",
       "unused-component-prop",
       "unused-component-emit",
       "unrendered-component",

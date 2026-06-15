@@ -16,6 +16,7 @@ export type IssueCategory =
   | "unused-class-members"
   | "unused-store-member"
   | "unused-server-action"
+  | "unused-load-data-keys"
   | "unused-component-prop"
   | "unused-component-emit"
   | "unrendered-component"
@@ -52,6 +53,7 @@ export const ISSUE_CATEGORY_LABELS: Record<IssueCategory, string> = {
   "unused-class-members": "Unused Class Members",
   "unused-store-member": "Unused Store Members",
   "unused-server-action": "Unused Server Actions",
+  "unused-load-data-keys": "Unused Load Data Keys",
   "unused-component-prop": "Unused Component Props",
   "unused-component-emit": "Unused Component Emits",
   "unrendered-component": "Unrendered Components",

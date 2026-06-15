@@ -376,6 +376,7 @@ mod severity_gate {
             unused_component_props: _,
             unused_component_emits: _,
             unused_server_actions: _,
+            unused_load_data_keys: _,
             route_collisions: _,
             dynamic_segment_name_conflicts: _,
             // ---- non-diagnostic fields (destructured-and-ignored) ----
@@ -395,6 +396,9 @@ mod severity_gate {
             feature_flags: _,
             export_usages: _,
             entry_point_summary: _,
+            // Project-wide abstain flag for the `unused-load-data-key` detector;
+            // an observability bool, not a per-finding diagnostic.
+            unused_load_data_keys_global_abstain: _,
         } = AnalysisResults::default();
     }
 
@@ -1064,6 +1068,23 @@ mod severity_gate {
                                 action_name: "createUser".to_string(),
                                 line: 1,
                                 col: 0,
+                            },
+                        ),
+                    );
+                }),
+            ),
+            (
+                "unused-load-data-key",
+                S::HINT,
+                Box::new(|root, r| {
+                    r.unused_load_data_keys.push(
+                        fallow_core::results::UnusedLoadDataKeyFinding::with_actions(
+                            fallow_core::results::UnusedLoadDataKey {
+                                path: root.join("src/routes/blog/+page.server.ts"),
+                                key_name: "posts".to_string(),
+                                line: 1,
+                                col: 0,
+                                route_dir: None,
                             },
                         ),
                     );

@@ -57,6 +57,7 @@ export const getIssueTypes = (): IssueTypeConfig =>
     "unused-class-members": true,
     "unused-store-member": true,
     "unused-server-action": true,
+    "unused-load-data-key": true,
     "unused-component-prop": true,
     "unused-component-emit": true,
     "unrendered-component": true,

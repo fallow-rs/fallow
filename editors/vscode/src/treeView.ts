@@ -35,6 +35,7 @@ const CATEGORY_ICONS: Record<IssueCategory, string> = {
   "unused-class-members": "symbol-field",
   "unused-store-member": "symbol-field",
   "unused-server-action": "symbol-method",
+  "unused-load-data-keys": "symbol-property",
   "unused-component-prop": "symbol-property",
   "unused-component-emit": "symbol-event",
   "unrendered-component": "symbol-misc",
@@ -73,6 +74,7 @@ const ISSUE_ICONS: Record<IssueCategory, string> = {
   "unused-class-members": "symbol-field",
   "unused-store-member": "symbol-field",
   "unused-server-action": "symbol-method",
+  "unused-load-data-keys": "symbol-property",
   "unused-component-prop": "symbol-property",
   "unused-component-emit": "symbol-event",
   "unrendered-component": "symbol-misc",
@@ -344,6 +346,15 @@ export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeIte
         "unused-server-action",
         this.result.unused_server_actions.map(
           (a) => new IssueItem(a.action_name, a.path, a.line, a.col, "unused-server-action"),
+        ),
+      );
+    }
+
+    if (this.result.unused_load_data_keys) {
+      addCategory(
+        "unused-load-data-keys",
+        this.result.unused_load_data_keys.map(
+          (k) => new IssueItem(k.key_name, k.path, k.line, k.col, "unused-load-data-keys"),
         ),
       );
     }
