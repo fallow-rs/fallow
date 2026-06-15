@@ -646,7 +646,16 @@ jobs:
       # Only suppress, css, and visitor/helpers run under Miri (pure data logic).
       # Parser-heavy modules (visitor::tests, sfc_template, html, template_usage)
       # have no unsafe code and are too slow under Miri interpretation.
+      #
+      # Tree Borrows for this crate only: the css analytics path parses via
+      # lightningcss (alpha), whose @layer string handling reconstructs a &str
+      # from raw parts in a way Miri's Stacked Borrows flags as a benign
+      # (still-experimental-rules) violation. Tree Borrows models the same
+      # aliasing safety but accepts lightningcss's reconstructed-pointer pattern.
+      # types/graph stay on Stacked Borrows (default).
       - name: fallow-extract
+        env:
+          MIRIFLAGS: -Zmiri-tree-borrows
         run: cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-extract --lib --tests -- --skip cache --skip visitor::tests --skip sfc_template --skip html --skip template_usage
 
   ci-ok:
