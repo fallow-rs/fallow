@@ -331,6 +331,15 @@ fn has_override_file_scoped_error(
     results: &fallow_core::results::AnalysisResults,
     config: &ResolvedConfig,
 ) -> bool {
+    has_override_dead_code_error(results, config)
+        || has_override_catalog_boundary_error(results, config)
+        || has_override_framework_error(results, config)
+}
+
+fn has_override_dead_code_error(
+    results: &fallow_core::results::AnalysisResults,
+    config: &ResolvedConfig,
+) -> bool {
     results
         .unused_files
         .iter()
@@ -408,10 +417,16 @@ fn has_override_file_scoped_error(
                 .unresolved_imports
                 == Severity::Error
         })
-        || results
-            .stale_suppressions
-            .iter()
-            .any(|s| config.resolve_rules_for_path(&s.path).stale_suppressions == Severity::Error)
+}
+
+fn has_override_catalog_boundary_error(
+    results: &fallow_core::results::AnalysisResults,
+    config: &ResolvedConfig,
+) -> bool {
+    results
+        .stale_suppressions
+        .iter()
+        .any(|s| config.resolve_rules_for_path(&s.path).stale_suppressions == Severity::Error)
         || results.unresolved_catalog_references.iter().any(|r| {
             config
                 .resolve_rules_for_path(&r.reference.path)
@@ -441,36 +456,38 @@ fn has_override_file_scoped_error(
                 config.resolve_rules_for_path(path).circular_dependencies == Severity::Error
             })
         })
-        || results.invalid_client_exports.iter().any(|e| {
-            config
-                .resolve_rules_for_path(&e.export.path)
-                .invalid_client_export
-                == Severity::Error
-        })
-        || results.mixed_client_server_barrels.iter().any(|b| {
-            config
-                .resolve_rules_for_path(&b.barrel.path)
-                .mixed_client_server_barrel
-                == Severity::Error
-        })
-        || results.misplaced_directives.iter().any(|d| {
-            config
-                .resolve_rules_for_path(&d.directive_site.path)
-                .misplaced_directive
-                == Severity::Error
-        })
-        || results.route_collisions.iter().any(|c| {
-            config
-                .resolve_rules_for_path(&c.collision.path)
-                .route_collision
-                == Severity::Error
-        })
-        || results.dynamic_segment_name_conflicts.iter().any(|c| {
-            config
-                .resolve_rules_for_path(&c.conflict.path)
-                .dynamic_segment_name_conflict
-                == Severity::Error
-        })
+}
+
+fn has_override_framework_error(
+    results: &fallow_core::results::AnalysisResults,
+    config: &ResolvedConfig,
+) -> bool {
+    results.invalid_client_exports.iter().any(|e| {
+        config
+            .resolve_rules_for_path(&e.export.path)
+            .invalid_client_export
+            == Severity::Error
+    }) || results.mixed_client_server_barrels.iter().any(|b| {
+        config
+            .resolve_rules_for_path(&b.barrel.path)
+            .mixed_client_server_barrel
+            == Severity::Error
+    }) || results.misplaced_directives.iter().any(|d| {
+        config
+            .resolve_rules_for_path(&d.directive_site.path)
+            .misplaced_directive
+            == Severity::Error
+    }) || results.route_collisions.iter().any(|c| {
+        config
+            .resolve_rules_for_path(&c.collision.path)
+            .route_collision
+            == Severity::Error
+    }) || results.dynamic_segment_name_conflicts.iter().any(|c| {
+        config
+            .resolve_rules_for_path(&c.conflict.path)
+            .dynamic_segment_name_conflict
+            == Severity::Error
+    })
 }
 
 fn has_default_file_scoped_error(
