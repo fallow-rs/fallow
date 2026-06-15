@@ -3480,6 +3480,22 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 continue;
             }
 
+            // Primitive A (unused-load-data-key): a destructure off the SvelteKit
+            // `data` prop local (`const { user } = data` / `let { user } = data`)
+            // emits `data.<key>` member accesses so the cross-file detector can
+            // see the consumed load-return keys. Rooted on the `data` local (not
+            // an import); a rest element (`const { a, ...rest } = data`) records a
+            // whole-object use of `data` (abstain). Crediting a member against a
+            // binding named `data` is inert for every other detector unless a
+            // tracked export / instance is also named `data`; the load-data-key
+            // join is the only consumer of `data.<key>`.
+            if let Expression::Identifier(ident) = init
+                && ident.name == "data"
+            {
+                self.handle_namespace_destructuring(declarator, &ident.name);
+                continue;
+            }
+
             let Some((import_expr, source)) = try_extract_dynamic_import(init) else {
                 continue;
             };

@@ -388,14 +388,12 @@ use crate::MemberKind;
 /// `has_emit_whole_object_use` abstain flags, so a warm cache from 159 would
 /// report zero unused-component-emit findings.
 ///
-/// Bumped to 161 for the `unused-server-action` detector: the suppression token
-/// `unused-server-action` is now a known `IssueKind` (discriminant 40). A warm
-/// cache from 160 stored that marker in `unknown_suppression_kinds` (it was an
-/// unrecognized token then), so reading it would leave a suppressed action
-/// unsuppressed (false `unused-server-action` finding) AND report the consumed
-/// marker as a stale suppression. Invalidating the cache forces a re-parse that
-/// routes the token to `suppressions` with the now-known discriminant.
-pub(super) const CACHE_VERSION: u32 = 161;
+/// Bumped to 162 for `unused-load-data-key` Primitive A: a destructure off the
+/// SvelteKit `data` prop local (`const { user } = data`) now emits `data.<key>`
+/// member accesses (rest element records a whole-object use). A warm cache from
+/// 161 lacks those accesses, so the cross-file load-data-key join would miss the
+/// consumed keys.
+pub(super) const CACHE_VERSION: u32 = 162;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
