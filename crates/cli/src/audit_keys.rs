@@ -73,6 +73,50 @@ fn unprovided_inject_key(item: &fallow_core::results::UnprovidedInject, root: &P
     )
 }
 
+fn unrendered_component_key(
+    item: &fallow_core::results::UnrenderedComponent,
+    root: &Path,
+) -> String {
+    format!(
+        "unrendered-component:{}:{}",
+        relative_key_path(&item.path, root),
+        item.component_name
+    )
+}
+
+fn unused_component_prop_key(
+    item: &fallow_core::results::UnusedComponentProp,
+    root: &Path,
+) -> String {
+    format!(
+        "unused-component-prop:{}:{}",
+        relative_key_path(&item.path, root),
+        item.prop_name
+    )
+}
+
+fn unused_component_emit_key(
+    item: &fallow_core::results::UnusedComponentEmit,
+    root: &Path,
+) -> String {
+    format!(
+        "unused-component-emit:{}:{}",
+        relative_key_path(&item.path, root),
+        item.emit_name
+    )
+}
+
+fn unused_server_action_key(
+    item: &fallow_core::results::UnusedServerAction,
+    root: &Path,
+) -> String {
+    format!(
+        "unused-server-action:{}:{}",
+        relative_key_path(&item.path, root),
+        item.action_name
+    )
+}
+
 fn route_collision_key(item: &fallow_core::results::RouteCollision, root: &Path) -> String {
     format!(
         "route-collision:{}:{}",
@@ -347,6 +391,10 @@ pub(super) fn dead_code_keys(
         mixed_client_server_barrels,
         misplaced_directives,
         unprovided_injects,
+        unrendered_components,
+        unused_component_props,
+        unused_component_emits,
+        unused_server_actions,
         route_collisions,
         dynamic_segment_name_conflicts,
         // Non-finding fields: counts and metadata, not attributable to a key.
@@ -397,6 +445,10 @@ pub(super) fn dead_code_keys(
     collector.add_mixed_client_server_barrels(mixed_client_server_barrels);
     collector.add_misplaced_directives(misplaced_directives);
     collector.add_unprovided_injects(unprovided_injects);
+    collector.add_unrendered_components(unrendered_components);
+    collector.add_unused_component_props(unused_component_props);
+    collector.add_unused_component_emits(unused_component_emits);
+    collector.add_unused_server_actions(unused_server_actions);
     collector.add_route_collisions(route_collisions);
     collector.add_dynamic_segment_name_conflicts(dynamic_segment_name_conflicts);
     collector.into_keys()
@@ -493,6 +545,42 @@ impl<'a> DeadCodeKeyCollector<'a> {
     fn add_unprovided_injects(&mut self, items: &[fallow_core::results::UnprovidedInjectFinding]) {
         for item in items {
             self.insert(unprovided_inject_key(&item.inject, self.root));
+        }
+    }
+
+    fn add_unrendered_components(
+        &mut self,
+        items: &[fallow_core::results::UnrenderedComponentFinding],
+    ) {
+        for item in items {
+            self.insert(unrendered_component_key(&item.component, self.root));
+        }
+    }
+
+    fn add_unused_component_props(
+        &mut self,
+        items: &[fallow_core::results::UnusedComponentPropFinding],
+    ) {
+        for item in items {
+            self.insert(unused_component_prop_key(&item.prop, self.root));
+        }
+    }
+
+    fn add_unused_component_emits(
+        &mut self,
+        items: &[fallow_core::results::UnusedComponentEmitFinding],
+    ) {
+        for item in items {
+            self.insert(unused_component_emit_key(&item.emit, self.root));
+        }
+    }
+
+    fn add_unused_server_actions(
+        &mut self,
+        items: &[fallow_core::results::UnusedServerActionFinding],
+    ) {
+        for item in items {
+            self.insert(unused_server_action_key(&item.action, self.root));
         }
     }
 
@@ -791,6 +879,10 @@ pub(super) fn retain_introduced_dead_code(
         mixed_client_server_barrels,
         misplaced_directives,
         unprovided_injects,
+        unrendered_components,
+        unused_component_props,
+        unused_component_emits,
+        unused_server_actions,
         route_collisions,
         dynamic_segment_name_conflicts,
         // Non-finding fields: counts and metadata, not subject to base-keyed
@@ -874,6 +966,10 @@ pub(super) fn retain_introduced_dead_code(
         .retain(|item| keep(mixed_client_server_barrel_key(&item.barrel, root)));
     misplaced_directives.retain(|item| keep(misplaced_directive_key(&item.directive_site, root)));
     unprovided_injects.retain(|item| keep(unprovided_inject_key(&item.inject, root)));
+    unrendered_components.retain(|item| keep(unrendered_component_key(&item.component, root)));
+    unused_component_props.retain(|item| keep(unused_component_prop_key(&item.prop, root)));
+    unused_component_emits.retain(|item| keep(unused_component_emit_key(&item.emit, root)));
+    unused_server_actions.retain(|item| keep(unused_server_action_key(&item.action, root)));
     route_collisions.retain(|item| keep(route_collision_key(&item.collision, root)));
     dynamic_segment_name_conflicts
         .retain(|item| keep(dynamic_segment_name_conflict_key(&item.conflict, root)));
@@ -1139,6 +1235,40 @@ impl DeadCodeJsonAnnotator<'_> {
             "unprovided_injects",
             self.results.unprovided_injects.iter().map(|item| {
                 issue_was_introduced(&unprovided_inject_key(&item.inject, self.root), self.base)
+            }),
+        );
+        annotate_issue_array(
+            self.json,
+            "unrendered_components",
+            self.results.unrendered_components.iter().map(|item| {
+                issue_was_introduced(
+                    &unrendered_component_key(&item.component, self.root),
+                    self.base,
+                )
+            }),
+        );
+        annotate_issue_array(
+            self.json,
+            "unused_component_props",
+            self.results.unused_component_props.iter().map(|item| {
+                issue_was_introduced(&unused_component_prop_key(&item.prop, self.root), self.base)
+            }),
+        );
+        annotate_issue_array(
+            self.json,
+            "unused_component_emits",
+            self.results.unused_component_emits.iter().map(|item| {
+                issue_was_introduced(&unused_component_emit_key(&item.emit, self.root), self.base)
+            }),
+        );
+        annotate_issue_array(
+            self.json,
+            "unused_server_actions",
+            self.results.unused_server_actions.iter().map(|item| {
+                issue_was_introduced(
+                    &unused_server_action_key(&item.action, self.root),
+                    self.base,
+                )
             }),
         );
         annotate_issue_array(

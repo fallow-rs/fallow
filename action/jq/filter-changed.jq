@@ -73,6 +73,21 @@ def filter_check:
   (if .dynamic_segment_name_conflicts then
     .dynamic_segment_name_conflicts |= map(select(.path | in_changed))
   else . end) |
+  (if .unused_server_actions then
+    .unused_server_actions |= map(select(.path | in_changed))
+  else . end) |
+  (if .unrendered_components then
+    .unrendered_components |= map(select(.path | in_changed))
+  else . end) |
+  (if .unused_component_props then
+    .unused_component_props |= map(select(.path | in_changed))
+  else . end) |
+  (if .unused_component_emits then
+    .unused_component_emits |= map(select(.path | in_changed))
+  else . end) |
+  (if .unprovided_injects then
+    .unprovided_injects |= map(select(.path | in_changed))
+  else . end) |
   # Recalculate total_issues from filtered arrays
   (if .total_issues != null then
     .total_issues = (
@@ -106,7 +121,12 @@ def filter_check:
       (.mixed_client_server_barrels // [] | length) +
       (.misplaced_directives // [] | length) +
       (.route_collisions // [] | length) +
-      (.dynamic_segment_name_conflicts // [] | length)
+      (.dynamic_segment_name_conflicts // [] | length) +
+      (.unused_server_actions // [] | length) +
+      (.unrendered_components // [] | length) +
+      (.unused_component_props // [] | length) +
+      (.unused_component_emits // [] | length) +
+      (.unprovided_injects // [] | length)
     )
   else . end);
 

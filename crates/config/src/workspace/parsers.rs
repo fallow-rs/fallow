@@ -440,14 +440,16 @@ fn expand_recursive_workspace_pattern(
 
     let mut results = Vec::new();
     walk_workspace_dirs(
-        root,
-        &base_dir,
         raw_pattern,
-        &matcher,
-        canonical_root,
-        ignore_patterns,
-        &mut results,
-        diagnostics,
+        &base_dir,
+        &mut WorkspaceDirWalkInput {
+            root,
+            matcher: &matcher,
+            canonical_root,
+            ignore_patterns,
+            results: &mut results,
+            diagnostics,
+        },
     );
     results
 }
@@ -458,20 +460,16 @@ fn expand_recursive_workspace_pattern(
 /// Glob-matched directories without `package.json` are surfaced as
 /// `glob-matched-no-package-json` diagnostics unless they are in the
 /// conventional skip list or covered by `ignore_patterns`.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "internal recursion that threads diagnostic accumulator + ignore globset; refactoring into a context struct would obscure the recursive call site"
-)]
-fn walk_workspace_dirs(
-    root: &Path,
-    dir: &Path,
-    raw_pattern: &str,
-    matcher: &glob::Pattern,
-    canonical_root: &Path,
-    ignore_patterns: &globset::GlobSet,
-    results: &mut Vec<(PathBuf, PathBuf)>,
-    diagnostics: &mut Vec<WorkspaceDiagnostic>,
-) {
+struct WorkspaceDirWalkInput<'a> {
+    root: &'a Path,
+    matcher: &'a glob::Pattern,
+    canonical_root: &'a Path,
+    ignore_patterns: &'a globset::GlobSet,
+    results: &'a mut Vec<(PathBuf, PathBuf)>,
+    diagnostics: &'a mut Vec<WorkspaceDiagnostic>,
+}
+
+fn walk_workspace_dirs(raw_pattern: &str, dir: &Path, input: &mut WorkspaceDirWalkInput<'_>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -484,27 +482,24 @@ fn walk_workspace_dirs(
         if name == "node_modules" || name == ".git" {
             continue;
         }
-        if matcher.matches_path(&path) {
+        if input.matcher.matches_path(&path) {
             if path.join("package.json").exists() {
                 if let Ok(cp) = dunce::canonicalize(&path)
-                    && cp.starts_with(canonical_root)
+                    && cp.starts_with(input.canonical_root)
                 {
-                    results.push((path.clone(), cp));
+                    input.results.push((path.clone(), cp));
                 }
             } else {
-                maybe_emit_glob_no_pkg_diag(root, raw_pattern, &path, ignore_patterns, diagnostics);
+                maybe_emit_glob_no_pkg_diag(
+                    input.root,
+                    raw_pattern,
+                    &path,
+                    input.ignore_patterns,
+                    input.diagnostics,
+                );
             }
         }
-        walk_workspace_dirs(
-            root,
-            &path,
-            raw_pattern,
-            matcher,
-            canonical_root,
-            ignore_patterns,
-            results,
-            diagnostics,
-        );
+        walk_workspace_dirs(raw_pattern, &path, input);
     }
 }
 

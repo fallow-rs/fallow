@@ -1,0 +1,11 @@
+{
+  "name": "unrendered-component-fixture",
+  "version": "0.0.0",
+  "main": "src/main.ts",
+  "exports": {
+    "./lib": "./src/lib/index.ts"
+  },
+  "dependencies": {
+    "vue": "^3.4.0"
+  }
+}

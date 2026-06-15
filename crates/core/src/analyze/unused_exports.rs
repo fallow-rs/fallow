@@ -401,11 +401,13 @@ fn find_unused_exports_for_module(
             module,
             export,
             ctx,
-            &same_file_used_exports,
-            &re_export_names,
-            &matching_ignore,
-            &matching_plugin,
-            &mut stale_expected_unused,
+            UnusedExportMatchContext {
+                same_file_used_exports: &same_file_used_exports,
+                re_export_names: &re_export_names,
+                matching_ignore: &matching_ignore,
+                matching_plugin: &matching_plugin,
+                stale_expected_unused: &mut stale_expected_unused,
+            },
         ) {
             if export.is_type_only {
                 unused_types.push(unused);
@@ -432,20 +434,28 @@ fn same_file_used_exports(
         })
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "checks one export against module context, same-file usage, matched rules, and stale-suppression output"
-)]
+struct UnusedExportMatchContext<'a> {
+    same_file_used_exports: &'a FxHashSet<String>,
+    re_export_names: &'a FxHashSet<&'a str>,
+    matching_ignore: &'a [&'a [String]],
+    matching_plugin: &'a [&'a [&'a str]],
+    stale_expected_unused: &'a mut Vec<StaleSuppression>,
+}
+
 fn unused_export_for_module(
     module: &ModuleNode,
     export: &ExportSymbol,
     ctx: &UnusedExportModuleContext<'_>,
-    same_file_used_exports: &FxHashSet<String>,
-    re_export_names: &FxHashSet<&str>,
-    matching_ignore: &[&[String]],
-    matching_plugin: &[&[&str]],
-    stale_expected_unused: &mut Vec<StaleSuppression>,
+    match_ctx: UnusedExportMatchContext<'_>,
 ) -> Option<UnusedExport> {
+    let UnusedExportMatchContext {
+        same_file_used_exports,
+        re_export_names,
+        matching_ignore,
+        matching_plugin,
+        stale_expected_unused,
+    } = match_ctx;
+
     let has_cross_file_ref = export_has_reachable_reference(ctx.graph, module, export);
     let is_referenced = has_cross_file_ref || (module.is_reachable() && export.is_side_effect_used);
     if matches!(

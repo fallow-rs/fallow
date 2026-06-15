@@ -159,15 +159,15 @@ impl CloneDetector {
         tracing::debug!(elapsed_us = lcp_time.as_micros(), "step4_lcp_array");
 
         let t0 = std::time::Instant::now();
-        let raw_groups = extraction::extract_clone_groups(
-            &sa,
-            &lcp_arr,
-            &file_of,
-            &file_offsets,
-            self.min_tokens,
-            &files,
-            focus_file_ids.as_deref(),
-        );
+        let raw_groups = extraction::extract_clone_groups(&extraction::CloneGroupExtractionInput {
+            sa: &sa,
+            lcp: &lcp_arr,
+            file_of: &file_of,
+            file_offsets: &file_offsets,
+            min_tokens: self.min_tokens,
+            files: &files,
+            focus_file_ids: focus_file_ids.as_deref(),
+        });
         let extract_time = t0.elapsed();
         tracing::debug!(
             elapsed_us = extract_time.as_micros(),

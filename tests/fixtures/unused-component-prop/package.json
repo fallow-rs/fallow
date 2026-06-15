@@ -1,0 +1,1 @@
+{ "name": "unused-component-prop-fixture", "version": "0.0.0", "private": true, "main": "src/main.ts", "dependencies": { "vue": "^3.4.0" } }

@@ -1100,6 +1100,13 @@ misplaced_directives?: MisplacedDirectiveFinding[]
  */
 unprovided_injects?: UnprovidedInjectFinding[]
 /**
+ * Vue/Svelte single-file components that are reachable but rendered nowhere
+ * (the imported-but-never-rendered dead-half). Wrapped in
+ * [`UnrenderedComponentFinding`] so each entry carries a typed `actions`
+ * array natively. Default severity is `warn`.
+ */
+unrendered_components?: UnrenderedComponentFinding[]
+/**
  * Next.js App Router route files that resolve to the same URL within one
  * app-root (a guaranteed `next build` failure). Wrapped in
  * [`RouteCollisionFinding`] so each entry carries a typed `actions` array
@@ -1113,6 +1120,28 @@ route_collisions?: RouteCollisionFinding[]
  * carries a typed `actions` array natively. Default severity is `warn`.
  */
 dynamic_segment_name_conflicts?: DynamicSegmentNameConflictFinding[]
+/**
+ * Vue `<script setup>` `defineProps` props referenced nowhere in their own
+ * SFC (neither `<script>` nor `<template>`). Wrapped in
+ * [`UnusedComponentPropFinding`] so each entry carries a typed `actions`
+ * array natively. Default severity is `warn`.
+ */
+unused_component_props?: UnusedComponentPropFinding[]
+/**
+ * Vue `<script setup>` `defineEmits` events emitted nowhere in their own SFC
+ * (no `emit('<name>')` call). Wrapped in [`UnusedComponentEmitFinding`] so
+ * each entry carries a typed `actions` array natively. Default severity is
+ * `warn`.
+ */
+unused_component_emits?: UnusedComponentEmitFinding[]
+/**
+ * Next.js Server Actions (exports of `"use server"` files) that no code in
+ * the project references. Reclassified out of `unused_exports` for
+ * `"use server"` files. Wrapped in [`UnusedServerActionFinding`] so each
+ * entry carries a typed `actions` array natively. Default severity is
+ * `warn`.
+ */
+unused_server_actions?: UnusedServerActionFinding[]
 baseline_deltas?: (BaselineDeltas | null)
 baseline?: (BaselineMatch | null)
 regression?: (RegressionResult | null)
@@ -1194,6 +1223,23 @@ unused_store_members?: number
  * Vue/Svelte injects whose key is provided nowhere in the project.
  */
 unprovided_injects?: number
+/**
+ * Vue/Svelte components reachable but rendered nowhere in the project.
+ */
+unrendered_components?: number
+/**
+ * Vue `<script setup>` props referenced nowhere inside their own SFC.
+ */
+unused_component_props?: number
+/**
+ * Vue `<script setup>` emits emitted nowhere inside their own SFC.
+ */
+unused_component_emits?: number
+/**
+ * Next.js Server Actions (exports of `"use server"` files) referenced by no
+ * code in the project.
+ */
+unused_server_actions?: number
 /**
  * Imports that could not be resolved against the project's module graph.
  */
@@ -2688,6 +2734,51 @@ actions: IssueAction[]
 introduced?: (AuditIntroduced | null)
 }
 /**
+ * Wire-shape envelope for an [`UnrenderedComponent`] finding. There is no safe
+ * auto-fix: the fix is binary but judgement-bearing (render the component
+ * somewhere, or delete the dead component). The only action is a line-level
+ * suppress.
+ */
+export interface UnrenderedComponentFinding {
+/**
+ * The component file that is reachable but rendered nowhere.
+ */
+path: string
+/**
+ * The component name (the `.vue`/`.svelte` file stem, PascalCase).
+ */
+component_name: string
+/**
+ * Which framework this component belongs to: `"vue"` or `"svelte"`.
+ */
+framework: string
+/**
+ * A barrel/file that re-exports this component, kept for the remediation
+ * trace ("reachable via X, rendered nowhere"). Absolute in memory,
+ * serialized workspace-relative (like `path`); `None` when not determinable.
+ */
+reachable_via?: (string | null)
+/**
+ * 1-based line number of the component (the file head; SFCs have no explicit
+ * default-export statement).
+ */
+line: number
+/**
+ * 0-based byte column offset.
+ */
+col: number
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+}
+/**
  * Wire-shape envelope for a [`RouteCollision`] finding. A route collision is a
  * guaranteed `next build` failure, so the PRIMARY action is manual guidance
  * (move or merge one of the colliding files), NOT a suppress: suppressing a
@@ -2762,6 +2853,115 @@ conflicting_paths: string[]
 line: number
 /**
  * 0-based byte column offset (file-level finding, always 0).
+ */
+col: number
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+}
+/**
+ * Wire-shape envelope for an [`UnusedComponentProp`] finding. There is no safe
+ * auto-fix: removing a declared prop is judgement-bearing (the prop may be part
+ * of a deliberately-stable public component API). The only action is a
+ * line-level suppress at the prop declaration.
+ */
+export interface UnusedComponentPropFinding {
+/**
+ * The `.vue` SFC declaring the unused prop.
+ */
+path: string
+/**
+ * The component name (the `.vue` file stem).
+ */
+component_name: string
+/**
+ * The declared prop name that is never referenced.
+ */
+prop_name: string
+/**
+ * 1-based line number of the prop declaration.
+ */
+line: number
+/**
+ * 0-based byte column offset of the prop declaration.
+ */
+col: number
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+}
+/**
+ * Wire-shape envelope for an [`UnusedComponentEmit`] finding. There is no safe
+ * auto-fix: removing a declared emit is judgement-bearing (the event may be
+ * part of a deliberately-stable public component API). The only action is a
+ * line-level suppress at the emit declaration.
+ */
+export interface UnusedComponentEmitFinding {
+/**
+ * The `.vue` SFC declaring the unused emit.
+ */
+path: string
+/**
+ * The component name (the `.vue` file stem).
+ */
+component_name: string
+/**
+ * The declared emit event name that is never emitted.
+ */
+emit_name: string
+/**
+ * 1-based line number of the emit declaration.
+ */
+line: number
+/**
+ * 0-based byte column offset of the emit declaration.
+ */
+col: number
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+}
+/**
+ * Wire-shape envelope for an [`UnusedServerAction`] finding. There is no safe
+ * auto-fix: the fix is binary but judgement-bearing (wire the action up to a
+ * consumer, or delete it). The only action is a line-level suppress.
+ */
+export interface UnusedServerActionFinding {
+/**
+ * The `"use server"` file that exports the unreferenced action.
+ */
+path: string
+/**
+ * The exported action name as written, or `"default"` for a default export.
+ */
+action_name: string
+/**
+ * 1-based line number of the export.
+ */
+line: number
+/**
+ * 0-based byte column offset of the export.
  */
 col: number
 /**
@@ -6172,6 +6372,13 @@ misplaced_directives?: MisplacedDirectiveFinding[]
  */
 unprovided_injects?: UnprovidedInjectFinding[]
 /**
+ * Vue/Svelte single-file components that are reachable but rendered nowhere
+ * (the imported-but-never-rendered dead-half). Wrapped in
+ * [`UnrenderedComponentFinding`] so each entry carries a typed `actions`
+ * array natively. Default severity is `warn`.
+ */
+unrendered_components?: UnrenderedComponentFinding[]
+/**
  * Next.js App Router route files that resolve to the same URL within one
  * app-root (a guaranteed `next build` failure). Wrapped in
  * [`RouteCollisionFinding`] so each entry carries a typed `actions` array
@@ -6185,6 +6392,28 @@ route_collisions?: RouteCollisionFinding[]
  * carries a typed `actions` array natively. Default severity is `warn`.
  */
 dynamic_segment_name_conflicts?: DynamicSegmentNameConflictFinding[]
+/**
+ * Vue `<script setup>` `defineProps` props referenced nowhere in their own
+ * SFC (neither `<script>` nor `<template>`). Wrapped in
+ * [`UnusedComponentPropFinding`] so each entry carries a typed `actions`
+ * array natively. Default severity is `warn`.
+ */
+unused_component_props?: UnusedComponentPropFinding[]
+/**
+ * Vue `<script setup>` `defineEmits` events emitted nowhere in their own SFC
+ * (no `emit('<name>')` call). Wrapped in [`UnusedComponentEmitFinding`] so
+ * each entry carries a typed `actions` array natively. Default severity is
+ * `warn`.
+ */
+unused_component_emits?: UnusedComponentEmitFinding[]
+/**
+ * Next.js Server Actions (exports of `"use server"` files) that no code in
+ * the project references. Reclassified out of `unused_exports` for
+ * `"use server"` files. Wrapped in [`UnusedServerActionFinding`] so each
+ * entry carries a typed `actions` array natively. Default severity is
+ * `warn`.
+ */
+unused_server_actions?: UnusedServerActionFinding[]
 }
 /**
  * The rendered impact report, derived purely from the store (no analysis run).

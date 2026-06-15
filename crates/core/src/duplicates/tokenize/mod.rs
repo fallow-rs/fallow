@@ -20,8 +20,9 @@ use super::token_visitor::TokenExtractor;
 /// aliases are stripped from the token stream. This enables cross-language clone
 /// detection between `.ts` and `.js` files.
 ///
-/// When `skip_imports` is true, ES `import` declarations are excluded from the
-/// token stream to reduce noise from sorted import blocks.
+/// When `skip_imports` is true, module-wiring declarations are excluded from the
+/// token stream to reduce noise from import, re-export, and top-level static
+/// require binding blocks.
 #[must_use]
 pub fn tokenize_file(path: &Path, source: &str, skip_imports: bool) -> FileTokens {
     tokenize_file_inner(path, source, false, skip_imports)

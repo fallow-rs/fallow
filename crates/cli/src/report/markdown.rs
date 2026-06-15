@@ -282,6 +282,30 @@ fn push_markdown_graph_sections(
     );
     markdown_section(
         out,
+        &results.unrendered_components,
+        "Unrendered components",
+        |c| format_markdown_unrendered_component(c, rel),
+    );
+    markdown_section(
+        out,
+        &results.unused_component_props,
+        "Unused component props",
+        |p| format_markdown_unused_component_prop(p, rel),
+    );
+    markdown_section(
+        out,
+        &results.unused_component_emits,
+        "Unused component emits",
+        |e| format_markdown_unused_component_emit(e, rel),
+    );
+    markdown_section(
+        out,
+        &results.unused_server_actions,
+        "Unused server actions",
+        |a| format_markdown_unused_server_action(a, rel),
+    );
+    markdown_section(
+        out,
         &results.stale_suppressions,
         "Stale suppressions",
         |s| {
@@ -450,6 +474,54 @@ fn format_markdown_unprovided_inject(
     )]
 }
 
+fn format_markdown_unrendered_component(
+    c: &fallow_core::results::UnrenderedComponentFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    vec![format!(
+        "- `{}`:{} `{}` is reachable but rendered nowhere in this project (render it somewhere or remove it)",
+        rel(&c.component.path),
+        c.component.line,
+        escape_backticks(&c.component.component_name),
+    )]
+}
+
+fn format_markdown_unused_component_prop(
+    p: &fallow_core::results::UnusedComponentPropFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    vec![format!(
+        "- `{}`:{} `{}` is declared but referenced nowhere in this component (remove it or use it)",
+        rel(&p.prop.path),
+        p.prop.line,
+        escape_backticks(&p.prop.prop_name),
+    )]
+}
+
+fn format_markdown_unused_component_emit(
+    e: &fallow_core::results::UnusedComponentEmitFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    vec![format!(
+        "- `{}`:{} `{}` is declared but emitted nowhere in this component (remove it or emit it)",
+        rel(&e.emit.path),
+        e.emit.line,
+        escape_backticks(&e.emit.emit_name),
+    )]
+}
+
+fn format_markdown_unused_server_action(
+    a: &fallow_core::results::UnusedServerActionFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    vec![format!(
+        "- `{}`:{} `{}` is exported from a \"use server\" file but no code in this project references it",
+        rel(&a.action.path),
+        a.action.line,
+        escape_backticks(&a.action.action_name),
+    )]
+}
+
 fn format_markdown_route_collision(
     c: &fallow_core::results::RouteCollisionFinding,
     rel: &dyn Fn(&Path) -> String,
@@ -467,10 +539,11 @@ fn format_markdown_dynamic_segment_name_conflict(
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
-        "- `{}` conflicting dynamic segments at `{}` ({})",
+        "- `{}` crashes at runtime: different slug names ({}) at the same dynamic path `{}`; \
+         `next build` passes but the route fails on its first request (rename to one consistent slug)",
         rel(&c.conflict.path),
-        c.conflict.position,
         c.conflict.conflicting_segments.join(" vs "),
+        c.conflict.position,
     )]
 }
 

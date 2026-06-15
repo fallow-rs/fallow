@@ -504,6 +504,18 @@ pub fn cached_to_module_opts(
         misplaced_directives: cached.misplaced_directives.clone(),
         di_key_sites: cached.di_key_sites.clone(),
         has_dynamic_provide: cached.has_dynamic_provide,
+        // Derived in `release_resolution_payload` from `imports` + `unused_import_bindings`
+        // (both cached); never persisted, so the cache-load path leaves it empty.
+        referenced_import_bindings: Vec::new(),
+        component_props: cached.component_props.clone(),
+        has_props_attrs_fallthrough: cached.has_props_attrs_fallthrough,
+        has_define_expose: cached.has_define_expose,
+        has_define_model: cached.has_define_model,
+        has_unharvestable_props: cached.has_unharvestable_props,
+        component_emits: cached.component_emits.clone(),
+        has_unharvestable_emits: cached.has_unharvestable_emits,
+        has_dynamic_emit: cached.has_dynamic_emit,
+        has_emit_whole_object_use: cached.has_emit_whole_object_use,
     }
 }
 
@@ -568,5 +580,14 @@ pub fn module_to_cached(
         misplaced_directives: module.misplaced_directives.clone(),
         di_key_sites: module.di_key_sites.clone(),
         has_dynamic_provide: module.has_dynamic_provide,
+        component_props: module.component_props.clone(),
+        has_props_attrs_fallthrough: module.has_props_attrs_fallthrough,
+        has_define_expose: module.has_define_expose,
+        has_define_model: module.has_define_model,
+        has_unharvestable_props: module.has_unharvestable_props,
+        component_emits: module.component_emits.clone(),
+        has_unharvestable_emits: module.has_unharvestable_emits,
+        has_dynamic_emit: module.has_dynamic_emit,
+        has_emit_whole_object_use: module.has_emit_whole_object_use,
     }
 }

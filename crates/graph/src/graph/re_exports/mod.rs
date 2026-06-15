@@ -12,7 +12,10 @@ use fallow_types::discover::FileId;
 
 use super::ModuleGraph;
 
-use propagate::{StarReExportPropagation, propagate_named_re_export, propagate_star_re_export};
+use propagate::{
+    NamedReExportPropagation, StarReExportPropagation, propagate_named_re_export,
+    propagate_star_re_export,
+};
 
 /// A re-export cycle or self-loop detected during Phase 4 chain resolution.
 ///
@@ -150,15 +153,15 @@ impl ModuleGraph {
                         synthetic_stubs: &mut synthetic_stubs,
                     });
                 } else {
-                    changed |= propagate_named_re_export(
-                        &mut self.modules,
-                        entry.barrel,
+                    changed |= propagate_named_re_export(NamedReExportPropagation {
+                        modules: &mut self.modules,
+                        barrel_id: entry.barrel,
                         barrel_idx,
                         source_idx,
-                        &entry.imported_name,
-                        &entry.exported_name,
-                        &mut existing_refs,
-                    );
+                        imported_name: &entry.imported_name,
+                        exported_name: &entry.exported_name,
+                        existing_refs: &mut existing_refs,
+                    });
                 }
             }
         }

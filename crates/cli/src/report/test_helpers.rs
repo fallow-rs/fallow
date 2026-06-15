@@ -5,9 +5,11 @@ use fallow_core::results::*;
 use fallow_types::output_dead_code::{
     BoundaryViolationFinding, CircularDependencyFinding, TestOnlyDependencyFinding,
     TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
-    UnresolvedImportFinding, UnusedClassMemberFinding, UnusedDependencyFinding,
+    UnrenderedComponentFinding, UnresolvedImportFinding, UnusedClassMemberFinding,
+    UnusedComponentEmitFinding, UnusedComponentPropFinding, UnusedDependencyFinding,
     UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
-    UnusedOptionalDependencyFinding, UnusedStoreMemberFinding, UnusedTypeFinding,
+    UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
+    UnusedTypeFinding,
 };
 
 /// Build an `AnalysisResults` populated with one issue of every type.
@@ -177,6 +179,46 @@ pub fn sample_results(root: &Path) -> AnalysisResults {
             line: 5,
             col: 2,
         }));
+    r.unrendered_components
+        .push(UnrenderedComponentFinding::with_actions(
+            UnrenderedComponent {
+                path: root.join("src/components/Orphan.vue"),
+                component_name: "Orphan".to_string(),
+                framework: "vue".to_string(),
+                reachable_via: Some(root.join("src/components/index.ts")),
+                line: 1,
+                col: 0,
+            },
+        ));
+    r.unused_component_props
+        .push(UnusedComponentPropFinding::with_actions(
+            UnusedComponentProp {
+                path: root.join("src/components/Widget.vue"),
+                component_name: "Widget".to_string(),
+                prop_name: "unusedSize".to_string(),
+                line: 4,
+                col: 2,
+            },
+        ));
+    r.unused_component_emits
+        .push(UnusedComponentEmitFinding::with_actions(
+            UnusedComponentEmit {
+                path: root.join("src/components/Widget.vue"),
+                component_name: "Widget".to_string(),
+                emit_name: "unusedClose".to_string(),
+                line: 5,
+                col: 2,
+            },
+        ));
+    r.unused_server_actions
+        .push(UnusedServerActionFinding::with_actions(
+            UnusedServerAction {
+                path: root.join("src/app/actions.ts"),
+                action_name: "submitForm".to_string(),
+                line: 3,
+                col: 0,
+            },
+        ));
     r.stale_suppressions.push(StaleSuppression {
         path: root.join("src/utils.ts"),
         line: 5,

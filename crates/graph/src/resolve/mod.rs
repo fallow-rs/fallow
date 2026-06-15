@@ -56,45 +56,56 @@ use static_imports::resolve_static_imports;
 use types::{PackageManifestInfo, ResolveContext};
 use upgrades::apply_specifier_upgrades;
 
+/// Inputs used to resolve imports for a complete extracted project.
+pub struct ResolveAllImportsInput<'a> {
+    /// Extracted modules whose imports should be resolved.
+    pub modules: &'a [ModuleInfo],
+    /// Discovered source files indexed by [`FileId`].
+    pub files: &'a [DiscoveredFile],
+    /// Workspace package roots used for package self-resolution.
+    pub workspaces: &'a [fallow_config::WorkspaceInfo],
+    /// Active plugin names that affect extensions and resolver conditions.
+    pub active_plugins: &'a [String],
+    /// Configured TypeScript path alias pairs.
+    pub path_aliases: &'a [(String, String)],
+    /// Auto-import rules that synthesize implicit graph edges.
+    pub auto_imports: &'a [AutoImportRule],
+    /// Additional Sass and SCSS include directories.
+    pub scss_include_paths: &'a [PathBuf],
+    /// Static directory mappings for framework-specific asset resolution.
+    pub static_dir_mappings: &'a [(PathBuf, String)],
+    /// Project root used for package manifest and relative-path resolution.
+    pub root: &'a Path,
+    /// Extra resolver conditions supplied by configuration.
+    pub extra_conditions: &'a [String],
+}
+
 /// Resolve all imports across all modules in parallel.
 #[must_use]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "resolver inputs come from disjoint sources (config, plugins, workspace, filesystem); \
-              bundling them into a struct would be a cross-cutting refactor outside this task"
-)]
-pub fn resolve_all_imports(
-    modules: &[ModuleInfo],
-    files: &[DiscoveredFile],
-    workspaces: &[fallow_config::WorkspaceInfo],
-    active_plugins: &[String],
-    path_aliases: &[(String, String)],
-    auto_imports: &[AutoImportRule],
-    scss_include_paths: &[PathBuf],
-    static_dir_mappings: &[(PathBuf, String)],
-    root: &Path,
-    extra_conditions: &[String],
-) -> Vec<ResolvedModule> {
-    let canonical_ws_roots: Vec<PathBuf> = workspaces
+pub fn resolve_all_imports(input: &ResolveAllImportsInput<'_>) -> Vec<ResolvedModule> {
+    let canonical_ws_roots: Vec<PathBuf> = input
+        .workspaces
         .par_iter()
         .map(|ws| dunce::canonicalize(&ws.root).unwrap_or_else(|_| ws.root.clone()))
         .collect();
-    let workspace_roots: FxHashMap<&str, &Path> = workspaces
+    let workspace_roots: FxHashMap<&str, &Path> = input
+        .workspaces
         .iter()
         .zip(canonical_ws_roots.iter())
         .map(|(ws, canonical)| (ws.name.as_str(), canonical.as_path()))
         .collect();
-    let root_canonical = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let root_canonical =
+        dunce::canonicalize(input.root).unwrap_or_else(|_| input.root.to_path_buf());
     let mut package_manifests = Vec::new();
-    if let Ok(package_json) = fallow_config::PackageJson::load(&root.join("package.json")) {
+    if let Ok(package_json) = fallow_config::PackageJson::load(&input.root.join("package.json")) {
         package_manifests.push(PackageManifestInfo {
-            root: root.to_path_buf(),
+            root: input.root.to_path_buf(),
             canonical_root: root_canonical,
             name: package_json.name.clone(),
             package_json,
         });
     }
-    for (ws, canonical_root) in workspaces.iter().zip(canonical_ws_roots.iter()) {
+    for (ws, canonical_root) in input.workspaces.iter().zip(canonical_ws_roots.iter()) {
         if let Ok(package_json) = fallow_config::PackageJson::load(&ws.root.join("package.json")) {
             package_manifests.push(PackageManifestInfo {
                 root: ws.root.clone(),
@@ -105,42 +116,50 @@ pub fn resolve_all_imports(
         }
     }
 
-    let root_is_canonical = dunce::canonicalize(root).is_ok_and(|c| c == root);
+    let root_is_canonical = dunce::canonicalize(input.root).is_ok_and(|c| c == input.root);
 
     let canonical_paths: Vec<PathBuf> = if root_is_canonical {
         Vec::new()
     } else {
-        files
+        input
+            .files
             .par_iter()
             .map(|f| dunce::canonicalize(&f.path).unwrap_or_else(|_| f.path.clone()))
             .collect()
     };
 
     let path_to_id: FxHashMap<&Path, FileId> = if root_is_canonical {
-        files.iter().map(|f| (f.path.as_path(), f.id)).collect()
+        input
+            .files
+            .iter()
+            .map(|f| (f.path.as_path(), f.id))
+            .collect()
     } else {
         canonical_paths
             .iter()
             .enumerate()
-            .map(|(idx, canonical)| (canonical.as_path(), files[idx].id))
+            .map(|(idx, canonical)| (canonical.as_path(), input.files[idx].id))
             .collect()
     };
 
-    let raw_path_to_id: FxHashMap<&Path, FileId> =
-        files.iter().map(|f| (f.path.as_path(), f.id)).collect();
+    let raw_path_to_id: FxHashMap<&Path, FileId> = input
+        .files
+        .iter()
+        .map(|f| (f.path.as_path(), f.id))
+        .collect();
 
-    let file_paths: Vec<&Path> = files.iter().map(|f| f.path.as_path()).collect();
+    let file_paths: Vec<&Path> = input.files.iter().map(|f| f.path.as_path()).collect();
 
-    let extensions = build_extensions(active_plugins);
-    let condition_names = build_condition_names(active_plugins, extra_conditions);
-    let resolver = create_resolver(active_plugins, extra_conditions);
-    let mut style_conditions = extra_conditions.to_vec();
+    let extensions = build_extensions(input.active_plugins);
+    let condition_names = build_condition_names(input.active_plugins, input.extra_conditions);
+    let resolver = create_resolver(input.active_plugins, input.extra_conditions);
+    let mut style_conditions = input.extra_conditions.to_vec();
     style_conditions.push("sass".to_string());
     style_conditions.push("style".to_string());
-    let style_resolver = create_resolver(active_plugins, &style_conditions);
+    let style_resolver = create_resolver(input.active_plugins, &style_conditions);
 
     let canonical_fallback = if root_is_canonical {
-        Some(types::CanonicalFallback::new(files))
+        Some(types::CanonicalFallback::new(input.files))
     } else {
         None
     };
@@ -156,18 +175,19 @@ pub fn resolve_all_imports(
         workspace_roots: &workspace_roots,
         package_manifests: &package_manifests,
         condition_names: &condition_names,
-        path_aliases,
-        scss_include_paths,
-        static_dir_mappings,
-        root,
+        path_aliases: input.path_aliases,
+        scss_include_paths: input.scss_include_paths,
+        static_dir_mappings: input.static_dir_mappings,
+        root: input.root,
         canonical_fallback: canonical_fallback.as_ref(),
         tsconfig_warned: &tsconfig_warned,
     };
 
-    let mut resolved: Vec<ResolvedModule> = modules
+    let mut resolved: Vec<ResolvedModule> = input
+        .modules
         .par_iter()
         .filter_map(|module| {
-            resolve_module_imports(module, &ctx, &file_paths, &canonical_paths, files)
+            resolve_module_imports(module, &ctx, &file_paths, &canonical_paths, input.files)
         })
         .collect();
 
@@ -175,8 +195,8 @@ pub fn resolve_all_imports(
 
     synthesize_auto_import_edges(
         &mut resolved,
-        modules,
-        auto_imports,
+        input.modules,
+        input.auto_imports,
         &path_to_id,
         &raw_path_to_id,
     );

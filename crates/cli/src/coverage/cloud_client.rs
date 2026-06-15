@@ -167,8 +167,13 @@ pub struct CloudRuntimeBlastRadiusEntry {
     pub file: String,
     pub function: String,
     pub line: u32,
-    pub caller_count: u32,
-    pub caller_count_weighted_by_traffic: u64,
+    /// `None` when the caller-graph is not uploaded: the cloud emits `null`
+    /// instead of a placeholder `0`. Also `None` for older clouds that omit
+    /// the field. `#[serde(default)]` keeps both wire shapes deserializable.
+    #[serde(default)]
+    pub caller_count: Option<u32>,
+    #[serde(default)]
+    pub caller_count_weighted_by_traffic: Option<u64>,
     #[serde(default)]
     pub deploys_touched: Option<u32>,
     pub risk_band: CloudRuntimeRiskBand,
@@ -195,8 +200,13 @@ pub struct CloudRuntimeImportanceEntry {
     pub function: String,
     pub line: u32,
     pub invocations: u64,
-    pub cyclomatic: u32,
-    pub owner_count: u32,
+    /// `None` when complexity / CODEOWNERS inputs are not available: the cloud
+    /// emits `null` instead of a placeholder `1`/`0`. Also `None` for older
+    /// clouds that omit the field. `#[serde(default)]` keeps both deserializable.
+    #[serde(default)]
+    pub cyclomatic: Option<u32>,
+    #[serde(default)]
+    pub owner_count: Option<u32>,
     pub importance_score: f64,
     pub reason: String,
 }
@@ -446,5 +456,115 @@ mod tests {
     #[test]
     fn cloud_error_exit_code_for_validation_is_two() {
         assert_eq!(CloudError::Validation("any".to_owned()).exit_code(), 2);
+    }
+
+    #[test]
+    fn blast_radius_entry_tolerates_null_and_absent_caller_fields() {
+        // The cloud emits `null` for caller_count once the caller-graph is not
+        // uploaded (instead of a placeholder 0). Before this was Option, serde
+        // failed to deserialize null into u32 and broke `analyze --cloud`.
+        let with_null: CloudRuntimeBlastRadiusEntry = serde_json::from_str(
+            r#"{"id":"fallow:blast:1","file":"src/a.ts","function":"a","line":1,"caller_count":null,"caller_count_weighted_by_traffic":null,"risk_band":"unknown"}"#,
+        )
+        .expect("null caller fields must deserialize");
+        assert_eq!(with_null.caller_count, None);
+        assert_eq!(with_null.caller_count_weighted_by_traffic, None);
+        assert_eq!(with_null.risk_band, CloudRuntimeRiskBand::Unknown);
+
+        // Older clouds omit the fields entirely.
+        let absent: CloudRuntimeBlastRadiusEntry = serde_json::from_str(
+            r#"{"id":"fallow:blast:1","file":"src/a.ts","function":"a","line":1,"risk_band":"low"}"#,
+        )
+        .expect("absent caller fields must deserialize");
+        assert_eq!(absent.caller_count, None);
+        assert_eq!(absent.caller_count_weighted_by_traffic, None);
+
+        // Legacy numeric values still parse.
+        let numeric: CloudRuntimeBlastRadiusEntry = serde_json::from_str(
+            r#"{"id":"fallow:blast:1","file":"src/a.ts","function":"a","line":1,"caller_count":5,"caller_count_weighted_by_traffic":1000,"risk_band":"high"}"#,
+        )
+        .expect("numeric caller fields must deserialize");
+        assert_eq!(numeric.caller_count, Some(5));
+        assert_eq!(numeric.caller_count_weighted_by_traffic, Some(1000));
+    }
+
+    #[test]
+    fn importance_entry_tolerates_null_and_absent_metric_fields() {
+        // The cloud emits `null` for cyclomatic/owner_count when complexity and
+        // CODEOWNERS inputs are not available (instead of placeholder 1/0).
+        let with_null: CloudRuntimeImportanceEntry = serde_json::from_str(
+            r#"{"id":"fallow:importance:1","file":"src/a.ts","function":"a","line":1,"invocations":42,"cyclomatic":null,"owner_count":null,"importance_score":12.5,"reason":"Moderate traffic"}"#,
+        )
+        .expect("null importance metrics must deserialize");
+        assert_eq!(with_null.cyclomatic, None);
+        assert_eq!(with_null.owner_count, None);
+
+        let absent: CloudRuntimeImportanceEntry = serde_json::from_str(
+            r#"{"id":"fallow:importance:1","file":"src/a.ts","function":"a","line":1,"invocations":42,"importance_score":12.5,"reason":"Moderate traffic"}"#,
+        )
+        .expect("absent importance metrics must deserialize");
+        assert_eq!(absent.cyclomatic, None);
+        assert_eq!(absent.owner_count, None);
+    }
+
+    #[test]
+    fn full_envelope_with_new_cloud_fields_deserializes() {
+        // Mirrors the fallow-cloud Wave 1 runtime-context response: the
+        // `{ "data": ... }` envelope, null measurement fields, risk_band
+        // "unknown", plus new top-level fields (actionable / verdict /
+        // provenance) and per-entry fields (context_unavailable_reason) the CLI
+        // does not model. None may break deserialization (no deny_unknown_fields).
+        let body = r#"{
+          "data": {
+            "schema_version": "fallow-cloud-runtime-v1",
+            "repo": "owner/repo",
+            "project_id": null,
+            "actionable": true,
+            "actionability_reason": null,
+            "verdict": null,
+            "provenance": {
+              "data_source": "cloud", "is_production": "unknown",
+              "freshness_days": 2, "untracked_ratio": 0.1,
+              "stale": false, "stale_after_days": 14
+            },
+            "window": { "period_days": 30 },
+            "summary": {
+              "trace_count": 1000, "deployments_seen": 1,
+              "functions_tracked": 10, "functions_hit": 6, "functions_unhit": 4,
+              "functions_untracked": 2, "coverage_percent": 60.0,
+              "last_received_at": "2026-06-15T00:00:00Z"
+            },
+            "functions": [],
+            "blast_radius": [{
+              "id": "fallow:blast:1", "file": "src/a.ts", "function": "a", "line": 1,
+              "caller_count": null, "caller_count_weighted_by_traffic": null,
+              "risk_band": "unknown",
+              "context_unavailable_reason": "caller-graph not uploaded"
+            }],
+            "importance": [{
+              "id": "fallow:importance:1", "file": "src/a.ts", "function": "a", "line": 1,
+              "invocations": 42, "cyclomatic": null, "owner_count": null,
+              "importance_score": 12.5, "reason": "Moderate traffic",
+              "context_unavailable_reason": "complexity and CODEOWNERS data not available"
+            }],
+            "warnings": []
+          }
+        }"#;
+
+        let context = serde_json::from_str::<CloudRuntimeContextResponse>(body)
+            .expect("new-cloud runtime-context envelope must deserialize")
+            .into_context();
+        assert_eq!(context.repo, "owner/repo");
+        assert_eq!(context.blast_radius[0].caller_count, None);
+        assert_eq!(
+            context.blast_radius[0].caller_count_weighted_by_traffic,
+            None
+        );
+        assert_eq!(
+            context.blast_radius[0].risk_band,
+            CloudRuntimeRiskBand::Unknown
+        );
+        assert_eq!(context.importance[0].cyclomatic, None);
+        assert_eq!(context.importance[0].owner_count, None);
     }
 }

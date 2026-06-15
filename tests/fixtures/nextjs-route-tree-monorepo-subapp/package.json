@@ -1,0 +1,1 @@
+{ "name": "nextjs-route-tree-monorepo-subapp", "private": true, "workspaces": ["packages/*", "examples/*"], "dependencies": { "react": "18.0.0" } }

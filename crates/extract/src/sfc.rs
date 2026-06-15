@@ -72,6 +72,25 @@ static SVELTE_GENERICS_ATTR_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
 static HTML_COMMENT_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| crate::static_regex(r"(?s)<!--.*?-->"));
 
+/// Regex to detect a whole-object prop/attr spread in a Vue template:
+/// `v-bind="$attrs"`, `v-bind="$props"`, or `v-bind="props"` (with single or
+/// double quotes). A bound prop may be consumed indirectly, so the
+/// `unused-component-prop` detector abstains on the whole file when this matches.
+static PROPS_ATTRS_SPREAD_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r#"v-bind\s*=\s*["'](?:\$attrs|\$props|props)["']"#));
+
+/// Matches an emit-style call in template markup: a callee identifier (or
+/// `$emit`) followed by `(` and its first argument. Group 1 is the callee name
+/// (filtered against the harvested emit binding / `$emit` by the caller), groups
+/// 2 and 3 are a string-literal first arg (single- or double-quoted: the event
+/// name, credited as used), and group 4 is the first non-space character of a
+/// NON-literal first arg (a dynamic emit, whose event name is unknowable, forcing
+/// a whole-file abstain). Event names allow kebab and namespaced forms
+/// (`update:modelValue`, `my-event`). The Rust `regex` crate has no
+/// backreferences, so the two quote styles are separate alternatives.
+static TEMPLATE_EMIT_CALL_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r#"([\w$]+)\s*\(\s*(?:'([\w:-]*)'|"([\w:-]*)"|(\S))"#));
+
 /// Regex to extract `<style>` block content from Vue/Svelte SFCs.
 /// Mirrors `SCRIPT_BLOCK_RE`: handles `>` inside quoted attribute values and
 /// captures the body so `@import` / `@use` / `@forward` directives can be parsed.
@@ -308,20 +327,34 @@ pub(crate) fn parse_sfc_to_module(
     let mut combined = empty_sfc_module(file_id, source, content_hash);
     let mut template_visible_imports: FxHashSet<String> = FxHashSet::default();
     let mut template_visible_bound_targets: FxHashMap<String, String> = FxHashMap::default();
+    let mut props_return_binding: Option<String> = None;
+    let mut emit_return_binding: Option<String> = None;
 
     for script in &scripts {
-        merge_script_into_module(
+        merge_script_into_module(&mut SfcScriptMergeInput {
             kind,
             script,
-            &mut combined,
-            &mut template_visible_imports,
-            &mut template_visible_bound_targets,
+            combined: &mut combined,
+            template_visible_imports: &mut template_visible_imports,
+            template_visible_bound_targets: &mut template_visible_bound_targets,
+            props_return_binding: &mut props_return_binding,
+            emit_return_binding: &mut emit_return_binding,
             need_complexity,
-        );
+        });
     }
 
     for style in &styles {
         merge_style_into_module(style, &mut combined);
+    }
+
+    // Whole-object prop/attr spread in the template (`v-bind="$attrs"`,
+    // `v-bind="$props"`, `v-bind="props"`) can consume a prop indirectly, so the
+    // `unused-component-prop` detector must abstain on the whole file.
+    if kind == SfcKind::Vue
+        && !combined.component_props.is_empty()
+        && PROPS_ATTRS_SPREAD_RE.is_match(source)
+    {
+        combined.has_props_attrs_fallthrough = true;
     }
 
     apply_template_usage(
@@ -329,8 +362,17 @@ pub(crate) fn parse_sfc_to_module(
         source,
         &template_visible_imports,
         &template_visible_bound_targets,
+        props_return_binding.as_deref(),
+        kind == SfcKind::Svelte && is_sveltekit_route_data_component(path),
         &mut combined,
     );
+
+    // Credit `<emit_binding>('event')` / `$emit('event')` calls in the template
+    // (`@click="emit('close')"`), which the script-only emit usage walk cannot
+    // see. A dynamic template emit (`$emit(someVar)`) abstains the whole file.
+    if kind == SfcKind::Vue && !combined.component_emits.is_empty() {
+        apply_template_emit_usage(source, emit_return_binding.as_deref(), &mut combined);
+    }
 
     // Static relative asset references in markup (`<img src="./logo.png">`)
     // become SideEffect imports so a genuinely-missing asset surfaces as
@@ -365,6 +407,30 @@ fn sfc_kind(path: &Path) -> SfcKind {
     } else {
         SfcKind::Svelte
     }
+}
+
+/// SvelteKit route components receive a `data` prop populated by the route's
+/// `load()` return object. This predicate gates the `data`-as-template-root
+/// credit (unused-load-data-key Primitive B) to exactly those files. It matches
+/// `+page.svelte` / `+layout.svelte` AND their layout-reset variants
+/// (`+page@.svelte`, `+page@named.svelte`, `+page@(group).svelte`, and the
+/// `+layout@...` forms), all of which still receive the `data` prop. `+error.svelte`
+/// is excluded (it receives `$page.error`, not the `load()` `data` prop), and a
+/// non-route file like `+pageHelper.svelte` is excluded by the grammar (the part
+/// after `+page` must be empty or start with `@`). The leading `+` is a
+/// SvelteKit-only filename convention, so no ordinary `.svelte` component matches.
+fn is_sveltekit_route_data_component(path: &Path) -> bool {
+    let Some(stem) = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .and_then(|name| name.strip_suffix(".svelte"))
+    else {
+        return false;
+    };
+    ["+page", "+layout"].iter().any(|prefix| {
+        stem.strip_prefix(prefix)
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with('@'))
+    })
 }
 
 fn empty_sfc_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleInfo {
@@ -412,38 +478,56 @@ fn empty_sfc_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleI
         misplaced_directives: Vec::new(),
         di_key_sites: Vec::new(),
         has_dynamic_provide: false,
+        referenced_import_bindings: Vec::new(),
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     }
 }
 
-fn merge_script_into_module(
+struct SfcScriptMergeInput<'a> {
     kind: SfcKind,
-    script: &SfcScript,
-    combined: &mut ModuleInfo,
-    template_visible_imports: &mut FxHashSet<String>,
-    template_visible_bound_targets: &mut FxHashMap<String, String>,
+    script: &'a SfcScript,
+    combined: &'a mut ModuleInfo,
+    template_visible_imports: &'a mut FxHashSet<String>,
+    template_visible_bound_targets: &'a mut FxHashMap<String, String>,
+    props_return_binding: &'a mut Option<String>,
+    emit_return_binding: &'a mut Option<String>,
     need_complexity: bool,
-) {
-    if kind == SfcKind::Vue
-        && let Some(src) = &script.src
+}
+
+fn merge_script_into_module(input: &mut SfcScriptMergeInput<'_>) {
+    if input.kind == SfcKind::Vue
+        && let Some(src) = &input.script.src
     {
-        add_script_src_import(combined, src, script.src_span);
+        add_script_src_import(input.combined, src, input.script.src_span);
     }
 
     let allocator = Allocator::default();
-    let parser_return =
-        Parser::new(&allocator, &script.body, source_type_for_script(script)).parse();
+    let parser_return = Parser::new(
+        &allocator,
+        &input.script.body,
+        source_type_for_script(input.script),
+    )
+    .parse();
     let mut extractor = ModuleInfoExtractor::new();
     extractor.visit_program(&parser_return.program);
-    let extraction = ExtractionResult::contiguous(&script.body, script.byte_offset);
+    let extraction = ExtractionResult::contiguous(&input.script.body, input.script.byte_offset);
     extractor.remap_spans_with(|span| extraction.remap_span(span));
     extractor.resolve_typed_destructure_bindings();
 
-    let augmented_body = build_generic_attr_probe_source(script);
+    let augmented_body = build_generic_attr_probe_source(input.script);
     let empty_template_used = rustc_hash::FxHashSet::default();
     let (binding_usage, auto_import_candidates) = if let Some(augmented) = augmented_body.as_deref()
     {
         let augmented_return =
-            Parser::new(&allocator, augmented, source_type_for_script(script)).parse();
+            Parser::new(&allocator, augmented, source_type_for_script(input.script)).parse();
         (
             compute_import_binding_usage(
                 &augmented_return.program,
@@ -463,35 +547,89 @@ fn merge_script_into_module(
             semantic_usage.auto_import_candidates,
         )
     };
-    combined
+    input
+        .combined
         .unused_import_bindings
         .extend(binding_usage.unused.iter().cloned());
-    combined
+    input
+        .combined
         .type_referenced_import_bindings
         .extend(binding_usage.type_referenced.iter().cloned());
-    combined
+    input
+        .combined
         .value_referenced_import_bindings
         .extend(binding_usage.value_referenced.iter().cloned());
-    combined
+    input
+        .combined
         .auto_import_candidates
         .extend(auto_import_candidates);
-    if need_complexity {
-        combined.complexity.extend(translate_script_complexity(
-            script,
-            &parser_return.program,
-            &combined.line_offsets,
-        ));
+    if input.need_complexity {
+        input
+            .combined
+            .complexity
+            .extend(translate_script_complexity(
+                input.script,
+                &parser_return.program,
+                &input.combined.line_offsets,
+            ));
     }
 
-    if is_template_visible_script(kind, script) {
-        template_visible_imports.extend(
+    // Vue `<script setup>` `defineProps` harvesting for `unused-component-prop`.
+    // Spans returned by the harvest are relative to the script body; remap onto
+    // the SFC source via the script byte offset.
+    if input.kind == SfcKind::Vue && input.script.is_setup {
+        let harvest = crate::sfc_props::harvest_define_props(&parser_return.program);
+        if harvest.has_unharvestable_props {
+            input.combined.has_unharvestable_props = true;
+        }
+        if harvest.has_props_attrs_fallthrough {
+            input.combined.has_props_attrs_fallthrough = true;
+        }
+        if harvest.has_define_expose {
+            input.combined.has_define_expose = true;
+        }
+        if harvest.has_define_model {
+            input.combined.has_define_model = true;
+        }
+        if let Some(binding) = harvest.props_return_binding {
+            *input.props_return_binding = Some(binding);
+        }
+        for mut prop in harvest.props {
+            prop.span_start += input.script.byte_offset as u32;
+            input.combined.component_props.push(prop);
+        }
+
+        // `defineEmits` harvesting for `unused-component-emit`. Same span remap.
+        // `defineModel` creates implicit `update:x` emits, so a file with
+        // `defineModel` must abstain emits too (reuse the props-side flag).
+        let emit_harvest = crate::sfc_props::harvest_define_emits(&parser_return.program);
+        if emit_harvest.has_unharvestable_emits {
+            input.combined.has_unharvestable_emits = true;
+        }
+        if emit_harvest.has_dynamic_emit {
+            input.combined.has_dynamic_emit = true;
+        }
+        if emit_harvest.has_emit_whole_object_use {
+            input.combined.has_emit_whole_object_use = true;
+        }
+        if let Some(binding) = emit_harvest.emit_binding {
+            *input.emit_return_binding = Some(binding);
+        }
+        for mut emit in emit_harvest.emits {
+            emit.span_start += input.script.byte_offset as u32;
+            input.combined.component_emits.push(emit);
+        }
+    }
+
+    if is_template_visible_script(input.kind, input.script) {
+        input.template_visible_imports.extend(
             extractor
                 .imports
                 .iter()
                 .filter(|import| !import.local_name.is_empty())
                 .map(|import| import.local_name.clone()),
         );
-        template_visible_bound_targets.extend(
+        input.template_visible_bound_targets.extend(
             extractor
                 .binding_target_names()
                 .iter()
@@ -500,7 +638,7 @@ fn merge_script_into_module(
         );
     }
 
-    extractor.merge_into(combined);
+    extractor.merge_into(input.combined);
 }
 
 fn translate_script_complexity(
@@ -622,14 +760,94 @@ fn apply_template_usage(
     source: &str,
     template_visible_imports: &FxHashSet<String>,
     template_visible_bound_targets: &FxHashMap<String, String>,
+    props_return_binding: Option<&str>,
+    credit_load_data: bool,
     combined: &mut ModuleInfo,
 ) {
+    // Props are NOT imports, so the template scanner does not credit them by
+    // default. Thread the harvested prop names (and the `defineProps` return
+    // binding, so `props.<name>` template member accesses are emitted) in as an
+    // additional credited set alongside `template_visible_imports`. Crediting a
+    // prop name against an import is inert (no import binding shares the name),
+    // so the unused-import retain is unaffected.
+    let mut credited: FxHashSet<String> = template_visible_imports.clone();
+    // unused-load-data-key Primitive B: a SvelteKit route component
+    // (`+page.svelte` / `+layout.svelte`) receives a `data` prop populated by
+    // the route's `load()` return object. The prop is template-visible
+    // (`{data.x}`, `{#each data.items as i}`) but is neither an import nor a
+    // tracked binding, so the member-access scanner gates it out by default.
+    // Credit `data` as a recognized root so its template member accesses
+    // (`data.<key>`) are emitted for the cross-file load-data-key join. Gated to
+    // route components only (`credit_load_data`): a non-route component's
+    // `let { data } = $props()` is a different, parent-passed `data`, so
+    // crediting it as load data would be semantically wrong. Inert for every
+    // other detector unless a tracked export/instance is named `data` (mirrors
+    // Primitive A); the load-data-key join is the only consumer of `data.<key>`.
+    if credit_load_data {
+        credited.insert("data".to_string());
+    }
+    if !combined.component_props.is_empty() {
+        for prop in &combined.component_props {
+            // Credit both the declared name (Vue exposes props by name in the
+            // template) and the destructure local (a renamed prop is used via it).
+            credited.insert(prop.name.clone());
+            credited.insert(prop.local.clone());
+        }
+        // Vue's implicit `$props` whole-props object is always available in a
+        // template; credit `$props.<name>` member accesses too.
+        credited.insert("$props".to_string());
+        if let Some(binding) = props_return_binding {
+            credited.insert(binding.to_string());
+        }
+    }
+
     let template_usage = collect_template_usage_with_bound_targets(
         kind,
         source,
-        template_visible_imports,
+        &credited,
         template_visible_bound_targets,
     );
+
+    // A template reference credits `used_in_template`: either a bare prop name in
+    // `used_bindings` (destructured prop form, or template uses the bare name) OR
+    // a `<props>.<name>` / `$props.<name>` member access (the
+    // `const props = defineProps()` form and Vue's implicit `$props`).
+    if !combined.component_props.is_empty() {
+        let member_used: FxHashSet<&str> = template_usage
+            .member_accesses
+            .iter()
+            .filter(|access| {
+                access.object == "$props"
+                    || props_return_binding.is_some_and(|binding| access.object == binding)
+            })
+            .map(|access| access.member.as_str())
+            .collect();
+        for prop in &mut combined.component_props {
+            if template_usage.used_bindings.contains(&prop.name)
+                || template_usage.used_bindings.contains(&prop.local)
+                || member_used.contains(prop.name.as_str())
+            {
+                prop.used_in_template = true;
+            }
+        }
+    }
+
+    // A custom-named `defineProps` return spread as a whole object in the template
+    // (`const myProps = defineProps(); <Child v-bind="myProps" />`) consumes every
+    // prop opaquely; the literal `props`/`$props`/`$attrs` regex misses a custom
+    // name. The scanner records a bare `v-bind="myProps"` value as a used binding
+    // (not a whole-object use), so a bare reference to the return binding in either
+    // set means abstain on the whole file.
+    if let Some(binding) = props_return_binding
+        && (template_usage.used_bindings.contains(binding)
+            || template_usage
+                .whole_object_uses
+                .iter()
+                .any(|used| used == binding))
+    {
+        combined.has_props_attrs_fallthrough = true;
+    }
+
     combined
         .unused_import_bindings
         .retain(|binding| !template_usage.used_bindings.contains(binding));
@@ -647,6 +865,65 @@ fn apply_template_usage(
         names.sort_unstable();
         combined.auto_import_candidates.extend(names);
         combined.auto_import_candidates.dedup();
+    }
+}
+
+/// Credit emit events fired from the `<template>` (`@click="emit('close')"`,
+/// `@click="$emit('remove')"`, `:close="{ onClick: () => emit('close') }"`),
+/// which the script-only emit usage walk in `harvest_define_emits` cannot see.
+///
+/// Scans the template-only region (scripts/styles/comments masked) for
+/// [`TEMPLATE_EMIT_CALL_RE`]: a call whose callee is the harvested emit binding
+/// (`emit` / `emits` / whatever it was bound to) or the implicit `$emit` (always
+/// available in a Vue template regardless of `<script setup>` binding). A
+/// string-literal first arg credits the matching `ComponentEmit` as used; a
+/// non-literal first arg (a variable / template-literal) is a dynamic template
+/// emit whose event is unknowable, so the whole file abstains (`has_dynamic_emit`)
+/// to preserve the zero-FP doctrine.
+///
+/// Over-crediting is the safe direction (it only suppresses a finding), so a
+/// liberal raw-source scan is intentional here. The scan is byte-safe: the regex
+/// runs over the `&str` template and only reads captured-group text, never
+/// slicing at arbitrary byte offsets.
+fn apply_template_emit_usage(
+    source: &str,
+    emit_return_binding: Option<&str>,
+    combined: &mut ModuleInfo,
+) {
+    let masked = mask_non_markup_regions(source);
+    let mut used: FxHashSet<String> = FxHashSet::default();
+    let mut dynamic = false;
+
+    for caps in TEMPLATE_EMIT_CALL_RE.captures_iter(&masked) {
+        let Some(callee) = caps.get(1) else {
+            continue;
+        };
+        let callee = callee.as_str();
+        let is_emit_call =
+            callee == "$emit" || emit_return_binding.is_some_and(|binding| callee == binding);
+        if !is_emit_call {
+            continue;
+        }
+        if let Some(event) = caps.get(2).or_else(|| caps.get(3)) {
+            // String-literal first arg (single- or double-quoted): the event
+            // name. Credit it as used.
+            used.insert(event.as_str().to_string());
+        } else if caps.get(4).is_some() {
+            // Non-literal first arg (`$emit(someVar)`, `emit(\`x\`)`): the event
+            // cannot be known. Abstain on the whole file.
+            dynamic = true;
+        }
+    }
+
+    if dynamic {
+        combined.has_dynamic_emit = true;
+    }
+    if !used.is_empty() {
+        for emit in &mut combined.component_emits {
+            if used.contains(&emit.name) {
+                emit.used = true;
+            }
+        }
     }
 }
 

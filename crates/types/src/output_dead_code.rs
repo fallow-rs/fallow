@@ -41,8 +41,9 @@ use crate::results::{
     InvalidClientExport, MisconfiguredDependencyOverride, MisplacedDirective,
     MixedClientServerBarrel, PolicyViolation, PrivateTypeLeak, ReExportCycle, ReExportCycleKind,
     RouteCollision, TestOnlyDependency, TypeOnlyDependency, UnlistedDependency, UnprovidedInject,
-    UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry, UnusedDependency,
-    UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedMember,
+    UnrenderedComponent, UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry,
+    UnusedComponentEmit, UnusedComponentProp, UnusedDependency, UnusedDependencyOverride,
+    UnusedExport, UnusedFile, UnusedMember, UnusedServerAction,
 };
 
 /// Shared note for the `duplicate-exports` fix action. Mirrors the const used
@@ -923,6 +924,165 @@ impl UnprovidedInjectFinding {
         })];
         Self {
             inject,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for an [`UnusedServerAction`] finding. There is no safe
+/// auto-fix: the fix is binary but judgement-bearing (wire the action up to a
+/// consumer, or delete it). The only action is a line-level suppress.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedServerActionFinding {
+    /// The underlying finding.
+    #[serde(flatten)]
+    pub action: UnusedServerAction,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl UnusedServerActionFinding {
+    /// Build the wrapper from a raw [`UnusedServerAction`]. Emits only a
+    /// line-level suppress action: there is no safe auto-fix because the fix
+    /// (wire the action to a consumer or remove it) is a human decision.
+    #[must_use]
+    pub fn with_actions(action: UnusedServerAction) -> Self {
+        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
+            kind: SuppressLineKind::SuppressLine,
+            auto_fixable: false,
+            description: "Suppress with an inline comment above the line".to_string(),
+            comment: "// fallow-ignore-next-line unused-server-action".to_string(),
+            scope: None,
+        })];
+        Self {
+            action,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for an [`UnrenderedComponent`] finding. There is no safe
+/// auto-fix: the fix is binary but judgement-bearing (render the component
+/// somewhere, or delete the dead component). The only action is a line-level
+/// suppress.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnrenderedComponentFinding {
+    /// The underlying finding.
+    #[serde(flatten)]
+    pub component: UnrenderedComponent,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl UnrenderedComponentFinding {
+    /// Build the wrapper from a raw [`UnrenderedComponent`]. Emits only a
+    /// line-level suppress action: there is no safe auto-fix because the fix
+    /// (render the component or remove it) is a human decision.
+    #[must_use]
+    pub fn with_actions(component: UnrenderedComponent) -> Self {
+        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
+            kind: SuppressLineKind::SuppressLine,
+            auto_fixable: false,
+            description: "Suppress with an inline comment above the line".to_string(),
+            comment: "// fallow-ignore-next-line unrendered-component".to_string(),
+            scope: None,
+        })];
+        Self {
+            component,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for an [`UnusedComponentProp`] finding. There is no safe
+/// auto-fix: removing a declared prop is judgement-bearing (the prop may be part
+/// of a deliberately-stable public component API). The only action is a
+/// line-level suppress at the prop declaration.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedComponentPropFinding {
+    /// The underlying finding.
+    #[serde(flatten)]
+    pub prop: UnusedComponentProp,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl UnusedComponentPropFinding {
+    /// Build the wrapper from a raw [`UnusedComponentProp`]. Emits only a
+    /// line-level suppress action: there is no safe auto-fix because removing a
+    /// prop is a human decision (it may be part of a stable component API).
+    #[must_use]
+    pub fn with_actions(prop: UnusedComponentProp) -> Self {
+        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
+            kind: SuppressLineKind::SuppressLine,
+            auto_fixable: false,
+            description: "Suppress with an inline comment above the line".to_string(),
+            comment: "// fallow-ignore-next-line unused-component-prop".to_string(),
+            scope: None,
+        })];
+        Self {
+            prop,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for an [`UnusedComponentEmit`] finding. There is no safe
+/// auto-fix: removing a declared emit is judgement-bearing (the event may be
+/// part of a deliberately-stable public component API). The only action is a
+/// line-level suppress at the emit declaration.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedComponentEmitFinding {
+    /// The underlying finding.
+    #[serde(flatten)]
+    pub emit: UnusedComponentEmit,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl UnusedComponentEmitFinding {
+    /// Build the wrapper from a raw [`UnusedComponentEmit`]. Emits only a
+    /// line-level suppress action: there is no safe auto-fix because removing an
+    /// emit is a human decision (it may be part of a stable component API).
+    #[must_use]
+    pub fn with_actions(emit: UnusedComponentEmit) -> Self {
+        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
+            kind: SuppressLineKind::SuppressLine,
+            auto_fixable: false,
+            description: "Suppress with an inline comment above the line".to_string(),
+            comment: "// fallow-ignore-next-line unused-component-emit".to_string(),
+            scope: None,
+        })];
+        Self {
+            emit,
             actions,
             introduced: None,
         }

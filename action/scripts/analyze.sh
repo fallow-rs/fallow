@@ -582,7 +582,7 @@ case "$INPUT_COMMAND" in
   audit)           ISSUES=$(jq -r 'if (.attribution.gate // "new-only") == "all" then ((.summary.dead_code_issues // 0) + (.summary.complexity_findings // 0) + (.summary.duplication_clone_groups // 0)) else ((.attribution.dead_code_introduced // 0) + (.attribution.complexity_introduced // 0) + (.attribution.duplication_introduced // 0)) end' "$RESULTS_FILE") ;;
   security)        ISSUES=$(jq -r 'if .gate then (.gate.new_count // 0) else (.summary.security_findings // ((.security_findings // []) | length)) end' "$RESULTS_FILE") ;;
   fix)             ISSUES=$(jq -r '(.fixes | length)' "$RESULTS_FILE") ;;
-  "")              ISSUES=$(jq -r '((.check.total_issues // 0) + (.dupes.stats.clone_groups // 0) + (.health.summary.functions_above_threshold // 0) + ((.health.runtime_coverage.findings // []) | map(select(.verdict == "safe_to_delete" or .verdict == "review_required" or .verdict == "low_traffic")) | length))' "$RESULTS_FILE") ;;
+  "")              ISSUES=$(jq -r '((.check.total_issues // 0) + ((.dupes.clone_groups // []) | length) + (.health.summary.functions_above_threshold // 0) + ((.health.runtime_coverage.findings // []) | map(select(.verdict == "safe_to_delete" or .verdict == "review_required" or .verdict == "low_traffic")) | length))' "$RESULTS_FILE") ;;
 esac
 
 if ! [[ "$ISSUES" =~ ^[0-9]+$ ]]; then

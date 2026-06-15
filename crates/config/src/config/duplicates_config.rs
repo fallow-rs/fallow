@@ -98,15 +98,16 @@ pub struct DuplicatesConfig {
     #[serde(default)]
     pub cross_language: bool,
 
-    /// Exclude ES `import` declarations from clone detection.
+    /// Exclude module-wiring declarations from clone detection.
     ///
-    /// Defaults to `true`: token-identical sorted import blocks are a structural
-    /// property of well-formatted code, not copy-paste, so they should not
-    /// surface as clone groups. Set to `false` to count import blocks again.
-    /// When enabled, all `import` statements (value imports, type imports, and
-    /// side-effect imports) are stripped from the token stream before clone
-    /// detection. Only affects ES `import` declarations; CommonJS `require()`
-    /// calls and `export ... from` re-export blocks are still counted.
+    /// Defaults to `true`: token-identical module wiring is a structural
+    /// property of well-formatted code, not copy-paste, so it should not
+    /// surface as clone groups. Set to `false` to count module wiring again.
+    /// When enabled, ES imports, re-export declarations, and top-level static
+    /// CommonJS `require("...")` binding declarations are stripped from the
+    /// token stream before clone detection. Dynamic imports, side-effect
+    /// `require()` calls, nested `require()` calls, dynamic require arguments,
+    /// and mixed declarations are still counted.
     #[serde(default = "default_true")]
     pub ignore_imports: bool,
 

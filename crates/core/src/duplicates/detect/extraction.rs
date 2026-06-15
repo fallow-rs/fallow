@@ -14,15 +14,22 @@ pub(super) struct RawGroup {
 /// minimum LCP value is >= `min_tokens`, and the interval contains suffixes
 /// from at least two different positions (cross-file or non-overlapping
 /// same-file).
-pub(super) fn extract_clone_groups(
-    sa: &[usize],
-    lcp: &[usize],
-    file_of: &[usize],
-    file_offsets: &[usize],
-    min_tokens: usize,
-    files: &[FileData],
-    focus_file_ids: Option<&[bool]>,
-) -> Vec<RawGroup> {
+pub(super) struct CloneGroupExtractionInput<'a> {
+    pub(super) sa: &'a [usize],
+    pub(super) lcp: &'a [usize],
+    pub(super) file_of: &'a [usize],
+    pub(super) file_offsets: &'a [usize],
+    pub(super) min_tokens: usize,
+    pub(super) files: &'a [FileData],
+    pub(super) focus_file_ids: Option<&'a [bool]>,
+}
+
+pub(super) fn extract_clone_groups(input: &CloneGroupExtractionInput<'_>) -> Vec<RawGroup> {
+    let sa = input.sa;
+    let lcp = input.lcp;
+    let file_of = input.file_of;
+    let file_offsets = input.file_offsets;
+    let files = input.files;
     let n = sa.len();
     if n < 2 {
         return vec![];
@@ -30,7 +37,9 @@ pub(super) fn extract_clone_groups(
 
     let mut stack: Vec<(usize, usize)> = Vec::new();
     let mut groups: Vec<RawGroup> = Vec::new();
-    let focus_prefix = focus_file_ids.map(|ids| build_focus_prefix(sa, file_of, ids));
+    let focus_prefix = input
+        .focus_file_ids
+        .map(|ids| build_focus_prefix(sa, file_of, ids));
 
     #[expect(
         clippy::needless_range_loop,
@@ -47,7 +56,7 @@ pub(super) fn extract_clone_groups(
             stack.pop();
             start = top_start;
 
-            if top_lcp >= min_tokens {
+            if top_lcp >= input.min_tokens {
                 let interval_begin = start - 1;
                 let interval_end = i;
                 if let Some(prefix) = focus_prefix.as_deref()

@@ -231,6 +231,73 @@ fn ignore_imports_removes_import_only_clones() {
     );
 }
 
+#[test]
+fn ignore_imports_removes_module_wiring_clones() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let src = dir.path().join("src");
+    for rel in ["a", "b", "c", "d"] {
+        std::fs::create_dir_all(src.join(rel)).expect("create source dir");
+    }
+
+    let re_exports = "export { alpha } from './alpha';\n\
+                      export { beta } from './beta';\n\
+                      export * as gamma from './gamma';\n\
+                      export * from './delta';\n";
+    let requires = "const alpha = require('./alpha');\n\
+                    const { beta } = require('./beta');\n\
+                    var gamma = require('./gamma');\n\
+                    let delta = require('./delta');\n";
+
+    let files = [
+        ("src/a/index.ts", re_exports),
+        ("src/b/index.ts", re_exports),
+        ("src/c/index.js", requires),
+        ("src/d/index.js", requires),
+    ];
+    for (rel, source) in files {
+        std::fs::write(dir.path().join(rel), source).expect("write fixture file");
+    }
+    std::fs::write(dir.path().join("package.json"), r#"{"name": "test"}"#)
+        .expect("write package.json");
+
+    let discovered: Vec<_> = files
+        .into_iter()
+        .enumerate()
+        .map(|(idx, (rel, source))| DiscoveredFile {
+            id: FileId(idx as u32),
+            path: dir.path().join(rel),
+            size_bytes: source.len() as u64,
+        })
+        .collect();
+
+    let config_with_wiring = fallow_core::duplicates::DuplicatesConfig {
+        min_tokens: 5,
+        min_lines: 3,
+        ignore_imports: false,
+        ..Default::default()
+    };
+    let report_with =
+        fallow_core::duplicates::find_duplicates(dir.path(), &discovered, &config_with_wiring);
+    assert!(
+        report_with.clone_groups.len() >= 2,
+        "With ignore_imports=false, re-export and require wiring blocks should be detected as clones"
+    );
+
+    let config_ignore = fallow_core::duplicates::DuplicatesConfig {
+        min_tokens: 5,
+        min_lines: 3,
+        ignore_imports: true,
+        ..Default::default()
+    };
+    let report_without =
+        fallow_core::duplicates::find_duplicates(dir.path(), &discovered, &config_ignore);
+    assert!(
+        report_without.clone_groups.is_empty(),
+        "With ignore_imports=true, module-wiring clones should be eliminated, but found {} groups",
+        report_without.clone_groups.len()
+    );
+}
+
 fn default_ignore_fixture_files(root: &std::path::Path) -> Vec<DiscoveredFile> {
     ["src/foo.ts", "lib/foo.js", ".next/static/chunks/foo.js"]
         .into_iter()

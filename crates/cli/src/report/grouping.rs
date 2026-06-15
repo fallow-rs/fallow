@@ -349,6 +349,26 @@ where
                 .unprovided_injects
                 .push(item.clone());
         }
+        for item in &results.unrendered_components {
+            self.entry_for_path(&item.component.path)
+                .unrendered_components
+                .push(item.clone());
+        }
+        for item in &results.unused_component_props {
+            self.entry_for_path(&item.prop.path)
+                .unused_component_props
+                .push(item.clone());
+        }
+        for item in &results.unused_component_emits {
+            self.entry_for_path(&item.emit.path)
+                .unused_component_emits
+                .push(item.clone());
+        }
+        for item in &results.unused_server_actions {
+            self.entry_for_path(&item.action.path)
+                .unused_server_actions
+                .push(item.clone());
+        }
         for item in &results.stale_suppressions {
             self.entry_for_path(&item.path)
                 .stale_suppressions

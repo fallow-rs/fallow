@@ -339,6 +339,58 @@ expression: redact_sarif_version(&json_str)
               }
             },
             {
+              "id": "fallow/unrendered-component",
+              "shortDescription": {
+                "text": "A Vue / Svelte component is reachable through a barrel but rendered nowhere"
+              },
+              "fullDescription": {
+                "text": "A Vue or Svelte single-file component (the default export of a `.vue` / `.svelte` file) is reachable in the module graph (a barrel re-exports it) but instantiated NOWHERE in the project: no `<Tag>`, no `:is` / `this=` binding, no `components` / `app.component` registration, no `h()` / auto-import use, and no script value-read. It survives unused-file (the barrel keeps it reachable) and unused-export (the re-export counts as a use), yet no file actually renders it. To fix: render the component somewhere, or delete it and drop the dead re-export. Defaults to warn, not error: a component can be rendered reflectively (a dynamic `<component :is>` resolved from a non-literal value), so analyzer confidence is lower. Components that are themselves entry points (route pages, layouts, `App.vue`) and components re-exported from a non-private package entry point are abstained."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unrendered-components",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "fallow/unused-component-prop",
+              "shortDescription": {
+                "text": "A Vue <script setup> defineProps prop is referenced nowhere in its own component"
+              },
+              "fullDescription": {
+                "text": "A Vue `<script setup>` defineProps declared prop that is referenced nowhere in its own component (neither script nor template). vue-tsc / Volar check caller-side prop correctness, not this in-component dead-input direction. Conservative: abstains on `$attrs` fallthrough, whole-object props use, defineExpose, defineModel, and imported prop-type aliases. Default warn; suppress or remove the prop."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-component-props",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "fallow/unused-component-emit",
+              "shortDescription": {
+                "text": "A Vue <script setup> defineEmits event is emitted nowhere in its own component"
+              },
+              "fullDescription": {
+                "text": "A Vue `<script setup>` defineEmits declared event that is emitted nowhere in its own component (no `emit('<name>')` call). vue-tsc / Volar check caller-side emit correctness, not this in-component dead-output direction. Conservative: abstains on `$attrs` fallthrough, whole-object emit use, defineExpose, defineModel, and imported emit-type aliases. Default warn; suppress or remove the emit."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-component-emits",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "fallow/unused-server-action",
+              "shortDescription": {
+                "text": "A Next.js Server Action exported from a \"use server\" file is referenced by no code in the project"
+              },
+              "fullDescription": {
+                "text": "A Next.js Server Action (an export of a `\"use server\"` file) that no code in the project references: no import-and-call, no `action={fn}` JSX binding, no `<form action={fn}>`. This is the cross-graph \"declared but zero consumers\" direction, reclassified out of `unused-export` for `\"use server\"` files so the finding carries the action-specific signal. eslint-plugin-next is single-file and cannot see cross-file usage. It does NOT mean the endpoint is unreachable: Next.js still registers a generated action id, so it stays POST-able; it means no project code references it (likely forgotten or dead, and a candidate for removal to shrink surface area). Default warn; wire the action to a consumer or remove it. The check runs only when the project declares `next`."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-server-actions",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
               "id": "fallow/route-collision",
               "shortDescription": {
                 "text": "Two or more Next.js App Router route files resolve to the same URL"

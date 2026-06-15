@@ -4975,6 +4975,34 @@ fn namespace_import_destructuring_with_rest_marks_whole() {
 }
 
 #[test]
+fn data_prop_destructuring_emits_member_accesses() {
+    // Primitive A (unused-load-data-key): `const { user, posts } = data` off the
+    // SvelteKit `data` prop emits `data.<key>` member accesses for the detector.
+    let info = parse("const { user, posts } = data;");
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "data" && a.member == "user")
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "data" && a.member == "posts")
+    );
+}
+
+#[test]
+fn data_prop_destructuring_with_rest_marks_whole() {
+    // A rest element consumes the whole `data` object opaquely: abstain.
+    let info = parse("const { user, ...rest } = data;");
+    assert!(info.whole_object_uses.contains(&"data".to_string()));
+    assert!(
+        !info.member_accesses.iter().any(|a| a.object == "data"),
+        "rest destructure must not emit per-key accesses"
+    );
+}
+
+#[test]
 fn require_namespace_destructuring() {
     let info = parse("const mod = require('./mod');\nconst { x, y } = mod;");
     assert!(

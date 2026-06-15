@@ -61,6 +61,14 @@ pub struct CheckCounts {
     #[serde(default)]
     pub unprovided_injects: usize,
     #[serde(default)]
+    pub unrendered_components: usize,
+    #[serde(default)]
+    pub unused_component_props: usize,
+    #[serde(default)]
+    pub unused_component_emits: usize,
+    #[serde(default)]
+    pub unused_server_actions: usize,
+    #[serde(default)]
     pub unresolved_imports: usize,
     #[serde(default)]
     pub unlisted_dependencies: usize,
@@ -99,6 +107,10 @@ impl CheckCounts {
             unused_class_members: results.unused_class_members.len(),
             unused_store_members: results.unused_store_members.len(),
             unprovided_injects: results.unprovided_injects.len(),
+            unrendered_components: results.unrendered_components.len(),
+            unused_component_props: results.unused_component_props.len(),
+            unused_component_emits: results.unused_component_emits.len(),
+            unused_server_actions: results.unused_server_actions.len(),
             unresolved_imports: results.unresolved_imports.len(),
             unlisted_dependencies: results.unlisted_dependencies.len(),
             duplicate_exports: results.duplicate_exports.len(),
@@ -132,6 +144,18 @@ impl CheckCounts {
             // `fallow_config::RegressionBaseline` has no `unprovided_injects`
             // field; default to 0 until the config baseline schema gains one.
             unprovided_injects: 0,
+            // `fallow_config::RegressionBaseline` has no `unrendered_components`
+            // field; default to 0 until the config baseline schema gains one.
+            unrendered_components: 0,
+            // `fallow_config::RegressionBaseline` has no `unused_component_props`
+            // field; default to 0 until the config baseline schema gains one.
+            unused_component_props: 0,
+            // `fallow_config::RegressionBaseline` has no `unused_component_emits`
+            // field; default to 0 until the config baseline schema gains one.
+            unused_component_emits: 0,
+            // `fallow_config::RegressionBaseline` has no `unused_server_actions`
+            // field; default to 0 until the config baseline schema gains one.
+            unused_server_actions: 0,
             unresolved_imports: b.unresolved_imports,
             unlisted_dependencies: b.unlisted_dependencies,
             duplicate_exports: b.duplicate_exports,
@@ -192,6 +216,10 @@ impl CheckCounts {
         push_delta!(unused_class_members);
         push_delta!(unused_store_members);
         push_delta!(unprovided_injects);
+        push_delta!(unrendered_components);
+        push_delta!(unused_component_props);
+        push_delta!(unused_component_emits);
+        push_delta!(unused_server_actions);
         push_delta!(unresolved_imports);
         push_delta!(unlisted_dependencies);
         push_delta!(duplicate_exports);
@@ -274,6 +302,10 @@ mod tests {
             unused_class_members: 0,
             unused_store_members: 0,
             unprovided_injects: 0,
+            unrendered_components: 0,
+            unused_component_props: 0,
+            unused_component_emits: 0,
+            unused_server_actions: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 0,
             duplicate_exports: 0,
@@ -317,6 +349,10 @@ mod tests {
                 unused_class_members: 1,
                 unused_store_members: 0,
                 unprovided_injects: 0,
+                unrendered_components: 0,
+                unused_component_props: 0,
+                unused_component_emits: 0,
+                unused_server_actions: 0,
                 unresolved_imports: 0,
                 unlisted_dependencies: 1,
                 duplicate_exports: 0,
@@ -355,6 +391,10 @@ mod tests {
             unused_class_members: 1,
             unused_store_members: 0,
             unprovided_injects: 0,
+            unrendered_components: 0,
+            unused_component_props: 0,
+            unused_component_emits: 0,
+            unused_server_actions: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 1,
             duplicate_exports: 0,
@@ -400,6 +440,10 @@ mod tests {
             unused_class_members: 0,
             unused_store_members: 0,
             unprovided_injects: 0,
+            unrendered_components: 0,
+            unused_component_props: 0,
+            unused_component_emits: 0,
+            unused_server_actions: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 0,
             duplicate_exports: 0,
@@ -432,6 +476,10 @@ mod tests {
             unused_class_members: 0,
             unused_store_members: 0,
             unprovided_injects: 0,
+            unrendered_components: 0,
+            unused_component_props: 0,
+            unused_component_emits: 0,
+            unused_server_actions: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 0,
             duplicate_exports: 0,
@@ -462,6 +510,10 @@ mod tests {
             unused_class_members: 0,
             unused_store_members: 0,
             unprovided_injects: 0,
+            unrendered_components: 0,
+            unused_component_props: 0,
+            unused_component_emits: 0,
+            unused_server_actions: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 0,
             duplicate_exports: 0,
@@ -486,6 +538,10 @@ mod tests {
             unused_class_members: 1,
             unused_store_members: 1,
             unprovided_injects: 1,
+            unrendered_components: 1,
+            unused_component_props: 0,
+            unused_component_emits: 0,
+            unused_server_actions: 0,
             unresolved_imports: 1,
             unlisted_dependencies: 1,
             duplicate_exports: 1,
@@ -499,7 +555,7 @@ mod tests {
             policy_violations: 0,
         };
         let deltas = baseline.deltas(&current);
-        assert_eq!(deltas.len(), 17);
+        assert_eq!(deltas.len(), 18);
         for (_, d) in &deltas {
             assert_eq!(*d, 1);
         }
@@ -519,6 +575,10 @@ mod tests {
             unused_class_members: 0,
             unused_store_members: 0,
             unprovided_injects: 0,
+            unrendered_components: 0,
+            unused_component_props: 0,
+            unused_component_emits: 0,
+            unused_server_actions: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 0,
             duplicate_exports: 0,

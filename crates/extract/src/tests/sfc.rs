@@ -1450,3 +1450,196 @@ type Local = UseTypeOnly;
             .contains(&"localOnly".to_string())
     );
 }
+
+// unused-load-data-key Primitive B: SvelteKit route components credit the `data`
+// prop as a template-visible root so `{data.x}` / `{#each data.items as i}`
+// markup reads emit `data.<key>` member accesses for the cross-file join.
+
+#[test]
+fn sveltekit_data_prop_template_member_access_in_page_svelte() {
+    let info = parse_sfc(
+        r#"
+<script lang="ts">
+export let data;
+</script>
+<h1>{data.title}</h1>
+<p>{data.user.name}</p>
+"#,
+        "src/routes/+page.svelte",
+    );
+
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "data" && access.member == "title"),
+        "template `data.title` should be recorded, got: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "data" && access.member == "user"),
+        "template `data.user` (nested) should record the first member, got: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn sveltekit_data_prop_each_block_member_access_in_page_svelte() {
+    let info = parse_sfc(
+        r#"
+<script lang="ts">
+export let data;
+</script>
+{#each data.items as item}
+  <li>{item}</li>
+{/each}
+"#,
+        "src/routes/blog/+page.svelte",
+    );
+
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "data" && access.member == "items"),
+        "`{{#each data.items as item}}` should record `data.items`, got: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn sveltekit_data_prop_credited_in_layout_svelte() {
+    let info = parse_sfc(
+        r#"
+<script lang="ts">
+export let data;
+</script>
+<nav>{data.menu}</nav>
+"#,
+        "src/routes/+layout.svelte",
+    );
+
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "data" && access.member == "menu"),
+        "`+layout.svelte` should credit `data.menu`, got: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn sveltekit_data_prop_credited_in_layout_reset_page() {
+    // Layout-reset route components (`+page@.svelte`, `+page@named.svelte`,
+    // `+page@(group).svelte`, `+layout@named.svelte`) still receive the `load()`
+    // `data` prop, so they must be credited too.
+    for filename in [
+        "src/routes/marketing/+page@.svelte",
+        "src/routes/marketing/+layout@named.svelte",
+        "src/routes/promo/+page@(checkout).svelte",
+    ] {
+        let info = parse_sfc(
+            r#"
+<script lang="ts">
+export let data;
+</script>
+<h1>{data.title}</h1>
+"#,
+            filename,
+        );
+
+        assert!(
+            info.member_accesses
+                .iter()
+                .any(|access| access.object == "data" && access.member == "title"),
+            "layout-reset route `{filename}` should credit `data.title`, got: {:?}",
+            info.member_accesses
+        );
+    }
+}
+
+#[test]
+fn sveltekit_data_credit_excludes_error_and_non_route_plus_files() {
+    // `+error.svelte` receives `$page.error`, not the `load()` `data` prop, and a
+    // `+pageHelper.svelte` is not a SvelteKit route file, so neither is credited.
+    for filename in ["src/routes/+error.svelte", "src/routes/+pageHelper.svelte"] {
+        let info = parse_sfc(
+            r#"
+<script lang="ts">
+export let data;
+</script>
+<h1>{data.title}</h1>
+"#,
+            filename,
+        );
+
+        assert!(
+            !info
+                .member_accesses
+                .iter()
+                .any(|access| access.object == "data"),
+            "`{filename}` must not credit `data.*`, got: {:?}",
+            info.member_accesses
+        );
+    }
+}
+
+#[test]
+fn sveltekit_data_prop_not_credited_in_non_route_svelte() {
+    // A non-route component's `data` is a parent-passed prop, NOT load() data, so
+    // crediting it as load data would be semantically wrong. Route-narrowing keeps
+    // the credit off ordinary `.svelte` files.
+    let info = parse_sfc(
+        r#"
+<script lang="ts">
+let { data } = $props();
+</script>
+<h1>{data.title}</h1>
+"#,
+        "src/lib/Card.svelte",
+    );
+
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|access| access.object == "data"),
+        "non-route `Card.svelte` must not credit `data.*`, got: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn sveltekit_page_store_data_key_recovered_in_script_and_template() {
+    // unused-load-data-key Primitive C cross-context contract: a SvelteKit global
+    // page-store `data` read recovers the nested `page.data.<key>` member access in
+    // BOTH the component `<script>` (Svelte 5 `$app/state`) and the markup
+    // (`{$page.data.X}` Svelte 4 store / `{page.data.X}` Svelte 5 rune). The script
+    // side already emitted the dotted object via the visitor's recursive
+    // member-name builder; this locks that contract and the template recovery.
+    let info = parse_sfc(
+        r#"
+<script lang="ts">
+import { page } from '$app/state';
+const id = page.data.session;
+</script>
+<h1>{page.data.title}</h1>
+"#,
+        "src/lib/Header.svelte",
+    );
+
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "page.data" && a.member == "session"),
+        "script `page.data.session` should be recorded, got: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "page.data" && a.member == "title"),
+        "template `page.data.title` should be recovered, got: {:?}",
+        info.member_accesses
+    );
+}

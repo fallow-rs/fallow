@@ -149,6 +149,52 @@ pub struct ModuleInfo {
     /// inject findings project-wide when any reachable module sets this flag.
     /// Mirrors the spread-return whole-object abstain used for Pinia stores.
     pub has_dynamic_provide: bool,
+    /// Local names of import bindings that ARE referenced somewhere in this file
+    /// (script value/type position OR template/markup). The complement of
+    /// `unused_import_bindings` among `imports`. Derived in
+    /// `release_resolution_payload` (where both `imports` and
+    /// `unused_import_bindings` are still present) so it survives the release and
+    /// is readable by the analyze layer; it is never cached (recomputed on every
+    /// cache load). Consumed by the `unrendered-component` detector to credit a
+    /// Vue/Svelte SFC that some file actually imports-and-uses, distinguishing it
+    /// from a component reachable only through a barrel re-export.
+    pub referenced_import_bindings: Vec<String>,
+    /// Vue `<script setup>` `defineProps` declared props. Consumed by the
+    /// `unused-component-prop` detector to flag a prop referenced nowhere in its
+    /// own SFC. Each entry carries `used_in_script` / `used_in_template`.
+    pub component_props: Vec<ComponentProp>,
+    /// `true` when the template spreads the whole props/attrs object
+    /// (`v-bind="$attrs"` / `v-bind="$props"` / `v-bind="props"`) or the
+    /// `defineProps` return is destructured with a rest element. Either form can
+    /// consume a prop indirectly, so the detector abstains on the whole file.
+    pub has_props_attrs_fallthrough: bool,
+    /// `true` when the SFC calls `defineExpose(...)`. A prop may be re-exposed,
+    /// so the detector conservatively abstains on the whole file.
+    pub has_define_expose: bool,
+    /// `true` when the SFC calls `defineModel(...)`. Two-way model props are out
+    /// of scope for v1, so the detector abstains on the whole file.
+    pub has_define_model: bool,
+    /// `true` when `defineProps` was called with an unharvestable argument (a
+    /// type-reference type argument such as `defineProps<Props>()` whose names
+    /// require cross-file type resolution). The detector abstains on the whole
+    /// file so a prop is never falsely flagged.
+    pub has_unharvestable_props: bool,
+    /// Vue `<script setup>` `defineEmits` declared events. Consumed by the
+    /// `unused-component-emit` detector to flag an event emitted nowhere in its
+    /// own SFC. Each entry carries `used`.
+    pub component_emits: Vec<ComponentEmit>,
+    /// `true` when `defineEmits` was called with an unharvestable argument (a
+    /// type-reference type argument such as `defineEmits<MyEmits>()`, a
+    /// non-literal runtime form, or an unbound `defineEmits([...])`). The
+    /// detector abstains on the whole file so an emit is never falsely flagged.
+    pub has_unharvestable_emits: bool,
+    /// `true` when an `emit(<nonLiteral>)` call was seen (the emitted event name
+    /// cannot be known statically). The detector abstains on the whole file.
+    pub has_dynamic_emit: bool,
+    /// `true` when the `defineEmits` return binding was used as a WHOLE value
+    /// (passed to a function, returned, or spread), which can emit any event
+    /// opaquely. The detector abstains on the whole file.
+    pub has_emit_whole_object_use: bool,
 }
 
 impl ModuleInfo {
@@ -158,6 +204,19 @@ impl ModuleInfo {
     /// and hash drift checks, while dropping vectors that otherwise duplicate
     /// data owned by `ResolvedModule` or already credited into the module graph.
     pub fn release_resolution_payload(&mut self) {
+        // Derive the referenced-binding set BEFORE releasing `unused_import_bindings`:
+        // the analyze-layer `unrendered-component` detector needs "which imports are
+        // actually used" but runs after this release, so capture the compact
+        // complement here. Skip empty local names (side-effect imports).
+        self.referenced_import_bindings = self
+            .imports
+            .iter()
+            .map(|import| import.local_name.clone())
+            .filter(|name| !name.is_empty() && !self.unused_import_bindings.contains(name))
+            .collect();
+        self.referenced_import_bindings.sort_unstable();
+        self.referenced_import_bindings.dedup();
+
         Self::release_vec(&mut self.dynamic_imports);
         Self::release_vec(&mut self.require_calls);
         Self::release_vec(&mut self.package_path_references);
@@ -1165,6 +1224,48 @@ pub struct DiKeySite {
     pub span_start: u32,
 }
 
+/// A Vue `<script setup>` `defineProps` declared prop, harvested from the
+/// runtime object form (`defineProps({ foo: {...} })`) or the inline TS literal
+/// form (`defineProps<{ foo: T }>()`). `used_in_script` / `used_in_template`
+/// are set during extraction; the `unused-component-prop` detector flags a prop
+/// where neither is true. See `harvest_define_props` in `sfc.rs`.
+#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode)]
+pub struct ComponentProp {
+    /// The declared prop name.
+    pub name: String,
+    /// The template/script-visible local binding name: the destructure alias for
+    /// `const { name: alias } = defineProps()`, otherwise the prop name itself.
+    /// A renamed prop is read through this local, so usage must be checked against
+    /// it, not the declared name.
+    pub local: String,
+    /// Start byte offset of the prop declaration (anchors the finding).
+    pub span_start: u32,
+    /// Whether this prop is referenced in the component's `<script>` (a
+    /// destructured local binding with a resolved reference, or a `props.<name>`
+    /// member access).
+    pub used_in_script: bool,
+    /// Whether this prop name is referenced in the component's `<template>`.
+    /// Set by `apply_template_usage` when the template scanner credits the name.
+    pub used_in_template: bool,
+}
+
+/// A Vue `<script setup>` `defineEmits` declared event, harvested from the type
+/// tuple-call form (`defineEmits<{ (e: 'foo'): void }>()`), the type object form
+/// (`defineEmits<{ foo: [x: string] }>()`), or the runtime array form
+/// (`defineEmits(['foo'])`). `used` is set during extraction when the bound emit
+/// name is called as `emit('<name>')`. The `unused-component-emit` detector flags
+/// an event where `used` is false. See `harvest_define_emits` in `sfc_props.rs`.
+#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode, PartialEq, Eq)]
+pub struct ComponentEmit {
+    /// The declared emit event name.
+    pub name: String,
+    /// Start byte offset of the emit declaration (anchors the finding).
+    pub span_start: u32,
+    /// Whether this event is emitted via `emit('<name>')` somewhere in the
+    /// component's `<script>`.
+    pub used: bool,
+}
+
 #[expect(
     clippy::trivially_copy_pass_by_ref,
     reason = "serde serialize_with requires &T"
@@ -1251,7 +1352,7 @@ const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 216);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 864);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 944);
 
 /// A re-export declaration.
 #[derive(Debug, Clone)]
@@ -1355,6 +1456,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "exhaustive field-by-field construction + release assertions for every ModuleInfo field"
+    )]
     fn release_resolution_payload_drops_copied_vectors_only() {
         let mut module = ModuleInfo {
             file_id: FileId(7),
@@ -1474,6 +1579,16 @@ mod tests {
             misplaced_directives: Vec::new(),
             di_key_sites: Vec::new(),
             has_dynamic_provide: false,
+            referenced_import_bindings: Vec::new(),
+            component_props: Vec::new(),
+            has_props_attrs_fallthrough: false,
+            has_define_expose: false,
+            has_define_model: false,
+            has_unharvestable_props: false,
+            component_emits: Vec::new(),
+            has_unharvestable_emits: false,
+            has_dynamic_emit: false,
+            has_emit_whole_object_use: false,
         };
 
         module.release_resolution_payload();
@@ -1505,6 +1620,10 @@ mod tests {
         assert_released!(module.value_referenced_import_bindings);
         assert_released!(module.namespace_object_aliases);
         assert_released!(module.auto_import_candidates);
+        assert_eq!(
+            module.referenced_import_bindings,
+            vec!["childProcess".to_string()]
+        );
     }
 
     #[test]

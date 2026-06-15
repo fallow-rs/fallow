@@ -9,9 +9,10 @@ use fallow_core::results::{
     EmptyCatalogGroupFinding, InvalidClientExport, MisconfiguredDependencyOverrideFinding,
     MisplacedDirective, MixedClientServerBarrel, PolicyViolation, PolicyViolationSeverity,
     PrivateTypeLeak, RouteCollision, StaleSuppression, TestOnlyDependency, TypeOnlyDependency,
-    UnlistedDependencyFinding, UnprovidedInject, UnresolvedCatalogReferenceFinding,
-    UnresolvedImport, UnusedCatalogEntryFinding, UnusedDependency, UnusedDependencyOverrideFinding,
-    UnusedExport, UnusedFile, UnusedMember,
+    UnlistedDependencyFinding, UnprovidedInject, UnrenderedComponent,
+    UnresolvedCatalogReferenceFinding, UnresolvedImport, UnusedCatalogEntryFinding,
+    UnusedComponentEmit, UnusedComponentProp, UnusedDependency, UnusedDependencyOverrideFinding,
+    UnusedExport, UnusedFile, UnusedMember, UnusedServerAction,
 };
 use rustc_hash::FxHashMap;
 
@@ -578,6 +579,82 @@ fn sarif_unprovided_inject_fields(
     }
 }
 
+fn sarif_unrendered_component_fields(
+    component: &UnrenderedComponent,
+    root: &Path,
+    level: &'static str,
+) -> SarifFields {
+    SarifFields {
+        rule_id: "fallow/unrendered-component",
+        level,
+        message: format!(
+            "component \"{}\" is reachable but rendered nowhere in this project; render it somewhere or remove it",
+            component.component_name
+        ),
+        uri: relative_uri(&component.path, root),
+        region: Some((component.line, component.col + 1)),
+        source_path: Some(component.path.clone()),
+        properties: None,
+    }
+}
+
+fn sarif_unused_component_prop_fields(
+    prop: &UnusedComponentProp,
+    root: &Path,
+    level: &'static str,
+) -> SarifFields {
+    SarifFields {
+        rule_id: "fallow/unused-component-prop",
+        level,
+        message: format!(
+            "prop \"{}\" is declared but referenced nowhere inside component \"{}\"; remove it or use it",
+            prop.prop_name, prop.component_name
+        ),
+        uri: relative_uri(&prop.path, root),
+        region: Some((prop.line, prop.col + 1)),
+        source_path: Some(prop.path.clone()),
+        properties: None,
+    }
+}
+
+fn sarif_unused_component_emit_fields(
+    emit: &UnusedComponentEmit,
+    root: &Path,
+    level: &'static str,
+) -> SarifFields {
+    SarifFields {
+        rule_id: "fallow/unused-component-emit",
+        level,
+        message: format!(
+            "emit \"{}\" is declared but emitted nowhere inside component \"{}\"; remove it or emit it",
+            emit.emit_name, emit.component_name
+        ),
+        uri: relative_uri(&emit.path, root),
+        region: Some((emit.line, emit.col + 1)),
+        source_path: Some(emit.path.clone()),
+        properties: None,
+    }
+}
+
+fn sarif_unused_server_action_fields(
+    action: &UnusedServerAction,
+    root: &Path,
+    level: &'static str,
+) -> SarifFields {
+    SarifFields {
+        rule_id: "fallow/unused-server-action",
+        level,
+        message: format!(
+            "server action \"{}\" is exported from a \"use server\" file but no code in this project references it; wire it to a consumer or remove it",
+            action.action_name
+        ),
+        uri: relative_uri(&action.path, root),
+        region: Some((action.line, action.col + 1)),
+        source_path: Some(action.path.clone()),
+        properties: None,
+    }
+}
+
 fn sarif_route_collision_fields(
     collision: &RouteCollision,
     root: &Path,
@@ -986,6 +1063,26 @@ fn sarif_graph_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
             rules.unprovided_injects,
         ),
         (
+            "fallow/unrendered-component",
+            "A Vue / Svelte component reachable through a barrel but rendered nowhere in the project",
+            rules.unrendered_components,
+        ),
+        (
+            "fallow/unused-component-prop",
+            "A Vue <script setup> defineProps prop referenced nowhere inside its own component",
+            rules.unused_component_props,
+        ),
+        (
+            "fallow/unused-component-emit",
+            "A Vue <script setup> defineEmits event emitted nowhere inside its own component",
+            rules.unused_component_emits,
+        ),
+        (
+            "fallow/unused-server-action",
+            "A Next.js Server Action exported from a \"use server\" file that no code in the project references",
+            rules.unused_server_actions,
+        ),
+        (
             "fallow/route-collision",
             "Two or more Next.js App Router route files resolve to the same URL",
             rules.route_collision,
@@ -1270,6 +1367,54 @@ fn push_misc_sarif_results(
     }
 }
 
+/// Push the component-contract SARIF results (`unused-component-prop` and
+/// `unused-component-emit`). Extracted from `push_graph_sarif_results` to keep
+/// that function under the unit-size lint.
+fn push_component_contract_sarif_results(
+    sarif_results: &mut Vec<serde_json::Value>,
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+    snippets: &mut SourceSnippetCache,
+) {
+    push_sarif_results(
+        sarif_results,
+        &results.unused_component_props,
+        snippets,
+        |p| {
+            sarif_unused_component_prop_fields(
+                &p.prop,
+                root,
+                severity_to_sarif_level(rules.unused_component_props),
+            )
+        },
+    );
+    push_sarif_results(
+        sarif_results,
+        &results.unused_component_emits,
+        snippets,
+        |e| {
+            sarif_unused_component_emit_fields(
+                &e.emit,
+                root,
+                severity_to_sarif_level(rules.unused_component_emits),
+            )
+        },
+    );
+    push_sarif_results(
+        sarif_results,
+        &results.unused_server_actions,
+        snippets,
+        |a| {
+            sarif_unused_server_action_fields(
+                &a.action,
+                root,
+                severity_to_sarif_level(rules.unused_server_actions),
+            )
+        },
+    );
+}
+
 fn push_graph_sarif_results(
     sarif_results: &mut Vec<serde_json::Value>,
     results: &AnalysisResults,
@@ -1373,6 +1518,19 @@ fn push_graph_sarif_results(
             severity_to_sarif_level(rules.unprovided_injects),
         )
     });
+    push_sarif_results(
+        sarif_results,
+        &results.unrendered_components,
+        snippets,
+        |c| {
+            sarif_unrendered_component_fields(
+                &c.component,
+                root,
+                severity_to_sarif_level(rules.unrendered_components),
+            )
+        },
+    );
+    push_component_contract_sarif_results(sarif_results, results, root, rules, snippets);
     push_sarif_results(sarif_results, &results.route_collisions, snippets, |c| {
         sarif_route_collision_fields(
             &c.collision,
@@ -2149,9 +2307,13 @@ mod tests {
         let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
             .as_array()
             .expect("rules should be an array");
-        assert_eq!(rules.len(), 33);
+        assert_eq!(rules.len(), 37);
 
         let rule_ids: Vec<&str> = rules.iter().map(|r| r["id"].as_str().unwrap()).collect();
+        assert!(rule_ids.contains(&"fallow/unrendered-component"));
+        assert!(rule_ids.contains(&"fallow/unused-component-prop"));
+        assert!(rule_ids.contains(&"fallow/unused-component-emit"));
+        assert!(rule_ids.contains(&"fallow/unused-server-action"));
         assert!(rule_ids.contains(&"fallow/route-collision"));
         assert!(rule_ids.contains(&"fallow/dynamic-segment-name-conflict"));
         assert!(rule_ids.contains(&"fallow/unused-file"));

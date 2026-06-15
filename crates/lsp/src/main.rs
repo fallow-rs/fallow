@@ -62,6 +62,10 @@ struct AnalysisCompleteParams {
     unused_class_members: usize,
     unused_store_members: usize,
     unprovided_injects: usize,
+    unrendered_components: usize,
+    unused_component_props: usize,
+    unused_component_emits: usize,
+    unused_server_actions: usize,
     unresolved_imports: usize,
     unlisted_dependencies: usize,
     duplicate_exports: usize,
@@ -97,6 +101,10 @@ fn analysis_complete_params(
         unused_class_members: results.unused_class_members.len(),
         unused_store_members: results.unused_store_members.len(),
         unprovided_injects: results.unprovided_injects.len(),
+        unrendered_components: results.unrendered_components.len(),
+        unused_component_props: results.unused_component_props.len(),
+        unused_component_emits: results.unused_component_emits.len(),
+        unused_server_actions: results.unused_server_actions.len(),
         unresolved_imports: results.unresolved_imports.len(),
         unlisted_dependencies: results.unlisted_dependencies.len(),
         duplicate_exports: results.duplicate_exports.len(),
@@ -255,6 +263,26 @@ const DIAGNOSTIC_ISSUE_TYPES: &[DiagnosticIssueType] = &[
         label: "Unprovided Injects",
     },
     DiagnosticIssueType {
+        config_key: Some("unrendered-components"),
+        code: "unrendered-component",
+        label: "Unrendered Components",
+    },
+    DiagnosticIssueType {
+        config_key: Some("unused-component-props"),
+        code: "unused-component-prop",
+        label: "Unused Component Props",
+    },
+    DiagnosticIssueType {
+        config_key: Some("unused-component-emits"),
+        code: "unused-component-emit",
+        label: "Unused Component Emits",
+    },
+    DiagnosticIssueType {
+        config_key: Some("unused-server-actions"),
+        code: "unused-server-action",
+        label: "Unused Server Actions",
+    },
+    DiagnosticIssueType {
         config_key: Some("route-collision"),
         code: "route-collision",
         label: "Route Collisions",
@@ -335,22 +363,23 @@ fn config_load_error_detail(
 /// findings to the merged accumulators and a status message to
 /// `config_messages`. Extracted out of `run_analysis` to keep that method
 /// under the 150-line clippy ceiling.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "LSP analysis merges dead-code, duplication, inline complexity, and config messages"
-)]
-fn analyze_project_root(
-    project_root: &Path,
-    config_path: Option<&Path>,
-    duplication_options: Option<&LspDuplicationOptions>,
+struct ProjectRootAnalysisInput<'a> {
+    project_root: &'a Path,
+    config_path: Option<&'a Path>,
+    duplication_options: Option<&'a LspDuplicationOptions>,
     production_override: Option<bool>,
     inline_complexity_enabled: bool,
-    merged_results: &mut AnalysisResults,
-    merged_duplication: &mut DuplicationReport,
-    merged_inline_complexity: &mut Vec<InlineComplexityFinding>,
-    config_messages: &mut Vec<(MessageType, String)>,
-) {
-    let (mut config, message) = match fallow_core::config_for_project(project_root, config_path) {
+    merged_results: &'a mut AnalysisResults,
+    merged_duplication: &'a mut DuplicationReport,
+    merged_inline_complexity: &'a mut Vec<InlineComplexityFinding>,
+    config_messages: &'a mut Vec<(MessageType, String)>,
+}
+
+fn analyze_project_root(input: &mut ProjectRootAnalysisInput<'_>) {
+    let (mut config, message) = match fallow_core::config_for_project(
+        input.project_root,
+        input.config_path,
+    ) {
         Ok((config, Some(path))) => (
             config,
             (
@@ -364,26 +393,26 @@ fn analyze_project_root(
                 MessageType::INFO,
                 format!(
                     "no config file found for {}, using defaults",
-                    project_root.display()
+                    input.project_root.display()
                 ),
             ),
         ),
         Err(e) => {
-            let detail = config_load_error_detail(project_root, config_path, &e);
-            config_messages.push((MessageType::WARNING, detail));
-            if config_path.is_none() {
+            let detail = config_load_error_detail(input.project_root, input.config_path, &e);
+            input.config_messages.push((MessageType::WARNING, detail));
+            if input.config_path.is_none() {
                 #[expect(
                     deprecated,
                     reason = "ADR-008 deprecates fallow_core::analyze_project externally; the LSP still uses the workspace path dependency"
                 )]
-                if let Ok(results) = fallow_core::analyze_project(project_root) {
-                    merge_results(merged_results, results);
+                if let Ok(results) = fallow_core::analyze_project(input.project_root) {
+                    merge_results(input.merged_results, results);
                 }
                 let duplication = fallow_core::duplicates::find_duplicates_in_project(
-                    project_root,
+                    input.project_root,
                     &DuplicatesConfig::default(),
                 );
-                merge_duplication(merged_duplication, duplication);
+                merge_duplication(input.merged_duplication, duplication);
             }
             return;
         }
@@ -393,20 +422,22 @@ fn analyze_project_root(
     // forwarded an explicit `fallow.production` (on/off). Mirrors the
     // CLI-driven sidebar receiving `--production`/`--no-production`, so the two
     // surfaces agree; `None` leaves the project config in force (issue #1055).
-    if let Some(production) = production_override {
+    if let Some(production) = input.production_override {
         config.production = production;
     }
 
-    config_messages.push(message);
+    input.config_messages.push(message);
 
-    if inline_complexity_enabled {
+    if input.inline_complexity_enabled {
         #[expect(
             deprecated,
             reason = "ADR-008 deprecates fallow_core typed analysis externally; the LSP still uses the workspace path dependency"
         )]
         if let Ok(output) = fallow_core::analyze_with_usages_and_complexity(&config) {
-            merged_inline_complexity.extend(collect_inline_complexity(&config, &output));
-            merge_results(merged_results, output.results);
+            input
+                .merged_inline_complexity
+                .extend(collect_inline_complexity(&config, &output));
+            merge_results(input.merged_results, output.results);
         }
     } else {
         #[expect(
@@ -414,18 +445,18 @@ fn analyze_project_root(
             reason = "ADR-008 deprecates fallow_core::analyze_with_usages externally; the LSP still uses the workspace path dependency"
         )]
         if let Ok(results) = fallow_core::analyze_with_usages(&config) {
-            merge_results(merged_results, results);
+            merge_results(input.merged_results, results);
         }
     }
 
     let files = fallow_core::discover::discover_files_with_plugin_scopes(&config);
-    let duplicates_config = duplication_options.map_or_else(
+    let duplicates_config = input.duplication_options.map_or_else(
         || config.duplicates.clone(),
         |options| options.merge_with(&config.duplicates),
     );
     let duplication =
-        fallow_core::duplicates::find_duplicates(project_root, &files, &duplicates_config);
-    merge_duplication(merged_duplication, duplication);
+        fallow_core::duplicates::find_duplicates(input.project_root, &files, &duplicates_config);
+    merge_duplication(input.merged_duplication, duplication);
 }
 
 /// Per-document state tracked by the LSP: the `version` integer supplied by
@@ -1175,17 +1206,17 @@ impl FallowLspServer {
             let mut config_messages: Vec<(MessageType, String)> =
                 Vec::with_capacity(project_roots.len());
             for project_root in &project_roots {
-                analyze_project_root(
+                analyze_project_root(&mut ProjectRootAnalysisInput {
                     project_root,
-                    config_path.as_deref(),
-                    duplication_options.as_ref(),
+                    config_path: config_path.as_deref(),
+                    duplication_options: duplication_options.as_ref(),
                     production_override,
                     inline_complexity_enabled,
-                    &mut merged_results,
-                    &mut merged_duplication,
-                    &mut merged_inline_complexity,
-                    &mut config_messages,
-                );
+                    merged_results: &mut merged_results,
+                    merged_duplication: &mut merged_duplication,
+                    merged_inline_complexity: &mut merged_inline_complexity,
+                    config_messages: &mut config_messages,
+                });
             }
 
             let changed_message = if let Some(ref git_ref) = changed_since {
@@ -1594,6 +1625,34 @@ mod tests {
     use serde_json::json;
     use tower::{Service, ServiceExt};
     use tower_lsp_server::jsonrpc::Request;
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "test helper keeps analyze_project_root fixtures focused on expected behavior"
+    )]
+    fn analyze_project_root_for_test(
+        project_root: &Path,
+        config_path: Option<&Path>,
+        duplication_options: Option<&LspDuplicationOptions>,
+        production_override: Option<bool>,
+        inline_complexity_enabled: bool,
+        merged_results: &mut AnalysisResults,
+        merged_duplication: &mut DuplicationReport,
+        merged_inline_complexity: &mut Vec<InlineComplexityFinding>,
+        config_messages: &mut Vec<(MessageType, String)>,
+    ) {
+        analyze_project_root(&mut ProjectRootAnalysisInput {
+            project_root,
+            config_path,
+            duplication_options,
+            production_override,
+            inline_complexity_enabled,
+            merged_results,
+            merged_duplication,
+            merged_inline_complexity,
+            config_messages,
+        });
+    }
 
     #[test]
     fn server_capabilities_advertise_pull_diagnostics() {
@@ -2075,7 +2134,7 @@ mod tests {
             let mut duplication = DuplicationReport::default();
             let mut inline_complexity = Vec::new();
             let mut messages = Vec::new();
-            analyze_project_root(
+            analyze_project_root_for_test(
                 root,
                 None,
                 None,
@@ -2135,7 +2194,7 @@ mod tests {
         let mut baseline_duplication = DuplicationReport::default();
         let mut baseline_inline_complexity = Vec::new();
         let mut baseline_messages = Vec::new();
-        analyze_project_root(
+        analyze_project_root_for_test(
             root,
             None,
             None,
@@ -2160,7 +2219,7 @@ mod tests {
             min_occurrences: Some(3),
             ..LspDuplicationOptions::default()
         };
-        analyze_project_root(
+        analyze_project_root_for_test(
             root,
             None,
             Some(&options),
@@ -2215,7 +2274,7 @@ export function choose(value: number): string {
         let mut inline_complexity = Vec::new();
         let mut messages = Vec::new();
 
-        analyze_project_root(
+        analyze_project_root_for_test(
             root,
             None,
             None,
@@ -2244,7 +2303,7 @@ export function choose(value: number): string {
         let mut inline_complexity = Vec::new();
         let mut messages = Vec::new();
 
-        analyze_project_root(
+        analyze_project_root_for_test(
             root,
             None,
             None,
@@ -2701,6 +2760,10 @@ export function choose(value: number): string {
                 ),
             ],
             unprovided_injects: vec![],
+            unrendered_components: vec![],
+            unused_component_props: vec![],
+            unused_component_emits: vec![],
+            unused_server_actions: vec![],
             route_collisions: vec![fallow_core::results::RouteCollisionFinding::with_actions(
                 fallow_core::results::RouteCollision {
                     path: "/app/(a)/about/page.tsx".into(),

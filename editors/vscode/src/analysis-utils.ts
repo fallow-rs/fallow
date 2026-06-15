@@ -286,6 +286,17 @@ export const countCheckIssues = (result: FallowCheckResult | null): number => {
     (result.unused_optional_dependencies?.length ?? 0) +
     result.unused_enum_members.length +
     result.unused_class_members.length +
+    (result.unused_store_members?.length ?? 0) +
+    (result.unused_server_actions?.length ?? 0) +
+    (result.unused_component_props?.length ?? 0) +
+    (result.unused_component_emits?.length ?? 0) +
+    (result.unrendered_components?.length ?? 0) +
+    (result.unprovided_injects?.length ?? 0) +
+    (result.invalid_client_exports?.length ?? 0) +
+    (result.mixed_client_server_barrels?.length ?? 0) +
+    (result.misplaced_directives?.length ?? 0) +
+    (result.route_collisions?.length ?? 0) +
+    (result.dynamic_segment_name_conflicts?.length ?? 0) +
     result.unresolved_imports.length +
     result.unlisted_dependencies.length +
     result.duplicate_exports.length +

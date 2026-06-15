@@ -1750,7 +1750,7 @@ pub fn find_unused_members(
     user_class_member_allowlist: &[UsedClassMemberRule],
     ignore_decorators: &[String],
 ) -> (Vec<UnusedMember>, Vec<UnusedMember>) {
-    let results = find_unused_members_with_public_api_entry_points(
+    let results = find_unused_members_with_public_api_entry_points(UnusedMemberScanInput {
         graph,
         resolved_modules,
         modules,
@@ -1758,8 +1758,8 @@ pub fn find_unused_members(
         line_offsets_by_file,
         user_class_member_allowlist,
         ignore_decorators,
-        &FxHashSet::default(),
-    );
+        public_api_entry_points: &FxHashSet::default(),
+    });
     (results.enum_members, results.class_members)
 }
 
@@ -1780,54 +1780,60 @@ pub struct UnusedMemberResults {
     pub store_members: Vec<UnusedMember>,
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "member tracking requires many graph traversal steps; further splitting is possible but not yet a priority"
-)]
+#[derive(Clone, Copy)]
+pub(super) struct UnusedMemberScanInput<'a> {
+    pub(super) graph: &'a ModuleGraph,
+    pub(super) resolved_modules: &'a [ResolvedModule],
+    pub(super) modules: &'a [ModuleInfo],
+    pub(super) suppressions: &'a SuppressionContext<'a>,
+    pub(super) line_offsets_by_file: &'a LineOffsetsMap<'a>,
+    pub(super) user_class_member_allowlist: &'a [UsedClassMemberRule],
+    pub(super) ignore_decorators: &'a [String],
+    pub(super) public_api_entry_points: &'a FxHashSet<FileId>,
+}
+
 #[expect(
     clippy::too_many_lines,
     reason = "the per-module member scan is a single cohesive pass; the propagation setup above it dominates the line count"
 )]
 pub(super) fn find_unused_members_with_public_api_entry_points(
-    graph: &ModuleGraph,
-    resolved_modules: &[ResolvedModule],
-    modules: &[ModuleInfo],
-    suppressions: &SuppressionContext<'_>,
-    line_offsets_by_file: &LineOffsetsMap<'_>,
-    user_class_member_allowlist: &[UsedClassMemberRule],
-    ignore_decorators: &[String],
-    public_api_entry_points: &FxHashSet<FileId>,
+    input: UnusedMemberScanInput<'_>,
 ) -> UnusedMemberResults {
     let mut unused_enum_members = Vec::new();
     let mut unused_class_members = Vec::new();
     let mut unused_store_members = Vec::new();
-    let allowlist = ClassMemberAllowlist::from_rules(user_class_member_allowlist);
-    let ignore_decorators = IgnoreDecoratorSet::from_config(ignore_decorators);
+    let allowlist = ClassMemberAllowlist::from_rules(input.user_class_member_allowlist);
+    let ignore_decorators = IgnoreDecoratorSet::from_config(input.ignore_decorators);
 
-    record_seen_ignore_decorators(graph, &ignore_decorators);
+    record_seen_ignore_decorators(input.graph, &ignore_decorators);
 
-    let heritage_context = build_member_heritage_context(graph, resolved_modules, modules);
+    let heritage_context =
+        build_member_heritage_context(input.graph, input.resolved_modules, input.modules);
 
     let MemberAccessCollections {
         mut accessed_members,
         mut self_accessed_members,
         mut whole_object_used_exports,
-    } = collect_direct_member_accesses(resolved_modules);
+    } = collect_direct_member_accesses(input.resolved_modules);
 
-    propagate_playwright_fixture_accesses(graph, resolved_modules, &mut accessed_members);
-    propagate_factory_call_accesses(graph, resolved_modules, &mut accessed_members);
-    propagate_fluent_chain_accesses(graph, resolved_modules, &mut accessed_members);
-    propagate_fluent_chain_new_accesses(graph, resolved_modules, &mut accessed_members);
+    propagate_playwright_fixture_accesses(
+        input.graph,
+        input.resolved_modules,
+        &mut accessed_members,
+    );
+    propagate_factory_call_accesses(input.graph, input.resolved_modules, &mut accessed_members);
+    propagate_fluent_chain_accesses(input.graph, input.resolved_modules, &mut accessed_members);
+    propagate_fluent_chain_new_accesses(input.graph, input.resolved_modules, &mut accessed_members);
     propagate_accesses_through_typed_instance_bindings(
-        graph,
-        resolved_modules,
-        modules,
+        input.graph,
+        input.resolved_modules,
+        input.modules,
         &mut accessed_members,
         &mut whole_object_used_exports,
     );
-    propagate_accesses_through_re_exports(graph, &mut accessed_members);
-    propagate_whole_object_through_re_exports(graph, &mut whole_object_used_exports);
-    let instance_targets = build_instance_export_targets(graph, resolved_modules);
+    propagate_accesses_through_re_exports(input.graph, &mut accessed_members);
+    propagate_whole_object_through_re_exports(input.graph, &mut whole_object_used_exports);
+    let instance_targets = build_instance_export_targets(input.graph, input.resolved_modules);
     propagate_accesses_through_instance_exports(
         &instance_targets,
         &mut accessed_members,
@@ -1840,14 +1846,14 @@ pub(super) fn find_unused_members_with_public_api_entry_points(
     );
 
     propagate_angular_template_member_accesses(
-        graph,
-        resolved_modules,
+        input.graph,
+        input.resolved_modules,
         &heritage_context,
         &mut accessed_members,
         &mut self_accessed_members,
     );
 
-    let parent_to_children = build_parent_to_children(graph, resolved_modules);
+    let parent_to_children = build_parent_to_children(input.graph, input.resolved_modules);
 
     propagate_class_inheritance(
         &parent_to_children,
@@ -1855,14 +1861,16 @@ pub(super) fn find_unused_members_with_public_api_entry_points(
         &mut self_accessed_members,
     );
 
-    let entry_star_targets = entry_point_star_re_export_targets(graph, public_api_entry_points);
+    let entry_star_targets =
+        entry_point_star_re_export_targets(input.graph, input.public_api_entry_points);
 
     let error_subclass_keys = build_error_subclass_export_keys(
         &parent_to_children,
         &heritage_context.class_heritage_by_export,
     );
 
-    let member_results: Vec<(Vec<UnusedMember>, Vec<UnusedMember>, Vec<UnusedMember>)> = graph
+    let member_results: Vec<(Vec<UnusedMember>, Vec<UnusedMember>, Vec<UnusedMember>)> = input
+        .graph
         .modules
         .par_iter()
         .map(|module| {
@@ -1889,7 +1897,7 @@ pub(super) fn find_unused_members_with_public_api_entry_points(
             let store_only_scan = module.is_entry_point();
 
             for export in &module.exports {
-                if should_skip_export_member_scan(graph, module, export) {
+                if should_skip_export_member_scan(input.graph, module, export) {
                     continue;
                 }
                 if store_only_scan
@@ -1915,11 +1923,11 @@ pub(super) fn find_unused_members_with_public_api_entry_points(
                 }
 
                 let is_public_api_class_export = is_entry_point_public_class_export(
-                    graph,
+                    input.graph,
                     module,
                     export,
                     &entry_star_targets,
-                    public_api_entry_points,
+                    input.public_api_entry_points,
                 );
 
                 let file_self_accesses = self_accessed_members.get(&module.file_id);
@@ -1952,8 +1960,8 @@ pub(super) fn find_unused_members_with_public_api_entry_points(
                         &module.path,
                         &export_name,
                         member,
-                        suppressions,
-                        line_offsets_by_file,
+                        input.suppressions,
+                        input.line_offsets_by_file,
                     ) else {
                         continue;
                     };
@@ -2348,6 +2356,16 @@ mod tests {
             misplaced_directives: Vec::new(),
             di_key_sites: Vec::new(),
             has_dynamic_provide: false,
+            referenced_import_bindings: Vec::new(),
+            component_props: Vec::new(),
+            has_props_attrs_fallthrough: false,
+            has_define_expose: false,
+            has_define_model: false,
+            has_unharvestable_props: false,
+            component_emits: Vec::new(),
+            has_unharvestable_emits: false,
+            has_dynamic_emit: false,
+            has_emit_whole_object_use: false,
         }
     }
 

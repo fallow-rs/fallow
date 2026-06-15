@@ -60,31 +60,40 @@ enum KeyResolution {
 /// Returns empty unless the project declares `vue` / `@vue/runtime-core` /
 /// `svelte`, or if any reachable module has an unknowable-key provide (see the
 /// module docs for the abstain ladder).
+#[derive(Clone, Copy)]
+pub(super) struct UnprovidedInjectInput<'a> {
+    pub(super) graph: &'a ModuleGraph,
+    pub(super) resolved_modules: &'a [ResolvedModule],
+    pub(super) modules: &'a [ModuleInfo],
+    pub(super) declared_deps: &'a FxHashSet<String>,
+    pub(super) public_api_entry_points: &'a FxHashSet<FileId>,
+    pub(super) suppressions: &'a SuppressionContext<'a>,
+    pub(super) line_offsets_by_file: &'a LineOffsetsMap<'a>,
+}
+
 #[must_use]
-pub fn find_unprovided_injects(
-    graph: &ModuleGraph,
-    resolved_modules: &[ResolvedModule],
-    modules: &[ModuleInfo],
-    declared_deps: &FxHashSet<String>,
-    public_api_entry_points: &FxHashSet<FileId>,
-    suppressions: &SuppressionContext<'_>,
-    line_offsets_by_file: &LineOffsetsMap<'_>,
-) -> Vec<UnprovidedInject> {
-    let vue = declared_deps.contains("vue") || declared_deps.contains("@vue/runtime-core");
-    let svelte = declared_deps.contains("svelte");
+pub fn find_unprovided_injects(input: UnprovidedInjectInput<'_>) -> Vec<UnprovidedInject> {
+    let vue =
+        input.declared_deps.contains("vue") || input.declared_deps.contains("@vue/runtime-core");
+    let svelte = input.declared_deps.contains("svelte");
     if !vue && !svelte {
         return Vec::new();
     }
 
     // Dynamic-provide abstain: a single unknowable-key provide anywhere means a
     // surviving inject finding could be a false positive, so abstain wholesale.
-    if modules.iter().any(|module| module.has_dynamic_provide) {
+    if input
+        .modules
+        .iter()
+        .any(|module| module.has_dynamic_provide)
+    {
         return Vec::new();
     }
 
     let modules_by_id: FxHashMap<FileId, &ModuleInfo> =
-        modules.iter().map(|m| (m.file_id, m)).collect();
-    let path_by_id: FxHashMap<FileId, &std::path::Path> = graph
+        input.modules.iter().map(|m| (m.file_id, m)).collect();
+    let path_by_id: FxHashMap<FileId, &std::path::Path> = input
+        .graph
         .modules
         .iter()
         .map(|module| (module.file_id, module.path.as_path()))
@@ -92,7 +101,7 @@ pub fn find_unprovided_injects(
 
     // Pass 1: build the provided-key set liberally.
     let mut provided: FxHashSet<ExportKey> = FxHashSet::default();
-    for resolved in resolved_modules {
+    for resolved in input.resolved_modules {
         let Some(module) = modules_by_id.get(&resolved.file_id) else {
             continue;
         };
@@ -108,7 +117,12 @@ pub fn find_unprovided_injects(
             if site.role != DiRole::Provide {
                 continue;
             }
-            match resolve_key(resolved, graph, &local_to_export_keys, &site.key_local) {
+            match resolve_key(
+                resolved,
+                input.graph,
+                &local_to_export_keys,
+                &site.key_local,
+            ) {
                 KeyResolution::Internal(keys) | KeyResolution::LocalOnly(keys) => {
                     provided.extend(keys);
                 }
@@ -117,11 +131,12 @@ pub fn find_unprovided_injects(
         }
     }
 
-    let entry_star_targets = entry_point_star_re_export_targets(graph, public_api_entry_points);
+    let entry_star_targets =
+        entry_point_star_re_export_targets(input.graph, input.public_api_entry_points);
 
     // Pass 2: emit a finding for each inject whose key is provided nowhere.
     let mut findings = Vec::new();
-    for resolved in resolved_modules {
+    for resolved in input.resolved_modules {
         let Some(module) = modules_by_id.get(&resolved.file_id) else {
             continue;
         };
@@ -137,12 +152,16 @@ pub fn find_unprovided_injects(
             if site.role != DiRole::Inject {
                 continue;
             }
-            let canonical =
-                match resolve_key(resolved, graph, &local_to_export_keys, &site.key_local) {
-                    // External: the provide may live inside the package; abstain.
-                    KeyResolution::External => continue,
-                    KeyResolution::Internal(keys) | KeyResolution::LocalOnly(keys) => keys,
-                };
+            let canonical = match resolve_key(
+                resolved,
+                input.graph,
+                &local_to_export_keys,
+                &site.key_local,
+            ) {
+                // External: the provide may live inside the package; abstain.
+                KeyResolution::External => continue,
+                KeyResolution::Internal(keys) | KeyResolution::LocalOnly(keys) => keys,
+            };
             if canonical.is_empty() {
                 continue;
             }
@@ -152,15 +171,27 @@ pub fn find_unprovided_injects(
             }
             // Public-API abstain: the consumer of this package provides the key.
             if canonical.iter().any(|key| {
-                key_is_public_api(graph, key, public_api_entry_points, &entry_star_targets)
+                key_is_public_api(
+                    input.graph,
+                    key,
+                    input.public_api_entry_points,
+                    &entry_star_targets,
+                )
             }) {
                 continue;
             }
 
-            let (line, col) =
-                byte_offset_to_line_col(line_offsets_by_file, resolved.file_id, site.span_start);
-            if suppressions.is_suppressed(resolved.file_id, line, IssueKind::UnprovidedInject)
-                || suppressions.is_file_suppressed(resolved.file_id, IssueKind::UnprovidedInject)
+            let (line, col) = byte_offset_to_line_col(
+                input.line_offsets_by_file,
+                resolved.file_id,
+                site.span_start,
+            );
+            if input
+                .suppressions
+                .is_suppressed(resolved.file_id, line, IssueKind::UnprovidedInject)
+                || input
+                    .suppressions
+                    .is_file_suppressed(resolved.file_id, IssueKind::UnprovidedInject)
             {
                 continue;
             }

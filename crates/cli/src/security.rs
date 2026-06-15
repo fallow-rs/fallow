@@ -409,11 +409,13 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
     let mut config = match load_config_for_analysis(
         opts.root,
         opts.config_path,
-        opts.output,
-        opts.no_cache,
-        opts.threads,
-        None,
-        opts.quiet,
+        crate::ConfigLoadOptions {
+            output: opts.output,
+            no_cache: opts.no_cache,
+            threads: opts.threads,
+            production_override: None,
+            quiet: opts.quiet,
+        },
         ProductionAnalysis::DeadCode,
     ) {
         Ok(config) => config,
@@ -847,11 +849,13 @@ fn compute_base_security_snapshot(
     let mut base_config = load_config_for_analysis(
         &base_root,
         &current_config_path,
-        opts.output,
-        opts.no_cache,
-        opts.threads,
-        None,
-        true,
+        crate::ConfigLoadOptions {
+            output: opts.output,
+            no_cache: opts.no_cache,
+            threads: opts.threads,
+            production_override: None,
+            quiet: true,
+        },
         ProductionAnalysis::DeadCode,
     )?;
     base_config.cache_dir =
@@ -3654,11 +3658,13 @@ mod tests {
         let mut config = load_config_for_analysis(
             &root,
             &NO_CONFIG,
-            OutputFormat::Json,
-            true,
-            1,
-            None,
-            true,
+            crate::ConfigLoadOptions {
+                output: OutputFormat::Json,
+                no_cache: true,
+                threads: 1,
+                production_override: None,
+                quiet: true,
+            },
             ProductionAnalysis::DeadCode,
         )
         .expect("fixture config loads");

@@ -215,12 +215,15 @@ pub fn execute_health_with_shared_parse(
     let config = crate::load_config_for_analysis(
         opts.root,
         opts.config_path,
-        opts.output,
-        opts.no_cache,
-        opts.threads,
-        opts.production_override
-            .or_else(|| opts.production.then_some(true)),
-        opts.quiet,
+        crate::ConfigLoadOptions {
+            output: opts.output,
+            no_cache: opts.no_cache,
+            threads: opts.threads,
+            production_override: opts
+                .production_override
+                .or_else(|| opts.production.then_some(true)),
+            quiet: opts.quiet,
+        },
         fallow_config::ProductionAnalysis::Health,
     )?;
     let config_ms = t.elapsed().as_secs_f64() * 1000.0;
@@ -250,12 +253,15 @@ pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode
     let config = crate::load_config_for_analysis(
         opts.root,
         opts.config_path,
-        opts.output,
-        opts.no_cache,
-        opts.threads,
-        opts.production_override
-            .or_else(|| opts.production.then_some(true)),
-        opts.quiet,
+        crate::ConfigLoadOptions {
+            output: opts.output,
+            no_cache: opts.no_cache,
+            threads: opts.threads,
+            production_override: opts
+                .production_override
+                .or_else(|| opts.production.then_some(true)),
+            quiet: opts.quiet,
+        },
         fallow_config::ProductionAnalysis::Health,
     )?;
     let config_ms = t.elapsed().as_secs_f64() * 1000.0;
@@ -416,25 +422,25 @@ fn execute_health_inner(
         },
     )?;
 
-    let vital_data = prepare_health_vital_data(
+    let vital_data = prepare_health_vital_data(&HealthVitalDataInput {
         opts,
-        &modules,
-        &file_paths,
-        analysis_data.score_output.as_ref(),
+        modules: &modules,
+        file_paths: &file_paths,
+        score_output: analysis_data.score_output.as_ref(),
         file_scores_slice,
-        &derived_sections.hotspots,
-        derived_sections.dupes_report.as_ref(),
-        &derived_sections.candidate_paths,
-        files.len(),
-        &config,
-        &ignore_set,
-        changed_files.as_ref(),
-        ws_roots.as_deref(),
+        hotspots: &derived_sections.hotspots,
+        dupes_report: derived_sections.dupes_report.as_ref(),
+        candidate_paths: &derived_sections.candidate_paths,
+        total_files: files.len(),
+        config: &config,
+        ignore_set: &ignore_set,
+        changed_files: changed_files.as_ref(),
+        ws_roots: ws_roots.as_deref(),
         diff_index,
-        derived_sections.hotspot_summary.as_ref(),
-        istanbul_coverage.is_some(),
+        hotspot_summary: derived_sections.hotspot_summary.as_ref(),
+        has_istanbul_coverage: istanbul_coverage.is_some(),
         needs_file_scores,
-    )?;
+    })?;
 
     let HealthOutputParts {
         mut report,
@@ -2718,77 +2724,78 @@ struct HealthVitalData {
     large_functions: Vec<crate::health_types::LargeFunctionEntry>,
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "vital-sign preparation needs the active health scope and output toggles"
-)]
-fn prepare_health_vital_data(
-    opts: &HealthOptions<'_>,
-    modules: &[fallow_core::extract::ModuleInfo],
-    file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
-    score_output: Option<&scoring::FileScoreOutput>,
-    file_scores_slice: &[FileHealthScore],
-    hotspots: &[HotspotEntry],
-    dupes_report: Option<&fallow_core::duplicates::DuplicationReport>,
-    candidate_paths: &rustc_hash::FxHashSet<std::path::PathBuf>,
+struct HealthVitalDataInput<'a> {
+    opts: &'a HealthOptions<'a>,
+    modules: &'a [fallow_core::extract::ModuleInfo],
+    file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
+    score_output: Option<&'a scoring::FileScoreOutput>,
+    file_scores_slice: &'a [FileHealthScore],
+    hotspots: &'a [HotspotEntry],
+    dupes_report: Option<&'a fallow_core::duplicates::DuplicationReport>,
+    candidate_paths: &'a rustc_hash::FxHashSet<std::path::PathBuf>,
     total_files: usize,
-    config: &ResolvedConfig,
-    ignore_set: &globset::GlobSet,
-    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
-    ws_roots: Option<&[std::path::PathBuf]>,
-    diff_index: Option<&crate::report::ci::diff_filter::DiffIndex>,
-    hotspot_summary: Option<&HotspotSummary>,
+    config: &'a ResolvedConfig,
+    ignore_set: &'a globset::GlobSet,
+    changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
+    ws_roots: Option<&'a [std::path::PathBuf]>,
+    diff_index: Option<&'a crate::report::ci::diff_filter::DiffIndex>,
+    hotspot_summary: Option<&'a HotspotSummary>,
     has_istanbul_coverage: bool,
     needs_file_scores: bool,
+}
+
+fn prepare_health_vital_data(
+    input: &HealthVitalDataInput<'_>,
 ) -> Result<HealthVitalData, ExitCode> {
-    let project_subset = if candidate_paths.len() == total_files {
+    let project_subset = if input.candidate_paths.len() == input.total_files {
         SubsetFilter::Full
     } else {
-        SubsetFilter::Paths(candidate_paths)
+        SubsetFilter::Paths(input.candidate_paths)
     };
-    let total_files_scoped = candidate_paths.len();
+    let total_files_scoped = input.candidate_paths.len();
     let vital_signs_input = VitalSignsAndCountsInput {
-        score_output,
-        modules,
-        file_paths,
-        needs_file_scores,
-        file_scores_slice,
-        needs_hotspots: opts.hotspots || opts.targets,
-        hotspots,
+        score_output: input.score_output,
+        modules: input.modules,
+        file_paths: input.file_paths,
+        needs_file_scores: input.needs_file_scores,
+        file_scores_slice: input.file_scores_slice,
+        needs_hotspots: input.opts.hotspots || input.opts.targets,
+        hotspots: input.hotspots,
         total_files: total_files_scoped,
         subset: &project_subset,
     };
     let (mut vital_signs, mut counts) = compute_vital_signs_and_counts(&vital_signs_input);
 
     let health_score = compute_health_score_metrics(
-        opts,
-        dupes_report,
+        input.opts,
+        input.dupes_report,
         &mut vital_signs,
         &mut counts,
         total_files_scoped,
     );
     let large_functions = collect_filtered_large_functions(
         &vital_signs,
-        modules,
-        file_paths,
-        config,
-        ignore_set,
-        changed_files,
-        ws_roots,
-        diff_index,
+        input.modules,
+        input.file_paths,
+        input.config,
+        input.ignore_set,
+        input.changed_files,
+        input.ws_roots,
+        input.diff_index,
     );
-    if let Some(ref snapshot_path) = opts.save_snapshot {
+    if let Some(ref snapshot_path) = input.opts.save_snapshot {
         save_snapshot(SnapshotInput {
-            opts,
+            opts: input.opts,
             snapshot_path,
             vital_signs: &vital_signs,
             counts: &counts,
-            hotspot_summary,
+            hotspot_summary: input.hotspot_summary,
             health_score: health_score.as_ref(),
-            coverage_model: Some(active_health_coverage_model(has_istanbul_coverage)),
+            coverage_model: Some(active_health_coverage_model(input.has_istanbul_coverage)),
         })?;
     }
-    let health_trend = compute_health_trend(opts, &vital_signs, &counts, health_score.as_ref());
+    let health_trend =
+        compute_health_trend(input.opts, &vital_signs, &counts, health_score.as_ref());
 
     Ok(HealthVitalData {
         vital_signs,
@@ -4321,6 +4328,16 @@ mod tests {
             misplaced_directives: Vec::new(),
             di_key_sites: Vec::new(),
             has_dynamic_provide: false,
+            referenced_import_bindings: Vec::new(),
+            component_props: Vec::new(),
+            has_props_attrs_fallthrough: false,
+            has_define_expose: false,
+            has_define_model: false,
+            has_unharvestable_props: false,
+            component_emits: Vec::new(),
+            has_unharvestable_emits: false,
+            has_dynamic_emit: false,
+            has_emit_whole_object_use: false,
         }
     }
 

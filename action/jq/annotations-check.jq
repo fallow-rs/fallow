@@ -60,10 +60,20 @@ def dependency_action(pkg):
     "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Mixed client/server barrel::This barrel re-exports both a \"use client\" module ('\(.client_origin | san)') and a server-only module ('\(.server_origin | san)'); one import drags the other's directive across the boundary.\(nl)\(nl)Split the barrel so client and server-only modules are re-exported from separate entry points."),
   (.misplaced_directives[]? |
     "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Misplaced directive::Directive \"\(.directive | san)\" is not in the leading position, so the RSC bundler ignores it.\(nl)\(nl)Move the directive to the very top of the file, above every import."),
+  (.unused_server_actions[]? |
+    "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Unused server action::Server Action '\(.action_name | san)' in this \"use server\" file is referenced by no project code.\(nl)\(nl)The action stays POST-able, but nothing calls it. Remove it to shrink the action surface, or wire it up to a consumer."),
   (.route_collisions[]? |
     "::warning file=\(.path | san),title=Route collision::This route file resolves to '\(.url | san)', also owned by \(.conflicting_paths | length) other file(s). Next.js fails the build because a URL can have only one owner.\(nl)\(nl)Move or merge one of the colliding files; route groups and parallel slots do not change the URL."),
   (.dynamic_segment_name_conflicts[]? |
     "::warning file=\(.path | san),title=Dynamic segment conflict::Dynamic segments at '\(.position | san)' use different slug names (\(.conflicting_segments | join(", ") | san)). Next.js requires one consistent name per dynamic path.\(nl)\(nl)Rename the dynamic segments at this position to a single slug name."),
+  (.unrendered_components[]? |
+    "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Unrendered component::\(.framework | san) component '\(.component_name | san)' is reachable but rendered nowhere: no tag, no dynamic binding, no registration.\(nl)\(nl)Render it where it is needed, or remove the component and the re-export keeping it reachable."),
+  (.unused_component_props[]? |
+    "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Unused component prop::Prop '\(.prop_name | san)' on component '\(.component_name | san)' is referenced nowhere in its own component (neither script nor template).\(nl)\(nl)Remove the prop, or use it. If it is part of a deliberately-stable public API, suppress this finding."),
+  (.unused_component_emits[]? |
+    "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Unused component emit::Emit '\(.emit_name | san)' on component '\(.component_name | san)' is emitted nowhere in its own component.\(nl)\(nl)Remove the emit, or emit it. If it is part of a deliberately-stable public API, suppress this finding."),
+  (.unprovided_injects[]? |
+    "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Unprovided inject::\(.framework | san) inject for key '\(.key_name | san)' has no matching provider in the project.\(nl)\(nl)Add a provide/setContext for this key, or remove the dead inject."),
   (.type_only_dependencies[]? |
     "::warning file=\(.path | san)\(if .line > 0 then ",line=\(.line)" else "" end),title=Type-only dependency::Package '\(.package_name | san)' is only used via type imports.\(nl)\(nl)Move it from dependencies to devDependencies to reduce production bundle size."),
   (.stale_suppressions[]? |

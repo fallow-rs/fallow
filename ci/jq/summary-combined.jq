@@ -52,7 +52,7 @@ def prod_hot_path_label($n):
   (if prod_hot_paths_touched then "hot path\(if $n == 1 then "" else "s" end) touched" else "hot path\(if $n == 1 then "" else "s" end)" end);
 
 (count(.check; "total_issues")) as $check |
-(count(.dupes.stats; "clone_groups")) as $dupes |
+((.dupes.clone_groups // []) | length) as $dupes |
 (count(.health.summary; "functions_above_threshold")) as $complex |
 (($complex) + (prod_failing_findings | length)) as $health |
 (prod_failing_findings | length) as $prod_failing |
@@ -144,6 +144,13 @@ else
       (if ((.check.invalid_client_exports // []) | length) > 0 then "| [Invalid client exports](\(docs("invalid-client-exports"))) | \(.check.invalid_client_exports | length) |" else null end),
       (if ((.check.mixed_client_server_barrels // []) | length) > 0 then "| [Mixed client/server barrels](\(docs("mixed-client-server-barrels"))) | \(.check.mixed_client_server_barrels | length) |" else null end),
       (if ((.check.misplaced_directives // []) | length) > 0 then "| [Misplaced directives](\(docs("misplaced-directives"))) | \(.check.misplaced_directives | length) |" else null end),
+      (if ((.check.unused_server_actions // []) | length) > 0 then "| [Unused server actions](\(docs("unused-server-action"))) | \(.check.unused_server_actions | length) |" else null end),
+      (if ((.check.route_collisions // []) | length) > 0 then "| [Route collisions](\(docs("route-collisions"))) | \(.check.route_collisions | length) |" else null end),
+      (if ((.check.dynamic_segment_name_conflicts // []) | length) > 0 then "| [Dynamic segment conflicts](\(docs("dynamic-segment-name-conflicts"))) | \(.check.dynamic_segment_name_conflicts | length) |" else null end),
+      (if ((.check.unrendered_components // []) | length) > 0 then "| [Unrendered components](\(docs("unrendered-component"))) | \(.check.unrendered_components | length) |" else null end),
+      (if ((.check.unused_component_props // []) | length) > 0 then "| [Unused component props](\(docs("unused-component-prop"))) | \(.check.unused_component_props | length) |" else null end),
+      (if ((.check.unused_component_emits // []) | length) > 0 then "| [Unused component emits](\(docs("unused-component-emit"))) | \(.check.unused_component_emits | length) |" else null end),
+      (if ((.check.unprovided_injects // []) | length) > 0 then "| [Unprovided injects](\(docs("unprovided-inject"))) | \(.check.unprovided_injects | length) |" else null end),
       (if (.check.type_only_dependencies | length) > 0 then "| [Type-only dependencies](\(docs("type-only-dependencies"))) | \(.check.type_only_dependencies | length) |" else null end),
       (if (.check.test_only_dependencies | length) > 0 then "| [Test-only dependencies](\(docs("test-only-dependencies"))) | \(.check.test_only_dependencies | length) |" else null end),
       (if (.check.stale_suppressions | length) > 0 then "| [Stale suppressions](\(docs("stale-suppressions"))) | \(.check.stale_suppressions | length) |" else null end),

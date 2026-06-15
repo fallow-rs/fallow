@@ -380,6 +380,38 @@ impl<'a> CompactLineBuilder<'a> {
                 finding.inject.key_name,
             ));
         }
+        for finding in &self.results.unrendered_components {
+            self.lines.push(format!(
+                "unrendered-component:{}:{}:{}",
+                self.rel(&finding.component.path),
+                finding.component.line,
+                finding.component.component_name,
+            ));
+        }
+        for finding in &self.results.unused_component_props {
+            self.lines.push(format!(
+                "unused-component-prop:{}:{}:{}",
+                self.rel(&finding.prop.path),
+                finding.prop.line,
+                finding.prop.prop_name,
+            ));
+        }
+        for finding in &self.results.unused_component_emits {
+            self.lines.push(format!(
+                "unused-component-emit:{}:{}:{}",
+                self.rel(&finding.emit.path),
+                finding.emit.line,
+                finding.emit.emit_name,
+            ));
+        }
+        for finding in &self.results.unused_server_actions {
+            self.lines.push(format!(
+                "unused-server-action:{}:{}:{}",
+                self.rel(&finding.action.path),
+                finding.action.line,
+                finding.action.action_name,
+            ));
+        }
         for finding in &self.results.route_collisions {
             self.lines.push(format!(
                 "route-collision:{}:{} (url {})",
@@ -1173,7 +1205,7 @@ mod tests {
         let results = sample_results(&root);
         let lines = build_compact_lines(&results, &root);
 
-        assert_eq!(lines.len(), 18);
+        assert_eq!(lines.len(), 22);
 
         assert!(lines[0].starts_with("unused-file:"));
         assert!(lines[1].starts_with("unused-export:"));
@@ -1192,6 +1224,18 @@ mod tests {
         assert!(lines[14].starts_with("circular-dependency:"));
         assert!(lines[15].starts_with("boundary-violation:"));
         assert!(lines.iter().any(|l| l.starts_with("unprovided-inject:")));
+        assert!(lines.iter().any(|l| l.starts_with("unrendered-component:")));
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.starts_with("unused-component-prop:"))
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.starts_with("unused-component-emit:"))
+        );
+        assert!(lines.iter().any(|l| l.starts_with("unused-server-action:")));
     }
 
     #[test]

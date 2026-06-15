@@ -899,18 +899,18 @@ fn resolve_analysis_imports(
     plugin_result: &plugins::AggregatedPluginResult,
     config: &ResolvedConfig,
 ) -> Vec<resolve::ResolvedModule> {
-    let mut resolved = resolve::resolve_all_imports(
+    let mut resolved = resolve::resolve_all_imports(&resolve::ResolveAllImportsInput {
         modules,
         files,
         workspaces,
-        &plugin_result.active_plugins,
-        &plugin_result.path_aliases,
-        &plugin_result.auto_imports,
-        &plugin_result.scss_include_paths,
-        &plugin_result.static_dir_mappings,
-        &config.root,
-        &config.resolve.conditions,
-    );
+        active_plugins: &plugin_result.active_plugins,
+        path_aliases: &plugin_result.path_aliases,
+        auto_imports: &plugin_result.auto_imports,
+        scss_include_paths: &plugin_result.scss_include_paths,
+        static_dir_mappings: &plugin_result.static_dir_mappings,
+        root: &config.root,
+        extra_conditions: &config.resolve.conditions,
+    });
     external_style_usage::augment_external_style_package_usage(
         &mut resolved,
         config,

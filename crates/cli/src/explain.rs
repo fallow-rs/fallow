@@ -308,6 +308,38 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#unprovided-injects",
     },
     RuleDef {
+        id: "fallow/unrendered-component",
+        category: "Dead code",
+        name: "Unrendered components",
+        short: "A Vue / Svelte component is reachable through a barrel but rendered nowhere",
+        full: "A Vue or Svelte single-file component (the default export of a `.vue` / `.svelte` file) is reachable in the module graph (a barrel re-exports it) but instantiated NOWHERE in the project: no `<Tag>`, no `:is` / `this=` binding, no `components` / `app.component` registration, no `h()` / auto-import use, and no script value-read. It survives unused-file (the barrel keeps it reachable) and unused-export (the re-export counts as a use), yet no file actually renders it. To fix: render the component somewhere, or delete it and drop the dead re-export. Defaults to warn, not error: a component can be rendered reflectively (a dynamic `<component :is>` resolved from a non-literal value), so analyzer confidence is lower. Components that are themselves entry points (route pages, layouts, `App.vue`) and components re-exported from a non-private package entry point are abstained.",
+        docs_path: "explanations/dead-code#unrendered-components",
+    },
+    RuleDef {
+        id: "fallow/unused-component-prop",
+        category: "Dead code",
+        name: "Unused component props",
+        short: "A Vue <script setup> defineProps prop is referenced nowhere in its own component",
+        full: "A Vue `<script setup>` defineProps declared prop that is referenced nowhere in its own component (neither script nor template). vue-tsc / Volar check caller-side prop correctness, not this in-component dead-input direction. Conservative: abstains on `$attrs` fallthrough, whole-object props use, defineExpose, defineModel, and imported prop-type aliases. Default warn; suppress or remove the prop.",
+        docs_path: "explanations/dead-code#unused-component-props",
+    },
+    RuleDef {
+        id: "fallow/unused-component-emit",
+        category: "Dead code",
+        name: "Unused component emits",
+        short: "A Vue <script setup> defineEmits event is emitted nowhere in its own component",
+        full: "A Vue `<script setup>` defineEmits declared event that is emitted nowhere in its own component (no `emit('<name>')` call). vue-tsc / Volar check caller-side emit correctness, not this in-component dead-output direction. Conservative: abstains on `$attrs` fallthrough, whole-object emit use, defineExpose, defineModel, and imported emit-type aliases. Default warn; suppress or remove the emit.",
+        docs_path: "explanations/dead-code#unused-component-emits",
+    },
+    RuleDef {
+        id: "fallow/unused-server-action",
+        category: "Dead code",
+        name: "Unused server actions",
+        short: "A Next.js Server Action exported from a \"use server\" file is referenced by no code in the project",
+        full: "A Next.js Server Action (an export of a `\"use server\"` file) that no code in the project references: no import-and-call, no `action={fn}` JSX binding, no `<form action={fn}>`. This is the cross-graph \"declared but zero consumers\" direction, reclassified out of `unused-export` for `\"use server\"` files so the finding carries the action-specific signal. eslint-plugin-next is single-file and cannot see cross-file usage. It does NOT mean the endpoint is unreachable: Next.js still registers a generated action id, so it stays POST-able; it means no project code references it (likely forgotten or dead, and a candidate for removal to shrink surface area). Default warn; wire the action to a consumer or remove it. The check runs only when the project declares `next`.",
+        docs_path: "explanations/dead-code#unused-server-actions",
+    },
+    RuleDef {
         id: "fallow/route-collision",
         category: "Policy",
         name: "Route collision",
@@ -429,6 +461,10 @@ fn dead_code_alias_id(normalized: &str) -> Option<&'static str> {
         "unused-class-members" => Some("fallow/unused-class-member"),
         "unused-store-members" => Some("fallow/unused-store-member"),
         "unprovided-injects" | "unprovided-inject" => Some("fallow/unprovided-inject"),
+        "unrendered-components" | "unrendered-component" => Some("fallow/unrendered-component"),
+        "unused-component-props" | "unused-component-prop" => Some("fallow/unused-component-prop"),
+        "unused-component-emits" | "unused-component-emit" => Some("fallow/unused-component-emit"),
+        "unused-server-actions" | "unused-server-action" => Some("fallow/unused-server-action"),
         "unresolved-imports" => Some("fallow/unresolved-import"),
         "unlisted-deps" | "unlisted-dependencies" => Some("fallow/unlisted-dependency"),
         "duplicate-exports" => Some("fallow/duplicate-export"),
@@ -567,6 +603,22 @@ fn member_import_rule_guide(id: &str) -> Option<RuleGuide> {
         "fallow/unprovided-inject" => RuleGuide {
             example: "A component calls inject(ThemeKey) (Vue) or getContext(ThemeKey) (Svelte) with an imported symbol key, but no provide(ThemeKey) / setContext(ThemeKey) exists anywhere in the project.",
             how_to_fix: "Add a matching provide() / setContext() for the key, or remove the dead inject() / getContext(). If a provider lives outside the analyzed graph (an app-level provide registered elsewhere, a plugin, a host app), suppress the line with // fallow-ignore-next-line unprovided-inject.",
+        },
+        "fallow/unrendered-component" => RuleGuide {
+            example: "components/Orphan.vue is re-exported from a barrel (export { default as Orphan } from './Orphan.vue') but no template, registration, h() call, or dynamic import ever renders it.",
+            how_to_fix: "Render the component where it belongs, or delete it and remove the dead barrel re-export. If it is rendered reflectively (a dynamic <component :is> from a non-literal value), suppress the line with // fallow-ignore-next-line unrendered-component.",
+        },
+        "fallow/unused-component-prop" => RuleGuide {
+            example: "Widget.vue declares defineProps<{ size: string }>() but `size` is referenced nowhere in the component's script or template.",
+            how_to_fix: "Remove the unused prop, or reference it in the script / template. If the prop is part of a deliberately-stable public component API, suppress the line with // fallow-ignore-next-line unused-component-prop.",
+        },
+        "fallow/unused-component-emit" => RuleGuide {
+            example: "Widget.vue declares defineEmits<{ close: [] }>() but `emit('close')` is called nowhere in the component's script.",
+            how_to_fix: "Remove the unused emit, or emit it in the script. If the emit is part of a deliberately-stable public component API, suppress the line with // fallow-ignore-next-line unused-component-emit.",
+        },
+        "fallow/unused-server-action" => RuleGuide {
+            example: "app/actions.ts has \"use server\" and exports submitForm, but no component imports it, binds it via action={submitForm}, or uses it in <form action={submitForm}>.",
+            how_to_fix: "Wire the action to a consumer (an import-and-call, an action={fn} binding, or a <form action={fn}>), or remove it. If it is invoked reflectively (an action registry dispatching by id, or a non-JS caller), suppress the line with // fallow-ignore-next-line unused-server-action.",
         },
         "fallow/unresolved-import" => RuleGuide {
             example: "src/app.ts imports ./routes/admin, but no matching file exists after extension and index resolution.",
@@ -2235,7 +2287,7 @@ mod tests {
 
     #[test]
     fn check_rules_count() {
-        assert_eq!(CHECK_RULES.len(), 33);
+        assert_eq!(CHECK_RULES.len(), 37);
     }
 
     #[test]
