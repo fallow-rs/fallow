@@ -214,6 +214,17 @@ fn push_markdown_graph_sections(
     results: &AnalysisResults,
     rel: &dyn Fn(&Path) -> String,
 ) {
+    push_markdown_structure_sections(out, results, rel);
+    push_markdown_framework_sections(out, results, rel);
+    push_markdown_component_sections(out, results, rel);
+    push_markdown_suppression_sections(out, results, rel);
+}
+
+fn push_markdown_structure_sections(
+    out: &mut String,
+    results: &AnalysisResults,
+    rel: &dyn Fn(&Path) -> String,
+) {
     markdown_section(
         out,
         &results.circular_dependencies,
@@ -247,6 +258,13 @@ fn push_markdown_graph_sections(
     markdown_section(out, &results.policy_violations, "Policy violations", |v| {
         format_markdown_policy_violation(v, rel)
     });
+}
+
+fn push_markdown_framework_sections(
+    out: &mut String,
+    results: &AnalysisResults,
+    rel: &dyn Fn(&Path) -> String,
+) {
     markdown_section(
         out,
         &results.invalid_client_exports,
@@ -280,6 +298,13 @@ fn push_markdown_graph_sections(
         "Unprovided injects",
         |i| format_markdown_unprovided_inject(i, rel),
     );
+}
+
+fn push_markdown_component_sections(
+    out: &mut String,
+    results: &AnalysisResults,
+    rel: &dyn Fn(&Path) -> String,
+) {
     markdown_section(
         out,
         &results.unrendered_components,
@@ -310,6 +335,13 @@ fn push_markdown_graph_sections(
         "Unused load data keys",
         |k| format_markdown_unused_load_data_key(k, rel),
     );
+}
+
+fn push_markdown_suppression_sections(
+    out: &mut String,
+    results: &AnalysisResults,
+    rel: &dyn Fn(&Path) -> String,
+) {
     markdown_section(
         out,
         &results.stale_suppressions,
