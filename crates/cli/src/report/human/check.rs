@@ -2736,6 +2736,16 @@ fn check_summary_categories(
     results: &AnalysisResults,
     rules: &RulesConfig,
 ) -> Vec<(&'static str, usize, Level)> {
+    let mut categories = check_summary_core_categories(results, rules);
+    categories.extend(check_summary_dependency_categories(results, rules));
+    categories.extend(check_summary_framework_categories(results, rules));
+    categories
+}
+
+fn check_summary_core_categories(
+    results: &AnalysisResults,
+    rules: &RulesConfig,
+) -> Vec<(&'static str, usize, Level)> {
     vec![
         (
             "Unused files",
@@ -2792,6 +2802,14 @@ fn check_summary_categories(
             results.unresolved_imports.len(),
             severity_to_level(rules.unresolved_imports),
         ),
+    ]
+}
+
+fn check_summary_dependency_categories(
+    results: &AnalysisResults,
+    rules: &RulesConfig,
+) -> Vec<(&'static str, usize, Level)> {
+    vec![
         (
             "Unlisted dependencies",
             results.unlisted_dependencies.len(),
@@ -2827,6 +2845,14 @@ fn check_summary_categories(
             results.boundary_violations.len(),
             severity_to_level(rules.boundary_violation),
         ),
+    ]
+}
+
+fn check_summary_framework_categories(
+    results: &AnalysisResults,
+    rules: &RulesConfig,
+) -> Vec<(&'static str, usize, Level)> {
+    vec![
         (
             "Unprovided injects",
             results.unprovided_injects.len(),
