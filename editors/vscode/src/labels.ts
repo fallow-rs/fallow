@@ -34,6 +34,7 @@ export type IssueCategory =
   | "circular-dependencies"
   | "re-export-cycles"
   | "boundary-violation"
+  | "policy-violations"
   | "stale-suppressions"
   | "unused-catalog-entries"
   | "empty-catalog-groups"
@@ -71,6 +72,7 @@ export const ISSUE_CATEGORY_LABELS: Record<IssueCategory, string> = {
   "circular-dependencies": "Circular Dependencies",
   "re-export-cycles": "Re-Export Cycles",
   "boundary-violation": "Boundary Violations",
+  "policy-violations": "Policy Violations",
   "stale-suppressions": "Stale Suppressions",
   "unused-catalog-entries": "Unused Catalog Entries",
   "empty-catalog-groups": "Empty Catalog Groups",

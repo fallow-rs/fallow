@@ -75,6 +75,7 @@ export const getIssueTypes = (): IssueTypeConfig =>
     "circular-dependencies": true,
     "re-export-cycles": true,
     "boundary-violation": true,
+    "policy-violation": true,
     "stale-suppressions": true,
     "unused-catalog-entries": true,
     "unresolved-catalog-references": true,

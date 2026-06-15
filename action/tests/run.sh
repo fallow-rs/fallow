@@ -2079,6 +2079,15 @@ assert_issuekind_summary_coverage "github summary-audit"    "$JQ_DIR/summary-aud
 assert_issuekind_summary_coverage "github annotations-check" "$JQ_DIR/annotations-check.jq"
 assert_issuekind_summary_coverage "github filter-changed"   "$JQ_DIR/filter-changed.jq"
 
+# VS Code DIAGNOSTIC_CATEGORIES is the diagnostic-code catalog the extension uses
+# to filter, count, and render findings. It is provider-agnostic (not GitHub- or
+# GitLab-specific), so it is checked once here. A new dead-code kind missing from
+# it leaves the kind uncounted and unfilterable in the editor sidebar even though
+# the LSP emits a squiggle for it (the empty-catalog-group / unused-load-data-key
+# gap class). This was the last surface a new kind could silently miss.
+assert_issuekind_vscode_category_coverage "vscode DIAGNOSTIC_CATEGORIES" \
+  "$DIR/../../editors/vscode/src/diagnosticFilter.ts"
+
 # --- Summary ---
 
 echo ""

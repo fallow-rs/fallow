@@ -794,6 +794,7 @@ describe("DIAGNOSTIC_CATEGORIES", () => {
       "stale-suppression",
       "code-duplication",
       "boundary-violation",
+      "policy-violation",
     ];
     const actual = new Set(DIAGNOSTIC_CATEGORIES.map((c) => c.code));
     for (const code of expected) {

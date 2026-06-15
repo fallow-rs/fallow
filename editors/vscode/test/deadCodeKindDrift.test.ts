@@ -236,6 +236,22 @@ const DEAD_CODE_WIRING = {
       actions: [],
     },
   },
+  "policy-violation": {
+    field: "policy_violations",
+    category: "policy-violations",
+    finding: {
+      path: "src/app.ts",
+      line: 7,
+      col: 2,
+      pack: "team-policy",
+      rule_id: "no-moment",
+      kind: "banned-import",
+      matched: "moment",
+      severity: "warn",
+      message: "Use date-fns.",
+      actions: [],
+    },
+  },
   "stale-suppression": {
     field: "stale_suppressions",
     category: "stale-suppressions",

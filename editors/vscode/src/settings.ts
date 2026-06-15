@@ -35,6 +35,7 @@ export interface IssueTypeConfig {
   readonly "circular-dependencies": boolean;
   readonly "re-export-cycles": boolean;
   readonly "boundary-violation": boolean;
+  readonly "policy-violation": boolean;
   readonly "stale-suppressions": boolean;
   readonly "unused-catalog-entries": boolean;
   readonly "unresolved-catalog-references": boolean;

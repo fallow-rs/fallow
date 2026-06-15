@@ -87,6 +87,19 @@ issuekind_json_key() {
   esac
 }
 
+# Map a canonical kebab id to the VS Code diagnostic CODE that filters it in
+# DIAGNOSTIC_CATEGORIES. Mostly identity (the diagnostic code equals the rule
+# id), except the boundary family: the LSP deliberately emits boundary-coverage
+# and boundary-call-violation findings under the single `boundary-violation`
+# diagnostic code, so one catalog entry filters all three and the two sub-kinds
+# do not get their own. Used only by the VS Code catalog check.
+issuekind_diagnostic_code() {
+  case "$1" in
+    boundary-coverage | boundary-call-violation) echo "boundary-violation" ;;
+    *) echo "$1" ;;
+  esac
+}
+
 # Resolve the canonical dead-code id list. Prefer `fallow schema` so the set is
 # command-tagged; fall back to suppress.rs kebab ids (non-dead-code kinds drop
 # out at the mapping step, which is the desired conservative behaviour).
@@ -219,4 +232,72 @@ assert_issuekind_summary_coverage() {
   fi
 
   pass "$label: every gated dead-code IssueKind appears in the surface"
+}
+
+# Assert the VS Code extension's DIAGNOSTIC_CATEGORIES (the diagnostic-code
+# catalog that drives the mute filter and seeds the counted / rendered surfaces)
+# carries every canonical dead-code IssueKind. DIAGNOSTIC_CATEGORIES keys on the
+# singular kebab rule-id (e.g. `code: "unused-file"`), which equals the `fallow
+# schema` issue-type id, so the canonical set is checked directly with no key
+# mapping. Same single source as the jq surfaces. This closes the last surface a
+# new kind could silently miss: once a kind is in DIAGNOSTIC_CATEGORIES,
+# deadCodeKindDrift.test.ts forces its count / tree / label and the LSP severity
+# gate forces its diagnostic, so the whole VS Code chain is covered. The catalog
+# is provider-agnostic, so this runs once (from the GitHub runner).
+assert_issuekind_vscode_category_coverage() {
+  local label="$1" ts_file="$2"
+  local ts_src ids id code missing=() skipped=() unmapped=()
+
+  if [ ! -f "$ts_file" ]; then
+    fail "$label: surface file present" "missing file: $ts_file"
+    return
+  fi
+  ts_src="$(cat "$ts_file")"
+  ids="$(fallow_dead_code_ids 2>/dev/null)"
+
+  if [ -z "$ids" ]; then
+    fail "$label: canonical IssueKind set resolved" "no dead-code ids derived"
+    return
+  fi
+
+  while IFS= read -r id; do
+    [ -z "$id" ] && continue
+    # Reuse the json-key map purely to classify dead-code vs non-dead-code: a
+    # successful mapping means a dead-code kind (must be in the catalog); a
+    # failed one is a non-dead-code kind carried by other catalogs.
+    if ! issuekind_json_key "$id" > /dev/null; then
+      case "$id" in
+        security-* | code-duplication | complexity | coverage-gaps | feature-flag)
+          skipped+=("$id") ;;
+        *) unmapped+=("$id") ;;
+      esac
+      continue
+    fi
+    # The catalog carries each kind under its diagnostic CODE (the boundary
+    # family collapses to boundary-violation); the quotes bound the match so
+    # "unused-file" never matches "unused-files".
+    code="$(issuekind_diagnostic_code "$id")"
+    if printf '%s' "$ts_src" | grep -qE "\"${code}\""; then
+      continue
+    fi
+    missing+=("$id -> code \"$code\"")
+  done <<< "$ids"
+
+  if [ "${#skipped[@]}" -gt 0 ]; then
+    echo "    (skipped non-dead-code kinds, carried by other catalogs: ${skipped[*]})"
+  fi
+
+  if [ "${#unmapped[@]}" -gt 0 ]; then
+    fail "$label: every dead-code IssueKind has a JSON key mapping" \
+      "no mapping for: ${unmapped[*]} (add to issuekind_json_key)"
+    return
+  fi
+
+  if [ "${#missing[@]}" -gt 0 ]; then
+    fail "$label: every dead-code IssueKind appears in DIAGNOSTIC_CATEGORIES" \
+      "absent diagnostic code(s): ${missing[*]} (add to editors/vscode/src/diagnosticFilter.ts)"
+    return
+  fi
+
+  pass "$label: every dead-code IssueKind appears in DIAGNOSTIC_CATEGORIES"
 }

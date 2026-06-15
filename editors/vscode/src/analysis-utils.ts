@@ -306,6 +306,7 @@ export const countCheckIssues = (result: FallowCheckResult | null): number => {
     (result.circular_dependencies?.length ?? 0) +
     (result.re_export_cycles?.length ?? 0) +
     (result.boundary_violations?.length ?? 0) +
+    (result.policy_violations?.length ?? 0) +
     (result.stale_suppressions?.length ?? 0) +
     (result.unused_catalog_entries?.length ?? 0) +
     // empty_catalog_groups has no per-type toggle (it is not in IssueTypeConfig),

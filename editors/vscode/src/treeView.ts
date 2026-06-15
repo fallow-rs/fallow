@@ -53,6 +53,7 @@ const CATEGORY_ICONS: Record<IssueCategory, string> = {
   "circular-dependencies": "sync",
   "re-export-cycles": "sync-ignored",
   "boundary-violation": "symbol-namespace",
+  "policy-violations": "symbol-namespace",
   "stale-suppressions": "trash",
   "unused-catalog-entries": "package",
   "empty-catalog-groups": "package",
@@ -92,6 +93,7 @@ const ISSUE_ICONS: Record<IssueCategory, string> = {
   "circular-dependencies": "sync",
   "re-export-cycles": "sync-ignored",
   "boundary-violation": "symbol-namespace",
+  "policy-violations": "symbol-namespace",
   "stale-suppressions": "trash",
   "unused-catalog-entries": "package",
   "empty-catalog-groups": "package",
@@ -547,6 +549,15 @@ export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeIte
               v.col,
               "boundary-violation",
             ),
+        ),
+      );
+    }
+
+    if (this.result.policy_violations) {
+      addCategory(
+        "policy-violations",
+        this.result.policy_violations.map(
+          (v) => new IssueItem(`${v.pack}/${v.rule_id}`, v.path, v.line, v.col, "policy-violations"),
         ),
       );
     }

@@ -245,6 +245,7 @@
             "circular-dependencies": true,
             "re-export-cycles": true,
             "boundary-violation": true,
+            "policy-violation": true,
             "stale-suppressions": true,
             "unused-catalog-entries": true,
             "unresolved-catalog-references": true,
@@ -338,6 +339,9 @@
               "type": "boolean"
             },
             "boundary-violation": {
+              "type": "boolean"
+            },
+            "policy-violation": {
               "type": "boolean"
             },
             "stale-suppressions": {
