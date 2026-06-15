@@ -363,6 +363,7 @@ pub(crate) fn parse_sfc_to_module(
         &template_visible_imports,
         &template_visible_bound_targets,
         props_return_binding.as_deref(),
+        kind == SfcKind::Svelte && is_sveltekit_route_data_component(path),
         &mut combined,
     );
 
@@ -406,6 +407,30 @@ fn sfc_kind(path: &Path) -> SfcKind {
     } else {
         SfcKind::Svelte
     }
+}
+
+/// SvelteKit route components receive a `data` prop populated by the route's
+/// `load()` return object. This predicate gates the `data`-as-template-root
+/// credit (unused-load-data-key Primitive B) to exactly those files. It matches
+/// `+page.svelte` / `+layout.svelte` AND their layout-reset variants
+/// (`+page@.svelte`, `+page@named.svelte`, `+page@(group).svelte`, and the
+/// `+layout@...` forms), all of which still receive the `data` prop. `+error.svelte`
+/// is excluded (it receives `$page.error`, not the `load()` `data` prop), and a
+/// non-route file like `+pageHelper.svelte` is excluded by the grammar (the part
+/// after `+page` must be empty or start with `@`). The leading `+` is a
+/// SvelteKit-only filename convention, so no ordinary `.svelte` component matches.
+fn is_sveltekit_route_data_component(path: &Path) -> bool {
+    let Some(stem) = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .and_then(|name| name.strip_suffix(".svelte"))
+    else {
+        return false;
+    };
+    ["+page", "+layout"].iter().any(|prefix| {
+        stem.strip_prefix(prefix)
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with('@'))
+    })
 }
 
 fn empty_sfc_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleInfo {
@@ -727,6 +752,7 @@ fn apply_template_usage(
     template_visible_imports: &FxHashSet<String>,
     template_visible_bound_targets: &FxHashMap<String, String>,
     props_return_binding: Option<&str>,
+    credit_load_data: bool,
     combined: &mut ModuleInfo,
 ) {
     // Props are NOT imports, so the template scanner does not credit them by
@@ -735,24 +761,36 @@ fn apply_template_usage(
     // additional credited set alongside `template_visible_imports`. Crediting a
     // prop name against an import is inert (no import binding shares the name),
     // so the unused-import retain is unaffected.
-    let credited: FxHashSet<String> = if combined.component_props.is_empty() {
-        template_visible_imports.clone()
-    } else {
-        let mut set = template_visible_imports.clone();
+    let mut credited: FxHashSet<String> = template_visible_imports.clone();
+    // unused-load-data-key Primitive B: a SvelteKit route component
+    // (`+page.svelte` / `+layout.svelte`) receives a `data` prop populated by
+    // the route's `load()` return object. The prop is template-visible
+    // (`{data.x}`, `{#each data.items as i}`) but is neither an import nor a
+    // tracked binding, so the member-access scanner gates it out by default.
+    // Credit `data` as a recognized root so its template member accesses
+    // (`data.<key>`) are emitted for the cross-file load-data-key join. Gated to
+    // route components only (`credit_load_data`): a non-route component's
+    // `let { data } = $props()` is a different, parent-passed `data`, so
+    // crediting it as load data would be semantically wrong. Inert for every
+    // other detector unless a tracked export/instance is named `data` (mirrors
+    // Primitive A); the load-data-key join is the only consumer of `data.<key>`.
+    if credit_load_data {
+        credited.insert("data".to_string());
+    }
+    if !combined.component_props.is_empty() {
         for prop in &combined.component_props {
             // Credit both the declared name (Vue exposes props by name in the
             // template) and the destructure local (a renamed prop is used via it).
-            set.insert(prop.name.clone());
-            set.insert(prop.local.clone());
+            credited.insert(prop.name.clone());
+            credited.insert(prop.local.clone());
         }
         // Vue's implicit `$props` whole-props object is always available in a
         // template; credit `$props.<name>` member accesses too.
-        set.insert("$props".to_string());
+        credited.insert("$props".to_string());
         if let Some(binding) = props_return_binding {
-            set.insert(binding.to_string());
+            credited.insert(binding.to_string());
         }
-        set
-    };
+    }
 
     let template_usage = collect_template_usage_with_bound_targets(
         kind,

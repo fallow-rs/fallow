@@ -393,7 +393,14 @@ use crate::MemberKind;
 /// member accesses (rest element records a whole-object use). A warm cache from
 /// 161 lacks those accesses, so the cross-file load-data-key join would miss the
 /// consumed keys.
-pub(super) const CACHE_VERSION: u32 = 162;
+///
+/// Bumped to 163 for `unused-load-data-key` Primitive B: a SvelteKit route
+/// component (`+page.svelte` / `+layout.svelte`) now credits the `data` prop as
+/// a template-visible root, so `{data.x}` / `{#each data.items as i}` markup
+/// reads emit `data.<key>` member accesses. A warm cache from 162 lacks those
+/// template-side accesses, so the cross-file load-data-key join would miss keys
+/// consumed only in markup.
+pub(super) const CACHE_VERSION: u32 = 163;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
