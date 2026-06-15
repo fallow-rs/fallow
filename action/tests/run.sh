@@ -2046,10 +2046,30 @@ rm -rf "$GATE_DIR"
 
 # --- IssueKind summary drift guard ---
 #
-# A new fallow dead-code IssueKind must be wired into summary-check.jq or it
-# vanishes silently from PR summaries. This guard derives the canonical
-# dead-code id set (from `fallow schema`, falling back to suppress.rs) and
-# asserts each one's JSON key is referenced by the GitHub summary table.
+# A new fallow dead-code IssueKind must be wired into every GitHub jq surface
+# that is supposed to carry the full dead-code set, or it vanishes silently
+# from PR output. This guard derives the canonical dead-code id set (from
+# `fallow schema`, falling back to suppress.rs) and asserts each one's JSON key
+# is referenced by every gated surface.
+#
+# Surface expectations:
+#   summary-check.jq      "all"    dead-code summary table
+#   summary-combined.jq   "all"    combined-mode Code-issues breakdown
+#   summary-audit.jq      "all"    audit dead_code_rows
+#   annotations-check.jq  subset   ::warning annotations
+#   filter-changed.jq     subset   per-changed-file filter + total_issues recount
+#
+# annotations-check.jq and filter-changed.jq currently omit
+# `test-only-dependency` (annotations: no ::warning is emitted; filter: the key
+# is absent from both the per-file filter blocks and the total_issues recount,
+# so a filtered count undercounts by the test-only finding count). That gap
+# predates this guard and is NOT a semantic "this surface never carries that
+# kind" decision: type-only-dependency, its sibling, IS carried on both. It is
+# enumerated as a documented, tolerated omission so the guard does not
+# false-fail today while still gating every OTHER kind (a future 38th IssueKind
+# missing from these two surfaces still fails). Closing the omission means
+# wiring test-only-dependency into the two jq scripts and dropping it from the
+# allow-list here.
 
 echo ""
 echo "=== IssueKind summary drift guard ==="
@@ -2057,7 +2077,13 @@ echo "=== IssueKind summary drift guard ==="
 GUARD_DIR="$DIR"
 # shellcheck source=action/tests/issuekind-drift-guard.sh
 . "$DIR/issuekind-drift-guard.sh"
-assert_issuekind_summary_coverage "github summary-check" "$JQ_DIR/summary-check.jq"
+assert_issuekind_summary_coverage "github summary-check"    "$JQ_DIR/summary-check.jq"
+assert_issuekind_summary_coverage "github summary-combined" "$JQ_DIR/summary-combined.jq"
+assert_issuekind_summary_coverage "github summary-audit"    "$JQ_DIR/summary-audit.jq"
+assert_issuekind_summary_coverage "github annotations-check" "$JQ_DIR/annotations-check.jq" \
+  "allow:test-only-dependency"
+assert_issuekind_summary_coverage "github filter-changed"   "$JQ_DIR/filter-changed.jq" \
+  "allow:test-only-dependency"
 
 # --- Summary ---
 
