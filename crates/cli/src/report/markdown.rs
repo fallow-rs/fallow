@@ -1023,6 +1023,11 @@ fn write_css_analytics_section(out: &mut String, report: &crate::health_types::H
         s.unused_font_faces,
         s.unused_theme_tokens,
     );
+    write_css_candidate_details(out, css);
+    out.push('\n');
+}
+
+fn write_css_candidate_details(out: &mut String, css: &crate::health_types::CssAnalyticsReport) {
     if !css.undefined_keyframes.is_empty() {
         let named: Vec<String> = css
             .undefined_keyframes
@@ -1115,7 +1120,6 @@ fn write_css_analytics_section(out: &mut String, report: &crate::health_types::H
             breakdown.join(", "),
         );
     }
-    out.push('\n');
 }
 
 fn write_coverage_intelligence_section(
