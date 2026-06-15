@@ -79,6 +79,16 @@ static HTML_COMMENT_RE: LazyLock<regex::Regex> =
 static PROPS_ATTRS_SPREAD_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| crate::static_regex(r#"v-bind\s*=\s*["'](?:\$attrs|\$props|props)["']"#));
 
+/// FP-1 (unused-load-data-key): a SvelteKit route component passing the whole
+/// `data` prop opaquely in MARKUP, where a child reads arbitrary keys the
+/// detector cannot see. Matches `data={data}` (whole-prop pass to a child) and
+/// `{...data}` (Svelte template spread). The script-side `const x = {...data}` /
+/// `fn(data)` / `const X = data` forms are captured by the JS visitor instead.
+/// Only a whole-`data` pass forces the abstain; `data.x` member access stays a
+/// credited consumer.
+static SVELTE_TEMPLATE_DATA_WHOLE_USE_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r"(?:=\s*\{\s*data\s*\}|\{\s*\.\.\.\s*data\s*\})"));
+
 /// Matches an emit-style call in template markup: a callee identifier (or
 /// `$emit`) followed by `(` and its first argument. Group 1 is the callee name
 /// (filtered against the harvested emit binding / `$emit` by the caller), groups
@@ -488,6 +498,9 @@ fn empty_sfc_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleI
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
     }
 }
 
@@ -785,6 +798,13 @@ fn apply_template_usage(
     // Primitive A); the load-data-key join is the only consumer of `data.<key>`.
     if credit_load_data {
         credited.insert("data".to_string());
+        // FP-1: a route component spreading / passing the whole `data` prop in
+        // markup consumes arbitrary keys opaquely; force the detector to abstain
+        // on this route. A false abstain only suppresses findings, never creates
+        // one, so matching the full source (script + template) is safe.
+        if SVELTE_TEMPLATE_DATA_WHOLE_USE_RE.is_match(source) {
+            combined.has_load_data_whole_use = true;
+        }
     }
     if !combined.component_props.is_empty() {
         for prop in &combined.component_props {

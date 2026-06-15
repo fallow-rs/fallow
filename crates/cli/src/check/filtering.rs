@@ -53,6 +53,9 @@ pub fn filter_to_workspaces(
         .unused_server_actions
         .retain(|a| any_under(&a.action.path));
     results
+        .unused_load_data_keys
+        .retain(|k| any_under(&k.key.path));
+    results
         .unresolved_imports
         .retain(|i| any_under(&i.import.path));
 
@@ -416,6 +419,9 @@ pub fn filter_results_by_diff(
     results
         .unused_server_actions
         .retain(|a| line_in_diff(&a.action.path, a.action.line));
+    results
+        .unused_load_data_keys
+        .retain(|k| line_in_diff(&k.key.path, k.key.line));
     results
         .unresolved_imports
         .retain(|i| line_in_diff(&i.import.path, i.import.line));

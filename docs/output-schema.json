@@ -699,6 +699,17 @@
           },
           "description": "Next.js Server Actions (exports of `\"use server\"` files) that no code in\nthe project references. Reclassified out of `unused_exports` for\n`\"use server\"` files. Wrapped in [`UnusedServerActionFinding`] so each\nentry carries a typed `actions` array natively. Default severity is\n`warn`."
         },
+        "unused_load_data_keys": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedLoadDataKeyFinding"
+          },
+          "description": "SvelteKit `+page.{ts,server.ts,js,server.js}` `load()` return-object keys\nread by no consumer. Wrapped in [`UnusedLoadDataKeyFinding`] so each entry\ncarries a typed `actions` array natively. Default severity is `warn`."
+        },
+        "unused_load_data_keys_global_abstain": {
+          "type": "boolean",
+          "description": "`true` when the `unused-load-data-key` detector abstained project-wide\nbecause a whole-object use of `page.data` / `$page.data` was seen\nsomewhere (S1 observability: an empty `unused_load_data_keys` with this\nflag set is NOT a clean bill, it means the rule could not run safely).\nSerialized only when `true` so the default JSON contract is unchanged."
+        },
         "baseline_deltas": {
           "anyOf": [
             {
@@ -1106,6 +1117,17 @@
             "$ref": "#/definitions/UnusedServerActionFinding"
           },
           "description": "Next.js Server Actions (exports of `\"use server\"` files) that no code in\nthe project references. Reclassified out of `unused_exports` for\n`\"use server\"` files. Wrapped in [`UnusedServerActionFinding`] so each\nentry carries a typed `actions` array natively. Default severity is\n`warn`."
+        },
+        "unused_load_data_keys": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedLoadDataKeyFinding"
+          },
+          "description": "SvelteKit `+page.{ts,server.ts,js,server.js}` `load()` return-object keys\nread by no consumer. Wrapped in [`UnusedLoadDataKeyFinding`] so each entry\ncarries a typed `actions` array natively. Default severity is `warn`."
+        },
+        "unused_load_data_keys_global_abstain": {
+          "type": "boolean",
+          "description": "`true` when the `unused-load-data-key` detector abstained project-wide\nbecause a whole-object use of `page.data` / `$page.data` was seen\nsomewhere (S1 observability: an empty `unused_load_data_keys` with this\nflag set is NOT a clean bill, it means the rule could not run safely).\nSerialized only when `true` so the default JSON contract is unchanged."
         }
       },
       "required": [
@@ -4828,6 +4850,10 @@
           "type": "integer",
           "description": "Next.js Server Actions (exports of `\"use server\"` files) referenced by no\ncode in the project."
         },
+        "unused_load_data_keys": {
+          "type": "integer",
+          "description": "SvelteKit `load()` return-object keys read by no consumer."
+        },
         "unresolved_imports": {
           "type": "integer",
           "description": "Imports that could not be resolved against the project's module graph."
@@ -5675,6 +5701,17 @@
             "$ref": "#/definitions/UnusedServerActionFinding"
           },
           "description": "Next.js Server Actions (exports of `\"use server\"` files) that no code in\nthe project references. Reclassified out of `unused_exports` for\n`\"use server\"` files. Wrapped in [`UnusedServerActionFinding`] so each\nentry carries a typed `actions` array natively. Default severity is\n`warn`."
+        },
+        "unused_load_data_keys": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedLoadDataKeyFinding"
+          },
+          "description": "SvelteKit `+page.{ts,server.ts,js,server.js}` `load()` return-object keys\nread by no consumer. Wrapped in [`UnusedLoadDataKeyFinding`] so each entry\ncarries a typed `actions` array natively. Default severity is `warn`."
+        },
+        "unused_load_data_keys_global_abstain": {
+          "type": "boolean",
+          "description": "`true` when the `unused-load-data-key` detector abstained project-wide\nbecause a whole-object use of `page.data` / `$page.data` was seen\nsomewhere (S1 observability: an empty `unused_load_data_keys` with this\nflag set is NOT a clean bill, it means the rule could not run safely).\nSerialized only when `true` so the default JSON contract is unchanged."
         }
       },
       "required": [
@@ -13218,6 +13255,60 @@
         "actions"
       ],
       "description": "Wire-shape envelope for an [`UnusedServerAction`] finding. There is no safe\nauto-fix: the fix is binary but judgement-bearing (wire the action up to a\nconsumer, or delete it). The only action is a line-level suppress."
+    },
+    "UnusedLoadDataKeyFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The producer `+page.{ts,server.ts,js,server.js}` file declaring the key."
+        },
+        "key_name": {
+          "type": "string",
+          "description": "The returned-object key name read by no consumer."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the key in the return object."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset of the key."
+        },
+        "route_dir": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The route directory relative to the project root (`src/routes/blog`), for\nagent remediation and per-route trend aggregation. `None` when not\ndeterminable."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "path",
+        "key_name",
+        "line",
+        "col",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for an [`UnusedLoadDataKey`] finding. There is no safe\nauto-fix: a `load()` fetch can have side effects, so deleting the key is a\nhuman call. The only action is a line-level suppress."
     }
   }
 }

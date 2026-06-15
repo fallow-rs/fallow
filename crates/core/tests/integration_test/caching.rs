@@ -70,6 +70,9 @@ fn cache_roundtrip() {
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
     };
 
     store.insert(std::path::Path::new("test.ts"), cached);
@@ -298,6 +301,9 @@ fn incremental_cache_prune_stale_entries() {
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
     };
 
     store.insert(std::path::Path::new("/project/existing.ts"), make_module());

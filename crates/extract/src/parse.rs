@@ -52,7 +52,29 @@ pub fn parse_source_to_module(
         parse_source_to_module_inner(file_id, path, source, content_hash, need_complexity);
     module.iconify_prefixes = crate::iconify::extract_iconify_prefixes(path, source);
     module.iconify_icon_names = crate::iconify::extract_iconify_icon_names(path, source);
+    // The `load()` producer harvest fires loosely in the visitor (any exported
+    // `load`); scope it to SvelteKit page-load files by basename here, where the
+    // path is known. A non-page `load` export (`export const load = ...` in an
+    // ordinary module) carries no SvelteKit `data` semantics.
+    if !is_sveltekit_page_load_file(path) {
+        module.load_return_keys = Vec::new();
+        module.has_unharvestable_load = false;
+    }
     module
+}
+
+/// Whether a file is a SvelteKit page-load producer:
+/// `+page.{ts,server.ts,js,server.js}`. Layout loads (`+layout(.server).{ts,js}`)
+/// are out of scope for v1 (cut A). The leading `+` is a SvelteKit-only
+/// filename convention, so no ordinary module matches.
+fn is_sveltekit_page_load_file(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    matches!(
+        name,
+        "+page.ts" | "+page.server.ts" | "+page.js" | "+page.server.js"
+    )
 }
 
 fn parse_source_to_module_inner(

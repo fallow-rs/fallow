@@ -340,6 +340,14 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#unused-server-actions",
     },
     RuleDef {
+        id: "fallow/unused-load-data-key",
+        category: "Dead code",
+        name: "Unused load data keys",
+        short: "A SvelteKit load() return-object key is read by no consumer",
+        full: "A SvelteKit route `load()` (in `+page.ts` / `+page.server.ts` and the `.js` variants) returns an object whose keys become the route's `data` prop. A returned key that NO consumer reads is dead: it runs a real server-side fetch / DB cost on every request for data nothing renders. fallow checks two channels: the sibling `+page.svelte`'s `data.<key>` reads (route-pinned), and project-wide `page.data.<key>` (Svelte 5 `$app/state`) / `$page.data.<key>` (Svelte 4 `$app/stores`) reads in any component. `svelte-check` types `data` via generated `$types` but never flags an unread RETURNED key. The detector abstains (never false-flags) on a spread / non-literal / multi-return / computed-key / wrapped `load`, on a sibling that passes the whole `data` object opaquely, on a `+page.server.ts` whose universal `+page.ts` sibling forwards its `data`, and project-wide when any whole-object use of `page.data` / `$page.data` is seen. Default warn; delete the key or wire a consumer. A load fetch can have side effects, so there is no safe auto-fix. The check runs only when the project declares `@sveltejs/kit`.",
+        docs_path: "explanations/dead-code#unused-load-data-keys",
+    },
+    RuleDef {
         id: "fallow/route-collision",
         category: "Policy",
         name: "Route collision",
@@ -465,6 +473,7 @@ fn dead_code_alias_id(normalized: &str) -> Option<&'static str> {
         "unused-component-props" | "unused-component-prop" => Some("fallow/unused-component-prop"),
         "unused-component-emits" | "unused-component-emit" => Some("fallow/unused-component-emit"),
         "unused-server-actions" | "unused-server-action" => Some("fallow/unused-server-action"),
+        "unused-load-data-keys" | "unused-load-data-key" => Some("fallow/unused-load-data-key"),
         "unresolved-imports" => Some("fallow/unresolved-import"),
         "unlisted-deps" | "unlisted-dependencies" => Some("fallow/unlisted-dependency"),
         "duplicate-exports" => Some("fallow/duplicate-export"),
@@ -619,6 +628,10 @@ fn member_import_rule_guide(id: &str) -> Option<RuleGuide> {
         "fallow/unused-server-action" => RuleGuide {
             example: "app/actions.ts has \"use server\" and exports submitForm, but no component imports it, binds it via action={submitForm}, or uses it in <form action={submitForm}>.",
             how_to_fix: "Wire the action to a consumer (an import-and-call, an action={fn} binding, or a <form action={fn}>), or remove it. If it is invoked reflectively (an action registry dispatching by id, or a non-JS caller), suppress the line with // fallow-ignore-next-line unused-server-action.",
+        },
+        "fallow/unused-load-data-key" => RuleGuide {
+            example: "src/routes/blog/+page.ts returns { posts, draftCount } but +page.svelte only reads data.posts and no component reads page.data.draftCount.",
+            how_to_fix: "Delete the unused key from the load() return (and skip its fetch), or wire a consumer (read data.<key> in +page.svelte, or page.data.<key> in a shared component). If the load fetch has a side effect you must keep, suppress the line with // fallow-ignore-next-line unused-load-data-key.",
         },
         "fallow/unresolved-import" => RuleGuide {
             example: "src/app.ts imports ./routes/admin, but no matching file exists after extension and index resolution.",
@@ -2287,7 +2300,7 @@ mod tests {
 
     #[test]
     fn check_rules_count() {
-        assert_eq!(CHECK_RULES.len(), 37);
+        assert_eq!(CHECK_RULES.len(), 38);
     }
 
     #[test]

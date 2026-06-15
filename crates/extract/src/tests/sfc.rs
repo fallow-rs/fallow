@@ -1643,3 +1643,39 @@ const id = page.data.session;
         info.member_accesses
     );
 }
+
+#[test]
+fn route_component_template_data_prop_pass_is_whole_use() {
+    // FP-1: `<Child data={data} />` in a route component passes the whole `data`
+    // prop opaquely, so the load-data detector must abstain on this route.
+    let source =
+        "<script lang=\"ts\">\n  let { data } = $props();\n</script>\n<Child data={data} />";
+    let info = parse_sfc(source, "+page.svelte");
+    assert!(
+        info.has_load_data_whole_use,
+        "data={{data}} in a route component is a whole-data use"
+    );
+}
+
+#[test]
+fn route_component_template_data_spread_is_whole_use() {
+    // FP-1: `{...data}` template spread passes the whole `data` prop opaquely.
+    let source = "<script lang=\"ts\">\n  let { data } = $props();\n</script>\n<Child {...data} />";
+    let info = parse_sfc(source, "+page.svelte");
+    assert!(
+        info.has_load_data_whole_use,
+        "{{...data}} template spread is a whole-data use"
+    );
+}
+
+#[test]
+fn route_component_template_member_access_is_not_whole_use() {
+    // `{data.title}` is a credited member access, NOT a whole-data use.
+    let source =
+        "<script lang=\"ts\">\n  let { data } = $props();\n</script>\n<h1>{data.title}</h1>";
+    let info = parse_sfc(source, "+page.svelte");
+    assert!(
+        !info.has_load_data_whole_use,
+        "data.title member access must not set the whole-data-use flag"
+    );
+}

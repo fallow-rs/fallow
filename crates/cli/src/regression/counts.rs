@@ -69,6 +69,8 @@ pub struct CheckCounts {
     #[serde(default)]
     pub unused_server_actions: usize,
     #[serde(default)]
+    pub unused_load_data_keys: usize,
+    #[serde(default)]
     pub unresolved_imports: usize,
     #[serde(default)]
     pub unlisted_dependencies: usize,
@@ -111,6 +113,7 @@ impl CheckCounts {
             unused_component_props: results.unused_component_props.len(),
             unused_component_emits: results.unused_component_emits.len(),
             unused_server_actions: results.unused_server_actions.len(),
+            unused_load_data_keys: results.unused_load_data_keys.len(),
             unresolved_imports: results.unresolved_imports.len(),
             unlisted_dependencies: results.unlisted_dependencies.len(),
             duplicate_exports: results.duplicate_exports.len(),
@@ -156,6 +159,9 @@ impl CheckCounts {
             // `fallow_config::RegressionBaseline` has no `unused_server_actions`
             // field; default to 0 until the config baseline schema gains one.
             unused_server_actions: 0,
+            // `fallow_config::RegressionBaseline` has no `unused_load_data_keys`
+            // field; default to 0 until the config baseline schema gains one.
+            unused_load_data_keys: 0,
             unresolved_imports: b.unresolved_imports,
             unlisted_dependencies: b.unlisted_dependencies,
             duplicate_exports: b.duplicate_exports,
@@ -220,6 +226,7 @@ impl CheckCounts {
         push_delta!(unused_component_props);
         push_delta!(unused_component_emits);
         push_delta!(unused_server_actions);
+        push_delta!(unused_load_data_keys);
         push_delta!(unresolved_imports);
         push_delta!(unlisted_dependencies);
         push_delta!(duplicate_exports);
@@ -306,6 +313,7 @@ mod tests {
             unused_component_props: 0,
             unused_component_emits: 0,
             unused_server_actions: 0,
+            unused_load_data_keys: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 0,
             duplicate_exports: 0,
@@ -353,6 +361,7 @@ mod tests {
                 unused_component_props: 0,
                 unused_component_emits: 0,
                 unused_server_actions: 0,
+                unused_load_data_keys: 0,
                 unresolved_imports: 0,
                 unlisted_dependencies: 1,
                 duplicate_exports: 0,
@@ -395,6 +404,7 @@ mod tests {
             unused_component_props: 0,
             unused_component_emits: 0,
             unused_server_actions: 0,
+            unused_load_data_keys: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 1,
             duplicate_exports: 0,
@@ -444,6 +454,7 @@ mod tests {
             unused_component_props: 0,
             unused_component_emits: 0,
             unused_server_actions: 0,
+            unused_load_data_keys: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 0,
             duplicate_exports: 0,
@@ -480,6 +491,7 @@ mod tests {
             unused_component_props: 0,
             unused_component_emits: 0,
             unused_server_actions: 0,
+            unused_load_data_keys: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 0,
             duplicate_exports: 0,
@@ -514,6 +526,7 @@ mod tests {
             unused_component_props: 0,
             unused_component_emits: 0,
             unused_server_actions: 0,
+            unused_load_data_keys: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 0,
             duplicate_exports: 0,
@@ -542,6 +555,7 @@ mod tests {
             unused_component_props: 0,
             unused_component_emits: 0,
             unused_server_actions: 0,
+            unused_load_data_keys: 0,
             unresolved_imports: 1,
             unlisted_dependencies: 1,
             duplicate_exports: 1,
@@ -579,6 +593,7 @@ mod tests {
             unused_component_props: 0,
             unused_component_emits: 0,
             unused_server_actions: 0,
+            unused_load_data_keys: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 0,
             duplicate_exports: 0,

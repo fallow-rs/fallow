@@ -131,6 +131,11 @@ pub enum IssueKind {
     /// no `<form action={fn}>`). Cross-graph dead-export direction, reclassified
     /// from `unused-export` for `"use server"` files.
     UnusedServerAction,
+    /// A SvelteKit `+page.{ts,server.ts,js,server.js}` `load()` return-object key
+    /// that no consumer reads: not off the sibling `+page.svelte`'s `data.<key>`,
+    /// nor project-wide via `page.data.<key>` / `$page.data.<key>`. A dead load
+    /// key runs a real server/DB fetch cost for data nothing renders.
+    UnusedLoadDataKey,
 }
 
 impl IssueKind {
@@ -192,6 +197,7 @@ impl IssueKind {
             "unused-component-prop" | "unused-component-props" => Some(Self::UnusedComponentProp),
             "unused-component-emit" | "unused-component-emits" => Some(Self::UnusedComponentEmit),
             "unused-server-action" | "unused-server-actions" => Some(Self::UnusedServerAction),
+            "unused-load-data-key" | "unused-load-data-keys" => Some(Self::UnusedLoadDataKey),
             _ => None,
         }
     }
@@ -240,6 +246,7 @@ impl IssueKind {
             Self::UnusedComponentProp => 38,
             Self::UnusedComponentEmit => 39,
             Self::UnusedServerAction => 40,
+            Self::UnusedLoadDataKey => 41,
         }
     }
 
@@ -287,6 +294,7 @@ impl IssueKind {
             38 => Some(Self::UnusedComponentProp),
             39 => Some(Self::UnusedComponentEmit),
             40 => Some(Self::UnusedServerAction),
+            41 => Some(Self::UnusedLoadDataKey),
             _ => None,
         }
     }
@@ -394,6 +402,7 @@ pub const fn issue_kind_to_kebab(kind: IssueKind) -> &'static str {
         IssueKind::UnusedComponentProp => "unused-component-prop",
         IssueKind::UnusedComponentEmit => "unused-component-emit",
         IssueKind::UnusedServerAction => "unused-server-action",
+        IssueKind::UnusedLoadDataKey => "unused-load-data-key",
     }
 }
 
@@ -648,6 +657,8 @@ pub const KNOWN_ISSUE_KIND_NAMES: &[&str] = &[
     "unused-component-emits",
     "unused-server-action",
     "unused-server-actions",
+    "unused-load-data-key",
+    "unused-load-data-keys",
 ];
 
 /// CLI filter flags on `fallow dead-code` that scope output to a single
@@ -672,6 +683,7 @@ pub const DEAD_CODE_FILTER_FLAGS: &[&str] = &[
     "--unused-component-props",
     "--unused-component-emits",
     "--unused-server-actions",
+    "--unused-load-data-keys",
     "--unresolved-imports",
     "--unlisted-deps",
     "--duplicate-exports",
@@ -961,6 +973,14 @@ mod tests {
             IssueKind::parse("unused-component-emits"),
             Some(IssueKind::UnusedComponentEmit)
         );
+        assert_eq!(
+            IssueKind::parse("unused-load-data-key"),
+            Some(IssueKind::UnusedLoadDataKey)
+        );
+        assert_eq!(
+            IssueKind::parse("unused-load-data-keys"),
+            Some(IssueKind::UnusedLoadDataKey)
+        );
     }
 
     #[test]
@@ -1028,7 +1048,11 @@ mod tests {
             IssueKind::from_discriminant(40),
             Some(IssueKind::UnusedServerAction)
         );
-        assert_eq!(IssueKind::from_discriminant(41), None);
+        assert_eq!(
+            IssueKind::from_discriminant(41),
+            Some(IssueKind::UnusedLoadDataKey)
+        );
+        assert_eq!(IssueKind::from_discriminant(42), None);
         assert_eq!(IssueKind::from_discriminant(u8::MAX), None);
     }
 
@@ -1075,6 +1099,7 @@ mod tests {
             IssueKind::UnusedComponentProp,
             IssueKind::UnusedComponentEmit,
             IssueKind::UnusedServerAction,
+            IssueKind::UnusedLoadDataKey,
         ] {
             assert_eq!(
                 IssueKind::from_discriminant(kind.to_discriminant()),
@@ -1082,7 +1107,7 @@ mod tests {
             );
         }
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(41), None);
+        assert_eq!(IssueKind::from_discriminant(42), None);
     }
 
     #[test]
@@ -1127,6 +1152,8 @@ mod tests {
             IssueKind::UnrenderedComponent,
             IssueKind::UnusedComponentProp,
             IssueKind::UnusedComponentEmit,
+            IssueKind::UnusedServerAction,
+            IssueKind::UnusedLoadDataKey,
         ];
         let discriminants: Vec<u8> = all_kinds.iter().map(|k| k.to_discriminant()).collect();
         let mut sorted = discriminants.clone();

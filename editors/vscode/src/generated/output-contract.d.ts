@@ -1134,6 +1134,20 @@ unused_component_emits?: UnusedComponentEmitFinding[]
  * `warn`.
  */
 unused_server_actions?: UnusedServerActionFinding[]
+/**
+ * SvelteKit `+page.{ts,server.ts,js,server.js}` `load()` return-object keys
+ * read by no consumer. Wrapped in [`UnusedLoadDataKeyFinding`] so each entry
+ * carries a typed `actions` array natively. Default severity is `warn`.
+ */
+unused_load_data_keys?: UnusedLoadDataKeyFinding[]
+/**
+ * `true` when the `unused-load-data-key` detector abstained project-wide
+ * because a whole-object use of `page.data` / `$page.data` was seen
+ * somewhere (S1 observability: an empty `unused_load_data_keys` with this
+ * flag set is NOT a clean bill, it means the rule could not run safely).
+ * Serialized only when `true` so the default JSON contract is unchanged.
+ */
+unused_load_data_keys_global_abstain?: boolean
 baseline_deltas?: (BaselineDeltas | null)
 baseline?: (BaselineMatch | null)
 regression?: (RegressionResult | null)
@@ -1232,6 +1246,10 @@ unused_component_emits?: number
  * code in the project.
  */
 unused_server_actions?: number
+/**
+ * SvelteKit `load()` return-object keys read by no consumer.
+ */
+unused_load_data_keys?: number
 /**
  * Imports that could not be resolved against the project's module graph.
  */
@@ -2956,6 +2974,45 @@ line: number
  * 0-based byte column offset of the export.
  */
 col: number
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+}
+/**
+ * Wire-shape envelope for an [`UnusedLoadDataKey`] finding. There is no safe
+ * auto-fix: a `load()` fetch can have side effects, so deleting the key is a
+ * human call. The only action is a line-level suppress.
+ */
+export interface UnusedLoadDataKeyFinding {
+/**
+ * The producer `+page.{ts,server.ts,js,server.js}` file declaring the key.
+ */
+path: string
+/**
+ * The returned-object key name read by no consumer.
+ */
+key_name: string
+/**
+ * 1-based line number of the key in the return object.
+ */
+line: number
+/**
+ * 0-based byte column offset of the key.
+ */
+col: number
+/**
+ * The route directory relative to the project root (`src/routes/blog`), for
+ * agent remediation and per-route trend aggregation. `None` when not
+ * determinable.
+ */
+route_dir?: (string | null)
 /**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
@@ -5867,6 +5924,20 @@ unused_component_emits?: UnusedComponentEmitFinding[]
  * `warn`.
  */
 unused_server_actions?: UnusedServerActionFinding[]
+/**
+ * SvelteKit `+page.{ts,server.ts,js,server.js}` `load()` return-object keys
+ * read by no consumer. Wrapped in [`UnusedLoadDataKeyFinding`] so each entry
+ * carries a typed `actions` array natively. Default severity is `warn`.
+ */
+unused_load_data_keys?: UnusedLoadDataKeyFinding[]
+/**
+ * `true` when the `unused-load-data-key` detector abstained project-wide
+ * because a whole-object use of `page.data` / `$page.data` was seen
+ * somewhere (S1 observability: an empty `unused_load_data_keys` with this
+ * flag set is NOT a clean bill, it means the rule could not run safely).
+ * Serialized only when `true` so the default JSON contract is unchanged.
+ */
+unused_load_data_keys_global_abstain?: boolean
 }
 /**
  * The rendered impact report, derived purely from the store (no analysis run).

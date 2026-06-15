@@ -412,6 +412,14 @@ impl<'a> CompactLineBuilder<'a> {
                 finding.action.action_name,
             ));
         }
+        for finding in &self.results.unused_load_data_keys {
+            self.lines.push(format!(
+                "unused-load-data-key:{}:{}:{}",
+                self.rel(&finding.key.path),
+                finding.key.line,
+                finding.key.key_name,
+            ));
+        }
         for finding in &self.results.route_collisions {
             self.lines.push(format!(
                 "route-collision:{}:{} (url {})",
@@ -1205,7 +1213,7 @@ mod tests {
         let results = sample_results(&root);
         let lines = build_compact_lines(&results, &root);
 
-        assert_eq!(lines.len(), 22);
+        assert_eq!(lines.len(), 23);
 
         assert!(lines[0].starts_with("unused-file:"));
         assert!(lines[1].starts_with("unused-export:"));
@@ -1236,6 +1244,7 @@ mod tests {
                 .any(|l| l.starts_with("unused-component-emit:"))
         );
         assert!(lines.iter().any(|l| l.starts_with("unused-server-action:")));
+        assert!(lines.iter().any(|l| l.starts_with("unused-load-data-key:")));
     }
 
     #[test]

@@ -8,8 +8,8 @@ use fallow_types::output_dead_code::{
     UnrenderedComponentFinding, UnresolvedImportFinding, UnusedClassMemberFinding,
     UnusedComponentEmitFinding, UnusedComponentPropFinding, UnusedDependencyFinding,
     UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
-    UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
-    UnusedTypeFinding,
+    UnusedLoadDataKeyFinding, UnusedOptionalDependencyFinding, UnusedServerActionFinding,
+    UnusedStoreMemberFinding, UnusedTypeFinding,
 };
 
 /// Build an `AnalysisResults` populated with one issue of every type.
@@ -219,6 +219,14 @@ pub fn sample_results(root: &Path) -> AnalysisResults {
                 col: 0,
             },
         ));
+    r.unused_load_data_keys
+        .push(UnusedLoadDataKeyFinding::with_actions(UnusedLoadDataKey {
+            path: root.join("src/routes/blog/+page.ts"),
+            key_name: "draftCount".to_string(),
+            line: 4,
+            col: 2,
+            route_dir: Some("src/routes/blog".to_string()),
+        }));
     r.stale_suppressions.push(StaleSuppression {
         path: root.join("src/utils.ts"),
         line: 5,

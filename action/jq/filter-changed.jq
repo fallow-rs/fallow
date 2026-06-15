@@ -88,6 +88,9 @@ def filter_check:
   (if .unprovided_injects then
     .unprovided_injects |= map(select(.path | in_changed))
   else . end) |
+  (if .unused_load_data_keys then
+    .unused_load_data_keys |= map(select(.path | in_changed))
+  else . end) |
   # Recalculate total_issues from filtered arrays
   (if .total_issues != null then
     .total_issues = (
@@ -126,7 +129,8 @@ def filter_check:
       (.unrendered_components // [] | length) +
       (.unused_component_props // [] | length) +
       (.unused_component_emits // [] | length) +
-      (.unprovided_injects // [] | length)
+      (.unprovided_injects // [] | length) +
+      (.unused_load_data_keys // [] | length)
     )
   else . end);
 

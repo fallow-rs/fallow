@@ -160,6 +160,7 @@
         "unused-component-props": "warn",
         "unused-component-emits": "warn",
         "unused-server-actions": "warn",
+        "unused-load-data-keys": "warn",
         "unresolved-imports": "error",
         "unlisted-dependencies": "error",
         "duplicate-exports": "error",
@@ -1053,6 +1054,11 @@
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
+        "unused-load-data-keys": {
+          "description": "SvelteKit `+page.{ts,server.ts,js,server.js}` `load()` return-object key\nread by no consumer: not off the sibling `+page.svelte`'s `data.<key>`,\nnor project-wide via `page.data.<key>` / `$page.data.<key>`. Cross-file\ndead-input direction. Defaults to `warn`, not `error`: the rule is new and\nfalse-negative-preferring (a whole-object `data` pass abstains), and a\nload fetch can have side effects so deletion is a human call; warn encodes\nthat without failing CI until corpus-validated.",
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
+        },
         "unresolved-imports": {
           "$ref": "#/$defs/Severity",
           "default": "error"
@@ -1708,6 +1714,16 @@
           ]
         },
         "unused-server-actions": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unused-load-data-keys": {
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"

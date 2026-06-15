@@ -406,7 +406,12 @@ use crate::MemberKind;
 /// recovers the nested `page.data.<key>` member access (the template scanner
 /// previously dropped the key, keeping only `page.data`). A warm cache from 163
 /// lacks those project-wide global-store accesses.
-pub(super) const CACHE_VERSION: u32 = 164;
+///
+/// Bumped to 165 for the `unused-load-data-key` detector: SvelteKit page-load
+/// producers now harvest `load_return_keys` + `has_unharvestable_load`, and
+/// every file records `has_load_data_whole_use` (the FP-1 whole-`data` pass
+/// signal). A warm cache from 164 lacks all three.
+pub(super) const CACHE_VERSION: u32 = 165;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -452,7 +457,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 936);
+assert_cached_type_size!(CachedModule, 960);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 56);
@@ -473,6 +478,7 @@ assert_cached_type_size!(fallow_types::extract::FunctionComplexity, 96);
 assert_cached_type_size!(fallow_types::extract::ComplexityContribution, 16);
 assert_cached_type_size!(fallow_types::extract::FlagUse, 80);
 assert_cached_type_size!(fallow_types::extract::ClassHeritageInfo, 96);
+assert_cached_type_size!(fallow_types::extract::LoadReturnKey, 32);
 
 /// Cached data for a single module.
 #[derive(Debug, Clone, Encode, Decode)]
@@ -616,6 +622,15 @@ pub struct CachedModule {
     /// Whether the emit binding was used as a whole value. Round-trips for the
     /// abstain.
     pub has_emit_whole_object_use: bool,
+    /// SvelteKit `load()` return-object keys. Round-trips so the
+    /// `unused-load-data-key` detector sees them on warm-cache loads.
+    pub load_return_keys: Vec<fallow_types::extract::LoadReturnKey>,
+    /// Whether this file's `load()` body could not be harvested safely.
+    /// Round-trips for the abstain.
+    pub has_unharvestable_load: bool,
+    /// Whether this file passes the whole `data` object opaquely. Round-trips
+    /// for the `unused-load-data-key` abstain.
+    pub has_load_data_whole_use: bool,
 }
 
 /// Cached namespace-object alias.

@@ -369,6 +369,11 @@ where
                 .unused_server_actions
                 .push(item.clone());
         }
+        for item in &results.unused_load_data_keys {
+            self.entry_for_path(&item.key.path)
+                .unused_load_data_keys
+                .push(item.clone());
+        }
         for item in &results.stale_suppressions {
             self.entry_for_path(&item.path)
                 .stale_suppressions

@@ -107,6 +107,9 @@ fn cache_store_insert_and_get() {
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
     };
     store.insert(Path::new("test.ts"), module);
     assert_eq!(store.len(), 1);
@@ -170,6 +173,9 @@ fn cache_store_hash_mismatch_returns_none() {
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
     };
     store.insert(Path::new("test.ts"), module);
     assert!(store.get(Path::new("test.ts"), 99).is_none());
@@ -237,6 +243,9 @@ fn cache_store_overwrite_entry() {
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
     };
     let m2 = CachedModule {
         content_hash: 2,
@@ -291,6 +300,9 @@ fn cache_store_overwrite_entry() {
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
     };
     store.insert(Path::new("test.ts"), m1);
     store.insert(Path::new("test.ts"), m2);
@@ -362,6 +374,9 @@ fn module_to_cached_roundtrip_named_export() {
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -453,6 +468,9 @@ fn module_to_cached_roundtrip_side_effect_used_export() {
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -529,6 +547,9 @@ fn module_to_cached_roundtrip_default_export() {
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -628,6 +649,9 @@ fn module_to_cached_roundtrip_imports() {
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -711,6 +735,9 @@ fn module_to_cached_roundtrip_re_exports() {
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -792,6 +819,9 @@ fn module_to_cached_roundtrip_dynamic_imports() {
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -902,6 +932,9 @@ fn module_to_cached_roundtrip_members() {
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -990,6 +1023,9 @@ fn cache_save_and_load_roundtrip() {
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
     };
     store.insert(Path::new("test.ts"), module);
     store.save(&dir, 0, DEFAULT_CACHE_MAX_SIZE).unwrap();
@@ -1064,6 +1100,9 @@ fn cache_version_mismatch_returns_none() {
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
     };
     store.insert(Path::new("test.ts"), module);
     store.save(&dir, 0, DEFAULT_CACHE_MAX_SIZE).unwrap();
@@ -1144,6 +1183,9 @@ fn module_to_cached_roundtrip_type_only_import() {
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1210,6 +1252,9 @@ fn get_by_path_only_returns_entry_regardless_of_hash() {
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
     };
     store.insert(Path::new("test.ts"), module);
 
@@ -1287,6 +1332,9 @@ fn retain_paths_removes_stale_entries() {
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
     };
 
     store.insert(Path::new("/project/a.ts"), m());
@@ -1370,6 +1418,9 @@ fn retain_paths_with_empty_files_clears_cache() {
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
     };
     store.insert(Path::new("a.ts"), m);
     assert_eq!(store.len(), 1);
@@ -1434,6 +1485,9 @@ fn get_by_metadata_returns_entry_on_match() {
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
     };
     store.insert(Path::new("test.ts"), module);
 
@@ -1498,6 +1552,9 @@ fn get_by_metadata_returns_none_on_mtime_mismatch() {
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
     };
     store.insert(Path::new("test.ts"), module);
 
@@ -1564,6 +1621,9 @@ fn get_by_metadata_returns_none_on_size_mismatch() {
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
     };
     store.insert(Path::new("test.ts"), module);
 
@@ -1630,6 +1690,9 @@ fn get_by_metadata_returns_none_for_zero_mtime() {
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
     };
     store.insert(Path::new("test.ts"), module);
 
@@ -1704,6 +1767,9 @@ fn module_to_cached_stores_mtime_and_size() {
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
     };
 
     let cached = module_to_cached(&module, 12345, 6789);
@@ -1766,6 +1832,9 @@ fn module_to_cached_roundtrip_line_offsets() {
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
     };
     let cached = module_to_cached(&module, 0, 0);
     let restored = cached_to_module(&cached, FileId(0));
@@ -1833,6 +1902,9 @@ fn module_to_cached_roundtrip_suppressions_with_kinds() {
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1926,6 +1998,9 @@ fn module_to_cached_roundtrip_unknown_suppression_kinds() {
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -2006,6 +2081,9 @@ fn module_to_cached_roundtrip_visibility() {
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -2077,6 +2155,9 @@ fn module_to_cached_roundtrip_visibility_internal() {
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -2148,6 +2229,9 @@ fn module_to_cached_roundtrip_visibility_beta() {
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -2219,6 +2303,9 @@ fn module_to_cached_roundtrip_visibility_alpha() {
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -2292,6 +2379,9 @@ fn module_to_cached_roundtrip_dynamic_import_patterns() {
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -2363,6 +2453,9 @@ fn module_to_cached_roundtrip_unused_import_bindings() {
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -2461,6 +2554,9 @@ fn module_to_cached_roundtrip_complexity() {
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -2536,6 +2632,9 @@ fn module_to_cached_roundtrip_require_with_destructured() {
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -2610,6 +2709,9 @@ fn module_to_cached_roundtrip_dynamic_import_with_local() {
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -2683,6 +2785,9 @@ fn module_to_cached_roundtrip_source_span() {
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -2763,6 +2868,9 @@ fn module_to_cached_roundtrip_member_decorators() {
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -2831,6 +2939,9 @@ fn synthetic_module(content_hash: u64, last_access_secs: u64, payload_kb: usize)
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
     }
 }
 
