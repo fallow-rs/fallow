@@ -10,14 +10,17 @@ fn tokenize_no_skip(code: &str) -> Vec<SourceToken> {
     tokenize_file(&path, code, false).tokens
 }
 
+fn has_keyword(tokens: &[SourceToken], keyword: KeywordType) -> bool {
+    tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::Keyword(found) if found == keyword))
+}
+
 #[test]
 fn skip_imports_removes_value_import() {
     let tokens = tokenize_skip_imports("import { useState } from 'react';");
-    let has_import = tokens
-        .iter()
-        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Import)));
     assert!(
-        !has_import,
+        !has_keyword(&tokens, KeywordType::Import),
         "Value import should be stripped when skip_imports is true"
     );
     assert!(
@@ -62,62 +65,163 @@ fn skip_imports_removes_type_import() {
 #[test]
 fn skip_imports_preserves_runtime_code() {
     let tokens = tokenize_skip_imports("import { useState } from 'react';\nconst x = useState(0);");
-    let has_const = tokens
-        .iter()
-        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Const)));
-    assert!(has_const, "Runtime code after import should be preserved");
-    let has_import = tokens
-        .iter()
-        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Import)));
-    assert!(!has_import, "Import keyword should be stripped");
+    assert!(
+        has_keyword(&tokens, KeywordType::Const),
+        "Runtime code after import should be preserved"
+    );
+    assert!(
+        !has_keyword(&tokens, KeywordType::Import),
+        "Import keyword should be stripped"
+    );
 }
 
 #[test]
 fn skip_imports_preserves_export_declaration() {
     let tokens = tokenize_skip_imports("export function foo() { return 1; }");
-    let has_export = tokens
-        .iter()
-        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Export)));
-    assert!(has_export, "Local export declaration should be preserved");
+    assert!(
+        has_keyword(&tokens, KeywordType::Export),
+        "Local export declaration should be preserved"
+    );
 }
 
 #[test]
 fn skip_imports_preserves_export_default() {
     let tokens = tokenize_skip_imports("export default class Foo {}");
-    let has_export = tokens
-        .iter()
-        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Export)));
-    assert!(has_export, "Export default should be preserved");
+    assert!(
+        has_keyword(&tokens, KeywordType::Export),
+        "Export default should be preserved"
+    );
 }
 
 #[test]
-fn skip_imports_preserves_reexport() {
+fn skip_imports_preserves_local_named_export() {
+    let tokens = tokenize_skip_imports("const foo = 1;\nexport { foo };");
+    assert!(
+        has_keyword(&tokens, KeywordType::Export),
+        "Local named export should be preserved"
+    );
+}
+
+#[test]
+fn skip_imports_removes_reexport() {
     let tokens = tokenize_skip_imports("export { foo } from './foo';");
-    let has_export = tokens
-        .iter()
-        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Export)));
-    assert!(has_export, "Re-export should be preserved (not an import)");
+    assert!(tokens.is_empty(), "Named re-export should be stripped");
 }
 
 #[test]
-fn skip_imports_preserves_export_all() {
+fn skip_imports_removes_default_alias_reexport() {
+    let tokens = tokenize_skip_imports("export { default as Button } from './button';");
+    assert!(
+        tokens.is_empty(),
+        "Default alias re-export should be stripped"
+    );
+}
+
+#[test]
+fn skip_imports_removes_namespace_reexport() {
+    let tokens = tokenize_skip_imports("export * as ns from './mod';");
+    assert!(tokens.is_empty(), "Namespace re-export should be stripped");
+}
+
+#[test]
+fn skip_imports_removes_export_all() {
     let tokens = tokenize_skip_imports("export * from './mod';");
-    let has_export = tokens
-        .iter()
-        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Export)));
-    assert!(has_export, "Export * should be preserved (not an import)");
+    assert!(tokens.is_empty(), "Export * should be stripped");
 }
 
 #[test]
-fn skip_imports_does_not_filter_require() {
+fn skip_imports_removes_type_reexport() {
+    let tokens = tokenize_skip_imports("export type { Foo } from './foo';");
+    assert!(tokens.is_empty(), "Type re-export should be stripped");
+}
+
+#[test]
+fn skip_imports_removes_top_level_require_binding() {
     let tokens = tokenize_skip_imports("const x = require('foo');");
-    let has_const = tokens
-        .iter()
-        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Const)));
-    assert!(has_const, "require() call should NOT be filtered");
+    assert!(
+        tokens.is_empty(),
+        "Top-level require binding should be stripped"
+    );
+}
+
+#[test]
+fn skip_imports_removes_top_level_destructured_require_binding() {
+    let tokens = tokenize_skip_imports("const { readFile, writeFile } = require('node:fs');");
+    assert!(
+        tokens.is_empty(),
+        "Top-level destructured require binding should be stripped"
+    );
+}
+
+#[test]
+fn skip_imports_removes_top_level_multi_require_binding() {
+    let tokens = tokenize_skip_imports("const fs = require('fs'), path = require('path');");
+    assert!(
+        tokens.is_empty(),
+        "Top-level declaration with only require bindings should be stripped"
+    );
+}
+
+#[test]
+fn skip_imports_preserves_function_local_require_binding() {
+    let tokens = tokenize_skip_imports("function load() { const x = require('foo'); return x; }");
+    assert!(
+        has_keyword(&tokens, KeywordType::Const),
+        "Function-local require binding should stay tokenized"
+    );
+}
+
+#[test]
+fn skip_imports_preserves_require_call_argument() {
+    let tokens = tokenize_skip_imports("doSomething(require('foo'));");
     assert!(
         !tokens.is_empty(),
-        "require() is a CallExpression, not an ImportDeclaration"
+        "Require used as an executable call argument should stay tokenized"
+    );
+}
+
+#[test]
+fn skip_imports_preserves_conditional_require_binding() {
+    let tokens = tokenize_skip_imports("const x = condition ? require('a') : require('b');");
+    assert!(
+        has_keyword(&tokens, KeywordType::Const),
+        "Conditional require binding should stay tokenized"
+    );
+}
+
+#[test]
+fn skip_imports_preserves_mixed_require_declaration() {
+    let tokens = tokenize_skip_imports("const fs = require('fs'), mode = process.env.NODE_ENV;");
+    assert!(
+        has_keyword(&tokens, KeywordType::Const),
+        "Mixed require and runtime declaration should stay tokenized"
+    );
+}
+
+#[test]
+fn skip_imports_preserves_non_string_require_binding() {
+    let tokens = tokenize_skip_imports("const plugin = require(pluginName);");
+    assert!(
+        has_keyword(&tokens, KeywordType::Const),
+        "Dynamic require binding should stay tokenized"
+    );
+}
+
+#[test]
+fn skip_imports_preserves_multi_arg_require_binding() {
+    let tokens = tokenize_skip_imports("const plugin = require('plugin', options);");
+    assert!(
+        has_keyword(&tokens, KeywordType::Const),
+        "Require binding with extra arguments should stay tokenized"
+    );
+}
+
+#[test]
+fn skip_imports_preserves_side_effect_require() {
+    let tokens = tokenize_skip_imports("require('dotenv/config');");
+    assert!(
+        !tokens.is_empty(),
+        "Side-effect require call should stay tokenized"
     );
 }
 
@@ -164,10 +268,10 @@ export function process() {
         .filter(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Import)))
         .count();
     assert_eq!(import_count, 0, "All import declarations should be removed");
-    let has_export = tokens
-        .iter()
-        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Export)));
-    assert!(has_export, "Export function should be preserved");
+    assert!(
+        has_keyword(&tokens, KeywordType::Export),
+        "Export function should be preserved"
+    );
 }
 
 #[test]

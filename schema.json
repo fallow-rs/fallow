@@ -708,7 +708,7 @@
           "default": false
         },
         "ignoreImports": {
-          "description": "Exclude ES `import` declarations from clone detection.\n\nDefaults to `true`: token-identical sorted import blocks are a structural\nproperty of well-formatted code, not copy-paste, so they should not\nsurface as clone groups. Set to `false` to count import blocks again.\nWhen enabled, all `import` statements (value imports, type imports, and\nside-effect imports) are stripped from the token stream before clone\ndetection. Only affects ES `import` declarations; CommonJS `require()`\ncalls and `export ... from` re-export blocks are still counted.",
+          "description": "Exclude module-wiring declarations from clone detection.\n\nDefaults to `true`: token-identical module wiring is a structural\nproperty of well-formatted code, not copy-paste, so it should not\nsurface as clone groups. Set to `false` to count module wiring again.\nWhen enabled, ES imports, re-export declarations, and top-level static\nCommonJS `require(\"...\")` binding declarations are stripped from the\ntoken stream before clone detection. Dynamic imports, side-effect\n`require()` calls, nested `require()` calls, dynamic require arguments,\nand mixed declarations are still counted.",
           "type": "boolean",
           "default": true
         },

@@ -101,7 +101,55 @@ fn expression_is_function_like(expr: &Expression<'_>) -> bool {
     }
 }
 
+fn is_static_require_binding_declaration(decl: &VariableDeclaration<'_>) -> bool {
+    matches!(
+        decl.kind,
+        VariableDeclarationKind::Var
+            | VariableDeclarationKind::Let
+            | VariableDeclarationKind::Const
+    ) && !decl.declarations.is_empty()
+        && decl
+            .declarations
+            .iter()
+            .all(is_static_require_binding_declarator)
+}
+
+fn is_static_require_binding_declarator(decl: &VariableDeclarator<'_>) -> bool {
+    decl.init
+        .as_ref()
+        .is_some_and(is_static_require_call_expression)
+}
+
+fn is_static_require_call_expression(expr: &Expression<'_>) -> bool {
+    let Expression::CallExpression(call) = expr else {
+        return false;
+    };
+    call.arguments.len() == 1
+        && matches!(&call.callee, Expression::Identifier(id) if id.name == "require")
+        && matches!(call.arguments.first(), Some(Argument::StringLiteral(_)))
+}
+
 impl<'a> Visit<'a> for TokenExtractor {
+    fn visit_program(&mut self, program: &Program<'a>) {
+        if !self.skip_imports {
+            walk::walk_program(self, program);
+            return;
+        }
+
+        if let Some(hashbang) = &program.hashbang {
+            self.visit_hashbang(hashbang);
+        }
+        self.visit_directives(&program.directives);
+        for stmt in &program.body {
+            if let Statement::VariableDeclaration(decl) = stmt
+                && is_static_require_binding_declaration(decl)
+            {
+                continue;
+            }
+            self.visit_statement(stmt);
+        }
+    }
+
     fn visit_variable_declaration(&mut self, decl: &VariableDeclaration<'a>) {
         let kw = match decl.kind {
             VariableDeclarationKind::Var => KeywordType::Var,
@@ -535,6 +583,9 @@ impl<'a> Visit<'a> for TokenExtractor {
     }
 
     fn visit_export_named_declaration(&mut self, decl: &ExportNamedDeclaration<'a>) {
+        if self.skip_imports && decl.source.is_some() {
+            return;
+        }
         if self.strip_types && decl.export_kind.is_type() {
             return;
         }
@@ -549,6 +600,9 @@ impl<'a> Visit<'a> for TokenExtractor {
     }
 
     fn visit_export_all_declaration(&mut self, decl: &ExportAllDeclaration<'a>) {
+        if self.skip_imports {
+            return;
+        }
         self.push_keyword(KeywordType::Export, decl.span);
         self.push_keyword(KeywordType::From, decl.span);
         self.push(

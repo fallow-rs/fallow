@@ -411,10 +411,9 @@ pub(super) const CACHE_VERSION: u32 = 164;
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
 ///
-/// Bumped to 5 for issue #1180: cached duplicate-analysis suppressions now
-/// preserve scoped rule-pack policy tokens instead of storing only a broad
-/// `IssueKind` discriminant.
-pub const DUPES_CACHE_VERSION: u32 = 5;
+/// Bumped to 6 for issue #1225: `ignoreImports` now excludes re-export barrels
+/// and top-level static CommonJS require binding declarations.
+pub const DUPES_CACHE_VERSION: u32 = 6;
 
 /// Default maximum cache size (256 MB). Overridable per-project via
 /// `cache.maxSizeMb` in the config file or `FALLOW_CACHE_MAX_SIZE` env var.

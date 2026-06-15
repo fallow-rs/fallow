@@ -805,11 +805,10 @@ pub fn print_min_occurrences_note(result: &DupesResult, quiet: bool) {
     );
 }
 
-/// Emit a stderr note when import declarations were excluded from clone
-/// detection (the default since #1224). Human-format only, so machine readers
-/// never see decorative stderr noise. Fires only when clone groups were
-/// reported, so a clean run stays quiet; it tells users the report excludes a
-/// category and how to opt back in.
+/// Emit a stderr note when module wiring was excluded from clone detection.
+/// Human-format only, so machine readers never see decorative stderr noise.
+/// Fires only when clone groups were reported, so a clean run stays quiet; it
+/// tells users the report excludes a category and how to opt back in.
 pub fn print_ignore_imports_note(result: &DupesResult, quiet: bool) {
     if quiet
         || !result.ignore_imports
@@ -828,7 +827,7 @@ pub fn print_ignore_imports_note(result: &DupesResult, quiet: bool) {
     }
 
     eprintln!(
-        "note: import declarations excluded from clone detection (--no-ignore-imports to include them)"
+        "note: module wiring excluded from clone detection (--no-ignore-imports to include it)"
     );
 }
 
