@@ -33,6 +33,17 @@ const CATEGORY_ICONS: Record<IssueCategory, string> = {
   "unused-optional-dependencies": "package",
   "unused-enum-members": "symbol-enum-member",
   "unused-class-members": "symbol-field",
+  "unused-store-member": "symbol-field",
+  "unused-server-action": "symbol-method",
+  "unused-component-prop": "symbol-property",
+  "unused-component-emit": "symbol-event",
+  "unrendered-component": "symbol-misc",
+  "unprovided-inject": "plug",
+  "invalid-client-export": "error",
+  "mixed-client-server-barrel": "files",
+  "misplaced-directive": "warning",
+  "route-collision": "git-merge",
+  "dynamic-segment-name-conflict": "git-merge",
   "unresolved-imports": "error",
   "unlisted-dependencies": "package",
   "duplicate-exports": "files",
@@ -60,6 +71,17 @@ const ISSUE_ICONS: Record<IssueCategory, string> = {
   "unused-optional-dependencies": "package",
   "unused-enum-members": "symbol-enum-member",
   "unused-class-members": "symbol-field",
+  "unused-store-member": "symbol-field",
+  "unused-server-action": "symbol-method",
+  "unused-component-prop": "symbol-property",
+  "unused-component-emit": "symbol-event",
+  "unrendered-component": "symbol-misc",
+  "unprovided-inject": "plug",
+  "invalid-client-export": "error",
+  "mixed-client-server-barrel": "files",
+  "misplaced-directive": "warning",
+  "route-collision": "git-merge",
+  "dynamic-segment-name-conflict": "git-merge",
   "unresolved-imports": "error",
   "unlisted-dependencies": "package",
   "duplicate-exports": "copy",
@@ -300,6 +322,140 @@ export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeIte
           ),
       ),
     );
+
+    if (this.result.unused_store_members) {
+      addCategory(
+        "unused-store-member",
+        this.result.unused_store_members.map(
+          (m) =>
+            new IssueItem(
+              `${m.parent_name}.${m.member_name}`,
+              m.path,
+              m.line,
+              m.col,
+              "unused-store-member",
+            ),
+        ),
+      );
+    }
+
+    if (this.result.unused_server_actions) {
+      addCategory(
+        "unused-server-action",
+        this.result.unused_server_actions.map(
+          (a) => new IssueItem(a.action_name, a.path, a.line, a.col, "unused-server-action"),
+        ),
+      );
+    }
+
+    if (this.result.unused_component_props) {
+      addCategory(
+        "unused-component-prop",
+        this.result.unused_component_props.map(
+          (p) =>
+            new IssueItem(
+              `${p.component_name}.${p.prop_name}`,
+              p.path,
+              p.line,
+              p.col,
+              "unused-component-prop",
+            ),
+        ),
+      );
+    }
+
+    if (this.result.unused_component_emits) {
+      addCategory(
+        "unused-component-emit",
+        this.result.unused_component_emits.map(
+          (e) =>
+            new IssueItem(
+              `${e.component_name}.${e.emit_name}`,
+              e.path,
+              e.line,
+              e.col,
+              "unused-component-emit",
+            ),
+        ),
+      );
+    }
+
+    if (this.result.unrendered_components) {
+      addCategory(
+        "unrendered-component",
+        this.result.unrendered_components.map(
+          (c) => new IssueItem(c.component_name, c.path, c.line, c.col, "unrendered-component"),
+        ),
+      );
+    }
+
+    if (this.result.unprovided_injects) {
+      addCategory(
+        "unprovided-inject",
+        this.result.unprovided_injects.map(
+          (i) => new IssueItem(i.key_name, i.path, i.line, i.col, "unprovided-inject"),
+        ),
+      );
+    }
+
+    if (this.result.invalid_client_exports) {
+      addCategory(
+        "invalid-client-export",
+        this.result.invalid_client_exports.map(
+          (e) => new IssueItem(e.export_name, e.path, e.line, e.col, "invalid-client-export"),
+        ),
+      );
+    }
+
+    if (this.result.mixed_client_server_barrels) {
+      addCategory(
+        "mixed-client-server-barrel",
+        this.result.mixed_client_server_barrels.map(
+          (b) =>
+            new IssueItem(
+              `${b.client_origin} + ${b.server_origin}`,
+              b.path,
+              b.line,
+              b.col,
+              "mixed-client-server-barrel",
+            ),
+        ),
+      );
+    }
+
+    if (this.result.misplaced_directives) {
+      addCategory(
+        "misplaced-directive",
+        this.result.misplaced_directives.map(
+          (d) => new IssueItem(d.directive, d.path, d.line, d.col, "misplaced-directive"),
+        ),
+      );
+    }
+
+    if (this.result.route_collisions) {
+      addCategory(
+        "route-collision",
+        this.result.route_collisions.map(
+          (r) => new IssueItem(r.url, r.path, r.line, r.col, "route-collision"),
+        ),
+      );
+    }
+
+    if (this.result.dynamic_segment_name_conflicts) {
+      addCategory(
+        "dynamic-segment-name-conflict",
+        this.result.dynamic_segment_name_conflicts.map(
+          (c) =>
+            new IssueItem(
+              `${c.position} (${c.conflicting_segments.join(" vs ")})`,
+              c.path,
+              c.line,
+              c.col,
+              "dynamic-segment-name-conflict",
+            ),
+        ),
+      );
+    }
 
     addCategory(
       "unresolved-imports",

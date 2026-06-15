@@ -168,6 +168,22 @@ fn section_footer_text(title: &str) -> Option<(&'static str, &'static str)> {
             "A Vue inject / Svelte getContext whose key is provided nowhere in the project, so at runtime it returns undefined",
             "https://docs.fallow.tools/explanations/dead-code#unprovided-injects",
         )),
+        "Unrendered components" => Some((
+            "A Vue / Svelte component reachable through a barrel but rendered nowhere in the project (render it somewhere or remove it)",
+            "https://docs.fallow.tools/explanations/dead-code#unrendered-components",
+        )),
+        "Unused component props" => Some((
+            "A Vue <script setup> defineProps prop referenced nowhere inside its own component (remove it or use it)",
+            "https://docs.fallow.tools/explanations/dead-code#unused-component-props",
+        )),
+        "Unused component emits" => Some((
+            "A Vue <script setup> defineEmits event emitted nowhere inside its own component (remove it or emit it)",
+            "https://docs.fallow.tools/explanations/dead-code#unused-component-emits",
+        )),
+        "Unused server actions" => Some((
+            "A Next.js Server Action exported from a \"use server\" file that no code in the project references (wire it to a consumer or remove it)",
+            "https://docs.fallow.tools/explanations/dead-code#unused-server-actions",
+        )),
         t if t.starts_with("Type-only") => Some((
             "Dependencies only used for type imports \u{2014} consider moving to devDependencies",
             "https://docs.fallow.tools/explanations/dead-code#type-only-dependencies",
@@ -202,6 +218,10 @@ fn section_suppress_rule(title: &str) -> Option<&'static str> {
         "Mixed client/server barrels" => Some("mixed-client-server-barrel"),
         "Misplaced directives" => Some("misplaced-directive"),
         "Unprovided injects" => Some("unprovided-injects"),
+        "Unrendered components" => Some("unrendered-components"),
+        "Unused component props" => Some("unused-component-props"),
+        "Unused component emits" => Some("unused-component-emits"),
+        "Unused server actions" => Some("unused-server-actions"),
         _ => None,
     }
 }

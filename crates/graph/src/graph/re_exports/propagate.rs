@@ -168,15 +168,27 @@ fn propagate_entry_point_star(
 /// to the source module's matching export.
 ///
 /// Returns `true` if any new references were added.
-pub(in crate::graph) fn propagate_named_re_export(
-    modules: &mut [ModuleNode],
-    barrel_id: FileId,
-    barrel_idx: usize,
-    source_idx: usize,
-    imported_name: &str,
-    exported_name: &str,
-    existing_refs: &mut FxHashSet<FileId>,
-) -> bool {
+pub(in crate::graph) struct NamedReExportPropagation<'a> {
+    pub(in crate::graph) modules: &'a mut [ModuleNode],
+    pub(in crate::graph) barrel_id: FileId,
+    pub(in crate::graph) barrel_idx: usize,
+    pub(in crate::graph) source_idx: usize,
+    pub(in crate::graph) imported_name: &'a str,
+    pub(in crate::graph) exported_name: &'a str,
+    pub(in crate::graph) existing_refs: &'a mut FxHashSet<FileId>,
+}
+
+pub(in crate::graph) fn propagate_named_re_export(input: NamedReExportPropagation<'_>) -> bool {
+    let NamedReExportPropagation {
+        modules,
+        barrel_id,
+        barrel_idx,
+        source_idx,
+        imported_name,
+        exported_name,
+        existing_refs,
+    } = input;
+
     let refs_on_barrel: Vec<SymbolReference> = modules[barrel_idx]
         .exports
         .iter()

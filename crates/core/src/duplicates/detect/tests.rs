@@ -666,15 +666,35 @@ fn make_file_data(path: &str, source: &str, num_tokens: usize) -> FileData {
     }
 }
 
+fn extract_clone_groups_for_test(
+    sa: &[usize],
+    lcp: &[usize],
+    file_of: &[usize],
+    file_offsets: &[usize],
+    min_tokens: usize,
+    files: &[FileData],
+    focus_file_ids: Option<&[bool]>,
+) -> Vec<extraction::RawGroup> {
+    extraction::extract_clone_groups(&extraction::CloneGroupExtractionInput {
+        sa,
+        lcp,
+        file_of,
+        file_offsets,
+        min_tokens,
+        files,
+        focus_file_ids,
+    })
+}
+
 #[test]
 fn extraction_empty_sa() {
-    let groups = extraction::extract_clone_groups(&[], &[], &[], &[], 3, &[], None);
+    let groups = extract_clone_groups_for_test(&[], &[], &[], &[], 3, &[], None);
     assert!(groups.is_empty());
 }
 
 #[test]
 fn extraction_single_suffix_no_groups() {
-    let groups = extraction::extract_clone_groups(&[0], &[0], &[0], &[0], 1, &[], None);
+    let groups = extract_clone_groups_for_test(&[0], &[0], &[0], &[0], 1, &[], None);
     assert!(groups.is_empty());
 }
 
@@ -689,7 +709,7 @@ fn extraction_below_min_tokens_no_groups() {
     let sa = suffix_array::build_suffix_array(&text);
     let lcp_arr = lcp::build_lcp(&text, &sa);
 
-    let groups = extraction::extract_clone_groups(
+    let groups = extract_clone_groups_for_test(
         &sa,
         &lcp_arr,
         &file_of,
@@ -713,7 +733,7 @@ fn extraction_skips_sentinel_positions() {
     let lcp_arr = lcp::build_lcp(&text, &sa);
 
     let groups =
-        extraction::extract_clone_groups(&sa, &lcp_arr, &file_of, &file_offsets, 2, &files, None);
+        extract_clone_groups_for_test(&sa, &lcp_arr, &file_of, &file_offsets, 2, &files, None);
 
     for group in &groups {
         for &(fid, _offset) in &group.instances {
@@ -738,7 +758,7 @@ fn extraction_produces_valid_offsets() {
     let lcp_arr = lcp::build_lcp(&text, &sa);
 
     let groups =
-        extraction::extract_clone_groups(&sa, &lcp_arr, &file_of, &file_offsets, 2, &files, None);
+        extract_clone_groups_for_test(&sa, &lcp_arr, &file_of, &file_offsets, 2, &files, None);
 
     for group in &groups {
         for &(fid, offset) in &group.instances {
@@ -768,7 +788,7 @@ fn extraction_removes_overlapping_same_file() {
     let lcp_arr = lcp::build_lcp(&text, &sa);
 
     let groups =
-        extraction::extract_clone_groups(&sa, &lcp_arr, &file_of, &file_offsets, 2, &files, None);
+        extract_clone_groups_for_test(&sa, &lcp_arr, &file_of, &file_offsets, 2, &files, None);
 
     for group in &groups {
         let mut same_file: Vec<(usize, usize)> = group
@@ -803,7 +823,7 @@ fn extraction_at_least_two_instances() {
     let lcp_arr = lcp::build_lcp(&text, &sa);
 
     let groups =
-        extraction::extract_clone_groups(&sa, &lcp_arr, &file_of, &file_offsets, 2, &files, None);
+        extract_clone_groups_for_test(&sa, &lcp_arr, &file_of, &file_offsets, 2, &files, None);
 
     for group in &groups {
         assert!(
@@ -1161,7 +1181,7 @@ fn pipeline_rank_concat_sa_lcp_roundtrip() {
     assert_eq!(lcp_arr[0], 0);
 
     let groups =
-        extraction::extract_clone_groups(&sa, &lcp_arr, &file_of, &file_offsets, 3, &files, None);
+        extract_clone_groups_for_test(&sa, &lcp_arr, &file_of, &file_offsets, 3, &files, None);
     assert!(
         !groups.is_empty(),
         "Should find clone group for shared [10,20,30]"
@@ -1194,7 +1214,7 @@ fn pipeline_no_false_positives_with_different_files() {
     let lcp_arr = lcp::build_lcp(&text, &sa);
 
     let groups =
-        extraction::extract_clone_groups(&sa, &lcp_arr, &file_of, &file_offsets, 2, &files, None);
+        extract_clone_groups_for_test(&sa, &lcp_arr, &file_of, &file_offsets, 2, &files, None);
     assert!(
         groups.is_empty(),
         "Completely different files should produce no clone groups"

@@ -33,6 +33,10 @@ pub struct IssueFilters {
     pub unused_class_members: bool,
     pub unused_store_members: bool,
     pub unprovided_injects: bool,
+    pub unrendered_components: bool,
+    pub unused_component_props: bool,
+    pub unused_component_emits: bool,
+    pub unused_server_actions: bool,
     pub unresolved_imports: bool,
     pub unlisted_deps: bool,
     pub duplicate_exports: bool,
@@ -64,6 +68,10 @@ impl IssueFilters {
             || self.unused_class_members
             || self.unused_store_members
             || self.unprovided_injects
+            || self.unrendered_components
+            || self.unused_component_props
+            || self.unused_component_emits
+            || self.unused_server_actions
             || self.unresolved_imports
             || self.unlisted_deps
             || self.duplicate_exports
@@ -126,6 +134,18 @@ impl IssueFilters {
         }
         if !self.unprovided_injects {
             results.unprovided_injects.clear();
+        }
+        if !self.unrendered_components {
+            results.unrendered_components.clear();
+        }
+        if !self.unused_component_props {
+            results.unused_component_props.clear();
+        }
+        if !self.unused_component_emits {
+            results.unused_component_emits.clear();
+        }
+        if !self.unused_server_actions {
+            results.unused_server_actions.clear();
         }
         if !self.unresolved_imports {
             results.unresolved_imports.clear();
@@ -316,12 +336,15 @@ fn prepare_check_config(opts: &CheckOptions<'_>) -> Result<ResolvedConfig, ExitC
     let mut config = load_config_for_analysis(
         opts.root,
         opts.config_path,
-        opts.output,
-        opts.no_cache,
-        opts.threads,
-        opts.production_override
-            .or_else(|| opts.production.then_some(true)),
-        opts.quiet,
+        crate::ConfigLoadOptions {
+            output: opts.output,
+            no_cache: opts.no_cache,
+            threads: opts.threads,
+            production_override: opts
+                .production_override
+                .or_else(|| opts.production.then_some(true)),
+            quiet: opts.quiet,
+        },
         fallow_config::ProductionAnalysis::DeadCode,
     )?;
     if opts.include_entry_exports {
@@ -818,6 +841,10 @@ mod tests {
             unused_class_members: false,
             unused_store_members: false,
             unprovided_injects: false,
+            unrendered_components: false,
+            unused_component_props: false,
+            unused_component_emits: false,
+            unused_server_actions: false,
             unresolved_imports: false,
             unlisted_deps: false,
             duplicate_exports: false,
@@ -1241,6 +1268,10 @@ mod tests {
             unused_class_members: true,
             unused_store_members: true,
             unprovided_injects: true,
+            unrendered_components: true,
+            unused_component_props: true,
+            unused_component_emits: true,
+            unused_server_actions: true,
             unresolved_imports: true,
             unlisted_deps: true,
             duplicate_exports: true,

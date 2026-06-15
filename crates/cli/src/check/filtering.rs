@@ -41,6 +41,18 @@ pub fn filter_to_workspaces(
         .unprovided_injects
         .retain(|f| any_under(&f.inject.path));
     results
+        .unrendered_components
+        .retain(|c| any_under(&c.component.path));
+    results
+        .unused_component_props
+        .retain(|p| any_under(&p.prop.path));
+    results
+        .unused_component_emits
+        .retain(|e| any_under(&e.emit.path));
+    results
+        .unused_server_actions
+        .retain(|a| any_under(&a.action.path));
+    results
         .unresolved_imports
         .retain(|i| any_under(&i.import.path));
 
@@ -392,6 +404,18 @@ pub fn filter_results_by_diff(
     results
         .unprovided_injects
         .retain(|f| line_in_diff(&f.inject.path, f.inject.line));
+    results
+        .unrendered_components
+        .retain(|c| line_in_diff(&c.component.path, c.component.line));
+    results
+        .unused_component_props
+        .retain(|p| line_in_diff(&p.prop.path, p.prop.line));
+    results
+        .unused_component_emits
+        .retain(|e| line_in_diff(&e.emit.path, e.emit.line));
+    results
+        .unused_server_actions
+        .retain(|a| line_in_diff(&a.action.path, a.action.line));
     results
         .unresolved_imports
         .retain(|i| line_in_diff(&i.import.path, i.import.line));

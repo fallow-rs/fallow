@@ -523,6 +523,135 @@ pub fn push_member_diagnostics(
             }
         }
     }
+
+    for finding in &results.unrendered_components {
+        let c = &finding.component;
+        if let Some(uri) = Uri::from_file_path(&c.path) {
+            let line = c.line.saturating_sub(1);
+            map.entry(uri).or_default().push(Diagnostic {
+                range: Range {
+                    start: Position {
+                        line,
+                        character: c.col,
+                    },
+                    end: Position {
+                        line,
+                        character: c.col + c.component_name.len() as u32,
+                    },
+                },
+                severity: Some(DiagnosticSeverity::HINT),
+                source: Some("fallow".to_string()),
+                code: Some(NumberOrString::String("unrendered-component".to_string())),
+                code_description: doc_link("unrendered-components"),
+                message: format!(
+                    "Component '{}' is reachable but rendered nowhere in this project",
+                    c.component_name
+                ),
+                tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+                ..Default::default()
+            });
+        }
+    }
+
+    for finding in &results.unused_component_props {
+        let p = &finding.prop;
+        if let Some(uri) = Uri::from_file_path(&p.path) {
+            let line = p.line.saturating_sub(1);
+            map.entry(uri).or_default().push(Diagnostic {
+                range: Range {
+                    start: Position {
+                        line,
+                        character: p.col,
+                    },
+                    end: Position {
+                        line,
+                        character: p.col + p.prop_name.len() as u32,
+                    },
+                },
+                severity: Some(DiagnosticSeverity::HINT),
+                source: Some("fallow".to_string()),
+                code: Some(NumberOrString::String("unused-component-prop".to_string())),
+                code_description: doc_link("unused-component-props"),
+                message: format!(
+                    "Prop '{}' is declared but referenced nowhere in this component",
+                    p.prop_name
+                ),
+                tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+                ..Default::default()
+            });
+        }
+    }
+
+    for finding in &results.unused_component_emits {
+        let e = &finding.emit;
+        if let Some(uri) = Uri::from_file_path(&e.path) {
+            let line = e.line.saturating_sub(1);
+            map.entry(uri).or_default().push(Diagnostic {
+                range: Range {
+                    start: Position {
+                        line,
+                        character: e.col,
+                    },
+                    end: Position {
+                        line,
+                        character: e.col + e.emit_name.len() as u32,
+                    },
+                },
+                severity: Some(DiagnosticSeverity::HINT),
+                source: Some("fallow".to_string()),
+                code: Some(NumberOrString::String("unused-component-emit".to_string())),
+                code_description: doc_link("unused-component-emits"),
+                message: format!(
+                    "Emit '{}' is declared but emitted nowhere in this component",
+                    e.emit_name
+                ),
+                tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+                ..Default::default()
+            });
+        }
+    }
+
+    push_unused_server_action_diagnostics(map, results);
+}
+
+/// Push HINT diagnostics for unused Next.js server actions (exports of a
+/// `"use server"` file referenced by no code in the project).
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "action name lengths are bounded by source size"
+)]
+fn push_unused_server_action_diagnostics(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+) {
+    for finding in &results.unused_server_actions {
+        let a = &finding.action;
+        if let Some(uri) = Uri::from_file_path(&a.path) {
+            let line = a.line.saturating_sub(1);
+            map.entry(uri).or_default().push(Diagnostic {
+                range: Range {
+                    start: Position {
+                        line,
+                        character: a.col,
+                    },
+                    end: Position {
+                        line,
+                        character: a.col + a.action_name.len() as u32,
+                    },
+                },
+                severity: Some(DiagnosticSeverity::HINT),
+                source: Some("fallow".to_string()),
+                code: Some(NumberOrString::String("unused-server-action".to_string())),
+                code_description: doc_link("unused-server-actions"),
+                message: format!(
+                    "Server action '{}' is exported from a \"use server\" file but no code in this project references it",
+                    a.action_name
+                ),
+                tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+                ..Default::default()
+            });
+        }
+    }
 }
 
 #[cfg(test)]

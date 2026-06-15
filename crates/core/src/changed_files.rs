@@ -437,8 +437,12 @@ pub fn filter_results_by_changed_files(
         mixed_client_server_barrels,
         misplaced_directives,
         unprovided_injects,
+        unrendered_components,
         route_collisions,
         dynamic_segment_name_conflicts,
+        unused_component_props,
+        unused_component_emits,
+        unused_server_actions,
         // Non-finding fields: counts and metadata, not issue collections.
         suppression_count: _suppression_count,
         active_suppressions: _active_suppressions,
@@ -512,8 +516,12 @@ pub fn filter_results_by_changed_files(
     mixed_client_server_barrels.retain(|b| contains_normalized(&cf, &b.barrel.path));
     misplaced_directives.retain(|d| contains_normalized(&cf, &d.directive_site.path));
     unprovided_injects.retain(|i| contains_normalized(&cf, &i.inject.path));
+    unrendered_components.retain(|c| contains_normalized(&cf, &c.component.path));
     route_collisions.retain(|c| contains_normalized(&cf, &c.collision.path));
     dynamic_segment_name_conflicts.retain(|c| contains_normalized(&cf, &c.conflict.path));
+    unused_component_props.retain(|p| contains_normalized(&cf, &p.prop.path));
+    unused_component_emits.retain(|e| contains_normalized(&cf, &e.emit.path));
+    unused_server_actions.retain(|a| contains_normalized(&cf, &a.action.path));
 }
 
 /// Pre-normalise a `changed_files` set through `dunce::simplified` so each

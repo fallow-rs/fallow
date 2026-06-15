@@ -1410,6 +1410,27 @@ fn collect_unused_symbol_findings(
             Some(f.inject.key_name.clone()),
         );
     }
+    for f in &results.unrendered_components {
+        push(
+            &f.component.path,
+            "unrendered-component",
+            Some(f.component.component_name.clone()),
+        );
+    }
+    for f in &results.unused_component_props {
+        push(
+            &f.prop.path,
+            "unused-component-prop",
+            Some(f.prop.prop_name.clone()),
+        );
+    }
+    for f in &results.unused_component_emits {
+        push(
+            &f.emit.path,
+            "unused-component-emit",
+            Some(f.emit.emit_name.clone()),
+        );
+    }
     for f in &results.unresolved_imports {
         push(
             &f.import.path,

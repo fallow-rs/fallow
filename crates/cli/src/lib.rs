@@ -174,4 +174,6 @@ mod validate;
 mod vital_signs;
 
 pub use runtime_support::{AnalysisKind, GroupBy};
-pub(crate) use runtime_support::{build_ownership_resolver, load_config_for_analysis};
+pub(crate) use runtime_support::{
+    ConfigLoadOptions, build_ownership_resolver, load_config_for_analysis,
+};

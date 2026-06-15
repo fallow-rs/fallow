@@ -350,11 +350,13 @@ fn build_static_index(ctx: &RunContext<'_>, production: bool) -> Result<StaticIn
     let config = crate::load_config_for_analysis(
         ctx.root,
         ctx.config_path,
-        ctx.output,
-        ctx.no_cache,
-        ctx.threads,
-        Some(production),
-        ctx.quiet,
+        crate::ConfigLoadOptions {
+            output: ctx.output,
+            no_cache: ctx.no_cache,
+            threads: ctx.threads,
+            production_override: Some(production),
+            quiet: ctx.quiet,
+        },
         fallow_config::ProductionAnalysis::Health,
     )?;
     let files = fallow_core::discover::discover_files_with_plugin_scopes(&config);
@@ -600,8 +602,10 @@ fn cloud_blast_radius_entries(
                 file: PathBuf::from(&entry.file),
                 function: entry.function.clone(),
                 line: entry.line,
-                caller_count: entry.caller_count,
-                caller_count_weighted_by_traffic: entry.caller_count_weighted_by_traffic,
+                caller_count: entry.caller_count.unwrap_or(0),
+                caller_count_weighted_by_traffic: entry
+                    .caller_count_weighted_by_traffic
+                    .unwrap_or(0),
                 deploys_touched: entry.deploys_touched,
                 risk_band: map_cloud_risk_band(entry.risk_band),
             },
@@ -630,8 +634,8 @@ fn cloud_importance_entries(
                 function: entry.function.clone(),
                 line: entry.line,
                 invocations: entry.invocations,
-                cyclomatic: entry.cyclomatic,
-                owner_count: entry.owner_count,
+                cyclomatic: entry.cyclomatic.unwrap_or(0),
+                owner_count: entry.owner_count.unwrap_or(0),
                 importance_score: entry.importance_score,
                 reason: entry.reason.clone(),
             },

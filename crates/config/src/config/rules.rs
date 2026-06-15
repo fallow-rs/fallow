@@ -100,6 +100,37 @@ pub struct RulesConfig {
     /// analyzer confidence is lower; warn encodes that without failing CI.
     #[serde(default, alias = "unprovided-inject")]
     pub unprovided_injects: Severity,
+    /// Vue/Svelte single-file component reachable in the module graph but
+    /// rendered nowhere in the project (the imported-but-never-rendered
+    /// dead-half). Defaults to `warn`, not `error`: a component can be rendered
+    /// reflectively (dynamic `<component :is>`), so analyzer confidence is
+    /// lower; warn encodes that without failing CI.
+    #[serde(default, alias = "unrendered-component")]
+    pub unrendered_components: Severity,
+    /// Vue `<script setup>` `defineProps` declared prop referenced nowhere
+    /// inside its own single-file component (neither `<script>` nor
+    /// `<template>`). The single-file dead-input direction. Defaults to `warn`,
+    /// not `error`: a prop can be part of a deliberately-stable public component
+    /// API, so analyzer confidence is lower; warn encodes that without failing
+    /// CI.
+    #[serde(default, alias = "unused-component-prop")]
+    pub unused_component_props: Severity,
+    /// Vue `<script setup>` `defineEmits` declared event emitted nowhere inside
+    /// its own single-file component (no `emit('<name>')` call). The single-file
+    /// dead-input direction. Defaults to `warn`, not `error`: an emit can be part
+    /// of a deliberately-stable public component API, so analyzer confidence is
+    /// lower; warn encodes that without failing CI.
+    #[serde(default, alias = "unused-component-emit")]
+    pub unused_component_emits: Severity,
+    /// Next.js Server Action (an export of a `"use server"` file) referenced by
+    /// no code in the project: no import-and-call, no `action={fn}` binding, no
+    /// `<form action={fn}>`. Cross-graph dead-export direction, reclassified out
+    /// of `unused-export` for `"use server"` files. Defaults to `warn`, not
+    /// `error`: the rule is new and false-negative-preferring, and reflective
+    /// action-dispatch shapes can hide a real consumer; warn encodes that
+    /// without failing CI until corpus-validated.
+    #[serde(default, alias = "unused-server-action")]
+    pub unused_server_actions: Severity,
     #[serde(default, alias = "unresolved-import")]
     pub unresolved_imports: Severity,
     #[serde(default, alias = "unlisted-dependency")]
@@ -183,17 +214,21 @@ pub struct RulesConfig {
     /// Two or more Next.js App Router route files that resolve to the same URL
     /// within one app-root. Next.js fails the build ("You cannot have two
     /// parallel pages that resolve to the same path"); fallow catches it
-    /// statically and names every colliding file. Defaults to `warn`.
-    #[serde(default = "Severity::default_warn", alias = "route-collisions")]
+    /// statically and names every colliding file. Defaults to `error`: the
+    /// project already fails `next build`, so flagging it as an error aligns
+    /// fallow's exit code with the build it mirrors.
+    #[serde(default, alias = "route-collisions")]
     pub route_collision: Severity,
     /// Sibling Next.js dynamic route segments at one tree position using
-    /// different param spellings (`[id]` vs `[slug]`). Next.js fails the build
-    /// ("You cannot use different slug names for the same dynamic path");
-    /// fallow catches it statically. Defaults to `warn`.
-    #[serde(
-        default = "Severity::default_warn",
-        alias = "dynamic-segment-name-conflicts"
-    )]
+    /// different param spellings (`[id]` vs `[slug]`). Next.js throws "You
+    /// cannot use different slug names for the same dynamic path" at dev and
+    /// production runtime when the position is hit; `next build` does NOT catch
+    /// it (the build succeeds), so CI passes while the route crashes on its
+    /// first request. fallow catches it statically. Defaults to `error`: the
+    /// route is a deterministic runtime crash on first request, so failing CI
+    /// is the honest signal even though `next build` stays green (this is the
+    /// "error-runtime" severity tier, shared with `route-collision`).
+    #[serde(default, alias = "dynamic-segment-name-conflicts")]
     pub dynamic_segment_name_conflict: Severity,
 }
 
@@ -211,6 +246,10 @@ impl Default for RulesConfig {
             unused_class_members: Severity::Error,
             unused_store_members: Severity::Warn,
             unprovided_injects: Severity::Warn,
+            unrendered_components: Severity::Warn,
+            unused_component_props: Severity::Warn,
+            unused_component_emits: Severity::Warn,
+            unused_server_actions: Severity::Warn,
             unresolved_imports: Severity::Error,
             unlisted_dependencies: Severity::Error,
             duplicate_exports: Severity::Error,
@@ -233,8 +272,8 @@ impl Default for RulesConfig {
             invalid_client_export: Severity::Warn,
             mixed_client_server_barrel: Severity::Warn,
             misplaced_directive: Severity::Warn,
-            route_collision: Severity::Warn,
-            dynamic_segment_name_conflict: Severity::Warn,
+            route_collision: Severity::Error,
+            dynamic_segment_name_conflict: Severity::Error,
         }
     }
 }
@@ -274,6 +313,18 @@ impl RulesConfig {
         }
         if let Some(s) = partial.unprovided_injects {
             self.unprovided_injects = s;
+        }
+        if let Some(s) = partial.unrendered_components {
+            self.unrendered_components = s;
+        }
+        if let Some(s) = partial.unused_component_props {
+            self.unused_component_props = s;
+        }
+        if let Some(s) = partial.unused_component_emits {
+            self.unused_component_emits = s;
+        }
+        if let Some(s) = partial.unused_server_actions {
+            self.unused_server_actions = s;
         }
         if let Some(s) = partial.unresolved_imports {
             self.unresolved_imports = s;
@@ -420,6 +471,30 @@ pub struct PartialRulesConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub unprovided_injects: Option<Severity>,
+    #[serde(
+        default,
+        alias = "unrendered-component",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub unrendered_components: Option<Severity>,
+    #[serde(
+        default,
+        alias = "unused-component-prop",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub unused_component_props: Option<Severity>,
+    #[serde(
+        default,
+        alias = "unused-component-emit",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub unused_component_emits: Option<Severity>,
+    #[serde(
+        default,
+        alias = "unused-server-action",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub unused_server_actions: Option<Severity>,
     #[serde(
         default,
         alias = "unresolved-import",
@@ -582,6 +657,10 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unused-class-members",
     "unused-store-members",
     "unprovided-injects",
+    "unrendered-components",
+    "unused-component-props",
+    "unused-component-emits",
+    "unused-server-actions",
     "unresolved-imports",
     "unlisted-dependencies",
     "duplicate-exports",
@@ -618,6 +697,10 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unused-class-member",
     "unused-store-member",
     "unprovided-inject",
+    "unrendered-component",
+    "unused-component-prop",
+    "unused-component-emit",
+    "unused-server-action",
     "unresolved-import",
     "unlisted-dependency",
     "duplicate-export",
@@ -916,6 +999,10 @@ mod tests {
             unused_class_members: Some(Severity::Off),
             unused_store_members: Some(Severity::Off),
             unprovided_injects: Some(Severity::Off),
+            unrendered_components: Some(Severity::Off),
+            unused_component_props: Some(Severity::Off),
+            unused_component_emits: Some(Severity::Off),
+            unused_server_actions: Some(Severity::Off),
             unresolved_imports: Some(Severity::Off),
             unlisted_dependencies: Some(Severity::Off),
             duplicate_exports: Some(Severity::Off),
@@ -956,6 +1043,9 @@ mod tests {
         assert_eq!(rules.invalid_client_export, Severity::Off);
         assert_eq!(rules.mixed_client_server_barrel, Severity::Off);
         assert_eq!(rules.misplaced_directive, Severity::Off);
+        assert_eq!(rules.unrendered_components, Severity::Off);
+        assert_eq!(rules.unused_component_props, Severity::Off);
+        assert_eq!(rules.unused_component_emits, Severity::Off);
         assert_eq!(rules.route_collision, Severity::Off);
         assert_eq!(rules.dynamic_segment_name_conflict, Severity::Off);
     }
@@ -1001,7 +1091,7 @@ mod tests {
 
     #[test]
     fn known_rule_names_count_matches_struct() {
-        assert_eq!(KNOWN_RULE_NAMES.len(), 70);
+        assert_eq!(KNOWN_RULE_NAMES.len(), 78);
     }
 
     #[test]
@@ -1042,8 +1132,8 @@ mod tests {
 
         assert_eq!(
             aliases_found.len(),
-            70,
-            "expected 70 source-level alias attrs (35 per struct); got {}: {:?}",
+            78,
+            "expected 78 source-level alias attrs (39 per struct); got {}: {:?}",
             aliases_found.len(),
             aliases_found
         );

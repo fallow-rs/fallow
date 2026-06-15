@@ -364,19 +364,61 @@ use crate::MemberKind;
 /// `<source>`, `<video poster>`) now emit `SideEffect` imports, so a warm cache
 /// from 155 would miss the new `unresolved-import` findings on missing assets.
 ///
-/// Bumped to 157 for #550: CSS Module class extraction now derives its class set
+/// Bumped to 157 because the Vue `<template>` body extractor now matches the
+/// root `</template>` with nesting depth tracking instead of the first
+/// `</template>`. A Vue SFC whose root template contains a nested `<template
+/// #slot>` no longer has its body truncated, so component tags rendered after
+/// the first nested slot are now credited; a warm cache from 156 would carry the
+/// truncated template-usage set and false-flag those components / their imports.
+///
+/// Bumped to 158 for the `unused-component-prop` detector: Vue `<script setup>`
+/// extraction now records `defineProps` declared props on `component_props`
+/// (with `used_in_script` / `used_in_template`) plus the
+/// `has_props_attrs_fallthrough` / `has_define_expose` / `has_define_model` /
+/// `has_unharvestable_props` abstain flags, so a warm cache from 157 would
+/// report zero unused-component-prop findings.
+///
+/// Bumped to 159 because `ComponentProp` gained a `local` field (the destructure
+/// alias for a renamed prop), changing the cached wire shape; a warm 158 cache
+/// would bitcode-misread it.
+///
+/// Bumped to 160 for the `unused-component-emit` detector: Vue `<script setup>`
+/// extraction now records `defineEmits` declared events on `component_emits`
+/// (with `used`) plus the `has_unharvestable_emits` / `has_dynamic_emit` /
+/// `has_emit_whole_object_use` abstain flags, so a warm cache from 159 would
+/// report zero unused-component-emit findings.
+///
+/// Bumped to 162 for `unused-load-data-key` Primitive A: a destructure off the
+/// SvelteKit `data` prop local (`const { user } = data`) now emits `data.<key>`
+/// member accesses (rest element records a whole-object use). A warm cache from
+/// 161 lacks those accesses, so the cross-file load-data-key join would miss the
+/// consumed keys.
+///
+/// Bumped to 163 for `unused-load-data-key` Primitive B: a SvelteKit route
+/// component (`+page.svelte` / `+layout.svelte`) now credits the `data` prop as
+/// a template-visible root, so `{data.x}` / `{#each data.items as i}` markup
+/// reads emit `data.<key>` member accesses. A warm cache from 162 lacks those
+/// template-side accesses, so the cross-file load-data-key join would miss keys
+/// consumed only in markup.
+///
+/// Bumped to 164 for `unused-load-data-key` Primitive C: a SvelteKit global
+/// page-store read in a template (`{$page.data.KEY}` / `{page.data.KEY}`) now
+/// recovers the nested `page.data.<key>` member access (the template scanner
+/// previously dropped the key, keeping only `page.data`). A warm cache from 163
+/// lacks those project-wide global-store accesses.
+///
+/// Bumped to 165 for #550: CSS Module class extraction now derives its class set
 /// from a real CSS AST (lightningcss) for standard CSS, so warm caches written
 /// by the regex-only extractor can differ on escaped class names and malformed
 /// at-rule preludes.
-pub(super) const CACHE_VERSION: u32 = 157;
+pub(super) const CACHE_VERSION: u32 = 165;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
 ///
-/// Bumped to 5 for issue #1180: cached duplicate-analysis suppressions now
-/// preserve scoped rule-pack policy tokens instead of storing only a broad
-/// `IssueKind` discriminant.
-pub const DUPES_CACHE_VERSION: u32 = 5;
+/// Bumped to 6 for issue #1225: `ignoreImports` now excludes re-export barrels
+/// and top-level static CommonJS require binding declarations.
+pub const DUPES_CACHE_VERSION: u32 = 6;
 
 /// Default maximum cache size (256 MB). Overridable per-project via
 /// `cache.maxSizeMb` in the config file or `FALLOW_CACHE_MAX_SIZE` env var.
@@ -415,7 +457,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 880);
+assert_cached_type_size!(CachedModule, 936);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 56);
@@ -555,6 +597,30 @@ pub struct CachedModule {
     /// Whether the module had an unknowable-key provide. Round-trips so the
     /// `unprovided-inject` project-wide abstain holds on warm-cache loads.
     pub has_dynamic_provide: bool,
+    /// Vue `<script setup>` `defineProps` declared props. Round-trips so the
+    /// `unused-component-prop` detector sees them on warm-cache loads.
+    pub component_props: Vec<fallow_types::extract::ComponentProp>,
+    /// Whether the template spreads `$attrs`/`$props`/`props` or the
+    /// `defineProps` return is rest-destructured. Round-trips for the abstain.
+    pub has_props_attrs_fallthrough: bool,
+    /// Whether the SFC calls `defineExpose(...)`. Round-trips for the abstain.
+    pub has_define_expose: bool,
+    /// Whether the SFC calls `defineModel(...)`. Round-trips for the abstain.
+    pub has_define_model: bool,
+    /// Whether `defineProps` had an unharvestable type-reference argument.
+    /// Round-trips for the abstain.
+    pub has_unharvestable_props: bool,
+    /// Vue `<script setup>` `defineEmits` declared events. Round-trips so the
+    /// `unused-component-emit` detector sees them on warm-cache loads.
+    pub component_emits: Vec<fallow_types::extract::ComponentEmit>,
+    /// Whether `defineEmits` had an unharvestable argument. Round-trips for the
+    /// abstain.
+    pub has_unharvestable_emits: bool,
+    /// Whether an `emit(<nonLiteral>)` call was seen. Round-trips for the abstain.
+    pub has_dynamic_emit: bool,
+    /// Whether the emit binding was used as a whole value. Round-trips for the
+    /// abstain.
+    pub has_emit_whole_object_use: bool,
 }
 
 /// Cached namespace-object alias.

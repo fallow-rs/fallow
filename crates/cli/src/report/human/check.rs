@@ -376,6 +376,7 @@ fn check_explain_for_header(line: &str) -> Option<&'static crate::explain::RuleD
             "fallow/mixed-client-server-barrel",
         ),
         ("Unprovided injects", "fallow/unprovided-inject"),
+        ("Unrendered components", "fallow/unrendered-component"),
         ("Misplaced directives", "fallow/misplaced-directive"),
     ];
     let (_, rule_id) = mappings
@@ -751,7 +752,7 @@ fn build_dependencies_section(
     push_category_header(lines, "Dependencies");
 
     push_package_dependency_sections(lines, results, root, rules, max_items, total_issues);
-    push_import_dependency_sections(
+    push_import_dependency_sections(ImportDependencySectionInput {
         lines,
         results,
         root,
@@ -759,7 +760,7 @@ fn build_dependencies_section(
         max_items,
         max_grouped_files,
         total_issues,
-    );
+    });
     push_catalog_dependency_sections(lines, results, root, rules, max_items, total_issues);
     push_dependency_override_sections(lines, results, root, rules, max_items, total_issues);
 }
@@ -816,15 +817,27 @@ fn push_package_dependency_sections(
     );
 }
 
-fn push_import_dependency_sections(
-    lines: &mut Vec<String>,
-    results: &AnalysisResults,
-    root: &Path,
-    rules: &RulesConfig,
+struct ImportDependencySectionInput<'a> {
+    lines: &'a mut Vec<String>,
+    results: &'a AnalysisResults,
+    root: &'a Path,
+    rules: &'a RulesConfig,
     max_items: usize,
     max_grouped_files: usize,
     total_issues: usize,
-) {
+}
+
+fn push_import_dependency_sections(input: ImportDependencySectionInput<'_>) {
+    let ImportDependencySectionInput {
+        lines,
+        results,
+        root,
+        rules,
+        max_items,
+        max_grouped_files,
+        total_issues,
+    } = input;
+
     build_human_grouped_section(GroupedSectionInput {
         lines,
         items: &results.unresolved_imports,
@@ -1274,6 +1287,10 @@ fn build_policy_section(
         && results.mixed_client_server_barrels.is_empty()
         && results.misplaced_directives.is_empty()
         && results.unprovided_injects.is_empty()
+        && results.unrendered_components.is_empty()
+        && results.unused_component_props.is_empty()
+        && results.unused_component_emits.is_empty()
+        && results.unused_server_actions.is_empty()
         && results.route_collisions.is_empty()
         && results.dynamic_segment_name_conflicts.is_empty()
     {
@@ -1332,6 +1349,58 @@ fn build_policy_section(
             i.inject.path.as_path()
         },
         format_detail: &format_unprovided_inject,
+    });
+
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.unrendered_components,
+        title: "Unrendered components",
+        level: severity_to_level(rules.unrendered_components),
+        root,
+        max_files: MAX_FLAT_ITEMS,
+        get_path: |c: &fallow_types::output_dead_code::UnrenderedComponentFinding| {
+            c.component.path.as_path()
+        },
+        format_detail: &format_unrendered_component,
+    });
+
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.unused_component_props,
+        title: "Unused component props",
+        level: severity_to_level(rules.unused_component_props),
+        root,
+        max_files: MAX_FLAT_ITEMS,
+        get_path: |p: &fallow_types::output_dead_code::UnusedComponentPropFinding| {
+            p.prop.path.as_path()
+        },
+        format_detail: &format_unused_component_prop,
+    });
+
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.unused_component_emits,
+        title: "Unused component emits",
+        level: severity_to_level(rules.unused_component_emits),
+        root,
+        max_files: MAX_FLAT_ITEMS,
+        get_path: |e: &fallow_types::output_dead_code::UnusedComponentEmitFinding| {
+            e.emit.path.as_path()
+        },
+        format_detail: &format_unused_component_emit,
+    });
+
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.unused_server_actions,
+        title: "Unused server actions",
+        level: severity_to_level(rules.unused_server_actions),
+        root,
+        max_files: MAX_FLAT_ITEMS,
+        get_path: |a: &fallow_types::output_dead_code::UnusedServerActionFinding| {
+            a.action.path.as_path()
+        },
+        format_detail: &format_unused_server_action,
     });
 
     build_human_grouped_section(GroupedSectionInput {
@@ -1419,6 +1488,55 @@ fn format_unprovided_inject(
     )
 }
 
+fn format_unrendered_component(
+    entry: &fallow_types::output_dead_code::UnrenderedComponentFinding,
+) -> String {
+    let c = &entry.component;
+    format!(
+        "{} {} {}",
+        format!(":{}", c.line).dimmed(),
+        c.component_name.bold(),
+        "is reachable but rendered nowhere in this project (render it somewhere or remove it)"
+            .dimmed(),
+    )
+}
+
+fn format_unused_component_prop(
+    entry: &fallow_types::output_dead_code::UnusedComponentPropFinding,
+) -> String {
+    let p = &entry.prop;
+    format!(
+        "{} {} {}",
+        format!(":{}", p.line).dimmed(),
+        p.prop_name.bold(),
+        "is declared but referenced nowhere in this component (remove it or use it)".dimmed(),
+    )
+}
+
+fn format_unused_component_emit(
+    entry: &fallow_types::output_dead_code::UnusedComponentEmitFinding,
+) -> String {
+    let e = &entry.emit;
+    format!(
+        "{} {} {}",
+        format!(":{}", e.line).dimmed(),
+        e.emit_name.bold(),
+        "is declared but emitted nowhere in this component (remove it or emit it)".dimmed(),
+    )
+}
+
+fn format_unused_server_action(
+    entry: &fallow_types::output_dead_code::UnusedServerActionFinding,
+) -> String {
+    let a = &entry.action;
+    format!(
+        "{} {} {}",
+        format!(":{}", a.line).dimmed(),
+        a.action_name.bold(),
+        "is exported from a \"use server\" file but no code in this project references it".dimmed(),
+    )
+}
+
 fn format_route_collision(entry: &fallow_types::output_dead_code::RouteCollisionFinding) -> String {
     let c = &entry.collision;
     let others = c.conflicting_paths.len();
@@ -1441,9 +1559,11 @@ fn format_dynamic_segment_name_conflict(
     format!(
         "{}",
         format!(
-            "conflicting dynamic segments at {} ({})",
-            c.position,
-            c.conflicting_segments.join(" vs ")
+            "crashes at runtime: different slug names ({}) at the same dynamic path {}; \
+             next build passes but the route fails on its first request (rename to one \
+             consistent slug)",
+            c.conflicting_segments.join(" vs "),
+            c.position
         )
         .dimmed(),
     )
@@ -2206,6 +2326,18 @@ fn collect_matching_rules(
     for i in &results.unprovided_injects {
         check(&i.inject.path);
     }
+    for c in &results.unrendered_components {
+        check(&c.component.path);
+    }
+    for p in &results.unused_component_props {
+        check(&p.prop.path);
+    }
+    for e in &results.unused_component_emits {
+        check(&e.emit.path);
+    }
+    for a in &results.unused_server_actions {
+        check(&a.action.path);
+    }
     for c in &results.route_collisions {
         check(&c.collision.path);
     }
@@ -2481,6 +2613,16 @@ fn build_summary_footer(
     add(results.re_export_cycles.len(), "re-export cycles");
     add(results.boundary_violations.len(), "violations");
     add(results.unprovided_injects.len(), "unprovided injects");
+    add(results.unrendered_components.len(), "unrendered components");
+    add(
+        results.unused_component_props.len(),
+        "unused component props",
+    );
+    add(
+        results.unused_component_emits.len(),
+        "unused component emits",
+    );
+    add(results.unused_server_actions.len(), "unused server actions");
     add(results.stale_suppressions.len(), "stale suppressions");
 
     parts.join(" \u{00b7} ")
@@ -2623,6 +2765,26 @@ fn check_summary_categories(
             "Unprovided injects",
             results.unprovided_injects.len(),
             severity_to_level(rules.unprovided_injects),
+        ),
+        (
+            "Unrendered components",
+            results.unrendered_components.len(),
+            severity_to_level(rules.unrendered_components),
+        ),
+        (
+            "Unused component props",
+            results.unused_component_props.len(),
+            severity_to_level(rules.unused_component_props),
+        ),
+        (
+            "Unused component emits",
+            results.unused_component_emits.len(),
+            severity_to_level(rules.unused_component_emits),
+        ),
+        (
+            "Unused server actions",
+            results.unused_server_actions.len(),
+            severity_to_level(rules.unused_server_actions),
         ),
         (
             "Stale suppressions",

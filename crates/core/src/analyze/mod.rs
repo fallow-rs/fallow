@@ -16,12 +16,16 @@ mod route_tree;
 mod security;
 mod server_only;
 mod unprovided_inject;
+mod unrendered_component;
 mod unused_catalog;
+mod unused_component_emit;
+mod unused_component_prop;
 mod unused_deps;
 mod unused_exports;
 mod unused_files;
 mod unused_members;
 mod unused_overrides;
+mod unused_server_action;
 
 #[cfg(test)]
 pub(crate) use unused_deps::matches_virtual_prefix;
@@ -47,8 +51,9 @@ use fallow_types::output_dead_code::{
     MisplacedDirectiveFinding, MixedClientServerBarrelFinding, PolicyViolationFinding,
     PrivateTypeLeakFinding, ReExportCycleFinding, RouteCollisionFinding, TestOnlyDependencyFinding,
     TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
-    UnresolvedCatalogReferenceFinding, UnresolvedImportFinding, UnusedCatalogEntryFinding,
-    UnusedClassMemberFinding, UnusedDependencyFinding, UnusedDependencyOverrideFinding,
+    UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
+    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentEmitFinding,
+    UnusedComponentPropFinding, UnusedDependencyFinding, UnusedDependencyOverrideFinding,
     UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
     UnusedOptionalDependencyFinding, UnusedStoreMemberFinding, UnusedTypeFinding,
 };
@@ -62,7 +67,8 @@ use misplaced_directive::find_misplaced_directives;
 use mixed_barrel::find_mixed_client_server_barrels;
 use re_export_cycles::find_re_export_cycles;
 use route_collision::find_route_collisions;
-use unprovided_inject::find_unprovided_injects;
+use unprovided_inject::{UnprovidedInjectInput, find_unprovided_injects};
+use unrendered_component::find_unrendered_components;
 #[expect(
     deprecated,
     reason = "ADR-008 deprecates detector helpers for external callers; core orchestration still calls them internally"
@@ -71,6 +77,8 @@ use unused_catalog::{
     find_empty_catalog_groups, find_unresolved_catalog_references, find_unused_catalog_entries,
     gather_pnpm_catalog_state,
 };
+use unused_component_emit::find_unused_component_emits;
+use unused_component_prop::find_unused_component_props;
 #[expect(
     deprecated,
     reason = "ADR-008 deprecates detector helpers for external callers; core orchestration still calls them internally"
@@ -92,7 +100,7 @@ use unused_exports::{
     reason = "ADR-008 deprecates detector helpers for external callers; core orchestration still calls them internally"
 )]
 use unused_files::find_unused_files;
-use unused_members::find_unused_members_with_public_api_entry_points;
+use unused_members::{UnusedMemberScanInput, find_unused_members_with_public_api_entry_points};
 #[expect(
     deprecated,
     reason = "ADR-008 deprecates detector helpers for external callers; core orchestration still calls them internally"
@@ -101,6 +109,7 @@ use unused_overrides::{
     find_misconfigured_dependency_overrides, find_unused_dependency_overrides,
     gather_pnpm_override_state,
 };
+use unused_server_action::reclassify_unused_server_actions;
 
 /// Pre-computed line offset tables indexed by `FileId`, built during parse and
 /// carried through the cache. Eliminates redundant file reads during analysis.
@@ -689,6 +698,19 @@ pub fn find_dead_code_full(
 
     filter_public_workspace_results(config, workspaces, &mut results);
 
+    // Reclassify the server-action subset of unused exports BEFORE stale
+    // detection so a `// fallow-ignore-next-line unused-server-action` marker is
+    // recorded as consumed. Gate-off keeps the findings as plain unused-exports.
+    if config.rules.unused_server_actions != Severity::Off {
+        reclassify_unused_server_actions(
+            graph,
+            modules,
+            &declared_deps,
+            &suppressions,
+            &mut results,
+        );
+    }
+
     let request_receivers = config
         .security
         .request_receivers
@@ -719,57 +741,88 @@ pub fn find_dead_code_full(
 
     populate_pnpm_catalog_findings(config, workspaces, &mut results);
     populate_pnpm_override_findings(config, workspaces, &mut results);
-    populate_invalid_client_export_findings(
-        graph,
-        modules,
-        config,
-        &declared_deps,
-        &suppressions,
-        &line_offsets_by_file,
-        &mut results,
-    );
-    populate_mixed_client_server_barrel_findings(
+    populate_framework_specific_findings(&mut FrameworkSpecificFindingsInput {
         graph,
         modules,
         resolved_modules,
-        config,
-        &declared_deps,
-        &suppressions,
-        &line_offsets_by_file,
-        &mut results,
-    );
-    populate_misplaced_directive_findings(
-        graph,
-        modules,
-        config,
-        &declared_deps,
-        &suppressions,
-        &line_offsets_by_file,
-        &mut results,
-    );
-    populate_unprovided_inject_findings(
-        graph,
-        modules,
-        resolved_modules,
-        config,
-        &declared_deps,
-        &public_api_entry_points,
-        &suppressions,
-        &line_offsets_by_file,
-        &mut results,
-    );
-    populate_nextjs_route_tree_findings(
-        graph,
         config,
         workspaces,
-        &declared_deps,
-        &suppressions,
-        &mut results,
-    );
+        declared_deps: &declared_deps,
+        public_api_entry_points: &public_api_entry_points,
+        suppressions: &suppressions,
+        line_offsets_by_file: &line_offsets_by_file,
+        results: &mut results,
+    });
 
     results.sort();
 
     results
+}
+
+/// Run the framework-convention detectors that share the resolved-graph and
+/// dep-gate context: Next.js RSC directives, Vue/Svelte DI and components, and
+/// the App Router route tree. Extracted from `find_dead_code_full` to keep that
+/// orchestrator under the unit-size ceiling; each callee is individually
+/// rule-gated.
+struct FrameworkSpecificFindingsInput<'a> {
+    graph: &'a ModuleGraph,
+    modules: &'a [ModuleInfo],
+    resolved_modules: &'a [ResolvedModule],
+    config: &'a ResolvedConfig,
+    workspaces: &'a [fallow_config::WorkspaceInfo],
+    declared_deps: &'a FxHashSet<String>,
+    public_api_entry_points: &'a FxHashSet<FileId>,
+    suppressions: &'a SuppressionContext<'a>,
+    line_offsets_by_file: &'a LineOffsetsMap<'a>,
+    results: &'a mut AnalysisResults,
+}
+
+fn populate_framework_specific_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
+    populate_invalid_client_export_findings(
+        input.graph,
+        input.modules,
+        input.config,
+        input.declared_deps,
+        input.suppressions,
+        input.line_offsets_by_file,
+        input.results,
+    );
+    populate_mixed_client_server_barrel_findings(input);
+    populate_misplaced_directive_findings(
+        input.graph,
+        input.modules,
+        input.config,
+        input.declared_deps,
+        input.suppressions,
+        input.line_offsets_by_file,
+        input.results,
+    );
+    populate_unprovided_inject_findings(input);
+    populate_unrendered_component_findings(input);
+    populate_unused_component_prop_findings(
+        input.graph,
+        input.modules,
+        input.config,
+        input.declared_deps,
+        input.line_offsets_by_file,
+        input.results,
+    );
+    populate_unused_component_emit_findings(
+        input.graph,
+        input.modules,
+        input.config,
+        input.declared_deps,
+        input.line_offsets_by_file,
+        input.results,
+    );
+    populate_nextjs_route_tree_findings(
+        input.graph,
+        input.config,
+        input.workspaces,
+        input.declared_deps,
+        input.suppressions,
+        input.results,
+    );
 }
 
 /// Populate `invalid_client_exports` when the rule is enabled. Gated on the
@@ -802,30 +855,17 @@ fn populate_invalid_client_export_findings(
 /// Populate `mixed_client_server_barrels` when the rule is enabled. Gated on the
 /// project declaring `next` inside the detector (see
 /// [`find_mixed_client_server_barrels`]).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "mirrors the invalid-client-export populate site; threading the resolved modules + gate context is intrinsic"
-)]
-fn populate_mixed_client_server_barrel_findings(
-    graph: &ModuleGraph,
-    modules: &[ModuleInfo],
-    resolved_modules: &[ResolvedModule],
-    config: &ResolvedConfig,
-    declared_deps: &FxHashSet<String>,
-    suppressions: &SuppressionContext<'_>,
-    line_offsets_by_file: &LineOffsetsMap<'_>,
-    results: &mut AnalysisResults,
-) {
-    if config.rules.mixed_client_server_barrel == Severity::Off {
+fn populate_mixed_client_server_barrel_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
+    if input.config.rules.mixed_client_server_barrel == Severity::Off {
         return;
     }
-    results.mixed_client_server_barrels = find_mixed_client_server_barrels(
-        graph,
-        modules,
-        resolved_modules,
-        declared_deps,
-        suppressions,
-        line_offsets_by_file,
+    input.results.mixed_client_server_barrels = find_mixed_client_server_barrels(
+        input.graph,
+        input.modules,
+        input.resolved_modules,
+        input.declared_deps,
+        input.suppressions,
+        input.line_offsets_by_file,
     )
     .into_iter()
     .map(MixedClientServerBarrelFinding::with_actions)
@@ -862,36 +902,84 @@ fn populate_misplaced_directive_findings(
 /// Populate `unprovided_injects` when the rule is enabled. Gated on the project
 /// declaring `vue` / `@vue/runtime-core` / `svelte` inside the detector (see
 /// [`find_unprovided_injects`]).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "mirrors the mixed-client-server-barrel populate site; threading resolved modules + the public-API entry-point set + the gate context is intrinsic"
-)]
-fn populate_unprovided_inject_findings(
-    graph: &ModuleGraph,
-    modules: &[ModuleInfo],
-    resolved_modules: &[ResolvedModule],
-    config: &ResolvedConfig,
-    declared_deps: &FxHashSet<String>,
-    public_api_entry_points: &FxHashSet<FileId>,
-    suppressions: &SuppressionContext<'_>,
-    line_offsets_by_file: &LineOffsetsMap<'_>,
-    results: &mut AnalysisResults,
-) {
-    if config.rules.unprovided_injects == Severity::Off {
+fn populate_unprovided_inject_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
+    if input.config.rules.unprovided_injects == Severity::Off {
         return;
     }
-    results.unprovided_injects = find_unprovided_injects(
-        graph,
-        resolved_modules,
-        modules,
-        declared_deps,
-        public_api_entry_points,
-        suppressions,
-        line_offsets_by_file,
-    )
+    input.results.unprovided_injects = find_unprovided_injects(UnprovidedInjectInput {
+        graph: input.graph,
+        resolved_modules: input.resolved_modules,
+        modules: input.modules,
+        declared_deps: input.declared_deps,
+        public_api_entry_points: input.public_api_entry_points,
+        suppressions: input.suppressions,
+        line_offsets_by_file: input.line_offsets_by_file,
+    })
     .into_iter()
     .map(UnprovidedInjectFinding::with_actions)
     .collect();
+}
+
+/// Populate `unrendered_components` when the rule is enabled. Gated on the
+/// project declaring `vue` / `svelte` inside the detector (see
+/// [`find_unrendered_components`]).
+fn populate_unrendered_component_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
+    if input.config.rules.unrendered_components == Severity::Off {
+        return;
+    }
+    input.results.unrendered_components = find_unrendered_components(
+        input.graph,
+        input.resolved_modules,
+        input.modules,
+        input.declared_deps,
+        input.public_api_entry_points,
+        input.suppressions,
+    )
+    .into_iter()
+    .map(UnrenderedComponentFinding::with_actions)
+    .collect();
+}
+
+/// Populate `unused_component_props` when the rule is enabled. Gated on the
+/// project declaring `vue` / `@vue/runtime-core` / `nuxt` inside the detector
+/// (see [`find_unused_component_props`]).
+fn populate_unused_component_prop_findings(
+    graph: &ModuleGraph,
+    modules: &[ModuleInfo],
+    config: &ResolvedConfig,
+    declared_deps: &FxHashSet<String>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+    results: &mut AnalysisResults,
+) {
+    if config.rules.unused_component_props == Severity::Off {
+        return;
+    }
+    results.unused_component_props =
+        find_unused_component_props(graph, modules, declared_deps, line_offsets_by_file)
+            .into_iter()
+            .map(UnusedComponentPropFinding::with_actions)
+            .collect();
+}
+
+/// Populate `unused_component_emits` when the rule is enabled. Gated on the
+/// project declaring `vue` / `@vue/runtime-core` / `nuxt` inside the detector
+/// (see [`find_unused_component_emits`]).
+fn populate_unused_component_emit_findings(
+    graph: &ModuleGraph,
+    modules: &[ModuleInfo],
+    config: &ResolvedConfig,
+    declared_deps: &FxHashSet<String>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+    results: &mut AnalysisResults,
+) {
+    if config.rules.unused_component_emits == Severity::Off {
+        return;
+    }
+    results.unused_component_emits =
+        find_unused_component_emits(graph, modules, declared_deps, line_offsets_by_file)
+            .into_iter()
+            .map(UnusedComponentEmitFinding::with_actions)
+            .collect();
 }
 
 /// Populate `route_collisions` when the rule is enabled. Gated on the project
@@ -1070,17 +1158,17 @@ fn run_member_and_dependency_detectors(
 ) -> (AnalysisResults, AnalysisResults) {
     rayon::join(
         || {
-            run_member_detectors(
-                input.graph,
-                input.resolved_modules,
-                input.modules,
-                input.config,
-                input.suppressions,
-                input.line_offsets_by_file,
-                input.user_class_members,
-                input.public_api_entry_points,
-                input.declared_deps,
-            )
+            run_member_detectors(MemberDetectorInput {
+                graph: input.graph,
+                resolved_modules: input.resolved_modules,
+                modules: input.modules,
+                config: input.config,
+                suppressions: input.suppressions,
+                line_offsets_by_file: input.line_offsets_by_file,
+                user_class_members: input.user_class_members,
+                public_api_entry_points: input.public_api_entry_points,
+                declared_deps: input.declared_deps,
+            })
         },
         || {
             run_dependency_detectors(
@@ -1546,53 +1634,52 @@ fn run_export_detectors(
     results
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "member detection needs graph context plus public API and allowlist filters"
-)]
-fn run_member_detectors(
-    graph: &ModuleGraph,
-    resolved_modules: &[ResolvedModule],
-    modules: &[ModuleInfo],
-    config: &ResolvedConfig,
-    suppressions: &crate::suppress::SuppressionContext<'_>,
-    line_offsets_by_file: &LineOffsetsMap<'_>,
-    user_class_members: &[fallow_config::UsedClassMemberRule],
-    public_api_entry_points: &FxHashSet<FileId>,
-    declared_deps: &FxHashSet<String>,
-) -> AnalysisResults {
+#[derive(Clone, Copy)]
+struct MemberDetectorInput<'a> {
+    graph: &'a ModuleGraph,
+    resolved_modules: &'a [ResolvedModule],
+    modules: &'a [ModuleInfo],
+    config: &'a ResolvedConfig,
+    suppressions: &'a crate::suppress::SuppressionContext<'a>,
+    line_offsets_by_file: &'a LineOffsetsMap<'a>,
+    user_class_members: &'a [fallow_config::UsedClassMemberRule],
+    public_api_entry_points: &'a FxHashSet<FileId>,
+    declared_deps: &'a FxHashSet<String>,
+}
+
+fn run_member_detectors(input: MemberDetectorInput<'_>) -> AnalysisResults {
     let mut results = AnalysisResults::default();
     // Store-member detection activates only when Pinia is a declared dependency,
     // so an unrelated user `defineStore`-named helper in a non-Pinia project
     // never fires. The harvest is intentionally loose at extraction time; this
     // is the activation boundary.
-    let store_members_active = config.rules.unused_store_members != Severity::Off
-        && (declared_deps.contains("pinia") || declared_deps.contains("@pinia/nuxt"));
-    if config.rules.unused_enum_members == Severity::Off
-        && config.rules.unused_class_members == Severity::Off
+    let store_members_active = input.config.rules.unused_store_members != Severity::Off
+        && (input.declared_deps.contains("pinia") || input.declared_deps.contains("@pinia/nuxt"));
+    if input.config.rules.unused_enum_members == Severity::Off
+        && input.config.rules.unused_class_members == Severity::Off
         && !store_members_active
     {
         return results;
     }
 
-    let member_results = find_unused_members_with_public_api_entry_points(
-        graph,
-        resolved_modules,
-        modules,
-        suppressions,
-        line_offsets_by_file,
-        user_class_members,
-        &config.ignore_decorators,
-        public_api_entry_points,
-    );
-    if config.rules.unused_enum_members != Severity::Off {
+    let member_results = find_unused_members_with_public_api_entry_points(UnusedMemberScanInput {
+        graph: input.graph,
+        resolved_modules: input.resolved_modules,
+        modules: input.modules,
+        suppressions: input.suppressions,
+        line_offsets_by_file: input.line_offsets_by_file,
+        user_class_member_allowlist: input.user_class_members,
+        ignore_decorators: &input.config.ignore_decorators,
+        public_api_entry_points: input.public_api_entry_points,
+    });
+    if input.config.rules.unused_enum_members != Severity::Off {
         results.unused_enum_members = member_results
             .enum_members
             .into_iter()
             .map(UnusedEnumMemberFinding::with_actions)
             .collect();
     }
-    if config.rules.unused_class_members != Severity::Off {
+    if input.config.rules.unused_class_members != Severity::Off {
         results.unused_class_members = member_results
             .class_members
             .into_iter()
@@ -1889,6 +1976,10 @@ mod tests {
                 unused_class_members: Severity::Off,
                 unused_store_members: Severity::Off,
                 unprovided_injects: Severity::Off,
+                unrendered_components: Severity::Off,
+                unused_component_props: Severity::Off,
+                unused_component_emits: Severity::Off,
+                unused_server_actions: Severity::Off,
                 unresolved_imports: Severity::Off,
                 unlisted_dependencies: Severity::Off,
                 duplicate_exports: Severity::Off,
@@ -2143,6 +2234,16 @@ mod tests {
                 misplaced_directives: Vec::new(),
                 di_key_sites: Vec::new(),
                 has_dynamic_provide: false,
+                referenced_import_bindings: Vec::new(),
+                component_props: Vec::new(),
+                has_props_attrs_fallthrough: false,
+                has_define_expose: false,
+                has_define_model: false,
+                has_unharvestable_props: false,
+                component_emits: Vec::new(),
+                has_unharvestable_emits: false,
+                has_dynamic_emit: false,
+                has_emit_whole_object_use: false,
             }];
 
             let rules = RulesConfig {

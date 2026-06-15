@@ -9,8 +9,8 @@ use oxc_span::Span;
 use crate::extract::{ImportInfo, ImportedName, parse_from_content};
 use crate::plugins::AggregatedPluginResult;
 use crate::resolve::{
-    ResolveResult, ResolvedImport, ResolvedModule, extract_package_name_from_node_modules_path,
-    resolve_all_imports,
+    ResolveAllImportsInput, ResolveResult, ResolvedImport, ResolvedModule,
+    extract_package_name_from_node_modules_path, resolve_all_imports,
 };
 
 pub fn augment_external_style_package_usage(
@@ -224,18 +224,18 @@ impl<'a> ExternalStylePackageScanner<'a> {
             size_bytes: source.len() as u64,
         };
         let module = parse_from_content(FileId(0), &canonical, &source);
-        let resolved = resolve_all_imports(
-            &[module],
-            &[file],
-            self.workspaces,
-            &self.plugin_result.active_plugins,
-            &self.plugin_result.path_aliases,
-            &[],
-            &self.plugin_result.scss_include_paths,
-            &self.plugin_result.static_dir_mappings,
-            &self.config.root,
-            &self.config.resolve.conditions,
-        );
+        let resolved = resolve_all_imports(&ResolveAllImportsInput {
+            modules: &[module],
+            files: &[file],
+            workspaces: self.workspaces,
+            active_plugins: &self.plugin_result.active_plugins,
+            path_aliases: &self.plugin_result.path_aliases,
+            auto_imports: &[],
+            scss_include_paths: &self.plugin_result.scss_include_paths,
+            static_dir_mappings: &self.plugin_result.static_dir_mappings,
+            root: &self.config.root,
+            extra_conditions: &self.config.resolve.conditions,
+        });
 
         if let Some(resolved_module) = resolved.first() {
             for import in resolved_module.all_resolved_imports() {

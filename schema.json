@@ -156,6 +156,10 @@
         "unused-class-members": "error",
         "unused-store-members": "warn",
         "unprovided-injects": "warn",
+        "unrendered-components": "warn",
+        "unused-component-props": "warn",
+        "unused-component-emits": "warn",
+        "unused-server-actions": "warn",
         "unresolved-imports": "error",
         "unlisted-dependencies": "error",
         "duplicate-exports": "error",
@@ -178,8 +182,8 @@
         "invalid-client-export": "warn",
         "mixed-client-server-barrel": "warn",
         "misplaced-directive": "warn",
-        "route-collision": "warn",
-        "dynamic-segment-name-conflict": "warn"
+        "route-collision": "error",
+        "dynamic-segment-name-conflict": "error"
       }
     },
     "boundaries": {
@@ -704,7 +708,7 @@
           "default": false
         },
         "ignoreImports": {
-          "description": "Exclude ES `import` declarations from clone detection.\n\nDefaults to `true`: token-identical sorted import blocks are a structural\nproperty of well-formatted code, not copy-paste, so they should not\nsurface as clone groups. Set to `false` to count import blocks again.\nWhen enabled, all `import` statements (value imports, type imports, and\nside-effect imports) are stripped from the token stream before clone\ndetection. Only affects ES `import` declarations; CommonJS `require()`\ncalls and `export ... from` re-export blocks are still counted.",
+          "description": "Exclude module-wiring declarations from clone detection.\n\nDefaults to `true`: token-identical module wiring is a structural\nproperty of well-formatted code, not copy-paste, so it should not\nsurface as clone groups. Set to `false` to count module wiring again.\nWhen enabled, ES imports, re-export declarations, and top-level static\nCommonJS `require(\"...\")` binding declarations are stripped from the\ntoken stream before clone detection. Dynamic imports, side-effect\n`require()` calls, nested `require()` calls, dynamic require arguments,\nand mixed declarations are still counted.",
           "type": "boolean",
           "default": true
         },
@@ -1029,6 +1033,26 @@
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
+        "unrendered-components": {
+          "description": "Vue/Svelte single-file component reachable in the module graph but\nrendered nowhere in the project (the imported-but-never-rendered\ndead-half). Defaults to `warn`, not `error`: a component can be rendered\nreflectively (dynamic `<component :is>`), so analyzer confidence is\nlower; warn encodes that without failing CI.",
+          "$ref": "#/$defs/Severity",
+          "default": "error"
+        },
+        "unused-component-props": {
+          "description": "Vue `<script setup>` `defineProps` declared prop referenced nowhere\ninside its own single-file component (neither `<script>` nor\n`<template>`). The single-file dead-input direction. Defaults to `warn`,\nnot `error`: a prop can be part of a deliberately-stable public component\nAPI, so analyzer confidence is lower; warn encodes that without failing\nCI.",
+          "$ref": "#/$defs/Severity",
+          "default": "error"
+        },
+        "unused-component-emits": {
+          "description": "Vue `<script setup>` `defineEmits` declared event emitted nowhere inside\nits own single-file component (no `emit('<name>')` call). The single-file\ndead-input direction. Defaults to `warn`, not `error`: an emit can be part\nof a deliberately-stable public component API, so analyzer confidence is\nlower; warn encodes that without failing CI.",
+          "$ref": "#/$defs/Severity",
+          "default": "error"
+        },
+        "unused-server-actions": {
+          "description": "Next.js Server Action (an export of a `\"use server\"` file) referenced by\nno code in the project: no import-and-call, no `action={fn}` binding, no\n`<form action={fn}>`. Cross-graph dead-export direction, reclassified out\nof `unused-export` for `\"use server\"` files. Defaults to `warn`, not\n`error`: the rule is new and false-negative-preferring, and reflective\naction-dispatch shapes can hide a real consumer; warn encodes that\nwithout failing CI until corpus-validated.",
+          "$ref": "#/$defs/Severity",
+          "default": "error"
+        },
         "unresolved-imports": {
           "$ref": "#/$defs/Severity",
           "default": "error"
@@ -1124,14 +1148,14 @@
           "default": "warn"
         },
         "route-collision": {
-          "description": "Two or more Next.js App Router route files that resolve to the same URL\nwithin one app-root. Next.js fails the build (\"You cannot have two\nparallel pages that resolve to the same path\"); fallow catches it\nstatically and names every colliding file. Defaults to `warn`.",
+          "description": "Two or more Next.js App Router route files that resolve to the same URL\nwithin one app-root. Next.js fails the build (\"You cannot have two\nparallel pages that resolve to the same path\"); fallow catches it\nstatically and names every colliding file. Defaults to `error`: the\nproject already fails `next build`, so flagging it as an error aligns\nfallow's exit code with the build it mirrors.",
           "$ref": "#/$defs/Severity",
-          "default": "warn"
+          "default": "error"
         },
         "dynamic-segment-name-conflict": {
-          "description": "Sibling Next.js dynamic route segments at one tree position using\ndifferent param spellings (`[id]` vs `[slug]`). Next.js fails the build\n(\"You cannot use different slug names for the same dynamic path\");\nfallow catches it statically. Defaults to `warn`.",
+          "description": "Sibling Next.js dynamic route segments at one tree position using\ndifferent param spellings (`[id]` vs `[slug]`). Next.js throws \"You\ncannot use different slug names for the same dynamic path\" at dev and\nproduction runtime when the position is hit; `next build` does NOT catch\nit (the build succeeds), so CI passes while the route crashes on its\nfirst request. fallow catches it statically. Defaults to `error`: the\nroute is a deterministic runtime crash on first request, so failing CI\nis the honest signal even though `next build` stays green (this is the\n\"error-runtime\" severity tier, shared with `route-collision`).",
           "$ref": "#/$defs/Severity",
-          "default": "warn"
+          "default": "error"
         }
       }
     },
@@ -1644,6 +1668,46 @@
           ]
         },
         "unprovided-injects": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unrendered-components": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unused-component-props": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unused-component-emits": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unused-server-actions": {
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"

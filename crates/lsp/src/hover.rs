@@ -40,6 +40,22 @@ pub fn build_hover(
         return Some(hover);
     }
 
+    if let Some(hover) = check_unrendered_component(results, file_path, position) {
+        return Some(hover);
+    }
+
+    if let Some(hover) = check_unused_component_prop(results, file_path, position) {
+        return Some(hover);
+    }
+
+    if let Some(hover) = check_unused_component_emit(results, file_path, position) {
+        return Some(hover);
+    }
+
+    if let Some(hover) = check_unused_server_action(results, file_path, position) {
+        return Some(hover);
+    }
+
     if let Some(hover) = check_unresolved_import(results, file_path, position) {
         return Some(hover);
     }
@@ -398,6 +414,206 @@ fn check_unused_member(
                 }),
             });
         }
+    }
+
+    None
+}
+
+/// Check if the position is on an unrendered Vue/Svelte component anchor.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "component name lengths are bounded by source size"
+)]
+fn check_unrendered_component(
+    results: &AnalysisResults,
+    file_path: &Path,
+    position: Position,
+) -> Option<Hover> {
+    for finding in &results.unrendered_components {
+        let c = &finding.component;
+        if c.path != file_path {
+            continue;
+        }
+        let component_line = c.line.saturating_sub(1);
+        if component_line != position.line {
+            continue;
+        }
+        let end_col = c.col + c.component_name.len() as u32;
+        if position.character < c.col || position.character >= end_col {
+            continue;
+        }
+
+        let value = format!(
+            "**fallow**: Component {} is reachable but rendered nowhere in this project.",
+            format_inline_code(&c.component_name),
+        );
+
+        return Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value,
+            }),
+            range: Some(Range {
+                start: Position {
+                    line: component_line,
+                    character: c.col,
+                },
+                end: Position {
+                    line: component_line,
+                    character: end_col,
+                },
+            }),
+        });
+    }
+
+    None
+}
+
+/// Check if the position is on an unused Vue component prop anchor.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "prop name lengths are bounded by source size"
+)]
+fn check_unused_component_prop(
+    results: &AnalysisResults,
+    file_path: &Path,
+    position: Position,
+) -> Option<Hover> {
+    for finding in &results.unused_component_props {
+        let p = &finding.prop;
+        if p.path != file_path {
+            continue;
+        }
+        let prop_line = p.line.saturating_sub(1);
+        if prop_line != position.line {
+            continue;
+        }
+        let end_col = p.col + p.prop_name.len() as u32;
+        if position.character < p.col || position.character >= end_col {
+            continue;
+        }
+
+        let value = format!(
+            "**fallow**: Prop {} is declared but referenced nowhere in this component.",
+            format_inline_code(&p.prop_name),
+        );
+
+        return Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value,
+            }),
+            range: Some(Range {
+                start: Position {
+                    line: prop_line,
+                    character: p.col,
+                },
+                end: Position {
+                    line: prop_line,
+                    character: end_col,
+                },
+            }),
+        });
+    }
+
+    None
+}
+
+/// Check if the position is on an unused Vue component emit anchor.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "emit name lengths are bounded by source size"
+)]
+fn check_unused_component_emit(
+    results: &AnalysisResults,
+    file_path: &Path,
+    position: Position,
+) -> Option<Hover> {
+    for finding in &results.unused_component_emits {
+        let e = &finding.emit;
+        if e.path != file_path {
+            continue;
+        }
+        let emit_line = e.line.saturating_sub(1);
+        if emit_line != position.line {
+            continue;
+        }
+        let end_col = e.col + e.emit_name.len() as u32;
+        if position.character < e.col || position.character >= end_col {
+            continue;
+        }
+
+        let value = format!(
+            "**fallow**: Emit {} is declared but emitted nowhere in this component.",
+            format_inline_code(&e.emit_name),
+        );
+
+        return Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value,
+            }),
+            range: Some(Range {
+                start: Position {
+                    line: emit_line,
+                    character: e.col,
+                },
+                end: Position {
+                    line: emit_line,
+                    character: end_col,
+                },
+            }),
+        });
+    }
+
+    None
+}
+
+/// Check if the position is on an unused Next.js server action.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "action name lengths are bounded by source size"
+)]
+fn check_unused_server_action(
+    results: &AnalysisResults,
+    file_path: &Path,
+    position: Position,
+) -> Option<Hover> {
+    for finding in &results.unused_server_actions {
+        let a = &finding.action;
+        if a.path != file_path {
+            continue;
+        }
+        let action_line = a.line.saturating_sub(1);
+        if action_line != position.line {
+            continue;
+        }
+        let end_col = a.col + a.action_name.len() as u32;
+        if position.character < a.col || position.character >= end_col {
+            continue;
+        }
+
+        let value = format!(
+            "**fallow**: Server action {} is exported from a \"use server\" file but no code in this project references it.",
+            format_inline_code(&a.action_name),
+        );
+
+        return Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value,
+            }),
+            range: Some(Range {
+                start: Position {
+                    line: action_line,
+                    character: a.col,
+                },
+                end: Position {
+                    line: action_line,
+                    character: end_col,
+                },
+            }),
+        });
     }
 
     None

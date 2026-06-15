@@ -226,17 +226,17 @@ pub(super) fn apply_export_fixes(
         if dry_run {
             push_dry_run_export_fixes(output, fixes, relative, path, &line_fixes);
         } else {
-            apply_grouped_export_fixes(
+            apply_grouped_export_fixes(GroupedExportFixInput {
                 plan,
                 path,
                 fixes,
                 relative,
-                &content,
-                &meta,
-                &lines,
-                &line_fixes,
-                &grouped,
-            );
+                content: &content,
+                meta: &meta,
+                lines: &lines,
+                line_fixes: &line_fixes,
+                grouped: &grouped,
+            });
         }
     }
 }
@@ -316,21 +316,31 @@ fn push_dry_run_export_fixes(
     }
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "applies one prepared file rewrite using the already-read source, metadata, grouped edits, and JSON sink"
-)]
-fn apply_grouped_export_fixes(
-    plan: &mut FixPlan,
-    path: &Path,
-    fixes: &mut Vec<serde_json::Value>,
-    relative: &Path,
-    content: &str,
-    meta: &super::io::EncodingMetadata,
-    lines: &[&str],
-    line_fixes: &[ExportFix],
-    grouped: &[(usize, Vec<String>)],
-) {
+struct GroupedExportFixInput<'a> {
+    plan: &'a mut FixPlan,
+    path: &'a Path,
+    fixes: &'a mut Vec<serde_json::Value>,
+    relative: &'a Path,
+    content: &'a str,
+    meta: &'a super::io::EncodingMetadata,
+    lines: &'a [&'a str],
+    line_fixes: &'a [ExportFix],
+    grouped: &'a [(usize, Vec<String>)],
+}
+
+fn apply_grouped_export_fixes(input: GroupedExportFixInput<'_>) {
+    let GroupedExportFixInput {
+        plan,
+        path,
+        fixes,
+        relative,
+        content,
+        meta,
+        lines,
+        line_fixes,
+        grouped,
+    } = input;
+
     let mut new_lines: Vec<String> = lines.iter().map(ToString::to_string).collect();
     let mut lines_to_delete = Vec::new();
     let mut ranges_to_delete = Vec::new();

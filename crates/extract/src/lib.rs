@@ -32,6 +32,7 @@ pub mod mdx;
 mod parse;
 pub mod sfc;
 pub mod sfc_css;
+mod sfc_props;
 mod sfc_template;
 mod source_map;
 pub mod suppress;

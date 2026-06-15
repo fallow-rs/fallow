@@ -15,6 +15,17 @@ export interface IssueTypeConfig {
   readonly "unused-optional-dependencies": boolean;
   readonly "unused-enum-members": boolean;
   readonly "unused-class-members": boolean;
+  readonly "unused-store-member": boolean;
+  readonly "unused-server-action": boolean;
+  readonly "unused-component-prop": boolean;
+  readonly "unused-component-emit": boolean;
+  readonly "unrendered-component": boolean;
+  readonly "unprovided-inject": boolean;
+  readonly "invalid-client-export": boolean;
+  readonly "mixed-client-server-barrel": boolean;
+  readonly "misplaced-directive": boolean;
+  readonly "route-collision": boolean;
+  readonly "dynamic-segment-name-conflict": boolean;
   readonly "unresolved-imports": boolean;
   readonly "unlisted-dependencies": boolean;
   readonly "duplicate-exports": boolean;

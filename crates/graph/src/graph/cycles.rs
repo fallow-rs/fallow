@@ -252,27 +252,29 @@ fn try_record_cycle(
 ///
 /// Appends any newly found cycles to `cycles` (deduped via `seen`).
 /// Stops early once `cycles.len() >= max_cycles`.
-fn dfs_find_cycles_from(
+struct DfsCycleInput<'a> {
     start: usize,
     depth_limit: usize,
-    scc_set: &FxHashSet<usize>,
-    succs: &SuccessorMap<'_>,
+    scc_set: &'a FxHashSet<usize>,
+    succs: &'a SuccessorMap<'a>,
     max_cycles: usize,
-    seen: &mut FxHashSet<Vec<u32>>,
-    cycles: &mut Vec<Vec<usize>>,
-) {
-    let mut path: Vec<usize> = vec![start];
-    let mut path_set = FixedBitSet::with_capacity(succs.modules.len());
-    path_set.insert(start);
+    seen: &'a mut FxHashSet<Vec<u32>>,
+    cycles: &'a mut Vec<Vec<usize>>,
+}
 
-    let range = &succs.succ_ranges[start];
+fn dfs_find_cycles_from(input: &mut DfsCycleInput<'_>) {
+    let mut path: Vec<usize> = vec![input.start];
+    let mut path_set = FixedBitSet::with_capacity(input.succs.modules.len());
+    path_set.insert(input.start);
+
+    let range = &input.succs.succ_ranges[input.start];
     let mut dfs: Vec<CycleFrame> = vec![CycleFrame {
         succ_pos: range.start,
         succ_end: range.end,
     }];
 
     while let Some(frame) = dfs.last_mut() {
-        if cycles.len() >= max_cycles {
+        if input.cycles.len() >= input.max_cycles {
             return;
         }
 
@@ -287,26 +289,26 @@ fn dfs_find_cycles_from(
             continue;
         }
 
-        let w = succs.all_succs[frame.succ_pos];
+        let w = input.succs.all_succs[frame.succ_pos];
         frame.succ_pos += 1;
 
-        if !scc_set.contains(&w) {
+        if !input.scc_set.contains(&w) {
             continue;
         }
 
-        if w == start && path.len() >= 2 && path.len() == depth_limit {
-            try_record_cycle(&path, succs.modules, seen, cycles);
+        if w == input.start && path.len() >= 2 && path.len() == input.depth_limit {
+            try_record_cycle(&path, input.succs.modules, input.seen, input.cycles);
             continue;
         }
 
-        if path_set.contains(w) || path.len() >= depth_limit {
+        if path_set.contains(w) || path.len() >= input.depth_limit {
             continue;
         }
 
         path.push(w);
         path_set.insert(w);
 
-        let range = &succs.succ_ranges[w];
+        let range = &input.succs.succ_ranges[w];
         dfs.push(CycleFrame {
             succ_pos: range.start,
             succ_end: range.end,
@@ -342,15 +344,15 @@ fn enumerate_elementary_cycles(
                 break;
             }
 
-            dfs_find_cycles_from(
+            dfs_find_cycles_from(&mut DfsCycleInput {
                 start,
                 depth_limit,
-                &scc_set,
+                scc_set: &scc_set,
                 succs,
                 max_cycles,
-                &mut seen,
-                &mut cycles,
-            );
+                seen: &mut seen,
+                cycles: &mut cycles,
+            });
         }
     }
 
@@ -370,7 +372,7 @@ mod tests {
     use fallow_types::extract::{ExportName, ImportInfo, ImportedName, VisibilityTag};
 
     use super::{
-        ModuleGraph, SuccessorMap, canonical_cycle, dfs_find_cycles_from,
+        DfsCycleInput, ModuleGraph, SuccessorMap, canonical_cycle, dfs_find_cycles_from,
         enumerate_elementary_cycles, try_record_cycle,
     };
 
@@ -442,6 +444,26 @@ mod tests {
         }];
 
         ModuleGraph::build(&resolved_modules, &entry_points, &files)
+    }
+
+    fn dfs_find_cycles_from_for_test(
+        start: usize,
+        depth_limit: usize,
+        scc_set: &FxHashSet<usize>,
+        succs: &SuccessorMap<'_>,
+        max_cycles: usize,
+        seen: &mut FxHashSet<Vec<u32>>,
+        cycles: &mut Vec<Vec<usize>>,
+    ) {
+        dfs_find_cycles_from(&mut DfsCycleInput {
+            start,
+            depth_limit,
+            scc_set,
+            succs,
+            max_cycles,
+            seen,
+            cycles,
+        });
     }
 
     #[test]
@@ -769,7 +791,7 @@ mod tests {
         let mut seen = FxHashSet::default();
         let mut cycles = Vec::new();
 
-        dfs_find_cycles_from(0, 2, &scc_set, &succs, 10, &mut seen, &mut cycles);
+        dfs_find_cycles_from_for_test(0, 2, &scc_set, &succs, 10, &mut seen, &mut cycles);
         assert!(cycles.is_empty(), "isolated node should have no cycles");
     }
 
@@ -785,7 +807,7 @@ mod tests {
         let mut seen = FxHashSet::default();
         let mut cycles = Vec::new();
 
-        dfs_find_cycles_from(0, 2, &scc_set, &succs, 10, &mut seen, &mut cycles);
+        dfs_find_cycles_from_for_test(0, 2, &scc_set, &succs, 10, &mut seen, &mut cycles);
         assert_eq!(cycles.len(), 1);
         assert_eq!(cycles[0].len(), 2);
     }
@@ -803,7 +825,7 @@ mod tests {
         let mut seen = FxHashSet::default();
         let mut cycles = Vec::new();
 
-        dfs_find_cycles_from(0, 3, &scc_set, &succs, 10, &mut seen, &mut cycles);
+        dfs_find_cycles_from_for_test(0, 3, &scc_set, &succs, 10, &mut seen, &mut cycles);
         assert_eq!(cycles.len(), 2, "diamond should have two 3-node cycles");
         assert!(cycles.iter().all(|c| c.len() == 3));
     }
@@ -821,7 +843,7 @@ mod tests {
         let mut seen = FxHashSet::default();
         let mut cycles = Vec::new();
 
-        dfs_find_cycles_from(0, 3, &scc_set, &succs, 10, &mut seen, &mut cycles);
+        dfs_find_cycles_from_for_test(0, 3, &scc_set, &succs, 10, &mut seen, &mut cycles);
         assert!(
             cycles.is_empty(),
             "depth_limit=3 should prevent finding a 4-node cycle"
@@ -841,7 +863,7 @@ mod tests {
         let mut seen = FxHashSet::default();
         let mut cycles = Vec::new();
 
-        dfs_find_cycles_from(0, 4, &scc_set, &succs, 10, &mut seen, &mut cycles);
+        dfs_find_cycles_from_for_test(0, 4, &scc_set, &succs, 10, &mut seen, &mut cycles);
         assert_eq!(
             cycles.len(),
             1,
@@ -865,7 +887,7 @@ mod tests {
         let mut seen = FxHashSet::default();
         let mut cycles = Vec::new();
 
-        dfs_find_cycles_from(0, 2, &scc_set, &succs, 2, &mut seen, &mut cycles);
+        dfs_find_cycles_from_for_test(0, 2, &scc_set, &succs, 2, &mut seen, &mut cycles);
         assert!(
             cycles.len() <= 2,
             "should respect max_cycles limit, got {}",
@@ -886,7 +908,7 @@ mod tests {
         let mut cycles = Vec::new();
 
         for depth in 2..=3 {
-            dfs_find_cycles_from(0, depth, &scc_set, &succs, 10, &mut seen, &mut cycles);
+            dfs_find_cycles_from_for_test(0, depth, &scc_set, &succs, 10, &mut seen, &mut cycles);
         }
         assert!(
             cycles.is_empty(),
@@ -1043,7 +1065,7 @@ mod tests {
         let mut cycles = Vec::new();
 
         for depth in 1..=3 {
-            dfs_find_cycles_from(0, depth, &scc_set, &succs, 10, &mut seen, &mut cycles);
+            dfs_find_cycles_from_for_test(0, depth, &scc_set, &succs, 10, &mut seen, &mut cycles);
         }
         assert!(
             cycles.is_empty(),

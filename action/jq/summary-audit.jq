@@ -31,6 +31,16 @@ def dead_code_rows:
    [ (.dead_code.boundary_coverage_violations // [])[] | {kind:"Boundary coverage", location:("`\(.path | rel_path):\(.line)`"), item:"no matching zone", introduced:.introduced} ] +
    [ (.dead_code.boundary_call_violations // [])[] | {kind:"Boundary call", location:("`\(.path | rel_path):\(.line)`"), item:("`\(.callee)` in \(.zone)"), introduced:.introduced} ] +
    [ (.dead_code.policy_violations // [])[] | {kind:"Policy violation", location:("`\(.path | rel_path):\(.line)`"), item:("`\(.matched)` banned by \(.pack)/\(.rule_id)"), introduced:.introduced} ] +
+   [ (.dead_code.invalid_client_exports // [])[] | {kind:"Invalid client export", location:("`\(.path | rel_path):\(.line)`"), item:("`\(.export_name)` in `\"\(.directive)\"`"), introduced:.introduced} ] +
+   [ (.dead_code.mixed_client_server_barrels // [])[] | {kind:"Mixed client/server barrel", location:("`\(.path | rel_path):\(.line)`"), item:("`\(.client_origin)` + `\(.server_origin)`"), introduced:.introduced} ] +
+   [ (.dead_code.misplaced_directives // [])[] | {kind:"Misplaced directive", location:("`\(.path | rel_path):\(.line)`"), item:("`\"\(.directive)\"`"), introduced:.introduced} ] +
+   [ (.dead_code.unused_server_actions // [])[] | {kind:"Unused server action", location:path_line, item:("`\(.action_name)`"), introduced:.introduced} ] +
+   [ (.dead_code.route_collisions // [])[] | {kind:"Route collision", location:("`\(.path | rel_path)`"), item:("`\(.url)`"), introduced:.introduced} ] +
+   [ (.dead_code.dynamic_segment_name_conflicts // [])[] | {kind:"Dynamic segment conflict", location:("`\(.path | rel_path)`"), item:("`\(.conflicting_segments | join(", "))`"), introduced:.introduced} ] +
+   [ (.dead_code.unrendered_components // [])[] | {kind:"Unrendered component", location:path_line, item:("`\(.component_name)` (\(.framework))"), introduced:.introduced} ] +
+   [ (.dead_code.unused_component_props // [])[] | {kind:"Unused component prop", location:path_line, item:("`\(.component_name).\(.prop_name)`"), introduced:.introduced} ] +
+   [ (.dead_code.unused_component_emits // [])[] | {kind:"Unused component emit", location:path_line, item:("`\(.component_name)` emit `\(.emit_name)`"), introduced:.introduced} ] +
+   [ (.dead_code.unprovided_injects // [])[] | {kind:"Unprovided inject", location:path_line, item:("`\(.key_name)` (\(.framework))"), introduced:.introduced} ] +
    [ (.dead_code.type_only_dependencies // [])[] | {kind:"Type-only dependency", location:path_line, item:("`\(.package_name)`"), introduced:.introduced} ] +
    [ (.dead_code.test_only_dependencies // [])[] | {kind:"Test-only dependency", location:path_line, item:("`\(.package_name)`"), introduced:.introduced} ] +
    [ (.dead_code.stale_suppressions // [])[] | {kind:"Stale suppression", location:path_line, item:(.description // "suppression"), introduced:.introduced} ] +

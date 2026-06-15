@@ -16,10 +16,12 @@ use crate::output_dead_code::{
     MisplacedDirectiveFinding, MixedClientServerBarrelFinding, PolicyViolationFinding,
     PrivateTypeLeakFinding, ReExportCycleFinding, RouteCollisionFinding, TestOnlyDependencyFinding,
     TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
-    UnresolvedCatalogReferenceFinding, UnresolvedImportFinding, UnusedCatalogEntryFinding,
-    UnusedClassMemberFinding, UnusedDependencyFinding, UnusedDependencyOverrideFinding,
+    UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
+    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentEmitFinding,
+    UnusedComponentPropFinding, UnusedDependencyFinding, UnusedDependencyOverrideFinding,
     UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
-    UnusedOptionalDependencyFinding, UnusedStoreMemberFinding, UnusedTypeFinding,
+    UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
+    UnusedTypeFinding,
 };
 use crate::serde_path;
 use crate::suppress::{IssueKind, closest_known_kind_name};
@@ -226,6 +228,12 @@ pub struct AnalysisResults {
     /// `actions` array natively. Default severity is `warn`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unprovided_injects: Vec<UnprovidedInjectFinding>,
+    /// Vue/Svelte single-file components that are reachable but rendered nowhere
+    /// (the imported-but-never-rendered dead-half). Wrapped in
+    /// [`UnrenderedComponentFinding`] so each entry carries a typed `actions`
+    /// array natively. Default severity is `warn`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unrendered_components: Vec<UnrenderedComponentFinding>,
     /// Next.js App Router route files that resolve to the same URL within one
     /// app-root (a guaranteed `next build` failure). Wrapped in
     /// [`RouteCollisionFinding`] so each entry carries a typed `actions` array
@@ -238,6 +246,25 @@ pub struct AnalysisResults {
     /// carries a typed `actions` array natively. Default severity is `warn`.
     #[serde(default)]
     pub dynamic_segment_name_conflicts: Vec<DynamicSegmentNameConflictFinding>,
+    /// Vue `<script setup>` `defineProps` props referenced nowhere in their own
+    /// SFC (neither `<script>` nor `<template>`). Wrapped in
+    /// [`UnusedComponentPropFinding`] so each entry carries a typed `actions`
+    /// array natively. Default severity is `warn`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unused_component_props: Vec<UnusedComponentPropFinding>,
+    /// Vue `<script setup>` `defineEmits` events emitted nowhere in their own SFC
+    /// (no `emit('<name>')` call). Wrapped in [`UnusedComponentEmitFinding`] so
+    /// each entry carries a typed `actions` array natively. Default severity is
+    /// `warn`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unused_component_emits: Vec<UnusedComponentEmitFinding>,
+    /// Next.js Server Actions (exports of `"use server"` files) that no code in
+    /// the project references. Reclassified out of `unused_exports` for
+    /// `"use server"` files. Wrapped in [`UnusedServerActionFinding`] so each
+    /// entry carries a typed `actions` array natively. Default severity is
+    /// `warn`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unused_server_actions: Vec<UnusedServerActionFinding>,
     /// Number of suppression entries that matched an issue during analysis.
     /// Human output uses this for the suppression footer; it is skipped in
     /// machine output to avoid changing the public JSON issue contract.
@@ -359,8 +386,12 @@ impl AnalysisResults {
             + self.mixed_client_server_barrels.len()
             + self.misplaced_directives.len()
             + self.unprovided_injects.len()
+            + self.unrendered_components.len()
             + self.route_collisions.len()
             + self.dynamic_segment_name_conflicts.len()
+            + self.unused_component_props.len()
+            + self.unused_component_emits.len()
+            + self.unused_server_actions.len()
     }
 
     /// Whether any issues were found.
@@ -414,8 +445,12 @@ impl AnalysisResults {
             mixed_client_server_barrels,
             misplaced_directives,
             unprovided_injects,
+            unrendered_components,
             route_collisions,
             dynamic_segment_name_conflicts,
+            unused_component_props,
+            unused_component_emits,
+            unused_server_actions,
             suppression_count,
             active_suppressions,
             feature_flags,
@@ -465,9 +500,13 @@ impl AnalysisResults {
             .extend(mixed_client_server_barrels);
         self.misplaced_directives.extend(misplaced_directives);
         self.unprovided_injects.extend(unprovided_injects);
+        self.unrendered_components.extend(unrendered_components);
         self.route_collisions.extend(route_collisions);
         self.dynamic_segment_name_conflicts
             .extend(dynamic_segment_name_conflicts);
+        self.unused_component_props.extend(unused_component_props);
+        self.unused_component_emits.extend(unused_component_emits);
+        self.unused_server_actions.extend(unused_server_actions);
         self.feature_flags.extend(feature_flags);
         self.security_findings.extend(security_findings);
         self.security_unresolved_edge_files += security_unresolved_edge_files;
@@ -621,6 +660,15 @@ impl AnalysisResults {
                 .then(a.inject.key_name.cmp(&b.inject.key_name))
         });
 
+        self.unrendered_components.sort_by(|a, b| {
+            a.component
+                .path
+                .cmp(&b.component.path)
+                .then(a.component.line.cmp(&b.component.line))
+                .then(a.component.col.cmp(&b.component.col))
+                .then(a.component.component_name.cmp(&b.component.component_name))
+        });
+
         self.route_collisions.sort_by(|a, b| {
             a.collision
                 .path
@@ -633,6 +681,31 @@ impl AnalysisResults {
                 .path
                 .cmp(&b.conflict.path)
                 .then(a.conflict.position.cmp(&b.conflict.position))
+        });
+
+        self.unused_component_props.sort_by(|a, b| {
+            a.prop
+                .path
+                .cmp(&b.prop.path)
+                .then(a.prop.line.cmp(&b.prop.line))
+                .then(a.prop.prop_name.cmp(&b.prop.prop_name))
+        });
+
+        self.unused_component_emits.sort_by(|a, b| {
+            a.emit
+                .path
+                .cmp(&b.emit.path)
+                .then(a.emit.line.cmp(&b.emit.line))
+                .then(a.emit.emit_name.cmp(&b.emit.emit_name))
+        });
+
+        self.unused_server_actions.sort_by(|a, b| {
+            a.action
+                .path
+                .cmp(&b.action.path)
+                .then(a.action.line.cmp(&b.action.line))
+                .then(a.action.col.cmp(&b.action.col))
+                .then(a.action.action_name.cmp(&b.action.action_name))
         });
     }
 
@@ -963,6 +1036,99 @@ pub struct UnprovidedInject {
     /// 1-based line number of the inject / getContext call.
     pub line: u32,
     /// 0-based byte column offset of the inject / getContext call.
+    pub col: u32,
+}
+
+/// A Next.js Server Action (an export of a `"use server"` file) that no code in
+/// the analyzed project references: no import-and-call, no `action={fn}` JSX
+/// binding, no `<form action={fn}>`. This is the cross-graph "declared but zero
+/// consumers" direction, reclassified out of `unused-export` for `"use server"`
+/// files so the finding carries the action-specific signal. It does NOT mean the
+/// endpoint is unreachable: Next still registers the action id, so it stays
+/// POST-able. It means no project code calls it (likely forgotten / dead, and a
+/// candidate for removal to shrink surface area).
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedServerAction {
+    /// The `"use server"` file that exports the unreferenced action.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// The exported action name as written, or `"default"` for a default export.
+    pub action_name: String,
+    /// 1-based line number of the export.
+    pub line: u32,
+    /// 0-based byte column offset of the export.
+    pub col: u32,
+}
+
+/// A Vue/Svelte single-file component (the default export of a `.vue`/`.svelte`
+/// file) that is reachable in the module graph but rendered NOWHERE in the
+/// project: no `<Tag>`, no `:is`/`this=` binding, no `components`/`app.component`
+/// registration, no `h()`/auto-import use, and no script value-read. It survives
+/// `unused-file` (a barrel re-export keeps it reachable) and `unused-export`
+/// (the re-export counts as a use), yet no file actually instantiates it.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnrenderedComponent {
+    /// The component file that is reachable but rendered nowhere.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// The component name (the `.vue`/`.svelte` file stem, PascalCase).
+    pub component_name: String,
+    /// Which framework this component belongs to: `"vue"` or `"svelte"`.
+    pub framework: String,
+    /// A barrel/file that re-exports this component, kept for the remediation
+    /// trace ("reachable via X, rendered nowhere"). Absolute in memory,
+    /// serialized workspace-relative (like `path`); `None` when not determinable.
+    #[serde(
+        serialize_with = "serde_path::serialize_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub reachable_via: Option<PathBuf>,
+    /// 1-based line number of the component (the file head; SFCs have no explicit
+    /// default-export statement).
+    pub line: u32,
+    /// 0-based byte column offset.
+    pub col: u32,
+}
+
+/// A Vue `<script setup>` `defineProps` declared prop that is referenced NOWHERE
+/// inside its own single-file component (neither `<script>` nor `<template>`).
+/// Single-file finding, zero-FP doctrine: the whole file abstains on any
+/// fallthrough / expose / model / unharvestable-type signal.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedComponentProp {
+    /// The `.vue` SFC declaring the unused prop.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// The component name (the `.vue` file stem).
+    pub component_name: String,
+    /// The declared prop name that is never referenced.
+    pub prop_name: String,
+    /// 1-based line number of the prop declaration.
+    pub line: u32,
+    /// 0-based byte column offset of the prop declaration.
+    pub col: u32,
+}
+
+/// A Vue `<script setup>` `defineEmits` declared event that is EMITTED nowhere
+/// inside its own single-file component (no `emit('<name>')` call). Single-file
+/// finding, zero-FP doctrine: the whole file abstains on any
+/// unharvestable / dynamic-emit / whole-object-use / `defineModel` signal.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedComponentEmit {
+    /// The `.vue` SFC declaring the unused emit.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// The component name (the `.vue` file stem).
+    pub component_name: String,
+    /// The declared emit event name that is never emitted.
+    pub emit_name: String,
+    /// 1-based line number of the emit declaration.
+    pub line: u32,
+    /// 0-based byte column offset of the emit declaration.
     pub col: u32,
 }
 

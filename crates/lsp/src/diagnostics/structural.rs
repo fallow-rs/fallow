@@ -613,7 +613,8 @@ pub fn push_unprovided_inject_diagnostics(
 
 /// Push `route-collision` diagnostics. File-level findings anchored at line 1;
 /// the finding's `path` is the absolute graph-node path, so the URI is built
-/// directly with no `root.join`.
+/// directly with no `root.join`. Fixed `ERROR` severity matching the rule's
+/// `error` default (Next.js fails the build on a route collision).
 pub fn push_route_collision_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
@@ -638,7 +639,7 @@ pub fn push_route_collision_diagnostics(
                     character: u32::MAX,
                 },
             },
-            severity: Some(DiagnosticSeverity::WARNING),
+            severity: Some(DiagnosticSeverity::ERROR),
             source: Some("fallow".to_string()),
             code: Some(NumberOrString::String("route-collision".to_string())),
             code_description: doc_link("route-collisions"),
@@ -650,7 +651,9 @@ pub fn push_route_collision_diagnostics(
 }
 
 /// Push `dynamic-segment-name-conflict` diagnostics. File-level findings
-/// anchored at line 1; absolute `path`, so the URI is built directly.
+/// anchored at line 1; absolute `path`, so the URI is built directly. Fixed
+/// `ERROR` severity matching the rule's `error` default (Next.js requires one
+/// consistent slug name per dynamic path).
 pub fn push_dynamic_segment_name_conflict_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
@@ -675,7 +678,7 @@ pub fn push_dynamic_segment_name_conflict_diagnostics(
                     character: u32::MAX,
                 },
             },
-            severity: Some(DiagnosticSeverity::WARNING),
+            severity: Some(DiagnosticSeverity::ERROR),
             source: Some("fallow".to_string()),
             code: Some(NumberOrString::String(
                 "dynamic-segment-name-conflict".to_string(),
@@ -1236,6 +1239,84 @@ mod tests {
         assert!(d.message.contains("use client"));
         assert_eq!(d.range.start.line, 3); // 1-based 4 -> 0-based 3
         assert_eq!(d.range.start.character, 0);
+    }
+
+    #[test]
+    fn route_collision_produces_error_diagnostic() {
+        let root = test_root();
+        let file = root.join("app/(a)/about/page.tsx");
+
+        let mut results = AnalysisResults::default();
+        results
+            .route_collisions
+            .push(fallow_core::results::RouteCollisionFinding::with_actions(
+                fallow_core::results::RouteCollision {
+                    path: file.clone(),
+                    url: "/about".to_string(),
+                    conflicting_paths: vec![root.join("app/(b)/about/page.tsx")],
+                    line: 1,
+                    col: 0,
+                },
+            ));
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, &root);
+
+        let uri = Uri::from_file_path(&file).unwrap();
+        let file_diags = diags
+            .get(&uri)
+            .expect("route-collision diagnostic should land under the file URI");
+        assert_eq!(file_diags.len(), 1);
+
+        // route-collision mirrors a `next build` failure, so it must surface as
+        // ERROR to match the rule's `error` default (regression guard for the
+        // WARNING -> ERROR severity flip).
+        let d = &file_diags[0];
+        assert_eq!(d.severity, Some(DiagnosticSeverity::ERROR));
+        assert_eq!(
+            d.code,
+            Some(NumberOrString::String("route-collision".to_string()))
+        );
+    }
+
+    #[test]
+    fn dynamic_segment_name_conflict_produces_error_diagnostic() {
+        let root = test_root();
+        let file = root.join("app/blog/[id]/page.tsx");
+
+        let mut results = AnalysisResults::default();
+        results.dynamic_segment_name_conflicts.push(
+            fallow_core::results::DynamicSegmentNameConflictFinding::with_actions(
+                fallow_core::results::DynamicSegmentNameConflict {
+                    path: file.clone(),
+                    position: "/blog".to_string(),
+                    conflicting_segments: vec!["[id]".to_string(), "[slug]".to_string()],
+                    conflicting_paths: vec![root.join("app/blog/[slug]/page.tsx")],
+                    line: 1,
+                    col: 0,
+                },
+            ),
+        );
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, &root);
+
+        let uri = Uri::from_file_path(&file).unwrap();
+        let file_diags = diags
+            .get(&uri)
+            .expect("dynamic-segment-name-conflict diagnostic should land under the file URI");
+        assert_eq!(file_diags.len(), 1);
+
+        // A deterministic runtime crash `next build` lets through; ERROR matches
+        // the rule's graduated `error` default (regression guard).
+        let d = &file_diags[0];
+        assert_eq!(d.severity, Some(DiagnosticSeverity::ERROR));
+        assert_eq!(
+            d.code,
+            Some(NumberOrString::String(
+                "dynamic-segment-name-conflict".to_string()
+            ))
+        );
     }
 
     #[test]

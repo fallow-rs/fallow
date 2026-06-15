@@ -66,7 +66,9 @@ use error::emit_error;
 use health::{HealthOptions, SortBy};
 use list::ListOptions;
 pub use runtime_support::{AnalysisKind, GroupBy};
-pub(crate) use runtime_support::{build_ownership_resolver, load_config, load_config_for_analysis};
+pub(crate) use runtime_support::{
+    ConfigLoadOptions, build_ownership_resolver, load_config, load_config_for_analysis,
+};
 
 const SECURITY_UNSUPPORTED_GLOBAL_LONGS: &[&str] = &[
     "baseline",
@@ -387,13 +389,13 @@ struct Cli {
     #[arg(long = "dupes-cross-language", global = true)]
     dupes_cross_language: bool,
 
-    /// Exclude import declarations from duplicate detection in combined mode
-    /// (default). Pass `--dupes-no-ignore-imports` to count them again.
+    /// Exclude module wiring from duplicate detection in combined mode
+    /// (default). Pass `--dupes-no-ignore-imports` to count it again.
     #[arg(long = "dupes-ignore-imports", global = true)]
     dupes_ignore_imports: bool,
 
-    /// Count import declarations as clone candidates in combined mode (opt out
-    /// of the default import exclusion).
+    /// Count module wiring as clone candidates in combined mode (opt out of the
+    /// default exclusion).
     #[arg(
         long = "dupes-no-ignore-imports",
         global = true,
@@ -473,6 +475,22 @@ enum Command {
         /// Only report unprovided injects
         #[arg(long)]
         unprovided_injects: bool,
+
+        /// Only report unrendered components
+        #[arg(long)]
+        unrendered_components: bool,
+
+        /// Only report unused component props
+        #[arg(long)]
+        unused_component_props: bool,
+
+        /// Only report unused component emits
+        #[arg(long)]
+        unused_component_emits: bool,
+
+        /// Only report unused server actions
+        #[arg(long)]
+        unused_server_actions: bool,
 
         /// Only report unresolved imports
         #[arg(long)]
@@ -743,14 +761,14 @@ enum Command {
         #[arg(long)]
         cross_language: bool,
 
-        /// Exclude import declarations from clone detection (default; reduces
-        /// noise from sorted import blocks). Pass `--no-ignore-imports` to
-        /// count them again.
+        /// Exclude module wiring from clone detection (default; covers imports,
+        /// re-exports, and top-level static require bindings). Pass
+        /// `--no-ignore-imports` to count it again.
         #[arg(long)]
         ignore_imports: bool,
 
-        /// Count import declarations as clone candidates (opt out of the
-        /// default import exclusion).
+        /// Count module wiring as clone candidates (opt out of the default
+        /// exclusion).
         #[arg(long, conflicts_with = "ignore_imports")]
         no_ignore_imports: bool,
 
@@ -3162,6 +3180,10 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             unused_class_members,
             unused_store_members,
             unprovided_injects,
+            unrendered_components,
+            unused_component_props,
+            unused_component_emits,
+            unused_server_actions,
             unresolved_imports,
             unlisted_deps,
             duplicate_exports,
@@ -3194,6 +3216,10 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
                     unused_class_members,
                     unused_store_members,
                     unprovided_injects,
+                    unrendered_components,
+                    unused_component_props,
+                    unused_component_emits,
+                    unused_server_actions,
                     unresolved_imports,
                     unlisted_deps,
                     duplicate_exports,
