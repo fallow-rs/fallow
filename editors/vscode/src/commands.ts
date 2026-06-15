@@ -416,6 +416,7 @@ const filterCheckResult = (result: FallowCheckResult): FallowCheckResult => {
     circular_dependencies: types["circular-dependencies"] ? result.circular_dependencies : [],
     re_export_cycles: types["re-export-cycles"] ? result.re_export_cycles : [],
     boundary_violations: types["boundary-violation"] ? result.boundary_violations : [],
+    policy_violations: types["policy-violation"] ? result.policy_violations : [],
     stale_suppressions: types["stale-suppressions"] ? result.stale_suppressions : [],
     unused_catalog_entries: types["unused-catalog-entries"] ? result.unused_catalog_entries : [],
     // Intentionally ungateable: there is no `empty-catalog-groups` key in
@@ -454,6 +455,7 @@ const filterCheckResult = (result: FallowCheckResult): FallowCheckResult => {
     circular_dependencies: filtered.circular_dependencies?.length ?? 0,
     re_export_cycles: filtered.re_export_cycles?.length ?? 0,
     boundary_violations: filtered.boundary_violations?.length ?? 0,
+    policy_violations: filtered.policy_violations?.length ?? 0,
     stale_suppressions: filtered.stale_suppressions?.length ?? 0,
     unused_catalog_entries: filtered.unused_catalog_entries?.length ?? 0,
     empty_catalog_groups: filtered.empty_catalog_groups?.length ?? 0,
