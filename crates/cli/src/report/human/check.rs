@@ -1299,7 +1299,17 @@ fn build_policy_section(
     }
     push_category_header(lines, "Policy");
     build_policy_violations_section(lines, &results.policy_violations, root, total_issues);
+    build_framework_policy_section(lines, results, root, rules);
+    build_component_policy_section(lines, results, root, rules);
+    build_route_policy_section(lines, results, root, rules);
+}
 
+fn build_framework_policy_section(
+    lines: &mut Vec<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+) {
     build_human_grouped_section(GroupedSectionInput {
         lines,
         items: &results.invalid_client_exports,
@@ -1364,7 +1374,14 @@ fn build_policy_section(
         },
         format_detail: &format_unrendered_component,
     });
+}
 
+fn build_component_policy_section(
+    lines: &mut Vec<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+) {
     build_human_grouped_section(GroupedSectionInput {
         lines,
         items: &results.unused_component_props,
@@ -1416,7 +1433,14 @@ fn build_policy_section(
         },
         format_detail: &format_unused_load_data_key,
     });
+}
 
+fn build_route_policy_section(
+    lines: &mut Vec<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+) {
     build_human_grouped_section(GroupedSectionInput {
         lines,
         items: &results.route_collisions,
