@@ -12,7 +12,7 @@
 use lightningcss::printer::PrinterOptions;
 use lightningcss::properties::Property;
 use lightningcss::properties::animation::AnimationName;
-use lightningcss::properties::custom::{CustomPropertyName, Variable};
+use lightningcss::properties::custom::{CustomPropertyName, Token, TokenOrValue, Variable};
 use lightningcss::properties::font::FontFamily;
 use lightningcss::rules::CssRule;
 use lightningcss::rules::font_face::FontFaceProperty;
@@ -348,6 +348,21 @@ fn record_style_rule(style: &StyleRule<'_>, depth: u8, acc: &mut Accumulator) {
             Property::Custom(custom) => {
                 if let CustomPropertyName::Custom(name) = &custom.name {
                     acc.defined_custom_properties.insert(name.0.to_string());
+                }
+                // A custom-property value can REFERENCE a font family without a
+                // `font-family:` declaration: a Tailwind v4 `--font-*` theme token
+                // (`--font-display: "Departure Mono", monospace`) is the canonical
+                // case. lightningcss's `Property::FontFamily` / `Property::Font`
+                // arms above never see this (a `--*:` declaration is an opaque
+                // token stream), so scan the raw tokens for string / ident values
+                // and credit them as referenced families. Generic keywords
+                // (`serif`, `monospace`) never appear in `defined_font_faces`, so
+                // crediting them here is inert; the `unused_font_faces`
+                // set-difference only ever drops a genuinely-declared family.
+                for token in &custom.value.0 {
+                    if let TokenOrValue::Token(Token::String(value) | Token::Ident(value)) = token {
+                        acc.referenced_font_families.insert(value.to_string());
+                    }
                 }
             }
             Property::AnimationName(names, _) => {

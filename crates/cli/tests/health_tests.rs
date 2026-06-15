@@ -2979,6 +2979,108 @@ fn unreferenced_classes(root: &std::path::Path) -> Vec<serde_json::Value> {
         .unwrap_or_default()
 }
 
+/// Names in a `css_analytics` list field for a `fallow health --css` run.
+fn css_list_names(root: &std::path::Path, field: &str, name_key: &str) -> Vec<String> {
+    let out = run_fallow_in_root(
+        "health",
+        root,
+        &[
+            "--css",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let mut names: Vec<String> = parse_json(&out)
+        .get("css_analytics")
+        .and_then(|c| c.get(field))
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.get(name_key).and_then(|s| s.as_str()).map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default();
+    names.sort();
+    names
+}
+
+#[test]
+fn health_css_keyframe_credited_by_tailwind_animate_and_js() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(&root.join("package.json"), r#"{"name":"kf"}"#);
+    // `arb` applied via an `animate-[arb_...]` arbitrary value, `util` via an
+    // `animate-util` named utility, `jsanim` via a JS inline-style `animation:`
+    // string. Only `dead` (referenced by nothing) is flagged.
+    write_file(
+        &root.join("src/anim.css"),
+        "@keyframes arb{from{opacity:0}to{opacity:1}}\n@keyframes util{from{}to{}}\n@keyframes jsanim{from{}to{}}\n@keyframes dead{from{}to{}}\n",
+    );
+    write_file(
+        &root.join("src/App.tsx"),
+        "export const A = () => (<div className=\"animate-[arb_0.5s_ease] animate-util\" style={{ animation: 'jsanim 1s linear' }} />);\n",
+    );
+
+    assert_eq!(
+        css_list_names(root, "unreferenced_keyframes", "name"),
+        vec!["dead".to_string()],
+        "only the genuinely-dead keyframe is flagged"
+    );
+}
+
+#[test]
+fn health_css_unreferenced_class_credits_dynamic_string_and_dependency() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"cls","dependencies":{"maplibre-gl":"^4.0.0"}}"#,
+    );
+    // `.stagger-1` applied dynamically (`stagger-${i}`), `.toast-skin` via a
+    // config-object string (`className: 'toast-skin'`), `.maplibregl-popup`
+    // styles a third-party library applied at runtime. Only `.really-dead-class`
+    // (referenced by nothing) is flagged.
+    write_file(
+        &root.join("src/g.css"),
+        ".stagger-1{}\n.toast-skin{}\n.maplibregl-popup{}\n.really-dead-class{}\n",
+    );
+    write_file(
+        &root.join("src/App.tsx"),
+        "export const A = ({ i }: { i: number }) => { const cfg = { className: 'toast-skin' }; return <div className={`stagger-${i}`} data-cfg={cfg.className} />; };\n",
+    );
+
+    assert_eq!(
+        css_list_names(root, "unreferenced_css_classes", "class"),
+        vec!["really-dead-class".to_string()],
+        "dynamic / string-literal / third-party classes are credited"
+    );
+}
+
+#[test]
+fn health_css_font_face_credited_by_custom_property_value() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(&root.join("package.json"), r#"{"name":"ff"}"#);
+    // `LiveFont` is referenced only via a `--font-display` custom property inside
+    // a `@theme` block (which lightningcss skips); `GhostFont` is referenced by
+    // nothing. Only `GhostFont` is flagged. The fonts' own `@font-face` blocks are
+    // masked so they do not self-credit.
+    write_file(
+        &root.join("src/fonts.css"),
+        "@font-face{font-family:\"LiveFont\";src:url(/l.woff2)}\n@font-face{font-family:\"GhostFont\";src:url(/g.woff2)}\n@theme{--font-display:\"LiveFont\",sans-serif}\n.x{font-family:var(--font-display)}\n",
+    );
+    write_file(&root.join("src/App.tsx"), "export const A = () => null;\n");
+
+    assert_eq!(
+        css_list_names(root, "unused_font_faces", "family"),
+        vec!["GhostFont".to_string()],
+        "a font referenced via a --font-* custom property is not flagged"
+    );
+}
+
 #[test]
 fn health_css_flags_unreferenced_global_class() {
     let dir = tempdir().unwrap();

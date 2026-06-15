@@ -1034,6 +1034,108 @@ fn scan_markup_tailwind_arbitrary_values(
     out
 }
 
+/// True for a byte that can appear inside a Tailwind class token (used to anchor
+/// the `animate-` prefix at a token boundary so `xanimate-` does not match).
+fn is_tailwind_class_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'-' || b == b'_'
+}
+
+/// Extract `@keyframes` names applied via Tailwind from one source string: the
+/// custom-ident after `animate-[<name>_...]` (arbitrary value, up to the first
+/// `_`/`]`) and after a bare `animate-<name>` utility. The `animate-` prefix must
+/// sit at a token boundary. Names are collected raw; the caller filters them to
+/// actually-defined keyframes.
+fn collect_animate_keyframe_names(source: &str, out: &mut rustc_hash::FxHashSet<String>) {
+    let bytes = source.as_bytes();
+    const PREFIX: &str = "animate-";
+    let mut search = 0;
+    while let Some(rel) = source[search..].find(PREFIX) {
+        let start = search + rel;
+        search = start + PREFIX.len();
+        // The prefix must start at a token boundary (`hover:animate-x` is fine,
+        // `myanimate-x` is not).
+        if start > 0 && is_tailwind_class_byte(bytes[start - 1]) {
+            continue;
+        }
+        let after = start + PREFIX.len();
+        if after >= bytes.len() {
+            continue;
+        }
+        if bytes[after] == b'[' {
+            // Arbitrary value: `animate-[badge-pop_0.5s_...]` -> `badge-pop`.
+            let name_start = after + 1;
+            let mut j = name_start;
+            while j < bytes.len() {
+                let c = bytes[j];
+                if c == b'-' || c.is_ascii_alphanumeric() {
+                    j += 1;
+                } else {
+                    break;
+                }
+            }
+            if j > name_start {
+                out.insert(source[name_start..j].to_owned());
+            }
+        } else {
+            // Named utility: `animate-bar-fill` -> `bar-fill`.
+            let mut j = after;
+            while j < bytes.len() {
+                let c = bytes[j];
+                if c == b'-' || c.is_ascii_lowercase() || c.is_ascii_digit() {
+                    j += 1;
+                } else {
+                    break;
+                }
+            }
+            let name = source[after..j].trim_end_matches('-');
+            if !name.is_empty() {
+                out.insert(name.to_owned());
+            }
+        }
+    }
+}
+
+/// Collect `@keyframes` names applied via Tailwind markup utilities
+/// (`animate-[name_...]` / `animate-name`) across the project's markup and JS,
+/// so a keyframe used only that way (never via a CSS `animation:` declaration)
+/// is not wrongly flagged `unreferenced`. Not gated on the Tailwind dependency:
+/// the `animate-[...]` / `animate-<name>` shapes are distinctive, the caller
+/// filters the result to actually-defined keyframes, and a project can apply
+/// Tailwind utilities without declaring the npm dep at the scanned root
+/// (CDN / PostCSS / monorepo subpackage).
+fn collect_markup_keyframe_references(
+    files: &[fallow_types::discover::DiscoveredFile],
+    config: &ResolvedConfig,
+    ignore_set: &globset::GlobSet,
+) -> rustc_hash::FxHashSet<String> {
+    let mut out: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
+    for file in files {
+        let path = &file.path;
+        let extension = path.extension().and_then(|ext| ext.to_str());
+        if !matches!(
+            extension,
+            Some("jsx" | "tsx" | "html" | "astro" | "vue" | "svelte" | "js" | "ts" | "mjs" | "cjs")
+        ) {
+            continue;
+        }
+        let relative = path.strip_prefix(&config.root).unwrap_or(path);
+        if ignore_set.is_match(relative) {
+            continue;
+        }
+        if let Ok(source) = std::fs::read_to_string(path) {
+            collect_animate_keyframe_names(&source, &mut out);
+            // Also a keyframe named in a JS inline-style `animation:` /
+            // `animationName:` string (`animation: 'progress-indeterminate 1.5s'`)
+            // appears as a dashed token in a quoted string; the caller filters
+            // these to actually-defined keyframes, so an unrelated dashed token
+            // can never manufacture a reference. `require_dash: false` so a
+            // single-word keyframe name (`spin`, `jsanim`) is credited too.
+            collect_quoted_class_tokens(&source, &mut out, false);
+        }
+    }
+    out
+}
+
 /// Shortest authored CSS class that can be a credible typo target. Below this a
 /// one-edit near miss is too likely to be a coincidental collision between two
 /// short real words (`catch` vs `match`, `list` vs `last`) rather than a typo.
@@ -1261,12 +1363,55 @@ fn scan_unresolved_class_references(
     out
 }
 
+/// Blank every `@font-face { ... }` block in a (lowercased) source so a declared
+/// family's own `font-family:` inside its definition does not self-credit when
+/// the source is scanned for OTHER references to that family. The `@font-face`,
+/// `{`, and `}` boundaries are ASCII, so replacing the whole block range with
+/// spaces preserves UTF-8 validity (any multi-byte family name inside the block
+/// is fully within the replaced range).
+fn mask_font_face_blocks(lower_source: &str) -> String {
+    if !lower_source.contains("@font-face") {
+        return lower_source.to_owned();
+    }
+    let mut bytes = lower_source.as_bytes().to_vec();
+    let sb = lower_source.as_bytes();
+    let mut search = 0;
+    while let Some(rel) = lower_source[search..].find("@font-face") {
+        let start = search + rel;
+        let Some(brace_rel) = lower_source[start..].find('{') else {
+            break;
+        };
+        let mut depth = 0usize;
+        let mut j = start + brace_rel;
+        while j < sb.len() {
+            match sb[j] {
+                b'{' => depth += 1,
+                b'}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            j += 1;
+        }
+        let end = (j + 1).min(bytes.len());
+        for b in &mut bytes[start..end] {
+            *b = b' ';
+        }
+        search = end;
+    }
+    String::from_utf8(bytes).unwrap_or_else(|_| lower_source.to_owned())
+}
+
 /// Of the candidate unused `@font-face` families, the subset whose name appears
-/// as a substring in some non-CSS source file (`.scss`/`.sass`/`.less`, JS/TS,
-/// or markup). Such a family is applied somewhere the CSS-only scan cannot see
-/// (a `.scss` theme, a canvas/JS `fontFamily` assignment, an inline style), so it
-/// is NOT dead. The plain `.css` surface is already covered by the CSS
-/// `font-family` reference set, so it is skipped here.
+/// as a substring in some other source file (`.css`/`.scss`/`.sass`/`.less`,
+/// JS/TS, or markup), OUTSIDE its own `@font-face` block. Such a family is
+/// applied somewhere the structural `font-family` reference set cannot see (a
+/// Tailwind v4 `--font-*` theme token in a `@theme` block lightningcss skips, a
+/// `.scss` theme, a canvas/JS `fontFamily` assignment, an inline style), so it
+/// is NOT dead.
 fn font_families_referenced_in_source(
     candidates: &[crate::health_types::UnusedFontFace],
     files: &[fallow_types::discover::DiscoveredFile],
@@ -1290,7 +1435,8 @@ fn font_families_referenced_in_source(
         if !matches!(
             extension,
             Some(
-                "scss"
+                "css"
+                    | "scss"
                     | "sass"
                     | "less"
                     | "js"
@@ -1315,7 +1461,12 @@ fn font_families_referenced_in_source(
         let Ok(source) = std::fs::read_to_string(path) else {
             continue;
         };
-        let source_lower = source.to_ascii_lowercase();
+        // `.css` is scanned too: a family can be referenced via a custom-property
+        // value (a Tailwind v4 `--font-*` theme token, which lives inside a
+        // `@theme` block that lightningcss skips, so the structural reference set
+        // never sees it). The family's OWN `@font-face` definition is masked so it
+        // does not self-credit (every declared family appears in its own block).
+        let source_lower = mask_font_face_blocks(&source.to_ascii_lowercase());
         pending.retain(|(family, family_lower)| {
             if source_lower.contains(family_lower.as_str()) {
                 found.insert(family.clone());
@@ -1332,6 +1483,118 @@ fn font_families_referenced_in_source(
 /// substring-prone (their literal appears inside many longer strings, so the
 /// substring reference check already keeps them safe) and low-signal.
 const MIN_UNREF_CLASS_LEN: usize = 5;
+
+/// Shortest a dependency's normalized name may be to serve as a third-party
+/// class-prefix abstain key. Below this a short package name (`vue`, `css`)
+/// would swallow too many real authored classes.
+const MIN_DEP_PREFIX_LEN: usize = 6;
+
+/// Normalize an identifier to a run of lowercase ASCII alphanumerics (drop
+/// scopes, hyphens, dots): `maplibre-gl` -> `maplibregl`, `@scope/pkg` keeps
+/// only `pkg` because the caller de-scopes first.
+fn normalize_dep_token(name: &str) -> String {
+    name.chars()
+        .filter(char::is_ascii_alphanumeric)
+        .map(|c| c.to_ascii_lowercase())
+        .collect()
+}
+
+/// Normalized names of the project's declared dependencies (length-floored),
+/// used to abstain on third-party CSS classes a library applies to its own
+/// runtime-created DOM (e.g. a `.maplibregl-*` rule that styles the
+/// `maplibre-gl` library). Scoped packages are de-scoped to the bare name.
+fn dependency_class_prefixes(config: &ResolvedConfig) -> rustc_hash::FxHashSet<String> {
+    let mut prefixes: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
+    let Ok(text) = std::fs::read_to_string(config.root.join("package.json")) else {
+        return prefixes;
+    };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return prefixes;
+    };
+    for key in ["dependencies", "devDependencies", "peerDependencies"] {
+        if let Some(deps) = json.get(key).and_then(serde_json::Value::as_object) {
+            for name in deps.keys() {
+                // De-scope `@scope/pkg` -> `pkg` so the prefix is the package's
+                // own name, not the scope.
+                let bare = name.rsplit('/').next().unwrap_or(name);
+                let normalized = normalize_dep_token(bare);
+                if normalized.len() >= MIN_DEP_PREFIX_LEN {
+                    prefixes.insert(normalized);
+                }
+            }
+        }
+    }
+    prefixes
+}
+
+/// True when a CSS class is a third-party library's class: its normalized form
+/// starts with a declared dependency's normalized name. `maplibregl-popup-content`
+/// -> `maplibreglpopupcontent` starts with `maplibregl`. Conservative
+/// (abstain-leaning): a third-party class wrongly flagged dead is a far worse
+/// candidate than a missed authored dead class.
+fn class_matches_dependency_prefix(
+    class: &str,
+    dependency_prefixes: &rustc_hash::FxHashSet<String>,
+) -> bool {
+    if dependency_prefixes.is_empty() {
+        return false;
+    }
+    let normalized = normalize_dep_token(class);
+    dependency_prefixes
+        .iter()
+        .any(|prefix| normalized.starts_with(prefix.as_str()))
+}
+
+/// Extract class-shaped tokens from quoted string literals (`'...'` / `"..."` /
+/// `` `...` ``) in a source string and add them to `out`, crediting a name
+/// applied outside a `class=` / `className=` attribute (a config-object
+/// `className: 'leveret-toast'`, a helper `return "x-y"`, a JS inline-style
+/// `animation: 'progress-indeterminate 1s'`).
+///
+/// `require_dash` controls strictness. For CLASS crediting it is `true`: only
+/// compound (dash-bearing) tokens are taken, so a generic single word never
+/// coincidentally credits a class and breaks the whole-sheet abstain that
+/// protects classes used in a surface fallow cannot read (Phoenix `.heex`). For
+/// KEYFRAME crediting it is `false` (the caller filters to actually-defined
+/// keyframes, so over-extraction is inert), letting a single-word keyframe name
+/// (`spin`, `jsanim`) be credited from a JS `animation:` string too.
+fn collect_quoted_class_tokens(
+    source: &str,
+    out: &mut rustc_hash::FxHashSet<String>,
+    require_dash: bool,
+) {
+    let bytes = source.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let quote = bytes[i];
+        if quote == b'"' || quote == b'\'' || quote == b'`' {
+            let start = i + 1;
+            let mut j = start;
+            while j < bytes.len() && bytes[j] != quote {
+                j += 1;
+            }
+            if let Some(content) = source.get(start..j) {
+                for token in content
+                    .split(|c: char| !(c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'))
+                {
+                    let shaped = token.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
+                        && !token.ends_with('-')
+                        && (if require_dash {
+                            token.contains('-')
+                        } else {
+                            token.len() >= 3
+                        });
+                    if shaped {
+                        out.insert(token.to_owned());
+                    }
+                }
+            }
+            i = j + 1;
+        } else {
+            i += 1;
+        }
+    }
+}
 
 /// Per-stylesheet located class definitions from STANDALONE `.css`/`.scss` files
 /// (not SFC `<style>` blocks, which are component-scoped and covered by the
@@ -1490,16 +1753,43 @@ fn scan_unreferenced_css_classes(
         for token in scan.static_tokens {
             static_tokens.insert(token.value);
         }
+        // Also credit a DASHED (compound) class applied outside a `class=` /
+        // `className=` attribute: a config-object `className: 'leveret-toast'`, a
+        // helper `return "today-highlight"`. Only dashed tokens from quoted
+        // strings are taken (not single words), so a generic word never breaks
+        // the whole-sheet abstain that protects classes used in a surface fallow
+        // cannot read (Phoenix `.heex`, server templates).
+        collect_quoted_class_tokens(&source, &mut static_tokens, true);
         if scan.has_dynamic {
             dynamic_corpus.push_str(&source);
             dynamic_corpus.push('\n');
         }
     }
 
-    let referenced =
-        |class: &str| -> bool { static_tokens.contains(class) || dynamic_corpus.contains(class) };
+    // A class assembled dynamically as `prefix-${...}` (e.g. `stagger-${i}`
+    // backing `.stagger-1`..`.stagger-6`) never appears as a full literal in the
+    // dynamic corpus, so credit it when its dash-prefix is immediately followed
+    // by an interpolation / concatenation boundary in a dynamic file. The dash
+    // AND the marker are both required, so `stagger` appearing in `add-stagger`
+    // does not credit `.stagger-1`.
+    let dynamic_prefix_referenced = |class: &str| -> bool {
+        let Some(dash) = class.rfind('-') else {
+            return false;
+        };
+        let head = &class[..=dash];
+        const INTERP_MARKERS: [&str; 6] = ["${", "' +", "'+", "\" +", "\"+", "` +"];
+        INTERP_MARKERS
+            .iter()
+            .any(|marker| dynamic_corpus.contains(&format!("{head}{marker}")))
+    };
+    let referenced = |class: &str| -> bool {
+        static_tokens.contains(class)
+            || dynamic_corpus.contains(class)
+            || dynamic_prefix_referenced(class)
+    };
 
     let published = published_css_paths(config);
+    let dependency_prefixes = dependency_class_prefixes(config);
     let located = collect_defined_css_classes_located(files, config, ignore_set);
 
     let mut out: Vec<UnreferencedCssClass> = Vec::new();
@@ -1514,7 +1804,10 @@ fn scan_unreferenced_css_classes(
             continue;
         }
         for (class, line) in classes {
-            if class.len() >= MIN_UNREF_CLASS_LEN && !referenced(&class) {
+            if class.len() >= MIN_UNREF_CLASS_LEN
+                && !referenced(&class)
+                && !class_matches_dependency_prefix(&class, &dependency_prefixes)
+            {
                 out.push(UnreferencedCssClass {
                     actions: vec![CssCandidateAction::verify_unreferenced_class(&class)],
                     class,
@@ -1633,6 +1926,16 @@ fn compute_css_analytics_report(
                 path: rel,
                 analytics,
             });
+        }
+    }
+
+    // Credit @keyframes applied via Tailwind markup (`animate-[name_...]` /
+    // `animate-name`), not just CSS `animation:` declarations, before the
+    // unreferenced diff. Filtered to actually-defined keyframes so a stray
+    // `animate-*` suffix never manufactures a false `undefined_keyframes`.
+    for name in collect_markup_keyframe_references(files, config, ignore_set) {
+        if tokens.defined_keyframes.contains(&name) {
+            tokens.referenced_keyframes.insert(name);
         }
     }
 
