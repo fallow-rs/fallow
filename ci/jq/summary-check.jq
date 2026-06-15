@@ -54,8 +54,13 @@ else
     table_row("Invalid client exports"; "invalid_client_exports"; "invalid-client-exports"),
     table_row("Mixed client/server barrels"; "mixed_client_server_barrels"; "mixed-client-server-barrels"),
     table_row("Misplaced directives"; "misplaced_directives"; "misplaced-directives"),
+    table_row("Unused server actions"; "unused_server_actions"; "unused-server-action"),
     table_row("Route collisions"; "route_collisions"; "route-collisions"),
     table_row("Dynamic segment conflicts"; "dynamic_segment_name_conflicts"; "dynamic-segment-name-conflicts"),
+    table_row("Unrendered components"; "unrendered_components"; "unrendered-component"),
+    table_row("Unused component props"; "unused_component_props"; "unused-component-prop"),
+    table_row("Unused component emits"; "unused_component_emits"; "unused-component-emit"),
+    table_row("Unprovided injects"; "unprovided_injects"; "unprovided-inject"),
     table_row("Type-only dependencies"; "type_only_dependencies"; "type-only-dependencies"),
     table_row("Test-only dependencies"; "test_only_dependencies"; "test-only-dependencies"),
     table_row("Stale suppressions"; "stale_suppressions"; "stale-suppressions"),
@@ -132,12 +137,27 @@ else
   section("Misplaced directives"; "misplaced_directives";
     "`\"use client\"` / `\"use server\"` directives written after a non-directive statement, so the RSC bundler ignores them. Move the directive to the top of the file.\n\n| File | Directive |\n|------|-----------|\n";
     "| `\(.path):\(.line)` | `\"\(.directive)\"` |") +
+  section("Unused server actions"; "unused_server_actions";
+    "Next.js Server Actions (exports of a `\"use server\"` file) that no project code references. The endpoint stays POST-able, but no code calls it (likely dead).\n\n| File | Action |\n|------|--------|\n";
+    "| `\(.path):\(.line)` | `\(.action_name)` |") +
   section("Route collisions"; "route_collisions";
     "Next.js App Router route files that resolve to the same URL within one app-root. Next.js fails the build because a URL can have only one owner.\n\n| File | URL |\n|------|-----|\n";
     "| `\(.path)` | `\(.url)` |") +
   section("Dynamic segment conflicts"; "dynamic_segment_name_conflicts";
     "Sibling Next.js dynamic route segments at one position using different slug names. Next.js requires one consistent name per dynamic path.\n\n| File | Position | Segments |\n|------|----------|----------|\n";
     "| `\(.path)` | `\(.position)` | `\(.conflicting_segments | join(", "))` |") +
+  section("Unrendered components"; "unrendered_components";
+    "Vue/Svelte components reachable in the module graph but rendered nowhere: no tag, no dynamic binding, no registration. A barrel re-export keeps them alive even though nothing instantiates them.\n\n| File | Component | Framework |\n|------|-----------|-----------|\n";
+    "| `\(.path):\(.line)` | `\(.component_name)` | \(.framework) |") +
+  section("Unused component props"; "unused_component_props";
+    "Vue `defineProps` props referenced nowhere inside their own single-file component (neither script nor template).\n\n| File | Component | Prop |\n|------|-----------|------|\n";
+    "| `\(.path):\(.line)` | `\(.component_name)` | `\(.prop_name)` |") +
+  section("Unused component emits"; "unused_component_emits";
+    "Vue `defineEmits` events emitted nowhere inside their own single-file component (no matching `emit()` call).\n\n| File | Component | Event |\n|------|-----------|-------|\n";
+    "| `\(.path):\(.line)` | `\(.component_name)` | `\(.emit_name)` |") +
+  section("Unprovided injects"; "unprovided_injects";
+    "Vue `inject` / Svelte `getContext` calls for a key that no ancestor `provide` / `setContext` supplies.\n\n| File | Key | Framework |\n|------|-----|-----------|\n";
+    "| `\(.path):\(.line)` | `\(.key_name)` | \(.framework) |") +
   section("Type-only dependencies"; "type_only_dependencies";
     "Dependencies only used for type imports \u2014 consider moving to `devDependencies`.\n\n| Package |\n|---------|\n";
     "| `\(.package_name)` |") +

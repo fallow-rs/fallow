@@ -14,6 +14,17 @@ export type IssueCategory =
   | "unused-optional-dependencies"
   | "unused-enum-members"
   | "unused-class-members"
+  | "unused-store-member"
+  | "unused-server-action"
+  | "unused-component-prop"
+  | "unused-component-emit"
+  | "unrendered-component"
+  | "unprovided-inject"
+  | "invalid-client-export"
+  | "mixed-client-server-barrel"
+  | "misplaced-directive"
+  | "route-collision"
+  | "dynamic-segment-name-conflict"
   | "unresolved-imports"
   | "unlisted-dependencies"
   | "duplicate-exports"
@@ -39,6 +50,17 @@ export const ISSUE_CATEGORY_LABELS: Record<IssueCategory, string> = {
   "unused-optional-dependencies": "Unused Optional Dependencies",
   "unused-enum-members": "Unused Enum Members",
   "unused-class-members": "Unused Class Members",
+  "unused-store-member": "Unused Store Members",
+  "unused-server-action": "Unused Server Actions",
+  "unused-component-prop": "Unused Component Props",
+  "unused-component-emit": "Unused Component Emits",
+  "unrendered-component": "Unrendered Components",
+  "unprovided-inject": "Unprovided Injects",
+  "invalid-client-export": "Invalid Client Exports",
+  "mixed-client-server-barrel": "Mixed Client/Server Barrels",
+  "misplaced-directive": "Misplaced Directives",
+  "route-collision": "Route Collisions",
+  "dynamic-segment-name-conflict": "Dynamic Segment Name Conflicts",
   "unresolved-imports": "Unresolved Imports",
   "unlisted-dependencies": "Unlisted Dependencies",
   "duplicate-exports": "Duplicate Exports",

@@ -781,6 +781,52 @@ assert_contains "$OUT_ICE" '`metadata` | `"use client"` |' "ice: directive colum
 OUT_MD_SERVER=$(jq '.misplaced_directives = [{"path": "src/action.ts", "line": 3, "col": 0, "directive": "use server", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/summary-check.jq" 2>&1)
 assert_contains "$OUT_MD_SERVER" '`"use server"` |' "md: use-server directive renders in section row"
 
+# Vue/Next framework IssueKinds: summary row + section + annotation + filter parity.
+OUT_USA=$(jq '.unused_server_actions = [{"path": "src/actions.ts", "line": 9, "col": 0, "action_name": "submitForm", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_USA" "Unused server actions" "usa: shows summary row and section"
+assert_contains "$OUT_USA" "submitForm" "usa: shows action name in section"
+OUT_USA_ANN=$(jq '.unused_server_actions = [{"path": "src/actions.ts", "line": 9, "col": 2, "action_name": "submitForm", "actions": []}]' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/annotations-check.jq" 2>&1)
+assert_contains "$OUT_USA_ANN" "::warning file=src/actions.ts,line=9,col=3,title=Unused server action::" "usa: warning-severity annotation"
+OUT_USA_FILTERED=$(jq '.unused_server_actions = [{"path": "src/actions.ts", "line": 9, "col": 0, "action_name": "submitForm", "actions": []}, {"path": "src/other.ts", "line": 1, "col": 0, "action_name": "delUser", "actions": []}]' "$FIXTURES/check.json" | jq --argjson changed '["src/actions.ts"]' -f "$JQ_DIR/filter-changed.jq" 2>&1)
+assert_json_value "$OUT_USA_FILTERED" '.unused_server_actions | length' "1" "usa: filter-changed keeps only changed-file findings"
+
+OUT_URC=$(jq '.unrendered_components = [{"path": "src/Foo.vue", "line": 1, "col": 0, "component_name": "Foo", "framework": "vue", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_URC" "Unrendered components" "urc: shows summary row and section"
+assert_contains "$OUT_URC" "Foo" "urc: shows component name in section"
+OUT_URC_ANN=$(jq '.unrendered_components = [{"path": "src/Foo.vue", "line": 1, "col": 0, "component_name": "Foo", "framework": "vue", "actions": []}]' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/annotations-check.jq" 2>&1)
+assert_contains "$OUT_URC_ANN" "::warning file=src/Foo.vue,line=1,col=1,title=Unrendered component::" "urc: warning-severity annotation"
+OUT_URC_FILTERED=$(jq '.unrendered_components = [{"path": "src/Foo.vue", "line": 1, "col": 0, "component_name": "Foo", "framework": "vue", "actions": []}, {"path": "src/Bar.vue", "line": 1, "col": 0, "component_name": "Bar", "framework": "vue", "actions": []}]' "$FIXTURES/check.json" | jq --argjson changed '["src/Foo.vue"]' -f "$JQ_DIR/filter-changed.jq" 2>&1)
+assert_json_value "$OUT_URC_FILTERED" '.unrendered_components | length' "1" "urc: filter-changed keeps only changed-file findings"
+
+OUT_UCP=$(jq '.unused_component_props = [{"path": "src/Widget.vue", "line": 12, "col": 0, "component_name": "Widget", "prop_name": "variant", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_UCP" "Unused component props" "ucp: shows summary row and section"
+assert_contains "$OUT_UCP" "variant" "ucp: shows prop name in section"
+OUT_UCP_ANN=$(jq '.unused_component_props = [{"path": "src/Widget.vue", "line": 12, "col": 4, "component_name": "Widget", "prop_name": "variant", "actions": []}]' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/annotations-check.jq" 2>&1)
+assert_contains "$OUT_UCP_ANN" "::warning file=src/Widget.vue,line=12,col=5,title=Unused component prop::" "ucp: warning-severity annotation"
+OUT_UCP_FILTERED=$(jq '.unused_component_props = [{"path": "src/Widget.vue", "line": 12, "col": 0, "component_name": "Widget", "prop_name": "variant", "actions": []}, {"path": "src/Other.vue", "line": 3, "col": 0, "component_name": "Other", "prop_name": "size", "actions": []}]' "$FIXTURES/check.json" | jq --argjson changed '["src/Widget.vue"]' -f "$JQ_DIR/filter-changed.jq" 2>&1)
+assert_json_value "$OUT_UCP_FILTERED" '.unused_component_props | length' "1" "ucp: filter-changed keeps only changed-file findings"
+
+OUT_UCE=$(jq '.unused_component_emits = [{"path": "src/Widget.vue", "line": 14, "col": 0, "component_name": "Widget", "emit_name": "submit", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_UCE" "Unused component emits" "uce: shows summary row and section"
+assert_contains "$OUT_UCE" "submit" "uce: shows emit name in section"
+OUT_UCE_ANN=$(jq '.unused_component_emits = [{"path": "src/Widget.vue", "line": 14, "col": 4, "component_name": "Widget", "emit_name": "submit", "actions": []}]' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/annotations-check.jq" 2>&1)
+assert_contains "$OUT_UCE_ANN" "::warning file=src/Widget.vue,line=14,col=5,title=Unused component emit::" "uce: warning-severity annotation"
+OUT_UCE_FILTERED=$(jq '.unused_component_emits = [{"path": "src/Widget.vue", "line": 14, "col": 0, "component_name": "Widget", "emit_name": "submit", "actions": []}, {"path": "src/Other.vue", "line": 5, "col": 0, "component_name": "Other", "emit_name": "close", "actions": []}]' "$FIXTURES/check.json" | jq --argjson changed '["src/Widget.vue"]' -f "$JQ_DIR/filter-changed.jq" 2>&1)
+assert_json_value "$OUT_UCE_FILTERED" '.unused_component_emits | length' "1" "uce: filter-changed keeps only changed-file findings"
+
+OUT_UPI=$(jq '.unprovided_injects = [{"path": "src/useTheme.ts", "line": 7, "col": 0, "key_name": "themeKey", "framework": "vue", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_UPI" "Unprovided injects" "upi: shows summary row and section"
+assert_contains "$OUT_UPI" "themeKey" "upi: shows inject key in section"
+OUT_UPI_ANN=$(jq '.unprovided_injects = [{"path": "src/useTheme.ts", "line": 7, "col": 2, "key_name": "themeKey", "framework": "vue", "actions": []}]' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/annotations-check.jq" 2>&1)
+assert_contains "$OUT_UPI_ANN" "::warning file=src/useTheme.ts,line=7,col=3,title=Unprovided inject::" "upi: warning-severity annotation"
+OUT_UPI_FILTERED=$(jq '.unprovided_injects = [{"path": "src/useTheme.ts", "line": 7, "col": 0, "key_name": "themeKey", "framework": "vue", "actions": []}, {"path": "src/other.ts", "line": 2, "col": 0, "key_name": "authKey", "framework": "svelte", "actions": []}]' "$FIXTURES/check.json" | jq --argjson changed '["src/useTheme.ts"]' -f "$JQ_DIR/filter-changed.jq" 2>&1)
+assert_json_value "$OUT_UPI_FILTERED" '.unprovided_injects | length' "1" "upi: filter-changed keeps only changed-file findings"
+
+# Missing keys must never crash jq (defensive `// []` / null-safe helpers). Strip every
+# framework array and confirm the summary still renders.
+OUT_NO_FRAMEWORK_KEYS=$(jq 'del(.unused_server_actions, .unrendered_components, .unused_component_props, .unused_component_emits, .unprovided_injects, .route_collisions, .dynamic_segment_name_conflicts, .invalid_client_exports, .mixed_client_server_barrels, .misplaced_directives)' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_NO_FRAMEWORK_KEYS" "Fallow Analysis" "missing-keys: summary-check survives absent framework keys"
+
 # filter-changed recalculates total_issues from the surviving arrays (synthetic minimal input
 # so the assertion does not depend on the base fixture's other findings).
 OUT_RSC_RECALC=$(jq -n '{total_issues: 2, invalid_client_exports: [{"path": "src/a.tsx", "line": 1, "col": 0, "export_name": "metadata", "directive": "use client", "actions": []}, {"path": "src/b.tsx", "line": 1, "col": 0, "export_name": "revalidate", "directive": "use client", "actions": []}]}' | jq --argjson changed '["src/a.tsx"]' -f "$JQ_DIR/filter-changed.jq" 2>&1)
@@ -1020,6 +1066,20 @@ OUT_RSC=$(jq '.check.invalid_client_exports = [{"path": "src/app.tsx", "line": 5
 assert_contains "$OUT_RSC" "| [Invalid client exports](" "combined: RSC invalid-client-exports row in breakdown"
 assert_contains "$OUT_RSC" "| [Mixed client/server barrels](" "combined: RSC mixed-barrel row in breakdown"
 assert_contains "$OUT_RSC" "| [Misplaced directives](" "combined: RSC misplaced-directives row in breakdown"
+
+# Next.js routing keys (route_collisions + dynamic_segment_name_conflicts) were previously
+# absent from the combined-mode Code issues breakdown; assert they now render.
+OUT_ROUTING=$(jq '.check.route_collisions = [{"path": "src/app/(a)/p/page.tsx", "url": "/p", "conflicting_paths": ["src/app/(b)/p/page.tsx"], "actions": []}] | .check.dynamic_segment_name_conflicts = [{"path": "src/app/[id]/page.tsx", "position": "0", "conflicting_segments": ["id", "slug"], "actions": []}] | .check.total_issues = (.check.total_issues + 2)' "$FIXTURES/combined.json" | jq -r -f "$JQ_DIR/summary-combined.jq" 2>&1)
+assert_contains "$OUT_ROUTING" "| [Route collisions](" "combined: route-collisions row in breakdown"
+assert_contains "$OUT_ROUTING" "| [Dynamic segment conflicts](" "combined: dynamic-segment-conflicts row in breakdown"
+
+# Vue/Next framework keys appear in the combined-mode Code issues breakdown table.
+OUT_FRAMEWORK=$(jq '.check.unused_server_actions = [{"path": "src/actions.ts", "line": 9, "col": 0, "action_name": "submitForm", "actions": []}] | .check.unrendered_components = [{"path": "src/Foo.vue", "line": 1, "col": 0, "component_name": "Foo", "framework": "vue", "actions": []}] | .check.unused_component_props = [{"path": "src/Widget.vue", "line": 12, "col": 0, "component_name": "Widget", "prop_name": "variant", "actions": []}] | .check.unused_component_emits = [{"path": "src/Widget.vue", "line": 14, "col": 0, "component_name": "Widget", "emit_name": "submit", "actions": []}] | .check.unprovided_injects = [{"path": "src/useTheme.ts", "line": 7, "col": 0, "key_name": "themeKey", "framework": "vue", "actions": []}] | .check.total_issues = (.check.total_issues + 5)' "$FIXTURES/combined.json" | jq -r -f "$JQ_DIR/summary-combined.jq" 2>&1)
+assert_contains "$OUT_FRAMEWORK" "| [Unused server actions](" "combined: unused-server-actions row in breakdown"
+assert_contains "$OUT_FRAMEWORK" "| [Unrendered components](" "combined: unrendered-components row in breakdown"
+assert_contains "$OUT_FRAMEWORK" "| [Unused component props](" "combined: unused-component-props row in breakdown"
+assert_contains "$OUT_FRAMEWORK" "| [Unused component emits](" "combined: unused-component-emits row in breakdown"
+assert_contains "$OUT_FRAMEWORK" "| [Unprovided injects](" "combined: unprovided-injects row in breakdown"
 
 # Worst-case truncation: 50 groups synthesized (paths differentiated per-group via `. as $g |`),
 # top-5 displayed + "and N more" line, total under 65k chars.
@@ -1983,6 +2043,21 @@ assert_contains "$GATE_LOG" "::warning::" "gate: unreadable visibility with prob
 assert_contains "$GATE_LOG" "::debug::" "gate: unreadable visibility with probe failure emits a fallback debug note"
 
 rm -rf "$GATE_DIR"
+
+# --- IssueKind summary drift guard ---
+#
+# A new fallow dead-code IssueKind must be wired into summary-check.jq or it
+# vanishes silently from PR summaries. This guard derives the canonical
+# dead-code id set (from `fallow schema`, falling back to suppress.rs) and
+# asserts each one's JSON key is referenced by the GitHub summary table.
+
+echo ""
+echo "=== IssueKind summary drift guard ==="
+
+GUARD_DIR="$DIR"
+# shellcheck source=action/tests/issuekind-drift-guard.sh
+. "$DIR/issuekind-drift-guard.sh"
+assert_issuekind_summary_coverage "github summary-check" "$JQ_DIR/summary-check.jq"
 
 # --- Summary ---
 

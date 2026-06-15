@@ -613,7 +613,8 @@ pub fn push_unprovided_inject_diagnostics(
 
 /// Push `route-collision` diagnostics. File-level findings anchored at line 1;
 /// the finding's `path` is the absolute graph-node path, so the URI is built
-/// directly with no `root.join`.
+/// directly with no `root.join`. Fixed `ERROR` severity matching the rule's
+/// `error` default (Next.js fails the build on a route collision).
 pub fn push_route_collision_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
@@ -638,7 +639,7 @@ pub fn push_route_collision_diagnostics(
                     character: u32::MAX,
                 },
             },
-            severity: Some(DiagnosticSeverity::WARNING),
+            severity: Some(DiagnosticSeverity::ERROR),
             source: Some("fallow".to_string()),
             code: Some(NumberOrString::String("route-collision".to_string())),
             code_description: doc_link("route-collisions"),
@@ -650,7 +651,9 @@ pub fn push_route_collision_diagnostics(
 }
 
 /// Push `dynamic-segment-name-conflict` diagnostics. File-level findings
-/// anchored at line 1; absolute `path`, so the URI is built directly.
+/// anchored at line 1; absolute `path`, so the URI is built directly. Fixed
+/// `ERROR` severity matching the rule's `error` default (Next.js requires one
+/// consistent slug name per dynamic path).
 pub fn push_dynamic_segment_name_conflict_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
@@ -675,7 +678,7 @@ pub fn push_dynamic_segment_name_conflict_diagnostics(
                     character: u32::MAX,
                 },
             },
-            severity: Some(DiagnosticSeverity::WARNING),
+            severity: Some(DiagnosticSeverity::ERROR),
             source: Some("fallow".to_string()),
             code: Some(NumberOrString::String(
                 "dynamic-segment-name-conflict".to_string(),

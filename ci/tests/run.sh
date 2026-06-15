@@ -498,6 +498,31 @@ assert_contains "$OUT_ICE" '`metadata` | `"use client"` |' "ice: directive colum
 OUT_MD_SERVER=$(jq '.misplaced_directives = [{"path": "src/action.ts", "line": 3, "col": 0, "directive": "use server", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$CI_JQ_DIR/summary-check.jq" 2>&1)
 assert_contains "$OUT_MD_SERVER" '`"use server"` |' "md: use-server directive renders in section row"
 
+# Vue/Next framework IssueKinds: summary row + section render in the GitLab variant.
+OUT_USA=$(jq '.unused_server_actions = [{"path": "src/actions.ts", "line": 9, "col": 0, "action_name": "submitForm", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$CI_JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_USA" "Unused server actions" "usa: shows summary row and section"
+assert_contains "$OUT_USA" "submitForm" "usa: shows action name in section"
+
+OUT_URC=$(jq '.unrendered_components = [{"path": "src/Foo.vue", "line": 1, "col": 0, "component_name": "Foo", "framework": "vue", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$CI_JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_URC" "Unrendered components" "urc: shows summary row and section"
+assert_contains "$OUT_URC" "Foo" "urc: shows component name in section"
+
+OUT_UCP=$(jq '.unused_component_props = [{"path": "src/Widget.vue", "line": 12, "col": 0, "component_name": "Widget", "prop_name": "variant", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$CI_JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_UCP" "Unused component props" "ucp: shows summary row and section"
+assert_contains "$OUT_UCP" "variant" "ucp: shows prop name in section"
+
+OUT_UCE=$(jq '.unused_component_emits = [{"path": "src/Widget.vue", "line": 14, "col": 0, "component_name": "Widget", "emit_name": "submit", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$CI_JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_UCE" "Unused component emits" "uce: shows summary row and section"
+assert_contains "$OUT_UCE" "submit" "uce: shows emit name in section"
+
+OUT_UPI=$(jq '.unprovided_injects = [{"path": "src/useTheme.ts", "line": 7, "col": 0, "key_name": "themeKey", "framework": "vue", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$CI_JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_UPI" "Unprovided injects" "upi: shows summary row and section"
+assert_contains "$OUT_UPI" "themeKey" "upi: shows inject key in section"
+
+# Missing keys must never crash jq (defensive `// []` / null-safe helpers).
+OUT_NO_FRAMEWORK_KEYS=$(jq 'del(.unused_server_actions, .unrendered_components, .unused_component_props, .unused_component_emits, .unprovided_injects, .route_collisions, .dynamic_segment_name_conflicts, .invalid_client_exports, .mixed_client_server_barrels, .misplaced_directives)' "$FIXTURES/check.json" | jq -r -f "$CI_JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_NO_FRAMEWORK_KEYS" "Fallow Analysis" "missing-keys: GitLab summary-check survives absent framework keys"
+
 OUT_CLEAN=$(jq -r -f "$CI_JQ_DIR/summary-check.jq" "$FIXTURES/check-clean.json" 2>&1)
 assert_contains "$OUT_CLEAN" "No issues found" "clean: shows no issues"
 
@@ -659,6 +684,20 @@ OUT_RSC_GL=$(jq '.check.invalid_client_exports = [{"path": "src/app.tsx", "line"
 assert_contains "$OUT_RSC_GL" "| [Invalid client exports](" "combined: RSC invalid-client-exports row in breakdown"
 assert_contains "$OUT_RSC_GL" "| [Mixed client/server barrels](" "combined: RSC mixed-barrel row in breakdown"
 assert_contains "$OUT_RSC_GL" "| [Misplaced directives](" "combined: RSC misplaced-directives row in breakdown"
+
+# Next.js routing keys (route_collisions + dynamic_segment_name_conflicts) were previously
+# absent from the GitLab combined-mode Code issues breakdown; assert they now render.
+OUT_ROUTING_GL=$(jq '.check.route_collisions = [{"path": "src/app/(a)/p/page.tsx", "url": "/p", "conflicting_paths": ["src/app/(b)/p/page.tsx"], "actions": []}] | .check.dynamic_segment_name_conflicts = [{"path": "src/app/[id]/page.tsx", "position": "0", "conflicting_segments": ["id", "slug"], "actions": []}] | .check.total_issues = (.check.total_issues + 2)' "$FIXTURES/combined.json" | jq -r -f "$CI_JQ_DIR/summary-combined.jq" 2>&1)
+assert_contains "$OUT_ROUTING_GL" "| [Route collisions](" "combined: route-collisions row in breakdown"
+assert_contains "$OUT_ROUTING_GL" "| [Dynamic segment conflicts](" "combined: dynamic-segment-conflicts row in breakdown"
+
+# Vue/Next framework keys appear in the GitLab combined-mode Code issues breakdown table.
+OUT_FRAMEWORK_GL=$(jq '.check.unused_server_actions = [{"path": "src/actions.ts", "line": 9, "col": 0, "action_name": "submitForm", "actions": []}] | .check.unrendered_components = [{"path": "src/Foo.vue", "line": 1, "col": 0, "component_name": "Foo", "framework": "vue", "actions": []}] | .check.unused_component_props = [{"path": "src/Widget.vue", "line": 12, "col": 0, "component_name": "Widget", "prop_name": "variant", "actions": []}] | .check.unused_component_emits = [{"path": "src/Widget.vue", "line": 14, "col": 0, "component_name": "Widget", "emit_name": "submit", "actions": []}] | .check.unprovided_injects = [{"path": "src/useTheme.ts", "line": 7, "col": 0, "key_name": "themeKey", "framework": "vue", "actions": []}] | .check.total_issues = (.check.total_issues + 5)' "$FIXTURES/combined.json" | jq -r -f "$CI_JQ_DIR/summary-combined.jq" 2>&1)
+assert_contains "$OUT_FRAMEWORK_GL" "| [Unused server actions](" "combined: unused-server-actions row in breakdown"
+assert_contains "$OUT_FRAMEWORK_GL" "| [Unrendered components](" "combined: unrendered-components row in breakdown"
+assert_contains "$OUT_FRAMEWORK_GL" "| [Unused component props](" "combined: unused-component-props row in breakdown"
+assert_contains "$OUT_FRAMEWORK_GL" "| [Unused component emits](" "combined: unused-component-emits row in breakdown"
+assert_contains "$OUT_FRAMEWORK_GL" "| [Unprovided injects](" "combined: unprovided-injects row in breakdown"
 
 # Worst-case truncation: 50 groups (paths differentiated per-group via `. as $g |`),
 # top-5 + overflow line, output stays under 65k chars.
@@ -1410,6 +1449,20 @@ else
 fi
 
 rm -rf "$CI_API_FAIL_WORK"
+
+# --- IssueKind summary drift guard ---
+#
+# Same guard as the GitHub Action suite, run against the GitLab
+# summary-check.jq. A new dead-code IssueKind that is not wired into the GitLab
+# summary table would otherwise vanish silently from MR summaries.
+
+echo ""
+echo "=== IssueKind summary drift guard (GitLab) ==="
+
+GUARD_DIR="$DIR/../../action/tests"
+# shellcheck source=action/tests/issuekind-drift-guard.sh
+. "$GUARD_DIR/issuekind-drift-guard.sh"
+assert_issuekind_summary_coverage "gitlab summary-check" "$CI_JQ_DIR/summary-check.jq"
 
 # --- Summary ---
 
