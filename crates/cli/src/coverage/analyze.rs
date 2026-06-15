@@ -601,8 +601,10 @@ fn cloud_blast_radius_entries(
                 file: PathBuf::from(&entry.file),
                 function: entry.function.clone(),
                 line: entry.line,
-                caller_count: entry.caller_count,
-                caller_count_weighted_by_traffic: entry.caller_count_weighted_by_traffic,
+                caller_count: entry.caller_count.unwrap_or(0),
+                caller_count_weighted_by_traffic: entry
+                    .caller_count_weighted_by_traffic
+                    .unwrap_or(0),
                 deploys_touched: entry.deploys_touched,
                 risk_band: map_cloud_risk_band(entry.risk_band),
             },
@@ -631,8 +633,8 @@ fn cloud_importance_entries(
                 function: entry.function.clone(),
                 line: entry.line,
                 invocations: entry.invocations,
-                cyclomatic: entry.cyclomatic,
-                owner_count: entry.owner_count,
+                cyclomatic: entry.cyclomatic.unwrap_or(0),
+                owner_count: entry.owner_count.unwrap_or(0),
                 importance_score: entry.importance_score,
                 reason: entry.reason.clone(),
             },
