@@ -2052,24 +2052,20 @@ rm -rf "$GATE_DIR"
 # `fallow schema`, falling back to suppress.rs) and asserts each one's JSON key
 # is referenced by every gated surface.
 #
-# Surface expectations:
+# Surface expectations (every GitHub surface is now gated "all"):
 #   summary-check.jq      "all"    dead-code summary table
 #   summary-combined.jq   "all"    combined-mode Code-issues breakdown
 #   summary-audit.jq      "all"    audit dead_code_rows
-#   annotations-check.jq  subset   ::warning annotations
-#   filter-changed.jq     subset   per-changed-file filter + total_issues recount
+#   annotations-check.jq  "all"    ::warning annotations
+#   filter-changed.jq     "all"    per-changed-file filter + total_issues recount
 #
-# annotations-check.jq and filter-changed.jq currently omit
-# `test-only-dependency` (annotations: no ::warning is emitted; filter: the key
-# is absent from both the per-file filter blocks and the total_issues recount,
-# so a filtered count undercounts by the test-only finding count). That gap
-# predates this guard and is NOT a semantic "this surface never carries that
-# kind" decision: type-only-dependency, its sibling, IS carried on both. It is
-# enumerated as a documented, tolerated omission so the guard does not
-# false-fail today while still gating every OTHER kind (a future 38th IssueKind
-# missing from these two surfaces still fails). Closing the omission means
-# wiring test-only-dependency into the two jq scripts and dropping it from the
-# allow-list here.
+# History: annotations-check.jq and filter-changed.jq once omitted
+# `test-only-dependency` (no ::warning was emitted, and the key was absent from
+# the total_issues recount so a --changed-since count undercounted it) while its
+# sibling type-only-dependency was carried on both. That omission is now closed
+# (the annotation and the recount entry were added), so both surfaces gate "all"
+# with no allow-list. The `allow:<ids>` machinery in the guard remains available
+# for any future surface that legitimately carries only a documented subset.
 
 echo ""
 echo "=== IssueKind summary drift guard ==="

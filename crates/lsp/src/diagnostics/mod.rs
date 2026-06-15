@@ -418,11 +418,17 @@ mod severity_gate {
         all[0].severity
     }
 
-    /// Whether `circular-dependency` / `boundary-violation` diverge from their
-    /// core `RulesConfig` ERROR default. The LSP softens both to WARNING.
-    /// DECIDED 2026-06-15: keep them editor-softer (WARNING) while CI still gates
-    /// them at error, because both can be numerous and appear mid-refactor, so a
-    /// red squiggle per occurrence would be noisy (unlike the rare, always-real
+    /// Severity drift gate: builds one synthetic finding per dead-code kind and
+    /// asserts each emits its expected `DiagnosticSeverity` from the table below.
+    /// The exhaustive `AnalysisResults` destructure forces a new result field to
+    /// be classified here before it can compile.
+    ///
+    /// Most kinds match their core `RulesConfig` default. The deliberate
+    /// divergences are `circular-dependency` and the `boundary-violation` family:
+    /// core default ERROR, but the LSP softens them to WARNING. DECIDED
+    /// 2026-06-15: keep them editor-softer (WARNING) while CI still gates them at
+    /// error, because both can be numerous and appear mid-refactor, so a red
+    /// squiggle per occurrence would be noisy (unlike the rare, always-real
     /// `route-collision` / `dynamic-segment-name-conflict`, which DO render
     /// ERROR). Pinned here so the divergence is a deliberate, reviewed value
     /// rather than silent drift.
