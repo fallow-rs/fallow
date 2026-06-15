@@ -58,7 +58,9 @@ pub use fallow_types::extract::{
 };
 
 pub use astro::extract_astro_frontmatter;
-pub use css::extract_css_module_exports;
+pub use css::{
+    ThemeScan, ThemeTokenDef, extract_apply_tokens, extract_css_module_exports, scan_theme_blocks,
+};
 pub use css_classes::{
     MarkupClassScan, MarkupClassToken, is_edit_distance_one, is_typo_edit, scan_markup_class_tokens,
 };

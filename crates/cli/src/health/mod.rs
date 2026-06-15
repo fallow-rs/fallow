@@ -7,6 +7,7 @@ mod hotspots;
 pub mod ownership;
 mod runtime_filter;
 pub mod scoring;
+mod tailwind_theme;
 mod targets;
 
 use std::process::ExitCode;
@@ -550,6 +551,22 @@ struct CssTokenSets {
     defined_font_faces: rustc_hash::FxHashSet<String>,
     referenced_font_families: rustc_hash::FxHashSet<String>,
     font_face_definers: rustc_hash::FxHashMap<String, String>,
+    /// Tailwind v4 `@theme` tokens (custom-property name without `--`) -> first
+    /// `(path, line)`, for the unused-theme-token candidate.
+    theme_token_definers: rustc_hash::FxHashMap<String, (String, u32)>,
+    /// Utility tokens referenced in `@apply` bodies across all CSS, so a theme
+    /// token whose utility is applied only in plain CSS is credited as used.
+    apply_tokens: rustc_hash::FxHashSet<String>,
+    /// Custom-property names (without `--`) read via `var()` inside `@theme`
+    /// interiors (lightningcss skips the unknown at-rule, so these are tracked
+    /// separately and never pollute the shared `referenced_custom_props` set
+    /// the `@property` / unreferenced-custom-property candidates diff against).
+    theme_var_reads: rustc_hash::FxHashSet<String>,
+    /// `true` when any analyzed stylesheet declares a Tailwind `@plugin`
+    /// directive: a plugin can consume theme tokens via `theme()` / `addUtilities`
+    /// invisibly to the markup / CSS / `var()` scan, so the unused-theme-token
+    /// candidate hard-abstains on plugin projects (the DI blind spot).
+    any_plugin_directive: bool,
 }
 
 impl CssTokenSets {
@@ -660,6 +677,26 @@ impl CssTokenSets {
             self.layer_declarers
                 .entry(name.clone())
                 .or_insert_with(|| rel.to_owned());
+        }
+    }
+
+    /// Fold one stylesheet's Tailwind v4 `@theme` tokens, `@apply` body tokens,
+    /// and `@theme`-interior `var()` reads into the project-wide sets (the inputs
+    /// to the unused-theme-token candidate). `scan_theme_blocks` /
+    /// `extract_apply_tokens` fast-path out on sources with no `@theme` / `@apply`,
+    /// so this is near-free for non-Tailwind stylesheets.
+    fn record_theme(&mut self, source: &str, rel: &str) {
+        let scan = fallow_core::extract::scan_theme_blocks(source);
+        for token in scan.tokens {
+            self.theme_token_definers
+                .entry(token.name)
+                .or_insert_with(|| (rel.to_owned(), token.line));
+        }
+        self.theme_var_reads.extend(scan.theme_var_reads);
+        self.apply_tokens
+            .extend(fallow_core::extract::extract_apply_tokens(source));
+        if source.contains("@plugin") {
+            self.any_plugin_directive = true;
         }
     }
 
@@ -1904,6 +1941,308 @@ fn scan_unreferenced_css_classes(
     out
 }
 
+/// Source-file extensions scanned for Tailwind utility-class-shaped tokens when
+/// crediting `@theme` token usage. Mirrors the font-family source scan (markup,
+/// JS/TS className strings / `clsx` args / CSS-in-JS, preprocessor stylesheets)
+/// but deliberately EXCLUDES plain `.css`, which would re-read the `@theme`
+/// DEFINITION and self-credit every token.
+const THEME_USAGE_SOURCE_EXTS: &[&str] = &[
+    "scss", "sass", "less", "js", "jsx", "ts", "tsx", "mjs", "cjs", "vue", "svelte", "astro",
+    "html", "mdx",
+];
+
+/// Collect every Tailwind-utility-shaped token from `source` into `out`: a
+/// maximal run of `[a-z0-9-]` that, with leading/trailing `-` trimmed, still
+/// contains a `-` and starts with a lowercase letter. Captures `bg-brand`,
+/// `rounded-card`, `text-2xl`, and the `color-brand` core of a
+/// `var(--color-brand)` / `[--color-brand]` reference. Deliberately captures the
+/// dashed SHAPE, never a bare word, so a dictionary-word theme name
+/// (`brand`/`card`/`muted`) is credited only by a real `-<name>` utility suffix,
+/// not by the word appearing anywhere in source.
+fn collect_class_shaped_tokens(source: &str, out: &mut rustc_hash::FxHashSet<String>) {
+    let bytes = source.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' {
+            let start = i;
+            while i < bytes.len() {
+                let c = bytes[i];
+                if c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-' {
+                    i += 1;
+                } else {
+                    break;
+                }
+            }
+            let tok = source[start..i].trim_matches('-');
+            if tok.contains('-') && tok.as_bytes().first().is_some_and(u8::is_ascii_lowercase) {
+                out.insert(tok.to_owned());
+            }
+        } else {
+            i += 1;
+        }
+    }
+}
+
+/// True when a `tailwind.config.*` text declares a non-empty `plugins` array
+/// (`plugins: [ <non-empty> ]`). Used by the unused-theme-token plugin abstain.
+/// Whitespace-tolerant, conservative (abstain-leaning): any `plugins` key whose
+/// next non-whitespace tokens are `:` `[` `<non-`]`>` counts.
+fn text_has_nonempty_plugins_array(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    let skip_ws = |mut k: usize| {
+        while k < bytes.len() && bytes[k].is_ascii_whitespace() {
+            k += 1;
+        }
+        k
+    };
+    let mut from = 0;
+    while let Some(rel) = text[from..].find("plugins") {
+        let mut k = skip_ws(from + rel + "plugins".len());
+        if k < bytes.len() && bytes[k] == b':' {
+            k = skip_ws(k + 1);
+            if k < bytes.len() && bytes[k] == b'[' {
+                k = skip_ws(k + 1);
+                if k < bytes.len() && bytes[k] != b']' {
+                    return true;
+                }
+            }
+        }
+        from = from + rel + "plugins".len();
+    }
+    false
+}
+
+/// True when the project declares a Tailwind plugin: a `@plugin` directive in any
+/// stylesheet (already accumulated) OR a `tailwind.config.*` with a non-empty
+/// `plugins` array. A plugin can consume `@theme` tokens via `theme()` /
+/// `addUtilities` invisibly to the markup / CSS / `var()` scan, so the
+/// unused-theme-token candidate hard-abstains on plugin projects.
+fn project_uses_tailwind_plugin(any_plugin_directive: bool, root: &std::path::Path) -> bool {
+    if any_plugin_directive {
+        return true;
+    }
+    for name in [
+        "tailwind.config.js",
+        "tailwind.config.ts",
+        "tailwind.config.mjs",
+        "tailwind.config.cjs",
+        "tailwind.config.mts",
+        "tailwind.config.cts",
+    ] {
+        if let Ok(text) = std::fs::read_to_string(root.join(name))
+            && text_has_nonempty_plugins_array(&text)
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// Tailwind v4 `@theme` design tokens (`--color-brand`, `--radius-card`) defined
+/// in a stylesheet but used by no generated utility, `var()` read, `@apply`, or
+/// arbitrary value anywhere in the project: dead design tokens (the
+/// `unused-export` of the token era). Heavily gated to stay near-zero-false-
+/// positive (panel BLOCKs):
+///
+/// - **Partial scope** (`changed_files` / `ws_roots`): abstain. A partial view
+///   cannot prove a token dead.
+/// - **v4 gate**: emit only when the project declares a `tailwindcss` dependency
+///   AND at least one `@theme` token was found.
+/// - **Tailwind plugin** (`@plugin` / config `plugins[]`): abstain. A plugin can
+///   consume tokens invisibly to the scan (the DI blind spot).
+/// - **Published library**: a token defined in a stylesheet that is a published
+///   package surface is a public design-token API consumed downstream; skip it.
+/// - **Variant namespaces** (`--breakpoint-*` / `--container-*`): excluded from
+///   candidacy in this version. Crediting their `<name>:` / `@<name>:` variant
+///   usage robustly needs a dedicated variant parser; a follow-up can add it.
+///   (Acceptance criterion 7: excluded when the variant scan is not built.)
+///
+/// The usage test is false-negative-leaning by design: every check CREDITS usage,
+/// so a genuinely-dead token is missed before a live one is flagged.
+fn scan_unused_theme_tokens(
+    tokens: &CssTokenSets,
+    files: &[fallow_types::discover::DiscoveredFile],
+    config: &ResolvedConfig,
+    ignore_set: &globset::GlobSet,
+    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
+    ws_roots: Option<&[std::path::PathBuf]>,
+    summary: &mut crate::health_types::CssAnalyticsSummary,
+) -> Vec<crate::health_types::UnusedThemeToken> {
+    use crate::health_types::{CssCandidateAction, UnusedThemeToken};
+
+    // Partial scope cannot prove a token dead.
+    if changed_files.is_some() || ws_roots.is_some() {
+        return Vec::new();
+    }
+    // v4 gate: a Tailwind dependency AND at least one @theme token present.
+    if tokens.theme_token_definers.is_empty() || !project_uses_tailwind(&config.root) {
+        return Vec::new();
+    }
+    // Tailwind-plugin abstain (DI blind spot).
+    if project_uses_tailwind_plugin(tokens.any_plugin_directive, &config.root) {
+        return Vec::new();
+    }
+
+    // Classify candidate tokens; drop variant namespaces, published-library
+    // stylesheets, and anything that does not match a known namespace.
+    let published = published_css_paths(config);
+    struct Candidate {
+        token: String,
+        namespace: String,
+        name: String,
+        path: String,
+        line: u32,
+    }
+    let mut candidates: Vec<Candidate> = Vec::new();
+    for (raw, (path, line)) in &tokens.theme_token_definers {
+        if published.contains(path) {
+            continue;
+        }
+        let Some(classified) = tailwind_theme::classify(raw) else {
+            continue;
+        };
+        if classified.is_variant {
+            continue;
+        }
+        candidates.push(Candidate {
+            token: format!("--{raw}"),
+            namespace: classified.namespace,
+            name: classified.name,
+            path: path.clone(),
+            line: *line,
+        });
+    }
+    if candidates.is_empty() {
+        summary.unused_theme_tokens = 0;
+        return Vec::new();
+    }
+
+    // Build the usage surfaces: every utility-shaped token from `@apply` bodies
+    // and from non-CSS source (markup class attributes, `clsx` args, CSS-in-JS),
+    // plus the `var()` reads (CSS-side, including `@theme` interiors).
+    let mut utility_tokens: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
+    for apply in &tokens.apply_tokens {
+        collect_class_shaped_tokens(apply, &mut utility_tokens);
+    }
+    for file in files {
+        let path = &file.path;
+        let extension = path.extension().and_then(|ext| ext.to_str());
+        if !extension.is_some_and(|ext| THEME_USAGE_SOURCE_EXTS.contains(&ext)) {
+            continue;
+        }
+        let relative = path.strip_prefix(&config.root).unwrap_or(path);
+        if ignore_set.is_match(relative) {
+            continue;
+        }
+        if let Ok(source) = std::fs::read_to_string(path) {
+            collect_class_shaped_tokens(&source, &mut utility_tokens);
+        }
+    }
+
+    let mut var_reads: rustc_hash::FxHashSet<String> = tokens.theme_var_reads.clone();
+    for referenced in &tokens.referenced_custom_props {
+        var_reads.insert(referenced.trim_start_matches('-').to_owned());
+    }
+
+    let mut out: Vec<UnusedThemeToken> = Vec::new();
+    for candidate in candidates {
+        let dash_name = format!("-{}", candidate.name);
+        // The token's own custom-property key, used by the var() read test.
+        let raw = candidate.token.trim_start_matches('-');
+        let used = var_reads.contains(raw)
+            || utility_tokens
+                .iter()
+                .any(|t| t.len() > dash_name.len() && t.ends_with(&dash_name));
+        if used {
+            continue;
+        }
+        out.push(UnusedThemeToken {
+            actions: vec![CssCandidateAction::verify_unused_theme_token(
+                &candidate.token,
+                &candidate.namespace,
+                &candidate.name,
+            )],
+            token: candidate.token,
+            namespace: candidate.namespace,
+            path: candidate.path,
+            line: candidate.line,
+        });
+    }
+    out.sort_by(|a, b| {
+        a.path
+            .cmp(&b.path)
+            .then_with(|| a.line.cmp(&b.line))
+            .then_with(|| a.token.cmp(&b.token))
+    });
+    summary.unused_theme_tokens = saturate_len(out.len());
+    out
+}
+
+/// The markup / source-derived CSS candidate lists, gathered in one pass-set so
+/// the orchestrator stays a thin assembler.
+struct MarkupCssCandidates {
+    tailwind_arbitrary_values: Vec<crate::health_types::TailwindArbitraryValue>,
+    unresolved_class_references: Vec<crate::health_types::UnresolvedClassReference>,
+    unreferenced_css_classes: Vec<crate::health_types::UnreferencedCssClass>,
+    unused_theme_tokens: Vec<crate::health_types::UnusedThemeToken>,
+}
+
+/// Run the markup / source-scanning CSS candidates (Tailwind arbitrary values,
+/// likely class typos, unreferenced global classes, unused `@theme` tokens),
+/// each honoring the same ignore / changed / workspace filters and setting its
+/// own summary counts.
+fn scan_markup_css_candidates(
+    tokens: &CssTokenSets,
+    files: &[fallow_types::discover::DiscoveredFile],
+    config: &ResolvedConfig,
+    ignore_set: &globset::GlobSet,
+    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
+    ws_roots: Option<&[std::path::PathBuf]>,
+    summary: &mut crate::health_types::CssAnalyticsSummary,
+) -> MarkupCssCandidates {
+    MarkupCssCandidates {
+        // Markup arbitrary-value scan (gated on the project using Tailwind).
+        tailwind_arbitrary_values: scan_markup_tailwind_arbitrary_values(
+            files,
+            config,
+            ignore_set,
+            changed_files,
+            ws_roots,
+            summary,
+        ),
+        // Static markup class tokens one edit from a defined class (likely typos).
+        unresolved_class_references: scan_unresolved_class_references(
+            files,
+            config,
+            ignore_set,
+            changed_files,
+            ws_roots,
+            summary,
+        ),
+        // Global classes referenced by no in-project markup (heavily gated).
+        unreferenced_css_classes: scan_unreferenced_css_classes(
+            files,
+            config,
+            ignore_set,
+            changed_files,
+            ws_roots,
+            summary,
+        ),
+        // Tailwind v4 @theme design tokens used by no utility / var() / @apply
+        // anywhere (heavily gated: v4 + non-plugin + non-published + whole-scope).
+        unused_theme_tokens: scan_unused_theme_tokens(
+            tokens,
+            files,
+            config,
+            ignore_set,
+            changed_files,
+            ws_roots,
+            summary,
+        ),
+    }
+}
+
 fn compute_css_analytics_report(
     files: &[fallow_types::discover::DiscoveredFile],
     config: &ResolvedConfig,
@@ -1996,6 +2335,7 @@ fn compute_css_analytics_report(
             summary.notable_truncated_files = summary.notable_truncated_files.saturating_add(1);
         }
         tokens.record(&analytics, &rel);
+        tokens.record_theme(css_source.as_ref(), &rel);
 
         if !analytics.notable_rules.is_empty() {
             file_reports.push(CssFileAnalytics {
@@ -2031,26 +2371,13 @@ fn compute_css_analytics_report(
         unused_font_faces.retain(|ff| !referenced.contains(&ff.family));
         summary.unused_font_faces = saturate_len(unused_font_faces.len());
     }
-    // Markup arbitrary-value scan (gated on the project using Tailwind).
-    let tailwind_arbitrary_values = scan_markup_tailwind_arbitrary_values(
-        files,
-        config,
-        ignore_set,
-        changed_files,
-        ws_roots,
-        &mut summary,
-    );
-    // Static markup class tokens one edit from a defined class (likely typos).
-    let unresolved_class_references = scan_unresolved_class_references(
-        files,
-        config,
-        ignore_set,
-        changed_files,
-        ws_roots,
-        &mut summary,
-    );
-    // Global classes referenced by no in-project markup (heavily gated).
-    let unreferenced_css_classes = scan_unreferenced_css_classes(
+    let MarkupCssCandidates {
+        tailwind_arbitrary_values,
+        unresolved_class_references,
+        unreferenced_css_classes,
+        unused_theme_tokens,
+    } = scan_markup_css_candidates(
+        &tokens,
         files,
         config,
         ignore_set,
@@ -2065,6 +2392,7 @@ fn compute_css_analytics_report(
         && unresolved_class_references.is_empty()
         && unreferenced_css_classes.is_empty()
         && unused_font_faces.is_empty()
+        && unused_theme_tokens.is_empty()
     {
         return None;
     }
@@ -2081,6 +2409,7 @@ fn compute_css_analytics_report(
         unresolved_class_references,
         unreferenced_css_classes,
         unused_font_faces,
+        unused_theme_tokens,
         font_size_unit_mix,
     })
 }

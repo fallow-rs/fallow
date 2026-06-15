@@ -259,6 +259,7 @@ fn render_css_analytics(lines: &mut Vec<String>, report: &crate::health_types::H
     render_css_unresolved_classes(lines, css);
     render_css_unreferenced_classes(lines, css);
     render_css_unused_font_faces(lines, css);
+    render_css_unused_theme_tokens(lines, css);
     render_css_font_size_unit_mix(lines, css);
 
     let mut notable: Vec<(&str, &fallow_types::extract::CssRuleMetric)> = css
@@ -475,6 +476,34 @@ fn render_css_unused_font_faces(
     ));
     for entry in css.unused_font_faces.iter().take(5) {
         lines.push(format!("  {}: {}", entry.path, entry.family));
+    }
+    if total > 5 {
+        let more = total - 5;
+        lines.push(
+            format!("  ... and {more} more (--format json for full list)")
+                .dimmed()
+                .to_string(),
+        );
+    }
+}
+
+/// Render Tailwind v4 `@theme` design tokens whose generated utility, `var()`
+/// reads, and `@apply` uses appear nowhere (dead design tokens), with the
+/// residual plugin / downstream-consumer caveat. Up to 5 located.
+fn render_css_unused_theme_tokens(
+    lines: &mut Vec<String>,
+    css: &crate::health_types::CssAnalyticsReport,
+) {
+    if css.unused_theme_tokens.is_empty() {
+        return;
+    }
+    let total = css.unused_theme_tokens.len();
+    lines.push(format!(
+        "  {total} Tailwind @theme token{} used by no utility, var(), or @apply (candidates; verify not consumed by a plugin or a downstream repo):",
+        plural(total),
+    ));
+    for entry in css.unused_theme_tokens.iter().take(5) {
+        lines.push(format!("  {}:{}: {}", entry.path, entry.line, entry.token));
     }
     if total > 5 {
         let more = total - 5;

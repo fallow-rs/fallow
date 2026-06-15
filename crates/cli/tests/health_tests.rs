@@ -3352,6 +3352,295 @@ fn health_css_unused_font_face_matches_family_case_insensitively() {
     );
 }
 
+/// Run `fallow health --css` and return the `css_analytics` node (or `Null`).
+fn css_analytics(root: &std::path::Path) -> serde_json::Value {
+    let out = run_fallow_in_root(
+        "health",
+        root,
+        &[
+            "--css",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    parse_json(&out)
+        .get("css_analytics")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null)
+}
+
+/// The flagged `unused_theme_tokens` token strings, sorted.
+fn flagged_theme_tokens(css: &serde_json::Value) -> Vec<String> {
+    css.get("unused_theme_tokens")
+        .and_then(serde_json::Value::as_array)
+        .map(|a| {
+            let mut v: Vec<String> = a
+                .iter()
+                .filter_map(|t| t["token"].as_str().map(str::to_owned))
+                .collect();
+            v.sort();
+            v
+        })
+        .unwrap_or_default()
+}
+
+/// A v4 `package.json` declaring the `tailwindcss` dependency (the v4 gate).
+const TW_PKG: &str = r#"{"name":"twtheme","devDependencies":{"tailwindcss":"^4.0.0"}}"#;
+
+#[test]
+fn health_css_flags_unused_theme_token() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(&root.join("package.json"), TW_PKG);
+    // `--color-brand` generates `bg-brand` (used); `--shadow-glow` generates
+    // `shadow-glow` (used by nothing): only the latter is a dead design token.
+    write_file(
+        &root.join("src/theme.css"),
+        "@theme {\n  --color-brand: #f05a28;\n  --shadow-glow: 0 0 8px red;\n}\n",
+    );
+    write_file(
+        &root.join("src/App.tsx"),
+        "export const C = () => <div className=\"bg-brand p-4\" />;\n",
+    );
+
+    let css = css_analytics(root);
+    assert_eq!(css["summary"]["unused_theme_tokens"], 1, "{css:#?}");
+    let tokens = css["unused_theme_tokens"]
+        .as_array()
+        .expect("unused_theme_tokens located list");
+    assert_eq!(
+        tokens.len(),
+        1,
+        "only the dead token is flagged: {tokens:#?}"
+    );
+    assert_eq!(tokens[0]["token"], "--shadow-glow");
+    assert_eq!(tokens[0]["namespace"], "shadow");
+    assert_eq!(tokens[0]["path"], "src/theme.css");
+    assert_eq!(tokens[0]["line"], 3);
+    assert_eq!(tokens[0]["actions"][0]["type"], "verify-unused");
+    assert_eq!(tokens[0]["actions"][0]["auto_fixable"], false);
+    // The verify command embeds the LITERAL qualified search terms.
+    let command = tokens[0]["actions"][0]["command"]
+        .as_str()
+        .expect("verify command");
+    assert!(command.contains("-glow"), "command: {command}");
+    assert!(command.contains("--shadow-glow"), "command: {command}");
+}
+
+#[test]
+fn health_css_theme_token_credited_by_apply_and_var() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(&root.join("package.json"), TW_PKG);
+    // `--radius-card` is applied only via `@apply rounded-card` in plain CSS;
+    // `--color-brand` is read only via `var()`, INCLUDING by another `@theme`
+    // token (`--color-button` backs onto it). Both must be credited. `--font-x`
+    // is genuinely dead.
+    write_file(
+        &root.join("src/theme.css"),
+        "@theme {\n  --radius-card: 12px;\n  --color-brand: #f05a28;\n  --color-button: var(--color-brand);\n  --font-x: \"X\";\n}\n.panel { @apply rounded-card; }\n.btn { background: var(--color-button); }\n",
+    );
+    write_file(&root.join("src/App.tsx"), "export const C = () => null;\n");
+
+    let css = css_analytics(root);
+    assert_eq!(
+        flagged_theme_tokens(&css),
+        vec!["--font-x".to_string()],
+        "@apply, var(), and token-backs-token must all credit usage: {css:#?}"
+    );
+}
+
+#[test]
+fn health_css_theme_token_credited_by_arbitrary_and_qualified_js() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(&root.join("package.json"), TW_PKG);
+    // `--radius-pill` used only via an arbitrary value `rounded-[--radius-pill]`;
+    // `--color-ring` used only via a qualified JS reference (`bg-ring` in a clsx
+    // string). `--text-ghost` is genuinely dead.
+    write_file(
+        &root.join("src/theme.css"),
+        "@theme {\n  --radius-pill: 9999px;\n  --color-ring: #00f;\n  --text-ghost: 8px;\n}\n",
+    );
+    write_file(
+        &root.join("src/App.tsx"),
+        "import clsx from 'clsx';\nexport const C = () => (<div className={clsx('bg-ring')}><span className=\"rounded-[--radius-pill]\" /></div>);\n",
+    );
+
+    let css = css_analytics(root);
+    assert_eq!(
+        flagged_theme_tokens(&css),
+        vec!["--text-ghost".to_string()],
+        "arbitrary value and qualified JS usage must credit: {css:#?}"
+    );
+}
+
+#[test]
+fn health_css_theme_token_default_override_not_flagged() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(&root.join("package.json"), TW_PKG);
+    // Overriding a default shade is credited the moment its utility appears.
+    write_file(
+        &root.join("src/theme.css"),
+        "@theme {\n  --color-red-500: #e00;\n}\n",
+    );
+    write_file(
+        &root.join("src/App.tsx"),
+        "export const C = () => <p className=\"text-red-500\" />;\n",
+    );
+
+    let css = css_analytics(root);
+    assert!(
+        flagged_theme_tokens(&css).is_empty(),
+        "a default override used in markup must not be flagged: {css:#?}"
+    );
+}
+
+#[test]
+fn health_css_theme_token_excludes_bare_default_and_reset() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(&root.join("package.json"), TW_PKG);
+    // Bare `--spacing` (multiplier base), `--default-*` (generates no utility),
+    // and the `--color-*: initial` reset are NEVER candidates. `--blur-soft` is
+    // a genuine dead token, present so the report is emitted.
+    write_file(
+        &root.join("src/theme.css"),
+        "@theme {\n  --spacing: 0.25rem;\n  --default-transition-duration: 150ms;\n  --color-*: initial;\n  --blur-soft: 4px;\n}\n",
+    );
+    write_file(&root.join("src/App.tsx"), "export const C = () => null;\n");
+
+    let css = css_analytics(root);
+    assert_eq!(
+        flagged_theme_tokens(&css),
+        vec!["--blur-soft".to_string()],
+        "bare / default / reset forms must never be candidates: {css:#?}"
+    );
+}
+
+#[test]
+fn health_css_theme_token_dictionary_word_not_credited_by_bare_word() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(&root.join("package.json"), TW_PKG);
+    // The make-or-break: a token named `brand` / `card` must NOT be credited
+    // merely because the WORD appears in source (branding, discard, cardboard).
+    // Only a real `-<name>` utility suffix credits it.
+    write_file(
+        &root.join("src/theme.css"),
+        "@theme {\n  --color-brand: #f05a28;\n  --radius-card: 8px;\n}\n",
+    );
+    write_file(
+        &root.join("src/App.tsx"),
+        "// brand card branding discard cardboard rebrand\nexport const brand = 'brand';\nconst card = { cardboard: true };\nexport const cls = 'flex p-4 unrelated-thing';\n",
+    );
+
+    let css = css_analytics(root);
+    assert_eq!(
+        flagged_theme_tokens(&css),
+        vec!["--color-brand".to_string(), "--radius-card".to_string()],
+        "bare dictionary words must NOT credit a theme token: {css:#?}"
+    );
+}
+
+#[test]
+fn health_css_theme_token_abstains_on_plugin_published_and_nontailwind() {
+    // (a) @plugin directive -> abstain.
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(&root.join("package.json"), TW_PKG);
+    write_file(
+        &root.join("src/theme.css"),
+        "@plugin \"daisyui\";\n@theme {\n  --color-dead: #000;\n}\n",
+    );
+    write_file(&root.join("src/App.tsx"), "export const C = () => null;\n");
+    assert!(
+        flagged_theme_tokens(&css_analytics(root)).is_empty(),
+        "a @plugin project must abstain"
+    );
+
+    // (b) the @theme stylesheet is a published package surface -> abstain.
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"lib","devDependencies":{"tailwindcss":"^4.0.0"},"exports":{"./styles":"./src/theme.css"}}"#,
+    );
+    write_file(
+        &root.join("src/theme.css"),
+        "@theme {\n  --color-dead: #000;\n}\n",
+    );
+    write_file(&root.join("src/App.tsx"), "export const C = () => null;\n");
+    assert!(
+        flagged_theme_tokens(&css_analytics(root)).is_empty(),
+        "a published-library @theme must abstain"
+    );
+
+    // (c) no tailwindcss dependency -> abstain.
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(&root.join("package.json"), r#"{"name":"plain"}"#);
+    write_file(
+        &root.join("src/theme.css"),
+        "@theme {\n  --color-dead: #000;\n}\n",
+    );
+    write_file(&root.join("src/App.tsx"), "export const C = () => null;\n");
+    assert!(
+        flagged_theme_tokens(&css_analytics(root)).is_empty(),
+        "a non-Tailwind project must abstain"
+    );
+}
+
+#[test]
+fn health_css_theme_token_property_modifier_not_flagged() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(&root.join("package.json"), TW_PKG);
+    // Tailwind v4 `--<token>--<property>` modifier configures an option on a
+    // token (here `font-feature-settings` on `font-sans`); it generates no
+    // standalone utility, so it must NOT be flagged (real-world smoke FP on the
+    // Tailwind docs site). `--shadow-dead` is a genuine dead token so the report
+    // is still emitted.
+    write_file(
+        &root.join("src/theme.css"),
+        "@theme {\n  --font-sans: \"Inter\", sans-serif;\n  --font-sans--font-feature-settings: \"cv02\", \"cv03\";\n  --shadow-dead: 0 0 1px red;\n}\n",
+    );
+    write_file(
+        &root.join("src/App.tsx"),
+        "export const C = () => <p className=\"font-sans\" />;\n",
+    );
+
+    let css = css_analytics(root);
+    assert_eq!(
+        flagged_theme_tokens(&css),
+        vec!["--shadow-dead".to_string()],
+        "a token-property modifier must never be flagged: {css:#?}"
+    );
+}
+
+#[test]
+fn health_css_unused_theme_token_renders_in_human() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(&root.join("package.json"), TW_PKG);
+    write_file(
+        &root.join("src/theme.css"),
+        "@theme {\n  --shadow-glow: 0 0 8px red;\n}\n",
+    );
+    write_file(&root.join("src/App.tsx"), "export const C = () => null;\n");
+
+    let out = run_fallow_in_root("health", root, &["--css", "--max-crap", "10000", "--quiet"]);
+    assert!(
+        out.stdout.contains("@theme token") && out.stdout.contains("--shadow-glow"),
+        "human output should list the unused @theme token: {}",
+        out.stdout
+    );
+}
+
 #[test]
 fn health_css_flags_font_size_unit_mix_above_floor() {
     let dir = tempdir().unwrap();

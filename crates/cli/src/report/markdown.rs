@@ -1010,7 +1010,7 @@ fn write_css_analytics_section(out: &mut String, report: &crate::health_types::H
     );
     let _ = writeln!(
         out,
-        "- Candidates: {} unreferenced + {} undefined @keyframes | {} duplicate blocks | {} scoped-unused classes | {} Tailwind arbitrary values | {} unused @property | {} unused @layer | {} likely class typos | {} unreferenced classes | {} unused @font-face",
+        "- Candidates: {} unreferenced + {} undefined @keyframes | {} duplicate blocks | {} scoped-unused classes | {} Tailwind arbitrary values | {} unused @property | {} unused @layer | {} likely class typos | {} unreferenced classes | {} unused @font-face | {} unused @theme tokens",
         s.keyframes_unreferenced,
         s.keyframes_undefined,
         s.duplicate_declaration_blocks,
@@ -1021,6 +1021,7 @@ fn write_css_analytics_section(out: &mut String, report: &crate::health_types::H
         s.unresolved_class_references,
         s.unreferenced_css_classes,
         s.unused_font_faces,
+        s.unused_theme_tokens,
     );
     if !css.undefined_keyframes.is_empty() {
         let named: Vec<String> = css
@@ -1085,6 +1086,19 @@ fn write_css_analytics_section(out: &mut String, report: &crate::health_types::H
         let _ = writeln!(
             out,
             "- Unused @font-face (dead web-font; candidates, may be set from JS/inline): {}",
+            named.join(", "),
+        );
+    }
+    if !css.unused_theme_tokens.is_empty() {
+        let named: Vec<String> = css
+            .unused_theme_tokens
+            .iter()
+            .take(5)
+            .map(|u| format!("`{}` ({}:{})", u.token, u.path, u.line))
+            .collect();
+        let _ = writeln!(
+            out,
+            "- Unused @theme tokens (dead Tailwind v4 design tokens; candidates, may be consumed by a plugin or downstream repo): {}",
             named.join(", "),
         );
     }

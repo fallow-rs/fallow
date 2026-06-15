@@ -265,6 +265,213 @@ pub fn extract_css_imports(source: &str, is_scss: bool) -> Vec<String> {
         .collect()
 }
 
+/// Opening of a Tailwind v4 `@theme` block: `@theme`, optional modifier keywords
+/// (`inline` / `static` / `reference` / `default`), then the `{`. Matches up to
+/// and including the brace so the caller can brace-match the body from `end()`.
+static CSS_THEME_OPEN_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    crate::static_regex(r"@theme(?:\s+(?:inline|static|reference|default))*\s*\{")
+});
+
+/// A `var(--custom-property)` reference, capturing the dashed-ident name without
+/// the leading `--`. Used only to credit a theme token read by another theme
+/// token inside a `@theme` interior (lightningcss skips the unknown at-rule).
+static CSS_VAR_REF_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r"var\(\s*--([A-Za-z0-9_-]+)"));
+
+/// A Tailwind v4 `@theme` token definition: the custom-property name WITHOUT the
+/// leading `--` (e.g. `color-brand`) and its 1-based line in the source.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThemeTokenDef {
+    /// The custom-property name with the `--` prefix stripped (`color-brand`).
+    pub name: String,
+    /// 1-based line of the declaration in the original source.
+    pub line: u32,
+}
+
+/// Result of scanning a CSS source for Tailwind v4 `@theme` blocks.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ThemeScan {
+    /// Custom-property tokens DEFINED at the top level of a `@theme` block, with
+    /// the `*`-reset form (`--color-*: initial`) and bare-namespace declarations
+    /// excluded. Deduped by name (first definition wins for the line).
+    pub tokens: Vec<ThemeTokenDef>,
+    /// Custom-property names (without `--`) READ via `var()` anywhere inside a
+    /// `@theme` block interior. lightningcss does not descend into the unknown
+    /// `@theme` at-rule, so these reads are invisible to `CssAnalytics`; a token
+    /// backing another token (`--color-button: var(--color-brand)`) keeps the
+    /// backing token live.
+    pub theme_var_reads: Vec<String>,
+}
+
+/// Scan a CSS source for Tailwind v4 `@theme` blocks, returning the defined
+/// design tokens plus the custom properties read via `var()` inside those blocks.
+///
+/// Tailwind v4 is CSS-first, so `@theme { --color-brand: #f00; }` is the unit of
+/// a user-authored design token. lightningcss treats `@theme` as an unknown
+/// at-rule and skips it, so this is a separate brace-matching pass (comments and
+/// strings masked first so braces / semicolons inside them never break the block
+/// boundary). Only top-level `--ident: value` declarations are tokens; declarations
+/// inside a nested block (e.g. `@keyframes` for `--animate-*`) are not.
+#[must_use]
+pub fn scan_theme_blocks(source: &str) -> ThemeScan {
+    // Fast path: skip the masking allocation for the common no-`@theme` file.
+    if !source.contains("@theme") {
+        return ThemeScan::default();
+    }
+    // Mask comments AND strings/url() so a brace or semicolon inside either does
+    // not break the block boundary. Both masks preserve byte length, so offsets in the
+    // masked buffer line up 1:1 with the original (line numbers are counted in
+    // the original below).
+    let masked = mask_with_whitespace(&mask_css_comments(source, false), &CSS_NON_SELECTOR_RE);
+    let bytes = masked.as_bytes();
+    let mut out = ThemeScan::default();
+    let mut seen: FxHashSet<String> = FxHashSet::default();
+    for open in CSS_THEME_OPEN_RE.find_iter(&masked) {
+        let body_start = open.end();
+        // Brace-match from just after the opening `{` to its partner.
+        let mut depth = 1usize;
+        let mut i = body_start;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'{' => depth += 1,
+                b'}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+        let body_end = i.min(bytes.len());
+        collect_theme_declarations(
+            source,
+            &masked,
+            body_start,
+            body_end,
+            &mut out.tokens,
+            &mut seen,
+        );
+        if let Some(body) = masked.get(body_start..body_end) {
+            for cap in CSS_VAR_REF_RE.captures_iter(body) {
+                if let Some(name) = cap.get(1) {
+                    out.theme_var_reads.push(name.as_str().to_owned());
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Walk a masked `@theme` body collecting top-level `--ident: value` declarations
+/// as tokens. Tracks brace depth so declarations inside a nested block (e.g. an
+/// `@keyframes` for `--animate-*`) are skipped, and statement position so only a
+/// `--ident` at a declaration start counts. The `*`-reset form (`--color-*`) is
+/// excluded because the `*` breaks the ident scan before the `:`.
+fn collect_theme_declarations(
+    source: &str,
+    masked: &str,
+    start: usize,
+    end: usize,
+    out: &mut Vec<ThemeTokenDef>,
+    seen: &mut FxHashSet<String>,
+) {
+    let bytes = masked.as_bytes();
+    let mut depth = 0usize;
+    let mut expect_decl = true;
+    let mut i = start;
+    while i < end {
+        let b = bytes[i];
+        match b {
+            b'{' => {
+                depth += 1;
+                expect_decl = false;
+                i += 1;
+            }
+            b'}' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    expect_decl = true;
+                }
+                i += 1;
+            }
+            b';' => {
+                if depth == 0 {
+                    expect_decl = true;
+                }
+                i += 1;
+            }
+            _ if b.is_ascii_whitespace() => i += 1,
+            _ => {
+                if depth == 0 && expect_decl {
+                    expect_decl = false;
+                    if b == b'-' && bytes.get(i + 1) == Some(&b'-') {
+                        let id_start = i;
+                        let mut j = i;
+                        while j < end {
+                            let c = bytes[j];
+                            if c == b'-' || c == b'_' || c.is_ascii_alphanumeric() {
+                                j += 1;
+                            } else {
+                                break;
+                            }
+                        }
+                        let mut k = j;
+                        while k < end && bytes[k].is_ascii_whitespace() {
+                            k += 1;
+                        }
+                        // Only a `--ident:` (no `*` before the colon) is a token.
+                        if k < end && bytes[k] == b':' {
+                            let name = &masked[id_start + 2..j];
+                            if !name.is_empty() && seen.insert(name.to_owned()) {
+                                let line = 1 + source
+                                    .get(..id_start)
+                                    .map_or(0, |s| s.bytes().filter(|&x| x == b'\n').count());
+                                out.push(ThemeTokenDef {
+                                    name: name.to_owned(),
+                                    line: u32::try_from(line).unwrap_or(u32::MAX),
+                                });
+                            }
+                        }
+                        i = j;
+                    } else {
+                        i += 1;
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+        }
+    }
+}
+
+/// Extract the utility tokens referenced in `@apply` directive bodies across a
+/// CSS source (comment / string masked). `@apply rounded-card font-bold;` yields
+/// `["rounded-card", "font-bold"]`. The leading-`!` and trailing-`!` important
+/// modifiers and a bare `!important` token are stripped, so a theme token whose
+/// utility is applied only via `@apply` is credited as used.
+#[must_use]
+pub fn extract_apply_tokens(source: &str) -> Vec<String> {
+    // Fast path: skip the masking allocation for the common no-`@apply` file.
+    if !source.contains("@apply") {
+        return Vec::new();
+    }
+    let masked = mask_with_whitespace(&mask_css_comments(source, false), &CSS_NON_SELECTOR_RE);
+    let mut out = Vec::new();
+    for m in CSS_APPLY_RE.find_iter(&masked) {
+        let body = m.as_str().trim_start_matches("@apply");
+        for token in body.split_whitespace() {
+            let token = token.trim_matches('!');
+            if token.is_empty() || token == "important" {
+                continue;
+            }
+            out.push(token.to_owned());
+        }
+    }
+    out
+}
+
 /// Mask every regex match in `src` with ASCII spaces (`0x20`) of equal byte
 /// length, so byte offsets in the returned string correspond 1:1 to byte
 /// offsets in the original.
@@ -1367,5 +1574,114 @@ mod tests {
             info.exports[0].span.start,
         );
         assert_eq!(line, 5, "downstream line must equal the source line");
+    }
+
+    fn theme_token_names(source: &str) -> Vec<String> {
+        scan_theme_blocks(source)
+            .tokens
+            .into_iter()
+            .map(|t| t.name)
+            .collect()
+    }
+
+    #[test]
+    fn theme_single_block_collects_tokens() {
+        let names = theme_token_names("@theme { --color-brand: #f00; --radius-card: 8px; }");
+        assert_eq!(names, vec!["color-brand", "radius-card"]);
+    }
+
+    #[test]
+    fn theme_dashed_multi_segment_names() {
+        let names = theme_token_names(
+            "@theme {\n  --font-weight-heavy: 900;\n  --inset-shadow-glow: 0 0 4px red;\n}",
+        );
+        assert_eq!(names, vec!["font-weight-heavy", "inset-shadow-glow"]);
+    }
+
+    #[test]
+    fn theme_inline_and_static_modifiers() {
+        assert_eq!(
+            theme_token_names("@theme inline { --color-a: red; }"),
+            vec!["color-a"]
+        );
+        assert_eq!(
+            theme_token_names("@theme static { --color-b: red; }"),
+            vec!["color-b"]
+        );
+    }
+
+    #[test]
+    fn theme_multiple_blocks_union() {
+        let names = theme_token_names(
+            "@theme { --color-a: red; }\n.x { color: blue; }\n@theme { --spacing-gutter: 1rem; }",
+        );
+        assert_eq!(names, vec!["color-a", "spacing-gutter"]);
+    }
+
+    #[test]
+    fn theme_reset_form_excluded() {
+        // `--color-*: initial` is a namespace reset directive, not a token.
+        let names = theme_token_names("@theme { --color-*: initial; --color-brand: red; }");
+        assert_eq!(names, vec!["color-brand"]);
+    }
+
+    #[test]
+    fn theme_no_block_yields_nothing() {
+        assert!(theme_token_names(".x { --color-brand: red; }").is_empty());
+    }
+
+    #[test]
+    fn theme_line_numbers() {
+        let scan = scan_theme_blocks("@theme {\n  --color-a: red;\n  --radius-b: 4px;\n}");
+        assert_eq!(scan.tokens[0].line, 2);
+        assert_eq!(scan.tokens[1].line, 3);
+    }
+
+    #[test]
+    fn theme_token_backs_token_via_var() {
+        let scan = scan_theme_blocks(
+            "@theme {\n  --color-brand: #f00;\n  --color-button: var(--color-brand);\n}",
+        );
+        assert!(scan.theme_var_reads.contains(&"color-brand".to_string()));
+    }
+
+    #[test]
+    fn theme_nested_keyframes_body_not_collected() {
+        // `@keyframes` inside `@theme` (for `--animate-*`) must not surface its
+        // step selectors or interior as theme tokens.
+        let names = theme_token_names(
+            "@theme {\n  --animate-spin: spin 1s linear infinite;\n  @keyframes spin { from { --x: 0; } to { --y: 1; } }\n}",
+        );
+        assert_eq!(names, vec!["animate-spin"]);
+    }
+
+    #[test]
+    fn theme_comment_block_ignored() {
+        let names = theme_token_names("/* @theme { --color-fake: red; } */ .x { color: blue; }");
+        assert!(names.is_empty(), "got {names:?}");
+    }
+
+    #[test]
+    fn theme_deduplicates_repeated_token() {
+        let names = theme_token_names("@theme { --color-a: red; --color-a: blue; }");
+        assert_eq!(names, vec!["color-a"]);
+    }
+
+    #[test]
+    fn apply_tokens_basic() {
+        let tokens = extract_apply_tokens(".panel { @apply rounded-card font-bold; }");
+        assert_eq!(tokens, vec!["rounded-card", "font-bold"]);
+    }
+
+    #[test]
+    fn apply_tokens_strips_important() {
+        let tokens = extract_apply_tokens(".x { @apply text-brand! font-bold !important; }");
+        assert_eq!(tokens, vec!["text-brand", "font-bold"]);
+    }
+
+    #[test]
+    fn apply_tokens_ignored_in_comments() {
+        let tokens = extract_apply_tokens("/* @apply hidden-token; */ .x { color: red; }");
+        assert!(tokens.is_empty(), "got {tokens:?}");
     }
 }

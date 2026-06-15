@@ -13409,6 +13409,13 @@
           },
           "description": "`@font-face` families declared in a stylesheet but referenced by no\n`font-family` anywhere in the project: a dead web-font payload (the font\nfile is downloaded but never applied). Located at the declaring\nstylesheet. Cleanup candidates: the family could be applied from inline\nstyles or set via JavaScript. Sorted by `(path, family)`."
         },
+        "unused_theme_tokens": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedThemeToken"
+          },
+          "description": "Tailwind v4 `@theme` design tokens (`--color-brand`, `--radius-card`)\ndefined in a stylesheet but used by no generated utility, `var()` read,\n`@apply`, or arbitrary value anywhere in the project: dead design tokens\n(the `unused-export` of the token era). Present only when the project is\nTailwind v4 (a `tailwindcss` dependency plus at least one `@theme` block)\nand not a plugin / published-library / partial-scope run. Candidates,\nnever gated findings: the token may be consumed by a Tailwind plugin or a\ndownstream repo. Sorted by `(path, line, token)`."
+        },
         "font_size_unit_mix": {
           "anyOf": [
             {
@@ -13779,6 +13786,10 @@
           "type": "integer",
           "description": "`@font-face` families declared but referenced by no `font-family` anywhere\n(located in `unused_font_faces`). Dead web-font cleanup candidates."
         },
+        "unused_theme_tokens": {
+          "type": "integer",
+          "description": "Tailwind v4 `@theme` design tokens defined but used by no generated\nutility, `var()`, `@apply`, or arbitrary value anywhere (located in\n`unused_theme_tokens`). Dead-design-token cleanup candidates; zero when\nthe project is not Tailwind v4 or a plugin / published-library /\npartial-scope run gated the scan out."
+        },
         "font_size_units_used": {
           "type": "integer",
           "description": "Number of distinct `font-size` units (`px` / `rem` / `em` / `%`) authored\nacross the codebase. Mixing units is a type-scale consistency smell,\nbroken out in `font_size_unit_mix`."
@@ -13817,6 +13828,7 @@
         "unresolved_class_references",
         "unreferenced_css_classes",
         "unused_font_faces",
+        "unused_theme_tokens",
         "font_size_units_used",
         "notable_truncated_files"
       ],
@@ -14241,6 +14253,42 @@
         "count"
       ],
       "description": "One notation bucket and the count of distinct values authored in it."
+    },
+    "UnusedThemeToken": {
+      "type": "object",
+      "properties": {
+        "token": {
+          "type": "string",
+          "description": "The full custom property as authored, including the `--` prefix\n(`--color-brand`)."
+        },
+        "namespace": {
+          "type": "string",
+          "description": "The Tailwind v4 theme namespace the token belongs to (`color`, `radius`,\n`font-weight`, `breakpoint`, ...)."
+        },
+        "path": {
+          "type": "string",
+          "description": "Project-root-relative, forward-slash path to the declaring stylesheet."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line of the token's definition inside the `@theme` block."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CssCandidateAction"
+          },
+          "description": "Read-only verification step(s) before removing. Always at least one entry,\nso consumers can iterate `actions` uniformly across every finding type."
+        }
+      },
+      "required": [
+        "token",
+        "namespace",
+        "path",
+        "line",
+        "actions"
+      ],
+      "description": "A Tailwind v4 `@theme` design token defined in a stylesheet whose generated\nutility, `var()` reads, and arbitrary-value references appear nowhere in the\nproject: a dead design token (the `unused-export` of the token era). A\ncandidate, never a gated finding: the token could be consumed by a Tailwind\nplugin, a published design-system surface, or a non-CSS-aware build step the\nscan cannot see (those cases are gated out before this is emitted)."
     }
   }
 }

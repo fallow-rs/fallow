@@ -152,6 +152,16 @@ pub struct CssAnalyticsReport {
     /// styles or set via JavaScript. Sorted by `(path, family)`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unused_font_faces: Vec<UnusedFontFace>,
+    /// Tailwind v4 `@theme` design tokens (`--color-brand`, `--radius-card`)
+    /// defined in a stylesheet but used by no generated utility, `var()` read,
+    /// `@apply`, or arbitrary value anywhere in the project: dead design tokens
+    /// (the `unused-export` of the token era). Present only when the project is
+    /// Tailwind v4 (a `tailwindcss` dependency plus at least one `@theme` block)
+    /// and not a plugin / published-library / partial-scope run. Candidates,
+    /// never gated findings: the token may be consumed by a Tailwind plugin or a
+    /// downstream repo. Sorted by `(path, line, token)`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unused_theme_tokens: Vec<UnusedThemeToken>,
     /// The project authors `font-size` values in several units (`px`, `rem`,
     /// `em`, `%`), with a per-unit distinct-value count: a type-scale
     /// inconsistency smell (mixing `px` and `rem` for type works against
@@ -309,6 +319,30 @@ pub struct UnusedFontFace {
     pub actions: Vec<CssCandidateAction>,
 }
 
+/// A Tailwind v4 `@theme` design token defined in a stylesheet whose generated
+/// utility, `var()` reads, and arbitrary-value references appear nowhere in the
+/// project: a dead design token (the `unused-export` of the token era). A
+/// candidate, never a gated finding: the token could be consumed by a Tailwind
+/// plugin, a published design-system surface, or a non-CSS-aware build step the
+/// scan cannot see (those cases are gated out before this is emitted).
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedThemeToken {
+    /// The full custom property as authored, including the `--` prefix
+    /// (`--color-brand`).
+    pub token: String,
+    /// The Tailwind v4 theme namespace the token belongs to (`color`, `radius`,
+    /// `font-weight`, `breakpoint`, ...).
+    pub namespace: String,
+    /// Project-root-relative, forward-slash path to the declaring stylesheet.
+    pub path: String,
+    /// 1-based line of the token's definition inside the `@theme` block.
+    pub line: u32,
+    /// Read-only verification step(s) before removing. Always at least one entry,
+    /// so consumers can iterate `actions` uniformly across every finding type.
+    pub actions: Vec<CssCandidateAction>,
+}
+
 /// A global CSS class defined in a plain `.css`/`.scss` rule whose literal name
 /// is referenced by no in-project markup (the CSS analogue of an unused export).
 /// A heavily-gated candidate, never a gated finding: the class may be applied
@@ -445,6 +479,23 @@ impl CssCandidateAction {
                 "Confirm the \"{family}\" font family is not applied from an inline style or JavaScript before removing the @font-face and its font files."
             ),
             command: safe_token_search(family),
+        }
+    }
+
+    /// Verify action for an unused Tailwind v4 `@theme` token: a read-only search
+    /// that embeds the LITERAL terms an agent should grep for, the generated
+    /// utility suffix (`bg-<name>` / `text-<name>` / `<namespace>-<name>`), the
+    /// `var(--<ns>-<name>)` read, and the arbitrary `[--<ns>-<name>]` value,
+    /// before removing the token. Verify-then-remove; never auto-fixable.
+    #[must_use]
+    pub fn verify_unused_theme_token(token: &str, namespace: &str, name: &str) -> Self {
+        Self {
+            kind: CssCandidateActionType::VerifyUnused,
+            auto_fixable: false,
+            description: format!(
+                "Confirm the {token} @theme token is used by nothing, no `*-{name}` utility (e.g. `bg-{name}` / `text-{name}` / `{namespace}-{name}`) in markup or @apply, no `var({token})` read in any stylesheet or JS, and no arbitrary `[{token}]` value, before removing it from the @theme block."
+            ),
+            command: theme_token_search(namespace, name),
         }
     }
 
@@ -603,6 +654,26 @@ impl CssCandidateAction {
     }
 }
 
+/// Build a read-only, placeholder-free, namespace-QUALIFIED search for a Tailwind
+/// v4 `@theme` token, or `None` when the namespace / name is not a plain CSS
+/// identifier (so the emitted command is always shell-safe). The pattern matches
+/// any `*-<name>` utility (`bg-<name>`, `rounded-<name>`, `font-<name>`, ...) AND
+/// the `--<ns>-<name>` custom property (covering `var()` reads and `[--ns-name]`
+/// arbitrary values), deliberately NOT a bare `<name>` (which would substring-hit
+/// every file for a dictionary-word token like `brand` / `card`).
+fn theme_token_search(namespace: &str, name: &str) -> Option<String> {
+    let is_plain = |s: &str| {
+        !s.is_empty()
+            && s.bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    };
+    (is_plain(namespace) && is_plain(name)).then(|| {
+        format!(
+            "grep -rnE -- '-{name}\\b|--{namespace}-{name}' --include='*.css' --include='*.html' --include='*.js' --include='*.jsx' --include='*.ts' --include='*.tsx' --include='*.vue' --include='*.svelte' --include='*.astro' ."
+        )
+    })
+}
+
 /// Build a read-only, placeholder-free token search for `name`, or `None` when
 /// the name is not a plain CSS identifier, so the emitted command is always
 /// shell-safe without quoting tricks.
@@ -718,6 +789,12 @@ pub struct CssAnalyticsSummary {
     /// `@font-face` families declared but referenced by no `font-family` anywhere
     /// (located in `unused_font_faces`). Dead web-font cleanup candidates.
     pub unused_font_faces: u32,
+    /// Tailwind v4 `@theme` design tokens defined but used by no generated
+    /// utility, `var()`, `@apply`, or arbitrary value anywhere (located in
+    /// `unused_theme_tokens`). Dead-design-token cleanup candidates; zero when
+    /// the project is not Tailwind v4 or a plugin / published-library /
+    /// partial-scope run gated the scan out.
+    pub unused_theme_tokens: u32,
     /// Number of distinct `font-size` units (`px` / `rem` / `em` / `%`) authored
     /// across the codebase. Mixing units is a type-scale consistency smell,
     /// broken out in `font_size_unit_mix`.

@@ -5121,6 +5121,17 @@ unreferenced_css_classes?: UnreferencedCssClass[]
  */
 unused_font_faces?: UnusedFontFace[]
 /**
+ * Tailwind v4 `@theme` design tokens (`--color-brand`, `--radius-card`)
+ * defined in a stylesheet but used by no generated utility, `var()` read,
+ * `@apply`, or arbitrary value anywhere in the project: dead design tokens
+ * (the `unused-export` of the token era). Present only when the project is
+ * Tailwind v4 (a `tailwindcss` dependency plus at least one `@theme` block)
+ * and not a plugin / published-library / partial-scope run. Candidates,
+ * never gated findings: the token may be consumed by a Tailwind plugin or a
+ * downstream repo. Sorted by `(path, line, token)`.
+ */
+unused_theme_tokens?: UnusedThemeToken[]
+/**
  * The project authors `font-size` values in several units (`px`, `rem`,
  * `em`, `%`), with a per-unit distinct-value count: a type-scale
  * inconsistency smell (mixing `px` and `rem` for type works against
@@ -5450,6 +5461,14 @@ unreferenced_css_classes: number
  */
 unused_font_faces: number
 /**
+ * Tailwind v4 `@theme` design tokens defined but used by no generated
+ * utility, `var()`, `@apply`, or arbitrary value anywhere (located in
+ * `unused_theme_tokens`). Dead-design-token cleanup candidates; zero when
+ * the project is not Tailwind v4 or a plugin / published-library /
+ * partial-scope run gated the scan out.
+ */
+unused_theme_tokens: number
+/**
  * Number of distinct `font-size` units (`px` / `rem` / `em` / `%`) authored
  * across the codebase. Mixing units is a type-scale consistency smell,
  * broken out in `font_size_unit_mix`.
@@ -5717,6 +5736,39 @@ family: string
  * Project-root-relative, forward-slash path to the declaring stylesheet.
  */
 path: string
+/**
+ * Read-only verification step(s) before removing. Always at least one entry,
+ * so consumers can iterate `actions` uniformly across every finding type.
+ */
+actions: CssCandidateAction[]
+}
+/**
+ * A Tailwind v4 `@theme` design token defined in a stylesheet whose generated
+ * utility, `var()` reads, and arbitrary-value references appear nowhere in the
+ * project: a dead design token (the `unused-export` of the token era). A
+ * candidate, never a gated finding: the token could be consumed by a Tailwind
+ * plugin, a published design-system surface, or a non-CSS-aware build step the
+ * scan cannot see (those cases are gated out before this is emitted).
+ */
+export interface UnusedThemeToken {
+/**
+ * The full custom property as authored, including the `--` prefix
+ * (`--color-brand`).
+ */
+token: string
+/**
+ * The Tailwind v4 theme namespace the token belongs to (`color`, `radius`,
+ * `font-weight`, `breakpoint`, ...).
+ */
+namespace: string
+/**
+ * Project-root-relative, forward-slash path to the declaring stylesheet.
+ */
+path: string
+/**
+ * 1-based line of the token's definition inside the `@theme` block.
+ */
+line: number
 /**
  * Read-only verification step(s) before removing. Always at least one entry,
  * so consumers can iterate `actions` uniformly across every finding type.

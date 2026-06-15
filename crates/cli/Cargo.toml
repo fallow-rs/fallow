@@ -67,6 +67,7 @@ colored = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml_ng = { workspace = true }
+toml = { workspace = true }
 semver = { workspace = true }
 bitcode = { workspace = true }
 jsonc-parser = { workspace = true }
@@ -104,7 +105,6 @@ path = "src/lib.rs"
 doctest = false
 
 [dev-dependencies]
-toml = { workspace = true }
 insta = { workspace = true }
 fallow-types = { workspace = true }
 oxc_span = { workspace = true }

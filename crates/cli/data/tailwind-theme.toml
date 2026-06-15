@@ -1,0 +1,45 @@
+# Tailwind CSS v4 `@theme` variable namespaces.
+#
+# Source: the Tailwind v4 theme-variable reference (https://tailwindcss.com/docs/theme).
+# Version-pinned: tracks Tailwind v4.x. Each token `--<namespace>-<name>` makes a
+# utility available whose suffix is `<name>` (suffix namespaces), or a `<name>:` /
+# `@<name>:` variant available (variant namespaces). Bump when Tailwind adds a
+# namespace. This is community-maintainable DATA, not a code constant, so the
+# `unused-theme-token` candidate stays consistent with the data-driven-tables
+# principle the other framework-knowledge tables (e.g. tooling.toml) follow.
+#
+# Excluded by construction (handled in the extractor / classifier, not listed
+# here): the `--default-*` namespace (generates no utility), the `--color-*:
+# initial` reset form, and bare-namespace declarations with no `-<name>` segment
+# (e.g. `--spacing`, the numeric-scale multiplier base).
+
+# Suffix-utility namespaces: a token `--<ns>-<name>` generates a utility ending
+# in `-<name>` (e.g. `--color-brand` -> `bg-brand` / `text-brand`; `--radius-card`
+# -> `rounded-card`; `--font-poppins` -> `font-poppins`).
+suffix = [
+  "color",
+  "font",
+  "text",
+  "font-weight",
+  "tracking",
+  "leading",
+  "tab-size",
+  "spacing",
+  "radius",
+  "shadow",
+  "inset-shadow",
+  "drop-shadow",
+  "blur",
+  "perspective",
+  "aspect",
+  "ease",
+  "animate",
+]
+
+# Variant namespaces: a token `--<ns>-<name>` generates a `<name>:` breakpoint
+# variant or `@<name>:` container variant rather than a utility suffix (e.g.
+# `--breakpoint-tablet` -> `tablet:flex`; `--container-prose` -> `@prose:block`).
+variant = [
+  "breakpoint",
+  "container",
+]
