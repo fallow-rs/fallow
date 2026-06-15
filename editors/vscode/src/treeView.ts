@@ -557,7 +557,8 @@ export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeIte
       addCategory(
         "policy-violations",
         this.result.policy_violations.map(
-          (v) => new IssueItem(`${v.pack}/${v.rule_id}`, v.path, v.line, v.col, "policy-violations"),
+          (v) =>
+            new IssueItem(`${v.pack}/${v.rule_id}`, v.path, v.line, v.col, "policy-violations"),
         ),
       );
     }
