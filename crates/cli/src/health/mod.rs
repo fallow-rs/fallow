@@ -159,6 +159,19 @@ struct HealthPipelineTimings {
     shared_parse: bool,
 }
 
+impl HealthPipelineTimings {
+    fn into_base_input(self, complexity_ms: f64) -> HealthTimingBaseInput {
+        HealthTimingBaseInput {
+            config_ms: self.config,
+            discover_ms: self.discover,
+            parse_ms: self.parse,
+            parse_cpu_ms: self.parse_cpu,
+            complexity_ms,
+            shared_parse: self.shared_parse,
+        }
+    }
+}
+
 struct HealthPipelineInput {
     config: ResolvedConfig,
     files: Vec<fallow_types::discover::DiscoveredFile>,
@@ -316,14 +329,7 @@ fn execute_health_inner(
         config,
         files,
         modules,
-        timings:
-            HealthPipelineTimings {
-                config: config_ms,
-                discover: discover_ms,
-                parse: parse_ms,
-                parse_cpu: parse_cpu_ms,
-                shared_parse,
-            },
+        timings,
         pre_computed_analysis,
     } = input;
 
@@ -469,14 +475,7 @@ fn execute_health_inner(
             sev_critical,
             sev_high,
             sev_moderate,
-            timing_base: HealthTimingBaseInput {
-                config_ms,
-                discover_ms,
-                parse_ms,
-                parse_cpu_ms,
-                complexity_ms,
-                shared_parse,
-            },
+            timing_base: timings.into_base_input(complexity_ms),
             start: &start,
         },
         HealthOutputSectionInput {
@@ -487,17 +486,16 @@ fn execute_health_inner(
         },
     );
 
-    if opts.css {
-        report.css_analytics = compute_css_analytics_report(
-            &files,
-            &config,
-            &ignore_set,
-            changed_files.as_ref(),
-            ws_roots.as_deref(),
-        );
-    }
-
-    record_health_telemetry(&report, coverage_gaps_has_findings);
+    finalize_health_report_side_effects(&mut HealthReportSideEffectsInput {
+        opts,
+        report: &mut report,
+        files: &files,
+        config: &config,
+        ignore_set: &ignore_set,
+        changed_files: changed_files.as_ref(),
+        ws_roots: ws_roots.as_deref(),
+        coverage_gaps_has_findings,
+    });
 
     Ok(build_health_result(HealthResultInput {
         config,
@@ -509,6 +507,31 @@ fn execute_health_inner(
         coverage_gaps_has_findings,
         should_fail_on_coverage_gaps: enforce_coverage_gaps,
     }))
+}
+
+struct HealthReportSideEffectsInput<'a> {
+    opts: &'a HealthOptions<'a>,
+    report: &'a mut crate::health_types::HealthReport,
+    files: &'a [fallow_types::discover::DiscoveredFile],
+    config: &'a ResolvedConfig,
+    ignore_set: &'a globset::GlobSet,
+    changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
+    ws_roots: Option<&'a [std::path::PathBuf]>,
+    coverage_gaps_has_findings: bool,
+}
+
+fn finalize_health_report_side_effects(input: &mut HealthReportSideEffectsInput<'_>) {
+    if input.opts.css {
+        input.report.css_analytics = compute_css_analytics_report(
+            input.files,
+            input.config,
+            input.ignore_set,
+            input.changed_files,
+            input.ws_roots,
+        );
+    }
+
+    record_health_telemetry(input.report, input.coverage_gaps_has_findings);
 }
 
 /// Compute structural CSS analytics, honoring the same ignore / changed-since /
