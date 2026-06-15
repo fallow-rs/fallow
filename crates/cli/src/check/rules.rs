@@ -73,6 +73,16 @@ fn apply_file_override_rules(
     results: &mut fallow_core::results::AnalysisResults,
     config: &ResolvedConfig,
 ) {
+    apply_dead_code_override_rules(results, config);
+    apply_catalog_override_rules(results, config);
+    apply_framework_override_rules(results, config);
+    apply_circular_override_rules(results, config);
+}
+
+fn apply_dead_code_override_rules(
+    results: &mut fallow_core::results::AnalysisResults,
+    config: &ResolvedConfig,
+) {
     results
         .unused_files
         .retain(|f| config.resolve_rules_for_path(&f.file.path).unused_files != Severity::Off);
@@ -148,6 +158,12 @@ fn apply_file_override_rules(
             .unresolved_imports
             != Severity::Off
     });
+}
+
+fn apply_catalog_override_rules(
+    results: &mut fallow_core::results::AnalysisResults,
+    config: &ResolvedConfig,
+) {
     results
         .stale_suppressions
         .retain(|s| config.resolve_rules_for_path(&s.path).stale_suppressions != Severity::Off);
@@ -175,6 +191,12 @@ fn apply_file_override_rules(
             .misconfigured_dependency_overrides
             != Severity::Off
     });
+}
+
+fn apply_framework_override_rules(
+    results: &mut fallow_core::results::AnalysisResults,
+    config: &ResolvedConfig,
+) {
     results.invalid_client_exports.retain(|e| {
         config
             .resolve_rules_for_path(&e.export.path)
@@ -205,6 +227,12 @@ fn apply_file_override_rules(
             .dynamic_segment_name_conflict
             != Severity::Off
     });
+}
+
+fn apply_circular_override_rules(
+    results: &mut fallow_core::results::AnalysisResults,
+    config: &ResolvedConfig,
+) {
     results.circular_dependencies.retain(|c| {
         c.cycle
             .files
