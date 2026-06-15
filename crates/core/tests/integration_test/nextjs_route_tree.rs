@@ -2,7 +2,8 @@ use fallow_config::{FallowConfig, OutputFormat, RulesConfig, Severity};
 
 use crate::common::fixture_path;
 
-/// Resolve a fixture with both route-tree rules at `warn` (their default). The
+/// Resolve a fixture with both route-tree rules pinned to `warn` (both default
+/// to `error`; pinning here keeps severity off the finding-vec assertions). The
 /// detectors are gated on the project declaring `next`.
 fn fixture_config(name: &str) -> fallow_config::ResolvedConfig {
     FallowConfig {

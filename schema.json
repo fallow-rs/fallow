@@ -183,7 +183,7 @@
         "mixed-client-server-barrel": "warn",
         "misplaced-directive": "warn",
         "route-collision": "error",
-        "dynamic-segment-name-conflict": "warn"
+        "dynamic-segment-name-conflict": "error"
       }
     },
     "boundaries": {
@@ -1153,9 +1153,9 @@
           "default": "error"
         },
         "dynamic-segment-name-conflict": {
-          "description": "Sibling Next.js dynamic route segments at one tree position using\ndifferent param spellings (`[id]` vs `[slug]`). Next.js throws \"You\ncannot use different slug names for the same dynamic path\" at dev and\nproduction runtime when the position is hit; `next build` does NOT catch\nit (the build succeeds), so CI passes while the route crashes on its\nfirst request. fallow catches it statically. Defaults to `warn` for now\n(graduates to `error` in a later release once field-proven).",
+          "description": "Sibling Next.js dynamic route segments at one tree position using\ndifferent param spellings (`[id]` vs `[slug]`). Next.js throws \"You\ncannot use different slug names for the same dynamic path\" at dev and\nproduction runtime when the position is hit; `next build` does NOT catch\nit (the build succeeds), so CI passes while the route crashes on its\nfirst request. fallow catches it statically. Defaults to `error`: the\nroute is a deterministic runtime crash on first request, so failing CI\nis the honest signal even though `next build` stays green (this is the\n\"error-runtime\" severity tier, shared with `route-collision`).",
           "$ref": "#/$defs/Severity",
-          "default": "warn"
+          "default": "error"
         }
       }
     },

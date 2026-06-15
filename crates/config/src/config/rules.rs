@@ -224,12 +224,11 @@ pub struct RulesConfig {
     /// cannot use different slug names for the same dynamic path" at dev and
     /// production runtime when the position is hit; `next build` does NOT catch
     /// it (the build succeeds), so CI passes while the route crashes on its
-    /// first request. fallow catches it statically. Defaults to `warn` for now
-    /// (graduates to `error` in a later release once field-proven).
-    #[serde(
-        default = "Severity::default_warn",
-        alias = "dynamic-segment-name-conflicts"
-    )]
+    /// first request. fallow catches it statically. Defaults to `error`: the
+    /// route is a deterministic runtime crash on first request, so failing CI
+    /// is the honest signal even though `next build` stays green (this is the
+    /// "error-runtime" severity tier, shared with `route-collision`).
+    #[serde(default, alias = "dynamic-segment-name-conflicts")]
     pub dynamic_segment_name_conflict: Severity,
 }
 
@@ -274,7 +273,7 @@ impl Default for RulesConfig {
             mixed_client_server_barrel: Severity::Warn,
             misplaced_directive: Severity::Warn,
             route_collision: Severity::Error,
-            dynamic_segment_name_conflict: Severity::Warn,
+            dynamic_segment_name_conflict: Severity::Error,
         }
     }
 }

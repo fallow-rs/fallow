@@ -413,7 +413,7 @@ expression: redact_sarif_version(&json_str)
               },
               "helpUri": "https://docs.fallow.tools/explanations/dead-code#dynamic-segment-name-conflicts",
               "defaultConfiguration": {
-                "level": "warning"
+                "level": "error"
               }
             },
             {
