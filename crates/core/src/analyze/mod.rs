@@ -821,7 +821,6 @@ fn populate_framework_specific_findings(input: &mut FrameworkSpecificFindingsInp
     populate_unused_load_data_key_findings(
         graph,
         modules,
-        resolved_modules,
         config,
         declared_deps,
         suppressions,
@@ -842,14 +841,9 @@ fn populate_framework_specific_findings(input: &mut FrameworkSpecificFindingsInp
 /// project declaring `@sveltejs/kit` inside the detector (see
 /// [`find_unused_load_data_keys`]). Runs as a sequential populate because it
 /// needs the run's `declared_deps` for the dep gate.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "mirrors the unprovided-inject populate site; threading resolved modules + the gate context is intrinsic"
-)]
 fn populate_unused_load_data_key_findings(
     graph: &ModuleGraph,
     modules: &[ModuleInfo],
-    resolved_modules: &[ResolvedModule],
     config: &ResolvedConfig,
     declared_deps: &FxHashSet<String>,
     suppressions: &SuppressionContext<'_>,
@@ -861,7 +855,6 @@ fn populate_unused_load_data_key_findings(
     }
     let result = find_unused_load_data_keys(
         graph,
-        resolved_modules,
         modules,
         declared_deps,
         suppressions,

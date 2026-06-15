@@ -34,7 +34,6 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use fallow_types::extract::ModuleInfo;
 
 use crate::graph::ModuleGraph;
-use crate::resolve::ResolvedModule;
 use crate::results::UnusedLoadDataKey;
 use crate::suppress::{IssueKind, SuppressionContext};
 
@@ -68,7 +67,6 @@ pub struct LoadDataKeyResult {
 #[must_use]
 pub fn find_unused_load_data_keys(
     graph: &ModuleGraph,
-    resolved_modules: &[ResolvedModule],
     modules: &[ModuleInfo],
     declared_deps: &FxHashSet<String>,
     suppressions: &SuppressionContext<'_>,
@@ -82,11 +80,6 @@ pub fn find_unused_load_data_keys(
     if !declared_deps.contains("@sveltejs/kit") {
         return empty;
     }
-
-    // Resolved modules carry `whole_object_uses` (released from `ModuleInfo`)
-    // and the project-wide `page.data.<key>` / `$page.data.<key>` accesses.
-    let resolved_by_id: FxHashMap<_, &ResolvedModule> =
-        resolved_modules.iter().map(|m| (m.file_id, m)).collect();
 
     // Path -> ModuleInfo for sibling lookups, keyed by absolute path.
     let module_by_path: FxHashMap<&Path, &ModuleInfo> = graph
@@ -105,7 +98,10 @@ pub fn find_unused_load_data_keys(
 
     // Ladder (ii): any module's whole-object use of `page.data` / `$page.data`
     // means a reflective read could consume any key, so abstain ALL routes.
-    let global_abstain = resolved_modules.iter().any(|m| {
+    // Read from the raw `ModuleInfo` extraction (complete), not the resolved
+    // payload, so a consumer whose file_id is absent from the resolved index is
+    // not silently dropped.
+    let global_abstain = modules.iter().any(|m| {
         m.whole_object_uses
             .iter()
             .any(|name| name == "page.data" || name == "$page.data")
@@ -118,11 +114,12 @@ pub fn find_unused_load_data_keys(
     }
 
     // Channel 2/3 (project-wide): collect every `page.data.<key>` /
-    // `$page.data.<key>` member access ONCE across all modules. Strip the
-    // leading `$` so Svelte 4 and Svelte 5 unify.
+    // `$page.data.<key>` member access ONCE across all modules. The captured
+    // object is already `page.data` (Svelte 5) or `$page.data` (Svelte 4); both
+    // unify on the bare member name.
     let mut global_used: FxHashSet<&str> = FxHashSet::default();
-    for resolved in resolved_modules {
-        for access in &resolved.member_accesses {
+    for module in modules {
+        for access in &module.member_accesses {
             if access.object == "page.data" || access.object == "$page.data" {
                 global_used.insert(access.member.as_str());
             }
@@ -151,7 +148,7 @@ pub fn find_unused_load_data_keys(
 
         // FP-1 / ladder (i): the sibling passes the whole `data` opaquely.
         if let Some(sibling) = svelte_sibling
-            && sibling_passes_whole_data(sibling, &resolved_by_id)
+            && sibling_passes_whole_data(sibling)
         {
             continue;
         }
@@ -160,7 +157,7 @@ pub fn find_unused_load_data_keys(
         // unioned with the project-wide channel 2/3.
         let mut route_used: FxHashSet<&str> = global_used.clone();
         if let Some(sibling) = svelte_sibling {
-            collect_data_member_accesses(sibling, &resolved_by_id, &mut route_used);
+            collect_data_member_accesses(sibling, &mut route_used);
         }
 
         // FP-2: a server producer's keys can be consumed by a sibling universal
@@ -176,11 +173,11 @@ pub fn find_unused_load_data_keys(
                 else {
                     continue;
                 };
-                if sibling_passes_whole_data(universal, &resolved_by_id) {
+                if sibling_passes_whole_data(universal) {
                     server_chain_abstain = true;
                     break;
                 }
-                collect_data_member_accesses(universal, &resolved_by_id, &mut route_used);
+                collect_data_member_accesses(universal, &mut route_used);
             }
         }
         if server_chain_abstain {
@@ -224,29 +221,20 @@ pub fn find_unused_load_data_keys(
 /// FP-1 flag (`has_load_data_whole_use`: `data={data}`, `{...data}`, `fn(data)`,
 /// `const X = data`) or a `whole_object_uses` of `data` (the script spread /
 /// rest forms already captured by Primitive A).
-fn sibling_passes_whole_data(
-    module: &ModuleInfo,
-    resolved_by_id: &FxHashMap<fallow_types::discover::FileId, &ResolvedModule>,
-) -> bool {
-    if module.has_load_data_whole_use {
-        return true;
-    }
-    resolved_by_id
-        .get(&module.file_id)
-        .is_some_and(|resolved| resolved.whole_object_uses.iter().any(|name| name == "data"))
+fn sibling_passes_whole_data(module: &ModuleInfo) -> bool {
+    module.has_load_data_whole_use || module.whole_object_uses.iter().any(|name| name == "data")
 }
 
 /// Credit every `data.<key>` member access on a consumer SFC into `used`.
-fn collect_data_member_accesses<'a>(
-    module: &'a ModuleInfo,
-    resolved_by_id: &FxHashMap<fallow_types::discover::FileId, &'a ResolvedModule>,
-    used: &mut FxHashSet<&'a str>,
-) {
-    if let Some(resolved) = resolved_by_id.get(&module.file_id) {
-        for access in &resolved.member_accesses {
-            if access.object == "data" {
-                used.insert(access.member.as_str());
-            }
+fn collect_data_member_accesses<'a>(module: &'a ModuleInfo, used: &mut FxHashSet<&'a str>) {
+    // Read the sibling's `data.<key>` reads from the raw `ModuleInfo` extraction
+    // (complete by construction), NOT the resolved payload: a reachable route
+    // `+page.svelte`'s file_id is not guaranteed to be in the `resolved_modules`
+    // index, and `data` is never graph-narrowed (it is a prop, not an import), so
+    // the resolved indirection only risked dropping a real consumer read.
+    for access in &module.member_accesses {
+        if access.object == "data" {
+            used.insert(access.member.as_str());
         }
     }
 }

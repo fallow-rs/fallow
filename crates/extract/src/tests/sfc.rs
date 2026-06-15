@@ -1484,6 +1484,56 @@ export let data;
     );
 }
 
+// Regression: a typed route `data` prop (`export let data: PageData`) must keep
+// its template `data.<key>` accesses keyed on `data`. The typed binding
+// (`data -> PageData`) otherwise remaps a component-attribute access
+// (`<Post postId={data.postId} />`) onto the generated `$types` alias
+// (`PageData.postId`), which made the cross-file load-data join miss the consumer
+// read and false-flag the `load()` return key. Caught on the `query` benchmark.
+#[test]
+fn sveltekit_typed_data_prop_template_attribute_stays_data_keyed() {
+    let info = parse_sfc(
+        r#"
+<script lang="ts">
+import Post from '$lib/Post.svelte'
+import type { PageData } from './$types'
+export let data: PageData
+</script>
+<Post postId={data.postId} />
+"#,
+        "src/routes/[postId]/+page.svelte",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "data" && access.member == "postId"),
+        "typed-data component-attribute `data.postId` should be recorded, got: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn sveltekit_typed_data_prop_script_read_stays_data_keyed() {
+    let info = parse_sfc(
+        r#"
+<script lang="ts">
+import type { PageData } from './$types'
+export let data: PageData
+const greeting = data.message
+</script>
+<h1>{greeting}</h1>
+"#,
+        "src/routes/+page.svelte",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "data" && access.member == "message"),
+        "typed-data script-side `data.message` should be recorded, got: {:?}",
+        info.member_accesses
+    );
+}
+
 #[test]
 fn sveltekit_data_prop_each_block_member_access_in_page_svelte() {
     let info = parse_sfc(

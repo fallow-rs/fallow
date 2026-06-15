@@ -103,6 +103,26 @@ fn server_load_key_consumed_by_universal_sibling_is_not_flagged() {
 }
 
 #[test]
+fn typed_data_prop_component_attribute_consumer_is_credited() {
+    // Regression for the `query`-benchmark false positive: a route whose
+    // `+page.svelte` types its `data` prop (`export let data: PageData`) and reads
+    // a key through a component attribute (`<Widget value={data.shown} />`). The
+    // typed binding must NOT cause the consumer read to be missed.
+    let config = fixture_config("sveltekit-load-data");
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let keys = key_names(&results);
+    assert!(
+        !keys.contains(&"shown".to_string()),
+        "`shown` is read via a typed `data` prop in a component attribute and must not be flagged: {keys:?}"
+    );
+    assert!(
+        keys.contains(&"typedDead".to_string()),
+        "`typedDead` is returned by the typed route's load() and read nowhere; it must be flagged: {keys:?}"
+    );
+}
+
+#[test]
 fn rule_off_produces_no_findings() {
     let config = fixture_config_rule_off("sveltekit-load-data");
     let results = fallow_core::analyze(&config).expect("analysis should succeed");

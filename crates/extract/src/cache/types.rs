@@ -411,7 +411,13 @@ use crate::MemberKind;
 /// producers now harvest `load_return_keys` + `has_unharvestable_load`, and
 /// every file records `has_load_data_whole_use` (the FP-1 whole-`data` pass
 /// signal). A warm cache from 164 lacks all three.
-pub(super) const CACHE_VERSION: u32 = 165;
+///
+/// Bumped to 166 for the typed-`data` template fix: a SvelteKit route component
+/// whose `data` prop is typed (`export let data: PageData`) no longer remaps its
+/// template `data.<key>` accesses onto the generated `$types` alias, keeping them
+/// keyed on `data` for the load-data join. A warm cache from 165 carries the
+/// remapped (`PageData.<key>`) accesses and would miss real consumer reads.
+pub(super) const CACHE_VERSION: u32 = 166;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

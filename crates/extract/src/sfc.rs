@@ -821,12 +821,29 @@ fn apply_template_usage(
         }
     }
 
-    let template_usage = collect_template_usage_with_bound_targets(
-        kind,
-        source,
-        &credited,
-        template_visible_bound_targets,
-    );
+    // unused-load-data-key Primitive B: a route `data` prop is usually typed as
+    // SvelteKit's generated `PageData` / `LayoutData` (`export let data:
+    // PageData`). That typed binding (`data -> PageData`) would otherwise make the
+    // template scanner remap `{data.x}` / `<Child foo={data.x} />` member accesses
+    // onto the generated type (`PageData.x`), dropping the `data`-keyed access the
+    // cross-file load-data join needs. Drop `data` from the bound-targets for the
+    // template scan so its template member accesses stay keyed on `data`. The
+    // generated `$types` aliases carry no real members for any member detector, so
+    // losing the type-keyed template credit is inert; script-side `data` reads are
+    // unaffected (their resolution already ran during `merge_into`).
+    let template_usage = if credit_load_data && template_visible_bound_targets.contains_key("data")
+    {
+        let mut filtered = template_visible_bound_targets.clone();
+        filtered.remove("data");
+        collect_template_usage_with_bound_targets(kind, source, &credited, &filtered)
+    } else {
+        collect_template_usage_with_bound_targets(
+            kind,
+            source,
+            &credited,
+            template_visible_bound_targets,
+        )
+    };
 
     // A template reference credits `used_in_template`: either a bare prop name in
     // `used_bindings` (destructured prop form, or template uses the bare name) OR
