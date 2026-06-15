@@ -433,6 +433,7 @@ pub(crate) fn parse_css_to_module(
         load_return_keys: Vec::new(),
         has_unharvestable_load: false,
         has_load_data_whole_use: false,
+        has_page_data_store_whole_use: false,
     }
 }
 

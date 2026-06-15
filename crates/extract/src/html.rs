@@ -225,6 +225,7 @@ pub(crate) fn parse_html_to_module_with_complexity(
         load_return_keys: Vec::new(),
         has_unharvestable_load: false,
         has_load_data_whole_use: false,
+        has_page_data_store_whole_use: false,
     }
 }
 

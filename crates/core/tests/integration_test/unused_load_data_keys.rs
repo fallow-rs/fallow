@@ -135,6 +135,27 @@ fn rule_off_produces_no_findings() {
 }
 
 #[test]
+fn global_page_data_whole_object_use_abstains_project_wide() {
+    // A module that reflectively reads the whole page-data store
+    // (`Object.values(page.data)`) means any route's key could be consumed
+    // opaquely, so the detector abstains for ALL routes and sets the observable
+    // `unused_load_data_keys_global_abstain` flag, distinguishing a real zero
+    // from a project-wide abstain.
+    let config = fixture_config("sveltekit-load-data-global-abstain");
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results.unused_load_data_keys.is_empty(),
+        "a project-wide whole-`page.data` use must abstain all routes: {:?}",
+        key_names(&results)
+    );
+    assert!(
+        results.unused_load_data_keys_global_abstain,
+        "the project-wide abstain flag must be set so a 0 finding count is distinguishable from 'abstained'"
+    );
+}
+
+#[test]
 fn no_findings_when_sveltekit_is_absent() {
     let config = fixture_config("sveltekit-load-data-no-dep");
     let results = fallow_core::analyze(&config).expect("analysis should succeed");

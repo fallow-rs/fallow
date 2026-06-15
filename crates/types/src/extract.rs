@@ -212,6 +212,17 @@ pub struct ModuleInfo {
     /// `unused-load-data-key` detector, so capturing it for all files is
     /// byte-identity-safe. See FP-1 in the plan.
     pub has_load_data_whole_use: bool,
+    /// `true` when this file uses the whole `page.data` / `$page.data` store
+    /// object opaquely (e.g. `Object.values(page.data)`, `{...$page.data}`), so a
+    /// reflective read could consume any route's key. Drives the
+    /// `unused-load-data-key` detector's project-wide abstain. Derived in
+    /// `release_resolution_payload` from `whole_object_uses` BEFORE that vector is
+    /// released (mirroring `referenced_import_bindings`), so it survives the
+    /// release the detector runs after; it is never cached (recomputed each run
+    /// from the cached `whole_object_uses`). Reassignment forms
+    /// (`const all = $page.data`) are not whole-object-tracked and stay out of
+    /// scope, matching the syntactic analyzer's conservative posture.
+    pub has_page_data_store_whole_use: bool,
 }
 
 impl ModuleInfo {
@@ -233,6 +244,15 @@ impl ModuleInfo {
             .collect();
         self.referenced_import_bindings.sort_unstable();
         self.referenced_import_bindings.dedup();
+
+        // Derive the project-wide page-data-store whole-use signal BEFORE
+        // releasing `whole_object_uses`: the `unused-load-data-key` detector runs
+        // after this release and needs to know whether ANY module reflectively
+        // consumes the whole `page.data` / `$page.data` store.
+        self.has_page_data_store_whole_use = self
+            .whole_object_uses
+            .iter()
+            .any(|name| name == "page.data" || name == "$page.data");
 
         Self::release_vec(&mut self.dynamic_imports);
         Self::release_vec(&mut self.require_calls);
@@ -1514,6 +1534,7 @@ mod tests {
             load_return_keys: Vec::new(),
             has_unharvestable_load: false,
             has_load_data_whole_use: false,
+            has_page_data_store_whole_use: false,
         };
 
         module.release_resolution_payload();

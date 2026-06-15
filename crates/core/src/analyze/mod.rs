@@ -819,13 +819,13 @@ fn populate_framework_specific_findings(input: &mut FrameworkSpecificFindingsInp
         input.results,
     );
     populate_unused_load_data_key_findings(
-        graph,
-        modules,
-        config,
-        declared_deps,
-        suppressions,
-        line_offsets_by_file,
-        results,
+        input.graph,
+        input.modules,
+        input.config,
+        input.declared_deps,
+        input.suppressions,
+        input.line_offsets_by_file,
+        input.results,
     );
     populate_nextjs_route_tree_findings(
         input.graph,
@@ -2298,6 +2298,7 @@ mod tests {
                 load_return_keys: Vec::new(),
                 has_unharvestable_load: false,
                 has_load_data_whole_use: false,
+                has_page_data_store_whole_use: false,
             }];
 
             let rules = RulesConfig {

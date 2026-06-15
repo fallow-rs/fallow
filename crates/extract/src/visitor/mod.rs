@@ -991,6 +991,8 @@ impl ModuleInfoExtractor {
             load_return_keys: self.load_return_keys,
             has_unharvestable_load: self.has_unharvestable_load,
             has_load_data_whole_use: self.has_load_data_whole_use,
+            // Derived in `release_resolution_payload` from `whole_object_uses`.
+            has_page_data_store_whole_use: false,
         }
     }
 

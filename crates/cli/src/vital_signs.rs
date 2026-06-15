@@ -1130,6 +1130,7 @@ mod tests {
             load_return_keys: Vec::new(),
             has_unharvestable_load: false,
             has_load_data_whole_use: false,
+            has_page_data_store_whole_use: false,
             complexity: vec![fallow_types::extract::FunctionComplexity {
                 name: format!("fn_{id}"),
                 line: id + 1,

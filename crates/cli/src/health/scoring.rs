@@ -1905,6 +1905,7 @@ mod tests {
             load_return_keys: Vec::new(),
             has_unharvestable_load: false,
             has_load_data_whole_use: false,
+            has_page_data_store_whole_use: false,
         };
 
         let (cyc, cog, funcs, lines) = aggregate_complexity(&module);
@@ -1969,6 +1970,7 @@ mod tests {
             load_return_keys: Vec::new(),
             has_unharvestable_load: false,
             has_load_data_whole_use: false,
+            has_page_data_store_whole_use: false,
             line_offsets: vec![0, 10, 20, 30, 40], // 5 lines
             complexity: vec![fallow_types::extract::FunctionComplexity {
                 name: "doStuff".into(),
@@ -2045,6 +2047,7 @@ mod tests {
             load_return_keys: Vec::new(),
             has_unharvestable_load: false,
             has_load_data_whole_use: false,
+            has_page_data_store_whole_use: false,
             line_offsets: vec![0, 10, 20], // 3 lines
             complexity: vec![
                 fallow_types::extract::FunctionComplexity {
@@ -2340,6 +2343,7 @@ mod tests {
             load_return_keys: Vec::new(),
             has_unharvestable_load: false,
             has_load_data_whole_use: false,
+            has_page_data_store_whole_use: false,
         }
     }
 

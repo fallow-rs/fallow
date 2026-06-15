@@ -97,15 +97,11 @@ pub fn find_unused_load_data_keys(
         .collect();
 
     // Ladder (ii): any module's whole-object use of `page.data` / `$page.data`
-    // means a reflective read could consume any key, so abstain ALL routes.
-    // Read from the raw `ModuleInfo` extraction (complete), not the resolved
-    // payload, so a consumer whose file_id is absent from the resolved index is
-    // not silently dropped.
-    let global_abstain = modules.iter().any(|m| {
-        m.whole_object_uses
-            .iter()
-            .any(|name| name == "page.data" || name == "$page.data")
-    });
+    // means a reflective read could consume any key, so abstain ALL routes. Read
+    // the persisted `has_page_data_store_whole_use` signal (derived in
+    // `release_resolution_payload` from `whole_object_uses` before that vector is
+    // released), NOT the now-drained `whole_object_uses` itself.
+    let global_abstain = modules.iter().any(|m| m.has_page_data_store_whole_use);
     if global_abstain {
         return LoadDataKeyResult {
             findings: Vec::new(),
@@ -217,12 +213,14 @@ pub fn find_unused_load_data_keys(
 }
 
 /// Whether a consumer SFC passes the whole `data` binding opaquely (so a child
-/// can read arbitrary keys the detector cannot see). Either the extraction
-/// FP-1 flag (`has_load_data_whole_use`: `data={data}`, `{...data}`, `fn(data)`,
-/// `const X = data`) or a `whole_object_uses` of `data` (the script spread /
-/// rest forms already captured by Primitive A).
+/// can read arbitrary keys the detector cannot see). Uses the persisted
+/// extraction FP-1 flag `has_load_data_whole_use` (`data={data}`, `{...data}`,
+/// `fn(data)`, `const X = data`, plus the script spread / rest forms captured by
+/// Primitive A), which already covers every whole-`data` shape; the raw
+/// `whole_object_uses` vector is released before the detector runs, so it is not
+/// consulted here.
 fn sibling_passes_whole_data(module: &ModuleInfo) -> bool {
-    module.has_load_data_whole_use || module.whole_object_uses.iter().any(|name| name == "data")
+    module.has_load_data_whole_use
 }
 
 /// Credit every `data.<key>` member access on a consumer SFC into `used`.

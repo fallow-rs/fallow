@@ -61,6 +61,7 @@ issuekind_json_key() {
     unused-component-prop) echo "unused_component_props" ;;
     unused-component-emit) echo "unused_component_emits" ;;
     unused-server-action) echo "unused_server_actions" ;;
+    unused-load-data-key) echo "unused_load_data_keys" ;;
     route-collision) echo "route_collisions" ;;
     dynamic-segment-name-conflict) echo "dynamic_segment_name_conflicts" ;;
     *) return 1 ;;

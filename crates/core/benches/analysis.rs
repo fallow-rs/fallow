@@ -656,6 +656,7 @@ fn bench_cache_round_trip(c: &mut Criterion) {
         load_return_keys: Vec::new(),
         has_unharvestable_load: false,
         has_load_data_whole_use: false,
+        has_page_data_store_whole_use: false,
     };
 
     c.bench_function("cache_round_trip", |b| {
