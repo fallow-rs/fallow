@@ -3082,6 +3082,36 @@ fn health_css_font_face_credited_by_custom_property_value() {
 }
 
 #[test]
+fn health_css_global_override_class_not_unreferenced_candidate() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"mod","dependencies":{"antd":"^5.0.0"}}"#,
+    );
+    // A CSS Module that styles an antd modal: `.dialog` is the local class (applied
+    // via `styles.dialog`), `:global(.ant-modal-header)` is antd's runtime DOM the
+    // module overrides, and `.dead-local` is a genuinely-unused local class. Only
+    // `dead-local` is flagged: the `:global(...)` override is never an unreferenced
+    // candidate (the project markup never authors it; antd applies it at runtime),
+    // even though `antd` normalizes too short for the dependency-prefix abstain.
+    write_file(
+        &root.join("src/Dialog.module.css"),
+        ".dialog :global(.ant-modal-header) { color: red; }\n.dialog { padding: 1rem; }\n.dead-local { display: none; }\n",
+    );
+    write_file(
+        &root.join("src/Dialog.tsx"),
+        "import styles from './Dialog.module.css';\nexport const D = () => <div className={styles.dialog} />;\n",
+    );
+
+    assert_eq!(
+        css_list_names(root, "unreferenced_css_classes", "class"),
+        vec!["dead-local".to_string()],
+        "a :global(...) override is not an unreferenced-class candidate"
+    );
+}
+
+#[test]
 fn health_css_flags_unreferenced_global_class() {
     let dir = tempdir().unwrap();
     let root = dir.path();

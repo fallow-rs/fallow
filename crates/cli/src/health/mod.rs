@@ -1596,11 +1596,73 @@ fn collect_quoted_class_tokens(
     }
 }
 
+/// Class names wrapped in a CSS Modules `:global(...)` selector. Such a class is
+/// applied by code OUTSIDE this stylesheet, most often a third-party library's
+/// runtime DOM that the module styles via an escape hatch (an antd
+/// `.validatiemeldingenModal :global(.ant-modal-header)` override). The project's
+/// own markup never writes that class, so it can never be credited and would
+/// always surface as a (false) unreferenced-class candidate. `:global` is the
+/// author's explicit "not locally scoped, applied elsewhere" marker, so excluding
+/// these from the candidate set is semantically correct, not a heuristic guess.
+fn collect_global_scoped_classes(source: &str, out: &mut rustc_hash::FxHashSet<String>) {
+    let bytes = source.as_bytes();
+    let mut i = 0;
+    while let Some(rel) = source[i..].find(":global(") {
+        let open = i + rel + ":global(".len();
+        // Balance parentheses so a `:global(:is(.a, .b))` still closes correctly.
+        let mut depth = 1usize;
+        let mut j = open;
+        while j < bytes.len() && depth > 0 {
+            match bytes[j] {
+                b'(' => depth += 1,
+                b')' => depth -= 1,
+                _ => {}
+            }
+            j += 1;
+        }
+        let inner_end = j.saturating_sub(1).max(open);
+        if let Some(inner) = source.get(open..inner_end) {
+            extract_dotted_class_names(inner, out);
+        }
+        i = j.max(open + 1);
+    }
+}
+
+/// Push every `.class` token in a CSS selector fragment (the bare name, no dot)
+/// into `out`. A class name is a dot followed by `[A-Za-z_-]` then any run of
+/// `[A-Za-z0-9_-]`.
+fn extract_dotted_class_names(selector: &str, out: &mut rustc_hash::FxHashSet<String>) {
+    let bytes = selector.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'.' {
+            let start = i + 1;
+            if start < bytes.len()
+                && (bytes[start].is_ascii_alphabetic() || matches!(bytes[start], b'_' | b'-'))
+            {
+                let mut j = start;
+                while j < bytes.len()
+                    && (bytes[j].is_ascii_alphanumeric() || matches!(bytes[j], b'_' | b'-'))
+                {
+                    j += 1;
+                }
+                if let Some(name) = selector.get(start..j) {
+                    out.insert(name.to_owned());
+                }
+                i = j;
+                continue;
+            }
+        }
+        i += 1;
+    }
+}
+
 /// Per-stylesheet located class definitions from STANDALONE `.css`/`.scss` files
 /// (not SFC `<style>` blocks, which are component-scoped and covered by the
 /// scoped-unused check). Returns `(rel_path, [(class, 1-based line)])`, each
 /// class deduped to its first definition. The defined surface for the
-/// unreferenced-global-class candidate.
+/// unreferenced-global-class candidate. Classes wrapped in `:global(...)` are
+/// dropped: they target externally-applied DOM and are never authored in markup.
 fn collect_defined_css_classes_located(
     files: &[fallow_types::discover::DiscoveredFile],
     config: &ResolvedConfig,
@@ -1622,12 +1684,20 @@ fn collect_defined_css_classes_located(
         let Ok(source) = std::fs::read_to_string(path) else {
             continue;
         };
+        let mut global_scoped: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
+        collect_global_scoped_classes(&source, &mut global_scoped);
         let mut seen: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
         let mut classes: Vec<(String, u32)> = Vec::new();
         for export in fallow_core::extract::extract_css_module_exports(&source, is_scss) {
             let ExportName::Named(name) = export.name else {
                 continue;
             };
+            // A `:global(.foo)` override targets DOM applied outside this module
+            // (a third-party library's runtime markup), so it is never authored in
+            // project markup and must not be an unreferenced-class candidate.
+            if global_scoped.contains(&name) {
+                continue;
+            }
             if !seen.insert(name.clone()) {
                 continue;
             }
