@@ -47,6 +47,7 @@ export const DIAGNOSTIC_CATEGORIES: ReadonlyArray<DiagnosticCategory> = [
   { code: "unused-class-member", label: "Unused Class Members" },
   { code: "unused-store-member", label: "Unused Store Members" },
   { code: "unused-server-action", label: "Unused Server Actions" },
+  { code: "unused-load-data-key", label: "Unused Load Data Keys" },
   { code: "unused-component-prop", label: "Unused Component Props" },
   { code: "unused-component-emit", label: "Unused Component Emits" },
   { code: "unrendered-component", label: "Unrendered Components" },
@@ -72,6 +73,7 @@ export const DIAGNOSTIC_CATEGORIES: ReadonlyArray<DiagnosticCategory> = [
   { code: "boundary-violation", label: "Boundary Violations" },
   { code: "stale-suppression", label: "Stale Suppressions" },
   { code: "unused-catalog-entry", label: "Unused Catalog Entries" },
+  { code: "empty-catalog-group", label: "Empty Catalog Groups" },
   {
     code: "unresolved-catalog-reference",
     label: "Unresolved Catalog References",

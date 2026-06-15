@@ -66,6 +66,7 @@ struct AnalysisCompleteParams {
     unused_component_props: usize,
     unused_component_emits: usize,
     unused_server_actions: usize,
+    unused_load_data_keys: usize,
     unresolved_imports: usize,
     unlisted_dependencies: usize,
     duplicate_exports: usize,
@@ -105,6 +106,7 @@ fn analysis_complete_params(
         unused_component_props: results.unused_component_props.len(),
         unused_component_emits: results.unused_component_emits.len(),
         unused_server_actions: results.unused_server_actions.len(),
+        unused_load_data_keys: results.unused_load_data_keys.len(),
         unresolved_imports: results.unresolved_imports.len(),
         unlisted_dependencies: results.unlisted_dependencies.len(),
         duplicate_exports: results.duplicate_exports.len(),
@@ -281,6 +283,11 @@ const DIAGNOSTIC_ISSUE_TYPES: &[DiagnosticIssueType] = &[
         config_key: Some("unused-server-actions"),
         code: "unused-server-action",
         label: "Unused Server Actions",
+    },
+    DiagnosticIssueType {
+        config_key: Some("unused-load-data-keys"),
+        code: "unused-load-data-key",
+        label: "Unused Load Data Keys",
     },
     DiagnosticIssueType {
         config_key: Some("route-collision"),
@@ -2764,6 +2771,8 @@ export function choose(value: number): string {
             unused_component_props: vec![],
             unused_component_emits: vec![],
             unused_server_actions: vec![],
+            unused_load_data_keys: vec![],
+            unused_load_data_keys_global_abstain: false,
             route_collisions: vec![fallow_core::results::RouteCollisionFinding::with_actions(
                 fallow_core::results::RouteCollision {
                     path: "/app/(a)/about/page.tsx".into(),

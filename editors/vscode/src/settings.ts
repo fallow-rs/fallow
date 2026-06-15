@@ -17,6 +17,7 @@ export interface IssueTypeConfig {
   readonly "unused-class-members": boolean;
   readonly "unused-store-member": boolean;
   readonly "unused-server-action": boolean;
+  readonly "unused-load-data-key": boolean;
   readonly "unused-component-prop": boolean;
   readonly "unused-component-emit": boolean;
   readonly "unrendered-component": boolean;

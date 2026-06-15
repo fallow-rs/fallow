@@ -74,8 +74,12 @@ def dependency_action(pkg):
     "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Unused component emit::Emit '\(.emit_name | san)' on component '\(.component_name | san)' is emitted nowhere in its own component.\(nl)\(nl)Remove the emit, or emit it. If it is part of a deliberately-stable public API, suppress this finding."),
   (.unprovided_injects[]? |
     "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Unprovided inject::\(.framework | san) inject for key '\(.key_name | san)' has no matching provider in the project.\(nl)\(nl)Add a provide/setContext for this key, or remove the dead inject."),
+  (.unused_load_data_keys[]? |
+    "::warning file=\(.path | san),line=\(.line),title=Unused load data key::SvelteKit load() return key '\(.key_name | san)' is read by no consumer (neither the sibling +page.svelte nor $page.data).\(nl)\(nl)The key runs a real server fetch / DB cost per request for data nothing renders. Remove the key, or use it."),
   (.type_only_dependencies[]? |
     "::warning file=\(.path | san)\(if .line > 0 then ",line=\(.line)" else "" end),title=Type-only dependency::Package '\(.package_name | san)' is only used via type imports.\(nl)\(nl)Move it from dependencies to devDependencies to reduce production bundle size."),
+  (.test_only_dependencies[]? |
+    "::warning file=\(.path | san)\(if .line > 0 then ",line=\(.line)" else "" end),title=Test-only dependency::Package '\(.package_name | san)' is only imported from test or config files.\(nl)\(nl)Move it from dependencies to devDependencies to reduce production bundle size."),
   (.stale_suppressions[]? |
     if .origin.type == "jsdoc_tag" then
       "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Stale @expected-unused::The @expected-unused tag on '\(.origin.export_name | san)' is stale because the export is now used.\(nl)\(nl)Remove the @expected-unused tag."

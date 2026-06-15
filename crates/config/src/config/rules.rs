@@ -131,6 +131,15 @@ pub struct RulesConfig {
     /// without failing CI until corpus-validated.
     #[serde(default, alias = "unused-server-action")]
     pub unused_server_actions: Severity,
+    /// SvelteKit `+page.{ts,server.ts,js,server.js}` `load()` return-object key
+    /// read by no consumer: not off the sibling `+page.svelte`'s `data.<key>`,
+    /// nor project-wide via `page.data.<key>` / `$page.data.<key>`. Cross-file
+    /// dead-input direction. Defaults to `warn`, not `error`: the rule is new and
+    /// false-negative-preferring (a whole-object `data` pass abstains), and a
+    /// load fetch can have side effects so deletion is a human call; warn encodes
+    /// that without failing CI until corpus-validated.
+    #[serde(default = "Severity::default_warn", alias = "unused-load-data-key")]
+    pub unused_load_data_keys: Severity,
     #[serde(default, alias = "unresolved-import")]
     pub unresolved_imports: Severity,
     #[serde(default, alias = "unlisted-dependency")]
@@ -250,6 +259,7 @@ impl Default for RulesConfig {
             unused_component_props: Severity::Warn,
             unused_component_emits: Severity::Warn,
             unused_server_actions: Severity::Warn,
+            unused_load_data_keys: Severity::Warn,
             unresolved_imports: Severity::Error,
             unlisted_dependencies: Severity::Error,
             duplicate_exports: Severity::Error,
@@ -325,6 +335,9 @@ impl RulesConfig {
         }
         if let Some(s) = partial.unused_server_actions {
             self.unused_server_actions = s;
+        }
+        if let Some(s) = partial.unused_load_data_keys {
+            self.unused_load_data_keys = s;
         }
         if let Some(s) = partial.unresolved_imports {
             self.unresolved_imports = s;
@@ -497,6 +510,12 @@ pub struct PartialRulesConfig {
     pub unused_server_actions: Option<Severity>,
     #[serde(
         default,
+        alias = "unused-load-data-key",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub unused_load_data_keys: Option<Severity>,
+    #[serde(
+        default,
         alias = "unresolved-import",
         skip_serializing_if = "Option::is_none"
     )]
@@ -661,6 +680,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unused-component-props",
     "unused-component-emits",
     "unused-server-actions",
+    "unused-load-data-keys",
     "unresolved-imports",
     "unlisted-dependencies",
     "duplicate-exports",
@@ -701,6 +721,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unused-component-prop",
     "unused-component-emit",
     "unused-server-action",
+    "unused-load-data-key",
     "unresolved-import",
     "unlisted-dependency",
     "duplicate-export",
@@ -1003,6 +1024,7 @@ mod tests {
             unused_component_props: Some(Severity::Off),
             unused_component_emits: Some(Severity::Off),
             unused_server_actions: Some(Severity::Off),
+            unused_load_data_keys: Some(Severity::Off),
             unresolved_imports: Some(Severity::Off),
             unlisted_dependencies: Some(Severity::Off),
             duplicate_exports: Some(Severity::Off),
@@ -1091,7 +1113,7 @@ mod tests {
 
     #[test]
     fn known_rule_names_count_matches_struct() {
-        assert_eq!(KNOWN_RULE_NAMES.len(), 78);
+        assert_eq!(KNOWN_RULE_NAMES.len(), 80);
     }
 
     #[test]
@@ -1132,8 +1154,8 @@ mod tests {
 
         assert_eq!(
             aliases_found.len(),
-            78,
-            "expected 78 source-level alias attrs (39 per struct); got {}: {:?}",
+            80,
+            "expected 80 source-level alias attrs (40 per struct); got {}: {:?}",
             aliases_found.len(),
             aliases_found
         );

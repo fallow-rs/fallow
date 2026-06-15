@@ -114,6 +114,7 @@ pub struct DeadCodeFilters {
     pub unused_component_props: bool,
     pub unused_component_emits: bool,
     pub unused_server_actions: bool,
+    pub unused_load_data_keys: bool,
     pub unresolved_imports: bool,
     pub unlisted_deps: bool,
     pub duplicate_exports: bool,
@@ -527,6 +528,7 @@ fn to_issue_filters(filters: &DeadCodeFilters) -> IssueFilters {
         unused_component_props: filters.unused_component_props,
         unused_component_emits: filters.unused_component_emits,
         unused_server_actions: filters.unused_server_actions,
+        unused_load_data_keys: filters.unused_load_data_keys,
         unresolved_imports: filters.unresolved_imports,
         unlisted_deps: filters.unlisted_deps,
         duplicate_exports: filters.duplicate_exports,
@@ -634,6 +636,7 @@ fn filter_for_circular_dependencies(results: &AnalysisResults) -> AnalysisResult
     filtered.unused_component_props.clear();
     filtered.unused_component_emits.clear();
     filtered.unused_server_actions.clear();
+    filtered.unused_load_data_keys.clear();
     filtered.unresolved_imports.clear();
     filtered.unlisted_dependencies.clear();
     filtered.duplicate_exports.clear();
@@ -664,6 +667,7 @@ fn filter_for_boundary_violations(results: &AnalysisResults) -> AnalysisResults 
     filtered.unused_component_props.clear();
     filtered.unused_component_emits.clear();
     filtered.unused_server_actions.clear();
+    filtered.unused_load_data_keys.clear();
     filtered.unresolved_imports.clear();
     filtered.unlisted_dependencies.clear();
     filtered.duplicate_exports.clear();

@@ -56,6 +56,10 @@ pub fn build_hover(
         return Some(hover);
     }
 
+    if let Some(hover) = check_unused_load_data_key(results, file_path, position) {
+        return Some(hover);
+    }
+
     if let Some(hover) = check_unresolved_import(results, file_path, position) {
         return Some(hover);
     }
@@ -610,6 +614,56 @@ fn check_unused_server_action(
                 },
                 end: Position {
                     line: action_line,
+                    character: end_col,
+                },
+            }),
+        });
+    }
+
+    None
+}
+
+/// Check if the position is on an unused SvelteKit `load()` return-object key.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "key name lengths are bounded by source size"
+)]
+fn check_unused_load_data_key(
+    results: &AnalysisResults,
+    file_path: &Path,
+    position: Position,
+) -> Option<Hover> {
+    for finding in &results.unused_load_data_keys {
+        let k = &finding.key;
+        if k.path != file_path {
+            continue;
+        }
+        let key_line = k.line.saturating_sub(1);
+        if key_line != position.line {
+            continue;
+        }
+        let end_col = k.col + k.key_name.len() as u32;
+        if position.character < k.col || position.character >= end_col {
+            continue;
+        }
+
+        let value = format!(
+            "**fallow**: load() return key {} is read by no consumer (sibling +page.svelte data.<key> or project-wide page.data.<key>).",
+            format_inline_code(&k.key_name),
+        );
+
+        return Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value,
+            }),
+            range: Some(Range {
+                start: Position {
+                    line: key_line,
+                    character: k.col,
+                },
+                end: Position {
+                    line: key_line,
                     character: end_col,
                 },
             }),

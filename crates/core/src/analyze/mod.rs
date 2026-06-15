@@ -23,6 +23,7 @@ mod unused_component_prop;
 mod unused_deps;
 mod unused_exports;
 mod unused_files;
+mod unused_load_data_key;
 mod unused_members;
 mod unused_overrides;
 mod unused_server_action;
@@ -55,7 +56,8 @@ use fallow_types::output_dead_code::{
     UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentEmitFinding,
     UnusedComponentPropFinding, UnusedDependencyFinding, UnusedDependencyOverrideFinding,
     UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
-    UnusedOptionalDependencyFinding, UnusedStoreMemberFinding, UnusedTypeFinding,
+    UnusedLoadDataKeyFinding, UnusedOptionalDependencyFinding, UnusedStoreMemberFinding,
+    UnusedTypeFinding,
 };
 
 use crate::results::{AnalysisResults, CircularDependency, CircularDependencyEdge};
@@ -100,6 +102,7 @@ use unused_exports::{
     reason = "ADR-008 deprecates detector helpers for external callers; core orchestration still calls them internally"
 )]
 use unused_files::find_unused_files;
+use unused_load_data_key::find_unused_load_data_keys;
 use unused_members::{UnusedMemberScanInput, find_unused_members_with_public_api_entry_points};
 #[expect(
     deprecated,
@@ -815,6 +818,15 @@ fn populate_framework_specific_findings(input: &mut FrameworkSpecificFindingsInp
         input.line_offsets_by_file,
         input.results,
     );
+    populate_unused_load_data_key_findings(
+        input.graph,
+        input.modules,
+        input.config,
+        input.declared_deps,
+        input.suppressions,
+        input.line_offsets_by_file,
+        input.results,
+    );
     populate_nextjs_route_tree_findings(
         input.graph,
         input.config,
@@ -823,6 +835,44 @@ fn populate_framework_specific_findings(input: &mut FrameworkSpecificFindingsInp
         input.suppressions,
         input.results,
     );
+}
+
+/// Populate `unused_load_data_keys` when the rule is enabled. Gated on the
+/// project declaring `@sveltejs/kit` inside the detector (see
+/// [`find_unused_load_data_keys`]). Runs as a sequential populate because it
+/// needs the run's `declared_deps` for the dep gate.
+fn populate_unused_load_data_key_findings(
+    graph: &ModuleGraph,
+    modules: &[ModuleInfo],
+    config: &ResolvedConfig,
+    declared_deps: &FxHashSet<String>,
+    suppressions: &SuppressionContext<'_>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+    results: &mut AnalysisResults,
+) {
+    if config.rules.unused_load_data_keys == Severity::Off {
+        return;
+    }
+    let result = find_unused_load_data_keys(
+        graph,
+        modules,
+        declared_deps,
+        suppressions,
+        line_offsets_by_file,
+        &config.root,
+    );
+    if result.global_abstain {
+        results.unused_load_data_keys_global_abstain = true;
+        tracing::debug!(
+            "unused-load-data-key: abstained project-wide (a whole-object use of \
+             page.data / $page.data was seen; any key could be read reflectively)"
+        );
+    }
+    results.unused_load_data_keys = result
+        .findings
+        .into_iter()
+        .map(UnusedLoadDataKeyFinding::with_actions)
+        .collect();
 }
 
 /// Populate `invalid_client_exports` when the rule is enabled. Gated on the
@@ -1980,6 +2030,7 @@ mod tests {
                 unused_component_props: Severity::Off,
                 unused_component_emits: Severity::Off,
                 unused_server_actions: Severity::Off,
+                unused_load_data_keys: Severity::Off,
                 unresolved_imports: Severity::Off,
                 unlisted_dependencies: Severity::Off,
                 duplicate_exports: Severity::Off,
@@ -2244,6 +2295,10 @@ mod tests {
                 has_unharvestable_emits: false,
                 has_dynamic_emit: false,
                 has_emit_whole_object_use: false,
+                load_return_keys: Vec::new(),
+                has_unharvestable_load: false,
+                has_load_data_whole_use: false,
+                has_page_data_store_whole_use: false,
             }];
 
             let rules = RulesConfig {

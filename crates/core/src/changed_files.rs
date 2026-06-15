@@ -443,6 +443,9 @@ pub fn filter_results_by_changed_files(
         unused_component_props,
         unused_component_emits,
         unused_server_actions,
+        unused_load_data_keys,
+        // Observability flag, not an issue collection.
+        unused_load_data_keys_global_abstain: _unused_load_data_keys_global_abstain,
         // Non-finding fields: counts and metadata, not issue collections.
         suppression_count: _suppression_count,
         active_suppressions: _active_suppressions,
@@ -522,6 +525,7 @@ pub fn filter_results_by_changed_files(
     unused_component_props.retain(|p| contains_normalized(&cf, &p.prop.path));
     unused_component_emits.retain(|e| contains_normalized(&cf, &e.emit.path));
     unused_server_actions.retain(|a| contains_normalized(&cf, &a.action.path));
+    unused_load_data_keys.retain(|k| contains_normalized(&cf, &k.key.path));
 }
 
 /// Pre-normalise a `changed_files` set through `dunce::simplified` so each

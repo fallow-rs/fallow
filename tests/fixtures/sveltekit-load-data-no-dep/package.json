@@ -1,0 +1,7 @@
+{
+  "name": "sveltekit-load-data-no-dep",
+  "private": true,
+  "dependencies": {
+    "svelte": "^5.0.0"
+  }
+}

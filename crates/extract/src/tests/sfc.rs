@@ -1484,6 +1484,56 @@ export let data;
     );
 }
 
+// Regression: a typed route `data` prop (`export let data: PageData`) must keep
+// its template `data.<key>` accesses keyed on `data`. The typed binding
+// (`data -> PageData`) otherwise remaps a component-attribute access
+// (`<Post postId={data.postId} />`) onto the generated `$types` alias
+// (`PageData.postId`), which made the cross-file load-data join miss the consumer
+// read and false-flag the `load()` return key. Caught on the `query` benchmark.
+#[test]
+fn sveltekit_typed_data_prop_template_attribute_stays_data_keyed() {
+    let info = parse_sfc(
+        r#"
+<script lang="ts">
+import Post from '$lib/Post.svelte'
+import type { PageData } from './$types'
+export let data: PageData
+</script>
+<Post postId={data.postId} />
+"#,
+        "src/routes/[postId]/+page.svelte",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "data" && access.member == "postId"),
+        "typed-data component-attribute `data.postId` should be recorded, got: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn sveltekit_typed_data_prop_script_read_stays_data_keyed() {
+    let info = parse_sfc(
+        r#"
+<script lang="ts">
+import type { PageData } from './$types'
+export let data: PageData
+const greeting = data.message
+</script>
+<h1>{greeting}</h1>
+"#,
+        "src/routes/+page.svelte",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "data" && access.member == "message"),
+        "typed-data script-side `data.message` should be recorded, got: {:?}",
+        info.member_accesses
+    );
+}
+
 #[test]
 fn sveltekit_data_prop_each_block_member_access_in_page_svelte() {
     let info = parse_sfc(
@@ -1641,5 +1691,41 @@ const id = page.data.session;
             .any(|a| a.object == "page.data" && a.member == "title"),
         "template `page.data.title` should be recovered, got: {:?}",
         info.member_accesses
+    );
+}
+
+#[test]
+fn route_component_template_data_prop_pass_is_whole_use() {
+    // FP-1: `<Child data={data} />` in a route component passes the whole `data`
+    // prop opaquely, so the load-data detector must abstain on this route.
+    let source =
+        "<script lang=\"ts\">\n  let { data } = $props();\n</script>\n<Child data={data} />";
+    let info = parse_sfc(source, "+page.svelte");
+    assert!(
+        info.has_load_data_whole_use,
+        "data={{data}} in a route component is a whole-data use"
+    );
+}
+
+#[test]
+fn route_component_template_data_spread_is_whole_use() {
+    // FP-1: `{...data}` template spread passes the whole `data` prop opaquely.
+    let source = "<script lang=\"ts\">\n  let { data } = $props();\n</script>\n<Child {...data} />";
+    let info = parse_sfc(source, "+page.svelte");
+    assert!(
+        info.has_load_data_whole_use,
+        "{{...data}} template spread is a whole-data use"
+    );
+}
+
+#[test]
+fn route_component_template_member_access_is_not_whole_use() {
+    // `{data.title}` is a credited member access, NOT a whole-data use.
+    let source =
+        "<script lang=\"ts\">\n  let { data } = $props();\n</script>\n<h1>{data.title}</h1>";
+    let info = parse_sfc(source, "+page.svelte");
+    assert!(
+        !info.has_load_data_whole_use,
+        "data.title member access must not set the whole-data-use flag"
     );
 }

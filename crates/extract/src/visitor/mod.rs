@@ -285,6 +285,19 @@ pub(crate) struct ModuleInfoExtractor {
     /// / `storeToRefs(s)`) so it never fires on a plain `new`-instance or object
     /// binding, keeping class-member detection drift-free. Working state only.
     store_instance_locals: FxHashSet<String>,
+    /// SvelteKit `load()` return-object keys harvested from a `load` export.
+    /// Basename-gated to page-load producers in `parse.rs` (cleared for any
+    /// non-`+page.{ts,server.ts,js,server.js}` file). Consumed by the
+    /// `unused-load-data-key` detector.
+    pub(crate) load_return_keys: Vec<fallow_types::extract::LoadReturnKey>,
+    /// `true` when a `load` export was seen whose body could not be harvested
+    /// safely (spread/non-literal/multi-return/computed-key/wrapped). Forces the
+    /// `unused-load-data-key` detector to abstain on the whole file.
+    pub(crate) has_unharvestable_load: bool,
+    /// `true` when this file passes the whole `data` binding opaquely
+    /// (`const X = data`, `fn(data)` / `fn(...data)`). Name-gated on `data`.
+    /// Consumed only by the `unused-load-data-key` detector (FP-1).
+    pub(crate) has_load_data_whole_use: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -975,6 +988,11 @@ impl ModuleInfoExtractor {
             has_unharvestable_emits: false,
             has_dynamic_emit: false,
             has_emit_whole_object_use: false,
+            load_return_keys: self.load_return_keys,
+            has_unharvestable_load: self.has_unharvestable_load,
+            has_load_data_whole_use: self.has_load_data_whole_use,
+            // Derived in `release_resolution_payload` from `whole_object_uses`.
+            has_page_data_store_whole_use: false,
         }
     }
 
@@ -1036,6 +1054,9 @@ impl ModuleInfoExtractor {
         info.misplaced_directives.extend(self.misplaced_directives);
         info.di_key_sites.extend(self.di_key_sites);
         info.has_dynamic_provide = info.has_dynamic_provide || self.has_dynamic_provide;
+        info.load_return_keys.extend(self.load_return_keys);
+        info.has_unharvestable_load = info.has_unharvestable_load || self.has_unharvestable_load;
+        info.has_load_data_whole_use = info.has_load_data_whole_use || self.has_load_data_whole_use;
     }
 }
 

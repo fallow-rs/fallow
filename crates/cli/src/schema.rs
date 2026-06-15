@@ -239,6 +239,10 @@ fn apply_source_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
             m.filter_flag = Some("--unused-server-actions");
             m.suppress = Some(("unused-server-action", false));
         }
+        "unused-load-data-key" => {
+            m.filter_flag = Some("--unused-load-data-keys");
+            m.suppress = Some(("unused-load-data-key", false));
+        }
         "unresolved-import" => {
             m.filter_flag = Some("--unresolved-imports");
             m.suppress = Some(("unresolved-import", false));

@@ -37,6 +37,7 @@ pub struct IssueFilters {
     pub unused_component_props: bool,
     pub unused_component_emits: bool,
     pub unused_server_actions: bool,
+    pub unused_load_data_keys: bool,
     pub unresolved_imports: bool,
     pub unlisted_deps: bool,
     pub duplicate_exports: bool,
@@ -72,6 +73,7 @@ impl IssueFilters {
             || self.unused_component_props
             || self.unused_component_emits
             || self.unused_server_actions
+            || self.unused_load_data_keys
             || self.unresolved_imports
             || self.unlisted_deps
             || self.duplicate_exports
@@ -146,6 +148,9 @@ impl IssueFilters {
         }
         if !self.unused_server_actions {
             results.unused_server_actions.clear();
+        }
+        if !self.unused_load_data_keys {
+            results.unused_load_data_keys.clear();
         }
         if !self.unresolved_imports {
             results.unresolved_imports.clear();
@@ -684,6 +689,19 @@ pub fn print_check_result(result: &CheckResult, opts: PrintCheckOptions) -> Exit
         }
     }
 
+    // S1 observability: when the load-data-key detector abstained project-wide
+    // (a whole-object use of page.data / $page.data was seen), a 0 finding count
+    // is NOT a clean bill, so say so on human output.
+    if result.results.unused_load_data_keys_global_abstain
+        && !opts.quiet
+        && matches!(result.config.output, OutputFormat::Human)
+    {
+        eprintln!(
+            "Note: unused-load-data-key abstained project-wide (a whole-object use of \
+             page.data / $page.data was seen; any returned key could be read reflectively)."
+        );
+    }
+
     if rules::has_error_severity_issues(&result.results, &effective_rules, Some(&result.config)) {
         ExitCode::from(1)
     } else {
@@ -845,6 +863,7 @@ mod tests {
             unused_component_props: false,
             unused_component_emits: false,
             unused_server_actions: false,
+            unused_load_data_keys: false,
             unresolved_imports: false,
             unlisted_deps: false,
             duplicate_exports: false,
@@ -1272,6 +1291,7 @@ mod tests {
             unused_component_props: true,
             unused_component_emits: true,
             unused_server_actions: true,
+            unused_load_data_keys: true,
             unresolved_imports: true,
             unlisted_deps: true,
             duplicate_exports: true,

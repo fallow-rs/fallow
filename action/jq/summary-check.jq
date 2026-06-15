@@ -58,6 +58,7 @@ else
     table_row("Unused component props"; "unused_component_props"; "unused-component-prop"),
     table_row("Unused component emits"; "unused_component_emits"; "unused-component-emit"),
     table_row("Unprovided injects"; "unprovided_injects"; "unprovided-inject"),
+    table_row("Unused load data keys"; "unused_load_data_keys"; "unused-load-data-key"),
     table_row("Type-only dependencies"; "type_only_dependencies"; "type-only-dependencies"),
     table_row("Test-only dependencies"; "test_only_dependencies"; "test-only-dependencies"),
     table_row("Stale suppressions"; "stale_suppressions"; "stale-suppressions"),
@@ -155,6 +156,9 @@ else
   section("Unprovided injects"; "unprovided_injects";
     "Vue `inject` / Svelte `getContext` calls for a key that no ancestor `provide` / `setContext` supplies.\n\n| File | Key | Framework |\n|------|-----|-----------|\n";
     "| `\(.path):\(.line)` | `\(.key_name)` | \(.framework) |") +
+  section("Unused load data keys"; "unused_load_data_keys";
+    "SvelteKit `load()` return-object keys read by no consumer (neither the sibling `+page.svelte` nor `$page.data`). The key runs a real server fetch / DB cost per request for data nothing renders.\n\n| File | Route | Key |\n|------|-------|-----|\n";
+    "| `\(.path):\(.line)` | `\(.route_dir)` | `\(.key_name)` |") +
   section("Type-only dependencies"; "type_only_dependencies";
     "Dependencies only used for type imports \u2014 consider moving to `devDependencies`.\n\n| Package |\n|---------|\n";
     "| `\(.package_name)` |") +

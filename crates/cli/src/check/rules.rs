@@ -136,6 +136,12 @@ fn apply_file_override_rules(
             .unused_server_actions
             != Severity::Off
     });
+    results.unused_load_data_keys.retain(|k| {
+        config
+            .resolve_rules_for_path(&k.key.path)
+            .unused_load_data_keys
+            != Severity::Off
+    });
     results.unresolved_imports.retain(|i| {
         config
             .resolve_rules_for_path(&i.import.path)
@@ -243,6 +249,9 @@ fn apply_base_file_rules(results: &mut fallow_core::results::AnalysisResults, ru
     }
     if rules.unused_server_actions == Severity::Off {
         results.unused_server_actions.clear();
+    }
+    if rules.unused_load_data_keys == Severity::Off {
+        results.unused_load_data_keys.clear();
     }
     if rules.unresolved_imports == Severity::Off {
         results.unresolved_imports.clear();
@@ -387,6 +396,12 @@ fn has_override_file_scoped_error(
                 .unused_server_actions
                 == Severity::Error
         })
+        || results.unused_load_data_keys.iter().any(|k| {
+            config
+                .resolve_rules_for_path(&k.key.path)
+                .unused_load_data_keys
+                == Severity::Error
+        })
         || results.unresolved_imports.iter().any(|i| {
             config
                 .resolve_rules_for_path(&i.import.path)
@@ -480,6 +495,8 @@ fn has_default_file_scoped_error(
             && !results.unused_component_emits.is_empty())
         || (rules.unused_server_actions == Severity::Error
             && !results.unused_server_actions.is_empty())
+        || (rules.unused_load_data_keys == Severity::Error
+            && !results.unused_load_data_keys.is_empty())
         || (rules.unresolved_imports == Severity::Error && !results.unresolved_imports.is_empty())
         || (rules.stale_suppressions == Severity::Error && !results.stale_suppressions.is_empty())
         || (rules.unresolved_catalog_references == Severity::Error
@@ -591,6 +608,9 @@ pub fn promote_warns_to_errors(rules: &mut RulesConfig) {
     }
     if rules.unused_server_actions == Severity::Warn {
         rules.unused_server_actions = Severity::Error;
+    }
+    if rules.unused_load_data_keys == Severity::Warn {
+        rules.unused_load_data_keys = Severity::Error;
     }
     if rules.unresolved_imports == Severity::Warn {
         rules.unresolved_imports = Severity::Error;
@@ -890,6 +910,7 @@ mod tests {
             unused_component_props: Severity::Off,
             unused_component_emits: Severity::Off,
             unused_server_actions: Severity::Off,
+            unused_load_data_keys: Severity::Off,
             unresolved_imports: Severity::Off,
             unlisted_dependencies: Severity::Off,
             duplicate_exports: Severity::Off,
@@ -1019,6 +1040,7 @@ mod tests {
             unused_component_props: Severity::Warn,
             unused_component_emits: Severity::Warn,
             unused_server_actions: Severity::Warn,
+            unused_load_data_keys: Severity::Warn,
             unresolved_imports: Severity::Warn,
             unlisted_dependencies: Severity::Warn,
             duplicate_exports: Severity::Warn,
@@ -1071,6 +1093,7 @@ mod tests {
             unused_component_props: Severity::Warn,
             unused_component_emits: Severity::Warn,
             unused_server_actions: Severity::Warn,
+            unused_load_data_keys: Severity::Warn,
             unresolved_imports: Severity::Warn,
             unlisted_dependencies: Severity::Warn,
             duplicate_exports: Severity::Warn,
@@ -1544,6 +1567,7 @@ mod tests {
             unused_component_props: Severity::Warn,
             unused_component_emits: Severity::Warn,
             unused_server_actions: Severity::Warn,
+            unused_load_data_keys: Severity::Warn,
             unresolved_imports: Severity::Warn,
             unlisted_dependencies: Severity::Warn,
             duplicate_exports: Severity::Warn,
@@ -1609,6 +1633,7 @@ mod tests {
             unused_component_props: Severity::Off,
             unused_component_emits: Severity::Off,
             unused_server_actions: Severity::Off,
+            unused_load_data_keys: Severity::Off,
             unresolved_imports: Severity::Off,
             unlisted_dependencies: Severity::Off,
             duplicate_exports: Severity::Off,

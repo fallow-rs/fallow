@@ -1452,9 +1452,14 @@ rm -rf "$CI_API_FAIL_WORK"
 
 # --- IssueKind summary drift guard ---
 #
-# Same guard as the GitHub Action suite, run against the GitLab
-# summary-check.jq. A new dead-code IssueKind that is not wired into the GitLab
-# summary table would otherwise vanish silently from MR summaries.
+# Same guard as the GitHub Action suite, run against every GitLab jq surface
+# that carries the full dead-code set. A new dead-code IssueKind not wired into
+# one of these would otherwise vanish silently from MR output. GitLab has no
+# annotations / filter-changed surfaces, so all three are gated "all".
+#
+#   summary-check.jq      dead-code summary table
+#   summary-combined.jq   combined-mode Code-issues breakdown
+#   summary-audit.jq      audit dead_code_rows
 
 echo ""
 echo "=== IssueKind summary drift guard (GitLab) ==="
@@ -1462,7 +1467,9 @@ echo "=== IssueKind summary drift guard (GitLab) ==="
 GUARD_DIR="$DIR/../../action/tests"
 # shellcheck source=action/tests/issuekind-drift-guard.sh
 . "$GUARD_DIR/issuekind-drift-guard.sh"
-assert_issuekind_summary_coverage "gitlab summary-check" "$CI_JQ_DIR/summary-check.jq"
+assert_issuekind_summary_coverage "gitlab summary-check"    "$CI_JQ_DIR/summary-check.jq"
+assert_issuekind_summary_coverage "gitlab summary-combined" "$CI_JQ_DIR/summary-combined.jq"
+assert_issuekind_summary_coverage "gitlab summary-audit"    "$CI_JQ_DIR/summary-audit.jq"
 
 # --- Summary ---
 
