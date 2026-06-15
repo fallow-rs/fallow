@@ -316,10 +316,6 @@ pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode
     )
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "health pipeline orchestration with many optional features"
-)]
 fn execute_health_inner(
     opts: &HealthOptions<'_>,
     input: HealthPipelineInput,
@@ -358,7 +354,7 @@ fn execute_health_inner(
         enforce_coverage_gaps,
         enforce_crap,
     );
-    let mut analysis_data = prepare_health_analysis_data(
+    let analysis_data = prepare_health_analysis_data(
         opts,
         &config,
         &modules,
@@ -370,8 +366,6 @@ fn execute_health_inner(
         pre_computed_analysis,
         needs_file_scores,
     )?;
-
-    let file_scores_slice = health_file_scores_slice(analysis_data.score_output.as_ref());
 
     let HealthFindingsData {
         findings,
@@ -400,54 +394,28 @@ fn execute_health_inner(
         analysis_data.score_output.as_ref(),
     )?;
 
-    let derived_sections = prepare_health_derived_sections(
+    let HealthRuntimeSections {
+        analysis_data,
+        derived_sections,
+        vital_data,
+    } = prepare_health_runtime_sections(
         opts,
-        HealthDerivedSectionInput {
+        HealthRuntimeSectionsInput {
             config: &config,
             files: &files,
+            modules: &modules,
+            file_paths: &file_paths,
             ignore_set: &ignore_set,
             changed_files: changed_files.as_ref(),
             ws_roots: ws_roots.as_deref(),
-            file_scores: file_scores_slice,
-            churn_fetch: analysis_data.churn_fetch.take(),
             diff_index,
-            score_output: analysis_data.score_output.as_ref(),
             loaded_baseline: loaded_baseline.as_ref(),
-        },
-    );
-
-    finalize_health_runtime_outputs(
-        opts,
-        HealthRuntimeFinalizeInput {
-            config: &config,
-            runtime_coverage: &mut analysis_data.runtime_coverage,
             findings: &findings,
-            targets: &derived_sections.targets,
-            loaded_baseline: loaded_baseline.as_ref(),
-            changed_files: changed_files.as_ref(),
-            diff_index,
+            analysis_data,
+            has_istanbul_coverage: istanbul_coverage.is_some(),
+            needs_file_scores,
         },
     )?;
-
-    let vital_data = prepare_health_vital_data(&HealthVitalDataInput {
-        opts,
-        modules: &modules,
-        file_paths: &file_paths,
-        score_output: analysis_data.score_output.as_ref(),
-        file_scores_slice,
-        hotspots: &derived_sections.hotspots,
-        dupes_report: derived_sections.dupes_report.as_ref(),
-        candidate_paths: &derived_sections.candidate_paths,
-        total_files: files.len(),
-        config: &config,
-        ignore_set: &ignore_set,
-        changed_files: changed_files.as_ref(),
-        ws_roots: ws_roots.as_deref(),
-        diff_index,
-        hotspot_summary: derived_sections.hotspot_summary.as_ref(),
-        has_istanbul_coverage: istanbul_coverage.is_some(),
-        needs_file_scores,
-    })?;
 
     let HealthOutputParts {
         mut report,
@@ -3741,6 +3709,103 @@ struct HealthAnalysisData {
     git_churn_ms: f64,
     git_churn_cache_hit: bool,
     churn_fetch: Option<hotspots::ChurnFetchResult>,
+}
+
+struct HealthRuntimeSectionsInput<'a> {
+    config: &'a ResolvedConfig,
+    files: &'a [fallow_types::discover::DiscoveredFile],
+    modules: &'a [fallow_core::extract::ModuleInfo],
+    file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
+    ignore_set: &'a globset::GlobSet,
+    changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
+    ws_roots: Option<&'a [std::path::PathBuf]>,
+    diff_index: Option<&'a crate::report::ci::diff_filter::DiffIndex>,
+    loaded_baseline: Option<&'a HealthBaselineData>,
+    findings: &'a [ComplexityViolation],
+    analysis_data: HealthAnalysisData,
+    has_istanbul_coverage: bool,
+    needs_file_scores: bool,
+}
+
+struct HealthRuntimeSections {
+    analysis_data: HealthAnalysisData,
+    derived_sections: HealthDerivedSections,
+    vital_data: HealthVitalData,
+}
+
+fn prepare_health_runtime_sections(
+    opts: &HealthOptions<'_>,
+    mut input: HealthRuntimeSectionsInput<'_>,
+) -> Result<HealthRuntimeSections, ExitCode> {
+    let file_scores_slice = health_file_scores_slice(input.analysis_data.score_output.as_ref());
+    let derived_sections = prepare_health_derived_sections(
+        opts,
+        HealthDerivedSectionInput {
+            config: input.config,
+            files: input.files,
+            ignore_set: input.ignore_set,
+            changed_files: input.changed_files,
+            ws_roots: input.ws_roots,
+            file_scores: file_scores_slice,
+            churn_fetch: input.analysis_data.churn_fetch.take(),
+            diff_index: input.diff_index,
+            score_output: input.analysis_data.score_output.as_ref(),
+            loaded_baseline: input.loaded_baseline,
+        },
+    );
+
+    finalize_health_runtime_outputs(
+        opts,
+        HealthRuntimeFinalizeInput {
+            config: input.config,
+            runtime_coverage: &mut input.analysis_data.runtime_coverage,
+            findings: input.findings,
+            targets: &derived_sections.targets,
+            loaded_baseline: input.loaded_baseline,
+            changed_files: input.changed_files,
+            diff_index: input.diff_index,
+        },
+    )?;
+
+    let vital_data = prepare_health_vital_data_from_sections(
+        opts,
+        &input,
+        &derived_sections,
+        file_scores_slice,
+    )?;
+
+    Ok(HealthRuntimeSections {
+        analysis_data: input.analysis_data,
+        derived_sections,
+        vital_data,
+    })
+}
+
+fn prepare_health_vital_data_from_sections(
+    opts: &HealthOptions<'_>,
+    input: &HealthRuntimeSectionsInput<'_>,
+    derived_sections: &HealthDerivedSections,
+    file_scores_slice: &[FileHealthScore],
+) -> Result<HealthVitalData, ExitCode> {
+    prepare_health_vital_data(&HealthVitalDataInput {
+        opts,
+        modules: input.modules,
+        file_paths: input.file_paths,
+        score_output: input.analysis_data.score_output.as_ref(),
+        file_scores_slice,
+        hotspots: &derived_sections.hotspots,
+        dupes_report: derived_sections.dupes_report.as_ref(),
+        candidate_paths: &derived_sections.candidate_paths,
+        total_files: input.files.len(),
+        config: input.config,
+        ignore_set: input.ignore_set,
+        changed_files: input.changed_files,
+        ws_roots: input.ws_roots,
+        diff_index: input.diff_index,
+        hotspot_summary: derived_sections.hotspot_summary.as_ref(),
+        has_istanbul_coverage: input.has_istanbul_coverage,
+        needs_file_scores: input.needs_file_scores,
+    })
 }
 
 #[expect(
