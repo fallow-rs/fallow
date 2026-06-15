@@ -553,11 +553,14 @@ impl AnalysisResults {
         self.sort_export_usages();
     }
 
-    #[expect(
-        clippy::too_many_lines,
-        reason = "a flat per-collection sort list: one stable sort_by per finding type. Splitting by category obscures the registration set."
-    )]
     fn sort_core_findings(&mut self) {
+        self.sort_core_declaration_findings();
+        self.sort_core_member_findings();
+        self.sort_core_framework_findings();
+        self.sort_core_route_and_load_findings();
+    }
+
+    fn sort_core_declaration_findings(&mut self) {
         self.unused_files
             .sort_by(|a, b| a.file.path.cmp(&b.file.path));
 
@@ -609,7 +612,9 @@ impl AnalysisResults {
                 .then(a.dep.line.cmp(&b.dep.line))
                 .then(a.dep.package_name.cmp(&b.dep.package_name))
         });
+    }
 
+    fn sort_core_member_findings(&mut self) {
         self.unused_enum_members.sort_by(|a, b| {
             a.member
                 .path
@@ -645,7 +650,9 @@ impl AnalysisResults {
                 .then(a.import.col.cmp(&b.import.col))
                 .then(a.import.specifier.cmp(&b.import.specifier))
         });
+    }
 
+    fn sort_core_framework_findings(&mut self) {
         self.invalid_client_exports.sort_by(|a, b| {
             a.export
                 .path
@@ -689,7 +696,9 @@ impl AnalysisResults {
                 .then(a.component.col.cmp(&b.component.col))
                 .then(a.component.component_name.cmp(&b.component.component_name))
         });
+    }
 
+    fn sort_core_route_and_load_findings(&mut self) {
         self.route_collisions.sort_by(|a, b| {
             a.collision
                 .path
