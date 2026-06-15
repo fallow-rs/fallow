@@ -89,6 +89,9 @@ pub struct BaselineData {
     /// Unused server actions, keyed by `file:action_name`.
     #[serde(default)]
     pub unused_server_actions: Vec<String>,
+    /// Unused SvelteKit load() data keys, keyed by `file:key_name`.
+    #[serde(default)]
+    pub unused_load_data_keys: Vec<String>,
     /// Unresolved imports, keyed by `file:specifier`.
     #[serde(default)]
     pub unresolved_imports: Vec<String>,
@@ -182,6 +185,7 @@ impl BaselineData {
             unused_component_props: member_imports.unused_component_props,
             unused_component_emits: member_imports.unused_component_emits,
             unused_server_actions: member_imports.unused_server_actions,
+            unused_load_data_keys: member_imports.unused_load_data_keys,
             unresolved_imports: member_imports.unresolved_imports,
             unlisted_dependencies: dependencies.unlisted,
             duplicate_exports: member_imports.duplicate_exports,
@@ -224,6 +228,7 @@ impl BaselineData {
             + self.unused_component_props.len()
             + self.unused_component_emits.len()
             + self.unused_server_actions.len()
+            + self.unused_load_data_keys.len()
             + self.unresolved_imports.len()
             + self.unlisted_dependencies.len()
             + self.duplicate_exports.len()
@@ -372,6 +377,7 @@ struct BaselineMemberImportKeys {
     unused_component_props: Vec<String>,
     unused_component_emits: Vec<String>,
     unused_server_actions: Vec<String>,
+    unused_load_data_keys: Vec<String>,
     unresolved_imports: Vec<String>,
     duplicate_exports: Vec<String>,
     stale_suppressions: Vec<String>,
@@ -460,6 +466,11 @@ fn baseline_member_import_keys(
                     a.action.action_name
                 )
             })
+            .collect(),
+        unused_load_data_keys: results
+            .unused_load_data_keys
+            .iter()
+            .map(|k| format!("{}:{}", relative_path(&k.key.path, root), k.key.key_name))
             .collect(),
         unresolved_imports: results
             .unresolved_imports
@@ -868,6 +879,21 @@ impl BaselineFilterContext<'_> {
                 finding.action.action_name
             );
             !baseline_unused_server_actions.contains(key.as_str())
+        });
+
+        let baseline_unused_load_data_keys: FxHashSet<&str> = self
+            .baseline
+            .unused_load_data_keys
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.unused_load_data_keys.retain(|finding| {
+            let key = format!(
+                "{}:{}",
+                relative_path(&finding.key.path, self.root),
+                finding.key.key_name
+            );
+            !baseline_unused_load_data_keys.contains(key.as_str())
         });
     }
 
@@ -2039,6 +2065,7 @@ mod tests {
             unused_component_props: vec![],
             unused_component_emits: vec![],
             unused_server_actions: vec![],
+            unused_load_data_keys: vec![],
             unresolved_imports: vec![],
             unlisted_dependencies: vec![],
             duplicate_exports: vec![],
@@ -2099,6 +2126,7 @@ mod tests {
             unused_component_props: vec![],
             unused_component_emits: vec![],
             unused_server_actions: vec![],
+            unused_load_data_keys: vec![],
             unresolved_imports: vec![],
             unlisted_dependencies: vec![],
             duplicate_exports: vec![],
@@ -2146,6 +2174,7 @@ mod tests {
             unused_component_props: vec![],
             unused_component_emits: vec![],
             unused_server_actions: vec![],
+            unused_load_data_keys: vec![],
             unresolved_imports: vec![],
             unlisted_dependencies: vec![],
             duplicate_exports: vec![],

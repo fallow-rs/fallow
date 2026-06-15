@@ -1,8 +1,19 @@
 #!/usr/bin/env bash
 # Shared drift guard: every canonical dead-code IssueKind must surface in the
-# CI jq summary tables. A new fallow IssueKind that is not wired into
-# summary-check.jq would otherwise vanish silently from PR/MR summaries (the
-# class of gap this guard exists to catch).
+# jq summary / annotation / filter tables that are supposed to carry the full
+# dead-code set. A new fallow IssueKind that is not wired into one of those
+# surfaces would otherwise vanish silently from PR/MR output (the class of gap
+# this guard exists to catch). It gates ALL such surfaces, not just
+# summary-check.jq:
+#
+#   action/jq/summary-check.jq      (all)   GitHub dead-code summary table
+#   action/jq/summary-combined.jq   (all)   GitHub combined Code-issues breakdown
+#   action/jq/summary-audit.jq      (all)   GitHub audit dead_code_rows
+#   action/jq/annotations-check.jq  (all)   GitHub ::warning annotations
+#   action/jq/filter-changed.jq     (all)   per-changed-file filter + recount
+#   ci/jq/summary-check.jq          (all)   GitLab dead-code summary table
+#   ci/jq/summary-combined.jq       (all)   GitLab combined Code-issues breakdown
+#   ci/jq/summary-audit.jq          (all)   GitLab audit dead_code_rows
 #
 # Sourced by both action/tests/run.sh and ci/tests/run.sh. Relies on the
 # `pass` / `fail` helpers defined by the sourcing runner, plus `$GUARD_DIR`
@@ -12,12 +23,20 @@
 # (issue_types[].command == "dead-code"). When the binary is unavailable the
 # fallback derives the kebab ids from crates/types/src/suppress.rs
 # `issue_kind_to_kebab` instead. Either source is mapped to the snake_case
-# plural JSON result key that summary-check.jq keys its table_row / section on.
+# plural JSON result key the surfaces reference.
 #
 # Non-dead-code kinds (security-*, code-duplication, complexity, coverage-gaps,
-# feature-flag) are NOT summarised in summary-check.jq: they belong to the
-# dupes / health / flags / security surfaces. They have no mapping entry and
-# are reported as deliberate skips rather than failures.
+# feature-flag) are NOT summarised by these dead-code surfaces: they belong to
+# the dupes / health / flags / security surfaces. They have no mapping entry
+# and are reported as deliberate skips rather than failures.
+#
+# Per-surface expectation. Each surface declares whether it SHOULD carry every
+# dead-code kind ("all") or a documented subset. A surface keyed "all" fails
+# the moment any canonical kind is absent. A subset surface lists the kebab ids
+# it is permitted to omit; those ids are skipped (reported, never failed) while
+# every OTHER kind is still gated. This means a brand-new 38th IssueKind that
+# fails to reach a subset surface STILL fails the guard; only the explicitly
+# enumerated, documented omissions are tolerated.
 
 # Deterministic kebab-id -> summary-check.jq JSON key. Irregular pluralisation
 # (catalog-entry -> catalog_entries, boundary-coverage -> *_violations) makes a
@@ -61,6 +80,7 @@ issuekind_json_key() {
     unused-component-prop) echo "unused_component_props" ;;
     unused-component-emit) echo "unused_component_emits" ;;
     unused-server-action) echo "unused_server_actions" ;;
+    unused-load-data-key) echo "unused_load_data_keys" ;;
     route-collision) echo "route_collisions" ;;
     dynamic-segment-name-conflict) echo "dynamic_segment_name_conflicts" ;;
     *) return 1 ;;
@@ -95,13 +115,53 @@ fallow_dead_code_ids() {
     | sed -E 's/=> "//; s/",//' | sort -u
 }
 
-# Run the guard against one summary-check.jq. Args: <label> <path-to-jq-file>.
+# Does the JSON result key appear in this jq source? Surfaces reference keys in
+# two distinct ways and the guard must recognise BOTH:
+#   * quoted string token   -> "unused_files"      (summary-check.jq table_row)
+#   * jq member access       -> .unused_files,
+#                               .check.unused_files,
+#                               .dead_code.unused_files[]?   (combined/audit/
+#                               annotations/filter surfaces)
+# The member-access form is matched as a literal `.` immediately followed by the
+# key, bounded so `.unused_file` never matches `.unused_files`. The trailing
+# bound also accepts end-of-line.
+issuekind_key_present() {
+  local jq_src="$1" key="$2"
+  printf '%s' "$jq_src" | grep -qE "\"${key}\"|\.${key}([^A-Za-z0-9_]|$)"
+}
+
+# Is <kebab-id> in the space-separated allowed-omission list <allow>? Used to
+# tolerate the documented per-surface subset exceptions.
+issuekind_in_allowlist() {
+  local id="$1" allow="$2" entry
+  for entry in $allow; do
+    [ "$entry" = "$id" ] && return 0
+  done
+  return 1
+}
+
+# Run the guard against one dead-code surface.
+#   $1 label        human label for pass/fail output
+#   $2 jq_file      path to the jq surface to scan
+#   $3 expectation  "all" (default) to require every canonical dead-code kind,
+#                   or "allow:<kebab-id> <kebab-id> ..." to permit a documented
+#                   subset to be omitted while still gating every other kind.
 assert_issuekind_summary_coverage() {
-  local label="$1" jq_file="$2"
-  local jq_src ids id key skipped=() missing=() unmapped=()
+  local label="$1" jq_file="$2" expectation="${3:-all}"
+  local jq_src ids id key allow="" allowed=() skipped=() missing=() unmapped=()
+
+  case "$expectation" in
+    all) ;;
+    allow:*) allow="${expectation#allow:}" ;;
+    *)
+      fail "$label: guard expectation is valid" \
+        "unknown expectation '$expectation' (use 'all' or 'allow:<ids>')"
+      return
+      ;;
+  esac
 
   if [ ! -f "$jq_file" ]; then
-    fail "$label: summary-check.jq present" "missing file: $jq_file"
+    fail "$label: surface file present" "missing file: $jq_file"
     return
   fi
   jq_src="$(cat "$jq_file")"
@@ -127,27 +187,36 @@ assert_issuekind_summary_coverage() {
       esac
       continue
     fi
-    # The key must appear as a quoted token inside a table_row/section call.
-    if ! printf '%s' "$jq_src" | grep -qF "\"$key\""; then
+    if issuekind_key_present "$jq_src" "$key"; then
+      continue
+    fi
+    # Key absent. If this surface is permitted to omit it, record it as an
+    # allowed-and-documented exception; otherwise it is a real drift miss.
+    if [ -n "$allow" ] && issuekind_in_allowlist "$id" "$allow"; then
+      allowed+=("$key")
+    else
       missing+=("$id -> $key")
     fi
   done <<< "$ids"
 
   if [ "${#skipped[@]}" -gt 0 ]; then
-    echo "    (skipped non-dead-code kinds, not summarised by summary-check.jq: ${skipped[*]})"
+    echo "    (skipped non-dead-code kinds, not carried by this surface: ${skipped[*]})"
+  fi
+  if [ "${#allowed[@]}" -gt 0 ]; then
+    echo "    (documented omissions tolerated for this surface: ${allowed[*]})"
   fi
 
   if [ "${#unmapped[@]}" -gt 0 ]; then
-    fail "$label: every dead-code IssueKind has a summary JSON key mapping" \
+    fail "$label: every dead-code IssueKind has a JSON key mapping" \
       "no mapping for: ${unmapped[*]} (add to issuekind_json_key)"
     return
   fi
 
   if [ "${#missing[@]}" -gt 0 ]; then
-    fail "$label: every canonical dead-code IssueKind appears in summary-check.jq" \
+    fail "$label: every gated dead-code IssueKind appears in the surface" \
       "absent JSON key(s): ${missing[*]}"
     return
   fi
 
-  pass "$label: every canonical dead-code IssueKind appears in summary-check.jq"
+  pass "$label: every gated dead-code IssueKind appears in the surface"
 }

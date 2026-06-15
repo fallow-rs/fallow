@@ -28,6 +28,12 @@ pub fn parse_tsx(source: &str) -> ModuleInfo {
     parse_source_to_module(FileId(0), Path::new("test.tsx"), source, 0, false)
 }
 
+/// Shared test helper: parse source at a specific path (basename-gated
+/// extraction such as the SvelteKit `load()` harvest needs the real filename).
+pub fn parse_at_path(path: &str, source: &str) -> ModuleInfo {
+    parse_source_to_module(FileId(0), Path::new(path), source, 0, false)
+}
+
 #[test]
 fn parses_glimmer_typescript_as_typescript() {
     let info = parse_source_to_module(

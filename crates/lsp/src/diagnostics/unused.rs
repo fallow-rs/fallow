@@ -612,6 +612,47 @@ pub fn push_member_diagnostics(
     }
 
     push_unused_server_action_diagnostics(map, results);
+    push_unused_load_data_key_diagnostics(map, results);
+}
+
+/// Push HINT diagnostics for unused SvelteKit `load()` return-object keys
+/// (returned by `+page.{ts,server.ts,js,server.js}` but read by no consumer).
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "key name lengths are bounded by source size"
+)]
+fn push_unused_load_data_key_diagnostics(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+) {
+    for finding in &results.unused_load_data_keys {
+        let k = &finding.key;
+        if let Some(uri) = Uri::from_file_path(&k.path) {
+            let line = k.line.saturating_sub(1);
+            map.entry(uri).or_default().push(Diagnostic {
+                range: Range {
+                    start: Position {
+                        line,
+                        character: k.col,
+                    },
+                    end: Position {
+                        line,
+                        character: k.col + k.key_name.len() as u32,
+                    },
+                },
+                severity: Some(DiagnosticSeverity::HINT),
+                source: Some("fallow".to_string()),
+                code: Some(NumberOrString::String("unused-load-data-key".to_string())),
+                code_description: doc_link("unused-load-data-keys"),
+                message: format!(
+                    "load() return key '{}' is read by no consumer (sibling +page.svelte data.<key> or project-wide page.data.<key>)",
+                    k.key_name
+                ),
+                tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+                ..Default::default()
+            });
+        }
+    }
 }
 
 /// Push HINT diagnostics for unused Next.js server actions (exports of a

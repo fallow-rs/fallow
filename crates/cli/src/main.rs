@@ -492,6 +492,10 @@ enum Command {
         #[arg(long)]
         unused_server_actions: bool,
 
+        /// Only report unused SvelteKit load() data keys
+        #[arg(long)]
+        unused_load_data_keys: bool,
+
         /// Only report unresolved imports
         #[arg(long)]
         unresolved_imports: bool,
@@ -3184,6 +3188,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             unused_component_props,
             unused_component_emits,
             unused_server_actions,
+            unused_load_data_keys,
             unresolved_imports,
             unlisted_deps,
             duplicate_exports,
@@ -3220,6 +3225,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
                     unused_component_props,
                     unused_component_emits,
                     unused_server_actions,
+                    unused_load_data_keys,
                     unresolved_imports,
                     unlisted_deps,
                     duplicate_exports,

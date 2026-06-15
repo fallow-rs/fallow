@@ -117,6 +117,14 @@ fn unused_server_action_key(
     )
 }
 
+fn unused_load_data_key_key(item: &fallow_core::results::UnusedLoadDataKey, root: &Path) -> String {
+    format!(
+        "unused-load-data-key:{}:{}",
+        relative_key_path(&item.path, root),
+        item.key_name
+    )
+}
+
 fn route_collision_key(item: &fallow_core::results::RouteCollision, root: &Path) -> String {
     format!(
         "route-collision:{}:{}",
@@ -395,6 +403,8 @@ pub(super) fn dead_code_keys(
         unused_component_props,
         unused_component_emits,
         unused_server_actions,
+        unused_load_data_keys,
+        unused_load_data_keys_global_abstain: _unused_load_data_keys_global_abstain,
         route_collisions,
         dynamic_segment_name_conflicts,
         // Non-finding fields: counts and metadata, not attributable to a key.
@@ -449,6 +459,7 @@ pub(super) fn dead_code_keys(
     collector.add_unused_component_props(unused_component_props);
     collector.add_unused_component_emits(unused_component_emits);
     collector.add_unused_server_actions(unused_server_actions);
+    collector.add_unused_load_data_keys(unused_load_data_keys);
     collector.add_route_collisions(route_collisions);
     collector.add_dynamic_segment_name_conflicts(dynamic_segment_name_conflicts);
     collector.into_keys()
@@ -581,6 +592,15 @@ impl<'a> DeadCodeKeyCollector<'a> {
     ) {
         for item in items {
             self.insert(unused_server_action_key(&item.action, self.root));
+        }
+    }
+
+    fn add_unused_load_data_keys(
+        &mut self,
+        items: &[fallow_core::results::UnusedLoadDataKeyFinding],
+    ) {
+        for item in items {
+            self.insert(unused_load_data_key_key(&item.key, self.root));
         }
     }
 
@@ -883,6 +903,8 @@ pub(super) fn retain_introduced_dead_code(
         unused_component_props,
         unused_component_emits,
         unused_server_actions,
+        unused_load_data_keys,
+        unused_load_data_keys_global_abstain: _unused_load_data_keys_global_abstain,
         route_collisions,
         dynamic_segment_name_conflicts,
         // Non-finding fields: counts and metadata, not subject to base-keyed
@@ -970,6 +992,7 @@ pub(super) fn retain_introduced_dead_code(
     unused_component_props.retain(|item| keep(unused_component_prop_key(&item.prop, root)));
     unused_component_emits.retain(|item| keep(unused_component_emit_key(&item.emit, root)));
     unused_server_actions.retain(|item| keep(unused_server_action_key(&item.action, root)));
+    unused_load_data_keys.retain(|item| keep(unused_load_data_key_key(&item.key, root)));
     route_collisions.retain(|item| keep(route_collision_key(&item.collision, root)));
     dynamic_segment_name_conflicts
         .retain(|item| keep(dynamic_segment_name_conflict_key(&item.conflict, root)));

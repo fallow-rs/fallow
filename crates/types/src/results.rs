@@ -20,8 +20,8 @@ use crate::output_dead_code::{
     UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentEmitFinding,
     UnusedComponentPropFinding, UnusedDependencyFinding, UnusedDependencyOverrideFinding,
     UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
-    UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
-    UnusedTypeFinding,
+    UnusedLoadDataKeyFinding, UnusedOptionalDependencyFinding, UnusedServerActionFinding,
+    UnusedStoreMemberFinding, UnusedTypeFinding,
 };
 use crate::serde_path;
 use crate::suppress::{IssueKind, closest_known_kind_name};
@@ -265,6 +265,18 @@ pub struct AnalysisResults {
     /// `warn`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unused_server_actions: Vec<UnusedServerActionFinding>,
+    /// SvelteKit `+page.{ts,server.ts,js,server.js}` `load()` return-object keys
+    /// read by no consumer. Wrapped in [`UnusedLoadDataKeyFinding`] so each entry
+    /// carries a typed `actions` array natively. Default severity is `warn`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unused_load_data_keys: Vec<UnusedLoadDataKeyFinding>,
+    /// `true` when the `unused-load-data-key` detector abstained project-wide
+    /// because a whole-object use of `page.data` / `$page.data` was seen
+    /// somewhere (S1 observability: an empty `unused_load_data_keys` with this
+    /// flag set is NOT a clean bill, it means the rule could not run safely).
+    /// Serialized only when `true` so the default JSON contract is unchanged.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unused_load_data_keys_global_abstain: bool,
     /// Number of suppression entries that matched an issue during analysis.
     /// Human output uses this for the suppression footer; it is skipped in
     /// machine output to avoid changing the public JSON issue contract.
@@ -392,6 +404,7 @@ impl AnalysisResults {
             + self.unused_component_props.len()
             + self.unused_component_emits.len()
             + self.unused_server_actions.len()
+            + self.unused_load_data_keys.len()
     }
 
     /// Whether any issues were found.
@@ -451,6 +464,8 @@ impl AnalysisResults {
             unused_component_props,
             unused_component_emits,
             unused_server_actions,
+            unused_load_data_keys,
+            unused_load_data_keys_global_abstain,
             suppression_count,
             active_suppressions,
             feature_flags,
@@ -507,6 +522,8 @@ impl AnalysisResults {
         self.unused_component_props.extend(unused_component_props);
         self.unused_component_emits.extend(unused_component_emits);
         self.unused_server_actions.extend(unused_server_actions);
+        self.unused_load_data_keys.extend(unused_load_data_keys);
+        self.unused_load_data_keys_global_abstain |= unused_load_data_keys_global_abstain;
         self.feature_flags.extend(feature_flags);
         self.security_findings.extend(security_findings);
         self.security_unresolved_edge_files += security_unresolved_edge_files;
@@ -536,6 +553,10 @@ impl AnalysisResults {
         self.sort_export_usages();
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "a flat per-collection sort list: one stable sort_by per finding type. Splitting by category obscures the registration set."
+    )]
     fn sort_core_findings(&mut self) {
         self.unused_files
             .sort_by(|a, b| a.file.path.cmp(&b.file.path));
@@ -706,6 +727,15 @@ impl AnalysisResults {
                 .then(a.action.line.cmp(&b.action.line))
                 .then(a.action.col.cmp(&b.action.col))
                 .then(a.action.action_name.cmp(&b.action.action_name))
+        });
+
+        self.unused_load_data_keys.sort_by(|a, b| {
+            a.key
+                .path
+                .cmp(&b.key.path)
+                .then(a.key.line.cmp(&b.key.line))
+                .then(a.key.col.cmp(&b.key.col))
+                .then(a.key.key_name.cmp(&b.key.key_name))
         });
     }
 
@@ -1059,6 +1089,31 @@ pub struct UnusedServerAction {
     pub line: u32,
     /// 0-based byte column offset of the export.
     pub col: u32,
+}
+
+/// A SvelteKit `+page.{ts,server.ts,js,server.js}` `load()` return-object key
+/// read by no consumer: not off the sibling `+page.svelte`'s `data.<key>`, nor
+/// project-wide via `page.data.<key>` / `$page.data.<key>`. A dead load key runs
+/// a real server/DB fetch cost on every request for data nothing renders. The
+/// fix is a human call (delete the key, or wire a consumer): a load fetch may
+/// have side effects, so there is no safe auto-fix.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedLoadDataKey {
+    /// The producer `+page.{ts,server.ts,js,server.js}` file declaring the key.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// The returned-object key name read by no consumer.
+    pub key_name: String,
+    /// 1-based line number of the key in the return object.
+    pub line: u32,
+    /// 0-based byte column offset of the key.
+    pub col: u32,
+    /// The route directory relative to the project root (`src/routes/blog`), for
+    /// agent remediation and per-route trend aggregation. `None` when not
+    /// determinable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route_dir: Option<String>,
 }
 
 /// A Vue/Svelte single-file component (the default export of a `.vue`/`.svelte`

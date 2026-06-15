@@ -282,6 +282,7 @@ fn build_check_summary(results: &AnalysisResults) -> CheckSummary {
         unused_component_props: results.unused_component_props.len(),
         unused_component_emits: results.unused_component_emits.len(),
         unused_server_actions: results.unused_server_actions.len(),
+        unused_load_data_keys: results.unused_load_data_keys.len(),
         route_collisions: results.route_collisions.len(),
         dynamic_segment_name_conflicts: results.dynamic_segment_name_conflicts.len(),
     }

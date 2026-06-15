@@ -184,6 +184,10 @@ fn section_footer_text(title: &str) -> Option<(&'static str, &'static str)> {
             "A Next.js Server Action exported from a \"use server\" file that no code in the project references (wire it to a consumer or remove it)",
             "https://docs.fallow.tools/explanations/dead-code#unused-server-actions",
         )),
+        "Unused load data keys" => Some((
+            "A SvelteKit load() return-object key no consumer reads (sibling +page.svelte data.<key> or project-wide page.data.<key>); delete the key or wire a consumer",
+            "https://docs.fallow.tools/explanations/dead-code#unused-load-data-keys",
+        )),
         t if t.starts_with("Type-only") => Some((
             "Dependencies only used for type imports \u{2014} consider moving to devDependencies",
             "https://docs.fallow.tools/explanations/dead-code#type-only-dependencies",
@@ -222,6 +226,7 @@ fn section_suppress_rule(title: &str) -> Option<&'static str> {
         "Unused component props" => Some("unused-component-props"),
         "Unused component emits" => Some("unused-component-emits"),
         "Unused server actions" => Some("unused-server-actions"),
+        "Unused load data keys" => Some("unused-load-data-keys"),
         _ => None,
     }
 }

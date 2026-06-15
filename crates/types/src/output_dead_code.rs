@@ -43,7 +43,7 @@ use crate::results::{
     RouteCollision, TestOnlyDependency, TypeOnlyDependency, UnlistedDependency, UnprovidedInject,
     UnrenderedComponent, UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry,
     UnusedComponentEmit, UnusedComponentProp, UnusedDependency, UnusedDependencyOverride,
-    UnusedExport, UnusedFile, UnusedMember, UnusedServerAction,
+    UnusedExport, UnusedFile, UnusedLoadDataKey, UnusedMember, UnusedServerAction,
 };
 
 /// Shared note for the `duplicate-exports` fix action. Mirrors the const used
@@ -963,6 +963,45 @@ impl UnusedServerActionFinding {
         })];
         Self {
             action,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for an [`UnusedLoadDataKey`] finding. There is no safe
+/// auto-fix: a `load()` fetch can have side effects, so deleting the key is a
+/// human call. The only action is a line-level suppress.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedLoadDataKeyFinding {
+    /// The underlying finding.
+    #[serde(flatten)]
+    pub key: UnusedLoadDataKey,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl UnusedLoadDataKeyFinding {
+    /// Build the wrapper from a raw [`UnusedLoadDataKey`]. Emits only a
+    /// line-level suppress action: there is no safe auto-fix because a load
+    /// fetch can have side effects, so deleting the key is a human decision.
+    #[must_use]
+    pub fn with_actions(key: UnusedLoadDataKey) -> Self {
+        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
+            kind: SuppressLineKind::SuppressLine,
+            auto_fixable: false,
+            description: "Suppress with an inline comment above the line".to_string(),
+            comment: "// fallow-ignore-next-line unused-load-data-key".to_string(),
+            scope: None,
+        })];
+        Self {
+            key,
             actions,
             introduced: None,
         }

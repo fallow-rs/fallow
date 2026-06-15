@@ -195,6 +195,34 @@ pub struct ModuleInfo {
     /// (passed to a function, returned, or spread), which can emit any event
     /// opaquely. The detector abstains on the whole file.
     pub has_emit_whole_object_use: bool,
+    /// SvelteKit `load()` return-object keys harvested from a
+    /// `+page.{ts,server.ts,js,server.js}` file's terminal return literal.
+    /// Consumed by the `unused-load-data-key` detector. Empty for every file
+    /// that is not a page-load producer (gated by basename at harvest time).
+    pub load_return_keys: Vec<LoadReturnKey>,
+    /// `true` when this file's `load()` body could not be harvested safely (a
+    /// spread return, a non-object/non-literal return, more than one top-level
+    /// `return`, a computed key, or a wrapped/re-exported `load`). The detector
+    /// abstains on the whole file so a key is never falsely flagged.
+    pub has_unharvestable_load: bool,
+    /// `true` when this file passes the whole `data` object opaquely (script
+    /// `const X = data`, `fn(data)` / `fn(...data)`, or template `data={data}` /
+    /// `{...data}` in a route component), so a child can read arbitrary keys the
+    /// detector cannot see. Name-gated on the `data` binding. Read ONLY by the
+    /// `unused-load-data-key` detector, so capturing it for all files is
+    /// byte-identity-safe. See FP-1 in the plan.
+    pub has_load_data_whole_use: bool,
+    /// `true` when this file uses the whole `page.data` / `$page.data` store
+    /// object opaquely (e.g. `Object.values(page.data)`, `{...$page.data}`), so a
+    /// reflective read could consume any route's key. Drives the
+    /// `unused-load-data-key` detector's project-wide abstain. Derived in
+    /// `release_resolution_payload` from `whole_object_uses` BEFORE that vector is
+    /// released (mirroring `referenced_import_bindings`), so it survives the
+    /// release the detector runs after; it is never cached (recomputed each run
+    /// from the cached `whole_object_uses`). Reassignment forms
+    /// (`const all = $page.data`) are not whole-object-tracked and stay out of
+    /// scope, matching the syntactic analyzer's conservative posture.
+    pub has_page_data_store_whole_use: bool,
 }
 
 impl ModuleInfo {
@@ -216,6 +244,15 @@ impl ModuleInfo {
             .collect();
         self.referenced_import_bindings.sort_unstable();
         self.referenced_import_bindings.dedup();
+
+        // Derive the project-wide page-data-store whole-use signal BEFORE
+        // releasing `whole_object_uses`: the `unused-load-data-key` detector runs
+        // after this release and needs to know whether ANY module reflectively
+        // consumes the whole `page.data` / `$page.data` store.
+        self.has_page_data_store_whole_use = self
+            .whole_object_uses
+            .iter()
+            .any(|name| name == "page.data" || name == "$page.data");
 
         Self::release_vec(&mut self.dynamic_imports);
         Self::release_vec(&mut self.require_calls);
@@ -1266,6 +1303,22 @@ pub struct ComponentEmit {
     pub used: bool,
 }
 
+/// A key returned from a SvelteKit route `load()` function's terminal return
+/// object literal. Harvested from `+page.{ts,server.ts,js,server.js}` files
+/// exporting a `load` function. Consumed by the `unused-load-data-key` detector,
+/// which flags a key read by no consumer. The span is stored as byte offsets
+/// (not an `oxc_span::Span`) so the type round-trips through the bitcode cache
+/// directly, mirroring `DiKeySite::span_start` / `ComponentEmit::span_start`.
+#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode, PartialEq, Eq)]
+pub struct LoadReturnKey {
+    /// The returned-object property key name.
+    pub name: String,
+    /// Start byte offset of the key (anchors the finding).
+    pub span_start: u32,
+    /// End byte offset of the key.
+    pub span_end: u32,
+}
+
 #[expect(
     clippy::trivially_copy_pass_by_ref,
     reason = "serde serialize_with requires &T"
@@ -1352,7 +1405,7 @@ const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 216);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 944);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 968);
 
 /// A re-export declaration.
 #[derive(Debug, Clone)]
@@ -1589,6 +1642,10 @@ mod tests {
             has_unharvestable_emits: false,
             has_dynamic_emit: false,
             has_emit_whole_object_use: false,
+            load_return_keys: Vec::new(),
+            has_unharvestable_load: false,
+            has_load_data_whole_use: false,
+            has_page_data_store_whole_use: false,
         };
 
         module.release_resolution_payload();

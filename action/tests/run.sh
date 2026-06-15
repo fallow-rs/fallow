@@ -2046,10 +2046,26 @@ rm -rf "$GATE_DIR"
 
 # --- IssueKind summary drift guard ---
 #
-# A new fallow dead-code IssueKind must be wired into summary-check.jq or it
-# vanishes silently from PR summaries. This guard derives the canonical
-# dead-code id set (from `fallow schema`, falling back to suppress.rs) and
-# asserts each one's JSON key is referenced by the GitHub summary table.
+# A new fallow dead-code IssueKind must be wired into every GitHub jq surface
+# that is supposed to carry the full dead-code set, or it vanishes silently
+# from PR output. This guard derives the canonical dead-code id set (from
+# `fallow schema`, falling back to suppress.rs) and asserts each one's JSON key
+# is referenced by every gated surface.
+#
+# Surface expectations (every GitHub surface is now gated "all"):
+#   summary-check.jq      "all"    dead-code summary table
+#   summary-combined.jq   "all"    combined-mode Code-issues breakdown
+#   summary-audit.jq      "all"    audit dead_code_rows
+#   annotations-check.jq  "all"    ::warning annotations
+#   filter-changed.jq     "all"    per-changed-file filter + total_issues recount
+#
+# History: annotations-check.jq and filter-changed.jq once omitted
+# `test-only-dependency` (no ::warning was emitted, and the key was absent from
+# the total_issues recount so a --changed-since count undercounted it) while its
+# sibling type-only-dependency was carried on both. That omission is now closed
+# (the annotation and the recount entry were added), so both surfaces gate "all"
+# with no allow-list. The `allow:<ids>` machinery in the guard remains available
+# for any future surface that legitimately carries only a documented subset.
 
 echo ""
 echo "=== IssueKind summary drift guard ==="
@@ -2057,7 +2073,11 @@ echo "=== IssueKind summary drift guard ==="
 GUARD_DIR="$DIR"
 # shellcheck source=action/tests/issuekind-drift-guard.sh
 . "$DIR/issuekind-drift-guard.sh"
-assert_issuekind_summary_coverage "github summary-check" "$JQ_DIR/summary-check.jq"
+assert_issuekind_summary_coverage "github summary-check"    "$JQ_DIR/summary-check.jq"
+assert_issuekind_summary_coverage "github summary-combined" "$JQ_DIR/summary-combined.jq"
+assert_issuekind_summary_coverage "github summary-audit"    "$JQ_DIR/summary-audit.jq"
+assert_issuekind_summary_coverage "github annotations-check" "$JQ_DIR/annotations-check.jq"
+assert_issuekind_summary_coverage "github filter-changed"   "$JQ_DIR/filter-changed.jq"
 
 # --- Summary ---
 

@@ -655,6 +655,25 @@ fn sarif_unused_server_action_fields(
     }
 }
 
+fn sarif_unused_load_data_key_fields(
+    key: &fallow_core::results::UnusedLoadDataKey,
+    root: &Path,
+    level: &'static str,
+) -> SarifFields {
+    SarifFields {
+        rule_id: "fallow/unused-load-data-key",
+        level,
+        message: format!(
+            "load() return key \"{}\" is read by no consumer (sibling +page.svelte data.<key> or project-wide page.data.<key>); delete the key or wire a consumer",
+            key.key_name
+        ),
+        uri: relative_uri(&key.path, root),
+        region: Some((key.line, key.col + 1)),
+        source_path: Some(key.path.clone()),
+        properties: None,
+    }
+}
+
 fn sarif_route_collision_fields(
     collision: &RouteCollision,
     root: &Path,
@@ -1083,6 +1102,11 @@ fn sarif_graph_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
             rules.unused_server_actions,
         ),
         (
+            "fallow/unused-load-data-key",
+            "A SvelteKit load() return-object key that no consumer reads (sibling +page.svelte data.<key> or project-wide page.data.<key>)",
+            rules.unused_load_data_keys,
+        ),
+        (
             "fallow/route-collision",
             "Two or more Next.js App Router route files resolve to the same URL",
             rules.route_collision,
@@ -1410,6 +1434,18 @@ fn push_component_contract_sarif_results(
                 &a.action,
                 root,
                 severity_to_sarif_level(rules.unused_server_actions),
+            )
+        },
+    );
+    push_sarif_results(
+        sarif_results,
+        &results.unused_load_data_keys,
+        snippets,
+        |k| {
+            sarif_unused_load_data_key_fields(
+                &k.key,
+                root,
+                severity_to_sarif_level(rules.unused_load_data_keys),
             )
         },
     );
@@ -2307,13 +2343,14 @@ mod tests {
         let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
             .as_array()
             .expect("rules should be an array");
-        assert_eq!(rules.len(), 37);
+        assert_eq!(rules.len(), 38);
 
         let rule_ids: Vec<&str> = rules.iter().map(|r| r["id"].as_str().unwrap()).collect();
         assert!(rule_ids.contains(&"fallow/unrendered-component"));
         assert!(rule_ids.contains(&"fallow/unused-component-prop"));
         assert!(rule_ids.contains(&"fallow/unused-component-emit"));
         assert!(rule_ids.contains(&"fallow/unused-server-action"));
+        assert!(rule_ids.contains(&"fallow/unused-load-data-key"));
         assert!(rule_ids.contains(&"fallow/route-collision"));
         assert!(rule_ids.contains(&"fallow/dynamic-segment-name-conflict"));
         assert!(rule_ids.contains(&"fallow/unused-file"));

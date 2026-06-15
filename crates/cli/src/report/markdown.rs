@@ -306,6 +306,12 @@ fn push_markdown_graph_sections(
     );
     markdown_section(
         out,
+        &results.unused_load_data_keys,
+        "Unused load data keys",
+        |k| format_markdown_unused_load_data_key(k, rel),
+    );
+    markdown_section(
+        out,
         &results.stale_suppressions,
         "Stale suppressions",
         |s| {
@@ -519,6 +525,18 @@ fn format_markdown_unused_server_action(
         rel(&a.action.path),
         a.action.line,
         escape_backticks(&a.action.action_name),
+    )]
+}
+
+fn format_markdown_unused_load_data_key(
+    k: &fallow_core::results::UnusedLoadDataKeyFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    vec![format!(
+        "- `{}`:{} `{}` is returned from load() but no consumer reads it",
+        rel(&k.key.path),
+        k.key.line,
+        escape_backticks(&k.key.key_name),
     )]
 }
 

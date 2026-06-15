@@ -1291,6 +1291,7 @@ fn build_policy_section(
         && results.unused_component_props.is_empty()
         && results.unused_component_emits.is_empty()
         && results.unused_server_actions.is_empty()
+        && results.unused_load_data_keys.is_empty()
         && results.route_collisions.is_empty()
         && results.dynamic_segment_name_conflicts.is_empty()
     {
@@ -1401,6 +1402,19 @@ fn build_policy_section(
             a.action.path.as_path()
         },
         format_detail: &format_unused_server_action,
+    });
+
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.unused_load_data_keys,
+        title: "Unused load data keys",
+        level: severity_to_level(rules.unused_load_data_keys),
+        root,
+        max_files: MAX_FLAT_ITEMS,
+        get_path: |k: &fallow_types::output_dead_code::UnusedLoadDataKeyFinding| {
+            k.key.path.as_path()
+        },
+        format_detail: &format_unused_load_data_key,
     });
 
     build_human_grouped_section(GroupedSectionInput {
@@ -1534,6 +1548,20 @@ fn format_unused_server_action(
         format!(":{}", a.line).dimmed(),
         a.action_name.bold(),
         "is exported from a \"use server\" file but no code in this project references it".dimmed(),
+    )
+}
+
+fn format_unused_load_data_key(
+    entry: &fallow_types::output_dead_code::UnusedLoadDataKeyFinding,
+) -> String {
+    let k = &entry.key;
+    format!(
+        "{} {} {}",
+        format!(":{}", k.line).dimmed(),
+        k.key_name.bold(),
+        "is returned from load() but no consumer reads it (sibling +page.svelte data.<key> or \
+         project-wide page.data.<key>)"
+            .dimmed(),
     )
 }
 
@@ -2338,6 +2366,9 @@ fn collect_matching_rules(
     for a in &results.unused_server_actions {
         check(&a.action.path);
     }
+    for k in &results.unused_load_data_keys {
+        check(&k.key.path);
+    }
     for c in &results.route_collisions {
         check(&c.collision.path);
     }
@@ -2623,6 +2654,7 @@ fn build_summary_footer(
         "unused component emits",
     );
     add(results.unused_server_actions.len(), "unused server actions");
+    add(results.unused_load_data_keys.len(), "unused load data keys");
     add(results.stale_suppressions.len(), "stale suppressions");
 
     parts.join(" \u{00b7} ")
@@ -2785,6 +2817,11 @@ fn check_summary_categories(
             "Unused server actions",
             results.unused_server_actions.len(),
             severity_to_level(rules.unused_server_actions),
+        ),
+        (
+            "Unused load data keys",
+            results.unused_load_data_keys.len(),
+            severity_to_level(rules.unused_load_data_keys),
         ),
         (
             "Stale suppressions",

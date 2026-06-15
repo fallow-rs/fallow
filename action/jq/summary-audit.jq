@@ -41,6 +41,7 @@ def dead_code_rows:
    [ (.dead_code.unused_component_props // [])[] | {kind:"Unused component prop", location:path_line, item:("`\(.component_name).\(.prop_name)`"), introduced:.introduced} ] +
    [ (.dead_code.unused_component_emits // [])[] | {kind:"Unused component emit", location:path_line, item:("`\(.component_name)` emit `\(.emit_name)`"), introduced:.introduced} ] +
    [ (.dead_code.unprovided_injects // [])[] | {kind:"Unprovided inject", location:path_line, item:("`\(.key_name)` (\(.framework))"), introduced:.introduced} ] +
+   [ (.dead_code.unused_load_data_keys // [])[] | {kind:"Unused load data key", location:path_line, item:("`\(.key_name)`"), introduced:.introduced} ] +
    [ (.dead_code.type_only_dependencies // [])[] | {kind:"Type-only dependency", location:path_line, item:("`\(.package_name)`"), introduced:.introduced} ] +
    [ (.dead_code.test_only_dependencies // [])[] | {kind:"Test-only dependency", location:path_line, item:("`\(.package_name)`"), introduced:.introduced} ] +
    [ (.dead_code.stale_suppressions // [])[] | {kind:"Stale suppression", location:path_line, item:(.description // "suppression"), introduced:.introduced} ] +

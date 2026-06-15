@@ -516,6 +516,11 @@ pub fn cached_to_module_opts(
         has_unharvestable_emits: cached.has_unharvestable_emits,
         has_dynamic_emit: cached.has_dynamic_emit,
         has_emit_whole_object_use: cached.has_emit_whole_object_use,
+        load_return_keys: cached.load_return_keys.clone(),
+        has_unharvestable_load: cached.has_unharvestable_load,
+        has_load_data_whole_use: cached.has_load_data_whole_use,
+        // Derived in `release_resolution_payload` from `whole_object_uses`.
+        has_page_data_store_whole_use: false,
     }
 }
 
@@ -589,5 +594,8 @@ pub fn module_to_cached(
         has_unharvestable_emits: module.has_unharvestable_emits,
         has_dynamic_emit: module.has_dynamic_emit,
         has_emit_whole_object_use: module.has_emit_whole_object_use,
+        load_return_keys: module.load_return_keys.clone(),
+        has_unharvestable_load: module.has_unharvestable_load,
+        has_load_data_whole_use: module.has_load_data_whole_use,
     }
 }

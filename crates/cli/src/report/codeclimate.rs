@@ -1156,6 +1156,42 @@ fn push_unused_server_action_issues(
     }
 }
 
+fn push_unused_load_data_key_issues(
+    issues: &mut Vec<CodeClimateIssue>,
+    findings: &[fallow_types::output_dead_code::UnusedLoadDataKeyFinding],
+    root: &Path,
+    severity: Severity,
+) {
+    if findings.is_empty() {
+        return;
+    }
+    let level = severity_to_codeclimate(severity);
+    for entry in findings {
+        let k = &entry.key;
+        let path = cc_path(&k.path, root);
+        let fp = fingerprint_hash(&[
+            "fallow/unused-load-data-key",
+            &path,
+            &k.line.to_string(),
+            &k.key_name,
+        ]);
+        let line = if k.line > 0 { Some(k.line) } else { None };
+        let message = format!(
+            "load() return key `{}` is read by no consumer (sibling +page.svelte data.<key> or project-wide page.data.<key>); delete the key or wire a consumer",
+            k.key_name
+        );
+        issues.push(cc_issue(
+            "fallow/unused-load-data-key",
+            &message,
+            level,
+            "Bug Risk",
+            &path,
+            line,
+            &fp,
+        ));
+    }
+}
+
 fn push_route_collision_issues(
     issues: &mut Vec<CodeClimateIssue>,
     findings: &[fallow_types::output_dead_code::RouteCollisionFinding],
@@ -1729,6 +1765,12 @@ impl CodeClimateBuilder<'_> {
             &self.results.unused_server_actions,
             self.root,
             self.rules.unused_server_actions,
+        );
+        push_unused_load_data_key_issues(
+            &mut self.issues,
+            &self.results.unused_load_data_keys,
+            self.root,
+            self.rules.unused_load_data_keys,
         );
         push_route_collision_issues(
             &mut self.issues,
