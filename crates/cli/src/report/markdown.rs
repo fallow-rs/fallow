@@ -1060,6 +1060,14 @@ fn write_css_analytics_section(out: &mut String, report: &crate::health_types::H
 }
 
 fn write_css_candidate_details(out: &mut String, css: &crate::health_types::CssAnalyticsReport) {
+    write_css_keyframe_details(out, css);
+    write_css_tailwind_details(out, css);
+    write_css_class_candidate_details(out, css);
+    write_css_font_candidate_details(out, css);
+    write_css_font_size_mix_details(out, css);
+}
+
+fn write_css_keyframe_details(out: &mut String, css: &crate::health_types::CssAnalyticsReport) {
     if !css.undefined_keyframes.is_empty() {
         let named: Vec<String> = css
             .undefined_keyframes
@@ -1073,6 +1081,9 @@ fn write_css_candidate_details(out: &mut String, css: &crate::health_types::CssA
             named.join(", "),
         );
     }
+}
+
+fn write_css_tailwind_details(out: &mut String, css: &crate::health_types::CssAnalyticsReport) {
     if !css.tailwind_arbitrary_values.is_empty() {
         let named: Vec<String> = css
             .tailwind_arbitrary_values
@@ -1082,6 +1093,12 @@ fn write_css_candidate_details(out: &mut String, css: &crate::health_types::CssA
             .collect();
         let _ = writeln!(out, "- Top Tailwind arbitrary values: {}", named.join(", "));
     }
+}
+
+fn write_css_class_candidate_details(
+    out: &mut String,
+    css: &crate::health_types::CssAnalyticsReport,
+) {
     if !css.unresolved_class_references.is_empty() {
         let named: Vec<String> = css
             .unresolved_class_references
@@ -1113,6 +1130,12 @@ fn write_css_candidate_details(out: &mut String, css: &crate::health_types::CssA
             named.join(", "),
         );
     }
+}
+
+fn write_css_font_candidate_details(
+    out: &mut String,
+    css: &crate::health_types::CssAnalyticsReport,
+) {
     if !css.unused_font_faces.is_empty() {
         let named: Vec<String> = css
             .unused_font_faces
@@ -1139,6 +1162,12 @@ fn write_css_candidate_details(out: &mut String, css: &crate::health_types::CssA
             named.join(", "),
         );
     }
+}
+
+fn write_css_font_size_mix_details(
+    out: &mut String,
+    css: &crate::health_types::CssAnalyticsReport,
+) {
     if let Some(mix) = &css.font_size_unit_mix {
         let breakdown: Vec<String> = mix
             .notations
