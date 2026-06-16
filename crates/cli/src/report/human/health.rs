@@ -179,11 +179,27 @@ fn render_css_analytics(lines: &mut Vec<String>, report: &crate::health_types::H
     let Some(ref css) = report.css_analytics else {
         return;
     };
-    let summary = &css.summary;
 
     lines.push(String::new());
     lines.push("CSS health".bold().to_string());
+    render_css_analytics_summary(lines, &css.summary);
+    render_css_keyframe_candidates(lines, css);
+    render_css_unused_at_rules(lines, css);
+    render_css_scoped_unused(lines, css);
+    render_css_duplicate_blocks(lines, css);
+    render_css_tailwind_arbitrary(lines, css);
+    render_css_unresolved_classes(lines, css);
+    render_css_unreferenced_classes(lines, css);
+    render_css_unused_font_faces(lines, css);
+    render_css_unused_theme_tokens(lines, css);
+    render_css_font_size_unit_mix(lines, css);
+    render_css_notable_rules(lines, css);
+}
 
+fn render_css_analytics_summary(
+    lines: &mut Vec<String>,
+    summary: &crate::health_types::CssAnalyticsSummary,
+) {
     let important_pct = if summary.total_declarations > 0 {
         f64::from(summary.important_declarations) / f64::from(summary.total_declarations) * 100.0
     } else {
@@ -225,8 +241,13 @@ fn render_css_analytics(lines: &mut Vec<String>, report: &crate::health_types::H
             summary.custom_properties_unreferenced,
         ));
     }
-    render_css_keyframe_candidates(lines, css);
-    render_css_unused_at_rules(lines, css);
+}
+
+fn render_css_scoped_unused(
+    lines: &mut Vec<String>,
+    css: &crate::health_types::CssAnalyticsReport,
+) {
+    let summary = &css.summary;
     if !css.scoped_unused.is_empty() {
         let class_word = if summary.scoped_unused_classes == 1 {
             "class"
@@ -254,14 +275,11 @@ fn render_css_analytics(lines: &mut Vec<String>, report: &crate::health_types::H
             );
         }
     }
-    render_css_duplicate_blocks(lines, css);
-    render_css_tailwind_arbitrary(lines, css);
-    render_css_unresolved_classes(lines, css);
-    render_css_unreferenced_classes(lines, css);
-    render_css_unused_font_faces(lines, css);
-    render_css_unused_theme_tokens(lines, css);
-    render_css_font_size_unit_mix(lines, css);
+}
 
+fn sorted_css_notable_rules(
+    css: &crate::health_types::CssAnalyticsReport,
+) -> Vec<(&str, &fallow_types::extract::CssRuleMetric)> {
     let mut notable: Vec<(&str, &fallow_types::extract::CssRuleMetric)> = css
         .files
         .iter()
@@ -272,7 +290,6 @@ fn render_css_analytics(lines: &mut Vec<String>, report: &crate::health_types::H
                 .map(move |rule| (file.path.as_str(), rule))
         })
         .collect();
-    let total_notable = notable.len();
     notable.sort_by(|a, b| {
         let key = |m: &fallow_types::extract::CssRuleMetric| {
             (
@@ -289,6 +306,15 @@ fn render_css_analytics(lines: &mut Vec<String>, report: &crate::health_types::H
             .cmp(&key(a.1))
             .then_with(|| (a.0, a.1.line).cmp(&(b.0, b.1.line)))
     });
+    notable
+}
+
+fn render_css_notable_rules(
+    lines: &mut Vec<String>,
+    css: &crate::health_types::CssAnalyticsReport,
+) {
+    let notable = sorted_css_notable_rules(css);
+    let total_notable = notable.len();
 
     for (path, rule) in notable.iter().take(5) {
         lines.push(format!(
