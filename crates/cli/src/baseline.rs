@@ -274,86 +274,19 @@ fn baseline_file_export_keys(
             .iter()
             .map(|f| relative_path(&f.file.path, root))
             .collect(),
-        unused_exports: results
-            .unused_exports
-            .iter()
-            .map(|e| {
-                format!(
-                    "{}:{}",
-                    relative_path(&e.export.path, root),
-                    e.export.export_name
-                )
-            })
-            .collect(),
-        unused_types: results
-            .unused_types
-            .iter()
-            .map(|e| {
-                format!(
-                    "{}:{}",
-                    relative_path(&e.export.path, root),
-                    e.export.export_name
-                )
-            })
-            .collect(),
-        private_type_leaks: results
-            .private_type_leaks
-            .iter()
-            .map(|e| {
-                format!(
-                    "{}:{}->{}",
-                    relative_path(&e.leak.path, root),
-                    e.leak.export_name,
-                    e.leak.type_name
-                )
-            })
-            .collect(),
-        invalid_client_exports: results
-            .invalid_client_exports
-            .iter()
-            .map(|e| {
-                format!(
-                    "{}:{}",
-                    relative_path(&e.export.path, root),
-                    e.export.export_name
-                )
-            })
-            .collect(),
-        mixed_client_server_barrels: results
-            .mixed_client_server_barrels
-            .iter()
-            .map(|b| {
-                format!(
-                    "{}:{}:{}",
-                    relative_path(&b.barrel.path, root),
-                    b.barrel.client_origin,
-                    b.barrel.server_origin
-                )
-            })
-            .collect(),
-        misplaced_directives: results
-            .misplaced_directives
-            .iter()
-            .map(|d| {
-                format!(
-                    "{}:{}:{}",
-                    relative_path(&d.directive_site.path, root),
-                    d.directive_site.line,
-                    d.directive_site.directive
-                )
-            })
-            .collect(),
-        route_collisions: results
-            .route_collisions
-            .iter()
-            .map(|c| {
-                format!(
-                    "{}:{}",
-                    relative_path(&c.collision.path, root),
-                    c.collision.url
-                )
-            })
-            .collect(),
+        unused_exports: unused_export_baseline_keys(&results.unused_exports, root),
+        unused_types: unused_type_baseline_keys(&results.unused_types, root),
+        private_type_leaks: private_type_leak_baseline_keys(&results.private_type_leaks, root),
+        invalid_client_exports: invalid_client_export_baseline_keys(
+            &results.invalid_client_exports,
+            root,
+        ),
+        mixed_client_server_barrels: barrel_baseline_keys(
+            &results.mixed_client_server_barrels,
+            root,
+        ),
+        misplaced_directives: directive_baseline_keys(&results.misplaced_directives, root),
+        route_collisions: route_collision_baseline_keys(&results.route_collisions, root),
         dynamic_segment_name_conflicts: results
             .dynamic_segment_name_conflicts
             .iter()
@@ -366,6 +299,121 @@ fn baseline_file_export_keys(
             })
             .collect(),
     }
+}
+
+fn unused_export_baseline_keys(
+    items: &[fallow_core::results::UnusedExportFinding],
+    root: &Path,
+) -> Vec<String> {
+    items
+        .iter()
+        .map(|e| {
+            format!(
+                "{}:{}",
+                relative_path(&e.export.path, root),
+                e.export.export_name
+            )
+        })
+        .collect()
+}
+
+fn unused_type_baseline_keys(
+    items: &[fallow_core::results::UnusedTypeFinding],
+    root: &Path,
+) -> Vec<String> {
+    items
+        .iter()
+        .map(|e| {
+            format!(
+                "{}:{}",
+                relative_path(&e.export.path, root),
+                e.export.export_name
+            )
+        })
+        .collect()
+}
+
+fn invalid_client_export_baseline_keys(
+    items: &[fallow_core::results::InvalidClientExportFinding],
+    root: &Path,
+) -> Vec<String> {
+    items
+        .iter()
+        .map(|e| {
+            format!(
+                "{}:{}",
+                relative_path(&e.export.path, root),
+                e.export.export_name
+            )
+        })
+        .collect()
+}
+
+fn private_type_leak_baseline_keys(
+    items: &[fallow_core::results::PrivateTypeLeakFinding],
+    root: &Path,
+) -> Vec<String> {
+    items
+        .iter()
+        .map(|e| {
+            format!(
+                "{}:{}->{}",
+                relative_path(&e.leak.path, root),
+                e.leak.export_name,
+                e.leak.type_name
+            )
+        })
+        .collect()
+}
+
+fn barrel_baseline_keys(
+    items: &[fallow_core::results::MixedClientServerBarrelFinding],
+    root: &Path,
+) -> Vec<String> {
+    items
+        .iter()
+        .map(|b| {
+            format!(
+                "{}:{}:{}",
+                relative_path(&b.barrel.path, root),
+                b.barrel.client_origin,
+                b.barrel.server_origin
+            )
+        })
+        .collect()
+}
+
+fn directive_baseline_keys(
+    items: &[fallow_core::results::MisplacedDirectiveFinding],
+    root: &Path,
+) -> Vec<String> {
+    items
+        .iter()
+        .map(|d| {
+            format!(
+                "{}:{}:{}",
+                relative_path(&d.directive_site.path, root),
+                d.directive_site.line,
+                d.directive_site.directive
+            )
+        })
+        .collect()
+}
+
+fn route_collision_baseline_keys(
+    items: &[fallow_core::results::RouteCollisionFinding],
+    root: &Path,
+) -> Vec<String> {
+    items
+        .iter()
+        .map(|c| {
+            format!(
+                "{}:{}",
+                relative_path(&c.collision.path, root),
+                c.collision.url
+            )
+        })
+        .collect()
 }
 
 struct BaselineMemberImportKeys {
