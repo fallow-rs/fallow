@@ -159,6 +159,24 @@ pub fn build_duplication_grouping(
     resolver: &OwnershipResolver,
 ) -> DuplicationGrouping {
     let fingerprints = CloneFingerprintSet::from_groups(&report.clone_groups);
+    let buckets = build_attributed_clone_buckets(report, root, resolver);
+    let mut groups: Vec<DuplicationGroup> = buckets
+        .into_iter()
+        .map(|(key, groups)| duplication_group(key, groups, report, &fingerprints))
+        .collect();
+    sort_duplication_groups(&mut groups);
+
+    DuplicationGrouping {
+        mode: resolver.mode_label(),
+        groups,
+    }
+}
+
+fn build_attributed_clone_buckets(
+    report: &DuplicationReport,
+    root: &Path,
+    resolver: &OwnershipResolver,
+) -> BTreeMap<String, Vec<AttributedCloneGroup>> {
     let mut buckets: BTreeMap<String, Vec<AttributedCloneGroup>> = BTreeMap::new();
     for group in &report.clone_groups {
         let attributed = AttributedCloneGroup::from_group(group, root, resolver);
@@ -167,67 +185,92 @@ pub fn build_duplication_grouping(
             .or_default()
             .push(attributed);
     }
+    buckets
+}
 
-    let mut groups: Vec<DuplicationGroup> = buckets
+fn duplication_group(
+    key: String,
+    attributed_groups: Vec<AttributedCloneGroup>,
+    report: &DuplicationReport,
+    fingerprints: &CloneFingerprintSet,
+) -> DuplicationGroup {
+    let mut subset = duplication_subset_report(&attributed_groups, report);
+    subset.stats = recompute_stats(&subset);
+    let clone_families = clone_families_for_bucket(&attributed_groups, report, fingerprints);
+    let clone_groups = attributed_groups
         .into_iter()
-        .map(|(key, attributed_groups)| {
-            let original_groups: Vec<CloneGroup> = attributed_groups
-                .iter()
-                .map(|ag| CloneGroup {
-                    instances: ag.instances.iter().map(|i| i.instance.clone()).collect(),
-                    token_count: ag.token_count,
-                    line_count: ag.line_count,
-                })
-                .collect();
-            let mut subset = DuplicationReport {
-                clone_groups: original_groups,
-                clone_families: Vec::new(),
-                mirrored_directories: Vec::new(),
-                stats: DuplicationStats {
-                    total_files: report.stats.total_files,
-                    files_with_clones: 0,
-                    total_lines: report.stats.total_lines,
-                    duplicated_lines: 0,
-                    total_tokens: report.stats.total_tokens,
-                    duplicated_tokens: 0,
-                    clone_groups: 0,
-                    clone_instances: 0,
-                    duplication_percentage: 0.0,
-                    clone_groups_below_min_occurrences: report
-                        .stats
-                        .clone_groups_below_min_occurrences,
-                },
-            };
-            subset.stats = recompute_stats(&subset);
-
-            let bucket_files: FxHashSet<&Path> = attributed_groups
-                .iter()
-                .flat_map(|ag| ag.instances.iter().map(|i| i.instance.file.as_path()))
-                .collect();
-            let clone_families: Vec<CloneFamilyFinding> = report
-                .clone_families
-                .iter()
-                .filter(|f| f.files.iter().any(|fp| bucket_files.contains(fp.as_path())))
-                .map(|family| CloneFamilyFinding::with_fingerprints(family.clone(), &fingerprints))
-                .collect();
-
-            let clone_groups: Vec<AttributedCloneGroupFinding> = attributed_groups
-                .into_iter()
-                .map(|group| {
-                    let fingerprint = group.fingerprint(&fingerprints);
-                    AttributedCloneGroupFinding::with_fingerprint(group, fingerprint)
-                })
-                .collect();
-
-            DuplicationGroup {
-                key,
-                stats: subset.stats,
-                clone_groups,
-                clone_families,
-            }
+        .map(|group| {
+            let fingerprint = group.fingerprint(fingerprints);
+            AttributedCloneGroupFinding::with_fingerprint(group, fingerprint)
         })
         .collect();
 
+    DuplicationGroup {
+        key,
+        stats: subset.stats,
+        clone_groups,
+        clone_families,
+    }
+}
+
+fn duplication_subset_report(
+    attributed_groups: &[AttributedCloneGroup],
+    report: &DuplicationReport,
+) -> DuplicationReport {
+    DuplicationReport {
+        clone_groups: attributed_groups
+            .iter()
+            .map(|group| CloneGroup {
+                instances: group
+                    .instances
+                    .iter()
+                    .map(|instance| instance.instance.clone())
+                    .collect(),
+                token_count: group.token_count,
+                line_count: group.line_count,
+            })
+            .collect(),
+        clone_families: Vec::new(),
+        mirrored_directories: Vec::new(),
+        stats: DuplicationStats {
+            total_files: report.stats.total_files,
+            files_with_clones: 0,
+            total_lines: report.stats.total_lines,
+            duplicated_lines: 0,
+            total_tokens: report.stats.total_tokens,
+            duplicated_tokens: 0,
+            clone_groups: 0,
+            clone_instances: 0,
+            duplication_percentage: 0.0,
+            clone_groups_below_min_occurrences: report.stats.clone_groups_below_min_occurrences,
+        },
+    }
+}
+
+fn clone_families_for_bucket(
+    attributed_groups: &[AttributedCloneGroup],
+    report: &DuplicationReport,
+    fingerprints: &CloneFingerprintSet,
+) -> Vec<CloneFamilyFinding> {
+    let bucket_files: FxHashSet<&Path> = attributed_groups
+        .iter()
+        .flat_map(|group| group.instances.iter().map(|i| i.instance.file.as_path()))
+        .collect();
+
+    report
+        .clone_families
+        .iter()
+        .filter(|family| {
+            family
+                .files
+                .iter()
+                .any(|path| bucket_files.contains(path.as_path()))
+        })
+        .map(|family| CloneFamilyFinding::with_fingerprints(family.clone(), fingerprints))
+        .collect()
+}
+
+fn sort_duplication_groups(groups: &mut [DuplicationGroup]) {
     groups.sort_by(|a, b| {
         let a_unowned = a.key == UNOWNED_LABEL;
         let b_unowned = b.key == UNOWNED_LABEL;
@@ -241,11 +284,6 @@ pub fn build_duplication_grouping(
                 .then_with(|| a.key.cmp(&b.key)),
         }
     });
-
-    DuplicationGrouping {
-        mode: resolver.mode_label(),
-        groups,
-    }
 }
 
 #[cfg(test)]
