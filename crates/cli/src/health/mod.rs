@@ -5005,26 +5005,9 @@ fn collect_findings_with_resolver(
     let mut findings: Vec<ComplexityViolation> = Vec::new();
 
     for module in input.modules {
-        let Some(&path) = input.file_paths.get(&module.file_id) else {
+        let Some((path, relative)) = collect_findings_module_path(input, module) else {
             continue;
         };
-
-        let relative = path.strip_prefix(input.config_root).unwrap_or(path);
-        if input.ignore_set.is_match(relative) {
-            continue;
-        }
-
-        if let Some(changed) = input.changed_files
-            && !changed.contains(path)
-        {
-            continue;
-        }
-
-        if let Some(ws) = input.ws_roots
-            && !ws.iter().any(|r| path.starts_with(r))
-        {
-            continue;
-        }
 
         files_analyzed += 1;
         for fc in &module.complexity {
@@ -5036,61 +5019,92 @@ fn collect_findings_with_resolver(
             ) {
                 continue;
             }
-            let (applied_thresholds, matched_overrides) =
-                input.threshold_resolver.resolve(relative, &fc.name);
-            input.threshold_state_tracker.record_complexity(
-                path,
-                &fc.name,
-                fc.cyclomatic,
-                fc.cognitive,
-                &matched_overrides,
-                input.threshold_resolver.global,
-            );
-            let exceeds_cyclomatic = fc.cyclomatic > applied_thresholds.effective.max_cyclomatic;
-            let exceeds_cognitive = fc.cognitive > applied_thresholds.effective.max_cognitive;
-            if exceeds_cyclomatic || exceeds_cognitive {
-                findings.push(ComplexityViolation {
-                    path: path.clone(),
-                    name: fc.name.clone(),
-                    line: fc.line,
-                    col: fc.col,
-                    cyclomatic: fc.cyclomatic,
-                    cognitive: fc.cognitive,
-                    line_count: fc.line_count,
-                    param_count: fc.param_count,
-                    exceeded: ExceededThreshold::from_bools(
-                        exceeds_cyclomatic,
-                        exceeds_cognitive,
-                        false,
-                    ),
-                    severity: compute_finding_severity(
-                        fc.cognitive,
-                        fc.cyclomatic,
-                        None,
-                        DEFAULT_COGNITIVE_HIGH,
-                        DEFAULT_COGNITIVE_CRITICAL,
-                        DEFAULT_CYCLOMATIC_HIGH,
-                        DEFAULT_CYCLOMATIC_CRITICAL,
-                    ),
-                    crap: None,
-                    coverage_pct: None,
-                    coverage_tier: None,
-                    coverage_source: None,
-                    inherited_from: None,
-                    component_rollup: None,
-                    contributions: contributions_for(input.complexity_breakdown, fc),
-                    effective_thresholds: applied_thresholds
-                        .override_index
-                        .map(|_| applied_thresholds.effective),
-                    threshold_source: applied_thresholds
-                        .override_index
-                        .map(|_| crate::health_types::ThresholdSource::Override),
-                });
+            if let Some(finding) = collect_complexity_finding(input, path, relative, fc) {
+                findings.push(finding);
             }
         }
     }
 
     (findings, files_analyzed, total_functions)
+}
+
+fn collect_findings_module_path<'a>(
+    input: &CollectFindingsInput<'a>,
+    module: &fallow_core::extract::ModuleInfo,
+) -> Option<(&'a std::path::PathBuf, &'a std::path::Path)> {
+    let &path = input.file_paths.get(&module.file_id)?;
+    let relative = path.strip_prefix(input.config_root).unwrap_or(path);
+    if input.ignore_set.is_match(relative) {
+        return None;
+    }
+    if let Some(changed) = input.changed_files
+        && !changed.contains(path)
+    {
+        return None;
+    }
+    if let Some(ws) = input.ws_roots
+        && !ws.iter().any(|root| path.starts_with(root))
+    {
+        return None;
+    }
+    Some((path, relative))
+}
+
+fn collect_complexity_finding(
+    input: &mut CollectFindingsInput<'_>,
+    path: &std::path::Path,
+    relative: &std::path::Path,
+    fc: &fallow_types::extract::FunctionComplexity,
+) -> Option<ComplexityViolation> {
+    let (applied_thresholds, matched_overrides) =
+        input.threshold_resolver.resolve(relative, &fc.name);
+    input.threshold_state_tracker.record_complexity(
+        path,
+        &fc.name,
+        fc.cyclomatic,
+        fc.cognitive,
+        &matched_overrides,
+        input.threshold_resolver.global,
+    );
+    let exceeds_cyclomatic = fc.cyclomatic > applied_thresholds.effective.max_cyclomatic;
+    let exceeds_cognitive = fc.cognitive > applied_thresholds.effective.max_cognitive;
+    if !exceeds_cyclomatic && !exceeds_cognitive {
+        return None;
+    }
+
+    Some(ComplexityViolation {
+        path: path.to_path_buf(),
+        name: fc.name.clone(),
+        line: fc.line,
+        col: fc.col,
+        cyclomatic: fc.cyclomatic,
+        cognitive: fc.cognitive,
+        line_count: fc.line_count,
+        param_count: fc.param_count,
+        exceeded: ExceededThreshold::from_bools(exceeds_cyclomatic, exceeds_cognitive, false),
+        severity: compute_finding_severity(
+            fc.cognitive,
+            fc.cyclomatic,
+            None,
+            DEFAULT_COGNITIVE_HIGH,
+            DEFAULT_COGNITIVE_CRITICAL,
+            DEFAULT_CYCLOMATIC_HIGH,
+            DEFAULT_CYCLOMATIC_CRITICAL,
+        ),
+        crap: None,
+        coverage_pct: None,
+        coverage_tier: None,
+        coverage_source: None,
+        inherited_from: None,
+        component_rollup: None,
+        contributions: contributions_for(input.complexity_breakdown, fc),
+        effective_thresholds: applied_thresholds
+            .override_index
+            .map(|_| applied_thresholds.effective),
+        threshold_source: applied_thresholds
+            .override_index
+            .map(|_| crate::health_types::ThresholdSource::Override),
+    })
 }
 
 /// Clone the per-decision-point breakdown onto a finding only when the caller
