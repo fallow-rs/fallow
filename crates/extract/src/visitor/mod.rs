@@ -18,8 +18,8 @@ use crate::{
 use fallow_types::extract::{
     AngularInputMember, AngularOutputMember, CalleeUse, ClassHeritageInfo, ComponentFunction,
     ComponentProp, DiKeySite, HookUse, LocalTypeDeclaration, MisplacedDirectiveSite,
-    PublicSignatureTypeReference, RenderEdge, SanitizedSinkArg, SanitizerScope, SecurityControlSite,
-    SinkLiteralValue, SinkSite, SkippedSecurityCalleeSite, TaintedBinding,
+    PublicSignatureTypeReference, RenderEdge, SanitizedSinkArg, SanitizerScope,
+    SecurityControlSite, SinkLiteralValue, SinkSite, SkippedSecurityCalleeSite, TaintedBinding,
 };
 use helpers::LitCustomElementDecorator;
 

@@ -1665,7 +1665,7 @@ const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 216);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1064);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1112);
 
 /// A re-export declaration.
 #[derive(Debug, Clone)]
