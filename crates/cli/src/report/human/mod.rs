@@ -71,6 +71,13 @@ pub(super) fn build_section_header(title: &str, count: usize, level: Level) -> S
 
 /// Section footer: description + docs URL (with anchor to specific section).
 fn section_footer_text(title: &str) -> Option<(&'static str, &'static str)> {
+    section_dead_code_footer_text(title)
+        .or_else(|| section_dependency_footer_text(title))
+        .or_else(|| section_framework_footer_text(title))
+        .or_else(|| section_component_footer_text(title))
+}
+
+fn section_dead_code_footer_text(title: &str) -> Option<(&'static str, &'static str)> {
     match title {
         "Unused files" => Some((
             "Files not reachable from any entry point",
@@ -113,9 +120,15 @@ fn section_footer_text(title: &str) -> Option<(&'static str, &'static str)> {
             "https://docs.fallow.tools/explanations/dead-code#unused-store-members",
         )),
         "Unresolved imports" => Some((
-            "Import paths that could not be resolved \u{2014} check for missing packages or broken paths. Framework-specific imports may need a plugin: https://docs.fallow.tools/plugins",
+            "Import paths that could not be resolved, check for missing packages or broken paths. Framework-specific imports may need a plugin: https://docs.fallow.tools/plugins",
             "https://docs.fallow.tools/explanations/dead-code#unresolved-imports",
         )),
+        _ => None,
+    }
+}
+
+fn section_dependency_footer_text(title: &str) -> Option<(&'static str, &'static str)> {
+    match title {
         "Unlisted dependencies" => Some((
             "Packages imported in code but missing from package.json",
             "https://docs.fallow.tools/explanations/dead-code#unlisted-dependencies",
@@ -152,6 +165,16 @@ fn section_footer_text(title: &str) -> Option<(&'static str, &'static str)> {
             "pnpm `overrides:` entries with an unparsable key or empty value (pnpm install will error)",
             "https://docs.fallow.tools/explanations/dead-code#misconfigured-dependency-overrides",
         )),
+        t if t.starts_with("Type-only") => Some((
+            "Dependencies only used for type imports; consider moving to devDependencies",
+            "https://docs.fallow.tools/explanations/dead-code#type-only-dependencies",
+        )),
+        _ => None,
+    }
+}
+
+fn section_framework_footer_text(title: &str) -> Option<(&'static str, &'static str)> {
+    match title {
         "Invalid client exports" => Some((
             "Server-only or route-config exports in a \"use client\" file (Next.js rejects this at build time)",
             "https://docs.fallow.tools/explanations/dead-code#invalid-client-exports",
@@ -168,6 +191,12 @@ fn section_footer_text(title: &str) -> Option<(&'static str, &'static str)> {
             "A Vue inject / Svelte getContext whose key is provided nowhere in the project, so at runtime it returns undefined",
             "https://docs.fallow.tools/explanations/dead-code#unprovided-injects",
         )),
+        _ => None,
+    }
+}
+
+fn section_component_footer_text(title: &str) -> Option<(&'static str, &'static str)> {
+    match title {
         "Unrendered components" => Some((
             "A Vue / Svelte component reachable through a barrel but rendered nowhere in the project (render it somewhere or remove it)",
             "https://docs.fallow.tools/explanations/dead-code#unrendered-components",
@@ -187,10 +216,6 @@ fn section_footer_text(title: &str) -> Option<(&'static str, &'static str)> {
         "Unused load data keys" => Some((
             "A SvelteKit load() return-object key no consumer reads (sibling +page.svelte data.<key> or project-wide page.data.<key>); delete the key or wire a consumer",
             "https://docs.fallow.tools/explanations/dead-code#unused-load-data-keys",
-        )),
-        t if t.starts_with("Type-only") => Some((
-            "Dependencies only used for type imports \u{2014} consider moving to devDependencies",
-            "https://docs.fallow.tools/explanations/dead-code#type-only-dependencies",
         )),
         _ => None,
     }
