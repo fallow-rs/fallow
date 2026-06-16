@@ -1807,7 +1807,7 @@ fn scan_unreferenced_css_classes(
     ws_roots: Option<&[std::path::PathBuf]>,
     summary: &mut crate::health_types::CssAnalyticsSummary,
 ) -> Vec<crate::health_types::UnreferencedCssClass> {
-    use crate::health_types::{CssCandidateAction, UnreferencedCssClass};
+    use crate::health_types::UnreferencedCssClass;
 
     // Partial scope cannot prove a global class dead.
     if changed_files.is_some() || ws_roots.is_some() {
@@ -1819,65 +1819,7 @@ fn scan_unreferenced_css_classes(
         return Vec::new();
     }
 
-    // Build the in-project markup reference surface: every whole static class
-    // token, plus the raw source of files that construct classes dynamically
-    // (for the substring abstain).
-    let mut static_tokens: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
-    let mut dynamic_corpus = String::new();
-    for file in files {
-        let path = &file.path;
-        let extension = path.extension().and_then(|ext| ext.to_str());
-        if !matches!(
-            extension,
-            Some("jsx" | "tsx" | "html" | "astro" | "vue" | "svelte")
-        ) {
-            continue;
-        }
-        let relative = path.strip_prefix(&config.root).unwrap_or(path);
-        if ignore_set.is_match(relative) {
-            continue;
-        }
-        let Ok(source) = std::fs::read_to_string(path) else {
-            continue;
-        };
-        let scan = fallow_core::extract::scan_markup_class_tokens(&source);
-        for token in scan.static_tokens {
-            static_tokens.insert(token.value);
-        }
-        // Also credit a DASHED (compound) class applied outside a `class=` /
-        // `className=` attribute: a config-object `className: 'leveret-toast'`, a
-        // helper `return "today-highlight"`. Only dashed tokens from quoted
-        // strings are taken (not single words), so a generic word never breaks
-        // the whole-sheet abstain that protects classes used in a surface fallow
-        // cannot read (Phoenix `.heex`, server templates).
-        collect_quoted_class_tokens(&source, &mut static_tokens, true);
-        if scan.has_dynamic {
-            dynamic_corpus.push_str(&source);
-            dynamic_corpus.push('\n');
-        }
-    }
-
-    // A class assembled dynamically as `prefix-${...}` (e.g. `stagger-${i}`
-    // backing `.stagger-1`..`.stagger-6`) never appears as a full literal in the
-    // dynamic corpus, so credit it when its dash-prefix is immediately followed
-    // by an interpolation / concatenation boundary in a dynamic file. The dash
-    // AND the marker are both required, so `stagger` appearing in `add-stagger`
-    // does not credit `.stagger-1`.
-    let dynamic_prefix_referenced = |class: &str| -> bool {
-        let Some(dash) = class.rfind('-') else {
-            return false;
-        };
-        let head = &class[..=dash];
-        const INTERP_MARKERS: [&str; 6] = ["${", "' +", "'+", "\" +", "\"+", "` +"];
-        INTERP_MARKERS
-            .iter()
-            .any(|marker| dynamic_corpus.contains(&format!("{head}{marker}")))
-    };
-    let referenced = |class: &str| -> bool {
-        static_tokens.contains(class)
-            || dynamic_corpus.contains(class)
-            || dynamic_prefix_referenced(class)
-    };
+    let reference_surface = css_reference_surface(files, config, ignore_set);
 
     let published = published_css_paths(config);
     let dependency_prefixes = dependency_class_prefixes(config);
@@ -1885,28 +1827,14 @@ fn scan_unreferenced_css_classes(
 
     let mut out: Vec<UnreferencedCssClass> = Vec::new();
     for (rel, classes) in located {
-        if published.contains(&rel) {
-            continue;
-        }
-        // In-project-consumption gate: a stylesheet none of whose classes are
-        // referenced locally is a published / external surface, not a pile of
-        // dead classes. Abstain for the whole sheet.
-        if !classes.iter().any(|(c, _)| referenced(c)) {
-            continue;
-        }
-        for (class, line) in classes {
-            if class.len() >= MIN_UNREF_CLASS_LEN
-                && !referenced(&class)
-                && !class_matches_dependency_prefix(&class, &dependency_prefixes)
-            {
-                out.push(UnreferencedCssClass {
-                    actions: vec![CssCandidateAction::verify_unreferenced_class(&class)],
-                    class,
-                    path: rel.clone(),
-                    line,
-                });
-            }
-        }
+        push_unreferenced_css_class_candidates(
+            &mut out,
+            &rel,
+            classes,
+            &published,
+            &dependency_prefixes,
+            &reference_surface,
+        );
     }
 
     out.sort_by(|a, b| {
@@ -1917,6 +1845,109 @@ fn scan_unreferenced_css_classes(
     });
     summary.unreferenced_css_classes = saturate_len(out.len());
     out
+}
+
+struct CssReferenceSurface {
+    static_tokens: rustc_hash::FxHashSet<String>,
+    dynamic_corpus: String,
+}
+
+impl CssReferenceSurface {
+    fn references(&self, class: &str) -> bool {
+        self.static_tokens.contains(class)
+            || self.dynamic_corpus.contains(class)
+            || self.dynamic_prefix_referenced(class)
+    }
+
+    fn dynamic_prefix_referenced(&self, class: &str) -> bool {
+        let Some(dash) = class.rfind('-') else {
+            return false;
+        };
+        let head = &class[..=dash];
+        const INTERP_MARKERS: [&str; 6] = ["${", "' +", "'+", "\" +", "\"+", "` +"];
+        INTERP_MARKERS
+            .iter()
+            .any(|marker| self.dynamic_corpus.contains(&format!("{head}{marker}")))
+    }
+}
+
+fn css_reference_surface(
+    files: &[fallow_types::discover::DiscoveredFile],
+    config: &ResolvedConfig,
+    ignore_set: &globset::GlobSet,
+) -> CssReferenceSurface {
+    let mut surface = CssReferenceSurface {
+        static_tokens: rustc_hash::FxHashSet::default(),
+        dynamic_corpus: String::new(),
+    };
+    for file in files {
+        collect_css_reference_surface_file(&mut surface, file, config, ignore_set);
+    }
+    surface
+}
+
+fn collect_css_reference_surface_file(
+    surface: &mut CssReferenceSurface,
+    file: &fallow_types::discover::DiscoveredFile,
+    config: &ResolvedConfig,
+    ignore_set: &globset::GlobSet,
+) {
+    let path = &file.path;
+    let extension = path.extension().and_then(|ext| ext.to_str());
+    if !matches!(
+        extension,
+        Some("jsx" | "tsx" | "html" | "astro" | "vue" | "svelte")
+    ) {
+        return;
+    }
+    let relative = path.strip_prefix(&config.root).unwrap_or(path);
+    if ignore_set.is_match(relative) {
+        return;
+    }
+    let Ok(source) = std::fs::read_to_string(path) else {
+        return;
+    };
+    let scan = fallow_core::extract::scan_markup_class_tokens(&source);
+    for token in scan.static_tokens {
+        surface.static_tokens.insert(token.value);
+    }
+    collect_quoted_class_tokens(&source, &mut surface.static_tokens, true);
+    if scan.has_dynamic {
+        surface.dynamic_corpus.push_str(&source);
+        surface.dynamic_corpus.push('\n');
+    }
+}
+
+fn push_unreferenced_css_class_candidates(
+    out: &mut Vec<crate::health_types::UnreferencedCssClass>,
+    rel: &str,
+    classes: Vec<(String, u32)>,
+    published: &rustc_hash::FxHashSet<String>,
+    dependency_prefixes: &rustc_hash::FxHashSet<String>,
+    reference_surface: &CssReferenceSurface,
+) {
+    use crate::health_types::{CssCandidateAction, UnreferencedCssClass};
+
+    if published.contains(rel)
+        || !classes
+            .iter()
+            .any(|(class, _)| reference_surface.references(class))
+    {
+        return;
+    }
+    for (class, line) in classes {
+        if class.len() >= MIN_UNREF_CLASS_LEN
+            && !reference_surface.references(&class)
+            && !class_matches_dependency_prefix(&class, dependency_prefixes)
+        {
+            out.push(UnreferencedCssClass {
+                actions: vec![CssCandidateAction::verify_unreferenced_class(&class)],
+                class,
+                path: rel.to_string(),
+                line,
+            });
+        }
+    }
 }
 
 /// Source-file extensions scanned for Tailwind utility-class-shaped tokens when
