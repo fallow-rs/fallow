@@ -1931,6 +1931,13 @@ fn append_health_sarif_results(
 }
 
 fn health_sarif_rules() -> Vec<serde_json::Value> {
+    let mut rules = health_complexity_sarif_rules();
+    rules.extend(health_runtime_sarif_rules());
+    rules.extend(health_coverage_intelligence_sarif_rules());
+    rules
+}
+
+fn health_complexity_sarif_rules() -> Vec<serde_json::Value> {
     vec![
         sarif_rule(
             "fallow/high-cyclomatic-complexity",
@@ -1957,6 +1964,11 @@ fn health_sarif_rules() -> Vec<serde_json::Value> {
             "File identified as a high-priority refactoring candidate",
             "warning",
         ),
+    ]
+}
+
+fn health_runtime_sarif_rules() -> Vec<serde_json::Value> {
+    vec![
         sarif_rule(
             "fallow/untested-file",
             "Runtime-reachable file has no test dependency path",
@@ -1992,6 +2004,11 @@ fn health_sarif_rules() -> Vec<serde_json::Value> {
             "Runtime coverage finding",
             "note",
         ),
+    ]
+}
+
+fn health_coverage_intelligence_sarif_rules() -> Vec<serde_json::Value> {
+    vec![
         sarif_rule(
             "fallow/coverage-intelligence-risky-change",
             "Changed hot path combines high CRAP and low test coverage",
