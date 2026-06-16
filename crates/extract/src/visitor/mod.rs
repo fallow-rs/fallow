@@ -231,6 +231,14 @@ pub(crate) struct ModuleInfoExtractor {
     /// prologue), so the RSC bundler silently ignores them. Captured by
     /// `visit_program` and consumed by the `misplaced-directive` detector.
     pub(crate) misplaced_directives: Vec<MisplacedDirectiveSite>,
+    /// Export LOCAL NAMES of exported functions / const-arrows whose body has an
+    /// inline `"use server"` directive. Captured by `extract_declaration_exports`
+    /// and consumed by the `unused-server-action` reclassifier. Only EXPORTED
+    /// declarations are captured (the capture sits on the exported-declaration
+    /// path), so a non-exported local function with a use-server body is never
+    /// recorded; even if it were, the reclassifier only matches against
+    /// unused-EXPORT names, so a stray name is inert.
+    pub(crate) inline_server_action_exports: Vec<String>,
     /// Vue `provide`/`inject` and Svelte `setContext`/`getContext` call sites
     /// keyed by a stable identifier symbol. Consumed by the `unprovided-inject`
     /// detector.
@@ -1070,6 +1078,7 @@ impl ModuleInfoExtractor {
             security_control_sites: self.security_control_sites,
             callee_uses: self.callee_uses,
             misplaced_directives: self.misplaced_directives,
+            inline_server_action_exports: self.inline_server_action_exports,
             di_key_sites: self.di_key_sites,
             has_dynamic_provide: self.has_dynamic_provide,
             // Populated in `release_resolution_payload`; empty at construction.
@@ -1160,6 +1169,8 @@ impl ModuleInfoExtractor {
             .extend(self.security_control_sites);
         info.callee_uses.extend(self.callee_uses);
         info.misplaced_directives.extend(self.misplaced_directives);
+        info.inline_server_action_exports
+            .extend(self.inline_server_action_exports);
         info.di_key_sites.extend(self.di_key_sites);
         info.has_dynamic_provide = info.has_dynamic_provide || self.has_dynamic_provide;
         info.load_return_keys.extend(self.load_return_keys);

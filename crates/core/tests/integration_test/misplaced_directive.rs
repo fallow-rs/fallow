@@ -74,3 +74,45 @@ fn no_findings_when_next_is_absent() {
         results.misplaced_directives
     );
 }
+
+/// W4.3: `misplaced-directive` is universal RSC semantics, so it fires for a
+/// framework-agnostic RSC bundler (Waku), not just Next.
+#[test]
+fn waku_project_flags_misplaced_directive() {
+    let config = fixture_config("misplaced-directive-waku");
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results.misplaced_directives.iter().any(|f| f
+            .directive_site
+            .path
+            .to_string_lossy()
+            .replace('\\', "/")
+            .ends_with("app/page.tsx")
+            && f.directive_site.directive == "use client"),
+        "a body-position `use client` in a Waku project must be flagged: {:?}",
+        results.misplaced_directives
+    );
+}
+
+/// W4.3: the two Next-specific RSC rules stay Next-gated. Under a Waku project,
+/// `invalid-client-export` (illegal names are Next route-segment config) and
+/// `unused-server-action` (Server Action registration is Next-specific) must not
+/// fire even though the same fixture carries a `metadata` client export and a
+/// dead `"use server"` action.
+#[test]
+fn waku_project_does_not_flag_next_specific_rules() {
+    let config = fixture_config("misplaced-directive-waku");
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results.invalid_client_exports.is_empty(),
+        "invalid-client-export is Next-only and must not fire under Waku: {:?}",
+        results.invalid_client_exports
+    );
+    assert!(
+        results.unused_server_actions.is_empty(),
+        "unused-server-action is Next-only and must not fire under Waku: {:?}",
+        results.unused_server_actions
+    );
+}

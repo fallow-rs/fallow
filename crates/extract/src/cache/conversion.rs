@@ -502,6 +502,7 @@ pub fn cached_to_module_opts(
         security_control_sites: cached.security_control_sites.clone(),
         callee_uses: cached.callee_uses.clone(),
         misplaced_directives: cached.misplaced_directives.clone(),
+        inline_server_action_exports: cached.inline_server_action_exports.clone(),
         di_key_sites: cached.di_key_sites.clone(),
         has_dynamic_provide: cached.has_dynamic_provide,
         // Derived in `release_resolution_payload` from `imports` + `unused_import_bindings`
@@ -596,6 +597,7 @@ pub fn module_to_cached(
         security_control_sites: module.security_control_sites.clone(),
         callee_uses: module.callee_uses.clone(),
         misplaced_directives: module.misplaced_directives.clone(),
+        inline_server_action_exports: module.inline_server_action_exports.clone(),
         di_key_sites: module.di_key_sites.clone(),
         has_dynamic_provide: module.has_dynamic_provide,
         component_props: module.component_props.clone(),

@@ -4598,7 +4598,7 @@ fn is_framework_route_receiver_path(callee_path: &str, method: &str) -> bool {
         || receiver.ends_with("server")
 }
 
-fn function_body_has_use_server(body: Option<&FunctionBody<'_>>) -> bool {
+pub(super) fn function_body_has_use_server(body: Option<&FunctionBody<'_>>) -> bool {
     body.is_some_and(|body| {
         body.directives
             .iter()

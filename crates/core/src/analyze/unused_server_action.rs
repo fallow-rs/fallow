@@ -25,8 +25,14 @@
 //!   elsewhere, so the directive on this barrel does not make `x` an action.
 //!
 //! Inline `"use server"` body directives (`export async function f() { "use
-//! server" }` in a non-`"use server"` file) are deferred to a later revision;
-//! such dead actions still surface as `unused-export` until then.
+//! server" }` in a non-`"use server"` file) are ALSO reclassified: the extract
+//! layer records the export local name of every exported function / const-arrow
+//! whose body carries an inline `"use server"` directive on
+//! [`ModuleInfo::inline_server_action_exports`](fallow_types::extract::ModuleInfo),
+//! and an unused export whose name appears there is moved into
+//! `unused_server_actions` just like a whole-`"use server"`-file export. The same
+//! `is_type_only` / `is_re_export` skips apply, so this inherits every
+//! unused-export abstain as well.
 
 use std::path::Path;
 
@@ -39,7 +45,8 @@ use crate::graph::ModuleGraph;
 use crate::results::{AnalysisResults, UnusedServerAction, UnusedServerActionFinding};
 use crate::suppress::{IssueKind, SuppressionContext};
 
-/// Move unused exports of `"use server"` files into `unused_server_actions`.
+/// Move unused exports of `"use server"` files (and inline `"use server"` body
+/// actions) into `unused_server_actions`.
 ///
 /// Gated on the project declaring `next`. The caller only invokes this when the
 /// `unused-server-action` rule is enabled; when it is `off`, the findings stay
@@ -65,7 +72,17 @@ pub fn reclassify_unused_server_actions(
         .map(|m| m.file_id)
         .collect();
 
-    if use_server_ids.is_empty() {
+    // Per-file inline `"use server"` body action export names (a non-use-server
+    // file can still export an inline Server Action). Keyed by FileId so the
+    // membership check can ask "does this file's inline set contain the export
+    // name?".
+    let inline_actions_by_id: FxHashMap<FileId, &Vec<String>> = modules
+        .iter()
+        .filter(|m| !m.inline_server_action_exports.is_empty())
+        .map(|m| (m.file_id, &m.inline_server_action_exports))
+        .collect();
+
+    if use_server_ids.is_empty() && inline_actions_by_id.is_empty() {
         return;
     }
 
@@ -80,14 +97,19 @@ pub fn reclassify_unused_server_actions(
     let mut reclassified: Vec<UnusedServerAction> = Vec::new();
     results.unused_exports.retain(|finding| {
         let export = &finding.export;
-        // Conservative: only direct value exports defined in a use-server file.
+        // Conservative: only direct value exports (a use-server file export, or
+        // an inline `"use server"` body action in any file).
         if export.is_type_only || export.is_re_export {
             return true;
         }
         let Some(&file_id) = file_id_by_path.get(export.path.as_path()) else {
             return true;
         };
-        if !use_server_ids.contains(&file_id) {
+        let is_whole_file_action = use_server_ids.contains(&file_id);
+        let is_inline_action = inline_actions_by_id
+            .get(&file_id)
+            .is_some_and(|names| names.contains(&export.export_name));
+        if !is_whole_file_action && !is_inline_action {
             return true;
         }
         // Suppressed as unused-server-action: drop from both buckets and mark

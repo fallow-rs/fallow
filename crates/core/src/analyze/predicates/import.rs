@@ -1,3 +1,27 @@
+use rustc_hash::FxHashSet;
+
+/// Whether the project uses a React Server Components bundler that honors the
+/// `"use client"` / `"use server"` directive prologue (Next plus the
+/// framework-agnostic RSC bundlers). Used to gate the universal RSC rules
+/// (misplaced-directive, mixed-client-server-barrel) that apply to any RSC
+/// toolchain, NOT the Next-specific rules (invalid-client-export's illegal
+/// names are Next route-segment config; unused-server-action's registration is
+/// Next-specific).
+pub fn project_uses_rsc_directives(declared_deps: &FxHashSet<String>) -> bool {
+    const RSC_BUNDLER_DEPS: &[&str] = &[
+        "next",
+        "waku",
+        "@lazarv/react-server",
+        "react-server-dom-webpack",
+        "react-server-dom-vite",
+        "react-server-dom-parcel",
+        "@vitejs/plugin-rsc",
+    ];
+    RSC_BUNDLER_DEPS
+        .iter()
+        .any(|dep| declared_deps.contains(*dep))
+}
+
 /// Check if an import specifier is a virtual module that does not correspond to a real file.
 ///
 /// The `virtual:` prefix is a convention established by Vite and widely adopted across
@@ -137,6 +161,36 @@ pub(in crate::analyze) fn is_path_alias(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn deps(names: &[&str]) -> FxHashSet<String> {
+        names.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    #[test]
+    fn rsc_bundler_deps_match() {
+        for dep in [
+            "next",
+            "waku",
+            "@lazarv/react-server",
+            "react-server-dom-webpack",
+            "react-server-dom-vite",
+            "react-server-dom-parcel",
+            "@vitejs/plugin-rsc",
+        ] {
+            assert!(
+                project_uses_rsc_directives(&deps(&[dep])),
+                "{dep} should be recognized as an RSC bundler"
+            );
+        }
+    }
+
+    #[test]
+    fn not_rsc_bundler_deps() {
+        assert!(!project_uses_rsc_directives(&deps(&["react"])));
+        assert!(!project_uses_rsc_directives(&deps(&["react-dom"])));
+        assert!(!project_uses_rsc_directives(&deps(&["vite"])));
+        assert!(!project_uses_rsc_directives(&FxHashSet::default()));
+    }
 
     #[test]
     fn builtin_module_fs() {

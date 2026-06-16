@@ -1,0 +1,7 @@
+{
+  "name": "misplaced-directive-waku",
+  "dependencies": {
+    "waku": "^0.21.0",
+    "react": "^18.0.0"
+  }
+}

@@ -136,6 +136,12 @@ pub struct ModuleInfo {
     /// occurrence. Consumed by the `misplaced-directive` detector. Captured
     /// only by JS/TS extraction.
     pub misplaced_directives: Vec<MisplacedDirectiveSite>,
+    /// Export LOCAL NAMES of exported functions / const-arrows whose body has an
+    /// inline `"use server"` directive (`export async function f() { "use server"
+    /// }`), captured in a NON-`"use server"` file. Consumed by the
+    /// `unused-server-action` detector to reclassify an unused inline Server
+    /// Action export out of `unused-export`. Captured only by JS/TS extraction.
+    pub inline_server_action_exports: Vec<String>,
     /// Vue `provide`/`inject` and Svelte `setContext`/`getContext` call sites
     /// keyed by an identifier symbol. Consumed by the `unprovided-inject`
     /// detector to find an inject/getContext whose key is provided nowhere
@@ -1756,7 +1762,7 @@ const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 216);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1232);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1256);
 
 /// A re-export declaration.
 #[derive(Debug, Clone)]
@@ -1984,6 +1990,7 @@ mod tests {
             security_control_sites: Vec::new(),
             callee_uses: Vec::new(),
             misplaced_directives: Vec::new(),
+            inline_server_action_exports: Vec::new(),
             di_key_sites: Vec::new(),
             has_dynamic_provide: false,
             referenced_import_bindings: Vec::new(),

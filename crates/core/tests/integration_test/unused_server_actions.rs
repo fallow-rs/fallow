@@ -159,6 +159,77 @@ fn rule_off_keeps_dead_action_as_unused_export() {
 }
 
 #[test]
+fn dead_inline_use_server_action_is_reclassified() {
+    // W4.4: an `export async function f() { "use server" }` in a NON-use-server
+    // file, referenced nowhere, is reclassified from unused-export into
+    // unused-server-action.
+    let config = fixture_config("unused-server-action");
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let actions = action_names(&results);
+    let exports = export_names(&results);
+
+    for dead_inline in ["deadInlineAction", "deadInlineArrow"] {
+        assert!(
+            actions.contains(&dead_inline.to_string()),
+            "{dead_inline} should be reclassified as unused-server-action: {actions:?}"
+        );
+        assert!(
+            !exports.contains(&dead_inline.to_string()),
+            "{dead_inline} should be moved out of unused_exports: {exports:?}"
+        );
+    }
+
+    // The dead inline action anchors at its defining file, not actions.ts.
+    let dead = results
+        .unused_server_actions
+        .iter()
+        .find(|f| f.action.action_name == "deadInlineAction")
+        .expect("deadInlineAction finding");
+    assert!(
+        dead.action
+            .path
+            .to_string_lossy()
+            .replace('\\', "/")
+            .ends_with("app/inline-actions.ts"),
+        "finding should anchor at app/inline-actions.ts, got {}",
+        dead.action.path.display()
+    );
+}
+
+#[test]
+fn used_inline_use_server_action_is_not_flagged() {
+    // W4.4: a USED inline server action (import-and-call from the page) is
+    // credited as referenced and must not be flagged in either bucket.
+    let config = fixture_config("unused-server-action");
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let actions = action_names(&results);
+    let exports = export_names(&results);
+    assert!(
+        !actions.contains(&"usedInlineAction".to_string()),
+        "usedInlineAction is referenced and must not be flagged: {actions:?}"
+    );
+    assert!(
+        !exports.contains(&"usedInlineAction".to_string()),
+        "usedInlineAction is referenced and must not surface as unused-export: {exports:?}"
+    );
+}
+
+#[test]
+fn rule_off_keeps_dead_inline_action_as_unused_export() {
+    // Neuter check: with the rule off, the inline action stays an unused-export.
+    let config = fixture_config_rule_off("unused-server-action");
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let exports = export_names(&results);
+    assert!(
+        exports.contains(&"deadInlineAction".to_string()),
+        "with the rule off, deadInlineAction should stay an unused-export: {exports:?}"
+    );
+}
+
+#[test]
 fn no_findings_when_next_is_absent() {
     let config = fixture_config("unused-server-action-no-next");
     let results = fallow_core::analyze(&config).expect("analysis should succeed");

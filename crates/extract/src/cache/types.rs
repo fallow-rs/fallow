@@ -515,7 +515,15 @@ use crate::MemberKind;
 /// an extra Vec element), so no size assertion changes. A warm cache from 176
 /// lacks the SFC `<template>` entry and would under-report SFC complexity until
 /// the file is re-parsed.
-pub(super) const CACHE_VERSION: u32 = 177;
+///
+/// Bumped to 178 (feat/rsc-widen-inline-server-action): `ModuleInfo` now carries
+/// `inline_server_action_exports`, the export local names of exported functions /
+/// const-arrows whose body has an inline `"use server"` directive in a
+/// non-`"use server"` file. The `unused-server-action` reclassifier reads it to
+/// move a dead inline Server Action out of `unused-export`. A warm cache from 177
+/// lacks the field and would leave such dead inline actions categorized as
+/// `unused-export` until the file is re-parsed.
+pub(super) const CACHE_VERSION: u32 = 178;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -561,7 +569,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 1232);
+assert_cached_type_size!(CachedModule, 1256);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 56);
@@ -695,6 +703,10 @@ pub struct CachedModule {
     /// Round-trips so the `misplaced-directive` detector sees them on
     /// warm-cache loads.
     pub misplaced_directives: Vec<fallow_types::extract::MisplacedDirectiveSite>,
+    /// Export local names of inline `"use server"` body Server Actions.
+    /// Round-trips so the `unused-server-action` reclassifier sees them on
+    /// warm-cache loads.
+    pub inline_server_action_exports: Vec<String>,
     /// Vue `provide`/`inject` and Svelte `setContext`/`getContext` key sites.
     /// Round-trips so the `unprovided-inject` detector sees them on warm-cache
     /// loads.

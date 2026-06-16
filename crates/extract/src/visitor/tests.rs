@@ -6387,6 +6387,54 @@ fn misplaced_use_strict_is_out_of_scope() {
     );
 }
 
+#[test]
+fn exported_function_with_inline_use_server_is_captured() {
+    let info = parse("export async function f() { \"use server\"; await g(); }\n");
+    assert_eq!(
+        info.inline_server_action_exports,
+        vec!["f".to_string()],
+        "an exported function with an inline \"use server\" body is an inline action"
+    );
+}
+
+#[test]
+fn exported_const_arrow_with_inline_use_server_is_captured() {
+    let info = parse("export const f = async () => { \"use server\"; await g(); };\n");
+    assert_eq!(
+        info.inline_server_action_exports,
+        vec!["f".to_string()],
+        "an exported const-arrow with an inline \"use server\" body is an inline action"
+    );
+}
+
+#[test]
+fn exported_const_function_expr_with_inline_use_server_is_captured() {
+    let info = parse("export const f = function () { \"use server\"; };\n");
+    assert_eq!(info.inline_server_action_exports, vec!["f".to_string()]);
+}
+
+#[test]
+fn non_exported_function_with_inline_use_server_is_not_captured() {
+    // Capture sits on the exported-declaration path, so a local function is not
+    // recorded (and could not be an unused-EXPORT anyway).
+    let info = parse("async function f() { \"use server\"; }\nexport const x = 1;\n");
+    assert!(
+        info.inline_server_action_exports.is_empty(),
+        "a non-exported function must not be captured: {:?}",
+        info.inline_server_action_exports
+    );
+}
+
+#[test]
+fn exported_function_without_use_server_is_not_captured() {
+    let info = parse("export async function f() { await g(); }\n");
+    assert!(
+        info.inline_server_action_exports.is_empty(),
+        "an ordinary exported function is not an inline action: {:?}",
+        info.inline_server_action_exports
+    );
+}
+
 fn di_sites(info: &crate::ModuleInfo) -> Vec<(String, DiRole, DiFramework)> {
     info.di_key_sites
         .iter()

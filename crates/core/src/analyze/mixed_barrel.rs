@@ -20,9 +20,11 @@
 //!   affects npm package re-exports). Origins that do not resolve to a LOCAL
 //!   source module (npm packages, unresolved) are ignored.
 //!
-//! Gated on the project declaring `next`: without Next.js the `"use client"` /
-//! `"use server"` directives have no special meaning, so firing would be a false
-//! positive.
+//! Gated on the project using a React Server Components bundler (see
+//! [`crate::analyze::predicates::project_uses_rsc_directives`]): the barrel
+//! footgun applies to Next AND the framework-agnostic RSC bundlers (Waku, Vite
+//! RSC, etc.). Without an RSC bundler the `"use client"` / `"use server"`
+//! directives have no special meaning, so firing would be a false positive.
 
 use rustc_hash::FxHashMap;
 
@@ -43,8 +45,9 @@ const USE_CLIENT: &str = "use client";
 /// Find barrel files that re-export BOTH a `"use client"` origin module AND a
 /// server-only origin module.
 ///
-/// Returns empty unless the project declares `next` (gated on `declared_deps`):
-/// without Next.js the directives carry no special meaning.
+/// Returns empty unless the project uses an RSC bundler (gated on
+/// `declared_deps` via [`crate::analyze::predicates::project_uses_rsc_directives`]):
+/// without one the directives carry no special meaning.
 ///
 /// For each resolved module with at least one re-export, the DIRECT re-export
 /// origins are resolved one hop to their `ModuleInfo` and classified as a client
@@ -64,7 +67,7 @@ pub fn find_mixed_client_server_barrels(
     suppressions: &SuppressionContext<'_>,
     line_offsets_by_file: &LineOffsetsMap<'_>,
 ) -> Vec<MixedClientServerBarrel> {
-    if !declared_deps.contains("next") {
+    if !crate::analyze::predicates::project_uses_rsc_directives(declared_deps) {
         return Vec::new();
     }
 

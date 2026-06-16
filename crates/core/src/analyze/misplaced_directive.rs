@@ -16,11 +16,13 @@
 //! detector resolves each site to a `(line, col)` and emits one finding per
 //! occurrence.
 //!
-//! Gated on the project declaring `next` (see [`find_misplaced_directives`]),
-//! exactly like the sibling `invalid_client_exports` / `mixed_barrel`
-//! detectors: without Next.js the directives carry no special meaning, so firing
-//! would be a false positive. Other RSC frameworks (Waku, Vite RSC) honor the
-//! same directive positioning, so widening the gate to them is a follow-up.
+//! Gated on the project using a React Server Components bundler (see
+//! [`find_misplaced_directives`] and
+//! [`crate::analyze::predicates::project_uses_rsc_directives`]): a body-position
+//! `"use client"` / `"use server"` is silently ignored by every RSC toolchain,
+//! so the rule applies to Next AND the framework-agnostic RSC bundlers (Waku,
+//! Vite RSC, etc.). Without an RSC bundler the directives carry no special
+//! meaning, so firing would be a false positive.
 
 use rustc_hash::FxHashMap;
 
@@ -43,8 +45,9 @@ const USE_SERVER: &str = "use server";
 
 /// Find misplaced `"use client"` / `"use server"` directives.
 ///
-/// Returns empty unless the project declares `next` (gated on `declared_deps`):
-/// without Next.js the directives carry no special meaning.
+/// Returns empty unless the project uses an RSC bundler (gated on
+/// `declared_deps` via [`crate::analyze::predicates::project_uses_rsc_directives`]):
+/// without one the directives carry no special meaning.
 ///
 /// For each module, every entry in
 /// [`ModuleInfo::misplaced_directives`](fallow_types::extract::ModuleInfo) is
@@ -61,7 +64,7 @@ pub fn find_misplaced_directives(
     suppressions: &SuppressionContext<'_>,
     line_offsets_by_file: &LineOffsetsMap<'_>,
 ) -> Vec<MisplacedDirective> {
-    if !declared_deps.contains("next") {
+    if !crate::analyze::predicates::project_uses_rsc_directives(declared_deps) {
         return Vec::new();
     }
 
@@ -114,7 +117,7 @@ mod tests {
     use super::find_misplaced_directives;
 
     #[test]
-    fn next_gate_returns_empty_without_next_dependency() {
+    fn rsc_gate_returns_empty_without_rsc_bundler_dependency() {
         let graph = ModuleGraph::build(&[], &[], &[]);
         let modules = Vec::new();
         let declared: FxHashSet<String> = std::iter::once("react".to_string()).collect();
@@ -125,7 +128,7 @@ mod tests {
             find_misplaced_directives(&graph, &modules, &declared, &suppressions, &offsets);
         assert!(
             findings.is_empty(),
-            "no `next` dependency means no findings"
+            "no RSC bundler dependency means no findings"
         );
     }
 }

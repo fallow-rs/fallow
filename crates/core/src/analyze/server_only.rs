@@ -135,6 +135,7 @@ mod tests {
             security_control_sites: vec![],
             callee_uses: vec![],
             misplaced_directives: vec![],
+            inline_server_action_exports: Vec::new(),
             di_key_sites: Vec::new(),
             has_dynamic_provide: false,
             referenced_import_bindings: Vec::new(),
