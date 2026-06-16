@@ -2354,95 +2354,144 @@ fn collect_matching_rules(
     resolver: &OwnershipResolver,
 ) -> Vec<String> {
     let mut rules: FxHashSet<String> = FxHashSet::default();
-
-    let mut check = |path: &Path| {
-        if let (_, Some(rule)) = resolver.resolve_with_rule(relative_path(path, root)) {
-            rules.insert(rule);
-        }
-    };
-
-    for f in &results.unused_files {
-        check(&f.file.path);
-    }
-    for e in &results.unused_exports {
-        check(&e.export.path);
-    }
-    for e in &results.unused_types {
-        check(&e.export.path);
-    }
-    for e in &results.private_type_leaks {
-        check(&e.leak.path);
-    }
-    for m in &results.unused_enum_members {
-        check(&m.member.path);
-    }
-    for m in &results.unused_class_members {
-        check(&m.member.path);
-    }
-    for m in &results.unused_store_members {
-        check(&m.member.path);
-    }
-    for u in &results.unresolved_imports {
-        check(&u.import.path);
-    }
-    for c in &results.circular_dependencies {
-        if let Some(first) = c.cycle.files.first() {
-            check(first);
-        }
-    }
-    for b in &results.boundary_violations {
-        check(&b.violation.from_path);
-    }
-    for b in &results.boundary_coverage_violations {
-        check(&b.violation.path);
-    }
-    for b in &results.boundary_call_violations {
-        check(&b.violation.path);
-    }
-    for v in &results.policy_violations {
-        check(&v.violation.path);
-    }
-    for e in &results.invalid_client_exports {
-        check(&e.export.path);
-    }
-    for b in &results.mixed_client_server_barrels {
-        check(&b.barrel.path);
-    }
-    for d in &results.misplaced_directives {
-        check(&d.directive_site.path);
-    }
-    for i in &results.unprovided_injects {
-        check(&i.inject.path);
-    }
-    for c in &results.unrendered_components {
-        check(&c.component.path);
-    }
-    for p in &results.unused_component_props {
-        check(&p.prop.path);
-    }
-    for e in &results.unused_component_emits {
-        check(&e.emit.path);
-    }
-    for a in &results.unused_server_actions {
-        check(&a.action.path);
-    }
-    for k in &results.unused_load_data_keys {
-        check(&k.key.path);
-    }
-    for c in &results.route_collisions {
-        check(&c.collision.path);
-    }
-    for c in &results.dynamic_segment_name_conflicts {
-        check(&c.conflict.path);
-    }
-    for s in &results.stale_suppressions {
-        check(&s.path);
-    }
+    collect_dead_code_rules(&mut rules, results, root, resolver);
+    collect_graph_rules(&mut rules, results, root, resolver);
+    collect_boundary_rules(&mut rules, results, root, resolver);
+    collect_framework_rules(&mut rules, results, root, resolver);
+    collect_suppression_rules(&mut rules, results, root, resolver);
 
     let mut sorted: Vec<String> = rules.into_iter().collect();
     sorted.sort();
     sorted.truncate(3);
     sorted
+}
+
+fn insert_matching_rule(
+    rules: &mut FxHashSet<String>,
+    path: &Path,
+    root: &Path,
+    resolver: &OwnershipResolver,
+) {
+    if let (_, Some(rule)) = resolver.resolve_with_rule(relative_path(path, root)) {
+        rules.insert(rule);
+    }
+}
+
+fn collect_dead_code_rules(
+    rules: &mut FxHashSet<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    resolver: &OwnershipResolver,
+) {
+    for f in &results.unused_files {
+        insert_matching_rule(rules, &f.file.path, root, resolver);
+    }
+    for e in &results.unused_exports {
+        insert_matching_rule(rules, &e.export.path, root, resolver);
+    }
+    for e in &results.unused_types {
+        insert_matching_rule(rules, &e.export.path, root, resolver);
+    }
+    for e in &results.private_type_leaks {
+        insert_matching_rule(rules, &e.leak.path, root, resolver);
+    }
+    for m in &results.unused_enum_members {
+        insert_matching_rule(rules, &m.member.path, root, resolver);
+    }
+    for m in &results.unused_class_members {
+        insert_matching_rule(rules, &m.member.path, root, resolver);
+    }
+    for m in &results.unused_store_members {
+        insert_matching_rule(rules, &m.member.path, root, resolver);
+    }
+}
+
+fn collect_graph_rules(
+    rules: &mut FxHashSet<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    resolver: &OwnershipResolver,
+) {
+    for u in &results.unresolved_imports {
+        insert_matching_rule(rules, &u.import.path, root, resolver);
+    }
+    for c in &results.circular_dependencies {
+        if let Some(first) = c.cycle.files.first() {
+            insert_matching_rule(rules, first, root, resolver);
+        }
+    }
+}
+
+fn collect_boundary_rules(
+    rules: &mut FxHashSet<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    resolver: &OwnershipResolver,
+) {
+    for b in &results.boundary_violations {
+        insert_matching_rule(rules, &b.violation.from_path, root, resolver);
+    }
+    for b in &results.boundary_coverage_violations {
+        insert_matching_rule(rules, &b.violation.path, root, resolver);
+    }
+    for b in &results.boundary_call_violations {
+        insert_matching_rule(rules, &b.violation.path, root, resolver);
+    }
+    for v in &results.policy_violations {
+        insert_matching_rule(rules, &v.violation.path, root, resolver);
+    }
+}
+
+fn collect_framework_rules(
+    rules: &mut FxHashSet<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    resolver: &OwnershipResolver,
+) {
+    for e in &results.invalid_client_exports {
+        insert_matching_rule(rules, &e.export.path, root, resolver);
+    }
+    for b in &results.mixed_client_server_barrels {
+        insert_matching_rule(rules, &b.barrel.path, root, resolver);
+    }
+    for d in &results.misplaced_directives {
+        insert_matching_rule(rules, &d.directive_site.path, root, resolver);
+    }
+    for i in &results.unprovided_injects {
+        insert_matching_rule(rules, &i.inject.path, root, resolver);
+    }
+    for c in &results.unrendered_components {
+        insert_matching_rule(rules, &c.component.path, root, resolver);
+    }
+    for p in &results.unused_component_props {
+        insert_matching_rule(rules, &p.prop.path, root, resolver);
+    }
+    for e in &results.unused_component_emits {
+        insert_matching_rule(rules, &e.emit.path, root, resolver);
+    }
+    for a in &results.unused_server_actions {
+        insert_matching_rule(rules, &a.action.path, root, resolver);
+    }
+    for k in &results.unused_load_data_keys {
+        insert_matching_rule(rules, &k.key.path, root, resolver);
+    }
+    for c in &results.route_collisions {
+        insert_matching_rule(rules, &c.collision.path, root, resolver);
+    }
+    for c in &results.dynamic_segment_name_conflicts {
+        insert_matching_rule(rules, &c.conflict.path, root, resolver);
+    }
+}
+
+fn collect_suppression_rules(
+    rules: &mut FxHashSet<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    resolver: &OwnershipResolver,
+) {
+    for s in &results.stale_suppressions {
+        insert_matching_rule(rules, &s.path, root, resolver);
+    }
 }
 
 /// Print analysis results grouped by owner or directory.
