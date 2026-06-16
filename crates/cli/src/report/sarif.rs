@@ -1030,7 +1030,20 @@ fn sarif_member_import_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
 }
 
 fn sarif_graph_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
-    [
+    let mut specs = sarif_cycle_rule_specs(rules);
+    specs.extend(sarif_boundary_rule_specs(rules));
+    specs.extend(sarif_framework_rule_specs(rules));
+    specs.extend(sarif_component_rule_specs(rules));
+    specs.push((
+        "fallow/stale-suppression",
+        "Suppression comment or tag no longer matches any issue",
+        rules.stale_suppressions,
+    ));
+    specs
+}
+
+fn sarif_cycle_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
+    vec![
         (
             "fallow/circular-dependency",
             "Circular dependency chain detected",
@@ -1041,6 +1054,11 @@ fn sarif_graph_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
             "Two or more barrel files re-export from each other in a loop",
             rules.re_export_cycle,
         ),
+    ]
+}
+
+fn sarif_boundary_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
+    vec![
         (
             "fallow/boundary-violation",
             "Import crosses an architecture boundary",
@@ -1061,6 +1079,11 @@ fn sarif_graph_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
             "Banned call or import matched a rule-pack rule",
             rules.policy_violation,
         ),
+    ]
+}
+
+fn sarif_framework_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
+    vec![
         (
             "fallow/invalid-client-export",
             "\"use client\" file exports a server-only / route-config name",
@@ -1076,6 +1099,11 @@ fn sarif_graph_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
             "\"use client\" / \"use server\" directive is not in the leading position and is ignored",
             rules.misplaced_directive,
         ),
+    ]
+}
+
+fn sarif_component_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
+    vec![
         (
             "fallow/unprovided-inject",
             "A Vue inject / Svelte getContext whose key is provided nowhere in the project",
@@ -1116,13 +1144,7 @@ fn sarif_graph_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
             "Sibling Next.js dynamic route segments use different slug names at the same position",
             rules.dynamic_segment_name_conflict,
         ),
-        (
-            "fallow/stale-suppression",
-            "Suppression comment or tag no longer matches any issue",
-            rules.stale_suppressions,
-        ),
     ]
-    .into()
 }
 
 fn sarif_workspace_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
