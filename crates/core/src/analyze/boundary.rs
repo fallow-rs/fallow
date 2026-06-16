@@ -3,7 +3,7 @@ use rustc_hash::FxHashMap;
 use fallow_config::ResolvedConfig;
 
 use crate::discover::FileId;
-use crate::graph::ModuleGraph;
+use crate::graph::{ModuleGraph, ModuleNode};
 use crate::suppress::{IssueKind, SuppressionContext};
 use fallow_types::results::BoundaryViolation;
 
@@ -24,106 +24,199 @@ pub fn find_boundary_violations(
     suppressions: &SuppressionContext<'_>,
     line_offsets_by_file: &LineOffsetsMap<'_>,
 ) -> Vec<BoundaryViolation> {
-    let boundaries = &config.boundaries;
     let mut violations = Vec::new();
-
     let mut zone_cache: FxHashMap<FileId, Option<String>> = FxHashMap::default();
-
-    let classify =
-        |file_id: FileId, cache: &mut FxHashMap<FileId, Option<String>>| -> Option<String> {
-            if let Some(cached) = cache.get(&file_id) {
-                return cached.clone();
-            }
-            let node = &graph.modules[file_id.0 as usize];
-            let rel_path = node
-                .path
-                .strip_prefix(&config.root)
-                .ok()
-                .map(|p| p.to_string_lossy().replace('\\', "/"));
-            let zone = rel_path.and_then(|p| boundaries.classify_zone(&p).map(str::to_owned));
-            cache.insert(file_id, zone.clone());
-            zone
-        };
+    let ctx = BoundaryContext {
+        graph,
+        config,
+        suppressions,
+        line_offsets_by_file,
+    };
 
     for node in &graph.modules {
-        if !node.is_reachable() && !node.is_entry_point() {
-            continue;
-        }
-
-        let Some(from_zone) = classify(node.file_id, &mut zone_cache) else {
-            continue; // Unzoned files are unrestricted.
-        };
-
-        let has_rule = boundaries.rules.iter().any(|r| r.from_zone == from_zone);
-        if !has_rule {
-            continue; // Unrestricted zone — skip all edge checks.
-        }
-
-        if suppressions.is_file_suppressed(node.file_id, IssueKind::BoundaryViolation) {
-            continue;
-        }
-
-        for (target_id, all_type_only, span_start) in graph.outgoing_edge_summaries(node.file_id) {
-            let Some(to_zone) = classify(target_id, &mut zone_cache) else {
-                continue; // Unzoned targets always allowed.
-            };
-
-            if boundaries.is_import_allowed(&from_zone, &to_zone) {
-                continue;
-            }
-
-            if all_type_only && boundaries.is_type_only_allowed(&from_zone, &to_zone) {
-                tracing::debug!(
-                    "boundary type-only allowed: '{}' -> '{}' ({} -> {})",
-                    from_zone,
-                    to_zone,
-                    node.path.display(),
-                    graph.modules[target_id.0 as usize].path.display()
-                );
-                continue;
-            }
-
-            let (line, col) = span_start.map_or((1, 0), |s| {
-                byte_offset_to_line_col(line_offsets_by_file, node.file_id, s)
-            });
-
-            if suppressions.is_suppressed(node.file_id, line, IssueKind::BoundaryViolation) {
-                continue;
-            }
-
-            let target_node = &graph.modules[target_id.0 as usize];
-            let import_specifier = target_node.path.strip_prefix(&config.root).map_or_else(
-                |_| target_node.path.to_string_lossy().replace('\\', "/"),
-                |p| p.to_string_lossy().replace('\\', "/"),
-            );
-
-            violations.push(BoundaryViolation {
-                from_path: node.path.clone(),
-                to_path: target_node.path.clone(),
-                from_zone: from_zone.clone(),
-                to_zone: to_zone.clone(),
-                import_specifier,
-                line,
-                col,
-            });
-        }
+        collect_node_boundary_violations(&mut violations, node, &mut zone_cache, &ctx);
     }
 
-    if !boundaries.is_empty() {
-        let classified_zones: rustc_hash::FxHashSet<&str> =
-            zone_cache.values().filter_map(|z| z.as_deref()).collect();
-        for zone in &boundaries.zones {
-            if !classified_zones.contains(zone.name.as_str()) {
-                tracing::warn!(
-                    "boundary zone '{}' matched 0 reachable files — check your directory \
-                     structure, pattern, or whether these files are all currently unreachable",
-                    zone.name
-                );
-            }
-        }
-    }
-
+    warn_unmatched_boundary_zones(config, &zone_cache);
     violations
+}
+
+struct BoundaryContext<'a> {
+    graph: &'a ModuleGraph,
+    config: &'a ResolvedConfig,
+    suppressions: &'a SuppressionContext<'a>,
+    line_offsets_by_file: &'a LineOffsetsMap<'a>,
+}
+
+fn classify_boundary_zone(
+    file_id: FileId,
+    cache: &mut FxHashMap<FileId, Option<String>>,
+    ctx: &BoundaryContext<'_>,
+) -> Option<String> {
+    if let Some(cached) = cache.get(&file_id) {
+        return cached.clone();
+    }
+    let node = &ctx.graph.modules[file_id.0 as usize];
+    let rel_path = node
+        .path
+        .strip_prefix(&ctx.config.root)
+        .ok()
+        .map(|p| p.to_string_lossy().replace('\\', "/"));
+    let zone = rel_path.and_then(|p| ctx.config.boundaries.classify_zone(&p).map(str::to_owned));
+    cache.insert(file_id, zone.clone());
+    zone
+}
+
+fn collect_node_boundary_violations(
+    violations: &mut Vec<BoundaryViolation>,
+    node: &ModuleNode,
+    zone_cache: &mut FxHashMap<FileId, Option<String>>,
+    ctx: &BoundaryContext<'_>,
+) {
+    if !node.is_reachable() && !node.is_entry_point() {
+        return;
+    }
+    let Some(from_zone) = classify_boundary_zone(node.file_id, zone_cache, ctx) else {
+        return;
+    };
+    if !ctx
+        .config
+        .boundaries
+        .rules
+        .iter()
+        .any(|r| r.from_zone == from_zone)
+    {
+        return;
+    }
+    if ctx
+        .suppressions
+        .is_file_suppressed(node.file_id, IssueKind::BoundaryViolation)
+    {
+        return;
+    }
+
+    for (target_id, all_type_only, span_start) in ctx.graph.outgoing_edge_summaries(node.file_id) {
+        collect_boundary_edge_violation(
+            violations,
+            node,
+            BoundaryEdge {
+                target_id,
+                all_type_only,
+                span_start,
+            },
+            &from_zone,
+            zone_cache,
+            ctx,
+        );
+    }
+}
+
+#[derive(Clone, Copy)]
+struct BoundaryEdge {
+    target_id: FileId,
+    all_type_only: bool,
+    span_start: Option<u32>,
+}
+
+fn collect_boundary_edge_violation(
+    violations: &mut Vec<BoundaryViolation>,
+    node: &ModuleNode,
+    edge: BoundaryEdge,
+    from_zone: &str,
+    zone_cache: &mut FxHashMap<FileId, Option<String>>,
+    ctx: &BoundaryContext<'_>,
+) {
+    let Some(to_zone) = classify_boundary_zone(edge.target_id, zone_cache, ctx) else {
+        return;
+    };
+    if is_boundary_import_allowed(
+        node,
+        edge.target_id,
+        edge.all_type_only,
+        from_zone,
+        &to_zone,
+        ctx,
+    ) {
+        return;
+    }
+
+    let (line, col) = edge.span_start.map_or((1, 0), |s| {
+        byte_offset_to_line_col(ctx.line_offsets_by_file, node.file_id, s)
+    });
+    if ctx
+        .suppressions
+        .is_suppressed(node.file_id, line, IssueKind::BoundaryViolation)
+    {
+        return;
+    }
+
+    let target_node = &ctx.graph.modules[edge.target_id.0 as usize];
+    violations.push(BoundaryViolation {
+        from_path: node.path.clone(),
+        to_path: target_node.path.clone(),
+        from_zone: from_zone.to_string(),
+        to_zone,
+        import_specifier: boundary_import_specifier(target_node, ctx.config),
+        line,
+        col,
+    });
+}
+
+fn is_boundary_import_allowed(
+    node: &ModuleNode,
+    target_id: FileId,
+    all_type_only: bool,
+    from_zone: &str,
+    to_zone: &str,
+    ctx: &BoundaryContext<'_>,
+) -> bool {
+    if ctx.config.boundaries.is_import_allowed(from_zone, to_zone) {
+        return true;
+    }
+    if all_type_only
+        && ctx
+            .config
+            .boundaries
+            .is_type_only_allowed(from_zone, to_zone)
+    {
+        tracing::debug!(
+            "boundary type-only allowed: '{}' -> '{}' ({} -> {})",
+            from_zone,
+            to_zone,
+            node.path.display(),
+            ctx.graph.modules[target_id.0 as usize].path.display()
+        );
+        return true;
+    }
+    false
+}
+
+fn boundary_import_specifier(target_node: &ModuleNode, config: &ResolvedConfig) -> String {
+    target_node.path.strip_prefix(&config.root).map_or_else(
+        |_| target_node.path.to_string_lossy().replace('\\', "/"),
+        |p| p.to_string_lossy().replace('\\', "/"),
+    )
+}
+
+fn warn_unmatched_boundary_zones(
+    config: &ResolvedConfig,
+    zone_cache: &FxHashMap<FileId, Option<String>>,
+) {
+    if config.boundaries.is_empty() {
+        return;
+    }
+
+    let classified_zones: rustc_hash::FxHashSet<&str> =
+        zone_cache.values().filter_map(|z| z.as_deref()).collect();
+    for zone in &config.boundaries.zones {
+        if !classified_zones.contains(zone.name.as_str()) {
+            tracing::warn!(
+                "boundary zone '{}' matched 0 reachable files, check your directory \
+                 structure, pattern, or whether these files are all currently unreachable",
+                zone.name
+            );
+        }
+    }
 }
 
 #[cfg(test)]
