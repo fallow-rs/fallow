@@ -847,7 +847,7 @@
     "vscode-languageserver-protocol": "3.18.0"
   },
   "devDependencies": {
-    "@types/node": "25.9.1",
+    "@types/node": "25.9.2",
     "@types/vscode": "1.96.0",
     "@types/mocha": "10.0.10",
     "@vscode/test-electron": "2.5.2",
