@@ -1417,6 +1417,17 @@ fn annotate_graph_json(
     root: &Path,
     base: &FxHashSet<String>,
 ) {
+    annotate_cycle_json(json, results, root, base);
+    annotate_boundary_json(json, results, root, base);
+    annotate_policy_json(json, results, root, base);
+}
+
+fn annotate_cycle_json(
+    json: &mut serde_json::Value,
+    results: &fallow_core::results::AnalysisResults,
+    root: &Path,
+    base: &FxHashSet<String>,
+) {
     annotate_issue_array(
         json,
         "circular_dependencies",
@@ -1449,6 +1460,14 @@ fn annotate_graph_json(
             issue_was_introduced(&format!("re-export-cycle:{kind}:{}", files.join("|")), base)
         }),
     );
+}
+
+fn annotate_boundary_json(
+    json: &mut serde_json::Value,
+    results: &fallow_core::results::AnalysisResults,
+    root: &Path,
+    base: &FxHashSet<String>,
+) {
     annotate_issue_array(
         json,
         "boundary_violations",
@@ -1491,6 +1510,14 @@ fn annotate_graph_json(
             )
         }),
     );
+}
+
+fn annotate_policy_json(
+    json: &mut serde_json::Value,
+    results: &fallow_core::results::AnalysisResults,
+    root: &Path,
+    base: &FxHashSet<String>,
+) {
     annotate_issue_array(
         json,
         "policy_violations",
