@@ -13,6 +13,19 @@ pub(super) fn render_runtime_coverage(
         return;
     };
 
+    render_runtime_summary(lines, production);
+    render_capture_quality_warning(lines, production);
+    render_runtime_findings(lines, production, root);
+    render_runtime_hot_paths(lines, production, root);
+    render_runtime_warnings(lines, production);
+    render_upgrade_prompt(lines, production);
+    lines.push(String::new());
+}
+
+fn render_runtime_summary(
+    lines: &mut Vec<String>,
+    production: &crate::health_types::RuntimeCoverageReport,
+) {
     let verdict = match production.verdict {
         crate::health_types::RuntimeCoverageReportVerdict::Clean => "clean",
         crate::health_types::RuntimeCoverageReportVerdict::HotPathTouched => "hot path touched",
@@ -62,7 +75,13 @@ pub(super) fn render_runtime_coverage(
             "  license expired grace active; refresh with `fallow license refresh`".to_owned(),
         );
     }
-    render_capture_quality_warning(lines, production);
+}
+
+fn render_runtime_findings(
+    lines: &mut Vec<String>,
+    production: &crate::health_types::RuntimeCoverageReport,
+    root: &Path,
+) {
     let shown_findings = production.findings.len().min(MAX_FLAT_ITEMS);
     for finding in &production.findings[..shown_findings] {
         let relative = format_path(&relative_path(&finding.path, root).display().to_string());
@@ -84,6 +103,13 @@ pub(super) fn render_runtime_coverage(
             production.findings.len() - MAX_FLAT_ITEMS
         ));
     }
+}
+
+fn render_runtime_hot_paths(
+    lines: &mut Vec<String>,
+    production: &crate::health_types::RuntimeCoverageReport,
+    root: &Path,
+) {
     if !production.hot_paths.is_empty() {
         lines.push("  hot paths:".to_owned());
         for entry in production.hot_paths.iter().take(5) {
@@ -97,11 +123,15 @@ pub(super) fn render_runtime_coverage(
             ));
         }
     }
+}
+
+fn render_runtime_warnings(
+    lines: &mut Vec<String>,
+    production: &crate::health_types::RuntimeCoverageReport,
+) {
     for warning in &production.warnings {
         lines.push(format!("  warning [{}]: {}", warning.code, warning.message));
     }
-    render_upgrade_prompt(lines, production);
-    lines.push(String::new());
 }
 
 fn render_capture_quality_warning(
