@@ -2034,73 +2034,12 @@ fn build_circular_deps_section(
     let title = "Circular dependencies";
     lines.push(build_section_header(title, items.len(), level));
 
-    let mut hub_groups: Vec<(String, Vec<&fallow_core::results::CircularDependency>)> = Vec::new();
-    let mut hub_map: rustc_hash::FxHashMap<String, usize> = rustc_hash::FxHashMap::default();
-
-    for entry in items {
-        let cycle = &entry.cycle;
-        let hub = cycle
-            .files
-            .first()
-            .map(|p| relative_path(p, root).display().to_string())
-            .unwrap_or_default();
-        if let Some(&idx) = hub_map.get(&hub) {
-            hub_groups[idx].1.push(cycle);
-        } else {
-            hub_map.insert(hub.clone(), hub_groups.len());
-            hub_groups.push((hub, vec![cycle]));
-        }
-    }
-
-    hub_groups.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then_with(|| a.0.cmp(&b.0)));
-
+    let hub_groups = circular_dependency_hub_groups(items, root);
     let shown = hub_groups.len().min(MAX_FLAT_ITEMS);
     for (hub_path, cycles) in &hub_groups[..shown] {
-        let count_tag = if cycles.len() > 1 {
-            format!(" ({} cycles)", cycles.len()).dimmed().to_string()
-        } else {
-            String::new()
-        };
-        lines.push(format!("  {}{}", format_path(hub_path), count_tag));
-
+        lines.push(circular_dependency_hub_line(hub_path, cycles.len()));
         for cycle in cycles {
-            let rel_paths: Vec<String> = cycle
-                .files
-                .iter()
-                .map(|p| relative_path(p, root).display().to_string())
-                .collect();
-
-            let mut chain_parts: Vec<String> = Vec::new();
-            for path in &rel_paths[1..] {
-                let elided = elide_common_prefix(hub_path, path);
-                chain_parts.push(format_path(elided));
-            }
-            let (_, hub_filename) = split_dir_filename(hub_path);
-            chain_parts.push(hub_filename.bold().to_string());
-
-            let type_only_tag = if cycle
-                .files
-                .iter()
-                .all(|p| p.to_str().is_some_and(|s| s.ends_with(".d.ts")))
-            {
-                format!(" {}", "(type-only)".dimmed())
-            } else {
-                String::new()
-            };
-
-            let cross_pkg_tag = if cycle.is_cross_package {
-                format!(" {}", "(cross-package)".dimmed())
-            } else {
-                String::new()
-            };
-
-            lines.push(format!(
-                "    {} {}{}{}",
-                "\u{2192}".dimmed(),
-                chain_parts.join(&format!(" {} ", "\u{2192}".dimmed())),
-                type_only_tag,
-                cross_pkg_tag,
-            ));
+            lines.push(circular_dependency_cycle_line(hub_path, cycle, root));
         }
         lines.push(String::new());
     }
@@ -2119,6 +2058,88 @@ fn build_circular_deps_section(
     push_section_footer_with_count(lines, title, items.len());
     if !lines.last().is_some_and(String::is_empty) {
         lines.push(String::new());
+    }
+}
+
+fn circular_dependency_hub_groups<'a>(
+    items: &'a [fallow_types::output_dead_code::CircularDependencyFinding],
+    root: &Path,
+) -> Vec<(String, Vec<&'a fallow_core::results::CircularDependency>)> {
+    let mut hub_groups: Vec<(String, Vec<&'a fallow_core::results::CircularDependency>)> =
+        Vec::new();
+    let mut hub_map: rustc_hash::FxHashMap<String, usize> = rustc_hash::FxHashMap::default();
+
+    for entry in items {
+        let cycle = &entry.cycle;
+        let hub = cycle
+            .files
+            .first()
+            .map(|path| relative_path(path, root).display().to_string())
+            .unwrap_or_default();
+        if let Some(&idx) = hub_map.get(&hub) {
+            hub_groups[idx].1.push(cycle);
+        } else {
+            hub_map.insert(hub.clone(), hub_groups.len());
+            hub_groups.push((hub, vec![cycle]));
+        }
+    }
+
+    hub_groups.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then_with(|| a.0.cmp(&b.0)));
+    hub_groups
+}
+
+fn circular_dependency_hub_line(hub_path: &str, cycle_count: usize) -> String {
+    let count_tag = if cycle_count > 1 {
+        format!(" ({cycle_count} cycles)").dimmed().to_string()
+    } else {
+        String::new()
+    };
+    format!("  {}{}", format_path(hub_path), count_tag)
+}
+
+fn circular_dependency_cycle_line(
+    hub_path: &str,
+    cycle: &fallow_core::results::CircularDependency,
+    root: &Path,
+) -> String {
+    let rel_paths: Vec<String> = cycle
+        .files
+        .iter()
+        .map(|path| relative_path(path, root).display().to_string())
+        .collect();
+    let mut chain_parts: Vec<String> = rel_paths[1..]
+        .iter()
+        .map(|path| format_path(elide_common_prefix(hub_path, path)))
+        .collect();
+    let (_, hub_filename) = split_dir_filename(hub_path);
+    chain_parts.push(hub_filename.bold().to_string());
+
+    format!(
+        "    {} {}{}{}",
+        "\u{2192}".dimmed(),
+        chain_parts.join(&format!(" {} ", "\u{2192}".dimmed())),
+        circular_type_only_tag(cycle),
+        circular_cross_package_tag(cycle),
+    )
+}
+
+fn circular_type_only_tag(cycle: &fallow_core::results::CircularDependency) -> String {
+    if cycle
+        .files
+        .iter()
+        .all(|path| path.to_str().is_some_and(|s| s.ends_with(".d.ts")))
+    {
+        format!(" {}", "(type-only)".dimmed())
+    } else {
+        String::new()
+    }
+}
+
+fn circular_cross_package_tag(cycle: &fallow_core::results::CircularDependency) -> String {
+    if cycle.is_cross_package {
+        format!(" {}", "(cross-package)".dimmed())
+    } else {
+        String::new()
     }
 }
 
