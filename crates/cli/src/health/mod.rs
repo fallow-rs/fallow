@@ -5704,21 +5704,7 @@ pub struct HealthPrintOptions {
 }
 
 pub fn print_health_result(result: &HealthResult, options: HealthPrintOptions) -> ExitCode {
-    let ctx = report::ReportContext {
-        root: &result.config.root,
-        rules: &result.config.rules,
-        elapsed: result.elapsed,
-        quiet: options.quiet,
-        explain: options.explain,
-        group_by: None,
-        top: None,
-        summary: options.summary,
-        summary_heading: options.summary_heading,
-        show_explain_tip: options.show_explain_tip,
-        baseline_matched: None,
-        config_fixable: false,
-        skip_score_and_trend: options.skip_score_and_trend,
-    };
+    let ctx = health_report_context(result, options);
     let report_code = report::print_health_report(
         &result.report,
         result.grouping.as_ref(),
@@ -5734,55 +5720,101 @@ pub fn print_health_result(result: &HealthResult, options: HealthPrintOptions) -
         return ExitCode::SUCCESS;
     }
 
-    let mut score_gate_failed = false;
-    if let Some(threshold) = options.min_score
-        && let Some(ref hs) = result.report.health_score
-        && hs.score < threshold
-    {
-        score_gate_failed = true;
-        if !options.quiet {
-            eprintln!(
-                "Health score {:.1} ({}) is below minimum threshold {:.0}",
-                hs.score, hs.grade, threshold
-            );
-        }
+    if health_exit_gate_failed(result, options) {
+        return ExitCode::from(1);
+    }
+    if result.should_fail_on_coverage_gaps && result.coverage_gaps_has_findings {
+        return ExitCode::from(1);
+    }
+    maybe_print_score_gate_note(result, options);
+
+    ExitCode::SUCCESS
+}
+
+fn health_report_context(
+    result: &HealthResult,
+    options: HealthPrintOptions,
+) -> report::ReportContext<'_> {
+    report::ReportContext {
+        root: &result.config.root,
+        rules: &result.config.rules,
+        elapsed: result.elapsed,
+        quiet: options.quiet,
+        explain: options.explain,
+        group_by: None,
+        top: None,
+        summary: options.summary,
+        summary_heading: options.summary_heading,
+        show_explain_tip: options.show_explain_tip,
+        baseline_matched: None,
+        config_fixable: false,
+        skip_score_and_trend: options.skip_score_and_trend,
+    }
+}
+
+fn health_exit_gate_failed(result: &HealthResult, options: HealthPrintOptions) -> bool {
+    score_gate_failed(result, options)
+        || findings_gate_failed(result, options)
+        || has_failing_runtime_coverage(result)
+}
+
+fn score_gate_failed(result: &HealthResult, options: HealthPrintOptions) -> bool {
+    let Some(threshold) = options.min_score else {
+        return false;
+    };
+    let Some(ref hs) = result.report.health_score else {
+        return false;
+    };
+    if hs.score >= threshold {
+        return false;
     }
 
-    let findings_gate_failed = if let Some(min_sev) = options.min_severity {
+    if !options.quiet {
+        eprintln!(
+            "Health score {:.1} ({}) is below minimum threshold {:.0}",
+            hs.score, hs.grade, threshold
+        );
+    }
+    true
+}
+
+fn findings_gate_failed(result: &HealthResult, options: HealthPrintOptions) -> bool {
+    if let Some(min_sev) = options.min_severity {
         result.report.findings.iter().any(|f| f.severity >= min_sev)
     } else if options.min_score.is_none() {
         !result.report.findings.is_empty()
     } else {
         false
-    };
-    let has_failing_runtime_coverage =
-        result
-            .report
-            .runtime_coverage
-            .as_ref()
-            .is_some_and(|report| {
-                report.findings.iter().any(|finding| {
-                    matches!(
-                        finding.verdict,
-                        crate::health_types::RuntimeCoverageVerdict::SafeToDelete
-                            | crate::health_types::RuntimeCoverageVerdict::ReviewRequired
-                            | crate::health_types::RuntimeCoverageVerdict::LowTraffic
-                    )
-                })
-            });
-    if score_gate_failed || findings_gate_failed || has_failing_runtime_coverage {
-        return ExitCode::from(1);
+    }
+}
+
+fn has_failing_runtime_coverage(result: &HealthResult) -> bool {
+    result
+        .report
+        .runtime_coverage
+        .as_ref()
+        .is_some_and(|report| report.findings.iter().any(is_failing_runtime_coverage))
+}
+
+fn is_failing_runtime_coverage(finding: &crate::health_types::RuntimeCoverageFinding) -> bool {
+    matches!(
+        finding.verdict,
+        crate::health_types::RuntimeCoverageVerdict::SafeToDelete
+            | crate::health_types::RuntimeCoverageVerdict::ReviewRequired
+            | crate::health_types::RuntimeCoverageVerdict::LowTraffic
+    )
+}
+
+fn maybe_print_score_gate_note(result: &HealthResult, options: HealthPrintOptions) {
+    if options.min_score.is_none()
+        || options.min_severity.is_some()
+        || options.quiet
+        || result.report.findings.is_empty()
+        || !matches!(result.config.output, OutputFormat::Human)
+    {
+        return;
     }
 
-    if result.should_fail_on_coverage_gaps && result.coverage_gaps_has_findings {
-        return ExitCode::from(1);
-    }
-
-    if options.min_score.is_some()
-        && options.min_severity.is_none()
-        && !options.quiet
-        && !result.report.findings.is_empty()
-        && matches!(result.config.output, OutputFormat::Human)
     {
         eprintln!(
             "{}",
@@ -5790,8 +5822,6 @@ pub fn print_health_result(result: &HealthResult, options: HealthPrintOptions) -
                 .dimmed()
         );
     }
-
-    ExitCode::SUCCESS
 }
 
 #[cfg(test)]
