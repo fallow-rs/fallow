@@ -316,6 +316,14 @@ impl<'a> CompactLineBuilder<'a> {
     }
 
     fn push_graph_lines(&mut self) {
+        self.push_structure_lines();
+        self.push_framework_lines();
+        self.push_component_lines();
+        self.push_route_lines();
+        self.push_suppression_lines();
+    }
+
+    fn push_structure_lines(&mut self) {
         for cycle in &self.results.circular_dependencies {
             self.lines
                 .push(compact_circular_dependency_line(cycle, self.root));
@@ -346,6 +354,9 @@ impl<'a> CompactLineBuilder<'a> {
                 violation.violation.rule_id,
             ));
         }
+    }
+
+    fn push_framework_lines(&mut self) {
         for finding in &self.results.invalid_client_exports {
             self.lines.push(format!(
                 "invalid-client-export:{}:{}:{} (from \"{}\")",
@@ -380,6 +391,9 @@ impl<'a> CompactLineBuilder<'a> {
                 finding.inject.key_name,
             ));
         }
+    }
+
+    fn push_component_lines(&mut self) {
         for finding in &self.results.unrendered_components {
             self.lines.push(format!(
                 "unrendered-component:{}:{}:{}",
@@ -420,6 +434,9 @@ impl<'a> CompactLineBuilder<'a> {
                 finding.key.key_name,
             ));
         }
+    }
+
+    fn push_route_lines(&mut self) {
         for finding in &self.results.route_collisions {
             self.lines.push(format!(
                 "route-collision:{}:{} (url {})",
@@ -437,6 +454,9 @@ impl<'a> CompactLineBuilder<'a> {
                 finding.conflict.position,
             ));
         }
+    }
+
+    fn push_suppression_lines(&mut self) {
         for suppression in &self.results.stale_suppressions {
             self.lines
                 .push(compact_stale_suppression_line(suppression, self.root));
