@@ -29,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`unused-class-members` no longer misses Playwright fixture methods reached through branch-selected aliases.** Fallow now credits fixture object aliases selected by ternaries, `if/else`, and `switch` branches inside Playwright test callbacks, and same-file local fixture tests passed into `mergeTests(...)` now feed the merged wrapper. The alias tracking is Playwright-only, order-sensitive, and conservative on shadowing or unknown reassignment, so genuinely unused page-object methods still report. Thanks [@vethman](https://github.com/vethman) for the report. (Closes [#1270](https://github.com/fallow-rs/fallow/issues/1270).)
+
 - **Svelte 5's bare `<script module>` is now recognized as module context.** Fallow previously recognized only the Svelte 4 `<script context="module">` form, so a Svelte 5 bare `<script module>` block was treated as the instance script and its imports were wrongly credited as template-visible, which could mask a genuinely unused import or export in a Svelte 5 component. The bare `module` attribute is now matched (with the same standalone-attribute anchoring as the `setup` attribute, so a `lang` or `generics` attribute containing the substring "module" cannot false-match), and its declarations are scoped as module context like the Svelte 4 form. The extraction cache version is bumped so warm caches refresh on upgrade.
 
 ## [2.97.0] - 2026-06-16

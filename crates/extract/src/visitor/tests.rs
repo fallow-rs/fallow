@@ -2566,6 +2566,138 @@ fn playwright_test_callback_records_fixture_member_uses() {
 }
 
 #[test]
+fn playwright_test_callback_records_branch_selected_fixture_alias_uses() {
+    let info = parse(
+        r"
+            import { test } from './fixtures';
+
+            test('branch aliases', async ({ readerA, readerB, pages }) => {
+                const directReader = readerA;
+                await directReader.directCall();
+
+                const dottedReader = pages.adminPage;
+                await dottedReader.dottedCall();
+
+                const ternaryReader = process.env.READER === 'a' ? readerA : readerB;
+                await ternaryReader.ternaryCall();
+
+                let ifReader;
+                if (process.env.READER === 'a') {
+                    ifReader = readerA;
+                } else {
+                    ifReader = readerB;
+                }
+                await ifReader.ifCall();
+
+                let switchReader;
+                switch (process.env.READER) {
+                    case 'a':
+                        switchReader = readerA;
+                        break;
+                    default:
+                        switchReader = readerB;
+                        break;
+                }
+                await switchReader.switchCall();
+            });
+        ",
+    );
+
+    let has_use = |fixture_name: &str, member_name: &str| {
+        info.member_accesses.iter().any(|a| {
+            a.object
+                == format!(
+                    "{}test:{fixture_name}",
+                    crate::PLAYWRIGHT_FIXTURE_USE_SENTINEL
+                )
+                && a.member == member_name
+        })
+    };
+
+    assert!(
+        has_use("readerA", "directCall"),
+        "direct reader alias should record a Playwright fixture use, found: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        has_use("pages.adminPage", "dottedCall"),
+        "dotted reader alias should record a Playwright fixture use, found: {:?}",
+        info.member_accesses
+    );
+    for member_name in ["ternaryCall", "ifCall", "switchCall"] {
+        assert!(
+            has_use("readerA", member_name),
+            "{member_name} should be credited to readerA, found: {:?}",
+            info.member_accesses
+        );
+        assert!(
+            has_use("readerB", member_name),
+            "{member_name} should be credited to readerB, found: {:?}",
+            info.member_accesses
+        );
+    }
+}
+
+#[test]
+fn playwright_test_callback_fixture_aliases_are_ordered_and_scoped() {
+    let info = parse(
+        r"
+            import { test } from './fixtures';
+
+            test('ordered aliases', async ({ readerA }) => {
+                late.lateCall();
+                const late = readerA;
+                await late.afterAssign();
+
+                {
+                    const readerA = {
+                        shadowedCall() {}
+                    };
+                    readerA.shadowedCall();
+                }
+
+                const reader = readerA;
+                const nested = () => {
+                    reader.nestedAliasCall();
+                };
+                await reader.liveAliasCall();
+
+                let cleared = readerA;
+                cleared = {};
+                cleared.notCredited();
+
+                await nested;
+            });
+        ",
+    );
+
+    let has_use = |member_name: &str| {
+        info.member_accesses.iter().any(|a| {
+            a.object == format!("{}test:readerA", crate::PLAYWRIGHT_FIXTURE_USE_SENTINEL)
+                && a.member == member_name
+        })
+    };
+
+    assert!(
+        has_use("afterAssign"),
+        "alias use after assignment should be credited, found: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        has_use("liveAliasCall"),
+        "top-level callback alias use should be credited, found: {:?}",
+        info.member_accesses
+    );
+    for member_name in ["lateCall", "shadowedCall", "nestedAliasCall", "notCredited"] {
+        assert!(
+            !has_use(member_name),
+            "{member_name} should not be credited through an invalid alias, found: {:?}",
+            info.member_accesses
+        );
+    }
+}
+
+#[test]
 fn playwright_nested_fixture_type_records_dotted_path_definitions() {
     let info = parse(
         r"

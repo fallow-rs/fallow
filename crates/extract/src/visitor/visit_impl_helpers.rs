@@ -464,6 +464,10 @@ pub(super) fn normalize_module_file_relative_path(relative: &str) -> Option<Stri
 #[derive(Default)]
 pub(super) struct PlaywrightFixtureMemberCollector {
     fixture_by_local: FxHashMap<String, String>,
+    alias_by_local: FxHashMap<String, Vec<String>>,
+    shadowed_stack: Vec<FxHashSet<String>>,
+    block_declared_stack: Vec<FxHashSet<String>>,
+    nested_function_depth: usize,
     accesses: Vec<MemberAccess>,
 }
 
@@ -471,7 +475,168 @@ impl PlaywrightFixtureMemberCollector {
     fn new(fixture_by_local: FxHashMap<String, String>) -> Self {
         Self {
             fixture_by_local,
+            alias_by_local: FxHashMap::default(),
+            shadowed_stack: Vec::new(),
+            block_declared_stack: Vec::new(),
+            nested_function_depth: 0,
             accesses: Vec::new(),
+        }
+    }
+
+    fn branch_collector(&self) -> Self {
+        Self {
+            fixture_by_local: self.fixture_by_local.clone(),
+            alias_by_local: self.alias_by_local.clone(),
+            shadowed_stack: self.shadowed_stack.clone(),
+            block_declared_stack: self.block_declared_stack.clone(),
+            nested_function_depth: self.nested_function_depth,
+            accesses: Vec::new(),
+        }
+    }
+
+    fn is_shadowed(&self, name: &str) -> bool {
+        self.shadowed_stack.iter().any(|scope| scope.contains(name))
+    }
+
+    fn resolve_object_to_fixture_paths(
+        &self,
+        object_dotted: &str,
+        include_aliases: bool,
+    ) -> Option<Vec<String>> {
+        let (root, rest) = object_dotted
+            .split_once('.')
+            .map_or((object_dotted, ""), |(r, x)| (r, x));
+        if self.is_shadowed(root) {
+            return None;
+        }
+
+        if let Some(base) = self.fixture_by_local.get(root) {
+            return Some(vec![append_fixture_path(base, rest)]);
+        }
+
+        if include_aliases
+            && self.nested_function_depth == 0
+            && let Some(paths) = self.alias_by_local.get(root)
+        {
+            let resolved = paths
+                .iter()
+                .map(|path| append_fixture_path(path, rest))
+                .collect();
+            return Some(resolved);
+        }
+
+        None
+    }
+
+    fn resolve_alias_source_paths(&self, expr: &Expression<'_>) -> Option<Vec<String>> {
+        match unwrap_static_expr(expr) {
+            Expression::Identifier(ident) => {
+                self.resolve_object_to_fixture_paths(ident.name.as_str(), false)
+            }
+            Expression::StaticMemberExpression(_) => static_member_object_name(expr)
+                .and_then(|name| self.resolve_object_to_fixture_paths(&name, false)),
+            Expression::ConditionalExpression(cond) => {
+                let mut paths = self.resolve_alias_source_paths(&cond.consequent)?;
+                let alternate = self.resolve_alias_source_paths(&cond.alternate)?;
+                append_unique_paths(&mut paths, alternate);
+                Some(paths)
+            }
+            _ => None,
+        }
+    }
+
+    fn record_binding_alias(&mut self, name: &str, init: Option<&Expression<'_>>) {
+        let Some(init) = init else {
+            return;
+        };
+        if let Some(paths) = self.resolve_alias_source_paths(init) {
+            self.alias_by_local.insert(name.to_string(), paths);
+        } else {
+            self.alias_by_local.remove(name);
+        }
+    }
+
+    fn record_assignment_alias(&mut self, name: &str, expr: &Expression<'_>) {
+        if self.is_shadowed(name) {
+            return;
+        }
+        if let Some(paths) = self.resolve_alias_source_paths(expr) {
+            self.alias_by_local.insert(name.to_string(), paths);
+        } else {
+            self.alias_by_local.remove(name);
+            if self.fixture_by_local.contains_key(name)
+                && let Some(scope) = self.shadowed_stack.last_mut()
+            {
+                scope.insert(name.to_string());
+            }
+        }
+    }
+
+    fn record_declared_name(&mut self, name: &str) {
+        if let Some(scope) = self.block_declared_stack.last_mut() {
+            scope.insert(name.to_string());
+        }
+        if (self.fixture_by_local.contains_key(name) || self.alias_by_local.contains_key(name))
+            && let Some(scope) = self.shadowed_stack.last_mut()
+        {
+            scope.insert(name.to_string());
+        }
+    }
+
+    fn collect_shadowed_params(&self, params: &FormalParameters<'_>) -> FxHashSet<String> {
+        let mut shadowed = FxHashSet::default();
+        for param in &params.items {
+            for binding in param.pattern.get_binding_identifiers() {
+                let name = binding.name.as_str();
+                if self.fixture_by_local.contains_key(name)
+                    || self.alias_by_local.contains_key(name)
+                {
+                    shadowed.insert(name.to_string());
+                }
+            }
+        }
+        shadowed
+    }
+
+    fn merge_branch_aliases(
+        &mut self,
+        before: &FxHashMap<String, Vec<String>>,
+        branches: &[FxHashMap<String, Vec<String>>],
+    ) {
+        if branches.is_empty() {
+            return;
+        }
+
+        let mut names = FxHashSet::default();
+        names.extend(before.keys().cloned());
+        for branch in branches {
+            names.extend(branch.keys().cloned());
+        }
+
+        for name in names {
+            let before_value = before.get(&name);
+            let changed = branches
+                .iter()
+                .any(|branch| branch.get(&name) != before_value);
+            if !changed {
+                continue;
+            }
+
+            let mut merged = Vec::new();
+            let mut all_fixture_derived = true;
+            for branch in branches {
+                let Some(paths) = branch.get(&name) else {
+                    all_fixture_derived = false;
+                    break;
+                };
+                append_unique_paths(&mut merged, paths.clone());
+            }
+
+            if all_fixture_derived {
+                self.alias_by_local.insert(name, merged);
+            } else {
+                self.alias_by_local.remove(&name);
+            }
         }
     }
 }
@@ -479,16 +644,168 @@ impl PlaywrightFixtureMemberCollector {
 impl<'a> Visit<'a> for PlaywrightFixtureMemberCollector {
     fn visit_static_member_expression(&mut self, expr: &StaticMemberExpression<'a>) {
         if let Some(object_dotted) = static_member_object_name(&expr.object)
-            && let Some(fixture_path) =
-                resolve_object_to_fixture_path(&object_dotted, &self.fixture_by_local)
+            && let Some(fixture_paths) = self.resolve_object_to_fixture_paths(&object_dotted, true)
         {
-            self.accesses.push(MemberAccess {
-                object: fixture_path,
-                member: expr.property.name.to_string(),
-            });
+            for fixture_path in fixture_paths {
+                self.accesses.push(MemberAccess {
+                    object: fixture_path,
+                    member: expr.property.name.to_string(),
+                });
+            }
             return;
         }
         walk::walk_static_member_expression(self, expr);
+    }
+
+    fn visit_variable_declaration(&mut self, decl: &VariableDeclaration<'a>) {
+        for declarator in &decl.declarations {
+            if let BindingPattern::BindingIdentifier(id) = &declarator.id {
+                let name = id.name.as_str();
+                self.record_declared_name(name);
+                if self.nested_function_depth == 0 {
+                    self.record_binding_alias(name, declarator.init.as_ref());
+                }
+            }
+        }
+        walk::walk_variable_declaration(self, decl);
+    }
+
+    fn visit_assignment_expression(&mut self, expr: &AssignmentExpression<'a>) {
+        if self.nested_function_depth == 0
+            && let Some(name) = assignment_target_identifier_name(&expr.left)
+        {
+            self.record_assignment_alias(name, &expr.right);
+        }
+        walk::walk_assignment_expression(self, expr);
+    }
+
+    fn visit_if_statement(&mut self, stmt: &IfStatement<'a>) {
+        self.visit_expression(&stmt.test);
+        let before = self.alias_by_local.clone();
+
+        let mut consequent = self.branch_collector();
+        consequent.visit_statement(&stmt.consequent);
+        self.accesses.extend(consequent.accesses);
+
+        let mut branches = vec![consequent.alias_by_local];
+        if let Some(alternate) = &stmt.alternate {
+            let mut alternate_collector = self.branch_collector();
+            alternate_collector.visit_statement(alternate);
+            self.accesses.extend(alternate_collector.accesses);
+            branches.push(alternate_collector.alias_by_local);
+        } else {
+            branches.push(before.clone());
+        }
+
+        self.merge_branch_aliases(&before, &branches);
+    }
+
+    fn visit_switch_statement(&mut self, stmt: &SwitchStatement<'a>) {
+        self.visit_expression(&stmt.discriminant);
+        let before = self.alias_by_local.clone();
+        let has_default = stmt.cases.iter().any(|case| case.test.is_none());
+        let mut branches = Vec::new();
+
+        for case in &stmt.cases {
+            if let Some(test) = &case.test {
+                self.visit_expression(test);
+            }
+            let mut case_collector = self.branch_collector();
+            for statement in &case.consequent {
+                case_collector.visit_statement(statement);
+            }
+            self.accesses.extend(case_collector.accesses);
+            branches.push(case_collector.alias_by_local);
+        }
+
+        if !has_default {
+            branches.push(before.clone());
+        }
+        self.merge_branch_aliases(&before, &branches);
+    }
+
+    fn visit_function(&mut self, func: &Function<'a>, flags: ScopeFlags) {
+        let shadowed = self.collect_shadowed_params(&func.params);
+        self.shadowed_stack.push(shadowed);
+        self.nested_function_depth += 1;
+        walk::walk_function(self, func, flags);
+        self.nested_function_depth -= 1;
+        self.shadowed_stack.pop();
+    }
+
+    fn visit_arrow_function_expression(&mut self, expr: &ArrowFunctionExpression<'a>) {
+        let shadowed = self.collect_shadowed_params(&expr.params);
+        self.shadowed_stack.push(shadowed);
+        self.nested_function_depth += 1;
+        walk::walk_arrow_function_expression(self, expr);
+        self.nested_function_depth -= 1;
+        self.shadowed_stack.pop();
+    }
+
+    fn visit_block_statement(&mut self, stmt: &BlockStatement<'a>) {
+        let before_aliases = self.alias_by_local.clone();
+        self.shadowed_stack.push(FxHashSet::default());
+        self.block_declared_stack.push(FxHashSet::default());
+        walk::walk_block_statement(self, stmt);
+        if let Some(declared) = self.block_declared_stack.pop() {
+            for name in declared {
+                if let Some(previous) = before_aliases.get(&name) {
+                    self.alias_by_local.insert(name, previous.clone());
+                } else {
+                    self.alias_by_local.remove(&name);
+                }
+            }
+        }
+        self.shadowed_stack.pop();
+    }
+}
+
+fn append_fixture_path(base: &str, rest: &str) -> String {
+    if rest.is_empty() {
+        base.to_string()
+    } else {
+        format!("{base}.{rest}")
+    }
+}
+
+fn append_unique_paths(target: &mut Vec<String>, paths: Vec<String>) {
+    for path in paths {
+        if !target.iter().any(|existing| existing == &path) {
+            target.push(path);
+        }
+    }
+}
+
+fn assignment_target_identifier_name<'b>(target: &'b AssignmentTarget<'_>) -> Option<&'b str> {
+    match target {
+        AssignmentTarget::AssignmentTargetIdentifier(ident) => Some(ident.name.as_str()),
+        AssignmentTarget::TSAsExpression(ts_as) => expression_identifier_name(&ts_as.expression),
+        AssignmentTarget::TSSatisfiesExpression(ts_sat) => {
+            expression_identifier_name(&ts_sat.expression)
+        }
+        AssignmentTarget::TSNonNullExpression(ts_non_null) => {
+            expression_identifier_name(&ts_non_null.expression)
+        }
+        AssignmentTarget::TSTypeAssertion(ts_assertion) => {
+            expression_identifier_name(&ts_assertion.expression)
+        }
+        _ => None,
+    }
+}
+
+fn expression_identifier_name<'b>(expr: &'b Expression<'_>) -> Option<&'b str> {
+    match expr {
+        Expression::Identifier(ident) => Some(ident.name.as_str()),
+        Expression::ParenthesizedExpression(paren) => expression_identifier_name(&paren.expression),
+        Expression::TSAsExpression(ts_as) => expression_identifier_name(&ts_as.expression),
+        Expression::TSSatisfiesExpression(ts_sat) => expression_identifier_name(&ts_sat.expression),
+        Expression::TSNonNullExpression(ts_non_null) => {
+            expression_identifier_name(&ts_non_null.expression)
+        }
+        Expression::TSTypeAssertion(ts_assertion) => {
+            expression_identifier_name(&ts_assertion.expression)
+        }
+        _ => None,
     }
 }
 
@@ -554,21 +871,6 @@ pub(super) fn collect_object_pattern_bindings(
                 }
             }
         }
-    }
-}
-
-pub(super) fn resolve_object_to_fixture_path(
-    object_dotted: &str,
-    fixture_by_local: &FxHashMap<String, String>,
-) -> Option<String> {
-    let (root, rest) = object_dotted
-        .split_once('.')
-        .map_or((object_dotted, ""), |(r, x)| (r, x));
-    let base = fixture_by_local.get(root)?;
-    if rest.is_empty() {
-        Some(base.clone())
-    } else {
-        Some(format!("{base}.{rest}"))
     }
 }
 

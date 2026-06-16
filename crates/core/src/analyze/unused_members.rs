@@ -929,17 +929,72 @@ fn parse_playwright_fixture_sentinel<'a>(
     object.strip_prefix(prefix)?.split_once(':')
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum PlaywrightTestKey {
+    Export(ExportKey),
+    Local { file_id: FileId, local_name: String },
+}
+
+fn push_playwright_test_key(keys: &mut Vec<PlaywrightTestKey>, key: PlaywrightTestKey) {
+    if !keys.contains(&key) {
+        keys.push(key);
+    }
+}
+
+fn collect_playwright_local_test_names(resolved: &ResolvedModule) -> FxHashSet<&str> {
+    let mut names = FxHashSet::default();
+    for access in &resolved.member_accesses {
+        if let Some((test_local_name, _)) = parse_playwright_fixture_sentinel(
+            access.object.as_str(),
+            PLAYWRIGHT_FIXTURE_DEF_SENTINEL,
+        ) {
+            names.insert(test_local_name);
+        }
+        if let Some((test_local_name, _)) = parse_playwright_fixture_sentinel(
+            access.object.as_str(),
+            PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL,
+        ) {
+            names.insert(test_local_name);
+        }
+    }
+    names
+}
+
+fn playwright_test_keys_for_local(
+    local_to_export_keys: &FxHashMap<&str, Vec<ExportKey>>,
+    local_playwright_test_names: &FxHashSet<&str>,
+    file_id: FileId,
+    local_name: &str,
+) -> Vec<PlaywrightTestKey> {
+    if let Some(export_keys) = local_to_export_keys.get(local_name) {
+        return export_keys
+            .iter()
+            .cloned()
+            .map(PlaywrightTestKey::Export)
+            .collect();
+    }
+    if local_playwright_test_names.contains(local_name) {
+        return vec![PlaywrightTestKey::Local {
+            file_id,
+            local_name: local_name.to_string(),
+        }];
+    }
+    Vec::new()
+}
+
 fn build_playwright_fixture_targets(
     graph: &ModuleGraph,
     resolved_modules: &[ResolvedModule],
 ) -> FxHashMap<ExportKey, FxHashMap<String, Vec<ExportKey>>> {
     let type_targets = build_playwright_fixture_type_targets(graph, resolved_modules);
-    let mut targets_by_test: FxHashMap<ExportKey, FxHashMap<String, Vec<ExportKey>>> =
+    let mut targets_by_test: FxHashMap<PlaywrightTestKey, FxHashMap<String, Vec<ExportKey>>> =
         FxHashMap::default();
-    let mut aliases_by_test: FxHashMap<ExportKey, Vec<ExportKey>> = FxHashMap::default();
+    let mut aliases_by_test: FxHashMap<PlaywrightTestKey, Vec<PlaywrightTestKey>> =
+        FxHashMap::default();
 
     for resolved in resolved_modules {
         let local_to_export_keys = build_local_to_export_keys(resolved);
+        let local_playwright_test_names = collect_playwright_local_test_names(resolved);
         for access in &resolved.member_accesses {
             let Some((test_local_name, fixture_name)) = parse_playwright_fixture_sentinel(
                 access.object.as_str(),
@@ -947,15 +1002,18 @@ fn build_playwright_fixture_targets(
             ) else {
                 continue;
             };
-            let Some(test_keys) = local_to_export_keys.get(test_local_name) else {
-                continue;
-            };
+            let test_keys = playwright_test_keys_for_local(
+                &local_to_export_keys,
+                &local_playwright_test_names,
+                resolved.file_id,
+                test_local_name,
+            );
             let Some(target_keys) = local_to_export_keys.get(access.member.as_str()) else {
                 continue;
             };
 
             for test_key in test_keys {
-                let fixture_targets = targets_by_test.entry(test_key.clone()).or_default();
+                let fixture_targets = targets_by_test.entry(test_key).or_default();
                 for target_key in target_keys {
                     push_playwright_fixture_target(
                         graph,
@@ -975,18 +1033,31 @@ fn build_playwright_fixture_targets(
             ) else {
                 continue;
             };
-            let Some(test_keys) = local_to_export_keys.get(test_local_name) else {
-                continue;
-            };
-            let Some(base_keys) = local_to_export_keys.get(access.member.as_str()) else {
-                continue;
-            };
+            let test_keys = playwright_test_keys_for_local(
+                &local_to_export_keys,
+                &local_playwright_test_names,
+                resolved.file_id,
+                test_local_name,
+            );
+            let base_keys = playwright_test_keys_for_local(
+                &local_to_export_keys,
+                &local_playwright_test_names,
+                resolved.file_id,
+                access.member.as_str(),
+            );
 
             for test_key in test_keys {
-                let aliases = aliases_by_test.entry(test_key.clone()).or_default();
-                for base_key in base_keys {
-                    for key in export_key_with_origins(graph, base_key) {
-                        push_export_key(aliases, key);
+                let aliases = aliases_by_test.entry(test_key).or_default();
+                for base_key in &base_keys {
+                    match base_key {
+                        PlaywrightTestKey::Export(export_key) => {
+                            for key in export_key_with_origins(graph, export_key) {
+                                push_playwright_test_key(aliases, PlaywrightTestKey::Export(key));
+                            }
+                        }
+                        PlaywrightTestKey::Local { .. } => {
+                            push_playwright_test_key(aliases, base_key.clone());
+                        }
                     }
                 }
             }
@@ -995,11 +1066,17 @@ fn build_playwright_fixture_targets(
 
     expand_playwright_fixture_aliases(&mut targets_by_test, &aliases_by_test);
     targets_by_test
+        .into_iter()
+        .filter_map(|(key, targets)| match key {
+            PlaywrightTestKey::Export(export_key) => Some((export_key, targets)),
+            PlaywrightTestKey::Local { .. } => None,
+        })
+        .collect()
 }
 
 fn expand_playwright_fixture_aliases(
-    targets_by_test: &mut FxHashMap<ExportKey, FxHashMap<String, Vec<ExportKey>>>,
-    aliases_by_test: &FxHashMap<ExportKey, Vec<ExportKey>>,
+    targets_by_test: &mut FxHashMap<PlaywrightTestKey, FxHashMap<String, Vec<ExportKey>>>,
+    aliases_by_test: &FxHashMap<PlaywrightTestKey, Vec<PlaywrightTestKey>>,
 ) {
     if aliases_by_test.is_empty() {
         return;

@@ -1,0 +1,9 @@
+{
+  "name": "issue-1270-playwright-fixture-branch-aliases",
+  "private": true,
+  "devDependencies": {
+    "@playwright/test": "^1.0.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}

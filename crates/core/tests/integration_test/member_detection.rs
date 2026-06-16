@@ -472,6 +472,46 @@ fn playwright_wrapper_fixtures_credit_nested_fixture_methods() {
 }
 
 #[test]
+fn playwright_branch_selected_fixture_aliases_are_credited() {
+    let root = fixture_path("issue-1270-playwright-fixture-branch-aliases");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<String> = results
+        .unused_class_members
+        .iter()
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
+        .collect();
+
+    for credited in [
+        "SingleReader.directControl",
+        "SingleReader.ternarySelected",
+        "SingleReader.ifElseSelected",
+        "SingleReader.switchSelected",
+        "MergedReader.directControl",
+        "MergedReader.ternarySelected",
+        "MergedReader.ifElseSelected",
+        "MergedReader.switchSelected",
+        "MergedReader.ifElseDirect",
+        "MergedReader.switchDirect",
+    ] {
+        assert!(
+            !unused_class_members.contains(&credited.to_string()),
+            "{credited} should be credited through Playwright fixture aliases, found: {unused_class_members:?}"
+        );
+    }
+
+    assert!(
+        unused_class_members.contains(&"SingleReader.unusedSingle".to_string()),
+        "the single-fixture unused control should still be reported, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&"MergedReader.unusedMerged".to_string()),
+        "the merged-fixture unused control should still be reported, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
 fn fluent_builder_chain_credits_intermediate_setters() {
     let root = fixture_path("issue-387-fluent-builder");
     let config = create_config(root);
