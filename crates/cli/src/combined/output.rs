@@ -70,79 +70,75 @@ fn print_machine_combined_report(
                 opts.config_path.is_some()
                     || fallow_config::FallowConfig::find_config_path(opts.root).is_some(),
             );
-            if code != ExitCode::SUCCESS {
-                return Err(code);
-            }
-            Ok(Some(0))
+            combined_machine_success(code)
         }
         OutputFormat::Sarif => {
             let code = print_combined_sarif(check_result, dupes_result, health_result);
-            if code != ExitCode::SUCCESS {
-                return Err(code);
-            }
-            Ok(Some(0))
+            combined_machine_success(code)
         }
         OutputFormat::CodeClimate => {
             let code = print_combined_codeclimate(check_result, dupes_result, health_result);
-            if code != ExitCode::SUCCESS {
-                return Err(code);
-            }
-            Ok(Some(0))
+            combined_machine_success(code)
         }
         OutputFormat::PrCommentGithub => {
-            let issues =
-                build_combined_codeclimate_issues(check_result, dupes_result, health_result);
-            let code = report::ci::pr_comment::print_pr_comment_from_codeclimate_issues(
-                "combined",
-                report::ci::pr_comment::Provider::Github,
-                &issues,
-            );
-            if code != ExitCode::SUCCESS {
-                return Err(code);
-            }
-            Ok(Some(0))
+            print_combined_pr_comment(check_result, dupes_result, health_result, true)
         }
         OutputFormat::PrCommentGitlab => {
-            let issues =
-                build_combined_codeclimate_issues(check_result, dupes_result, health_result);
-            let code = report::ci::pr_comment::print_pr_comment_from_codeclimate_issues(
-                "combined",
-                report::ci::pr_comment::Provider::Gitlab,
-                &issues,
-            );
-            if code != ExitCode::SUCCESS {
-                return Err(code);
-            }
-            Ok(Some(0))
+            print_combined_pr_comment(check_result, dupes_result, health_result, false)
         }
         OutputFormat::ReviewGithub => {
-            let issues =
-                build_combined_codeclimate_issues(check_result, dupes_result, health_result);
-            let code = report::ci::review::print_review_envelope_from_codeclimate_issues(
-                "combined",
-                report::ci::pr_comment::Provider::Github,
-                &issues,
-            );
-            if code != ExitCode::SUCCESS {
-                return Err(code);
-            }
-            Ok(Some(0))
+            print_combined_review(check_result, dupes_result, health_result, true)
         }
         OutputFormat::ReviewGitlab => {
-            let issues =
-                build_combined_codeclimate_issues(check_result, dupes_result, health_result);
-            let code = report::ci::review::print_review_envelope_from_codeclimate_issues(
-                "combined",
-                report::ci::pr_comment::Provider::Gitlab,
-                &issues,
-            );
-            if code != ExitCode::SUCCESS {
-                return Err(code);
-            }
-            Ok(Some(0))
+            print_combined_review(check_result, dupes_result, health_result, false)
         }
         _ => Ok(None),
     }
+}
+
+fn combined_machine_success(code: ExitCode) -> Result<Option<u8>, ExitCode> {
+    if code != ExitCode::SUCCESS {
+        return Err(code);
+    }
+    Ok(Some(0))
+}
+
+fn combined_provider(github: bool) -> report::ci::pr_comment::Provider {
+    if github {
+        report::ci::pr_comment::Provider::Github
+    } else {
+        report::ci::pr_comment::Provider::Gitlab
+    }
+}
+
+fn print_combined_pr_comment(
+    check_result: Option<&CheckResult>,
+    dupes_result: Option<&DupesResult>,
+    health_result: Option<&HealthResult>,
+    github: bool,
+) -> Result<Option<u8>, ExitCode> {
+    let issues = build_combined_codeclimate_issues(check_result, dupes_result, health_result);
+    let code = report::ci::pr_comment::print_pr_comment_from_codeclimate_issues(
+        "combined",
+        combined_provider(github),
+        &issues,
+    );
+    combined_machine_success(code)
+}
+
+fn print_combined_review(
+    check_result: Option<&CheckResult>,
+    dupes_result: Option<&DupesResult>,
+    health_result: Option<&HealthResult>,
+    github: bool,
+) -> Result<Option<u8>, ExitCode> {
+    let issues = build_combined_codeclimate_issues(check_result, dupes_result, health_result);
+    let code = report::ci::review::print_review_envelope_from_codeclimate_issues(
+        "combined",
+        combined_provider(github),
+        &issues,
+    );
+    combined_machine_success(code)
 }
 
 /// Print human/compact/markdown sections with optional section headers.
