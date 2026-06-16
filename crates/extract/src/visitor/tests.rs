@@ -4567,7 +4567,7 @@ fn non_angular_injection_token_is_not_recorded() {
 }
 
 #[test]
-fn untyped_injection_token_is_not_recorded() {
+fn untyped_injection_token_is_recorded_with_empty_interface() {
     let info = parse(
         r"
         import { InjectionToken } from '@angular/core';
@@ -4576,9 +4576,14 @@ fn untyped_injection_token_is_not_recorded() {
         ",
     );
 
-    assert!(
-        info.injection_tokens.is_empty(),
-        "InjectionToken without a type argument has no interface to resolve, found: {:?}",
+    // The token is recorded so the unprovided-inject FP gate recognizes it as a
+    // real InjectionToken, but with an EMPTY interface name: it has no type
+    // reference to bridge to, so the #920 template-member bridge (which credits
+    // implementers of the named interface) finds no interface "" and skips it.
+    assert_eq!(
+        info.injection_tokens,
+        vec![("GREETER".to_string(), String::new())],
+        "an untyped InjectionToken should be recorded with an empty interface, found: {:?}",
         info.injection_tokens
     );
 }
@@ -6585,6 +6590,194 @@ fn symbol_bound_const_di_key_is_kept() {
             .iter()
             .any(|s| s.key_local == "KEY" && s.role == DiRole::Inject),
         "an inject keyed by a Symbol()-bound const must be recorded: {:?}",
+        info.di_key_sites
+    );
+}
+
+#[test]
+fn angular_inject_records_inject_site() {
+    let info = parse(
+        r"
+        import { inject } from '@angular/core'
+        import { TOKEN } from './tokens'
+        export class Service {
+          value = inject(TOKEN)
+        }
+        ",
+    );
+    let sites = di_sites(&info);
+    assert!(
+        sites.contains(&("TOKEN".to_string(), DiRole::Inject, DiFramework::Angular)),
+        "inject(TOKEN) from @angular/core should record an Angular inject site: {sites:?}"
+    );
+}
+
+#[test]
+fn angular_optional_inject_records_nothing() {
+    let info = parse(
+        r"
+        import { inject } from '@angular/core'
+        import { TOKEN } from './tokens'
+        export class Service {
+          value = inject(TOKEN, { optional: true })
+        }
+        ",
+    );
+    assert!(
+        info.di_key_sites.is_empty(),
+        "inject(TOKEN, {{ optional: true }}) is designed to be unprovided and must record nothing: {:?}",
+        info.di_key_sites
+    );
+}
+
+#[test]
+fn angular_provide_object_records_provide_site() {
+    let info = parse(
+        r"
+        import { TOKEN } from './tokens'
+        export const config = {
+          providers: [{ provide: TOKEN, useValue: 1 }],
+        }
+        ",
+    );
+    let sites = di_sites(&info);
+    assert!(
+        sites.contains(&("TOKEN".to_string(), DiRole::Provide, DiFramework::Angular)),
+        "a {{ provide: TOKEN, useValue: x }} object should record an Angular provide site: {sites:?}"
+    );
+    assert!(
+        !info.has_dynamic_provide,
+        "a stable-identifier provide key must not set has_dynamic_provide"
+    );
+}
+
+#[test]
+fn angular_injection_token_factory_records_self_provide() {
+    let info = parse(
+        r"
+        import { InjectionToken } from '@angular/core'
+        export const TOKEN = new InjectionToken('x', { factory: () => 1 })
+        ",
+    );
+    let sites = di_sites(&info);
+    assert!(
+        sites.contains(&("TOKEN".to_string(), DiRole::Provide, DiFramework::Angular)),
+        "a tree-shakable InjectionToken with a factory must record a self-provide: {sites:?}"
+    );
+}
+
+#[test]
+fn angular_injection_token_provided_in_records_self_provide() {
+    let info = parse(
+        r"
+        import { InjectionToken } from '@angular/core'
+        export const TOKEN = new InjectionToken('x', { providedIn: 'root', factory: () => 1 })
+        ",
+    );
+    let sites = di_sites(&info);
+    assert!(
+        sites.contains(&("TOKEN".to_string(), DiRole::Provide, DiFramework::Angular)),
+        "a providedIn InjectionToken must record a self-provide: {sites:?}"
+    );
+}
+
+#[test]
+fn angular_import_providers_from_sets_dynamic_provide() {
+    let info = parse(
+        r"
+        import { importProvidersFrom } from '@angular/core'
+        import { SomeModule } from './some.module'
+        export const config = {
+          providers: [importProvidersFrom(SomeModule)],
+        }
+        ",
+    );
+    assert!(
+        info.has_dynamic_provide,
+        "importProvidersFrom(...) builds an opaque provider bundle and must set has_dynamic_provide"
+    );
+}
+
+#[test]
+fn angular_make_environment_providers_sets_dynamic_provide() {
+    let info = parse(
+        r"
+        import { makeEnvironmentProviders } from '@angular/core'
+        export function provideFeature() {
+          return makeEnvironmentProviders([])
+        }
+        ",
+    );
+    assert!(
+        info.has_dynamic_provide,
+        "makeEnvironmentProviders(...) must set has_dynamic_provide"
+    );
+}
+
+#[test]
+fn angular_providers_spread_sets_dynamic_provide() {
+    let info = parse(
+        r"
+        import { shared } from './shared'
+        export const config = {
+          providers: [...shared],
+        }
+        ",
+    );
+    assert!(
+        info.has_dynamic_provide,
+        "a spread inside a providers array must set has_dynamic_provide"
+    );
+}
+
+#[test]
+fn angular_computed_provide_key_sets_dynamic_provide() {
+    let info = parse(
+        r"
+        import { factory } from './factory'
+        export const config = {
+          providers: [{ provide: factory(), useValue: 1 }],
+        }
+        ",
+    );
+    assert!(
+        info.has_dynamic_provide,
+        "a non-identifier provide key (a call) must set has_dynamic_provide"
+    );
+}
+
+#[test]
+fn angular_param_inject_decorator_records_inject_site() {
+    let info = parse(
+        r"
+        import { Inject } from '@angular/core'
+        import { TOKEN } from './tokens'
+        export class Service {
+          constructor(@Inject(TOKEN) private value: unknown) {}
+        }
+        ",
+    );
+    let sites = di_sites(&info);
+    assert!(
+        sites.contains(&("TOKEN".to_string(), DiRole::Inject, DiFramework::Angular)),
+        "@Inject(TOKEN) constructor param should record an Angular inject site: {sites:?}"
+    );
+}
+
+#[test]
+fn angular_optional_param_inject_decorator_records_nothing() {
+    let info = parse(
+        r"
+        import { Inject, Optional } from '@angular/core'
+        import { TOKEN } from './tokens'
+        export class Service {
+          constructor(@Optional() @Inject(TOKEN) private value: unknown) {}
+        }
+        ",
+    );
+    assert!(
+        info.di_key_sites.is_empty(),
+        "an @Optional() @Inject(TOKEN) param is designed to be unprovided and must record nothing: {:?}",
         info.di_key_sites
     );
 }

@@ -709,8 +709,11 @@ impl ModuleInfoExtractor {
     /// so the analyze layer can follow the token's interface type argument to
     /// the classes that `implement` it. Gated on `InjectionToken` being a named
     /// import from `@angular/core` (a same-named local class is ignored). A
-    /// token with no type argument carries no interface and is skipped. See
-    /// issue #920.
+    /// token with no type argument carries no interface for the template-chain
+    /// bridge, but a tree-shakable token (a `{ factory }` / `{ providedIn }`
+    /// second argument) still records a self-provide DI site so the
+    /// `unprovided-inject` detector treats it as provided. See issues #920 and
+    /// the Angular `unprovided-inject` arm.
     fn record_injection_token(&mut self, name: &str, init: &Expression<'_>) {
         if !self.is_module_scope() {
             return;
@@ -724,16 +727,43 @@ impl ModuleInfoExtractor {
         if !self.is_named_import_from(callee.name.as_str(), "@angular/core", "InjectionToken") {
             return;
         }
-        let Some(type_arguments) = new_expr.type_arguments.as_deref() else {
-            return;
-        };
-        let Some(TSType::TSTypeReference(type_ref)) = type_arguments.params.first() else {
-            return;
-        };
-        if let Some((interface_name, _)) = type_name_root(&type_ref.type_name) {
-            self.injection_tokens
-                .push((name.to_string(), interface_name));
+
+        // A tree-shakable token (`new InjectionToken('x', { factory: () => ... })`
+        // or `{ providedIn: 'root' }`) provides itself, so record it as a Provide
+        // of its own const name. This makes a self-providing token count as
+        // provided even without a `{ provide: TOKEN }` object anywhere.
+        if let Some(Argument::ObjectExpression(options)) = new_expr.arguments.get(1)
+            && object_has_any_key(options, &["factory", "providedIn"])
+        {
+            self.di_key_sites.push(DiKeySite {
+                key_local: name.to_string(),
+                role: DiRole::Provide,
+                framework: DiFramework::Angular,
+                span_start: new_expr.span.start,
+            });
         }
+
+        // Record EVERY `new InjectionToken(...)` declaration so the
+        // `unprovided-inject` FP gate recognizes it as a token regardless of its
+        // type argument. The interface name (consumed by the #920 template-member
+        // bridge in `unused_members.rs`) comes from a type-REFERENCE type argument
+        // (`new InjectionToken<Greeter>(...)`); a primitive type argument
+        // (`<string>`) or no type argument yields an empty interface, which the
+        // bridge harmlessly skips (it credits implementers of a named interface,
+        // and no interface is named "").
+        let interface_name = new_expr
+            .type_arguments
+            .as_deref()
+            .and_then(|type_arguments| type_arguments.params.first())
+            .and_then(|param| match param {
+                TSType::TSTypeReference(type_ref) => {
+                    type_name_root(&type_ref.type_name).map(|(interface_name, _)| interface_name)
+                }
+                _ => None,
+            })
+            .unwrap_or_default();
+        self.injection_tokens
+            .push((name.to_string(), interface_name));
     }
 
     fn clear_literal_allowlist_on_mutating_member_call(&mut self, call: &CallExpression<'_>) {
@@ -3079,6 +3109,8 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             self.record_typed_destructure_binding(obj_pat, type_annotation);
         }
 
+        self.record_angular_param_inject(param);
+
         walk::walk_formal_parameter(self, param);
     }
 
@@ -3697,6 +3729,12 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         walk::walk_object_property(self, prop);
     }
 
+    fn visit_object_expression(&mut self, obj: &ObjectExpression<'a>) {
+        self.record_angular_provider_object(obj);
+
+        walk::walk_object_expression(self, obj);
+    }
+
     fn visit_call_expression(&mut self, expr: &CallExpression<'a>) {
         self.record_structural_class_call_candidate(expr);
         self.clear_literal_allowlist_on_mutating_member_call(expr);
@@ -3740,6 +3778,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
         self.record_angular_dynamic_component_render(expr);
         self.record_angular_bootstrap_call(expr);
+        self.record_angular_dynamic_providers(expr);
 
         self.record_callee_use(expr);
 
@@ -6802,6 +6841,10 @@ impl ModuleInfoExtractor {
                     && self.is_named_import_from(name, "svelte", "getContext")
                 {
                     Some((DiFramework::Svelte, DiRole::Inject))
+                } else if name == "inject"
+                    && self.is_named_import_from(name, "@angular/core", "inject")
+                {
+                    Some((DiFramework::Angular, DiRole::Inject))
                 } else {
                     None
                 }
@@ -6821,6 +6864,17 @@ impl ModuleInfoExtractor {
         let Some((framework, role)) = classified else {
             return;
         };
+
+        // Angular `inject(TOKEN, { optional: true })`: an optional inject is
+        // DESIGNED to be unprovided (it returns null), so it is never a dead
+        // link. Drop the site entirely. Other frameworks have no such 2nd-arg
+        // shape, so this check is Angular-only.
+        if framework == DiFramework::Angular
+            && role == DiRole::Inject
+            && angular_inject_is_optional(expr)
+        {
+            return;
+        }
 
         // No argument: not a usable call.
         let Some(first) = expr.arguments.first() else {
@@ -6851,6 +6905,134 @@ impl ModuleInfoExtractor {
                     self.has_dynamic_provide = true;
                 }
             }
+        }
+    }
+
+    /// Record an Angular `@Inject(TOKEN)` constructor-parameter decorator as a
+    /// `(Angular, Inject)` `DiKeySite` keyed on the TOKEN identifier. ABSTAIN
+    /// when the same parameter also carries an `@Optional()` decorator (an
+    /// optional inject is designed to be unprovided). Both `@Inject` and
+    /// `@Optional` are gated on a named import from `@angular/core`, so an
+    /// unrelated same-named decorator is ignored. The site anchors at the
+    /// parameter span. Only the `inject()` CALL form (the modern dominant shape)
+    /// abstains on `{ optional: true }`; the `@Optional()` decorator covers the
+    /// param-decorator form here.
+    fn record_angular_param_inject(&mut self, param: &FormalParameter<'_>) {
+        if param.decorators.is_empty() {
+            return;
+        }
+        let is_named_import = |local: &str, source: &str, imported: &str| {
+            self.is_named_import_from(local, source, imported)
+        };
+        if angular_param_is_optional(param, &is_named_import) {
+            return;
+        }
+        let token = param
+            .decorators
+            .iter()
+            .find_map(|decorator| angular_param_inject_token(decorator, &is_named_import));
+        let Some(token) = token else {
+            return;
+        };
+        self.di_key_sites.push(DiKeySite {
+            key_local: token.to_string(),
+            role: DiRole::Inject,
+            framework: DiFramework::Angular,
+            span_start: param.span.start,
+        });
+    }
+
+    /// Record Angular provider wiring as `(Angular, Provide)` DI sites from an
+    /// object literal. A `{ provide: TOKEN, useClass|useValue|useFactory|`
+    /// `useExisting: ... }` provider recipe whose `provide:` value is a stable
+    /// module-level identifier records a Provide keyed on that identifier
+    /// (catches decorator `providers:`, `bootstrapApplication`,
+    /// `ApplicationConfig`, and route configs uniformly); the provider-recipe
+    /// sibling key is REQUIRED so a Vue Options-API `provide: {...}` / `provide()`
+    /// option cannot trip the shared `has_dynamic_provide`. A non-stable
+    /// `provide:` value (computed, member, call) inside a real recipe is
+    /// unknowable and sets the project-wide `has_dynamic_provide` abstain. A
+    /// `...spread` inside a `providers:` array is also unknowable (it may supply
+    /// any token), so it sets `has_dynamic_provide` regardless of a recipe
+    /// sibling. Over-broad capture is safe: a Provide only ever suppresses a
+    /// finding, and the detector is gated on `@angular/core`, so non-Angular
+    /// projects never read these sites.
+    fn record_angular_provider_object(&mut self, obj: &ObjectExpression<'_>) {
+        // A `...spread` inside a `providers:` array (`providers: [...shared]`) is
+        // an opaque bundle that can supply any token, so abstain project-wide.
+        // This does not need a recipe sibling and applies to any object carrying
+        // a `providers:` property (decorator metadata, ApplicationConfig, route).
+        for prop in &obj.properties {
+            let ObjectPropertyKind::ObjectProperty(p) = prop else {
+                continue;
+            };
+            if p.key.static_name().as_deref() == Some("providers")
+                && let Expression::ArrayExpression(arr) = &p.value
+                && arr
+                    .elements
+                    .iter()
+                    .any(|elem| matches!(elem, ArrayExpressionElement::SpreadElement(_)))
+            {
+                self.has_dynamic_provide = true;
+            }
+        }
+
+        // Only treat `provide:` as Angular DI when the SAME object literal carries
+        // an Angular provider-recipe sibling (`useClass` / `useValue` /
+        // `useFactory` / `useExisting`). A bare `{ provide: TOKEN }` is invalid
+        // Angular (a provider needs a recipe), and requiring the sibling
+        // disambiguates from Vue's Options-API `provide: {...}` / `provide()`
+        // option, which would otherwise trip the shared `has_dynamic_provide` and
+        // silently neuter the Vue inject rule. Over-broad capture is otherwise
+        // safe: a Provide only ever suppresses a finding, and the detector is
+        // gated on `@angular/core`, so non-Angular projects never read these sites.
+        if !object_has_any_key(obj, &["useClass", "useValue", "useFactory", "useExisting"]) {
+            return;
+        }
+        for prop in &obj.properties {
+            let ObjectPropertyKind::ObjectProperty(p) = prop else {
+                continue;
+            };
+            if p.key.static_name().as_deref() != Some("provide") {
+                continue;
+            }
+            match &p.value {
+                Expression::Identifier(ident)
+                    if !self.nested_scope_shadows(ident.name.as_str()) =>
+                {
+                    self.di_key_sites.push(DiKeySite {
+                        key_local: ident.name.to_string(),
+                        role: DiRole::Provide,
+                        framework: DiFramework::Angular,
+                        span_start: p.span.start,
+                    });
+                }
+                // A computed / member / call provide key in a real provider recipe
+                // is unknowable: it could provide any token, so a surviving inject
+                // finding could be a false positive. Abstain project-wide.
+                _ => {
+                    self.has_dynamic_provide = true;
+                }
+            }
+        }
+    }
+
+    /// Flag `importProvidersFrom(...)` / `makeEnvironmentProviders(...)` calls
+    /// (named imports from `@angular/core`) as a project-wide provide abstain:
+    /// both build an opaque provider bundle that can supply any token, so the
+    /// `provide:` scan cannot see what they provide. Mirrors the dynamic-provide
+    /// abstain for unknowable provider shapes.
+    fn record_angular_dynamic_providers(&mut self, expr: &CallExpression<'_>) {
+        let Expression::Identifier(callee) = &expr.callee else {
+            return;
+        };
+        let name = callee.name.as_str();
+        if (name == "importProvidersFrom"
+            && self.is_named_import_from(name, "@angular/core", "importProvidersFrom"))
+            || (name == "makeEnvironmentProviders"
+                && self.is_named_import_from(name, "@angular/core", "makeEnvironmentProviders"))
+        {
+            self.has_dynamic_provide = true;
         }
     }
 
@@ -7933,5 +8115,62 @@ fn object_property_value<'a>(
             .static_name()
             .is_some_and(|name| name == key)
             .then_some(&prop.value)
+    })
+}
+
+/// Whether an Angular `inject(TOKEN, { optional: true })` call's second argument
+/// is an object literal carrying `optional: true`. An optional inject is designed
+/// to be unprovided (it returns null), so the site is never a dead DI link.
+fn angular_inject_is_optional(expr: &CallExpression<'_>) -> bool {
+    let Some(Argument::ObjectExpression(options)) = expr.arguments.get(1) else {
+        return false;
+    };
+    matches!(
+        object_property_value(options, "optional"),
+        Some(Expression::BooleanLiteral(lit)) if lit.value
+    )
+}
+
+/// The token identifier passed to an Angular `@Inject(TOKEN)` parameter
+/// decorator. Returns `None` for `@Inject()` with no argument or a non-identifier
+/// argument (a string/computed key is a different identity space). The decorator
+/// callee must be a named `Inject` import from `@angular/core`; the provenance
+/// check is supplied by the visitor closure.
+fn angular_param_inject_token<'a>(
+    decorator: &'a Decorator<'a>,
+    is_named_import: &impl Fn(&str, &str, &str) -> bool,
+) -> Option<&'a str> {
+    let Expression::CallExpression(call) = &decorator.expression else {
+        return None;
+    };
+    let Expression::Identifier(callee) = &call.callee else {
+        return None;
+    };
+    if callee.name != "Inject" || !is_named_import(callee.name.as_str(), "@angular/core", "Inject")
+    {
+        return None;
+    }
+    match call.arguments.first() {
+        Some(Argument::Identifier(ident)) => Some(ident.name.as_str()),
+        _ => None,
+    }
+}
+
+/// Whether an Angular constructor parameter carries an `@Optional()` decorator
+/// imported from `@angular/core`. An `@Optional()` inject is designed to be
+/// unprovided, so the matching `@Inject(TOKEN)` site is dropped. Matches both the
+/// call form (`@Optional()`) and the bare form (`@Optional`).
+fn angular_param_is_optional(
+    param: &FormalParameter<'_>,
+    is_named_import: &impl Fn(&str, &str, &str) -> bool,
+) -> bool {
+    param.decorators.iter().any(|decorator| {
+        let callee = match &decorator.expression {
+            Expression::CallExpression(call) => &call.callee,
+            other => other,
+        };
+        matches!(callee, Expression::Identifier(id)
+            if id.name == "Optional"
+                && is_named_import(id.name.as_str(), "@angular/core", "Optional"))
     })
 }

@@ -143,6 +143,40 @@ fn abstains_on_public_api_inject_composable() {
 }
 
 #[test]
+fn flags_dead_angular_inject_token_and_credits_provided_self_and_class() {
+    let root = fixture_path("angular-unprovided-inject");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let mut angular: Vec<String> = results
+        .unprovided_injects
+        .iter()
+        .filter(|f| f.inject.framework == "angular")
+        .map(|f| f.inject.key_name.clone())
+        .collect();
+    angular.sort();
+
+    // DEAD_TOKEN (inject() call) and DEAD_PARAM_TOKEN (@Inject() param decorator)
+    // are known InjectionTokens supplied by no provider recipe: both flagged.
+    assert_eq!(
+        angular,
+        vec!["DEAD_PARAM_TOKEN".to_string(), "DEAD_TOKEN".to_string()],
+        "exactly the two unprovided InjectionTokens (inject() + @Inject() forms) should be flagged: {angular:?}"
+    );
+
+    // The full result must contain nothing else for these credited/abstained
+    // tokens: LIVE_TOKEN is provided by a { provide, useValue } recipe, SELF_TOKEN
+    // self-provides via its factory, MyService is a class token (out of scope),
+    // and OPT_TOKEN is injected only with { optional: true }.
+    for credited in ["LIVE_TOKEN", "SELF_TOKEN", "MyService", "OPT_TOKEN"] {
+        assert!(
+            !angular.iter().any(|k| k == credited),
+            "{credited} must not be flagged (provided / self-provides / class / optional): {angular:?}"
+        );
+    }
+}
+
+#[test]
 fn dynamic_provide_forces_project_wide_abstain() {
     let root = fixture_path("unprovided-inject-dynamic-provide");
     let config = create_config(root.clone());

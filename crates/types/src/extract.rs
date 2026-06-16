@@ -1356,6 +1356,9 @@ pub enum DiFramework {
     Vue,
     /// Svelte `setContext` / `getContext` (from `svelte`).
     Svelte,
+    /// Angular `inject(TOKEN)` / `@Inject(TOKEN)` (from `@angular/core`),
+    /// matched against `{ provide: TOKEN, ... }` provider objects.
+    Angular,
 }
 
 /// A Vue `provide`/`inject` or Svelte `setContext`/`getContext` call site keyed

@@ -1,0 +1,10 @@
+{
+  "name": "angular-unprovided-inject",
+  "version": "0.0.0",
+  "private": true,
+  "main": "src/main.ts",
+  "dependencies": {
+    "@angular/core": "^20.0.0",
+    "@angular/platform-browser": "^20.0.0"
+  }
+}

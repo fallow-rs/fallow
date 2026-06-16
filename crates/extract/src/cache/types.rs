@@ -497,7 +497,16 @@ use crate::MemberKind;
 /// `*ngComponentOutlet` / `createComponent(<ident>)` project-wide abstain). A
 /// warm cache from 174 lacks the selector IR and would report zero Angular
 /// `unrendered-component` findings.
-pub(super) const CACHE_VERSION: u32 = 175;
+///
+/// Bumped to 176 (feat/angular-unprovided-inject, W4.1): the `di_key_sites` set
+/// now carries Angular entries (`inject(TOKEN)` / `@Inject(TOKEN)` injects and
+/// `{ provide: TOKEN, ... }` provides via the new `DiFramework::Angular` variant),
+/// `has_dynamic_provide` is additionally set by `importProvidersFrom` /
+/// `makeEnvironmentProviders` / a `providers:` spread, and a tree-shakable
+/// `new InjectionToken(..., { factory } | { providedIn })` records a self-provide.
+/// A warm cache from 175 lacks the Angular DI sites and would report zero Angular
+/// `unprovided-inject` findings.
+pub(super) const CACHE_VERSION: u32 = 176;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

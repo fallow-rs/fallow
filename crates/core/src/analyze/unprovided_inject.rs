@@ -76,7 +76,8 @@ pub fn find_unprovided_injects(input: UnprovidedInjectInput<'_>) -> Vec<Unprovid
     let vue =
         input.declared_deps.contains("vue") || input.declared_deps.contains("@vue/runtime-core");
     let svelte = input.declared_deps.contains("svelte");
-    if !vue && !svelte {
+    let angular = input.declared_deps.contains("@angular/core");
+    if !vue && !svelte && !angular {
         return Vec::new();
     }
 
@@ -163,6 +164,19 @@ pub fn find_unprovided_injects(input: UnprovidedInjectInput<'_>) -> Vec<Unprovid
                 KeyResolution::Internal(keys) | KeyResolution::LocalOnly(keys) => keys,
             };
             if canonical.is_empty() {
+                continue;
+            }
+            // Angular InjectionToken FP gate: only a USER `InjectionToken` is in
+            // scope. A class / framework token (`inject(MyService)`) is FP-prone
+            // via `providedIn: 'root'` and third-party `provideX()`, so abstain
+            // unless at least one canonical key is a known InjectionToken (its
+            // defining module lists the export name in `injection_tokens`).
+            // Vue / Svelte sites skip this gate entirely.
+            if site.framework == DiFramework::Angular
+                && !canonical
+                    .iter()
+                    .any(|key| is_known_injection_token(&modules_by_id, key))
+            {
                 continue;
             }
             // Matched by a provide somewhere in the project.
@@ -275,6 +289,21 @@ fn key_is_public_api(
         || export_has_entry_point_re_export_reference(graph, export, public_api_entry_points)
 }
 
+/// Whether a canonical export key names a known Angular `InjectionToken`: the
+/// key's defining module lists the export name (`.0`) in `injection_tokens`. This
+/// is the load-bearing FP gate that keeps class / framework tokens out of scope.
+fn is_known_injection_token(
+    modules_by_id: &FxHashMap<FileId, &ModuleInfo>,
+    key: &ExportKey,
+) -> bool {
+    modules_by_id.get(&key.file_id).is_some_and(|module| {
+        module
+            .injection_tokens
+            .iter()
+            .any(|(token_name, _interface)| *token_name == key.export_name)
+    })
+}
+
 fn export_name_matches(name: &ExportName, target: &str) -> bool {
     match name {
         ExportName::Named(n) => n == target,
@@ -286,5 +315,6 @@ const fn framework_str(framework: DiFramework) -> &'static str {
     match framework {
         DiFramework::Vue => "vue",
         DiFramework::Svelte => "svelte",
+        DiFramework::Angular => "angular",
     }
 }
