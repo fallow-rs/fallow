@@ -144,6 +144,142 @@ pub fn harvest_define_props(program: &Program<'_>) -> DefinePropsHarvest {
     harvest
 }
 
+/// Harvest Svelte 5 `$props()` declared props and abstain flags from a parsed
+/// instance `<script>` program. The Svelte 5 analogue of [`harvest_define_props`]:
+/// it reuses the same [`ComponentProp`] IR and the same abstain-flag fields on
+/// [`DefinePropsHarvest`] (`has_unharvestable_props`, `has_props_attrs_fallthrough`)
+/// so NO new `ModuleInfo` field is needed.
+///
+/// There is exactly one declaration form to harvest: a variable declarator whose
+/// `init` is a `CallExpression` with callee identifier `$props`. The destructure
+/// target is handled like `bind_define_props_target`:
+/// - object pattern: each property is a declared prop; renames map name -> local;
+///   defaults (`{ a = 1 }`, `{ a = $bindable() }`) peel via [`binding_local_name`].
+/// - a rest element (`{ a, ...rest }`) sets `has_props_attrs_fallthrough` (abstain).
+/// - a bare identifier binding (`let p = $props()`) sets `has_unharvestable_props`
+///   (every prop is reached opaquely through `p.x`).
+/// - a nested object/array destructure (`{ a: { x } }`) returns `None` from
+///   `binding_local_name`, so it sets `has_unharvestable_props` (abstain).
+///
+/// `used_in_script` is computed via [`resolve_used_locals`], reused verbatim.
+/// `used_in_template` is left `false` and set in `sfc.rs::apply_template_usage`.
+/// Byte spans are RELATIVE to the script body; the caller remaps them onto the
+/// SFC source.
+pub fn harvest_svelte_props(program: &Program<'_>) -> DefinePropsHarvest {
+    let mut harvest = DefinePropsHarvest::default();
+
+    let mut destructured_locals: FxHashSet<String> = FxHashSet::default();
+    // declared prop name -> local binding name (for `{ a: alias }`).
+    let mut prop_aliases: FxHashMap<String, String> = FxHashMap::default();
+    let mut prop_names: Vec<(String, u32)> = Vec::new();
+
+    for stmt in &program.body {
+        let Statement::VariableDeclaration(decl) = stmt else {
+            continue;
+        };
+        for declarator in &decl.declarations {
+            let Some(init) = &declarator.init else {
+                continue;
+            };
+            if !is_props_rune_call(init) {
+                continue;
+            }
+            bind_svelte_props_target(
+                &declarator.id,
+                &mut destructured_locals,
+                &mut prop_aliases,
+                &mut prop_names,
+                &mut harvest,
+            );
+        }
+    }
+
+    if prop_names.is_empty() {
+        return harvest;
+    }
+
+    let used_locals = resolve_used_locals(program, &destructured_locals);
+
+    for (name, span_start) in prop_names {
+        let local = prop_aliases
+            .get(&name)
+            .cloned()
+            .unwrap_or_else(|| name.clone());
+        let used_in_script = used_locals.contains(&local);
+        harvest.props.push(ComponentProp {
+            name,
+            local,
+            span_start,
+            used_in_script,
+            used_in_template: false,
+            // Svelte: one component per `.svelte` file; the detector (a future
+            // consumer) derives the component name from the file stem, so this
+            // stays empty, matching the Vue harvest.
+            component: String::new(),
+            // React-only forward-vs-consume signal; Svelte does not compute it.
+            used_outside_forward: false,
+        });
+    }
+
+    harvest
+}
+
+/// Whether an expression is a bare `$props()` rune call (callee is the identifier
+/// `$props`). The Svelte compiler treats `$props` as a reserved rune, so a
+/// same-named local function is not a real concern, but matching the bare
+/// identifier callee keeps the check tight regardless.
+fn is_props_rune_call(expr: &Expression<'_>) -> bool {
+    let Expression::CallExpression(call) = expr else {
+        return false;
+    };
+    simple_callee_name(&call.callee) == Some("$props")
+}
+
+/// Bind the `$props()` destructure target. Mirrors [`bind_define_props_target`]
+/// for the destructure form, but a bare identifier binding (`let p = $props()`)
+/// is the WHOLE-OBJECT abstain shape for Svelte (every prop reached via `p.x`),
+/// so it sets `has_unharvestable_props` rather than tracking member access.
+fn bind_svelte_props_target(
+    id: &BindingPattern<'_>,
+    destructured_locals: &mut FxHashSet<String>,
+    prop_aliases: &mut FxHashMap<String, String>,
+    prop_names: &mut Vec<(String, u32)>,
+    harvest: &mut DefinePropsHarvest,
+) {
+    match id {
+        // `let p = $props()`: every prop reached opaquely through `p.x`. Abstain.
+        BindingPattern::BindingIdentifier(_) => {
+            harvest.has_unharvestable_props = true;
+        }
+        BindingPattern::ObjectPattern(pattern) => {
+            for prop in &pattern.properties {
+                if let Some(local) = binding_local_name(&prop.value) {
+                    destructured_locals.insert(local.to_string());
+                    if let Some(prop_name) = property_key_name(&prop.key) {
+                        prop_names.push((prop_name.clone(), prop.span.start));
+                        prop_aliases.insert(prop_name, local.to_string());
+                    } else {
+                        // A computed key (`{ [k]: v }`) hides the declared name.
+                        harvest.has_unharvestable_props = true;
+                    }
+                } else {
+                    // A nested object/array destructure (`{ a: { x } }`):
+                    // `binding_local_name` is `None` for non-flat patterns. The
+                    // declared prop name is unenumerable in flat form. Abstain.
+                    harvest.has_unharvestable_props = true;
+                }
+            }
+            // A rest element (`{ a, ...rest }`) carries arbitrary props opaquely.
+            if pattern.rest.is_some() {
+                harvest.has_props_attrs_fallthrough = true;
+            }
+        }
+        // Any other binding shape (an array pattern, an assignment pattern at the
+        // top level): unenumerable. Abstain.
+        _ => harvest.has_unharvestable_props = true,
+    }
+}
+
 /// Unwrap an expression to the inner `defineProps(...)` call, peeling
 /// `withDefaults(defineProps(...), {...})`. Returns `None` for anything else.
 fn unwrap_define_props_call<'a, 'b>(expr: &'b Expression<'a>) -> Option<&'b CallExpression<'a>> {

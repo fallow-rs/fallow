@@ -1319,4 +1319,56 @@ mod tests {
 
         assert!(usage.used_bindings.contains("getName"));
     }
+
+    // The `<svelte:component this={X}>` / `<svelte:element this={tag}>` bound
+    // target is already credited by the generic attribute-value scan in
+    // `apply_markup_tag` (`this` is an ordinary attr whose `{...}` value flows
+    // through `merge_attribute_value_usage`), so no special-element dispatch is
+    // needed. These tests pin that behavior and guard `<svelte:self>` against a
+    // scanner crash.
+    #[test]
+    fn svelte_component_this_credits_target() {
+        let usage = collect_template_usage(
+            "<script>import Foo from './Foo.svelte';</script><svelte:component this={Foo} />",
+            &imported(&["Foo"]),
+        );
+        assert!(
+            usage.used_bindings.contains("Foo"),
+            "Foo should be credited via the existing attr-value scan, got: {usage:?}"
+        );
+    }
+
+    #[test]
+    fn svelte_element_this_credits_tag_binding() {
+        let usage = collect_template_usage(
+            "<script>let tag = 'div';</script><svelte:element this={tag}>x</svelte:element>",
+            &imported(&["tag"]),
+        );
+        assert!(
+            usage.used_bindings.contains("tag"),
+            "tag should be credited via the existing attr-value scan, got: {usage:?}"
+        );
+    }
+
+    #[test]
+    fn svelte_element_string_literal_this_credits_nothing() {
+        let usage = collect_template_usage(
+            r#"<svelte:element this="div">x</svelte:element>"#,
+            &imported(&["div"]),
+        );
+        assert!(
+            usage.is_empty(),
+            "a string-literal element name is a native DOM tag, got: {usage:?}"
+        );
+    }
+
+    #[test]
+    fn svelte_self_does_not_crash() {
+        let usage = collect_template_usage(
+            "{#if depth}<svelte:self depth={depth} />{/if}",
+            &imported(&["depth"]),
+        );
+        // Inert for component crediting; just must not panic.
+        let _ = usage;
+    }
 }

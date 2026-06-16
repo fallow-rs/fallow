@@ -51,9 +51,16 @@ static SRC_ATTR_RE: LazyLock<regex::Regex> =
 static SETUP_ATTR_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| crate::static_regex(r"(?:^|\s)setup(?:\s|$)"));
 
-/// Regex to detect Svelte's `context="module"` attribute.
+/// Regex to detect Svelte's `context="module"` attribute (Svelte 4).
 static CONTEXT_MODULE_ATTR_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| crate::static_regex(r#"context\s*=\s*["']module["']"#));
+
+/// Regex to detect Svelte 5's bare `module` script attribute (`<script module>`,
+/// `<script module lang="ts">`). Anchored like [`SETUP_ATTR_RE`] so `module` must
+/// be a standalone attribute, not a substring of another attr name (e.g.
+/// `data-module`) or value.
+static SVELTE_MODULE_ATTR_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r"(?:^|\s)module(?:\s|$|=)"));
 
 /// Regex to extract Vue's `generic="..."` attribute value (script-setup
 /// generics). Matches the contents between the quotes and stops at the
@@ -228,7 +235,12 @@ pub fn extract_sfc_scripts(source: &str) -> Vec<SfcScript> {
                 )
             });
             let is_setup = SETUP_ATTR_RE.is_match(attrs);
-            let is_context_module = CONTEXT_MODULE_ATTR_RE.is_match(attrs);
+            // Svelte module context: Svelte 4 `context="module"` OR Svelte 5's
+            // bare `module` attribute. Both scope declarations to the module
+            // script (not the instance), so `is_template_visible_script` returns
+            // false and the instance/module split for runes harvest is correct.
+            let is_context_module =
+                CONTEXT_MODULE_ATTR_RE.is_match(attrs) || SVELTE_MODULE_ATTR_RE.is_match(attrs);
             let generic_attr = VUE_GENERIC_ATTR_RE
                 .captures(attrs)
                 .or_else(|| SVELTE_GENERICS_ATTR_RE.captures(attrs))
@@ -594,81 +606,24 @@ fn merge_script_into_module(input: &mut SfcScriptMergeInput<'_>) {
             ));
     }
 
-    // Vue `<script setup>` `defineProps` harvesting for `unused-component-prop`.
-    // Spans returned by the harvest are relative to the script body; remap onto
-    // the SFC source via the script byte offset.
-    if input.kind == SfcKind::Vue && input.script.is_setup {
-        let harvest = crate::sfc_props::harvest_define_props(&parser_return.program);
-        if harvest.has_unharvestable_props {
-            input.combined.has_unharvestable_props = true;
-        }
-        if harvest.has_props_attrs_fallthrough {
-            input.combined.has_props_attrs_fallthrough = true;
-        }
-        if harvest.has_define_expose {
-            input.combined.has_define_expose = true;
-        }
-        if harvest.has_define_model {
-            input.combined.has_define_model = true;
-        }
-        if let Some(binding) = harvest.props_return_binding {
-            *input.props_return_binding = Some(binding);
-        }
-        for mut prop in harvest.props {
-            prop.span_start += input.script.byte_offset as u32;
-            input.combined.component_props.push(prop);
-        }
+    // Vue prop/emit harvesting (`<script setup>` macros + Options API) for the
+    // `unused-component-prop` / `unused-component-emit` detectors. Extracted to a
+    // helper to keep this function under the unit-size lint.
+    if input.kind == SfcKind::Vue {
+        merge_vue_props_emits_into(input, &parser_return.program);
+    }
 
-        // `defineEmits` harvesting for `unused-component-emit`. Same span remap.
-        // `defineModel` creates implicit `update:x` emits, so a file with
-        // `defineModel` must abstain emits too (reuse the props-side flag).
-        let emit_harvest = crate::sfc_props::harvest_define_emits(&parser_return.program);
-        if emit_harvest.has_unharvestable_emits {
-            input.combined.has_unharvestable_emits = true;
-        }
-        if emit_harvest.has_dynamic_emit {
-            input.combined.has_dynamic_emit = true;
-        }
-        if emit_harvest.has_emit_whole_object_use {
-            input.combined.has_emit_whole_object_use = true;
-        }
-        if let Some(binding) = emit_harvest.emit_binding {
-            *input.emit_return_binding = Some(binding);
-        }
-        for mut emit in emit_harvest.emits {
-            emit.span_start += input.script.byte_offset as u32;
-            input.combined.component_emits.push(emit);
-        }
-    } else if input.kind == SfcKind::Vue {
-        // Vue Options API (`export default { props, emits, ... }` /
-        // `export default defineComponent({ ... })`) in a non-setup `<script>`.
-        // Same `ComponentProp` / `ComponentEmit` IR, same abstain flags, and the
-        // same span-offset remap as the setup path; the only difference is the
-        // harvest source (a component-options object instead of the
-        // `defineProps` / `defineEmits` macros).
-        let harvest = crate::sfc_props::harvest_options_api_props(&parser_return.program);
-        if harvest.has_unharvestable_props {
-            input.combined.has_unharvestable_props = true;
-        }
-        if harvest.has_props_attrs_fallthrough {
-            input.combined.has_props_attrs_fallthrough = true;
-        }
-        for mut prop in harvest.props {
-            prop.span_start += input.script.byte_offset as u32;
-            input.combined.component_props.push(prop);
-        }
-
-        let emit_harvest = crate::sfc_props::harvest_options_api_emits(&parser_return.program);
-        if emit_harvest.has_unharvestable_emits {
-            input.combined.has_unharvestable_emits = true;
-        }
-        if emit_harvest.has_dynamic_emit {
-            input.combined.has_dynamic_emit = true;
-        }
-        for mut emit in emit_harvest.emits {
-            emit.span_start += input.script.byte_offset as u32;
-            input.combined.component_emits.push(emit);
-        }
+    // Svelte 5 `$props()` rune harvesting. Groundwork for the W2.2 dead-event /
+    // template-root crediting; this unit ships no detector for Svelte props
+    // (the compiler + eslint cover single-file prop deadness). `$props` is an
+    // instance-only rune, so harvest ONLY the template-visible instance script,
+    // never the module script (`<script context="module">` / `<script module>`).
+    if input.kind == SfcKind::Svelte && is_template_visible_script(input.kind, input.script) {
+        merge_svelte_props_into(
+            input.combined,
+            &parser_return.program,
+            input.script.byte_offset,
+        );
     }
 
     if is_template_visible_script(input.kind, input.script) {
@@ -689,6 +644,104 @@ fn merge_script_into_module(input: &mut SfcScriptMergeInput<'_>) {
     }
 
     extractor.merge_into(input.combined);
+}
+
+/// Harvest Svelte 5 `$props()` declared props from an instance `<script>`
+/// program into `combined.component_props` (reusing the Vue IR + abstain flags),
+/// remapping each prop's body-relative span onto the SFC source via `byte_offset`.
+fn merge_svelte_props_into(
+    combined: &mut ModuleInfo,
+    program: &oxc_ast::ast::Program<'_>,
+    byte_offset: usize,
+) {
+    let harvest = crate::sfc_props::harvest_svelte_props(program);
+    if harvest.has_unharvestable_props {
+        combined.has_unharvestable_props = true;
+    }
+    if harvest.has_props_attrs_fallthrough {
+        combined.has_props_attrs_fallthrough = true;
+    }
+    for mut prop in harvest.props {
+        prop.span_start += byte_offset as u32;
+        combined.component_props.push(prop);
+    }
+}
+
+/// Harvest Vue prop/emit declarations into `combined`, remapping body-relative
+/// spans onto the SFC source via the script byte offset. The `<script setup>`
+/// path harvests `defineProps` / `defineEmits` (and the `defineExpose` /
+/// `defineModel` abstain flags + return bindings); the non-setup path harvests
+/// the Options API `props:` / `emits:` (same IR, same abstain flags, same remap,
+/// only the harvest source differs).
+fn merge_vue_props_emits_into(
+    input: &mut SfcScriptMergeInput<'_>,
+    program: &oxc_ast::ast::Program<'_>,
+) {
+    let byte_offset = input.script.byte_offset as u32;
+    if input.script.is_setup {
+        let harvest = crate::sfc_props::harvest_define_props(program);
+        if harvest.has_unharvestable_props {
+            input.combined.has_unharvestable_props = true;
+        }
+        if harvest.has_props_attrs_fallthrough {
+            input.combined.has_props_attrs_fallthrough = true;
+        }
+        if harvest.has_define_expose {
+            input.combined.has_define_expose = true;
+        }
+        if harvest.has_define_model {
+            input.combined.has_define_model = true;
+        }
+        if let Some(binding) = harvest.props_return_binding {
+            *input.props_return_binding = Some(binding);
+        }
+        for mut prop in harvest.props {
+            prop.span_start += byte_offset;
+            input.combined.component_props.push(prop);
+        }
+
+        let emit_harvest = crate::sfc_props::harvest_define_emits(program);
+        if emit_harvest.has_unharvestable_emits {
+            input.combined.has_unharvestable_emits = true;
+        }
+        if emit_harvest.has_dynamic_emit {
+            input.combined.has_dynamic_emit = true;
+        }
+        if emit_harvest.has_emit_whole_object_use {
+            input.combined.has_emit_whole_object_use = true;
+        }
+        if let Some(binding) = emit_harvest.emit_binding {
+            *input.emit_return_binding = Some(binding);
+        }
+        for mut emit in emit_harvest.emits {
+            emit.span_start += byte_offset;
+            input.combined.component_emits.push(emit);
+        }
+    } else {
+        let harvest = crate::sfc_props::harvest_options_api_props(program);
+        if harvest.has_unharvestable_props {
+            input.combined.has_unharvestable_props = true;
+        }
+        if harvest.has_props_attrs_fallthrough {
+            input.combined.has_props_attrs_fallthrough = true;
+        }
+        for mut prop in harvest.props {
+            prop.span_start += byte_offset;
+            input.combined.component_props.push(prop);
+        }
+
+        let emit_harvest = crate::sfc_props::harvest_options_api_emits(program);
+        if emit_harvest.has_unharvestable_emits {
+            input.combined.has_unharvestable_emits = true;
+        }
+        if emit_harvest.has_dynamic_emit {
+            input.combined.has_dynamic_emit = true;
+        }
+        for mut emit in emit_harvest.emits {
+            emit.span_start += byte_offset;
+            input.combined.component_emits.push(emit);
+        }
+    }
 }
 
 fn translate_script_complexity(
@@ -1101,6 +1154,81 @@ const count = 0;
         let scripts = extract_sfc_scripts(r#"<script src="./component.ts" lang="ts"></script>"#);
         assert_eq!(scripts.len(), 1);
         assert_eq!(scripts[0].src.as_deref(), Some("./component.ts"));
+    }
+
+    // -- Svelte module-context recognition (W1.1 piece 1) ----------------------
+
+    #[test]
+    fn svelte4_context_module_is_module_context() {
+        let scripts =
+            extract_sfc_scripts(r#"<script context="module">export const x = 1;</script>"#);
+        assert_eq!(scripts.len(), 1);
+        assert!(scripts[0].is_context_module);
+    }
+
+    #[test]
+    fn svelte5_bare_module_attr_is_module_context() {
+        let scripts = extract_sfc_scripts(r"<script module>export const x = 1;</script>");
+        assert_eq!(scripts.len(), 1);
+        assert!(scripts[0].is_context_module);
+    }
+
+    #[test]
+    fn svelte5_module_with_lang_is_module_context() {
+        let scripts =
+            extract_sfc_scripts(r#"<script module lang="ts">export const x = 1;</script>"#);
+        assert_eq!(scripts.len(), 1);
+        assert!(scripts[0].is_context_module);
+        assert!(scripts[0].is_typescript);
+    }
+
+    #[test]
+    fn plain_script_is_not_module_context() {
+        let scripts = extract_sfc_scripts(r"<script>const x = 1;</script>");
+        assert_eq!(scripts.len(), 1);
+        assert!(!scripts[0].is_context_module);
+    }
+
+    #[test]
+    fn lang_ts_script_is_not_module_context() {
+        let scripts = extract_sfc_scripts(r#"<script lang="ts">const x = 1;</script>"#);
+        assert_eq!(scripts.len(), 1);
+        assert!(!scripts[0].is_context_module);
+    }
+
+    #[test]
+    fn data_module_attr_is_not_module_context() {
+        // The `(?:^|\s)module(?:\s|$|=)` anchor must not match `data-module`.
+        let scripts =
+            extract_sfc_scripts(r#"<script data-module="x" lang="ts">const x = 1;</script>"#);
+        assert_eq!(scripts.len(), 1);
+        assert!(!scripts[0].is_context_module);
+    }
+
+    #[test]
+    fn bare_module_script_is_not_template_visible() {
+        // AC-2: a bare `<script module>` is scoped as module context, so its
+        // imports are NOT credited as template-visible (matching `context="module"`).
+        let module_script = SfcScript {
+            body: String::new(),
+            is_typescript: false,
+            is_jsx: false,
+            byte_offset: 0,
+            src: None,
+            src_span: None,
+            is_setup: false,
+            is_context_module: true,
+            generic_attr: None,
+        };
+        assert!(!is_template_visible_script(SfcKind::Svelte, &module_script));
+        let instance_script = SfcScript {
+            is_context_module: false,
+            ..module_script
+        };
+        assert!(is_template_visible_script(
+            SfcKind::Svelte,
+            &instance_script
+        ));
     }
 
     #[test]
@@ -1579,5 +1707,118 @@ export const foo = 1;
             "template <img src> should seed a SideEffect import: {:?}",
             info.imports
         );
+    }
+
+    // -- Svelte 5 `$props()` rune harvest (W1.1 piece 2) -----------------------
+
+    fn svelte_props(source: &str) -> Vec<crate::ModuleInfo> {
+        vec![parse_sfc_to_module(
+            FileId(0),
+            Path::new("Component.svelte"),
+            source,
+            0,
+            false,
+        )]
+    }
+
+    fn prop_names(info: &crate::ModuleInfo) -> Vec<String> {
+        let mut names: Vec<String> = info
+            .component_props
+            .iter()
+            .map(|p| p.name.clone())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn svelte_shorthand_props_harvested() {
+        // AC-3: `let { a, b } = $props()` harvests `a`, `b` with `local == name`.
+        let info = &svelte_props(r"<script>let { a, b } = $props();</script>")[0];
+        assert_eq!(prop_names(info), vec!["a", "b"]);
+        for prop in &info.component_props {
+            assert_eq!(prop.local, prop.name);
+        }
+    }
+
+    #[test]
+    fn svelte_renamed_prop_tracks_local_and_script_use() {
+        // AC-4: `let { a: alias } = $props()` harvests `a` with `local == "alias"`,
+        // and a reference to `alias` sets `used_in_script` for prop `a`.
+        let info =
+            &svelte_props(r"<script>let { a: alias } = $props(); console.log(alias);</script>")[0];
+        assert_eq!(prop_names(info), vec!["a"]);
+        let prop = &info.component_props[0];
+        assert_eq!(prop.local, "alias");
+        assert!(
+            prop.used_in_script,
+            "alias is referenced, so a is used in script"
+        );
+    }
+
+    #[test]
+    fn svelte_unreferenced_prop_is_unused_in_script() {
+        let info = &svelte_props(r"<script>let { a } = $props();</script>")[0];
+        assert_eq!(prop_names(info), vec!["a"]);
+        assert!(!info.component_props[0].used_in_script);
+    }
+
+    #[test]
+    fn svelte_default_prop_peeled() {
+        // AC-5: `let { a = 1 } = $props()` harvests `a` (default peeled).
+        let info = &svelte_props(r"<script>let { a = 1 } = $props();</script>")[0];
+        assert_eq!(prop_names(info), vec!["a"]);
+    }
+
+    #[test]
+    fn svelte_bindable_default_peeled() {
+        // The bindable form `let { a = $bindable() } = $props()`: `a` is still a
+        // declared prop (the default value is irrelevant to the local name).
+        let info = &svelte_props(r"<script>let { a = $bindable() } = $props();</script>")[0];
+        assert_eq!(prop_names(info), vec!["a"]);
+    }
+
+    #[test]
+    fn svelte_rest_element_sets_fallthrough_abstain() {
+        // AC-6: `let { a, ...rest } = $props()` sets has_props_attrs_fallthrough.
+        let info = &svelte_props(r"<script>let { a, ...rest } = $props();</script>")[0];
+        assert!(info.has_props_attrs_fallthrough);
+    }
+
+    #[test]
+    fn svelte_bare_identifier_binding_sets_unharvestable_abstain() {
+        // AC-7: `let p = $props()` (no destructure) sets has_unharvestable_props.
+        let info = &svelte_props(r"<script>let p = $props(); console.log(p.x);</script>")[0];
+        assert!(info.has_unharvestable_props);
+        assert!(info.component_props.is_empty());
+    }
+
+    #[test]
+    fn svelte_nested_destructure_sets_unharvestable_abstain() {
+        // A nested destructure (`{ a: { x } }`) cannot be flattened. Abstain.
+        let info = &svelte_props(r"<script>let { a: { x } } = $props();</script>")[0];
+        assert!(info.has_unharvestable_props);
+    }
+
+    #[test]
+    fn svelte_prop_used_only_in_markup_credited_as_template_root() {
+        // AC-8: a prop used only in markup (`{a}`) is credited via
+        // `apply_template_usage`, so `used_in_template` is set (parity with Vue).
+        let info = &svelte_props(r"<script>let { a } = $props();</script><p>{a}</p>")[0];
+        assert_eq!(prop_names(info), vec!["a"]);
+        assert!(
+            info.component_props[0].used_in_template,
+            "a is used in markup, so used_in_template should be true"
+        );
+    }
+
+    #[test]
+    fn svelte_module_script_props_not_harvested() {
+        // `$props()` is instance-only; a module-context script must not harvest.
+        let info = &svelte_props(
+            r"<script module>let { a } = $props();</script><script>let { b } = $props();</script>",
+        )[0];
+        // Only the instance script's `b` is harvested.
+        assert_eq!(prop_names(info), vec!["b"]);
     }
 }

@@ -468,7 +468,17 @@ use crate::MemberKind;
 /// the abstain flags the same way `<script setup>` does; a warm cache from 171
 /// lacks the Options-API prop/emit IR and would report zero findings on those
 /// components.
-pub(super) const CACHE_VERSION: u32 = 172;
+///
+/// Bumped to 173 (feat/svelte-runes-extraction, W1.1): two `.svelte` extraction
+/// changes alter serialized module state. (1) Svelte 5's bare `<script module>`
+/// attribute is now recognized as module context (was treated as the instance
+/// script), so a warm cache wrongly scoped module-level declarations and credited the
+/// module script's imports as template-visible. (2) The Svelte 5 `$props()` rune
+/// is now harvested into `component_props` (reusing the Vue IR + abstain flags);
+/// a warm cache from 172 lacks the Svelte prop IR. (`<svelte:component>` /
+/// `<svelte:element>` / `<svelte:self>` were verified already credited by the
+/// existing attribute-value scan, so no template-scanner change rides this bump.)
+pub(super) const CACHE_VERSION: u32 = 173;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

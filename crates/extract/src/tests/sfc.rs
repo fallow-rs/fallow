@@ -1637,8 +1637,16 @@ export let data;
 #[test]
 fn sveltekit_data_prop_not_credited_in_non_route_svelte() {
     // A non-route component's `data` is a parent-passed prop, NOT load() data, so
-    // crediting it as load data would be semantically wrong. Route-narrowing keeps
-    // the credit off ordinary `.svelte` files.
+    // crediting it as LOAD DATA would be semantically wrong. Route-narrowing keeps
+    // the load-data credit off ordinary `.svelte` files.
+    //
+    // Since W1.1's `$props()` harvest, the `data` prop IS harvested as an ordinary
+    // `ComponentProp` and credited as a template root, so `{data.title}` now emits
+    // a `data.title` member access keyed on `data`. That access is inert: the
+    // `unused-load-data-key` detector's sibling channel only reads `data.<key>`
+    // from the `+page.svelte` SIBLING of a `load()` producer's route directory, so
+    // a `src/lib/Card.svelte` is never consumed by the load-data join. The
+    // load-data-specific signal (`has_load_data_whole_use`) must stay off here.
     let info = parse_sfc(
         r#"
 <script lang="ts">
@@ -1649,13 +1657,20 @@ let { data } = $props();
         "src/lib/Card.svelte",
     );
 
+    // The prop is harvested generically (W1.1), so the template member access is
+    // present and keyed on `data` (inert for the route-pinned load-data join).
     assert!(
-        !info
-            .member_accesses
-            .iter()
-            .any(|access| access.object == "data"),
-        "non-route `Card.svelte` must not credit `data.*`, got: {:?}",
         info.member_accesses
+            .iter()
+            .any(|access| access.object == "data" && access.member == "title"),
+        "non-route `data` prop is harvested generically and credited in markup, got: {:?}",
+        info.member_accesses
+    );
+    // The SvelteKit load-data-specific whole-`data` abstain signal must NOT fire on
+    // a non-route component (it is gated to route components via `credit_load_data`).
+    assert!(
+        !info.has_load_data_whole_use,
+        "non-route `Card.svelte` must not set the load-data whole-use signal"
     );
 }
 
