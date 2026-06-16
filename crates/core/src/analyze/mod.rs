@@ -870,6 +870,7 @@ fn populate_render_fan_in(input: &mut FrameworkSpecificFindingsInput<'_>) {
         input.modules,
         input.resolved_modules,
         input.declared_deps,
+        &input.config.root,
     );
 }
 

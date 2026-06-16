@@ -1216,8 +1216,41 @@ fn health_vital_signs_carry_render_fan_in_on_react_project() {
         vital
             .get("max_render_fan_in")
             .and_then(serde_json::Value::as_u64),
+        Some(3),
+        "the headline is the honest DISTINCT-PARENTS count (Button = 3 parents), \
+         not the inflated render-site count (6): {vital}"
+    );
+    // The located top-N is sorted by distinct_parents descending: Button (3) leads.
+    let top = vital
+        .get("top_render_fan_in")
+        .and_then(serde_json::Value::as_array)
+        .expect("top_render_fan_in present on a React project");
+    let first = &top[0];
+    assert_eq!(
+        first.get("component").and_then(serde_json::Value::as_str),
+        Some("Button"),
+        "the top entry is sorted by distinct_parents desc (Button leads): {vital}"
+    );
+    assert_eq!(
+        first
+            .get("distinct_parents")
+            .and_then(serde_json::Value::as_u64),
+        Some(3),
+        "Button's headline axis is distinct_parents = 3: {vital}"
+    );
+    assert_eq!(
+        first
+            .get("render_sites")
+            .and_then(serde_json::Value::as_u64),
         Some(6),
-        "the shared <Button> is the headline blast radius (6 render sites): {vital}"
+        "render_sites is kept as secondary 'incl. repeats' context (6): {vital}"
+    );
+    // No test-file component (the fixture's __tests__/Button.test.tsx Page) leaks
+    // into the located list.
+    assert!(
+        !top.iter()
+            .any(|c| c.get("component").and_then(serde_json::Value::as_str) == Some("Page")),
+        "a component defined in a test file must not appear in top_render_fan_in: {vital}"
     );
     assert!(
         vital.get("p95_render_fan_in").is_some(),

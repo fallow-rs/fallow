@@ -1177,12 +1177,14 @@ fn render_risk_profiles(lines: &mut Vec<String>, report: &crate::health_types::H
 
 /// Render the descriptive render-fan-in (blast-radius) list of the highest
 /// fan-in React/Preact components, e.g.
-/// `Render fan-in: <QueryClientProvider> 146 sites (31 parents) ...`.
+/// `Render fan-in: <Button> 31 parents (146 incl. repeats) ...`.
 ///
+/// The HEADLINE axis is distinct parents (the honest count of distinct render
+/// LOCATIONS); render sites is shown as secondary "incl. repeats" context.
 /// Mirrors `render_risk_profiles`: descriptive vital-sign context, gated on a
 /// non-empty `top_render_fan_in` so non-React output is byte-identical. The
-/// list is already sorted by render sites descending and project-relativized in
-/// the health layer; this only renders a capped, dimmed summary line.
+/// list is already sorted by distinct parents descending and project-relativized
+/// in the health layer; this only renders a capped, dimmed summary line.
 fn render_render_fan_in(lines: &mut Vec<String>, report: &crate::health_types::HealthReport) {
     let Some(ref vs) = report.vital_signs else {
         return;
@@ -1198,12 +1200,11 @@ fn render_render_fan_in(lines: &mut Vec<String>, report: &crate::health_types::H
         .take(MAX_SHOWN)
         .map(|c| {
             format!(
-                "<{}> {} site{} ({} parent{})",
+                "<{}> {} parent{} ({} incl. repeats)",
                 c.component,
-                c.render_sites,
-                plural(c.render_sites as usize),
                 c.distinct_parents,
                 plural(c.distinct_parents as usize),
+                c.render_sites,
             )
         })
         .collect();

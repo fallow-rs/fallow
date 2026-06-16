@@ -3600,14 +3600,14 @@
             "integer",
             "null"
           ],
-          "description": "The single highest render-SITE count across all components (the headline\nblast-radius number: a shared `<Button>` rendered in N places). `None` on\nnon-React runs. Descriptive context, no threshold."
+          "description": "The single highest DISTINCT-PARENTS count across all components (the\nheadline blast-radius number: the most distinct render LOCATIONS any one\ncomponent is rendered from, the honest edit-ripple count). `render_sites`\n(incl. repeats) is secondary per-component context, never the headline.\n`None` on non-React runs. Descriptive context, no threshold."
         },
         "top_render_fan_in": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/RenderFanInTopComponent"
           },
-          "description": "The highest-fan-in React/Preact components, located (component name +\nproject-relative path + render-site / distinct-parent counts), sorted by\nrender sites descending and capped at a small N. Lets a consumer see\nWHICH component carries the headline `max_render_fan_in`, not just the\nnumber. Empty (and omitted from JSON) on non-React runs, so the contract\nstays byte-identical there. Descriptive blast-radius context, NOT a gate."
+          "description": "The highest-fan-in React/Preact components, located (component name +\nproject-relative path + render-site / distinct-parent counts), sorted by\ndistinct parents (the honest headline axis) descending, tie-broken on\nrender sites descending, and capped at a small N. Lets a consumer see\nWHICH component carries the headline `max_render_fan_in`, not just the\nnumber. Empty (and omitted from JSON) on non-React runs, so the contract\nstays byte-identical there. Descriptive blast-radius context, NOT a gate."
         },
         "total_loc": {
           "type": "integer",
@@ -14731,11 +14731,11 @@
         },
         "render_sites": {
           "type": "integer",
-          "description": "Total JSX render SITES that resolve to this component across the project."
+          "description": "Total JSX render SITES that resolve to this component across the project.\nSECONDARY \"incl. repeats\" context, not the headline (see `distinct_parents`)."
         },
         "distinct_parents": {
           "type": "integer",
-          "description": "Distinct `(parent_file, parent_component)` keys that render this component."
+          "description": "Distinct `(parent_file, parent_component)` keys that render this component.\nThe HEADLINE blast-radius axis: distinct render LOCATIONS."
         }
       },
       "required": [
@@ -14744,7 +14744,7 @@
         "render_sites",
         "distinct_parents"
       ],
-      "description": "One located high-fan-in React/Preact component for the descriptive\n`top_render_fan_in` blast-radius list on [`VitalSigns`].\n\nThe component-graph analogue of a high-fan-in module: `render_sites` counts\nJSX render SITES targeting this component project-wide (the headline\nblast-radius number, since a shared `<Button>` is rendered in far more places\nthan it is imported), `distinct_parents` counts the distinct parent\ncomponents that render it. Undercount-safe like the underlying metric: a\nchild rendered via a JSX spread / dynamic / member-expression tag resolves to\nno component, so a true high-fan-in component can only be undersold."
+      "description": "One located high-fan-in React/Preact component for the descriptive\n`top_render_fan_in` blast-radius list on [`VitalSigns`].\n\nThe component-graph analogue of a high-fan-in module: `distinct_parents` is\nthe HEADLINE axis (the honest count of distinct parent components / render\nLOCATIONS that render this component), `render_sites` is secondary \"incl.\nrepeats\" context (every JSX render SITE, so a single parent rendering one\nchild five times is five sites but one parent). Undercount-safe like the\nunderlying metric: a child rendered via a JSX spread / dynamic /\nmember-expression tag resolves to no component, so a true high-fan-in\ncomponent can only be undersold."
     }
   }
 }

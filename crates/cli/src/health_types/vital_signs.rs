@@ -108,14 +108,17 @@ pub struct VitalSigns {
     /// tunable constant). `None` on non-React runs. Mirrors `coupling_high_pct`.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub render_fan_in_high_pct: Option<f64>,
-    /// The single highest render-SITE count across all components (the headline
-    /// blast-radius number: a shared `<Button>` rendered in N places). `None` on
-    /// non-React runs. Descriptive context, no threshold.
+    /// The single highest DISTINCT-PARENTS count across all components (the
+    /// headline blast-radius number: the most distinct render LOCATIONS any one
+    /// component is rendered from, the honest edit-ripple count). `render_sites`
+    /// (incl. repeats) is secondary per-component context, never the headline.
+    /// `None` on non-React runs. Descriptive context, no threshold.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub max_render_fan_in: Option<u32>,
     /// The highest-fan-in React/Preact components, located (component name +
     /// project-relative path + render-site / distinct-parent counts), sorted by
-    /// render sites descending and capped at a small N. Lets a consumer see
+    /// distinct parents (the honest headline axis) descending, tie-broken on
+    /// render sites descending, and capped at a small N. Lets a consumer see
     /// WHICH component carries the headline `max_render_fan_in`, not just the
     /// number. Empty (and omitted from JSON) on non-React runs, so the contract
     /// stays byte-identical there. Descriptive blast-radius context, NOT a gate.
@@ -129,13 +132,14 @@ pub struct VitalSigns {
 /// One located high-fan-in React/Preact component for the descriptive
 /// `top_render_fan_in` blast-radius list on [`VitalSigns`].
 ///
-/// The component-graph analogue of a high-fan-in module: `render_sites` counts
-/// JSX render SITES targeting this component project-wide (the headline
-/// blast-radius number, since a shared `<Button>` is rendered in far more places
-/// than it is imported), `distinct_parents` counts the distinct parent
-/// components that render it. Undercount-safe like the underlying metric: a
-/// child rendered via a JSX spread / dynamic / member-expression tag resolves to
-/// no component, so a true high-fan-in component can only be undersold.
+/// The component-graph analogue of a high-fan-in module: `distinct_parents` is
+/// the HEADLINE axis (the honest count of distinct parent components / render
+/// LOCATIONS that render this component), `render_sites` is secondary "incl.
+/// repeats" context (every JSX render SITE, so a single parent rendering one
+/// child five times is five sites but one parent). Undercount-safe like the
+/// underlying metric: a child rendered via a JSX spread / dynamic /
+/// member-expression tag resolves to no component, so a true high-fan-in
+/// component can only be undersold.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RenderFanInTopComponent {
@@ -146,8 +150,10 @@ pub struct RenderFanInTopComponent {
     #[serde(serialize_with = "fallow_types::serde_path::serialize")]
     pub path: std::path::PathBuf,
     /// Total JSX render SITES that resolve to this component across the project.
+    /// SECONDARY "incl. repeats" context, not the headline (see `distinct_parents`).
     pub render_sites: u32,
     /// Distinct `(parent_file, parent_component)` keys that render this component.
+    /// The HEADLINE blast-radius axis: distinct render LOCATIONS.
     pub distinct_parents: u32,
 }
 

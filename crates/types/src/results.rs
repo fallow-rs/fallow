@@ -78,9 +78,12 @@ pub struct RenderFanInMetric {
     /// `max(p95, 10)` threshold (the same floor coupling concentration uses).
     /// `None` on an empty population.
     pub high_pct: Option<f64>,
-    /// The single highest render-SITE count across all components (the headline
-    /// blast-radius number). `None` on an empty population.
-    pub max_render_sites: Option<u32>,
+    /// The single highest DISTINCT-PARENTS count across all components (the
+    /// headline blast-radius number: the most distinct render LOCATIONS any one
+    /// component is rendered from, the honest edit-ripple count). `None` on an
+    /// empty population. `render_sites` (incl. repeats) is secondary per-component
+    /// context, never the headline.
+    pub max_distinct_parents: Option<u32>,
 }
 
 /// One component's render fan-in detail: how many JSX render SITES target it and
@@ -92,11 +95,14 @@ pub struct RenderFanInComponent {
     /// The component name.
     pub component: String,
     /// Total JSX render SITES that resolve to this component across the project
-    /// (each capitalized / member JSX tag is one site). The headline
-    /// blast-radius number per component.
+    /// (each capitalized / member JSX tag is one site). SECONDARY context ("incl.
+    /// repeats"): a single parent rendering one child five times is five sites but
+    /// one distinct parent, so render_sites overcounts blast radius.
     pub render_sites: u32,
     /// Distinct `(parent_file, parent_component)` keys that render this
-    /// component. The percentiled distribution analogue of "distinct importers".
+    /// component. The HEADLINE blast-radius axis: the honest count of distinct
+    /// render LOCATIONS, the percentiled distribution analogue of "distinct
+    /// importers".
     pub distinct_parents: u32,
 }
 

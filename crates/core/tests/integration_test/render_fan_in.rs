@@ -60,11 +60,13 @@ fn counts_render_sites_and_distinct_parents() {
         "Unrendered is a real 0 in the population, not missing"
     );
 
-    // The headline blast-radius number is Button's 6.
+    // The headline blast-radius number is the max DISTINCT-PARENTS (Button = 3
+    // distinct parents: Home, Settings, Toolbar), NOT the inflated render-site
+    // count (6).
     assert_eq!(
-        metric.max_render_sites,
-        Some(6),
-        "max render-sites is the single highest count (Button = 6)"
+        metric.max_distinct_parents,
+        Some(3),
+        "max distinct-parents is the single highest count (Button = 3 parents)"
     );
 
     // The percentile aggregates are populated and finite.
@@ -99,6 +101,42 @@ fn rarely_rendered_component_is_not_high_fan_in() {
     assert!(
         button > rare,
         "the shared Button ({button}) is a far higher blast radius than RareModal ({rare})"
+    );
+}
+
+/// Test-file exclusion: a component DEFINED in a test/spec file is NOT a fan-in
+/// target (the test-local `Page` never appears in the per-component map), and a
+/// render SITE whose parent is a test file does NOT count (the 5 `<Button>`
+/// renders inside `__tests__/Button.test.tsx` do not inflate Button's headline).
+/// This is the panel release-blocker: on real repos the headline was dominated
+/// by test-local render loops (TanStack's `Page` at 146 sites / 2 parents).
+#[test]
+fn test_files_are_excluded_from_render_fan_in() {
+    let root = fixture_path("render-fan-in");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let metric = results.render_fan_in.as_ref().expect("metric present");
+
+    // The test-local `Page` component must not be a fan-in target at all.
+    assert!(
+        counts_for(metric, "Page").is_none(),
+        "a component DEFINED in a test file must not appear in the per-component map"
+    );
+
+    // Button's counts are unchanged by the 5 test-file render sites: still 6
+    // production sites from 3 distinct production parents.
+    assert_eq!(
+        counts_for(metric, "Button"),
+        Some((6, 3)),
+        "render SITES whose parent is a test file must NOT count toward Button"
+    );
+
+    // The honest headline (max distinct-parents) stays 3, NOT inflated by the
+    // test-local loop.
+    assert_eq!(
+        metric.max_distinct_parents,
+        Some(3),
+        "the test-file render loop must not inflate the headline distinct-parents"
     );
 }
 

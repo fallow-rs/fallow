@@ -2859,7 +2859,7 @@ export function choose(value: number): string {
                 }],
                 p95_distinct_parents: Some(3),
                 high_pct: Some(0.0),
-                max_render_sites: Some(6),
+                max_distinct_parents: Some(3),
             }),
         }
     }
@@ -2911,8 +2911,8 @@ export function choose(value: number): string {
             target
                 .render_fan_in
                 .as_ref()
-                .and_then(|m| m.max_render_sites),
-            Some(6)
+                .and_then(|m| m.max_distinct_parents),
+            Some(3)
         );
     }
 

@@ -4188,23 +4188,29 @@ fn prepare_health_vital_data(
     {
         vital_signs.p95_render_fan_in = metric.p95_distinct_parents;
         vital_signs.render_fan_in_high_pct = metric.high_pct;
-        vital_signs.max_render_fan_in = metric.max_render_sites;
+        // The public headline (`max_render_fan_in`) is the max DISTINCT-PARENTS:
+        // honest blast radius = the most distinct render LOCATIONS any one
+        // component is rendered from. `render_sites` (incl. repeats) is secondary.
+        vital_signs.max_render_fan_in = metric.max_distinct_parents;
 
         // Located top-N list so a consumer sees WHICH component carries the
         // headline fan-in, not just the number. The core carrier is sorted by
         // (path, component) for run-stability and INCLUDES rendered-nowhere `0`
-        // entries (for the percentile distribution), so re-sort by render_sites
-        // descending and drop the `0`-fan-in entries here. Tie-break on
-        // (path, component) so the cap is deterministic. Cap at a small N.
+        // entries (for the percentile distribution), so re-sort by
+        // distinct_parents (the honest headline axis) descending, tie-break on
+        // render_sites descending, and drop the `0`-fan-in entries here. Final
+        // tie-break on (path, component) so the cap is deterministic. Cap at a
+        // small N.
         const MAX_TOP_RENDER_FAN_IN: usize = 20;
         let mut top: Vec<&fallow_types::results::RenderFanInComponent> = metric
             .per_component
             .iter()
-            .filter(|c| c.render_sites > 0)
+            .filter(|c| c.distinct_parents > 0)
             .collect();
         top.sort_by(|a, b| {
-            b.render_sites
-                .cmp(&a.render_sites)
+            b.distinct_parents
+                .cmp(&a.distinct_parents)
+                .then_with(|| b.render_sites.cmp(&a.render_sites))
                 .then_with(|| a.file.cmp(&b.file))
                 .then_with(|| a.component.cmp(&b.component))
         });

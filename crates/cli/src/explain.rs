@@ -1284,6 +1284,7 @@ fn health_metrics() -> Value {
         health_size_complexity_metrics(),
         health_quality_metrics(),
         health_coupling_metrics(),
+        health_render_fan_in_metrics(),
         health_churn_metrics(),
         health_refactoring_rank_metrics(),
         health_refactoring_confidence_metrics(),
@@ -1368,6 +1369,17 @@ fn health_coupling_metrics() -> Value {
                 "range": "[0, \u{221e})",
                 "interpretation": "lower is better; MI penalty caps at ~40 imports"
             },
+    })
+}
+
+fn health_render_fan_in_metrics() -> Value {
+    json!({
+            "max_render_fan_in": {
+                "name": "Render Fan-in (Blast Radius)",
+                "description": "DESCRIPTIVE, NOT A RULE. The component-graph analogue of module fan-in: where module fan-in counts importing MODULES, render fan-in counts distinct render LOCATIONS of a React/Preact component (a shared <Button> is rendered in far more places than it is imported). The headline `max_render_fan_in` is the highest DISTINCT-PARENTS count across components (the honest edit-ripple count); each top component also reports `render_sites` as secondary \u{201c}incl. repeats\u{201d} context (one parent rendering a child five times is five sites but one distinct parent). Test / spec / story / fixture files are excluded (a test rendering <Page> 146 times is not blast radius). Undercount-safe: a child rendered via a JSX spread / dynamic / member-expression tag is not resolved, so a high-fan-in component can only be undersold. Computed only on React/Preact projects; absent otherwise.",
+                "range": "[0, \u{221e})",
+                "interpretation": "context-dependent; a high distinct-parents component edit-ripples to many render locations. Descriptive only, never a gate or finding"
+            }
     })
 }
 
