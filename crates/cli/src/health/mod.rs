@@ -5386,39 +5386,17 @@ fn append_component_rollup_findings(
     max_cyclomatic: u16,
     max_cognitive: u16,
 ) {
-    use crate::health_types::{ComplexityViolation, ComponentRollup, ExceededThreshold};
+    use crate::health_types::ComplexityViolation;
 
     let mut by_owner: rustc_hash::FxHashMap<std::path::PathBuf, (Vec<usize>, Vec<usize>)> =
         rustc_hash::FxHashMap::default();
     for (idx, f) in findings.iter().enumerate() {
         if f.name == "<template>" {
-            let ext = f
-                .path
-                .extension()
-                .and_then(|e| e.to_str())
-                .map(str::to_ascii_lowercase);
-            let owner = match ext.as_deref() {
-                Some("html") => template_owner_lookup.and_then(|m| m.get(&f.path)).cloned(),
-                Some("ts" | "tsx" | "mts" | "cts") => Some(f.path.clone()),
-                _ => None,
-            };
-            if let Some(owner) = owner {
+            if let Some(owner) = component_template_owner(f, template_owner_lookup) {
                 by_owner.entry(owner).or_default().1.push(idx);
             }
-        } else if f.name != "<component>" {
-            let is_ts = f
-                .path
-                .extension()
-                .and_then(|e| e.to_str())
-                .is_some_and(|ext| {
-                    matches!(
-                        ext.to_ascii_lowercase().as_str(),
-                        "ts" | "tsx" | "mts" | "cts"
-                    )
-                });
-            if is_ts {
-                by_owner.entry(f.path.clone()).or_default().0.push(idx);
-            }
+        } else if is_component_class_finding(f) {
+            by_owner.entry(f.path.clone()).or_default().0.push(idx);
         }
     }
 
@@ -5439,19 +5417,79 @@ fn append_component_rollup_findings(
             continue;
         };
         let worst = &findings[worst_idx];
-        let component = owner.file_stem().map_or_else(
-            || "<unknown-component>".to_string(),
-            |stem| stem.to_string_lossy().into_owned(),
-        );
-        let worst_method = worst.name.clone();
-        let rollup_cyc = worst.cyclomatic.saturating_add(template.cyclomatic);
-        let rollup_cog = worst.cognitive.saturating_add(template.cognitive);
-        let exceeds_cyclomatic = rollup_cyc > max_cyclomatic;
-        let exceeds_cognitive = rollup_cog > max_cognitive;
-        if !exceeds_cyclomatic && !exceeds_cognitive {
-            continue;
+        if let Some(rollup) =
+            build_component_rollup(owner, worst, template, max_cyclomatic, max_cognitive)
+        {
+            to_push.push(rollup);
         }
-        let severity = compute_finding_severity(
+    }
+    findings.extend(to_push);
+}
+
+fn component_template_owner(
+    finding: &crate::health_types::ComplexityViolation,
+    template_owner_lookup: Option<&rustc_hash::FxHashMap<std::path::PathBuf, std::path::PathBuf>>,
+) -> Option<std::path::PathBuf> {
+    let ext = finding
+        .path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase);
+    match ext.as_deref() {
+        Some("html") => template_owner_lookup
+            .and_then(|m| m.get(&finding.path))
+            .cloned(),
+        Some("ts" | "tsx" | "mts" | "cts") => Some(finding.path.clone()),
+        _ => None,
+    }
+}
+
+fn is_component_class_finding(finding: &crate::health_types::ComplexityViolation) -> bool {
+    finding.name != "<component>"
+        && finding
+            .path
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|ext| {
+                matches!(
+                    ext.to_ascii_lowercase().as_str(),
+                    "ts" | "tsx" | "mts" | "cts"
+                )
+            })
+}
+
+fn build_component_rollup(
+    owner: std::path::PathBuf,
+    worst: &crate::health_types::ComplexityViolation,
+    template: &crate::health_types::ComplexityViolation,
+    max_cyclomatic: u16,
+    max_cognitive: u16,
+) -> Option<crate::health_types::ComplexityViolation> {
+    use crate::health_types::{ComponentRollup, ExceededThreshold};
+
+    let rollup_cyc = worst.cyclomatic.saturating_add(template.cyclomatic);
+    let rollup_cog = worst.cognitive.saturating_add(template.cognitive);
+    let exceeds_cyclomatic = rollup_cyc > max_cyclomatic;
+    let exceeds_cognitive = rollup_cog > max_cognitive;
+    if !exceeds_cyclomatic && !exceeds_cognitive {
+        return None;
+    }
+
+    let component = owner.file_stem().map_or_else(
+        || "<unknown-component>".to_string(),
+        |stem| stem.to_string_lossy().into_owned(),
+    );
+    Some(crate::health_types::ComplexityViolation {
+        path: owner,
+        name: "<component>".to_string(),
+        line: worst.line,
+        col: worst.col,
+        cyclomatic: rollup_cyc,
+        cognitive: rollup_cog,
+        line_count: worst.line_count.saturating_add(template.line_count),
+        param_count: 0,
+        exceeded: ExceededThreshold::from_bools(exceeds_cyclomatic, exceeds_cognitive, false),
+        severity: compute_finding_severity(
             rollup_cog,
             rollup_cyc,
             None,
@@ -5459,38 +5497,25 @@ fn append_component_rollup_findings(
             DEFAULT_COGNITIVE_CRITICAL,
             DEFAULT_CYCLOMATIC_HIGH,
             DEFAULT_CYCLOMATIC_CRITICAL,
-        );
-        to_push.push(ComplexityViolation {
-            path: owner,
-            name: "<component>".to_string(),
-            line: worst.line,
-            col: worst.col,
-            cyclomatic: rollup_cyc,
-            cognitive: rollup_cog,
-            line_count: worst.line_count.saturating_add(template.line_count),
-            param_count: 0,
-            exceeded: ExceededThreshold::from_bools(exceeds_cyclomatic, exceeds_cognitive, false),
-            severity,
-            crap: None,
-            coverage_pct: None,
-            coverage_tier: None,
-            coverage_source: None,
-            inherited_from: None,
-            component_rollup: Some(ComponentRollup {
-                component,
-                class_worst_function: worst_method,
-                class_cyclomatic: worst.cyclomatic,
-                class_cognitive: worst.cognitive,
-                template_path: template.path.clone(),
-                template_cyclomatic: template.cyclomatic,
-                template_cognitive: template.cognitive,
-            }),
-            contributions: Vec::new(),
-            effective_thresholds: None,
-            threshold_source: None,
-        });
-    }
-    findings.extend(to_push);
+        ),
+        crap: None,
+        coverage_pct: None,
+        coverage_tier: None,
+        coverage_source: None,
+        inherited_from: None,
+        component_rollup: Some(ComponentRollup {
+            component,
+            class_worst_function: worst.name.clone(),
+            class_cyclomatic: worst.cyclomatic,
+            class_cognitive: worst.cognitive,
+            template_path: template.path.clone(),
+            template_cyclomatic: template.cyclomatic,
+            template_cognitive: template.cognitive,
+        }),
+        contributions: Vec::new(),
+        effective_thresholds: None,
+        threshold_source: None,
+    })
 }
 
 /// Resolve the `inherited_from` provenance path for a CRAP finding.
