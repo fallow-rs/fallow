@@ -622,3 +622,402 @@ impl<'a> oxc_ast_visit::Visit<'a> for EmitBindingVisitor<'a> {
         }
     }
 }
+
+// -- Vue Options API (`export default { props, emits, ... }` and
+// `export default defineComponent({ props, emits, ... })`) --------------------
+//
+// The setup harvest above reads `defineProps` / `defineEmits` macros from a
+// `<script setup>` block. The Options API instead declares the same contract as
+// keys on the component-options object: `props` / `emits` declare the names,
+// `this.<prop>` reads them, and `this.$emit('<name>')` fires events. The harvest
+// here finds that options object (a default-export object literal, or the first
+// argument of `defineComponent(...)`), reuses the same `ComponentProp` /
+// `ComponentEmit` IR and abstain-flag structs the setup versions return, and
+// computes per-prop / per-emit usage from a `this.*` walk over the whole script.
+//
+// Whole-component abstains (set the existing flags so the detector skips the
+// file): `mixins: [...]` and an Options-API `extends:` key (a mixin / base may
+// read a prop or fire an emit invisibly to the per-component scan), a dynamic
+// `this[<computed>]` access, an unharvestable `props` / `emits` value (an
+// identifier, a spread, or a `defineComponent<Type>()` type generic with no
+// runtime object), and a dynamic `this.$emit(<nonLiteral>)`.
+
+/// Locate the Vue Options API component-options object in a non-setup `<script>`
+/// program: the `export default { ... }` object literal, or the first-argument
+/// object of `export default defineComponent({ ... })`. A
+/// `defineComponent<Type>()` type-generic form (no runtime object argument) is
+/// reported via `has_type_generic` so the caller can abstain. Returns `None`
+/// when no options object is present (a non-component script).
+fn find_options_object<'a, 'b>(
+    program: &'b Program<'a>,
+    has_type_generic: &mut bool,
+) -> Option<&'b ObjectExpression<'a>> {
+    for stmt in &program.body {
+        let Statement::ExportDefaultDeclaration(export) = stmt else {
+            continue;
+        };
+        let Some(expr) = export.declaration.as_expression() else {
+            continue;
+        };
+        match expr {
+            // `export default { ... }`.
+            Expression::ObjectExpression(obj) => return Some(obj),
+            // `export default defineComponent({ ... })` / `defineComponent<T>()`.
+            Expression::CallExpression(call) => {
+                if simple_callee_name(&call.callee) != Some("defineComponent") {
+                    return None;
+                }
+                // `defineComponent<Props>()`: the runtime object is absent and the
+                // prop names live in a type the per-file scan cannot resolve.
+                if call.type_arguments.is_some()
+                    && !call
+                        .arguments
+                        .first()
+                        .and_then(|arg| arg.as_expression())
+                        .is_some_and(|e| matches!(e, Expression::ObjectExpression(_)))
+                {
+                    *has_type_generic = true;
+                    return None;
+                }
+                if let Some(Expression::ObjectExpression(obj)) =
+                    call.arguments.first().and_then(|arg| arg.as_expression())
+                {
+                    return Some(obj);
+                }
+                return None;
+            }
+            _ => return None,
+        }
+    }
+    None
+}
+
+/// The value expression of an options-object property whose static key matches
+/// `key`. Returns `None` for a spread, a computed key, or an absent key.
+fn options_property_value<'a, 'b>(
+    obj: &'b ObjectExpression<'a>,
+    key: &str,
+) -> Option<&'b Expression<'a>> {
+    for prop in &obj.properties {
+        if let ObjectPropertyKind::ObjectProperty(p) = prop
+            && property_key_name(&p.key).as_deref() == Some(key)
+        {
+            return Some(&p.value);
+        }
+    }
+    None
+}
+
+/// Whether the options object carries a `mixins:` or `extends:` key. Either one
+/// can read a prop or fire an emit from another file, invisible to the
+/// per-component scan, so the whole component abstains. The `extends:` here is
+/// an Options-API component-options KEY, not a JS `class X extends Y` clause.
+fn options_has_mixin_or_extends(obj: &ObjectExpression<'_>) -> bool {
+    obj.properties.iter().any(|prop| {
+        matches!(
+            prop,
+            ObjectPropertyKind::ObjectProperty(p)
+                if matches!(property_key_name(&p.key).as_deref(), Some("mixins" | "extends"))
+        )
+    })
+}
+
+/// Whether the options object declares a `setup(...)` method (or `setup:` value
+/// property). A `setup` receives the props object as its first parameter and can
+/// read any prop opaquely, so the caller credits a whole-object props use.
+fn options_has_setup_method(obj: &ObjectExpression<'_>) -> bool {
+    obj.properties.iter().any(|prop| match prop {
+        ObjectPropertyKind::ObjectProperty(p) => {
+            property_key_name(&p.key).as_deref() == Some("setup")
+        }
+        ObjectPropertyKind::SpreadProperty(_) => false,
+    })
+}
+
+/// Harvest Options-API declared props and abstain flags from a non-setup
+/// `<script>` program. Reuses [`DefinePropsHarvest`]: `props` carries the
+/// declared names with `used_in_script` set from a `this.<prop>` read walk;
+/// `has_unharvestable_props` abstains the whole file. Byte spans are RELATIVE to
+/// the script body; the caller remaps them onto the SFC source.
+pub fn harvest_options_api_props(program: &Program<'_>) -> DefinePropsHarvest {
+    let mut harvest = DefinePropsHarvest::default();
+
+    let mut has_type_generic = false;
+    let Some(obj) = find_options_object(program, &mut has_type_generic) else {
+        if has_type_generic {
+            harvest.has_unharvestable_props = true;
+        }
+        return harvest;
+    };
+
+    // A mixin / base component is an opaque additional source of prop reads.
+    if options_has_mixin_or_extends(obj) {
+        harvest.has_unharvestable_props = true;
+    }
+
+    // A `setup(props)` method receives the whole props object as its first
+    // parameter and can consume any prop opaquely; credit conservatively as a
+    // whole-object props use (the script-side analog of `v-bind="props"`) rather
+    // than risk a false positive. Reuses the existing fallthrough abstain.
+    if options_has_setup_method(obj) {
+        harvest.has_props_attrs_fallthrough = true;
+    }
+
+    let mut prop_names: Vec<(String, u32)> = Vec::new();
+    if let Some(props_value) = options_property_value(obj, "props") {
+        collect_options_prop_names(props_value, &mut prop_names, &mut harvest);
+    }
+
+    if prop_names.is_empty() {
+        return harvest;
+    }
+
+    // `this.foo` reads (and a dynamic `this[<computed>]` whole-component abstain)
+    // across the entire script: methods, computed, watch, lifecycle hooks, and a
+    // `setup()` body that reads its `props` param is handled separately by the
+    // caller (whole-object props use).
+    let usage = collect_this_member_usage(program);
+    if usage.has_dynamic_this {
+        harvest.has_props_attrs_fallthrough = true;
+    }
+
+    for (name, span_start) in prop_names {
+        let used_in_script = usage.read.contains(&name);
+        harvest.props.push(ComponentProp {
+            name: name.clone(),
+            // Options-API props have no destructure local; the declared name is
+            // also the template-credit name, mirroring the setup non-destructure
+            // form. Default the local to the prop name.
+            local: name,
+            span_start,
+            used_in_script,
+            used_in_template: false,
+            // Vue: one component per `.vue` file; the detector derives the name
+            // from the file stem, so this stays empty.
+            component: String::new(),
+            // React-only forward-vs-consume signal; Vue does not compute it.
+            used_outside_forward: false,
+        });
+    }
+
+    harvest
+}
+
+/// Collect prop names from the `props:` value of an Options-API component. The
+/// array form (`props: ['foo', 'bar']`) credits each string-literal element; the
+/// object form (`props: { foo: {...}, bar: Number }`) credits each static object
+/// key. An identifier (`props: sharedProps`), a spread, a non-string array
+/// element, or any other shape sets `has_unharvestable_props` (abstain).
+fn collect_options_prop_names(
+    value: &Expression<'_>,
+    prop_names: &mut Vec<(String, u32)>,
+    harvest: &mut DefinePropsHarvest,
+) {
+    match value {
+        // `props: { foo: { type: String }, bar: Number }`.
+        Expression::ObjectExpression(obj) => {
+            for prop in &obj.properties {
+                match prop {
+                    ObjectPropertyKind::ObjectProperty(p) => {
+                        if let Some(name) = property_key_name(&p.key) {
+                            // Anchor on the property span, matching the setup
+                            // object form (`p.span.start`).
+                            prop_names.push((name, p.span.start));
+                        } else {
+                            // A computed key (`[dynamic]: {...}`) hides the name.
+                            harvest.has_unharvestable_props = true;
+                        }
+                    }
+                    // `{ ...sharedProps }` hides names: abstain.
+                    ObjectPropertyKind::SpreadProperty(_) => {
+                        harvest.has_unharvestable_props = true;
+                    }
+                }
+            }
+        }
+        // `props: ['foo', 'bar']`.
+        Expression::ArrayExpression(arr) => {
+            for element in &arr.elements {
+                if let ArrayExpressionElement::StringLiteral(lit) = element {
+                    prop_names.push((lit.value.to_string(), lit.span.start));
+                } else if !matches!(element, ArrayExpressionElement::Elision(_)) {
+                    harvest.has_unharvestable_props = true;
+                }
+            }
+        }
+        // `props: sharedProps` (an identifier) or any other shape: unharvestable.
+        _ => harvest.has_unharvestable_props = true,
+    }
+}
+
+/// Harvest Options-API declared emit events and abstain flags from a non-setup
+/// `<script>` program. Reuses [`DefineEmitsHarvest`]: each event's `used` flag is
+/// set from a `this.$emit('<name>')` script call; a `this.$emit(<nonLiteral>)`
+/// sets `has_dynamic_emit`. Byte spans are RELATIVE to the script body; the
+/// caller remaps them onto the SFC source.
+pub fn harvest_options_api_emits(program: &Program<'_>) -> DefineEmitsHarvest {
+    let mut harvest = DefineEmitsHarvest::default();
+
+    let mut has_type_generic = false;
+    let Some(obj) = find_options_object(program, &mut has_type_generic) else {
+        if has_type_generic {
+            harvest.has_unharvestable_emits = true;
+        }
+        return harvest;
+    };
+
+    // A mixin / base component may fire an emit invisibly to the scan.
+    if options_has_mixin_or_extends(obj) {
+        harvest.has_unharvestable_emits = true;
+    }
+
+    // A `setup(props, { emit })` method can fire bare `emit('name')` calls
+    // through the context binding, which the `this.$emit` walk cannot see.
+    // Abstain the whole component's emit findings (mirrors the props side,
+    // which sets has_props_attrs_fallthrough for the same reason).
+    if options_has_setup_method(obj) {
+        harvest.has_dynamic_emit = true;
+    }
+
+    let mut emit_names: Vec<(String, u32)> = Vec::new();
+    if let Some(emits_value) = options_property_value(obj, "emits") {
+        collect_options_emit_names(emits_value, &mut emit_names, &mut harvest);
+    }
+
+    if emit_names.is_empty() {
+        return harvest;
+    }
+
+    let usage = collect_this_member_usage(program);
+    if usage.has_dynamic_emit {
+        harvest.has_dynamic_emit = true;
+    }
+
+    for (name, span_start) in emit_names {
+        let used = usage.emitted.contains(&name);
+        harvest.emits.push(ComponentEmit {
+            name,
+            span_start,
+            used,
+        });
+    }
+
+    harvest
+}
+
+/// Collect emit event names from the `emits:` value of an Options-API component.
+/// The array form (`emits: ['save']`) credits each string-literal element; the
+/// object form (`emits: { save: payload => true }`) credits each static object
+/// key. An identifier, a spread, a non-string array element, or any other shape
+/// sets `has_unharvestable_emits` (abstain).
+fn collect_options_emit_names(
+    value: &Expression<'_>,
+    emit_names: &mut Vec<(String, u32)>,
+    harvest: &mut DefineEmitsHarvest,
+) {
+    match value {
+        Expression::ObjectExpression(obj) => {
+            for prop in &obj.properties {
+                match prop {
+                    ObjectPropertyKind::ObjectProperty(p) => {
+                        if let Some(name) = property_key_name(&p.key) {
+                            emit_names.push((name, p.span.start));
+                        } else {
+                            harvest.has_unharvestable_emits = true;
+                        }
+                    }
+                    ObjectPropertyKind::SpreadProperty(_) => {
+                        harvest.has_unharvestable_emits = true;
+                    }
+                }
+            }
+        }
+        Expression::ArrayExpression(arr) => {
+            for element in &arr.elements {
+                if let ArrayExpressionElement::StringLiteral(lit) = element {
+                    emit_names.push((lit.value.to_string(), lit.span.start));
+                } else if !matches!(element, ArrayExpressionElement::Elision(_)) {
+                    harvest.has_unharvestable_emits = true;
+                }
+            }
+        }
+        _ => harvest.has_unharvestable_emits = true,
+    }
+}
+
+/// Result of walking a non-setup `<script>` program for `this.*` usage shared by
+/// the Options-API prop and emit harvests.
+#[derive(Debug, Default)]
+struct ThisMemberUsage {
+    /// Prop names read via `this.<name>` (any static-member read).
+    read: FxHashSet<String>,
+    /// Emit event names fired via `this.$emit('<name>')` (string-literal arg).
+    emitted: FxHashSet<String>,
+    /// A `this[<computed>]` dynamic member access was seen: a prop could be read
+    /// opaquely, so the whole component abstains its prop findings.
+    has_dynamic_this: bool,
+    /// A `this.$emit(<nonLiteral>)` was seen: the event is unknowable, so the
+    /// whole component abstains its emit findings.
+    has_dynamic_emit: bool,
+}
+
+/// Walk every `this.*` access in the program. `this.<name>` (static member)
+/// credits a prop read; `this[<computed>]` sets the dynamic-this abstain; a
+/// `this.$emit('<name>')` call credits an emit, while `this.$emit(<nonLiteral>)`
+/// sets the dynamic-emit abstain.
+fn collect_this_member_usage(program: &Program<'_>) -> ThisMemberUsage {
+    let mut visitor = ThisMemberVisitor {
+        usage: ThisMemberUsage::default(),
+    };
+    oxc_ast_visit::Visit::visit_program(&mut visitor, program);
+    visitor.usage
+}
+
+struct ThisMemberVisitor {
+    usage: ThisMemberUsage,
+}
+
+impl<'a> oxc_ast_visit::Visit<'a> for ThisMemberVisitor {
+    fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+        // `this.$emit('event')` / `this.$emit('event', payload)`: a string-literal
+        // first arg credits that event; a non-literal first arg is a dynamic emit.
+        if let Expression::StaticMemberExpression(member) = &call.callee
+            && matches!(member.object, Expression::ThisExpression(_))
+            && member.property.name.as_str() == "$emit"
+        {
+            match call.arguments.first().and_then(|arg| arg.as_expression()) {
+                Some(Expression::StringLiteral(lit)) => {
+                    self.usage.emitted.insert(lit.value.to_string());
+                }
+                // `this.$emit(someVar)` / `this.$emit()`: event unknowable.
+                _ => self.usage.has_dynamic_emit = true,
+            }
+            // Walk the arguments (a payload may read a prop via `this.<name>`).
+            for arg in &call.arguments {
+                if let Some(expr) = arg.as_expression() {
+                    self.visit_expression(expr);
+                }
+            }
+            return;
+        }
+        oxc_ast_visit::walk::walk_call_expression(self, call);
+    }
+
+    fn visit_static_member_expression(&mut self, member: &StaticMemberExpression<'a>) {
+        // `this.foo`: credit a prop read. `this.$emit` member handled at the call
+        // site above; record `$`-prefixed instance API reads too (harmless, no
+        // prop is named with a leading `$`).
+        if matches!(member.object, Expression::ThisExpression(_)) {
+            self.usage.read.insert(member.property.name.to_string());
+        }
+        oxc_ast_visit::walk::walk_static_member_expression(self, member);
+    }
+
+    fn visit_computed_member_expression(&mut self, member: &ComputedMemberExpression<'a>) {
+        // `this[<computed>]`: a prop could be read by a name we cannot resolve.
+        if matches!(member.object, Expression::ThisExpression(_)) {
+            self.usage.has_dynamic_this = true;
+        }
+        oxc_ast_visit::walk::walk_computed_member_expression(self, member);
+    }
+}

@@ -299,6 +299,8 @@ mod lexical_nodes;
 mod script_multiplexers;
 #[path = "integration_test/visibility_tags.rs"]
 mod visibility_tags;
+#[path = "integration_test/vue_options_api_prop_emit.rs"]
+mod vue_options_api_prop_emit;
 
 #[path = "integration_test/ember_classic.rs"]
 mod ember_classic;

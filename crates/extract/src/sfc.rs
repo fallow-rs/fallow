@@ -639,6 +639,36 @@ fn merge_script_into_module(input: &mut SfcScriptMergeInput<'_>) {
             emit.span_start += input.script.byte_offset as u32;
             input.combined.component_emits.push(emit);
         }
+    } else if input.kind == SfcKind::Vue {
+        // Vue Options API (`export default { props, emits, ... }` /
+        // `export default defineComponent({ ... })`) in a non-setup `<script>`.
+        // Same `ComponentProp` / `ComponentEmit` IR, same abstain flags, and the
+        // same span-offset remap as the setup path; the only difference is the
+        // harvest source (a component-options object instead of the
+        // `defineProps` / `defineEmits` macros).
+        let harvest = crate::sfc_props::harvest_options_api_props(&parser_return.program);
+        if harvest.has_unharvestable_props {
+            input.combined.has_unharvestable_props = true;
+        }
+        if harvest.has_props_attrs_fallthrough {
+            input.combined.has_props_attrs_fallthrough = true;
+        }
+        for mut prop in harvest.props {
+            prop.span_start += input.script.byte_offset as u32;
+            input.combined.component_props.push(prop);
+        }
+
+        let emit_harvest = crate::sfc_props::harvest_options_api_emits(&parser_return.program);
+        if emit_harvest.has_unharvestable_emits {
+            input.combined.has_unharvestable_emits = true;
+        }
+        if emit_harvest.has_dynamic_emit {
+            input.combined.has_dynamic_emit = true;
+        }
+        for mut emit in emit_harvest.emits {
+            emit.span_start += input.script.byte_offset as u32;
+            input.combined.component_emits.push(emit);
+        }
     }
 
     if is_template_visible_script(input.kind, input.script) {

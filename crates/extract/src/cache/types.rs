@@ -461,7 +461,14 @@ use crate::MemberKind;
 /// input/output detectors); a warm cache from 170 lacks the Angular IR and the
 /// sentinel and would report zero input/output findings or false-flag
 /// spread-forwarded inputs/outputs.
-pub(super) const CACHE_VERSION: u32 = 171;
+///
+/// Bumped to 172 (feat/vue-options-api-prop-emit): the Vue Options API
+/// (`export default { props, emits, ... }` / `defineComponent({ ... })`) in a
+/// non-setup `<script>` now harvests `component_props` / `component_emits` and
+/// the abstain flags the same way `<script setup>` does; a warm cache from 171
+/// lacks the Options-API prop/emit IR and would report zero findings on those
+/// components.
+pub(super) const CACHE_VERSION: u32 = 172;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
