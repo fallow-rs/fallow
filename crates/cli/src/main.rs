@@ -4645,6 +4645,46 @@ fn path_from_env(name: &str) -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
+fn validate_health_report_only_gate(
+    report_only: bool,
+    min_score: Option<f64>,
+    min_severity: Option<health_types::FindingSeverity>,
+    output: fallow_config::OutputFormat,
+) -> Result<(), ExitCode> {
+    if report_only && (min_score.is_some() || min_severity.is_some()) {
+        return Err(emit_error(
+            "--report-only cannot be combined with --min-score or --min-severity. \
+             --report-only always exits 0; drop it to gate on score/severity, or \
+             drop the gate flags to stay advisory.",
+            2,
+            output,
+        ));
+    }
+
+    Ok(())
+}
+
+fn resolve_runtime_coverage_options(
+    runtime_coverage: Option<&std::path::Path>,
+    min_invocations_hot: u64,
+    min_observation_volume: Option<u32>,
+    low_traffic_threshold: Option<f64>,
+    output: fallow_config::OutputFormat,
+) -> Result<Option<health::RuntimeCoverageOptions>, ExitCode> {
+    let Some(path) = runtime_coverage else {
+        return Ok(None);
+    };
+
+    health::coverage::prepare_options(
+        path,
+        min_invocations_hot,
+        min_observation_volume,
+        low_traffic_threshold,
+        output,
+    )
+    .map(Some)
+}
+
 fn dispatch_health(dispatch: &DispatchContext<'_>, args: HealthDispatchArgs<'_>) -> ExitCode {
     let cli = dispatch.cli;
     let root = dispatch.root;
@@ -4681,14 +4721,10 @@ fn dispatch_health(dispatch: &DispatchContext<'_>, args: HealthDispatchArgs<'_>)
         min_observation_volume,
         low_traffic_threshold,
     } = args;
-    if report_only && (min_score.is_some() || min_severity.is_some()) {
-        return emit_error(
-            "--report-only cannot be combined with --min-score or --min-severity. \
-             --report-only always exits 0; drop it to gate on score/severity, or \
-             drop the gate flags to stay advisory.",
-            2,
-            output,
-        );
+    if let Err(code) =
+        validate_health_report_only_gate(report_only, min_score, min_severity, output)
+    {
+        return code;
     }
     let targets = targets || effort.is_some();
     let sections = effective_health_sections(&EffectiveHealthSectionInput {
@@ -4704,19 +4740,15 @@ fn dispatch_health(dispatch: &DispatchContext<'_>, args: HealthDispatchArgs<'_>)
         save_snapshot,
         trend,
     });
-    let runtime_coverage = if let Some(path) = runtime_coverage {
-        match health::coverage::prepare_options(
-            path,
-            min_invocations_hot,
-            min_observation_volume,
-            low_traffic_threshold,
-            output,
-        ) {
-            Ok(options) => Some(options),
-            Err(code) => return code,
-        }
-    } else {
-        None
+    let runtime_coverage = match resolve_runtime_coverage_options(
+        runtime_coverage,
+        min_invocations_hot,
+        min_observation_volume,
+        low_traffic_threshold,
+        output,
+    ) {
+        Ok(options) => options,
+        Err(code) => return code,
     };
     let production = match resolve_production_modes(cli, root, output, false, false, false) {
         Ok(modes) => modes.for_analysis(fallow_config::ProductionAnalysis::Health),
