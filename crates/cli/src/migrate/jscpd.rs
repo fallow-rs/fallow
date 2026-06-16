@@ -79,8 +79,30 @@ pub(super) fn migrate_jscpd(
         return;
     };
 
-    let mut dupes = serde_json::Map::new();
+    let dupes = duplicate_options_from_jscpd(obj, warnings);
+    if !dupes.is_empty() {
+        config.insert("duplicates".to_string(), serde_json::Value::Object(dupes));
+    }
 
+    push_unmappable_jscpd_warnings(obj, warnings);
+}
+
+fn duplicate_options_from_jscpd(
+    obj: &serde_json::Map<String, serde_json::Value>,
+    warnings: &mut Vec<MigrationWarning>,
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut dupes = serde_json::Map::new();
+    insert_jscpd_numeric_options(obj, &mut dupes);
+    insert_jscpd_mode(obj, &mut dupes, warnings);
+    insert_jscpd_skip_local(obj, &mut dupes);
+    insert_jscpd_ignore(obj, &mut dupes);
+    dupes
+}
+
+fn insert_jscpd_numeric_options(
+    obj: &serde_json::Map<String, serde_json::Value>,
+    dupes: &mut serde_json::Map<String, serde_json::Value>,
+) {
     if let Some(min_tokens) = obj.get("minTokens").and_then(serde_json::Value::as_u64) {
         dupes.insert(
             "minTokens".to_string(),
@@ -100,7 +122,13 @@ pub(super) fn migrate_jscpd(
     {
         dupes.insert("threshold".to_string(), serde_json::Value::Number(n));
     }
+}
 
+fn insert_jscpd_mode(
+    obj: &serde_json::Map<String, serde_json::Value>,
+    dupes: &mut serde_json::Map<String, serde_json::Value>,
+    warnings: &mut Vec<MigrationWarning>,
+) {
     if let Some(mode_str) = obj.get("mode").and_then(|v| v.as_str()) {
         let fallow_mode = match mode_str {
             "strict" => Some("strict"),
@@ -135,11 +163,21 @@ pub(super) fn migrate_jscpd(
             );
         }
     }
+}
 
+fn insert_jscpd_skip_local(
+    obj: &serde_json::Map<String, serde_json::Value>,
+    dupes: &mut serde_json::Map<String, serde_json::Value>,
+) {
     if let Some(skip_local) = obj.get("skipLocal").and_then(serde_json::Value::as_bool) {
         dupes.insert("skipLocal".to_string(), serde_json::Value::Bool(skip_local));
     }
+}
 
+fn insert_jscpd_ignore(
+    obj: &serde_json::Map<String, serde_json::Value>,
+    dupes: &mut serde_json::Map<String, serde_json::Value>,
+) {
     if let Some(ignore_val) = obj.get("ignore") {
         let ignores = string_or_array(ignore_val);
         if !ignores.is_empty() {
@@ -151,11 +189,12 @@ pub(super) fn migrate_jscpd(
             );
         }
     }
+}
 
-    if !dupes.is_empty() {
-        config.insert("duplicates".to_string(), serde_json::Value::Object(dupes));
-    }
-
+fn push_unmappable_jscpd_warnings(
+    obj: &serde_json::Map<String, serde_json::Value>,
+    warnings: &mut Vec<MigrationWarning>,
+) {
     for (field, message, suggestion) in JSCPD_UNMAPPABLE_FIELDS {
         if obj.contains_key(*field) {
             warnings.push(MigrationWarning {
