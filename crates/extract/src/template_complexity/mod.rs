@@ -1,71 +1,24 @@
-//! Angular template cyclomatic and cognitive complexity.
+//! Synthetic `<template>` cyclomatic and cognitive complexity for framework
+//! templates (Angular `.html` + inline decorators, Vue SFCs, Svelte SFCs).
+//!
+//! The framework-agnostic JS-expression engine (`TemplateComplexity`,
+//! `compute_expression_metrics`, and the byte-safe tokenization helpers) lives
+//! in [`engine`] and is shared by all three scanners. This module hosts the
+//! Angular outer scanner; [`vue`] and [`svelte`] host the SFC scanners.
+
+mod engine;
+mod svelte;
+mod vue;
 
 use fallow_types::extract::{FunctionComplexity, byte_offset_to_line_col, compute_line_offsets};
 
-/// Internal scanner error. Carries no data: any malformed-template path
-/// just falls through and the caller drops the synthetic finding.
-#[derive(Debug, Clone, Copy)]
-struct ScanError;
+use engine::{
+    ScanError, TemplateComplexity, find_matching_delimiter, is_identifier_after,
+    is_identifier_before, read_identifier, skip_quoted, skip_whitespace,
+};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LogicalOperator {
-    And,
-    Or,
-    Nullish,
-}
-
-#[derive(Debug)]
-struct TemplateComplexity {
-    cyclomatic: u16,
-    cognitive: u16,
-    first_offset: Option<usize>,
-}
-
-impl Default for TemplateComplexity {
-    fn default() -> Self {
-        Self {
-            cyclomatic: 1,
-            cognitive: 0,
-            first_offset: None,
-        }
-    }
-}
-
-impl TemplateComplexity {
-    fn add_expression(
-        &mut self,
-        source: &str,
-        offset: usize,
-        nesting: u16,
-    ) -> Result<(), ScanError> {
-        let Some(trim_start) = source.find(|c: char| !c.is_whitespace()) else {
-            return Ok(());
-        };
-        self.first_offset.get_or_insert(offset + trim_start);
-        let metrics = compute_expression_metrics(&source[trim_start..], nesting)?;
-        self.cyclomatic = self.cyclomatic.saturating_add(metrics.cyclomatic);
-        self.cognitive = self.cognitive.saturating_add(metrics.cognitive);
-        Ok(())
-    }
-
-    fn add_control_flow(&mut self, nesting: u16) {
-        self.cyclomatic = self.cyclomatic.saturating_add(1);
-        self.cognitive = self.cognitive.saturating_add(1 + nesting);
-    }
-}
-
-#[derive(Clone, Copy, Default)]
-struct ExpressionMetrics {
-    cyclomatic: u16,
-    cognitive: u16,
-}
-
-impl ExpressionMetrics {
-    fn add(&mut self, other: Self) {
-        self.cyclomatic = self.cyclomatic.saturating_add(other.cyclomatic);
-        self.cognitive = self.cognitive.saturating_add(other.cognitive);
-    }
-}
+pub use svelte::compute_svelte_template_complexity;
+pub use vue::compute_vue_template_complexity;
 
 struct TemplateScanner<'a> {
     source: &'a str,
@@ -320,6 +273,44 @@ impl<'a> TemplateScanner<'a> {
 /// Compute synthetic `<template>` complexity for an Angular HTML template.
 pub fn compute_angular_template_complexity(source: &str) -> Option<FunctionComplexity> {
     let complexity = TemplateScanner::new(source).scan().ok()?;
+    build_template_complexity(source, &complexity)
+}
+
+/// Replace each `regex` match in `source` with an equal-length run of ASCII
+/// spaces, preserving byte offsets for the unmasked regions. Used by the SFC
+/// scanners to mask `<script>` / `<style>` / comment regions before scanning,
+/// matching the masking convention in `crate::sfc_template`. Building a fresh
+/// `String` (rather than mutating in place) keeps the crate `unsafe`-free.
+pub(in crate::template_complexity) fn mask_ranges(source: &str, regex: &regex::Regex) -> String {
+    let mut spans: Vec<(usize, usize)> = regex
+        .find_iter(source)
+        .map(|m| (m.start(), m.end()))
+        .collect();
+    spans.sort_unstable_by_key(|range| range.0);
+
+    let mut masked = String::with_capacity(source.len());
+    let mut cursor = 0;
+    for (start, end) in spans {
+        if start < cursor {
+            // Overlapping or already-consumed match (the regex alternates, so
+            // matches can adjoin); skip to keep the cursor monotonic.
+            continue;
+        }
+        masked.push_str(&source[cursor..start]);
+        masked.extend(std::iter::repeat_n(' ', end - start));
+        cursor = end;
+    }
+    masked.push_str(&source[cursor..]);
+    masked
+}
+
+/// Shared emission shape for every framework template scanner: drop the
+/// trivial baseline, anchor the finding at the first non-trivial expression,
+/// and produce the synthetic `<template>` [`FunctionComplexity`].
+pub(in crate::template_complexity) fn build_template_complexity(
+    source: &str,
+    complexity: &TemplateComplexity,
+) -> Option<FunctionComplexity> {
     if complexity.cyclomatic == 1 && complexity.cognitive == 0 {
         return None;
     }
@@ -341,170 +332,10 @@ pub fn compute_angular_template_complexity(source: &str) -> Option<FunctionCompl
         react_jsx_max_depth: 0,
         react_prop_count: 0,
         source_hash: None,
-        // The hand-rolled Angular template scanner emits only aggregate metrics;
+        // The hand-rolled template scanners emit only aggregate metrics;
         // per-construct contributions are out of scope for the first cut.
         contributions: Vec::new(),
     })
-}
-
-fn compute_expression_metrics(source: &str, nesting: u16) -> Result<ExpressionMetrics, ScanError> {
-    let source = source.trim();
-    if source.is_empty() {
-        return Ok(ExpressionMetrics::default());
-    }
-    if let Some((question, colon)) = find_top_level_ternary(source)? {
-        let mut metrics = ExpressionMetrics::default();
-        metrics.add(compute_expression_metrics(&source[..question], nesting)?);
-        metrics.cyclomatic = metrics.cyclomatic.saturating_add(1);
-        metrics.cognitive = metrics.cognitive.saturating_add(1 + nesting);
-        metrics.add(compute_expression_metrics(
-            &source[question + 1..colon],
-            nesting.saturating_add(1),
-        )?);
-        metrics.add(compute_expression_metrics(
-            &source[colon + 1..],
-            nesting.saturating_add(1),
-        )?);
-        return Ok(metrics);
-    }
-    scan_expression_without_ternary(source, nesting)
-}
-
-fn scan_expression_without_ternary(
-    source: &str,
-    nesting: u16,
-) -> Result<ExpressionMetrics, ScanError> {
-    let mut metrics = ExpressionMetrics::default();
-    let mut last_logical_operator: Option<LogicalOperator> = None;
-    let mut needs_rhs = false;
-    let mut offset = 0;
-
-    while offset < source.len() {
-        match source.as_bytes()[offset] {
-            byte if byte.is_ascii_whitespace() => offset += 1,
-            b'\'' | b'"' | b'`' => {
-                offset = skip_quoted(source, offset)?;
-                needs_rhs = false;
-            }
-            b'(' | b'[' | b'{' => {
-                let close = matching_close_byte(source.as_bytes()[offset]).ok_or(ScanError)?;
-                let end =
-                    find_matching_delimiter(source, offset, source.as_bytes()[offset], close)?;
-                metrics.add(compute_expression_metrics(
-                    &source[offset + 1..end],
-                    nesting,
-                )?);
-                last_logical_operator = None;
-                needs_rhs = false;
-                offset = end + 1;
-            }
-            b')' | b']' | b'}' => return Err(ScanError),
-            _ if source[offset..].starts_with("?.") => {
-                metrics.cyclomatic = metrics.cyclomatic.saturating_add(1);
-                offset += 2;
-            }
-            _ if source[offset..].starts_with("&&=")
-                || source[offset..].starts_with("||=")
-                || source[offset..].starts_with("??=") =>
-            {
-                metrics.cyclomatic = metrics.cyclomatic.saturating_add(1);
-                last_logical_operator = None;
-                needs_rhs = true;
-                offset += 3;
-            }
-            _ if source[offset..].starts_with("&&")
-                || source[offset..].starts_with("||")
-                || source[offset..].starts_with("??") =>
-            {
-                if needs_rhs {
-                    return Err(ScanError);
-                }
-                let operator = if source[offset..].starts_with("&&") {
-                    LogicalOperator::And
-                } else if source[offset..].starts_with("||") {
-                    LogicalOperator::Or
-                } else {
-                    LogicalOperator::Nullish
-                };
-                metrics.cyclomatic = metrics.cyclomatic.saturating_add(1);
-                if last_logical_operator != Some(operator) {
-                    metrics.cognitive = metrics.cognitive.saturating_add(1);
-                    last_logical_operator = Some(operator);
-                }
-                needs_rhs = true;
-                offset += 2;
-            }
-            b',' | b';' => {
-                if needs_rhs {
-                    return Err(ScanError);
-                }
-                last_logical_operator = None;
-                offset += 1;
-            }
-            _ => {
-                needs_rhs = false;
-                offset += source[offset..].chars().next().map_or(1, char::len_utf8);
-            }
-        }
-    }
-
-    if needs_rhs {
-        Err(ScanError)
-    } else {
-        Ok(metrics)
-    }
-}
-
-fn find_top_level_ternary(source: &str) -> Result<Option<(usize, usize)>, ScanError> {
-    let mut offset = 0;
-    let mut depth = 0_u16;
-    let mut nested_ternaries = 0_u16;
-    let mut question = None;
-
-    while offset < source.len() {
-        match source.as_bytes()[offset] {
-            b'\'' | b'"' | b'`' => offset = skip_quoted(source, offset)?,
-            b'(' | b'[' | b'{' => {
-                depth = depth.saturating_add(1);
-                offset += 1;
-            }
-            b')' | b']' | b'}' => {
-                if depth == 0 {
-                    return Err(ScanError);
-                }
-                depth -= 1;
-                offset += 1;
-            }
-            b'?' if source[offset..].starts_with("??") || source[offset..].starts_with("?.") => {
-                offset += 2;
-            }
-            b'?' if depth == 0 => {
-                if question.is_none() {
-                    question = Some(offset);
-                } else {
-                    nested_ternaries = nested_ternaries.saturating_add(1);
-                }
-                offset += 1;
-            }
-            b':' if depth == 0 && question.is_some() => {
-                if nested_ternaries == 0 {
-                    if let Some(question) = question {
-                        return Ok(Some((question, offset)));
-                    }
-                    return Err(ScanError);
-                }
-                nested_ternaries -= 1;
-                offset += 1;
-            }
-            _ => offset += source[offset..].chars().next().map_or(1, char::len_utf8),
-        }
-    }
-
-    if question.is_some() || depth != 0 {
-        Err(ScanError)
-    } else {
-        Ok(None)
-    }
 }
 
 fn scan_interpolations(
@@ -537,34 +368,6 @@ fn parse_parenthesized(source: &str, offset: usize) -> Result<(usize, usize, usi
     }
     let close = find_matching_delimiter(source, open, b'(', b')')?;
     Ok((open + 1, close, close + 1))
-}
-
-fn find_matching_delimiter(
-    source: &str,
-    open_offset: usize,
-    open: u8,
-    close: u8,
-) -> Result<usize, ScanError> {
-    let mut offset = open_offset + 1;
-    let mut depth = 1_u16;
-    while offset < source.len() {
-        match source.as_bytes()[offset] {
-            b'\'' | b'"' | b'`' => offset = skip_quoted(source, offset)?,
-            byte if byte == open => {
-                depth = depth.saturating_add(1);
-                offset += 1;
-            }
-            byte if byte == close => {
-                depth -= 1;
-                if depth == 0 {
-                    return Ok(offset);
-                }
-                offset += 1;
-            }
-            _ => offset += source[offset..].chars().next().map_or(1, char::len_utf8),
-        }
-    }
-    Err(ScanError)
 }
 
 fn find_tag_end(source: &str, tag_start: usize) -> Result<usize, ScanError> {
@@ -600,44 +403,6 @@ fn read_attribute_value(source: &str, offset: usize) -> Result<(usize, usize, us
     }
 }
 
-fn skip_quoted(source: &str, quote_offset: usize) -> Result<usize, ScanError> {
-    let quote = source.as_bytes()[quote_offset];
-    let mut offset = quote_offset + 1;
-    while offset < source.len() {
-        match source.as_bytes()[offset] {
-            // Advance past the backslash, then one full char: a fixed +2 byte
-            // advance can land mid-character when the escapee is multi-byte.
-            b'\\' => {
-                offset += 1;
-                if offset < source.len() {
-                    offset += source[offset..].chars().next().map_or(0, char::len_utf8);
-                }
-            }
-            byte if byte == quote => return Ok(offset + 1),
-            _ => offset += source[offset..].chars().next().map_or(1, char::len_utf8),
-        }
-    }
-    Err(ScanError)
-}
-
-fn skip_whitespace(source: &str, mut offset: usize) -> usize {
-    while offset < source.len() && source.as_bytes()[offset].is_ascii_whitespace() {
-        offset += 1;
-    }
-    offset
-}
-
-fn read_identifier(source: &str, offset: usize) -> Option<(&str, usize)> {
-    if offset >= source.len() || !is_identifier_start(source.as_bytes()[offset]) {
-        return None;
-    }
-    let mut end = offset + 1;
-    while end < source.len() && is_identifier_continue(source.as_bytes()[end]) {
-        end += 1;
-    }
-    Some((&source[offset..end], end))
-}
-
 fn find_word(source: &str, word: &str) -> Option<usize> {
     let mut offset = 0;
     while let Some(relative) = source[offset..].find(word) {
@@ -656,31 +421,6 @@ fn is_bound_template_attribute(name: &str) -> bool {
         || name.starts_with('(')
         || name.starts_with("bind-")
         || name.starts_with("on-")
-}
-
-fn matching_close_byte(open: u8) -> Option<u8> {
-    match open {
-        b'(' => Some(b')'),
-        b'[' => Some(b']'),
-        b'{' => Some(b'}'),
-        _ => None,
-    }
-}
-
-fn is_identifier_before(source: &str, offset: usize) -> bool {
-    offset > 0 && is_identifier_continue(source.as_bytes()[offset - 1])
-}
-
-fn is_identifier_after(source: &str, offset: usize) -> bool {
-    offset < source.len() && is_identifier_continue(source.as_bytes()[offset])
-}
-
-fn is_identifier_start(byte: u8) -> bool {
-    byte == b'_' || byte == b'$' || byte.is_ascii_alphabetic()
-}
-
-fn is_identifier_continue(byte: u8) -> bool {
-    is_identifier_start(byte) || byte.is_ascii_digit()
 }
 
 #[cfg(test)]

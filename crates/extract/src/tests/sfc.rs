@@ -1283,6 +1283,130 @@ fn vue_inline_script_complexity_maps_columns_to_sfc_source() {
 }
 
 #[test]
+fn vue_template_control_flow_adds_synthetic_template_entry() {
+    // Nested `v-for` inside `v-if` plus a ternary binding must surface a
+    // `<template>` complexity entry alongside the script function, proving the
+    // template scan is wired into `parse_sfc_to_module` under `need_complexity`.
+    let info = parse_sfc_with_complexity(
+        r#"<script setup>
+const helper = () => { if (flag) return 1; return 0; };
+</script>
+<template>
+  <div v-if="user?.enabled && ready">
+    <li v-for="item in items" :key="item.id">
+      <badge :color="item.level > 3 ? 'red' : 'green'" />
+    </li>
+  </div>
+</template>
+"#,
+        "VueTemplateComplexity.vue",
+    );
+
+    let template = info
+        .complexity
+        .iter()
+        .find(|fc| fc.name == "<template>")
+        .expect("vue template control flow should add a <template> entry");
+    assert!(template.cyclomatic > 1, "{template:?}");
+    assert!(template.cognitive > 0, "{template:?}");
+    // The script function must still be present (template entry is additive).
+    assert!(info.complexity.iter().any(|fc| fc.name == "helper"));
+}
+
+#[test]
+fn svelte_template_control_flow_adds_synthetic_template_entry() {
+    let info = parse_sfc_with_complexity(
+        r"<script>
+const helper = () => { if (flag) return 1; return 0; };
+</script>
+{#if user?.enabled && ready}
+  {#each items as item (item.id)}
+    <p>{item.level > 3 ? 'high' : 'low'}</p>
+  {/each}
+{:else if fallback}
+  <p>fallback</p>
+{/if}
+",
+        "SvelteTemplateComplexity.svelte",
+    );
+
+    let template = info
+        .complexity
+        .iter()
+        .find(|fc| fc.name == "<template>")
+        .expect("svelte template control flow should add a <template> entry");
+    assert!(template.cyclomatic > 1, "{template:?}");
+    assert!(template.cognitive > 0, "{template:?}");
+    assert!(info.complexity.iter().any(|fc| fc.name == "helper"));
+}
+
+#[test]
+fn vue_markup_only_template_adds_no_synthetic_entry() {
+    let info = parse_sfc_with_complexity(
+        r#"<script setup>
+const greeting = 'hi';
+</script>
+<template><div class="x"><p>Static markup</p></div></template>
+"#,
+        "VueMarkupOnly.vue",
+    );
+
+    assert!(
+        !info.complexity.iter().any(|fc| fc.name == "<template>"),
+        "markup-only template must not add a synthetic entry: {:?}",
+        info.complexity
+    );
+}
+
+#[test]
+fn vue_script_control_flow_not_counted_in_template_entry() {
+    // The `<script>` has an if/for, but the template is trivial: there must be
+    // no `<template>` entry (proving script control flow is masked out and not
+    // double-counted by the template scan).
+    let info = parse_sfc_with_complexity(
+        r"<script setup>
+const helper = () => {
+  if (a && b) return go();
+  for (const i of items) use(i);
+  return 0;
+};
+</script>
+<template><p>Static</p></template>
+",
+        "VueScriptOnly.vue",
+    );
+
+    assert!(
+        !info.complexity.iter().any(|fc| fc.name == "<template>"),
+        "trivial template must not inherit script control flow: {:?}",
+        info.complexity
+    );
+    // The script function is still scored on its own.
+    let helper = info
+        .complexity
+        .iter()
+        .find(|fc| fc.name == "helper")
+        .expect("script function should still be scored");
+    assert!(helper.cyclomatic > 1, "{helper:?}");
+}
+
+#[test]
+fn svelte_malformed_template_does_not_panic_or_add_entry() {
+    let info = parse_sfc_with_complexity(
+        r"<script>const x = 1;</script>
+{#if a && </p>
+",
+        "SvelteMalformed.svelte",
+    );
+
+    assert!(
+        !info.complexity.iter().any(|fc| fc.name == "<template>"),
+        "malformed template must not add a recovered entry: {:?}",
+        info.complexity
+    );
+}
+
+#[test]
 fn svelte_typed_snippet_full_pipeline() {
     let info = parse_sfc(
         r#"

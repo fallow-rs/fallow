@@ -389,6 +389,23 @@ pub(crate) fn parse_sfc_to_module(
         &mut combined,
     );
 
+    // Synthetic per-SFC `<template>` complexity: count template control flow
+    // (`v-if`/`v-for`, `{#if}`/`{#each}`) and bound-expression/interpolation
+    // complexity so a template-heavy SFC is not scored as artificially simple.
+    // The scanners mask `<script>`/`<style>`/comments, so script control flow is
+    // NOT double-counted (it is scored by `translate_script_complexity` above).
+    // Mirrors Angular's `template_complexity` synthetic entry; no new rule or
+    // threshold, the entry folds into the existing complexity aggregate.
+    if need_complexity {
+        let template_complexity = match kind {
+            SfcKind::Vue => crate::template_complexity::compute_vue_template_complexity(source),
+            SfcKind::Svelte => {
+                crate::template_complexity::compute_svelte_template_complexity(source)
+            }
+        };
+        combined.complexity.extend(template_complexity);
+    }
+
     // Credit `<emit_binding>('event')` / `$emit('event')` calls in the template
     // (`@click="emit('close')"`), which the script-only emit usage walk cannot
     // see. A dynamic template emit (`$emit(someVar)`) abstains the whole file.

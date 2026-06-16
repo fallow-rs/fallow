@@ -506,7 +506,16 @@ use crate::MemberKind;
 /// `new InjectionToken(..., { factory } | { providedIn })` records a self-provide.
 /// A warm cache from 175 lacks the Angular DI sites and would report zero Angular
 /// `unprovided-inject` findings.
-pub(super) const CACHE_VERSION: u32 = 176;
+///
+/// Bumped to 177 (feat/sfc-template-complexity): Vue and Svelte SFC
+/// `module.complexity` now carries a synthetic `<template>` `FunctionComplexity`
+/// entry computed from template control flow (`v-if`/`v-for`, `{#if}`/`{#each}`)
+/// plus bound-expression and interpolation complexity, mirroring Angular's
+/// existing `<template>` entry. The `FunctionComplexity` shape is unchanged (only
+/// an extra Vec element), so no size assertion changes. A warm cache from 176
+/// lacks the SFC `<template>` entry and would under-report SFC complexity until
+/// the file is re-parsed.
+pub(super) const CACHE_VERSION: u32 = 177;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
