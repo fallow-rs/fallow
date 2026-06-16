@@ -69,7 +69,34 @@ pub struct FlagsOptions<'a> {
 pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
     let start = Instant::now();
 
-    let config = match crate::runtime_support::load_config(
+    let config = match load_flags_config(opts) {
+        Ok(c) => c,
+        Err(code) => return code,
+    };
+    let files = fallow_core::discover::discover_files_with_plugin_scopes(&config);
+    if files.is_empty() {
+        return emit_error("no files discovered", 2, opts.output);
+    }
+
+    let mut flags = collect_flags_for_files(&config, &files);
+    if let Err(code) = apply_flag_scopes(&mut flags, opts) {
+        return code;
+    }
+    sort_and_limit_flags(&mut flags, opts.top);
+
+    let elapsed = start.elapsed();
+    if let Err(code) = validate_flags_output(opts.output) {
+        return code;
+    }
+
+    let files_scanned = files.len();
+    print_flags_result(&flags, &config, opts, elapsed, files_scanned);
+
+    ExitCode::SUCCESS
+}
+
+fn load_flags_config(opts: &FlagsOptions<'_>) -> Result<ResolvedConfig, ExitCode> {
+    crate::runtime_support::load_config(
         opts.root,
         opts.config_path,
         opts.output,
@@ -77,61 +104,71 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
         opts.threads,
         opts.production,
         opts.quiet,
-    ) {
-        Ok(c) => c,
-        Err(code) => return code,
-    };
+    )
+}
 
-    let files = fallow_core::discover::discover_files_with_plugin_scopes(&config);
-    if files.is_empty() {
-        return emit_error("no files discovered", 2, opts.output);
-    }
-
+fn collect_flags_for_files(
+    config: &ResolvedConfig,
+    files: &[fallow_core::discover::DiscoveredFile],
+) -> Vec<FeatureFlag> {
     let cache_store = if config.no_cache {
         None
     } else {
         fallow_core::cache::CacheStore::load(
             &config.cache_dir,
             config.cache_config_hash,
-            fallow_core::resolve_cache_max_size_bytes(&config),
+            fallow_core::resolve_cache_max_size_bytes(config),
         )
     };
-    let parse_result = fallow_core::extract::parse_all_files(&files, cache_store.as_ref(), false);
+    let parse_result = fallow_core::extract::parse_all_files(files, cache_store.as_ref(), false);
 
-    let mut flags = collect_flags_from_parse_result(&config, &files, &parse_result);
+    let mut flags = collect_flags_from_parse_result(config, files, &parse_result);
+    correlate_flags_with_dead_code(&mut flags, config, &parse_result);
+    flags
+}
 
+fn correlate_flags_with_dead_code(
+    flags: &mut [FeatureFlag],
+    config: &ResolvedConfig,
+    parse_result: &ParseResult,
+) {
     #[expect(
         deprecated,
         reason = "ADR-008 deprecates fallow_core::analyze_with_parse_result and the feature_flags helpers externally; flags still uses the workspace path dependency"
     )]
     if let Ok(analysis_output) =
-        fallow_core::analyze_with_parse_result(&config, &parse_result.modules)
+        fallow_core::analyze_with_parse_result(config, &parse_result.modules)
     {
         fallow_core::analyze::feature_flags::correlate_with_dead_code(
-            &mut flags,
+            flags,
             &analysis_output.results,
         );
     }
+}
 
+fn apply_flag_scopes(
+    flags: &mut Vec<FeatureFlag>,
+    opts: &FlagsOptions<'_>,
+) -> Result<(), ExitCode> {
     if let Some(git_ref) = opts.changed_since
         && let Some(changed) = crate::check::get_changed_files(opts.root, git_ref)
     {
         flags.retain(|f| changed.contains(&f.path));
     }
 
-    let ws_scope = match crate::check::resolve_workspace_scope(
+    let ws_scope = crate::check::resolve_workspace_scope(
         opts.root,
         opts.workspace,
         opts.changed_workspaces,
         opts.output,
-    ) {
-        Ok(scope) => scope,
-        Err(code) => return code,
-    };
+    )?;
     if let Some(ref ws_roots) = ws_scope {
         flags.retain(|f| ws_roots.iter().any(|r| f.path.starts_with(r)));
     }
+    Ok(())
+}
 
+fn sort_and_limit_flags(flags: &mut Vec<FeatureFlag>, top: Option<usize>) {
     flags.sort_by(|a, b| {
         a.path
             .cmp(&b.path)
@@ -139,31 +176,27 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
             .then(a.flag_name.cmp(&b.flag_name))
     });
 
-    if let Some(top) = opts.top {
+    if let Some(top) = top {
         flags.truncate(top);
     }
+}
 
-    let elapsed = start.elapsed();
-
+fn validate_flags_output(output: OutputFormat) -> Result<(), ExitCode> {
     if matches!(
-        opts.output,
+        output,
         OutputFormat::PrCommentGithub
             | OutputFormat::PrCommentGitlab
             | OutputFormat::ReviewGithub
             | OutputFormat::ReviewGitlab
             | OutputFormat::Badge
     ) {
-        return emit_error(
+        return Err(emit_error(
             "flags supports human, json, compact, sarif, markdown, and codeclimate output",
             2,
-            opts.output,
-        );
+            output,
+        ));
     }
-
-    let files_scanned = files.len();
-    print_flags_result(&flags, &config, opts, elapsed, files_scanned);
-
-    ExitCode::SUCCESS
+    Ok(())
 }
 
 fn collect_flags_from_parse_result(
