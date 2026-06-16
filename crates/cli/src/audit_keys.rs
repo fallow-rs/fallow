@@ -1180,6 +1180,13 @@ impl DeadCodeJsonAnnotator<'_> {
     }
 
     fn annotate_imports_and_exports(&mut self) {
+        self.annotate_import_dependency_keys();
+        self.annotate_framework_keys();
+        self.annotate_component_keys();
+        self.annotate_route_keys();
+    }
+
+    fn annotate_import_dependency_keys(&mut self) {
         annotate_issue_array(
             self.json,
             "unresolved_imports",
@@ -1223,6 +1230,9 @@ impl DeadCodeJsonAnnotator<'_> {
                 )
             }),
         );
+    }
+
+    fn annotate_framework_keys(&mut self) {
         annotate_issue_array(
             self.json,
             "invalid_client_exports",
@@ -1260,6 +1270,9 @@ impl DeadCodeJsonAnnotator<'_> {
                 issue_was_introduced(&unprovided_inject_key(&item.inject, self.root), self.base)
             }),
         );
+    }
+
+    fn annotate_component_keys(&mut self) {
         annotate_issue_array(
             self.json,
             "unrendered_components",
@@ -1294,6 +1307,9 @@ impl DeadCodeJsonAnnotator<'_> {
                 )
             }),
         );
+    }
+
+    fn annotate_route_keys(&mut self) {
         annotate_issue_array(
             self.json,
             "route_collisions",
