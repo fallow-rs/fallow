@@ -2221,6 +2221,88 @@ fn scan_markup_css_candidates(
     }
 }
 
+fn css_report_scan_target<'a>(
+    file: &'a fallow_types::discover::DiscoveredFile,
+    config: &ResolvedConfig,
+    ignore_set: &globset::GlobSet,
+    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
+    ws_roots: Option<&[std::path::PathBuf]>,
+) -> Option<(&'a std::path::Path, bool)> {
+    let path = &file.path;
+    let extension = path.extension().and_then(|ext| ext.to_str());
+    let is_css = extension == Some("css");
+    let is_sfc = matches!(extension, Some("vue") | Some("svelte"));
+    if !is_css && !is_sfc {
+        return None;
+    }
+
+    let relative = path.strip_prefix(&config.root).unwrap_or(path);
+    if ignore_set.is_match(relative) {
+        return None;
+    }
+    if let Some(changed) = changed_files
+        && !changed.contains(path)
+    {
+        return None;
+    }
+    if let Some(roots) = ws_roots
+        && !roots.iter().any(|root| path.starts_with(root))
+    {
+        return None;
+    }
+    Some((relative, is_sfc))
+}
+
+fn record_scoped_unused_classes(
+    source: &str,
+    relative: &std::path::Path,
+    summary: &mut crate::health_types::CssAnalyticsSummary,
+    scoped_unused: &mut Vec<crate::health_types::ScopedUnusedClasses>,
+) {
+    let classes = fallow_core::extract::scoped_unused_classes(source);
+    if classes.is_empty() {
+        return;
+    }
+
+    summary.scoped_unused_classes = summary
+        .scoped_unused_classes
+        .saturating_add(u32::try_from(classes.len()).unwrap_or(u32::MAX));
+    scoped_unused.push(crate::health_types::ScopedUnusedClasses {
+        path: relative.to_string_lossy().replace('\\', "/"),
+        classes,
+        actions: vec![crate::health_types::CssCandidateAction::verify_scoped_classes()],
+    });
+}
+
+fn css_report_stylesheet_source(source: &str, is_sfc: bool) -> Option<std::borrow::Cow<'_, str>> {
+    if is_sfc {
+        return fallow_core::extract::sfc_virtual_stylesheet(source).map(std::borrow::Cow::Owned);
+    }
+
+    Some(std::borrow::Cow::Borrowed(source))
+}
+
+fn record_css_analytics_summary(
+    summary: &mut crate::health_types::CssAnalyticsSummary,
+    analytics: &fallow_types::extract::CssAnalytics,
+) {
+    summary.files_analyzed = summary.files_analyzed.saturating_add(1);
+    summary.total_rules = summary.total_rules.saturating_add(analytics.rule_count);
+    summary.total_declarations = summary
+        .total_declarations
+        .saturating_add(analytics.total_declarations);
+    summary.important_declarations = summary
+        .important_declarations
+        .saturating_add(analytics.important_declarations);
+    summary.empty_rules = summary
+        .empty_rules
+        .saturating_add(analytics.empty_rule_count);
+    summary.max_nesting_depth = summary.max_nesting_depth.max(analytics.max_nesting_depth);
+    if analytics.notable_truncated {
+        summary.notable_truncated_files = summary.notable_truncated_files.saturating_add(1);
+    }
+}
+
 fn compute_css_analytics_report(
     files: &[fallow_types::discover::DiscoveredFile],
     config: &ResolvedConfig,
@@ -2229,8 +2311,7 @@ fn compute_css_analytics_report(
     ws_roots: Option<&[std::path::PathBuf]>,
 ) -> Option<crate::health_types::CssAnalyticsReport> {
     use crate::health_types::{
-        CssAnalyticsReport, CssAnalyticsSummary, CssCandidateAction, CssFileAnalytics,
-        ScopedUnusedClasses,
+        CssAnalyticsReport, CssAnalyticsSummary, CssFileAnalytics, ScopedUnusedClasses,
     };
 
     let mut file_reports = Vec::new();
@@ -2242,76 +2323,31 @@ fn compute_css_analytics_report(
     let mut tokens = CssTokenSets::default();
 
     for file in files {
-        let path = &file.path;
-        let extension = path.extension().and_then(|ext| ext.to_str());
-        let is_css = extension == Some("css");
-        let is_sfc = matches!(extension, Some("vue") | Some("svelte"));
-        if !is_css && !is_sfc {
+        let Some((relative, is_sfc)) =
+            css_report_scan_target(file, config, ignore_set, changed_files, ws_roots)
+        else {
             continue;
-        }
-        let relative = path.strip_prefix(&config.root).unwrap_or(path);
-        if ignore_set.is_match(relative) {
-            continue;
-        }
-        if let Some(changed) = changed_files
-            && !changed.contains(path)
-        {
-            continue;
-        }
-        if let Some(roots) = ws_roots
-            && !roots.iter().any(|root| path.starts_with(root))
-        {
-            continue;
-        }
-        let Ok(source) = std::fs::read_to_string(path) else {
+        };
+        let Ok(source) = std::fs::read_to_string(&file.path) else {
             continue;
         };
 
         if is_sfc {
-            let classes = fallow_core::extract::scoped_unused_classes(&source);
-            if !classes.is_empty() {
-                summary.scoped_unused_classes = summary
-                    .scoped_unused_classes
-                    .saturating_add(u32::try_from(classes.len()).unwrap_or(u32::MAX));
-                scoped_unused.push(ScopedUnusedClasses {
-                    path: relative.to_string_lossy().replace('\\', "/"),
-                    classes,
-                    actions: vec![CssCandidateAction::verify_scoped_classes()],
-                });
-            }
+            record_scoped_unused_classes(&source, relative, &mut summary, &mut scoped_unused);
         }
 
         // Vue/Svelte SFC `<style>` blocks are folded into a virtual stylesheet so
         // their structural metrics (specificity, !important, design tokens) count
         // the same as a standalone .css file; SFCs with only SCSS blocks yield None.
-        let css_source = if is_sfc {
-            match fallow_core::extract::sfc_virtual_stylesheet(&source) {
-                Some(virtual_css) => std::borrow::Cow::Owned(virtual_css),
-                None => continue,
-            }
-        } else {
-            std::borrow::Cow::Borrowed(source.as_str())
+        let Some(css_source) = css_report_stylesheet_source(&source, is_sfc) else {
+            continue;
         };
         let Some(analytics) = fallow_core::extract::compute_css_analytics(&css_source) else {
             continue;
         };
 
         let rel = relative.to_string_lossy().replace('\\', "/");
-        summary.files_analyzed = summary.files_analyzed.saturating_add(1);
-        summary.total_rules = summary.total_rules.saturating_add(analytics.rule_count);
-        summary.total_declarations = summary
-            .total_declarations
-            .saturating_add(analytics.total_declarations);
-        summary.important_declarations = summary
-            .important_declarations
-            .saturating_add(analytics.important_declarations);
-        summary.empty_rules = summary
-            .empty_rules
-            .saturating_add(analytics.empty_rule_count);
-        summary.max_nesting_depth = summary.max_nesting_depth.max(analytics.max_nesting_depth);
-        if analytics.notable_truncated {
-            summary.notable_truncated_files = summary.notable_truncated_files.saturating_add(1);
-        }
+        record_css_analytics_summary(&mut summary, &analytics);
         tokens.record(&analytics, &rel);
         tokens.record_theme(css_source.as_ref(), &rel);
 
