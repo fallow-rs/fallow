@@ -367,10 +367,6 @@ fn export_target_thresholds(thresholds: &DistributionThresholds) -> TargetThresh
 /// Try to match a file against refactoring rules in priority order.
 ///
 /// Returns the first matching `(category, recommendation)`, or `None` if no rule matches.
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "threshold values and export counts are bounded by project size"
-)]
 fn try_match_rules(
     score: &FileHealthScore,
     hotspot: Option<&HotspotEntry>,
@@ -380,102 +376,159 @@ fn try_match_rules(
     value_exports: usize,
     thresholds: &DistributionThresholds,
 ) -> Option<(RecommendationCategory, String)> {
-    if let Some(h) = hotspot
-        && h.score >= 50.0
-        && matches!(h.trend, fallow_core::churn::ChurnTrend::Accelerating)
-        && score.complexity_density > 0.5
+    match_churn_complexity(score, hotspot)
+        .or_else(|| match_circular_impact(score, is_circular))
+        .or_else(|| match_high_impact_split(score, thresholds))
+        .or_else(|| match_dead_code(score, value_exports))
+        .or_else(|| match_complex_function_extraction(score, top_fns))
+        .or_else(|| match_dependency_extraction(score, thresholds, is_entry))
+        .or_else(|| match_coverage_gap(score))
+        .or_else(|| match_circular_fallback(is_circular))
+}
+
+fn match_churn_complexity(
+    score: &FileHealthScore,
+    hotspot: Option<&HotspotEntry>,
+) -> Option<(RecommendationCategory, String)> {
+    let h = hotspot?;
+    if h.score < 50.0
+        || !matches!(h.trend, fallow_core::churn::ChurnTrend::Accelerating)
+        || score.complexity_density <= 0.5
     {
-        return Some((
-            RecommendationCategory::UrgentChurnComplexity,
-            "Actively-changing file with growing complexity \u{2014} stabilize before adding features".into(),
-        ));
+        return None;
     }
 
-    if is_circular && score.fan_in >= 5 {
-        return Some((
-            RecommendationCategory::BreakCircularDependency,
-            format!(
-                "Break import cycle \u{2014} {} files depend on this, changes cascade through the cycle",
-                score.fan_in
-            ),
-        ));
+    Some((
+        RecommendationCategory::UrgentChurnComplexity,
+        "Actively-changing file with growing complexity, stabilize before adding features".into(),
+    ))
+}
+
+fn match_circular_impact(
+    score: &FileHealthScore,
+    is_circular: bool,
+) -> Option<(RecommendationCategory, String)> {
+    if !is_circular || score.fan_in < 5 {
+        return None;
     }
 
+    Some((
+        RecommendationCategory::BreakCircularDependency,
+        format!(
+            "Break import cycle, {} files depend on this, changes cascade through the cycle",
+            score.fan_in
+        ),
+    ))
+}
+
+fn match_high_impact_split(
+    score: &FileHealthScore,
+    thresholds: &DistributionThresholds,
+) -> Option<(RecommendationCategory, String)> {
     let fan_in_high = thresholds.fan_in_p95 as usize;
     let fan_in_moderate = thresholds.fan_in_p75 as usize;
-    if score.complexity_density > 0.3
-        && (score.fan_in >= fan_in_high
-            || (score.fan_in >= fan_in_moderate && score.function_count >= 5))
+    if score.complexity_density <= 0.3
+        || (score.fan_in < fan_in_high
+            && (score.fan_in < fan_in_moderate || score.function_count < 5))
     {
-        return Some((
-            RecommendationCategory::SplitHighImpact,
-            format!(
-                "Split high-impact file ({} LOC) \u{2014} {} dependents amplify every change",
-                score.lines, score.fan_in
-            ),
-        ));
+        return None;
     }
 
-    if score.dead_code_ratio >= 0.5 && value_exports >= 3 {
-        let unused_count = (score.dead_code_ratio * value_exports as f64).round() as usize;
-        return Some((
-            RecommendationCategory::RemoveDeadCode,
-            format!(
-                "Remove {} unused exports to reduce surface area ({:.0}% dead)",
-                unused_count,
-                score.dead_code_ratio * 100.0
-            ),
-        ));
+    Some((
+        RecommendationCategory::SplitHighImpact,
+        format!(
+            "Split high-impact file ({} LOC), {} dependents amplify every change",
+            score.lines, score.fan_in
+        ),
+    ))
+}
+
+fn match_dead_code(
+    score: &FileHealthScore,
+    value_exports: usize,
+) -> Option<(RecommendationCategory, String)> {
+    if score.dead_code_ratio < 0.5 || value_exports < 3 {
+        return None;
     }
 
-    if let Some(fns) = top_fns {
-        let high: Vec<&(String, u32, u16)> = fns
-            .iter()
-            .filter(|(_, _, cog)| *cog >= COGNITIVE_EXTRACTION_THRESHOLD)
-            .collect();
-        if !high.is_empty() {
-            let desc = match high.len() {
-                1 => format!(
-                    "Extract {} (cognitive: {}) in {}-LOC file into smaller functions",
-                    high[0].0, high[0].2, score.lines
-                ),
-                _ => format!(
-                    "Extract {} (cognitive: {}) and {} (cognitive: {}) in {}-LOC file into smaller functions",
-                    high[0].0, high[0].2, high[1].0, high[1].2, score.lines
-                ),
-            };
-            return Some((RecommendationCategory::ExtractComplexFunctions, desc));
-        }
+    let unused_count = (score.dead_code_ratio * value_exports as f64).round() as usize;
+    Some((
+        RecommendationCategory::RemoveDeadCode,
+        format!(
+            "Remove {} unused exports to reduce surface area ({:.0}% dead)",
+            unused_count,
+            score.dead_code_ratio * 100.0
+        ),
+    ))
+}
+
+fn match_complex_function_extraction(
+    score: &FileHealthScore,
+    top_fns: Option<&Vec<(String, u32, u16)>>,
+) -> Option<(RecommendationCategory, String)> {
+    let fns = top_fns?;
+    let high: Vec<&(String, u32, u16)> = fns
+        .iter()
+        .filter(|(_, _, cog)| *cog >= COGNITIVE_EXTRACTION_THRESHOLD)
+        .collect();
+    if high.is_empty() {
+        return None;
     }
 
-    if !is_entry && score.fan_out >= thresholds.fan_out_p90 && score.maintainability_index < 60.0 {
-        return Some((
-            RecommendationCategory::ExtractDependencies,
-            format!(
-                "Reduce coupling \u{2014} {}-LOC file imports {} modules, limiting testability",
-                score.lines, score.fan_out
-            ),
-        ));
+    let desc = match high.len() {
+        1 => format!(
+            "Extract {} (cognitive: {}) in {}-LOC file into smaller functions",
+            high[0].0, high[0].2, score.lines
+        ),
+        _ => format!(
+            "Extract {} (cognitive: {}) and {} (cognitive: {}) in {}-LOC file into smaller functions",
+            high[0].0, high[0].2, high[1].0, high[1].2, score.lines
+        ),
+    };
+    Some((RecommendationCategory::ExtractComplexFunctions, desc))
+}
+
+fn match_dependency_extraction(
+    score: &FileHealthScore,
+    thresholds: &DistributionThresholds,
+    is_entry: bool,
+) -> Option<(RecommendationCategory, String)> {
+    if is_entry || score.fan_out < thresholds.fan_out_p90 || score.maintainability_index >= 60.0 {
+        return None;
     }
 
-    if score.crap_above_threshold >= 2 && score.complexity_density > 0.3 {
-        return Some((
-            RecommendationCategory::AddTestCoverage,
-            format!(
-                "{} complex functions lack test coverage path, add tests before modifying",
-                score.crap_above_threshold
-            ),
-        ));
+    Some((
+        RecommendationCategory::ExtractDependencies,
+        format!(
+            "Reduce coupling, {}-LOC file imports {} modules, limiting testability",
+            score.lines, score.fan_out
+        ),
+    ))
+}
+
+fn match_coverage_gap(score: &FileHealthScore) -> Option<(RecommendationCategory, String)> {
+    if score.crap_above_threshold < 2 || score.complexity_density <= 0.3 {
+        return None;
     }
 
-    if is_circular {
-        return Some((
-            RecommendationCategory::BreakCircularDependency,
-            "Break import cycle to reduce change cascade risk".into(),
-        ));
+    Some((
+        RecommendationCategory::AddTestCoverage,
+        format!(
+            "{} complex functions lack test coverage path, add tests before modifying",
+            score.crap_above_threshold
+        ),
+    ))
+}
+
+fn match_circular_fallback(is_circular: bool) -> Option<(RecommendationCategory, String)> {
+    if !is_circular {
+        return None;
     }
 
-    None
+    Some((
+        RecommendationCategory::BreakCircularDependency,
+        "Break import cycle to reduce change cascade risk".into(),
+    ))
 }
 
 /// Map recommendation category to confidence level based on data source reliability.
