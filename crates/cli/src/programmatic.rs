@@ -824,40 +824,7 @@ fn build_complexity_options<'a>(
     resolved: &'a ResolvedAnalysisOptions,
     options: &'a ComplexityOptions,
 ) -> HealthOptions<'a> {
-    let ownership = options.ownership || options.ownership_emails.is_some();
-    let hotspots = options.hotspots || ownership;
-    let targets = options.targets || options.effort.is_some();
-    let any_section = options.complexity
-        || options.file_scores
-        || options.coverage_gaps
-        || hotspots
-        || targets
-        || options.score;
-    let eff_score = if any_section { options.score } else { true };
-    let force_full = eff_score;
-    let score_only_output = options.score
-        && !options.complexity
-        && !options.file_scores
-        && !options.coverage_gaps
-        && !hotspots
-        && !targets;
-    let eff_file_scores = if any_section {
-        options.file_scores
-    } else {
-        true
-    } || force_full;
-    let eff_hotspots = if any_section { hotspots } else { true };
-    let eff_complexity = if any_section {
-        options.complexity
-    } else {
-        true
-    };
-    let eff_targets = if any_section { targets } else { true };
-    let eff_coverage_gaps = if any_section {
-        options.coverage_gaps
-    } else {
-        false
-    };
+    let state = derived_complexity_options(options);
 
     HealthOptions {
         root: &resolved.root,
@@ -880,21 +847,21 @@ fn build_complexity_options<'a>(
         changed_workspaces: resolved.changed_workspaces.as_deref(),
         baseline: None,
         save_baseline: None,
-        complexity: eff_complexity,
+        complexity: state.complexity,
         complexity_breakdown: false,
-        file_scores: eff_file_scores,
-        coverage_gaps: eff_coverage_gaps,
-        config_activates_coverage_gaps: !any_section,
-        hotspots: eff_hotspots,
-        ownership: ownership && eff_hotspots,
+        file_scores: state.file_scores,
+        coverage_gaps: state.coverage_gaps,
+        config_activates_coverage_gaps: !state.any_section,
+        hotspots: state.hotspots,
+        ownership: state.ownership,
         ownership_emails: options.ownership_emails.map(OwnershipEmailMode::to_config),
-        targets: eff_targets,
+        targets: state.targets,
         css: false,
-        force_full,
-        score_only_output,
+        force_full: state.force_full,
+        score_only_output: state.score_only_output,
         enforce_coverage_gap_gate: true,
         effort: options.effort.map(TargetEffort::to_cli),
-        score: eff_score,
+        score: state.score,
         min_score: None,
         since: options.since.as_deref(),
         min_commits: options.min_commits,
@@ -913,6 +880,75 @@ fn build_complexity_options<'a>(
         // imported hotspots call the CLI. Git churn is used when available.
         churn_file: None,
     }
+}
+
+struct DerivedComplexityOptions {
+    any_section: bool,
+    complexity: bool,
+    file_scores: bool,
+    coverage_gaps: bool,
+    hotspots: bool,
+    ownership: bool,
+    targets: bool,
+    force_full: bool,
+    score_only_output: bool,
+    score: bool,
+}
+
+fn derived_complexity_options(options: &ComplexityOptions) -> DerivedComplexityOptions {
+    let ownership = options.ownership || options.ownership_emails.is_some();
+    let requested_hotspots = options.hotspots || ownership;
+    let requested_targets = options.targets || options.effort.is_some();
+    let any_section = options.complexity
+        || options.file_scores
+        || options.coverage_gaps
+        || requested_hotspots
+        || requested_targets
+        || options.score;
+    let score = if any_section { options.score } else { true };
+    let hotspots = if any_section {
+        requested_hotspots
+    } else {
+        true
+    };
+
+    DerivedComplexityOptions {
+        any_section,
+        complexity: if any_section {
+            options.complexity
+        } else {
+            true
+        },
+        file_scores: effective_file_scores(options, any_section, score),
+        coverage_gaps: if any_section {
+            options.coverage_gaps
+        } else {
+            false
+        },
+        hotspots,
+        ownership: ownership && hotspots,
+        targets: if any_section { requested_targets } else { true },
+        force_full: score,
+        score_only_output: is_score_only_output(options, requested_hotspots, requested_targets),
+        score,
+    }
+}
+
+fn effective_file_scores(options: &ComplexityOptions, any_section: bool, force_full: bool) -> bool {
+    (if any_section {
+        options.file_scores
+    } else {
+        true
+    }) || force_full
+}
+
+fn is_score_only_output(options: &ComplexityOptions, hotspots: bool, targets: bool) -> bool {
+    options.score
+        && !options.complexity
+        && !options.file_scores
+        && !options.coverage_gaps
+        && !hotspots
+        && !targets
 }
 
 /// Run the health / complexity analysis and return the CLI JSON contract as a value.
