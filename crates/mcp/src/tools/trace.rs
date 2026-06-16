@@ -80,40 +80,7 @@ pub fn build_trace_dependency_args(params: &TraceDependencyParams) -> Result<Vec
 
 /// Build CLI arguments for the `trace_clone` tool.
 pub fn build_trace_clone_args(params: &TraceCloneParams) -> Result<Vec<String>, String> {
-    let has_location = params.file.is_some() || params.line.is_some();
-    let has_fingerprint = params
-        .fingerprint
-        .as_deref()
-        .is_some_and(|fp| !fp.trim().is_empty());
-    let trace_spec = match (has_location, has_fingerprint) {
-        (true, true) => {
-            return Err(validation_error_body(
-                "provide either file + line OR fingerprint, not both",
-            ));
-        }
-        (false, false) => {
-            return Err(validation_error_body(
-                "provide file + line (a clone location) or fingerprint (a dup:<id> from find_dupes)",
-            ));
-        }
-        (true, false) => {
-            let file = params.file.as_deref().unwrap_or_default();
-            if file.trim().is_empty() {
-                return Err(validation_error_body("file must not be empty"));
-            }
-            match params.line {
-                None => return Err(validation_error_body("line is required with file")),
-                Some(0) => return Err(validation_error_body("line must be greater than 0")),
-                Some(line) => format!("{file}:{line}"),
-            }
-        }
-        (false, true) => params
-            .fingerprint
-            .as_deref()
-            .unwrap_or_default()
-            .trim()
-            .to_string(),
-    };
+    let trace_spec = trace_clone_spec(params)?;
 
     let mut args = vec![
         "dupes".to_string(),
@@ -132,14 +99,86 @@ pub fn build_trace_clone_args(params: &TraceCloneParams) -> Result<Vec<String>, 
     if let Some(ref workspace) = params.workspace {
         args.extend(["--workspace".to_string(), workspace.clone()]);
     }
-    if let Some(ref mode) = params.mode {
-        if !VALID_DUPES_MODES.contains(&mode.as_str()) {
-            return Err(validation_error_body(format!(
-                "Invalid mode '{mode}'. Valid values: strict, mild, weak, semantic"
-            )));
-        }
-        args.extend(["--mode".to_string(), mode.clone()]);
+    push_trace_clone_options(&mut args, params)?;
+    args.extend(["--trace".to_string(), trace_spec]);
+
+    Ok(args)
+}
+
+fn trace_clone_spec(params: &TraceCloneParams) -> Result<String, String> {
+    let has_location = params.file.is_some() || params.line.is_some();
+    let has_fingerprint = params
+        .fingerprint
+        .as_deref()
+        .is_some_and(|fp| !fp.trim().is_empty());
+
+    match (has_location, has_fingerprint) {
+        (true, true) => Err(validation_error_body(
+            "provide either file + line OR fingerprint, not both",
+        )),
+        (false, false) => Err(validation_error_body(
+            "provide file + line (a clone location) or fingerprint (a dup:<id> from find_dupes)",
+        )),
+        (true, false) => trace_clone_location(params),
+        (false, true) => Ok(params
+            .fingerprint
+            .as_deref()
+            .unwrap_or_default()
+            .trim()
+            .to_string()),
     }
+}
+
+fn trace_clone_location(params: &TraceCloneParams) -> Result<String, String> {
+    let file = params.file.as_deref().unwrap_or_default();
+    if file.trim().is_empty() {
+        return Err(validation_error_body("file must not be empty"));
+    }
+
+    match params.line {
+        None => Err(validation_error_body("line is required with file")),
+        Some(0) => Err(validation_error_body("line must be greater than 0")),
+        Some(line) => Ok(format!("{file}:{line}")),
+    }
+}
+
+fn push_trace_clone_options(
+    args: &mut Vec<String>,
+    params: &TraceCloneParams,
+) -> Result<(), String> {
+    push_trace_clone_mode(args, params)?;
+    push_trace_clone_numeric_options(args, params)?;
+    if params.skip_local == Some(true) {
+        args.push("--skip-local".to_string());
+    }
+    if params.cross_language == Some(true) {
+        args.push("--cross-language".to_string());
+    }
+    match params.ignore_imports {
+        Some(true) => args.push("--ignore-imports".to_string()),
+        Some(false) => args.push("--no-ignore-imports".to_string()),
+        None => {}
+    }
+    Ok(())
+}
+
+fn push_trace_clone_mode(args: &mut Vec<String>, params: &TraceCloneParams) -> Result<(), String> {
+    let Some(ref mode) = params.mode else {
+        return Ok(());
+    };
+    if !VALID_DUPES_MODES.contains(&mode.as_str()) {
+        return Err(validation_error_body(format!(
+            "Invalid mode '{mode}'. Valid values: strict, mild, weak, semantic"
+        )));
+    }
+    args.extend(["--mode".to_string(), mode.clone()]);
+    Ok(())
+}
+
+fn push_trace_clone_numeric_options(
+    args: &mut Vec<String>,
+    params: &TraceCloneParams,
+) -> Result<(), String> {
     if let Some(min_tokens) = params.min_tokens {
         args.extend(["--min-tokens".to_string(), min_tokens.to_string()]);
     }
@@ -157,20 +196,7 @@ pub fn build_trace_clone_args(params: &TraceCloneParams) -> Result<Vec<String>, 
     if let Some(threshold) = params.threshold {
         args.extend(["--threshold".to_string(), threshold.to_string()]);
     }
-    if params.skip_local == Some(true) {
-        args.push("--skip-local".to_string());
-    }
-    if params.cross_language == Some(true) {
-        args.push("--cross-language".to_string());
-    }
-    match params.ignore_imports {
-        Some(true) => args.push("--ignore-imports".to_string()),
-        Some(false) => args.push("--no-ignore-imports".to_string()),
-        None => {}
-    }
-    args.extend(["--trace".to_string(), trace_spec]);
-
-    Ok(args)
+    Ok(())
 }
 
 fn require_non_empty(field: &str, value: &str) -> Result<(), String> {

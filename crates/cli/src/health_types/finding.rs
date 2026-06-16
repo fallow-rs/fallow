@@ -436,8 +436,15 @@ impl HotspotFinding {
 fn build_hotspot_actions(entry: &HotspotEntry, root: &Path) -> Vec<HotspotAction> {
     let relative = entry.path.strip_prefix(root).unwrap_or(&entry.path);
     let path = relative.to_string_lossy().replace('\\', "/");
+    let mut actions = base_hotspot_actions(&path);
+    if let Some(ownership) = entry.ownership.as_ref() {
+        append_ownership_hotspot_actions(&mut actions, ownership, &path);
+    }
+    actions
+}
 
-    let mut actions = vec![
+fn base_hotspot_actions(path: &str) -> Vec<HotspotAction> {
+    vec![
         HotspotAction {
             kind: HotspotActionType::RefactorFile,
             auto_fixable: false,
@@ -462,12 +469,14 @@ fn build_hotspot_actions(entry: &HotspotEntry, root: &Path) -> Vec<HotspotAction
             suggested_pattern: None,
             heuristic: None,
         },
-    ];
+    ]
+}
 
-    let Some(ownership) = entry.ownership.as_ref() else {
-        return actions;
-    };
-
+fn append_ownership_hotspot_actions(
+    actions: &mut Vec<HotspotAction>,
+    ownership: &crate::health_types::OwnershipMetrics,
+    path: &str,
+) {
     if ownership.bus_factor == 1 {
         let top = &ownership.top_contributor;
         let owner = top.identifier.as_str();
@@ -515,7 +524,7 @@ fn build_hotspot_actions(entry: &HotspotEntry, root: &Path) -> Vec<HotspotAction
                 "Frequently-changed files without declared owners create review bottlenecks"
                     .to_string(),
             ),
-            suggested_pattern: Some(suggest_codeowners_pattern(&path)),
+            suggested_pattern: Some(suggest_codeowners_pattern(path)),
             heuristic: Some(HotspotActionHeuristic::DirectoryDeepest),
         });
     }
@@ -537,8 +546,6 @@ fn build_hotspot_actions(entry: &HotspotEntry, root: &Path) -> Vec<HotspotAction
             heuristic: None,
         });
     }
-
-    actions
 }
 
 /// Suggest a CODEOWNERS pattern for an unowned hotspot.

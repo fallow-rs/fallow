@@ -703,6 +703,16 @@ fn build_unused_code_section(
         format_detail: &format_private_type_leak,
     });
 
+    build_unused_member_sections(lines, results, root, rules, max_grouped_files);
+}
+
+fn build_unused_member_sections(
+    lines: &mut Vec<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+    max_grouped_files: usize,
+) {
     build_human_grouped_section(GroupedSectionInput {
         lines,
         items: &results.unused_enum_members,
@@ -1348,7 +1358,17 @@ fn build_policy_section(
     }
     push_category_header(lines, "Policy");
     build_policy_violations_section(lines, &results.policy_violations, root, total_issues);
+    build_framework_policy_section(lines, results, root, rules);
+    build_component_policy_section(lines, results, root, rules);
+    build_route_policy_section(lines, results, root, rules);
+}
 
+fn build_framework_policy_section(
+    lines: &mut Vec<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+) {
     build_human_grouped_section(GroupedSectionInput {
         lines,
         items: &results.invalid_client_exports,
@@ -1413,7 +1433,14 @@ fn build_policy_section(
         },
         format_detail: &format_unrendered_component,
     });
+}
 
+fn build_component_policy_section(
+    lines: &mut Vec<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+) {
     build_human_grouped_section(GroupedSectionInput {
         lines,
         items: &results.unused_component_props,
@@ -1467,14 +1494,12 @@ fn build_policy_section(
         },
         format_detail: &format_unused_load_data_key,
     });
-
-    build_route_tree_policy_sections(lines, results, root, rules);
 }
 
 /// Render the Next.js App Router route-tree policy sections (route collisions
 /// and dynamic-segment name conflicts). Split out of `build_policy_section` to
 /// keep that orchestrator under the unit-size limit.
-fn build_route_tree_policy_sections(
+fn build_route_policy_section(
     lines: &mut Vec<String>,
     results: &AnalysisResults,
     root: &Path,
@@ -1821,6 +1846,26 @@ fn build_dir_rollup_section(
     let level = severity_to_level(rules.unused_files);
     lines.push(build_section_header(title, unused_files.len(), level));
 
+    let dir_counts = unused_file_dir_counts(unused_files, root);
+
+    let total = unused_files.len();
+    let dominant = dir_counts
+        .iter()
+        .find(|(_, count, is_dir)| *is_dir && count * 100 / total.max(1) > 80)
+        .map(|(dir, _, _)| dir.clone());
+
+    let display_entries =
+        unused_file_display_entries(unused_files, root, &dir_counts, dominant.as_deref());
+
+    render_dir_rollup_entries(lines, &display_entries, total_issues);
+    push_section_footer_rollup(lines, title, unused_files.len());
+    lines.push(String::new());
+}
+
+fn unused_file_dir_counts(
+    unused_files: &[fallow_types::output_dead_code::UnusedFileFinding],
+    root: &Path,
+) -> Vec<(String, usize, bool)> {
     let mut dir_counts: Vec<(String, usize, bool)> = Vec::new();
     let mut dir_map: FxHashMap<String, usize> = FxHashMap::default();
     for f in unused_files {
@@ -1844,47 +1889,55 @@ fn build_dir_rollup_section(
         }
     }
     dir_counts.sort_by_key(|b| std::cmp::Reverse(b.1));
+    dir_counts
+}
 
-    let total = unused_files.len();
-    let dominant = dir_counts
-        .iter()
-        .find(|(_, count, is_dir)| *is_dir && count * 100 / total.max(1) > 80)
-        .map(|(dir, _, _)| dir.clone());
-
-    let display_entries: Vec<(String, usize, bool)> = if let Some(ref dom_dir) = dominant {
-        let mut sub_counts: Vec<(String, usize, bool)> = Vec::new();
-        let mut sub_map: FxHashMap<String, usize> = FxHashMap::default();
-        for f in unused_files {
-            let rel = relative_path(&f.file.path, root);
-            let mut components = rel.components();
-            let first = components
-                .next()
-                .map(|c| c.as_os_str().to_string_lossy().to_string());
-            if first.as_deref() == Some(dom_dir.as_str()) {
-                let sub_key = components.next().map_or_else(
-                    || dom_dir.clone(),
-                    |c| format!("{}/{}", dom_dir, c.as_os_str().to_string_lossy()),
-                );
-                if let Some(&idx) = sub_map.get(&sub_key) {
-                    sub_counts[idx].1 += 1;
-                } else {
-                    sub_map.insert(sub_key.clone(), sub_counts.len());
-                    sub_counts.push((sub_key, 1, true));
-                }
-            }
-        }
-        sub_counts.sort_by_key(|b| std::cmp::Reverse(b.1));
-        let mut combined = sub_counts;
-        for entry in &dir_counts {
-            if entry.0 != *dom_dir {
-                combined.push(entry.clone());
-            }
-        }
-        combined
-    } else {
-        dir_counts.clone()
+fn unused_file_display_entries(
+    unused_files: &[fallow_types::output_dead_code::UnusedFileFinding],
+    root: &Path,
+    dir_counts: &[(String, usize, bool)],
+    dominant: Option<&str>,
+) -> Vec<(String, usize, bool)> {
+    let Some(dom_dir) = dominant else {
+        return dir_counts.to_vec();
     };
 
+    let mut sub_counts: Vec<(String, usize, bool)> = Vec::new();
+    let mut sub_map: FxHashMap<String, usize> = FxHashMap::default();
+    for f in unused_files {
+        let rel = relative_path(&f.file.path, root);
+        let mut components = rel.components();
+        let first = components
+            .next()
+            .map(|c| c.as_os_str().to_string_lossy().to_string());
+        if first.as_deref() == Some(dom_dir) {
+            let sub_key = components.next().map_or_else(
+                || dom_dir.to_string(),
+                |c| format!("{}/{}", dom_dir, c.as_os_str().to_string_lossy()),
+            );
+            if let Some(&idx) = sub_map.get(&sub_key) {
+                sub_counts[idx].1 += 1;
+            } else {
+                sub_map.insert(sub_key.clone(), sub_counts.len());
+                sub_counts.push((sub_key, 1, true));
+            }
+        }
+    }
+    sub_counts.sort_by_key(|b| std::cmp::Reverse(b.1));
+    let mut combined = sub_counts;
+    for entry in dir_counts {
+        if entry.0 != dom_dir {
+            combined.push(entry.clone());
+        }
+    }
+    combined
+}
+
+fn render_dir_rollup_entries(
+    lines: &mut Vec<String>,
+    display_entries: &[(String, usize, bool)],
+    total_issues: usize,
+) {
     let shown = display_entries.len().min(MAX_FLAT_ITEMS);
     for (dir, count, is_dir) in &display_entries[..shown] {
         let label = if *is_dir {
@@ -1898,7 +1951,7 @@ fn build_dir_rollup_section(
         let remaining = display_entries.len() - MAX_FLAT_ITEMS;
         let hint = if remaining > SCOPING_HINT_THRESHOLD || total_issues > SCOPING_HINT_THRESHOLD {
             format!(
-                "... and {remaining} more director{} \u{2014} try --workspace <name> or --changed-since main to scope",
+                "... and {remaining} more director{}, try --workspace <name> or --changed-since main to scope",
                 if remaining == 1 { "y" } else { "ies" }
             )
         } else {
@@ -1909,8 +1962,6 @@ fn build_dir_rollup_section(
         };
         lines.push(format!("  {}", hint.dimmed()));
     }
-    push_section_footer_rollup(lines, title, unused_files.len());
-    lines.push(String::new());
 }
 
 /// Append a non-empty section with a header, doc-link footer, and truncated items.
@@ -2102,73 +2153,12 @@ fn build_circular_deps_section(
     let title = "Circular dependencies";
     lines.push(build_section_header(title, items.len(), level));
 
-    let mut hub_groups: Vec<(String, Vec<&fallow_core::results::CircularDependency>)> = Vec::new();
-    let mut hub_map: rustc_hash::FxHashMap<String, usize> = rustc_hash::FxHashMap::default();
-
-    for entry in items {
-        let cycle = &entry.cycle;
-        let hub = cycle
-            .files
-            .first()
-            .map(|p| relative_path(p, root).display().to_string())
-            .unwrap_or_default();
-        if let Some(&idx) = hub_map.get(&hub) {
-            hub_groups[idx].1.push(cycle);
-        } else {
-            hub_map.insert(hub.clone(), hub_groups.len());
-            hub_groups.push((hub, vec![cycle]));
-        }
-    }
-
-    hub_groups.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then_with(|| a.0.cmp(&b.0)));
-
+    let hub_groups = circular_dependency_hub_groups(items, root);
     let shown = hub_groups.len().min(MAX_FLAT_ITEMS);
     for (hub_path, cycles) in &hub_groups[..shown] {
-        let count_tag = if cycles.len() > 1 {
-            format!(" ({} cycles)", cycles.len()).dimmed().to_string()
-        } else {
-            String::new()
-        };
-        lines.push(format!("  {}{}", format_path(hub_path), count_tag));
-
+        lines.push(circular_dependency_hub_line(hub_path, cycles.len()));
         for cycle in cycles {
-            let rel_paths: Vec<String> = cycle
-                .files
-                .iter()
-                .map(|p| relative_path(p, root).display().to_string())
-                .collect();
-
-            let mut chain_parts: Vec<String> = Vec::new();
-            for path in &rel_paths[1..] {
-                let elided = elide_common_prefix(hub_path, path);
-                chain_parts.push(format_path(elided));
-            }
-            let (_, hub_filename) = split_dir_filename(hub_path);
-            chain_parts.push(hub_filename.bold().to_string());
-
-            let type_only_tag = if cycle
-                .files
-                .iter()
-                .all(|p| p.to_str().is_some_and(|s| s.ends_with(".d.ts")))
-            {
-                format!(" {}", "(type-only)".dimmed())
-            } else {
-                String::new()
-            };
-
-            let cross_pkg_tag = if cycle.is_cross_package {
-                format!(" {}", "(cross-package)".dimmed())
-            } else {
-                String::new()
-            };
-
-            lines.push(format!(
-                "    {} {}{}{}",
-                "\u{2192}".dimmed(),
-                chain_parts.join(&format!(" {} ", "\u{2192}".dimmed())),
-                type_only_tag,
-                cross_pkg_tag,
-            ));
+            lines.push(circular_dependency_cycle_line(hub_path, cycle, root));
         }
         lines.push(String::new());
     }
@@ -2187,6 +2177,88 @@ fn build_circular_deps_section(
     push_section_footer_with_count(lines, title, items.len());
     if !lines.last().is_some_and(String::is_empty) {
         lines.push(String::new());
+    }
+}
+
+fn circular_dependency_hub_groups<'a>(
+    items: &'a [fallow_types::output_dead_code::CircularDependencyFinding],
+    root: &Path,
+) -> Vec<(String, Vec<&'a fallow_core::results::CircularDependency>)> {
+    let mut hub_groups: Vec<(String, Vec<&'a fallow_core::results::CircularDependency>)> =
+        Vec::new();
+    let mut hub_map: rustc_hash::FxHashMap<String, usize> = rustc_hash::FxHashMap::default();
+
+    for entry in items {
+        let cycle = &entry.cycle;
+        let hub = cycle
+            .files
+            .first()
+            .map(|path| relative_path(path, root).display().to_string())
+            .unwrap_or_default();
+        if let Some(&idx) = hub_map.get(&hub) {
+            hub_groups[idx].1.push(cycle);
+        } else {
+            hub_map.insert(hub.clone(), hub_groups.len());
+            hub_groups.push((hub, vec![cycle]));
+        }
+    }
+
+    hub_groups.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then_with(|| a.0.cmp(&b.0)));
+    hub_groups
+}
+
+fn circular_dependency_hub_line(hub_path: &str, cycle_count: usize) -> String {
+    let count_tag = if cycle_count > 1 {
+        format!(" ({cycle_count} cycles)").dimmed().to_string()
+    } else {
+        String::new()
+    };
+    format!("  {}{}", format_path(hub_path), count_tag)
+}
+
+fn circular_dependency_cycle_line(
+    hub_path: &str,
+    cycle: &fallow_core::results::CircularDependency,
+    root: &Path,
+) -> String {
+    let rel_paths: Vec<String> = cycle
+        .files
+        .iter()
+        .map(|path| relative_path(path, root).display().to_string())
+        .collect();
+    let mut chain_parts: Vec<String> = rel_paths[1..]
+        .iter()
+        .map(|path| format_path(elide_common_prefix(hub_path, path)))
+        .collect();
+    let (_, hub_filename) = split_dir_filename(hub_path);
+    chain_parts.push(hub_filename.bold().to_string());
+
+    format!(
+        "    {} {}{}{}",
+        "\u{2192}".dimmed(),
+        chain_parts.join(&format!(" {} ", "\u{2192}".dimmed())),
+        circular_type_only_tag(cycle),
+        circular_cross_package_tag(cycle),
+    )
+}
+
+fn circular_type_only_tag(cycle: &fallow_core::results::CircularDependency) -> String {
+    if cycle
+        .files
+        .iter()
+        .all(|path| path.to_str().is_some_and(|s| s.ends_with(".d.ts")))
+    {
+        format!(" {}", "(type-only)".dimmed())
+    } else {
+        String::new()
+    }
+}
+
+fn circular_cross_package_tag(cycle: &fallow_core::results::CircularDependency) -> String {
+    if cycle.is_cross_package {
+        format!(" {}", "(cross-package)".dimmed())
+    } else {
+        String::new()
     }
 }
 
@@ -2422,95 +2494,144 @@ fn collect_matching_rules(
     resolver: &OwnershipResolver,
 ) -> Vec<String> {
     let mut rules: FxHashSet<String> = FxHashSet::default();
-
-    let mut check = |path: &Path| {
-        if let (_, Some(rule)) = resolver.resolve_with_rule(relative_path(path, root)) {
-            rules.insert(rule);
-        }
-    };
-
-    for f in &results.unused_files {
-        check(&f.file.path);
-    }
-    for e in &results.unused_exports {
-        check(&e.export.path);
-    }
-    for e in &results.unused_types {
-        check(&e.export.path);
-    }
-    for e in &results.private_type_leaks {
-        check(&e.leak.path);
-    }
-    for m in &results.unused_enum_members {
-        check(&m.member.path);
-    }
-    for m in &results.unused_class_members {
-        check(&m.member.path);
-    }
-    for m in &results.unused_store_members {
-        check(&m.member.path);
-    }
-    for u in &results.unresolved_imports {
-        check(&u.import.path);
-    }
-    for c in &results.circular_dependencies {
-        if let Some(first) = c.cycle.files.first() {
-            check(first);
-        }
-    }
-    for b in &results.boundary_violations {
-        check(&b.violation.from_path);
-    }
-    for b in &results.boundary_coverage_violations {
-        check(&b.violation.path);
-    }
-    for b in &results.boundary_call_violations {
-        check(&b.violation.path);
-    }
-    for v in &results.policy_violations {
-        check(&v.violation.path);
-    }
-    for e in &results.invalid_client_exports {
-        check(&e.export.path);
-    }
-    for b in &results.mixed_client_server_barrels {
-        check(&b.barrel.path);
-    }
-    for d in &results.misplaced_directives {
-        check(&d.directive_site.path);
-    }
-    for i in &results.unprovided_injects {
-        check(&i.inject.path);
-    }
-    for c in &results.unrendered_components {
-        check(&c.component.path);
-    }
-    for p in &results.unused_component_props {
-        check(&p.prop.path);
-    }
-    for e in &results.unused_component_emits {
-        check(&e.emit.path);
-    }
-    for a in &results.unused_server_actions {
-        check(&a.action.path);
-    }
-    for k in &results.unused_load_data_keys {
-        check(&k.key.path);
-    }
-    for c in &results.route_collisions {
-        check(&c.collision.path);
-    }
-    for c in &results.dynamic_segment_name_conflicts {
-        check(&c.conflict.path);
-    }
-    for s in &results.stale_suppressions {
-        check(&s.path);
-    }
+    collect_dead_code_rules(&mut rules, results, root, resolver);
+    collect_graph_rules(&mut rules, results, root, resolver);
+    collect_boundary_rules(&mut rules, results, root, resolver);
+    collect_framework_rules(&mut rules, results, root, resolver);
+    collect_suppression_rules(&mut rules, results, root, resolver);
 
     let mut sorted: Vec<String> = rules.into_iter().collect();
     sorted.sort();
     sorted.truncate(3);
     sorted
+}
+
+fn insert_matching_rule(
+    rules: &mut FxHashSet<String>,
+    path: &Path,
+    root: &Path,
+    resolver: &OwnershipResolver,
+) {
+    if let (_, Some(rule)) = resolver.resolve_with_rule(relative_path(path, root)) {
+        rules.insert(rule);
+    }
+}
+
+fn collect_dead_code_rules(
+    rules: &mut FxHashSet<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    resolver: &OwnershipResolver,
+) {
+    for f in &results.unused_files {
+        insert_matching_rule(rules, &f.file.path, root, resolver);
+    }
+    for e in &results.unused_exports {
+        insert_matching_rule(rules, &e.export.path, root, resolver);
+    }
+    for e in &results.unused_types {
+        insert_matching_rule(rules, &e.export.path, root, resolver);
+    }
+    for e in &results.private_type_leaks {
+        insert_matching_rule(rules, &e.leak.path, root, resolver);
+    }
+    for m in &results.unused_enum_members {
+        insert_matching_rule(rules, &m.member.path, root, resolver);
+    }
+    for m in &results.unused_class_members {
+        insert_matching_rule(rules, &m.member.path, root, resolver);
+    }
+    for m in &results.unused_store_members {
+        insert_matching_rule(rules, &m.member.path, root, resolver);
+    }
+}
+
+fn collect_graph_rules(
+    rules: &mut FxHashSet<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    resolver: &OwnershipResolver,
+) {
+    for u in &results.unresolved_imports {
+        insert_matching_rule(rules, &u.import.path, root, resolver);
+    }
+    for c in &results.circular_dependencies {
+        if let Some(first) = c.cycle.files.first() {
+            insert_matching_rule(rules, first, root, resolver);
+        }
+    }
+}
+
+fn collect_boundary_rules(
+    rules: &mut FxHashSet<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    resolver: &OwnershipResolver,
+) {
+    for b in &results.boundary_violations {
+        insert_matching_rule(rules, &b.violation.from_path, root, resolver);
+    }
+    for b in &results.boundary_coverage_violations {
+        insert_matching_rule(rules, &b.violation.path, root, resolver);
+    }
+    for b in &results.boundary_call_violations {
+        insert_matching_rule(rules, &b.violation.path, root, resolver);
+    }
+    for v in &results.policy_violations {
+        insert_matching_rule(rules, &v.violation.path, root, resolver);
+    }
+}
+
+fn collect_framework_rules(
+    rules: &mut FxHashSet<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    resolver: &OwnershipResolver,
+) {
+    for e in &results.invalid_client_exports {
+        insert_matching_rule(rules, &e.export.path, root, resolver);
+    }
+    for b in &results.mixed_client_server_barrels {
+        insert_matching_rule(rules, &b.barrel.path, root, resolver);
+    }
+    for d in &results.misplaced_directives {
+        insert_matching_rule(rules, &d.directive_site.path, root, resolver);
+    }
+    for i in &results.unprovided_injects {
+        insert_matching_rule(rules, &i.inject.path, root, resolver);
+    }
+    for c in &results.unrendered_components {
+        insert_matching_rule(rules, &c.component.path, root, resolver);
+    }
+    for p in &results.unused_component_props {
+        insert_matching_rule(rules, &p.prop.path, root, resolver);
+    }
+    for e in &results.unused_component_emits {
+        insert_matching_rule(rules, &e.emit.path, root, resolver);
+    }
+    for a in &results.unused_server_actions {
+        insert_matching_rule(rules, &a.action.path, root, resolver);
+    }
+    for k in &results.unused_load_data_keys {
+        insert_matching_rule(rules, &k.key.path, root, resolver);
+    }
+    for c in &results.route_collisions {
+        insert_matching_rule(rules, &c.collision.path, root, resolver);
+    }
+    for c in &results.dynamic_segment_name_conflicts {
+        insert_matching_rule(rules, &c.conflict.path, root, resolver);
+    }
+}
+
+fn collect_suppression_rules(
+    rules: &mut FxHashSet<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    resolver: &OwnershipResolver,
+) {
+    for s in &results.stale_suppressions {
+        insert_matching_rule(rules, &s.path, root, resolver);
+    }
 }
 
 /// Print analysis results grouped by owner or directory.
@@ -2528,6 +2649,123 @@ pub(in crate::report) struct PrintGroupedHumanInput<'a> {
     pub(in crate::report) explain: bool,
 }
 
+fn grouped_issue_counts(groups: &[crate::report::grouping::ResultGroup]) -> Vec<(&str, usize)> {
+    let mut group_counts: Vec<(&str, usize)> = groups
+        .iter()
+        .map(|g| (g.key.as_str(), g.results.total_issues()))
+        .filter(|(_, count)| *count > 0)
+        .collect();
+    group_counts.sort_by_key(|b| std::cmp::Reverse(b.1));
+    group_counts
+}
+
+fn emit_grouped_summary(group_counts: &[(&str, usize)]) {
+    if group_counts.is_empty() {
+        return;
+    }
+
+    let summary_parts: Vec<String> = group_counts
+        .iter()
+        .map(|(key, count)| format!("{key} {count}"))
+        .collect();
+    let summary = format!(
+        "{} group{}: {}",
+        group_counts.len(),
+        plural(group_counts.len()),
+        summary_parts.join(" \u{00b7} ")
+    );
+    outln!("{}", summary.dimmed());
+    outln!();
+}
+
+fn grouped_header_text(
+    group: &crate::report::grouping::ResultGroup,
+    root: &Path,
+    resolver: Option<&OwnershipResolver>,
+    total: usize,
+) -> String {
+    let issue_word = if total == 1 { "issue" } else { "issues" };
+    let breakdown = build_summary_footer(&group.results, 0, 0);
+    let header_text = if breakdown.is_empty() {
+        format!("{} ({total} {issue_word})", group.key)
+    } else {
+        format!("{} ({total} {issue_word}: {breakdown})", group.key)
+    };
+
+    match resolver {
+        Some(r @ OwnershipResolver::Owner(_)) => {
+            let matched = collect_matching_rules(&group.results, root, r);
+            if matched.is_empty() {
+                header_text
+            } else {
+                format!("{header_text}, matched by {}", matched.join(", "))
+            }
+        }
+        _ => header_text,
+    }
+}
+
+fn emit_grouped_body(
+    group: &crate::report::grouping::ResultGroup,
+    root: &Path,
+    rules: &RulesConfig,
+    seen_footers: &mut FxHashSet<String>,
+    explain: bool,
+) {
+    if let Some(ref owners) = group.owners
+        && !owners.is_empty()
+    {
+        outln!("  {} {}", "owners:".dimmed(), owners.join(" ").dimmed());
+    }
+
+    let lines = build_human_lines_with_explain(&group.results, root, rules, None, explain);
+    for line in &lines {
+        if line.contains("docs.fallow.tools") && !seen_footers.insert(line.clone()) {
+            continue;
+        }
+        outln!("{line}");
+    }
+
+    if group.key == crate::codeowners::UNOWNED_LABEL {
+        eprintln!(
+            "  {}",
+            "Files with no CODEOWNERS entry, add ownership or verify before removing".dimmed()
+        );
+        eprintln!();
+    }
+}
+
+fn emit_grouped_final_status(
+    groups: &[crate::report::grouping::ResultGroup],
+    grand_total: usize,
+    elapsed: Duration,
+) {
+    if grand_total == 0 {
+        eprintln!(
+            "{}",
+            format!("\u{2713} No issues found ({:.2}s)", elapsed.as_secs_f64())
+                .green()
+                .bold()
+        );
+    } else {
+        let non_empty_groups = groups
+            .iter()
+            .filter(|g| g.results.total_issues() > 0)
+            .count();
+        eprintln!(
+            "{}",
+            format!(
+                "\u{2717} {grand_total} issue{} across {non_empty_groups} group{} ({:.2}s)",
+                plural(grand_total),
+                plural(non_empty_groups),
+                elapsed.as_secs_f64()
+            )
+            .red()
+            .bold()
+        );
+    }
+}
+
 pub(in crate::report) fn print_grouped_human(input: &PrintGroupedHumanInput<'_>) {
     let groups = input.groups;
     let root = input.root;
@@ -2540,27 +2778,7 @@ pub(in crate::report) fn print_grouped_human(input: &PrintGroupedHumanInput<'_>)
         eprintln!();
     }
 
-    let mut group_counts: Vec<(&str, usize)> = groups
-        .iter()
-        .map(|g| (g.key.as_str(), g.results.total_issues()))
-        .filter(|(_, count)| *count > 0)
-        .collect();
-    group_counts.sort_by_key(|b| std::cmp::Reverse(b.1));
-
-    if !group_counts.is_empty() {
-        let summary_parts: Vec<String> = group_counts
-            .iter()
-            .map(|(key, count)| format!("{key} {count}"))
-            .collect();
-        let summary = format!(
-            "{} group{}: {}",
-            group_counts.len(),
-            plural(group_counts.len()),
-            summary_parts.join(" \u{00b7} ")
-        );
-        outln!("{}", summary.dimmed());
-        outln!();
-    }
+    emit_grouped_summary(&grouped_issue_counts(groups));
 
     let mut grand_total: usize = 0;
     let mut seen_footers: FxHashSet<String> = FxHashSet::default();
@@ -2572,82 +2790,13 @@ pub(in crate::report) fn print_grouped_human(input: &PrintGroupedHumanInput<'_>)
         }
         grand_total += total;
 
-        let issue_word = if total == 1 { "issue" } else { "issues" };
-        let breakdown = build_summary_footer(&group.results, 0, 0);
-        let header_text = if breakdown.is_empty() {
-            format!("{} ({total} {issue_word})", group.key)
-        } else {
-            format!("{} ({total} {issue_word}: {breakdown})", group.key)
-        };
-
-        let header_text = match resolver {
-            Some(r @ OwnershipResolver::Owner(_)) => {
-                let matched = collect_matching_rules(&group.results, root, r);
-                if matched.is_empty() {
-                    header_text
-                } else {
-                    format!("{header_text} \u{2014} matched by {}", matched.join(", "))
-                }
-            }
-            _ => header_text,
-        };
-
+        let header_text = grouped_header_text(group, root, resolver, total);
         outln!("{}", header_text.cyan().bold());
-
-        if let Some(ref owners) = group.owners
-            && !owners.is_empty()
-        {
-            outln!("  {} {}", "owners:".dimmed(), owners.join(" ").dimmed());
-        }
-
-        let lines = build_human_lines_with_explain(&group.results, root, rules, None, explain);
-        for line in &lines {
-            if line.contains("docs.fallow.tools") && !seen_footers.insert(line.clone()) {
-                continue;
-            }
-            outln!("{line}");
-        }
-
-        if group.key == crate::codeowners::UNOWNED_LABEL {
-            eprintln!(
-                "  {}",
-                "Files with no CODEOWNERS entry \u{2014} add ownership or verify before removing"
-                    .dimmed()
-            );
-            eprintln!();
-        }
+        emit_grouped_body(group, root, rules, &mut seen_footers, explain);
     }
 
     if !quiet {
-        if grand_total == 0 {
-            eprintln!(
-                "{}",
-                format!("\u{2713} No issues found ({:.2}s)", elapsed.as_secs_f64())
-                    .green()
-                    .bold()
-            );
-        } else {
-            eprintln!(
-                "{}",
-                format!(
-                    "\u{2717} {grand_total} issue{} across {} group{} ({:.2}s)",
-                    plural(grand_total),
-                    groups
-                        .iter()
-                        .filter(|g| g.results.total_issues() > 0)
-                        .count(),
-                    plural(
-                        groups
-                            .iter()
-                            .filter(|g| g.results.total_issues() > 0)
-                            .count()
-                    ),
-                    elapsed.as_secs_f64()
-                )
-                .red()
-                .bold()
-            );
-        }
+        emit_grouped_final_status(groups, grand_total, elapsed);
     }
 }
 
@@ -2830,6 +2979,16 @@ fn check_summary_categories(
     results: &AnalysisResults,
     rules: &RulesConfig,
 ) -> Vec<(&'static str, usize, Level)> {
+    let mut categories = check_summary_core_categories(results, rules);
+    categories.extend(check_summary_dependency_categories(results, rules));
+    categories.extend(check_summary_framework_categories(results, rules));
+    categories
+}
+
+fn check_summary_core_categories(
+    results: &AnalysisResults,
+    rules: &RulesConfig,
+) -> Vec<(&'static str, usize, Level)> {
     vec![
         (
             "Unused files",
@@ -2886,6 +3045,14 @@ fn check_summary_categories(
             results.unresolved_imports.len(),
             severity_to_level(rules.unresolved_imports),
         ),
+    ]
+}
+
+fn check_summary_dependency_categories(
+    results: &AnalysisResults,
+    rules: &RulesConfig,
+) -> Vec<(&'static str, usize, Level)> {
+    vec![
         (
             "Unlisted dependencies",
             results.unlisted_dependencies.len(),
@@ -2921,6 +3088,14 @@ fn check_summary_categories(
             results.boundary_violations.len(),
             severity_to_level(rules.boundary_violation),
         ),
+    ]
+}
+
+fn check_summary_framework_categories(
+    results: &AnalysisResults,
+    rules: &RulesConfig,
+) -> Vec<(&'static str, usize, Level)> {
+    vec![
         (
             "Unprovided injects",
             results.unprovided_injects.len(),

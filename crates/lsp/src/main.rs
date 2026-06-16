@@ -382,6 +382,25 @@ struct ProjectRootAnalysisInput<'a> {
     config_messages: &'a mut Vec<(MessageType, String)>,
 }
 
+struct BlockingAnalysisInput {
+    project_roots: Vec<PathBuf>,
+    config_path: Option<PathBuf>,
+    duplication_options: Option<LspDuplicationOptions>,
+    production_override: Option<bool>,
+    inline_complexity_enabled: bool,
+    root: PathBuf,
+    toplevel: Option<PathBuf>,
+    changed_since: Option<String>,
+}
+
+struct BlockingAnalysisOutput {
+    results: AnalysisResults,
+    duplication: DuplicationReport,
+    inline_complexity: Vec<InlineComplexityFinding>,
+    config_messages: Vec<(MessageType, String)>,
+    changed_message: Option<(MessageType, String)>,
+}
+
 fn analyze_project_root(input: &mut ProjectRootAnalysisInput<'_>) {
     let (mut config, message) = match fallow_core::config_for_project(
         input.project_root,
@@ -464,6 +483,77 @@ fn analyze_project_root(input: &mut ProjectRootAnalysisInput<'_>) {
     let duplication =
         fallow_core::duplicates::find_duplicates(input.project_root, &files, &duplicates_config);
     merge_duplication(input.merged_duplication, duplication);
+}
+
+fn run_blocking_analysis(input: &BlockingAnalysisInput) -> BlockingAnalysisOutput {
+    let mut results = AnalysisResults::default();
+    let mut duplication = DuplicationReport::default();
+    let mut inline_complexity = Vec::new();
+    let mut config_messages: Vec<(MessageType, String)> =
+        Vec::with_capacity(input.project_roots.len());
+    for project_root in &input.project_roots {
+        analyze_project_root(&mut ProjectRootAnalysisInput {
+            project_root,
+            config_path: input.config_path.as_deref(),
+            duplication_options: input.duplication_options.as_ref(),
+            production_override: input.production_override,
+            inline_complexity_enabled: input.inline_complexity_enabled,
+            merged_results: &mut results,
+            merged_duplication: &mut duplication,
+            merged_inline_complexity: &mut inline_complexity,
+            config_messages: &mut config_messages,
+        });
+    }
+
+    let changed_message = apply_changed_since_filter(
+        input.changed_since.as_deref(),
+        input.toplevel.as_deref().unwrap_or(input.root.as_path()),
+        &input.root,
+        &mut results,
+        &mut duplication,
+        &mut inline_complexity,
+    );
+
+    BlockingAnalysisOutput {
+        results,
+        duplication,
+        inline_complexity,
+        config_messages,
+        changed_message,
+    }
+}
+
+fn apply_changed_since_filter(
+    changed_since: Option<&str>,
+    toplevel: &Path,
+    root: &Path,
+    results: &mut AnalysisResults,
+    duplication: &mut DuplicationReport,
+    inline_complexity: &mut Vec<InlineComplexityFinding>,
+) -> Option<(MessageType, String)> {
+    let git_ref = changed_since?;
+
+    match try_get_changed_files_with_toplevel(root, toplevel, git_ref) {
+        Ok(changed) => {
+            filter_results_by_changed_files(results, &changed);
+            filter_duplication_by_changed_files(duplication, &changed, root);
+            filter_inline_complexity_by_changed_files(inline_complexity, &changed);
+            Some((
+                MessageType::INFO,
+                format!(
+                    "changedSince '{git_ref}': scoped to {} changed file(s)",
+                    changed.len()
+                ),
+            ))
+        }
+        Err(err) => Some((
+            MessageType::WARNING,
+            format!(
+                "changedSince '{git_ref}' ignored: {} (showing full-scope results)",
+                err.describe()
+            ),
+        )),
+    }
 }
 
 /// Per-document state tracked by the LSP: the `version` integer supplied by
@@ -1202,106 +1292,54 @@ impl FallowLspServer {
         let inline_complexity_enabled = *self.inline_complexity_enabled.read().await;
 
         let resolved_toplevel = self.resolved_git_toplevel(&root).await;
-
         let blocking_root = root.clone();
         let blocking_toplevel = resolved_toplevel.clone();
 
         let join_result = tokio::task::spawn_blocking(move || {
-            let mut merged_results = AnalysisResults::default();
-            let mut merged_duplication = DuplicationReport::default();
-            let mut merged_inline_complexity = Vec::new();
-            let mut config_messages: Vec<(MessageType, String)> =
-                Vec::with_capacity(project_roots.len());
-            for project_root in &project_roots {
-                analyze_project_root(&mut ProjectRootAnalysisInput {
-                    project_root,
-                    config_path: config_path.as_deref(),
-                    duplication_options: duplication_options.as_ref(),
-                    production_override,
-                    inline_complexity_enabled,
-                    merged_results: &mut merged_results,
-                    merged_duplication: &mut merged_duplication,
-                    merged_inline_complexity: &mut merged_inline_complexity,
-                    config_messages: &mut config_messages,
-                });
-            }
-
-            let changed_message = if let Some(ref git_ref) = changed_since {
-                let toplevel = blocking_toplevel
-                    .as_deref()
-                    .unwrap_or(blocking_root.as_path());
-                match try_get_changed_files_with_toplevel(&blocking_root, toplevel, git_ref) {
-                    Ok(changed) => {
-                        filter_results_by_changed_files(&mut merged_results, &changed);
-                        filter_duplication_by_changed_files(
-                            &mut merged_duplication,
-                            &changed,
-                            &blocking_root,
-                        );
-                        filter_inline_complexity_by_changed_files(
-                            &mut merged_inline_complexity,
-                            &changed,
-                        );
-                        Some((
-                            MessageType::INFO,
-                            format!(
-                                "changedSince '{git_ref}': scoped to {} changed file(s)",
-                                changed.len()
-                            ),
-                        ))
-                    }
-                    Err(err) => Some((
-                        MessageType::WARNING,
-                        format!(
-                            "changedSince '{git_ref}' ignored: {} (showing full-scope results)",
-                            err.describe()
-                        ),
-                    )),
-                }
-            } else {
-                None
+            let input = BlockingAnalysisInput {
+                project_roots,
+                config_path,
+                duplication_options,
+                production_override,
+                inline_complexity_enabled,
+                root: blocking_root,
+                toplevel: blocking_toplevel,
+                changed_since,
             };
-
-            (
-                merged_results,
-                merged_duplication,
-                merged_inline_complexity,
-                config_messages,
-                changed_message,
-            )
+            run_blocking_analysis(&input)
         })
         .await;
 
         match join_result {
-            Ok((results, duplication, inline_complexity, config_messages, changed_message)) => {
+            Ok(output) => {
                 if self.cancellation.load(Ordering::SeqCst) {
                     return;
                 }
 
-                for (level, msg) in config_messages {
+                for (level, msg) in output.config_messages {
                     self.client.log_message(level, msg).await;
                 }
 
-                if let Some((level, msg)) = changed_message {
+                if let Some((level, msg)) = output.changed_message {
                     self.client.log_message(level, msg).await;
                 }
 
                 let mut all_diagnostics =
-                    diagnostics::build_diagnostics(&results, &duplication, &root);
+                    diagnostics::build_diagnostics(&output.results, &output.duplication, &root);
                 attach_changed_since_data(&mut all_diagnostics, changed_since_for_data.as_deref());
                 self.publish_collected_diagnostics(all_diagnostics, &version_snapshot)
                     .await;
 
                 self.client
                     .send_notification::<AnalysisComplete>(analysis_complete_params(
-                        &results,
-                        &duplication,
+                        &output.results,
+                        &output.duplication,
                     ))
                     .await;
 
-                *self.results.write().await = Some(results);
-                *self.duplication.write().await = Some(duplication);
-                *self.inline_complexity.write().await = inline_complexity;
+                *self.results.write().await = Some(output.results);
+                *self.duplication.write().await = Some(output.duplication);
+                *self.inline_complexity.write().await = output.inline_complexity;
 
                 self.spawn_code_lens_refresh();
 

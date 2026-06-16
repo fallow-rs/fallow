@@ -550,84 +550,110 @@ fn compute_boundary_data(
         };
     }
 
-    let zones: Vec<ZoneInfo> = boundaries
-        .zones
-        .iter()
-        .map(|zone| {
-            let file_count = discovered.map_or(0, |files| {
-                files
-                    .iter()
-                    .filter(|f| {
-                        let rel = f
-                            .path
-                            .strip_prefix(&config.root)
-                            .ok()
-                            .map(|p| p.to_string_lossy().replace('\\', "/"));
-                        rel.is_some_and(|p| {
-                            boundaries.classify_zone(&p) == Some(zone.name.as_str())
-                        })
-                    })
-                    .count()
-            });
-            ZoneInfo {
-                name: zone.name.clone(),
-                patterns: zone.matchers.iter().map(|m| m.glob().to_string()).collect(),
-                file_count,
-            }
-        })
-        .collect();
-
-    let rules: Vec<RuleInfo> = boundaries
-        .rules
-        .iter()
-        .map(|r| RuleInfo {
-            from: r.from_zone.clone(),
-            allow: r.allowed_zones.clone(),
-        })
-        .collect();
-
-    let zone_count_by_name: rustc_hash::FxHashMap<&str, usize> = zones
-        .iter()
-        .map(|z| (z.name.as_str(), z.file_count))
-        .collect();
-
-    let logical_groups: Vec<LogicalGroupInfo> = boundaries
-        .logical_groups
-        .iter()
-        .map(|g| {
-            let child_file_count: usize = g
-                .children
-                .iter()
-                .filter_map(|child| zone_count_by_name.get(child.as_str()).copied())
-                .sum();
-            let fallback_file_count = g
-                .fallback_zone
-                .as_deref()
-                .and_then(|fb| zone_count_by_name.get(fb).copied())
-                .unwrap_or(0);
-            LogicalGroupInfo {
-                name: g.name.clone(),
-                children: g.children.clone(),
-                auto_discover: g.auto_discover.clone(),
-                authored_rule: g.authored_rule.clone(),
-                fallback_zone: g.fallback_zone.clone(),
-                source_zone_index: g.source_zone_index,
-                status: g.status,
-                file_count: child_file_count + fallback_file_count,
-                child_file_count,
-                fallback_file_count,
-                merged_from: g.merged_from.clone(),
-                original_zone_root: g.original_zone_root.clone(),
-                child_source_indices: g.child_source_indices.clone(),
-            }
-        })
-        .collect();
+    let zones = build_boundary_zones(config, discovered);
+    let rules = build_boundary_rules(boundaries);
+    let logical_groups = build_logical_groups(boundaries, &zones);
 
     BoundaryData {
         zones,
         rules,
         logical_groups,
         is_empty: false,
+    }
+}
+
+fn build_boundary_zones(
+    config: &fallow_config::ResolvedConfig,
+    discovered: Option<&[fallow_core::discover::DiscoveredFile]>,
+) -> Vec<ZoneInfo> {
+    config
+        .boundaries
+        .zones
+        .iter()
+        .map(|zone| ZoneInfo {
+            name: zone.name.clone(),
+            patterns: zone.matchers.iter().map(|m| m.glob().to_string()).collect(),
+            file_count: count_boundary_zone_files(config, discovered, &zone.name),
+        })
+        .collect()
+}
+
+fn count_boundary_zone_files(
+    config: &fallow_config::ResolvedConfig,
+    discovered: Option<&[fallow_core::discover::DiscoveredFile]>,
+    zone_name: &str,
+) -> usize {
+    discovered.map_or(0, |files| {
+        files
+            .iter()
+            .filter(|f| {
+                let rel = f
+                    .path
+                    .strip_prefix(&config.root)
+                    .ok()
+                    .map(|p| p.to_string_lossy().replace('\\', "/"));
+                rel.is_some_and(|p| config.boundaries.classify_zone(&p) == Some(zone_name))
+            })
+            .count()
+    })
+}
+
+fn build_boundary_rules(boundaries: &fallow_config::ResolvedBoundaryConfig) -> Vec<RuleInfo> {
+    boundaries
+        .rules
+        .iter()
+        .map(|rule| RuleInfo {
+            from: rule.from_zone.clone(),
+            allow: rule.allowed_zones.clone(),
+        })
+        .collect()
+}
+
+fn build_logical_groups(
+    boundaries: &fallow_config::ResolvedBoundaryConfig,
+    zones: &[ZoneInfo],
+) -> Vec<LogicalGroupInfo> {
+    let zone_count_by_name: rustc_hash::FxHashMap<&str, usize> = zones
+        .iter()
+        .map(|zone| (zone.name.as_str(), zone.file_count))
+        .collect();
+
+    boundaries
+        .logical_groups
+        .iter()
+        .map(|group| logical_group_info(group, &zone_count_by_name))
+        .collect()
+}
+
+fn logical_group_info(
+    group: &fallow_config::LogicalGroup,
+    zone_count_by_name: &rustc_hash::FxHashMap<&str, usize>,
+) -> LogicalGroupInfo {
+    let child_file_count: usize = group
+        .children
+        .iter()
+        .filter_map(|child| zone_count_by_name.get(child.as_str()).copied())
+        .sum();
+    let fallback_file_count = group
+        .fallback_zone
+        .as_deref()
+        .and_then(|fallback| zone_count_by_name.get(fallback).copied())
+        .unwrap_or(0);
+
+    LogicalGroupInfo {
+        name: group.name.clone(),
+        children: group.children.clone(),
+        auto_discover: group.auto_discover.clone(),
+        authored_rule: group.authored_rule.clone(),
+        fallback_zone: group.fallback_zone.clone(),
+        source_zone_index: group.source_zone_index,
+        status: group.status,
+        file_count: child_file_count + fallback_file_count,
+        child_file_count,
+        fallback_file_count,
+        merged_from: group.merged_from.clone(),
+        original_zone_root: group.original_zone_root.clone(),
+        child_source_indices: group.child_source_indices.clone(),
     }
 }
 

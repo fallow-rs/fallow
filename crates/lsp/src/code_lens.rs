@@ -41,108 +41,131 @@ pub fn build_code_lenses(
     file_path: &Path,
     document_uri: &Uri,
 ) -> Vec<CodeLens> {
-    let mut lenses: Vec<CodeLens> = results
+    let mut lenses = export_usage_code_lenses(results, file_path, document_uri);
+    lenses.extend(complexity_code_lenses(complexity, file_path));
+
+    lenses
+}
+
+fn export_usage_code_lenses(
+    results: &AnalysisResults,
+    file_path: &Path,
+    document_uri: &Uri,
+) -> Vec<CodeLens> {
+    results
         .export_usages
         .iter()
         .filter(|usage| usage.path == file_path)
-        .map(|usage| {
-            let line = usage.line.saturating_sub(1);
-            let title = if usage.reference_count == 1 {
-                "1 reference".to_string()
-            } else {
-                format!("{} references", usage.reference_count)
-            };
+        .map(|usage| export_usage_code_lens(usage, document_uri))
+        .collect()
+}
 
-            let export_position = Position {
-                line,
-                character: usage.col,
-            };
-
-            let ref_locations: Vec<serde_json::Value> = usage
-                .reference_locations
-                .iter()
-                .filter_map(|loc| {
-                    let uri = Uri::from_file_path(&loc.path)?;
-                    let ref_line = loc.line.saturating_sub(1);
-                    Some(serde_json::json!({
-                        "uri": uri.as_str(),
-                        "range": {
-                            "start": { "line": ref_line, "character": loc.col },
-                            "end": { "line": ref_line, "character": loc.col }
-                        }
-                    }))
-                })
-                .collect();
-
-            // Delegate to a thin extension-side command rather than the built-in
-            // `editor.action.showReferences`: that built-in validates its args with
-            // `instanceof URI / Position / Location`, which the JSON sent over the
-            // wire (a string URI, a plain position, plain locations) fails with
-            // "argument does not match one of these constraints". The
-            // `fallow.showReferences` command in the VS Code extension converts
-            // these into real vscode types and then calls the built-in.
-            let (command_name, arguments) = if ref_locations.is_empty() {
-                ("fallow.noop".to_string(), None)
-            } else {
-                (
-                    "fallow.showReferences".to_string(),
-                    Some(vec![
-                        serde_json::json!(document_uri.as_str()),
-                        serde_json::json!({
-                            "line": export_position.line,
-                            "character": export_position.character,
-                        }),
-                        serde_json::json!(ref_locations),
-                    ]),
-                )
-            };
-
-            CodeLens {
-                range: Range {
-                    start: export_position,
-                    end: export_position,
-                },
-                command: Some(Command {
-                    title,
-                    command: command_name,
-                    arguments,
-                }),
-                data: None,
-            }
-        })
+fn export_usage_code_lens(
+    usage: &fallow_core::results::ExportUsage,
+    document_uri: &Uri,
+) -> CodeLens {
+    let line = usage.line.saturating_sub(1);
+    let title = if usage.reference_count == 1 {
+        "1 reference".to_string()
+    } else {
+        format!("{} references", usage.reference_count)
+    };
+    let export_position = Position {
+        line,
+        character: usage.col,
+    };
+    let ref_locations: Vec<serde_json::Value> = usage
+        .reference_locations
+        .iter()
+        .filter_map(reference_location_payload)
         .collect();
+    let (command_name, arguments) =
+        reference_command(document_uri, export_position, &ref_locations);
 
-    lenses.extend(
-        complexity
-            .iter()
-            .filter(|finding| finding.path == file_path)
-            .map(|finding| {
-                let position = Position {
-                    line: finding.line.saturating_sub(1),
-                    character: finding.col,
-                };
-                CodeLens {
-                    range: Range {
-                        start: position,
-                        end: position,
-                    },
-                    command: Some(Command {
-                        title: format!(
-                            "{} complexity: {} cyc, {} cog ({})",
-                            finding.name,
-                            finding.cyclomatic,
-                            finding.cognitive,
-                            finding.exceeded.label()
-                        ),
-                        command: "fallow.noop".to_string(),
-                        arguments: None,
-                    }),
-                    data: None,
-                }
+    CodeLens {
+        range: Range {
+            start: export_position,
+            end: export_position,
+        },
+        command: Some(Command {
+            title,
+            command: command_name,
+            arguments,
+        }),
+        data: None,
+    }
+}
+
+fn reference_location_payload(
+    loc: &fallow_core::results::ReferenceLocation,
+) -> Option<serde_json::Value> {
+    let uri = Uri::from_file_path(&loc.path)?;
+    let ref_line = loc.line.saturating_sub(1);
+    Some(serde_json::json!({
+        "uri": uri.as_str(),
+        "range": {
+            "start": { "line": ref_line, "character": loc.col },
+            "end": { "line": ref_line, "character": loc.col }
+        }
+    }))
+}
+
+fn reference_command(
+    document_uri: &Uri,
+    export_position: Position,
+    ref_locations: &[serde_json::Value],
+) -> (String, Option<Vec<serde_json::Value>>) {
+    if ref_locations.is_empty() {
+        return ("fallow.noop".to_string(), None);
+    }
+
+    (
+        "fallow.showReferences".to_string(),
+        Some(vec![
+            serde_json::json!(document_uri.as_str()),
+            serde_json::json!({
+                "line": export_position.line,
+                "character": export_position.character,
             }),
-    );
+            serde_json::json!(ref_locations),
+        ]),
+    )
+}
 
-    lenses
+fn complexity_code_lenses(
+    complexity: &[InlineComplexityFinding],
+    file_path: &Path,
+) -> Vec<CodeLens> {
+    complexity
+        .iter()
+        .filter(|finding| finding.path == file_path)
+        .map(complexity_code_lens)
+        .collect()
+}
+
+fn complexity_code_lens(finding: &InlineComplexityFinding) -> CodeLens {
+    let position = Position {
+        line: finding.line.saturating_sub(1),
+        character: finding.col,
+    };
+    CodeLens {
+        range: Range {
+            start: position,
+            end: position,
+        },
+        command: Some(Command {
+            title: format!(
+                "{} complexity: {} cyc, {} cog ({})",
+                finding.name,
+                finding.cyclomatic,
+                finding.cognitive,
+                finding.exceeded.label()
+            ),
+            command: "fallow.noop".to_string(),
+            arguments: None,
+        }),
+        data: None,
+    }
 }
 
 #[cfg(test)]

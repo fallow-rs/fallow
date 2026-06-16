@@ -51,28 +51,7 @@ pub(in crate::report) fn print_health_human(input: &PrintHealthHumanInput<'_>) {
         && report.css_analytics.is_none()
         && !has_score
     {
-        if !quiet {
-            eprintln!(
-                "{}",
-                format!(
-                    "\u{2713} No functions exceed complexity thresholds ({:.2}s)",
-                    elapsed.as_secs_f64()
-                )
-                .green()
-                .bold()
-            );
-            eprintln!(
-                "{}",
-                format!(
-                    "  {} functions analyzed (max cyclomatic: {}, max cognitive: {}, max CRAP: {:.1})",
-                    report.summary.functions_analyzed,
-                    report.summary.max_cyclomatic_threshold,
-                    report.summary.max_cognitive_threshold,
-                    report.summary.max_crap_threshold,
-                )
-                .dimmed()
-            );
-        }
+        print_health_empty_state(report, elapsed, quiet);
         return;
     }
 
@@ -92,43 +71,78 @@ pub(in crate::report) fn print_health_human(input: &PrintHealthHumanInput<'_>) {
     }
 
     if !quiet {
-        let s = &report.summary;
-        let mut parts = Vec::new();
-        parts.push(format!("{} above threshold", s.functions_above_threshold));
-        parts.push(format!("{} analyzed", s.functions_analyzed));
-        if let Some(avg) = s.average_maintainability {
-            let label = if avg >= 85.0 {
-                "good"
-            } else if avg >= 65.0 {
-                "moderate"
-            } else {
-                "low"
-            };
-            parts.push(format!("maintainability {avg:.1} ({label})"));
-        }
-        if let Some(ref production) = report.runtime_coverage {
-            parts.push(format!(
-                "{} unhit in production",
-                production.summary.functions_unhit
-            ));
-        }
+        print_health_final_status(report, elapsed);
+    }
+}
+
+fn print_health_empty_state(
+    report: &crate::health_types::HealthReport,
+    elapsed: Duration,
+    quiet: bool,
+) {
+    if quiet {
+        return;
+    }
+
+    eprintln!(
+        "{}",
+        format!(
+            "\u{2713} No functions exceed complexity thresholds ({:.2}s)",
+            elapsed.as_secs_f64()
+        )
+        .green()
+        .bold()
+    );
+    eprintln!(
+        "{}",
+        format!(
+            "  {} functions analyzed (max cyclomatic: {}, max cognitive: {}, max CRAP: {:.1})",
+            report.summary.functions_analyzed,
+            report.summary.max_cyclomatic_threshold,
+            report.summary.max_cognitive_threshold,
+            report.summary.max_crap_threshold,
+        )
+        .dimmed()
+    );
+}
+
+fn print_health_final_status(report: &crate::health_types::HealthReport, elapsed: Duration) {
+    let s = &report.summary;
+    let mut parts = Vec::new();
+    parts.push(format!("{} above threshold", s.functions_above_threshold));
+    parts.push(format!("{} analyzed", s.functions_analyzed));
+    if let Some(avg) = s.average_maintainability {
+        let label = if avg >= 85.0 {
+            "good"
+        } else if avg >= 65.0 {
+            "moderate"
+        } else {
+            "low"
+        };
+        parts.push(format!("maintainability {avg:.1} ({label})"));
+    }
+    if let Some(ref production) = report.runtime_coverage {
+        parts.push(format!(
+            "{} unhit in production",
+            production.summary.functions_unhit
+        ));
+    }
+    eprintln!(
+        "{}",
+        format!(
+            "\u{2717} {} ({:.2}s)",
+            parts.join(" \u{00b7} "),
+            elapsed.as_secs_f64()
+        )
+        .red()
+        .bold()
+    );
+    if s.average_maintainability.is_some_and(|mi| mi < 85.0) {
         eprintln!(
             "{}",
-            format!(
-                "\u{2717} {} ({:.2}s)",
-                parts.join(" \u{00b7} "),
-                elapsed.as_secs_f64()
-            )
-            .red()
-            .bold()
+            "  Maintainability scale: good \u{2265}85, moderate \u{2265}65, low <65 (0\u{2013}100)"
+                .dimmed()
         );
-        if s.average_maintainability.is_some_and(|mi| mi < 85.0) {
-            eprintln!(
-                "{}",
-                "  Maintainability scale: good \u{2265}85, moderate \u{2265}65, low <65 (0\u{2013}100)"
-                    .dimmed()
-            );
-        }
     }
 }
 
@@ -180,11 +194,27 @@ fn render_css_analytics(lines: &mut Vec<String>, report: &crate::health_types::H
     let Some(ref css) = report.css_analytics else {
         return;
     };
-    let summary = &css.summary;
 
     lines.push(String::new());
     lines.push("CSS health".bold().to_string());
+    render_css_analytics_summary(lines, &css.summary);
+    render_css_keyframe_candidates(lines, css);
+    render_css_unused_at_rules(lines, css);
+    render_css_scoped_unused(lines, css);
+    render_css_duplicate_blocks(lines, css);
+    render_css_tailwind_arbitrary(lines, css);
+    render_css_unresolved_classes(lines, css);
+    render_css_unreferenced_classes(lines, css);
+    render_css_unused_font_faces(lines, css);
+    render_css_unused_theme_tokens(lines, css);
+    render_css_font_size_unit_mix(lines, css);
+    render_css_notable_rules(lines, css);
+}
 
+fn render_css_analytics_summary(
+    lines: &mut Vec<String>,
+    summary: &crate::health_types::CssAnalyticsSummary,
+) {
     let important_pct = if summary.total_declarations > 0 {
         f64::from(summary.important_declarations) / f64::from(summary.total_declarations) * 100.0
     } else {
@@ -226,8 +256,13 @@ fn render_css_analytics(lines: &mut Vec<String>, report: &crate::health_types::H
             summary.custom_properties_unreferenced,
         ));
     }
-    render_css_keyframe_candidates(lines, css);
-    render_css_unused_at_rules(lines, css);
+}
+
+fn render_css_scoped_unused(
+    lines: &mut Vec<String>,
+    css: &crate::health_types::CssAnalyticsReport,
+) {
+    let summary = &css.summary;
     if !css.scoped_unused.is_empty() {
         let class_word = if summary.scoped_unused_classes == 1 {
             "class"
@@ -255,14 +290,11 @@ fn render_css_analytics(lines: &mut Vec<String>, report: &crate::health_types::H
             );
         }
     }
-    render_css_duplicate_blocks(lines, css);
-    render_css_tailwind_arbitrary(lines, css);
-    render_css_unresolved_classes(lines, css);
-    render_css_unreferenced_classes(lines, css);
-    render_css_unused_font_faces(lines, css);
-    render_css_unused_theme_tokens(lines, css);
-    render_css_font_size_unit_mix(lines, css);
+}
 
+fn sorted_css_notable_rules(
+    css: &crate::health_types::CssAnalyticsReport,
+) -> Vec<(&str, &fallow_types::extract::CssRuleMetric)> {
     let mut notable: Vec<(&str, &fallow_types::extract::CssRuleMetric)> = css
         .files
         .iter()
@@ -273,7 +305,6 @@ fn render_css_analytics(lines: &mut Vec<String>, report: &crate::health_types::H
                 .map(move |rule| (file.path.as_str(), rule))
         })
         .collect();
-    let total_notable = notable.len();
     notable.sort_by(|a, b| {
         let key = |m: &fallow_types::extract::CssRuleMetric| {
             (
@@ -290,6 +321,15 @@ fn render_css_analytics(lines: &mut Vec<String>, report: &crate::health_types::H
             .cmp(&key(a.1))
             .then_with(|| (a.0, a.1.line).cmp(&(b.0, b.1.line)))
     });
+    notable
+}
+
+fn render_css_notable_rules(
+    lines: &mut Vec<String>,
+    css: &crate::health_types::CssAnalyticsReport,
+) {
+    let notable = sorted_css_notable_rules(css);
+    let total_notable = notable.len();
 
     for (path, rule) in notable.iter().take(5) {
         lines.push(format!(

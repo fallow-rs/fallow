@@ -1095,7 +1095,20 @@ fn sarif_member_import_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
 }
 
 fn sarif_graph_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
-    [
+    let mut specs = sarif_cycle_rule_specs(rules);
+    specs.extend(sarif_boundary_rule_specs(rules));
+    specs.extend(sarif_framework_rule_specs(rules));
+    specs.extend(sarif_component_rule_specs(rules));
+    specs.push((
+        "fallow/stale-suppression",
+        "Suppression comment or tag no longer matches any issue",
+        rules.stale_suppressions,
+    ));
+    specs
+}
+
+fn sarif_cycle_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
+    vec![
         (
             "fallow/circular-dependency",
             "Circular dependency chain detected",
@@ -1106,6 +1119,11 @@ fn sarif_graph_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
             "Two or more barrel files re-export from each other in a loop",
             rules.re_export_cycle,
         ),
+    ]
+}
+
+fn sarif_boundary_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
+    vec![
         (
             "fallow/boundary-violation",
             "Import crosses an architecture boundary",
@@ -1126,6 +1144,11 @@ fn sarif_graph_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
             "Banned call or import matched a rule-pack rule",
             rules.policy_violation,
         ),
+    ]
+}
+
+fn sarif_framework_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
+    vec![
         (
             "fallow/invalid-client-export",
             "\"use client\" file exports a server-only / route-config name",
@@ -1141,6 +1164,11 @@ fn sarif_graph_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
             "\"use client\" / \"use server\" directive is not in the leading position and is ignored",
             rules.misplaced_directive,
         ),
+    ]
+}
+
+fn sarif_component_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
+    vec![
         (
             "fallow/unprovided-inject",
             "A Vue inject / Svelte getContext whose key is provided nowhere in the project",
@@ -1196,13 +1224,7 @@ fn sarif_graph_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
             "Sibling Next.js dynamic route segments use different slug names at the same position",
             rules.dynamic_segment_name_conflict,
         ),
-        (
-            "fallow/stale-suppression",
-            "Suppression comment or tag no longer matches any issue",
-            rules.stale_suppressions,
-        ),
     ]
-    .into()
 }
 
 fn sarif_workspace_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
@@ -1245,54 +1267,7 @@ pub fn build_sarif(
     let mut sarif_results = Vec::new();
     let mut snippets = SourceSnippetCache::default();
 
-    push_sarif_results(
-        &mut sarif_results,
-        &results.unused_files,
-        &mut snippets,
-        |f| sarif_unused_file_fields(&f.file, root, severity_to_sarif_level(rules.unused_files)),
-    );
-    push_sarif_results(
-        &mut sarif_results,
-        &results.unused_exports,
-        &mut snippets,
-        |e| {
-            sarif_export_fields(
-                &e.export,
-                root,
-                "fallow/unused-export",
-                severity_to_sarif_level(rules.unused_exports),
-                "Export",
-                "Re-export",
-            )
-        },
-    );
-    push_sarif_results(
-        &mut sarif_results,
-        &results.unused_types,
-        &mut snippets,
-        |e| {
-            sarif_export_fields(
-                &e.export,
-                root,
-                "fallow/unused-type",
-                severity_to_sarif_level(rules.unused_types),
-                "Type export",
-                "Type re-export",
-            )
-        },
-    );
-    push_sarif_results(
-        &mut sarif_results,
-        &results.private_type_leaks,
-        &mut snippets,
-        |e| {
-            sarif_private_type_leak_fields(
-                &e.leak,
-                root,
-                severity_to_sarif_level(rules.private_type_leaks),
-            )
-        },
-    );
+    push_primary_dead_code_sarif_results(&mut sarif_results, results, root, rules, &mut snippets);
     push_dependency_sarif_results(&mut sarif_results, results, root, rules, &mut snippets);
     push_member_sarif_results(&mut sarif_results, results, root, rules, &mut snippets);
     push_sarif_results(
@@ -1311,6 +1286,67 @@ pub fn build_sarif(
     push_graph_sarif_results(&mut sarif_results, results, root, rules, &mut snippets);
     push_catalog_sarif_results(&mut sarif_results, results, root, rules, &mut snippets);
 
+    let sarif_rules = build_sarif_rules(rules);
+    sarif_document(&sarif_results, &sarif_rules)
+}
+
+fn push_primary_dead_code_sarif_results(
+    sarif_results: &mut Vec<serde_json::Value>,
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+    snippets: &mut SourceSnippetCache,
+) {
+    push_sarif_results(sarif_results, &results.unused_files, snippets, |finding| {
+        sarif_unused_file_fields(
+            &finding.file,
+            root,
+            severity_to_sarif_level(rules.unused_files),
+        )
+    });
+    push_sarif_results(
+        sarif_results,
+        &results.unused_exports,
+        snippets,
+        |finding| {
+            sarif_export_fields(
+                &finding.export,
+                root,
+                "fallow/unused-export",
+                severity_to_sarif_level(rules.unused_exports),
+                "Export",
+                "Re-export",
+            )
+        },
+    );
+    push_sarif_results(sarif_results, &results.unused_types, snippets, |finding| {
+        sarif_export_fields(
+            &finding.export,
+            root,
+            "fallow/unused-type",
+            severity_to_sarif_level(rules.unused_types),
+            "Type export",
+            "Type re-export",
+        )
+    });
+    push_sarif_results(
+        sarif_results,
+        &results.private_type_leaks,
+        snippets,
+        |finding| {
+            sarif_private_type_leak_fields(
+                &finding.leak,
+                root,
+                severity_to_sarif_level(rules.private_type_leaks),
+            )
+        },
+    );
+}
+
+fn sarif_document(
+    sarif_results: &[serde_json::Value],
+    sarif_rules: &[serde_json::Value],
+) -> serde_json::Value {
     serde_json::json!({
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
         "version": "2.1.0",
@@ -1320,7 +1356,7 @@ pub fn build_sarif(
                     "name": "fallow",
                     "version": env!("CARGO_PKG_VERSION"),
                     "informationUri": "https://github.com/fallow-rs/fallow",
-                    "rules": build_sarif_rules(rules)
+                    "rules": sarif_rules
                 }
             },
             "results": sarif_results
@@ -1565,6 +1601,19 @@ fn push_graph_sarif_results(
     rules: &RulesConfig,
     snippets: &mut SourceSnippetCache,
 ) {
+    push_structure_sarif_results(sarif_results, results, root, rules, snippets);
+    push_framework_sarif_results(sarif_results, results, root, rules, snippets);
+    push_route_sarif_results(sarif_results, results, root, rules, snippets);
+    push_suppression_sarif_results(sarif_results, results, root, rules, snippets);
+}
+
+fn push_structure_sarif_results(
+    sarif_results: &mut Vec<serde_json::Value>,
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+    snippets: &mut SourceSnippetCache,
+) {
     push_sarif_results(
         sarif_results,
         &results.circular_dependencies,
@@ -1618,6 +1667,15 @@ fn push_graph_sarif_results(
     push_sarif_results(sarif_results, &results.policy_violations, snippets, |v| {
         sarif_policy_violation_fields(&v.violation, root)
     });
+}
+
+fn push_framework_sarif_results(
+    sarif_results: &mut Vec<serde_json::Value>,
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+    snippets: &mut SourceSnippetCache,
+) {
     push_sarif_results(
         sarif_results,
         &results.invalid_client_exports,
@@ -1674,6 +1732,15 @@ fn push_graph_sarif_results(
         },
     );
     push_component_contract_sarif_results(sarif_results, results, root, rules, snippets);
+}
+
+fn push_route_sarif_results(
+    sarif_results: &mut Vec<serde_json::Value>,
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+    snippets: &mut SourceSnippetCache,
+) {
     push_sarif_results(sarif_results, &results.route_collisions, snippets, |c| {
         sarif_route_collision_fields(
             &c.collision,
@@ -1693,6 +1760,15 @@ fn push_graph_sarif_results(
             )
         },
     );
+}
+
+fn push_suppression_sarif_results(
+    sarif_results: &mut Vec<serde_json::Value>,
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+    snippets: &mut SourceSnippetCache,
+) {
     push_sarif_results(sarif_results, &results.stale_suppressions, snippets, |s| {
         sarif_stale_suppression_fields(s, root, severity_to_sarif_level(rules.stale_suppressions))
     });
@@ -1976,6 +2052,13 @@ fn append_health_sarif_results(
 }
 
 fn health_sarif_rules() -> Vec<serde_json::Value> {
+    let mut rules = health_complexity_sarif_rules();
+    rules.extend(health_runtime_sarif_rules());
+    rules.extend(health_coverage_intelligence_sarif_rules());
+    rules
+}
+
+fn health_complexity_sarif_rules() -> Vec<serde_json::Value> {
     vec![
         sarif_rule(
             "fallow/high-cyclomatic-complexity",
@@ -2002,6 +2085,11 @@ fn health_sarif_rules() -> Vec<serde_json::Value> {
             "File identified as a high-priority refactoring candidate",
             "warning",
         ),
+    ]
+}
+
+fn health_runtime_sarif_rules() -> Vec<serde_json::Value> {
+    vec![
         sarif_rule(
             "fallow/untested-file",
             "Runtime-reachable file has no test dependency path",
@@ -2037,6 +2125,11 @@ fn health_sarif_rules() -> Vec<serde_json::Value> {
             "Runtime coverage finding",
             "note",
         ),
+    ]
+}
+
+fn health_coverage_intelligence_sarif_rules() -> Vec<serde_json::Value> {
+    vec![
         sarif_rule(
             "fallow/coverage-intelligence-risky-change",
             "Changed hot path combines high CRAP and low test coverage",

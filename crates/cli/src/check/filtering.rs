@@ -22,6 +22,16 @@ pub fn filter_to_workspaces(
     let pkg_jsons: Vec<PathBuf> = ws_roots.iter().map(|r| r.join("package.json")).collect();
     let in_pkg_jsons = |p: &Path| pkg_jsons.iter().any(|pkg| p == pkg);
 
+    filter_workspace_source_findings(results, &any_under);
+    filter_workspace_dependency_findings(results, &any_under, &in_pkg_jsons);
+    filter_workspace_graph_findings(results, &any_under);
+    filter_workspace_policy_findings(results, &any_under);
+}
+
+fn filter_workspace_source_findings(
+    results: &mut fallow_core::results::AnalysisResults,
+    any_under: &dyn Fn(&Path) -> bool,
+) {
     results.unused_files.retain(|f| any_under(&f.file.path));
     results.unused_exports.retain(|e| any_under(&e.export.path));
     results.unused_types.retain(|e| any_under(&e.export.path));
@@ -58,7 +68,13 @@ pub fn filter_to_workspaces(
     results
         .unresolved_imports
         .retain(|i| any_under(&i.import.path));
+}
 
+fn filter_workspace_dependency_findings(
+    results: &mut fallow_core::results::AnalysisResults,
+    any_under: &dyn Fn(&Path) -> bool,
+    in_pkg_jsons: &dyn Fn(&Path) -> bool,
+) {
     results
         .unused_dependencies
         .retain(|d| in_pkg_jsons(&d.dep.path));
@@ -78,7 +94,14 @@ pub fn filter_to_workspaces(
     results
         .unlisted_dependencies
         .retain(|d| d.dep.imported_from.iter().any(|s| any_under(&s.path)));
+    results.unused_dependency_overrides.clear();
+    results.misconfigured_dependency_overrides.clear();
+}
 
+fn filter_workspace_graph_findings(
+    results: &mut fallow_core::results::AnalysisResults,
+    any_under: &dyn Fn(&Path) -> bool,
+) {
     for dup in &mut results.duplicate_exports {
         dup.export.locations.retain(|loc| any_under(&loc.path));
     }
@@ -93,7 +116,12 @@ pub fn filter_to_workspaces(
     results
         .re_export_cycles
         .retain(|c| c.cycle.files.iter().any(|f| any_under(f)));
+}
 
+fn filter_workspace_policy_findings(
+    results: &mut fallow_core::results::AnalysisResults,
+    any_under: &dyn Fn(&Path) -> bool,
+) {
     results
         .boundary_violations
         .retain(|v| any_under(&v.violation.from_path));
@@ -119,8 +147,6 @@ pub fn filter_to_workspaces(
     results
         .unresolved_catalog_references
         .retain(|r| any_under(&r.reference.path));
-    results.unused_dependency_overrides.clear();
-    results.misconfigured_dependency_overrides.clear();
 
     results
         .invalid_client_exports
@@ -384,6 +410,18 @@ pub fn filter_results_by_diff(
         }
     };
 
+    filter_diff_source_findings(results, &touches_file, &line_in_diff);
+    filter_diff_security_findings(results, &touches_file, &line_in_diff);
+    filter_diff_dependency_findings(results, &line_in_diff);
+    filter_diff_graph_findings(results, &touches_file, &line_in_diff);
+    filter_diff_framework_findings(results, &line_in_diff);
+}
+
+fn filter_diff_source_findings(
+    results: &mut fallow_core::results::AnalysisResults,
+    touches_file: &dyn Fn(&Path) -> bool,
+    line_in_diff: &dyn Fn(&Path, u32) -> bool,
+) {
     results.unused_files.retain(|f| touches_file(&f.file.path));
 
     results
@@ -425,6 +463,13 @@ pub fn filter_results_by_diff(
     results
         .unresolved_imports
         .retain(|i| line_in_diff(&i.import.path, i.import.line));
+}
+
+fn filter_diff_security_findings(
+    results: &mut fallow_core::results::AnalysisResults,
+    touches_file: &dyn Fn(&Path) -> bool,
+    line_in_diff: &dyn Fn(&Path, u32) -> bool,
+) {
     results.security_findings.retain(|f| {
         line_in_diff(&f.path, f.line)
             || f.trace.iter().any(|hop| {
@@ -447,7 +492,12 @@ pub fn filter_results_by_diff(
     results
         .security_unresolved_callee_diagnostics
         .retain(|d| line_in_diff(&d.path, d.line));
+}
 
+fn filter_diff_dependency_findings(
+    results: &mut fallow_core::results::AnalysisResults,
+    line_in_diff: &dyn Fn(&Path, u32) -> bool,
+) {
     for unlisted in &mut results.unlisted_dependencies {
         unlisted
             .dep
@@ -457,7 +507,13 @@ pub fn filter_results_by_diff(
     results
         .unlisted_dependencies
         .retain(|d| !d.dep.imported_from.is_empty());
+}
 
+fn filter_diff_graph_findings(
+    results: &mut fallow_core::results::AnalysisResults,
+    touches_file: &dyn Fn(&Path) -> bool,
+    line_in_diff: &dyn Fn(&Path, u32) -> bool,
+) {
     results.duplicate_exports.retain(|d| {
         d.export
             .locations
@@ -480,7 +536,12 @@ pub fn filter_results_by_diff(
     results
         .stale_suppressions
         .retain(|s| line_in_diff(&s.path, s.line));
+}
 
+fn filter_diff_framework_findings(
+    results: &mut fallow_core::results::AnalysisResults,
+    line_in_diff: &dyn Fn(&Path, u32) -> bool,
+) {
     results
         .invalid_client_exports
         .retain(|e| line_in_diff(&e.export.path, e.export.line));

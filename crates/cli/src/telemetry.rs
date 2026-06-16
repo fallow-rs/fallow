@@ -1373,6 +1373,14 @@ fn example_event() -> TelemetryEvent {
 }
 
 fn field_purposes() -> Vec<(&'static str, &'static str)> {
+    let mut fields = telemetry_context_field_purposes();
+    fields.extend(telemetry_analysis_field_purposes());
+    fields.extend(telemetry_result_field_purposes());
+    fields.extend(telemetry_run_field_purposes());
+    fields
+}
+
+fn telemetry_context_field_purposes() -> Vec<(&'static str, &'static str)> {
     vec![
         (
             "workflow",
@@ -1414,6 +1422,11 @@ fn field_purposes() -> Vec<(&'static str, &'static str)> {
             "output_destination",
             "Classifies the report sink as stdout, file, or CI comment without storing paths or URLs.",
         ),
+    ]
+}
+
+fn telemetry_analysis_field_purposes() -> Vec<(&'static str, &'static str)> {
+    vec![
         (
             "analysis_mode",
             "Classifies static, runtime-coverage, production-coverage, security, and fix workflows without storing raw command lines.",
@@ -1430,6 +1443,11 @@ fn field_purposes() -> Vec<(&'static str, &'static str)> {
             "avg_fan_out_bucket",
             "Coarse average fan-out from an already-retained module graph, derived from existing module and edge counts only. Absent when the workflow has no retained graph.",
         ),
+    ]
+}
+
+fn telemetry_result_field_purposes() -> Vec<(&'static str, &'static str)> {
+    vec![
         (
             "findings_present",
             "Whether the analysis surfaced any findings, decoupled from the exit-code gate. On combined and audit workflows it is an OR across sub-analyses; per-analysis find-rate is answerable only on standalone dead_code, dupes, and health.",
@@ -1454,6 +1472,11 @@ fn field_purposes() -> Vec<(&'static str, &'static str)> {
             "mcp_tool",
             "Which MCP tool an agent called, from a fixed allowlist, so MCP usage is attributable per tool.",
         ),
+    ]
+}
+
+fn telemetry_run_field_purposes() -> Vec<(&'static str, &'static str)> {
+    vec![
         (
             "has_parent_run",
             "Shows whether a run has a sanitized parent-run correlation token without exposing the token.",

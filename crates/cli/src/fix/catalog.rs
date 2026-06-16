@@ -317,12 +317,7 @@ pub(super) fn apply_empty_catalog_group_fixes(
         return summary;
     }
 
-    let mut by_path: rustc_hash::FxHashMap<&Path, Vec<&EmptyCatalogGroup>> =
-        rustc_hash::FxHashMap::default();
-    for group in groups {
-        let group = &group.group;
-        by_path.entry(group.path.as_path()).or_default().push(group);
-    }
+    let by_path = group_empty_catalog_groups_by_path(groups);
 
     for (relative_path, file_groups) in by_path {
         let absolute = root.join(relative_path);
@@ -346,23 +341,14 @@ pub(super) fn apply_empty_catalog_group_fixes(
         }
 
         let lines: Vec<&str> = content.split(meta.line_ending).collect();
-        let mut to_remove: Vec<(usize, &EmptyCatalogGroup)> = Vec::new();
-        for group in &file_groups {
-            let line_idx = group.line.saturating_sub(1) as usize;
-            if line_idx >= lines.len() {
-                summary.skipped += 1;
-                fixes.push(skip_group_record(
-                    group,
-                    "line_out_of_range",
-                    "Skipped: the reported line is past the end of pnpm-workspace.yaml; the file may have been edited since fallow dead-code ran",
-                    output,
-                    relative_path,
-                ));
-                continue;
-            }
-            to_remove.push((line_idx, group));
-        }
-
+        let mut to_remove = collect_empty_catalog_group_removals(
+            &file_groups,
+            &lines,
+            &mut summary,
+            fixes,
+            output,
+            relative_path,
+        );
         if to_remove.is_empty() {
             continue;
         }
@@ -371,17 +357,7 @@ pub(super) fn apply_empty_catalog_group_fixes(
         to_remove.dedup_by_key(|(line_idx, _)| *line_idx);
 
         if dry_run {
-            for (line_idx, group) in &to_remove {
-                if !matches!(output, OutputFormat::Json) {
-                    eprintln!(
-                        "Would remove empty catalog group from {}:{} `{}`",
-                        relative_path.display(),
-                        line_idx + 1,
-                        group.catalog_name,
-                    );
-                }
-                fixes.push(remove_group_record(group, *line_idx, false, relative_path));
-            }
+            record_empty_catalog_group_dry_run(&to_remove, output, relative_path, fixes);
             summary.applied += to_remove.len();
             continue;
         }
@@ -419,6 +395,64 @@ pub(super) fn apply_empty_catalog_group_fixes(
     }
 
     summary
+}
+
+fn group_empty_catalog_groups_by_path(
+    groups: &[EmptyCatalogGroupFinding],
+) -> rustc_hash::FxHashMap<&Path, Vec<&EmptyCatalogGroup>> {
+    let mut by_path: rustc_hash::FxHashMap<&Path, Vec<&EmptyCatalogGroup>> =
+        rustc_hash::FxHashMap::default();
+    for group in groups {
+        let group = &group.group;
+        by_path.entry(group.path.as_path()).or_default().push(group);
+    }
+    by_path
+}
+
+fn collect_empty_catalog_group_removals<'a>(
+    file_groups: &[&'a EmptyCatalogGroup],
+    lines: &[&str],
+    summary: &mut CatalogFixSummary,
+    fixes: &mut Vec<serde_json::Value>,
+    output: OutputFormat,
+    relative_path: &Path,
+) -> Vec<(usize, &'a EmptyCatalogGroup)> {
+    let mut to_remove: Vec<(usize, &EmptyCatalogGroup)> = Vec::new();
+    for group in file_groups {
+        let line_idx = group.line.saturating_sub(1) as usize;
+        if line_idx >= lines.len() {
+            summary.skipped += 1;
+            fixes.push(skip_group_record(
+                group,
+                "line_out_of_range",
+                "Skipped: the reported line is past the end of pnpm-workspace.yaml; the file may have been edited since fallow dead-code ran",
+                output,
+                relative_path,
+            ));
+            continue;
+        }
+        to_remove.push((line_idx, group));
+    }
+    to_remove
+}
+
+fn record_empty_catalog_group_dry_run(
+    to_remove: &[(usize, &EmptyCatalogGroup)],
+    output: OutputFormat,
+    relative_path: &Path,
+    fixes: &mut Vec<serde_json::Value>,
+) {
+    for (line_idx, group) in to_remove {
+        if !matches!(output, OutputFormat::Json) {
+            eprintln!(
+                "Would remove empty catalog group from {}:{} `{}`",
+                relative_path.display(),
+                line_idx + 1,
+                group.catalog_name,
+            );
+        }
+        fixes.push(remove_group_record(group, *line_idx, false, relative_path));
+    }
 }
 
 /// Output of `apply_catalog_entry_fixes` consumed by the orchestrator.

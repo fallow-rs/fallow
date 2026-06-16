@@ -73,6 +73,16 @@ fn apply_file_override_rules(
     results: &mut fallow_core::results::AnalysisResults,
     config: &ResolvedConfig,
 ) {
+    apply_dead_code_override_rules(results, config);
+    apply_catalog_override_rules(results, config);
+    apply_framework_override_rules(results, config);
+    apply_circular_override_rules(results, config);
+}
+
+fn apply_dead_code_override_rules(
+    results: &mut fallow_core::results::AnalysisResults,
+    config: &ResolvedConfig,
+) {
     results
         .unused_files
         .retain(|f| config.resolve_rules_for_path(&f.file.path).unused_files != Severity::Off);
@@ -148,6 +158,12 @@ fn apply_file_override_rules(
             .unresolved_imports
             != Severity::Off
     });
+}
+
+fn apply_catalog_override_rules(
+    results: &mut fallow_core::results::AnalysisResults,
+    config: &ResolvedConfig,
+) {
     results
         .stale_suppressions
         .retain(|s| config.resolve_rules_for_path(&s.path).stale_suppressions != Severity::Off);
@@ -175,6 +191,12 @@ fn apply_file_override_rules(
             .misconfigured_dependency_overrides
             != Severity::Off
     });
+}
+
+fn apply_framework_override_rules(
+    results: &mut fallow_core::results::AnalysisResults,
+    config: &ResolvedConfig,
+) {
     results.invalid_client_exports.retain(|e| {
         config
             .resolve_rules_for_path(&e.export.path)
@@ -205,6 +227,12 @@ fn apply_file_override_rules(
             .dynamic_segment_name_conflict
             != Severity::Off
     });
+}
+
+fn apply_circular_override_rules(
+    results: &mut fallow_core::results::AnalysisResults,
+    config: &ResolvedConfig,
+) {
     results.circular_dependencies.retain(|c| {
         c.cycle
             .files
@@ -331,6 +359,15 @@ fn has_override_file_scoped_error(
     results: &fallow_core::results::AnalysisResults,
     config: &ResolvedConfig,
 ) -> bool {
+    has_override_dead_code_error(results, config)
+        || has_override_catalog_boundary_error(results, config)
+        || has_override_framework_error(results, config)
+}
+
+fn has_override_dead_code_error(
+    results: &fallow_core::results::AnalysisResults,
+    config: &ResolvedConfig,
+) -> bool {
     results
         .unused_files
         .iter()
@@ -408,10 +445,16 @@ fn has_override_file_scoped_error(
                 .unresolved_imports
                 == Severity::Error
         })
-        || results
-            .stale_suppressions
-            .iter()
-            .any(|s| config.resolve_rules_for_path(&s.path).stale_suppressions == Severity::Error)
+}
+
+fn has_override_catalog_boundary_error(
+    results: &fallow_core::results::AnalysisResults,
+    config: &ResolvedConfig,
+) -> bool {
+    results
+        .stale_suppressions
+        .iter()
+        .any(|s| config.resolve_rules_for_path(&s.path).stale_suppressions == Severity::Error)
         || results.unresolved_catalog_references.iter().any(|r| {
             config
                 .resolve_rules_for_path(&r.reference.path)
@@ -441,36 +484,38 @@ fn has_override_file_scoped_error(
                 config.resolve_rules_for_path(path).circular_dependencies == Severity::Error
             })
         })
-        || results.invalid_client_exports.iter().any(|e| {
-            config
-                .resolve_rules_for_path(&e.export.path)
-                .invalid_client_export
-                == Severity::Error
-        })
-        || results.mixed_client_server_barrels.iter().any(|b| {
-            config
-                .resolve_rules_for_path(&b.barrel.path)
-                .mixed_client_server_barrel
-                == Severity::Error
-        })
-        || results.misplaced_directives.iter().any(|d| {
-            config
-                .resolve_rules_for_path(&d.directive_site.path)
-                .misplaced_directive
-                == Severity::Error
-        })
-        || results.route_collisions.iter().any(|c| {
-            config
-                .resolve_rules_for_path(&c.collision.path)
-                .route_collision
-                == Severity::Error
-        })
-        || results.dynamic_segment_name_conflicts.iter().any(|c| {
-            config
-                .resolve_rules_for_path(&c.conflict.path)
-                .dynamic_segment_name_conflict
-                == Severity::Error
-        })
+}
+
+fn has_override_framework_error(
+    results: &fallow_core::results::AnalysisResults,
+    config: &ResolvedConfig,
+) -> bool {
+    results.invalid_client_exports.iter().any(|e| {
+        config
+            .resolve_rules_for_path(&e.export.path)
+            .invalid_client_export
+            == Severity::Error
+    }) || results.mixed_client_server_barrels.iter().any(|b| {
+        config
+            .resolve_rules_for_path(&b.barrel.path)
+            .mixed_client_server_barrel
+            == Severity::Error
+    }) || results.misplaced_directives.iter().any(|d| {
+        config
+            .resolve_rules_for_path(&d.directive_site.path)
+            .misplaced_directive
+            == Severity::Error
+    }) || results.route_collisions.iter().any(|c| {
+        config
+            .resolve_rules_for_path(&c.collision.path)
+            .route_collision
+            == Severity::Error
+    }) || results.dynamic_segment_name_conflicts.iter().any(|c| {
+        config
+            .resolve_rules_for_path(&c.conflict.path)
+            .dynamic_segment_name_conflict
+            == Severity::Error
+    })
 }
 
 fn has_default_file_scoped_error(
@@ -564,116 +609,52 @@ fn has_project_level_error(
 
 /// Promote all `Warn` severities to `Error` for a single run.
 pub fn promote_warns_to_errors(rules: &mut RulesConfig) {
-    if rules.unused_files == Severity::Warn {
-        rules.unused_files = Severity::Error;
+    for rule in [
+        &mut rules.unused_files,
+        &mut rules.unused_exports,
+        &mut rules.unused_types,
+        &mut rules.private_type_leaks,
+        &mut rules.unused_dependencies,
+        &mut rules.unused_dev_dependencies,
+        &mut rules.unused_optional_dependencies,
+        &mut rules.unused_enum_members,
+        &mut rules.unused_class_members,
+        &mut rules.unused_store_members,
+        &mut rules.unprovided_injects,
+        &mut rules.unrendered_components,
+        &mut rules.unused_component_props,
+        &mut rules.unused_component_emits,
+        &mut rules.unused_server_actions,
+        &mut rules.unused_load_data_keys,
+        &mut rules.unresolved_imports,
+        &mut rules.unlisted_dependencies,
+        &mut rules.duplicate_exports,
+        &mut rules.type_only_dependencies,
+        &mut rules.test_only_dependencies,
+        &mut rules.circular_dependencies,
+        &mut rules.re_export_cycle,
+        &mut rules.boundary_violation,
+        &mut rules.coverage_gaps,
+        &mut rules.stale_suppressions,
+        &mut rules.unused_catalog_entries,
+        &mut rules.empty_catalog_groups,
+        &mut rules.unresolved_catalog_references,
+        &mut rules.unused_dependency_overrides,
+        &mut rules.misconfigured_dependency_overrides,
+        &mut rules.policy_violation,
+        &mut rules.invalid_client_export,
+        &mut rules.mixed_client_server_barrel,
+        &mut rules.misplaced_directive,
+        &mut rules.route_collision,
+        &mut rules.dynamic_segment_name_conflict,
+    ] {
+        promote_warn_to_error(rule);
     }
-    if rules.unused_exports == Severity::Warn {
-        rules.unused_exports = Severity::Error;
-    }
-    if rules.unused_types == Severity::Warn {
-        rules.unused_types = Severity::Error;
-    }
-    if rules.private_type_leaks == Severity::Warn {
-        rules.private_type_leaks = Severity::Error;
-    }
-    if rules.unused_dependencies == Severity::Warn {
-        rules.unused_dependencies = Severity::Error;
-    }
-    if rules.unused_dev_dependencies == Severity::Warn {
-        rules.unused_dev_dependencies = Severity::Error;
-    }
-    if rules.unused_optional_dependencies == Severity::Warn {
-        rules.unused_optional_dependencies = Severity::Error;
-    }
-    if rules.unused_enum_members == Severity::Warn {
-        rules.unused_enum_members = Severity::Error;
-    }
-    if rules.unused_class_members == Severity::Warn {
-        rules.unused_class_members = Severity::Error;
-    }
-    if rules.unused_store_members == Severity::Warn {
-        rules.unused_store_members = Severity::Error;
-    }
-    if rules.unprovided_injects == Severity::Warn {
-        rules.unprovided_injects = Severity::Error;
-    }
-    if rules.unrendered_components == Severity::Warn {
-        rules.unrendered_components = Severity::Error;
-    }
-    if rules.unused_component_props == Severity::Warn {
-        rules.unused_component_props = Severity::Error;
-    }
-    if rules.unused_component_emits == Severity::Warn {
-        rules.unused_component_emits = Severity::Error;
-    }
-    if rules.unused_server_actions == Severity::Warn {
-        rules.unused_server_actions = Severity::Error;
-    }
-    if rules.unused_load_data_keys == Severity::Warn {
-        rules.unused_load_data_keys = Severity::Error;
-    }
-    if rules.unresolved_imports == Severity::Warn {
-        rules.unresolved_imports = Severity::Error;
-    }
-    if rules.unlisted_dependencies == Severity::Warn {
-        rules.unlisted_dependencies = Severity::Error;
-    }
-    if rules.duplicate_exports == Severity::Warn {
-        rules.duplicate_exports = Severity::Error;
-    }
-    if rules.type_only_dependencies == Severity::Warn {
-        rules.type_only_dependencies = Severity::Error;
-    }
-    if rules.test_only_dependencies == Severity::Warn {
-        rules.test_only_dependencies = Severity::Error;
-    }
-    if rules.circular_dependencies == Severity::Warn {
-        rules.circular_dependencies = Severity::Error;
-    }
-    if rules.re_export_cycle == Severity::Warn {
-        rules.re_export_cycle = Severity::Error;
-    }
-    if rules.boundary_violation == Severity::Warn {
-        rules.boundary_violation = Severity::Error;
-    }
-    if rules.coverage_gaps == Severity::Warn {
-        rules.coverage_gaps = Severity::Error;
-    }
-    if rules.stale_suppressions == Severity::Warn {
-        rules.stale_suppressions = Severity::Error;
-    }
-    if rules.unused_catalog_entries == Severity::Warn {
-        rules.unused_catalog_entries = Severity::Error;
-    }
-    if rules.empty_catalog_groups == Severity::Warn {
-        rules.empty_catalog_groups = Severity::Error;
-    }
-    if rules.unresolved_catalog_references == Severity::Warn {
-        rules.unresolved_catalog_references = Severity::Error;
-    }
-    if rules.unused_dependency_overrides == Severity::Warn {
-        rules.unused_dependency_overrides = Severity::Error;
-    }
-    if rules.misconfigured_dependency_overrides == Severity::Warn {
-        rules.misconfigured_dependency_overrides = Severity::Error;
-    }
-    if rules.policy_violation == Severity::Warn {
-        rules.policy_violation = Severity::Error;
-    }
-    if rules.invalid_client_export == Severity::Warn {
-        rules.invalid_client_export = Severity::Error;
-    }
-    if rules.mixed_client_server_barrel == Severity::Warn {
-        rules.mixed_client_server_barrel = Severity::Error;
-    }
-    if rules.misplaced_directive == Severity::Warn {
-        rules.misplaced_directive = Severity::Error;
-    }
-    if rules.route_collision == Severity::Warn {
-        rules.route_collision = Severity::Error;
-    }
-    if rules.dynamic_segment_name_conflict == Severity::Warn {
-        rules.dynamic_segment_name_conflict = Severity::Error;
+}
+
+fn promote_warn_to_error(rule: &mut Severity) {
+    if *rule == Severity::Warn {
+        *rule = Severity::Error;
     }
 }
 

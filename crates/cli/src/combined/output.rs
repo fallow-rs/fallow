@@ -32,6 +32,32 @@ pub(super) fn print_combined_report(
     let resolver =
         crate::build_ownership_resolver(opts.group_by, opts.root, codeowners_cfg, opts.output)?;
 
+    if let Some(code) = print_machine_combined_report(
+        opts,
+        check_result,
+        dupes_result,
+        health_result,
+        total_elapsed,
+    )? {
+        return Ok(code);
+    }
+
+    Ok(print_human_sections(
+        opts,
+        check_result,
+        dupes_result,
+        health_result,
+        resolver,
+    ))
+}
+
+fn print_machine_combined_report(
+    opts: &CombinedOptions<'_>,
+    check_result: Option<&CheckResult>,
+    dupes_result: Option<&DupesResult>,
+    health_result: Option<&HealthResult>,
+    total_elapsed: std::time::Duration,
+) -> Result<Option<u8>, ExitCode> {
     match opts.output {
         OutputFormat::Json => {
             let code = print_combined_json(
@@ -44,81 +70,75 @@ pub(super) fn print_combined_report(
                 opts.config_path.is_some()
                     || fallow_config::FallowConfig::find_config_path(opts.root).is_some(),
             );
-            if code != ExitCode::SUCCESS {
-                return Err(code);
-            }
+            combined_machine_success(code)
         }
         OutputFormat::Sarif => {
             let code = print_combined_sarif(check_result, dupes_result, health_result);
-            if code != ExitCode::SUCCESS {
-                return Err(code);
-            }
+            combined_machine_success(code)
         }
         OutputFormat::CodeClimate => {
             let code = print_combined_codeclimate(check_result, dupes_result, health_result);
-            if code != ExitCode::SUCCESS {
-                return Err(code);
-            }
+            combined_machine_success(code)
         }
         OutputFormat::PrCommentGithub => {
-            let issues =
-                build_combined_codeclimate_issues(check_result, dupes_result, health_result);
-            let code = report::ci::pr_comment::print_pr_comment_from_codeclimate_issues(
-                "combined",
-                report::ci::pr_comment::Provider::Github,
-                &issues,
-            );
-            if code != ExitCode::SUCCESS {
-                return Err(code);
-            }
+            print_combined_pr_comment(check_result, dupes_result, health_result, true)
         }
         OutputFormat::PrCommentGitlab => {
-            let issues =
-                build_combined_codeclimate_issues(check_result, dupes_result, health_result);
-            let code = report::ci::pr_comment::print_pr_comment_from_codeclimate_issues(
-                "combined",
-                report::ci::pr_comment::Provider::Gitlab,
-                &issues,
-            );
-            if code != ExitCode::SUCCESS {
-                return Err(code);
-            }
+            print_combined_pr_comment(check_result, dupes_result, health_result, false)
         }
         OutputFormat::ReviewGithub => {
-            let issues =
-                build_combined_codeclimate_issues(check_result, dupes_result, health_result);
-            let code = report::ci::review::print_review_envelope_from_codeclimate_issues(
-                "combined",
-                report::ci::pr_comment::Provider::Github,
-                &issues,
-            );
-            if code != ExitCode::SUCCESS {
-                return Err(code);
-            }
+            print_combined_review(check_result, dupes_result, health_result, true)
         }
         OutputFormat::ReviewGitlab => {
-            let issues =
-                build_combined_codeclimate_issues(check_result, dupes_result, health_result);
-            let code = report::ci::review::print_review_envelope_from_codeclimate_issues(
-                "combined",
-                report::ci::pr_comment::Provider::Gitlab,
-                &issues,
-            );
-            if code != ExitCode::SUCCESS {
-                return Err(code);
-            }
+            print_combined_review(check_result, dupes_result, health_result, false)
         }
-        _ => {
-            return Ok(print_human_sections(
-                opts,
-                check_result,
-                dupes_result,
-                health_result,
-                resolver,
-            ));
-        }
+        _ => Ok(None),
     }
-    Ok(0)
+}
+
+fn combined_machine_success(code: ExitCode) -> Result<Option<u8>, ExitCode> {
+    if code != ExitCode::SUCCESS {
+        return Err(code);
+    }
+    Ok(Some(0))
+}
+
+fn combined_provider(github: bool) -> report::ci::pr_comment::Provider {
+    if github {
+        report::ci::pr_comment::Provider::Github
+    } else {
+        report::ci::pr_comment::Provider::Gitlab
+    }
+}
+
+fn print_combined_pr_comment(
+    check_result: Option<&CheckResult>,
+    dupes_result: Option<&DupesResult>,
+    health_result: Option<&HealthResult>,
+    github: bool,
+) -> Result<Option<u8>, ExitCode> {
+    let issues = build_combined_codeclimate_issues(check_result, dupes_result, health_result);
+    let code = report::ci::pr_comment::print_pr_comment_from_codeclimate_issues(
+        "combined",
+        combined_provider(github),
+        &issues,
+    );
+    combined_machine_success(code)
+}
+
+fn print_combined_review(
+    check_result: Option<&CheckResult>,
+    dupes_result: Option<&DupesResult>,
+    health_result: Option<&HealthResult>,
+    github: bool,
+) -> Result<Option<u8>, ExitCode> {
+    let issues = build_combined_codeclimate_issues(check_result, dupes_result, health_result);
+    let code = report::ci::review::print_review_envelope_from_codeclimate_issues(
+        "combined",
+        combined_provider(github),
+        &issues,
+    );
+    combined_machine_success(code)
 }
 
 /// Print human/compact/markdown sections with optional section headers.
@@ -143,97 +163,148 @@ fn print_human_sections(
     let has_any_findings = check_result.is_some_and(|result| result.results.total_issues() > 0)
         || dupes_result.is_some_and(|result| !result.report.clone_groups.is_empty())
         || health_result.is_some_and(|result| !result.report.findings.is_empty());
-    if show_headers
-        && has_any_findings
-        && std::io::stdout().is_terminal()
-        && !crate::report::sink::is_redirected()
-    {
-        println!(
-            "{}",
-            "Tip: run `fallow explain <issue label>`; spaces and hyphens both work, e.g. `fallow explain unused files`."
-                .dimmed()
-        );
-        println!();
+    print_combined_hints(
+        opts,
+        check_result,
+        dupes_result,
+        health_result,
+        show_headers,
+        has_any_findings,
+    );
 
-        let dupes_payload = dupes_result
-            .map(|result| crate::output_dupes::DupesReportPayload::from_report(&result.report));
-        if let Some(step) = crate::report::suggestions::top_combined_next_step(
-            check_result.map(|result| &result.results),
-            dupes_payload.as_ref(),
-            health_result.map(|result| &result.report),
-            opts.root,
-        ) {
-            println!(
-                "{}",
-                format!("Next: {}  ({})", step.command, step.reason).dimmed()
-            );
-            println!();
-        }
-    }
-
-    if let Some(result) = check_result {
-        if show_headers {
-            eprintln!();
-            eprintln!("── Dead Code ──────────────────────────────────────");
-        }
-        let code = crate::check::print_check_result(
-            result,
-            crate::check::PrintCheckOptions {
-                quiet: opts.quiet,
-                explain: opts.explain,
-                regression_json: false,
-                group_by: resolver,
-                top: None,
-                summary: opts.summary,
-                summary_heading: !show_headers,
-                show_explain_tip: false,
-            },
-        );
-        max_exit = max_exit.max(exit_code_to_u8(code));
-    }
-
-    if let Some(result) = dupes_result {
-        if show_headers {
-            eprintln!();
-            eprintln!("── Duplication ────────────────────────────────────");
-        }
-        let code = crate::dupes::print_dupes_result(
-            result,
-            opts.quiet,
-            opts.explain,
-            opts.summary,
-            !show_headers,
-            false,
-        );
-        max_exit = max_exit.max(exit_code_to_u8(code));
-    }
-
-    if let Some(result) = health_result {
-        if show_headers {
-            eprintln!();
-            eprintln!("── Complexity ─────────────────────────────────────");
-        }
-        if let Some(ref timings) = result.timings {
-            report::print_health_performance(timings, opts.output);
-        }
-        let code = crate::health::print_health_result(
-            result,
-            crate::health::HealthPrintOptions {
-                quiet: opts.quiet,
-                explain: opts.explain,
-                min_score: None,
-                min_severity: None,
-                report_only: false,
-                summary: opts.summary,
-                summary_heading: !show_headers,
-                show_explain_tip: false,
-                skip_score_and_trend: true,
-            },
-        );
-        max_exit = max_exit.max(exit_code_to_u8(code));
-    }
+    max_exit = max_exit.max(print_check_section(
+        opts,
+        check_result,
+        resolver,
+        show_headers,
+    ));
+    max_exit = max_exit.max(print_dupes_section(opts, dupes_result, show_headers));
+    max_exit = max_exit.max(print_health_section(opts, health_result, show_headers));
 
     max_exit
+}
+
+fn print_combined_hints(
+    opts: &CombinedOptions<'_>,
+    check_result: Option<&CheckResult>,
+    dupes_result: Option<&DupesResult>,
+    health_result: Option<&HealthResult>,
+    show_headers: bool,
+    has_any_findings: bool,
+) {
+    if !show_headers
+        || !has_any_findings
+        || !std::io::stdout().is_terminal()
+        || crate::report::sink::is_redirected()
+    {
+        return;
+    }
+
+    println!(
+        "{}",
+        "Tip: run `fallow explain <issue label>`; spaces and hyphens both work, e.g. `fallow explain unused files`."
+            .dimmed()
+    );
+    println!();
+
+    let dupes_payload = dupes_result
+        .map(|result| crate::output_dupes::DupesReportPayload::from_report(&result.report));
+    if let Some(step) = crate::report::suggestions::top_combined_next_step(
+        check_result.map(|result| &result.results),
+        dupes_payload.as_ref(),
+        health_result.map(|result| &result.report),
+        opts.root,
+    ) {
+        println!(
+            "{}",
+            format!("Next: {}  ({})", step.command, step.reason).dimmed()
+        );
+        println!();
+    }
+}
+
+fn print_check_section(
+    opts: &CombinedOptions<'_>,
+    check_result: Option<&CheckResult>,
+    resolver: Option<report::OwnershipResolver>,
+    show_headers: bool,
+) -> u8 {
+    let Some(result) = check_result else {
+        return 0;
+    };
+    if show_headers {
+        eprintln!();
+        eprintln!("── Dead Code ──────────────────────────────────────");
+    }
+    let code = crate::check::print_check_result(
+        result,
+        crate::check::PrintCheckOptions {
+            quiet: opts.quiet,
+            explain: opts.explain,
+            regression_json: false,
+            group_by: resolver,
+            top: None,
+            summary: opts.summary,
+            summary_heading: !show_headers,
+            show_explain_tip: false,
+        },
+    );
+    exit_code_to_u8(code)
+}
+
+fn print_dupes_section(
+    opts: &CombinedOptions<'_>,
+    dupes_result: Option<&DupesResult>,
+    show_headers: bool,
+) -> u8 {
+    let Some(result) = dupes_result else {
+        return 0;
+    };
+    if show_headers {
+        eprintln!();
+        eprintln!("── Duplication ────────────────────────────────────");
+    }
+    let code = crate::dupes::print_dupes_result(
+        result,
+        opts.quiet,
+        opts.explain,
+        opts.summary,
+        !show_headers,
+        false,
+    );
+    exit_code_to_u8(code)
+}
+
+fn print_health_section(
+    opts: &CombinedOptions<'_>,
+    health_result: Option<&HealthResult>,
+    show_headers: bool,
+) -> u8 {
+    let Some(result) = health_result else {
+        return 0;
+    };
+    if show_headers {
+        eprintln!();
+        eprintln!("── Complexity ─────────────────────────────────────");
+    }
+    if let Some(ref timings) = result.timings {
+        report::print_health_performance(timings, opts.output);
+    }
+    let code = crate::health::print_health_result(
+        result,
+        crate::health::HealthPrintOptions {
+            quiet: opts.quiet,
+            explain: opts.explain,
+            min_score: None,
+            min_severity: None,
+            report_only: false,
+            summary: opts.summary,
+            summary_heading: !show_headers,
+            show_explain_tip: false,
+            skip_score_and_trend: true,
+        },
+    );
+    exit_code_to_u8(code)
 }
 
 /// Handle regression outcome and print failure summary.

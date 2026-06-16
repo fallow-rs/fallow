@@ -1699,6 +1699,13 @@ impl CodeClimateBuilder<'_> {
     }
 
     fn push_boundary_issues(&mut self) {
+        self.push_architecture_boundary_issues();
+        self.push_client_server_boundary_issues();
+        self.push_component_boundary_issues();
+        self.push_framework_route_issues();
+    }
+
+    fn push_architecture_boundary_issues(&mut self) {
         push_boundary_violation_issues(
             &mut self.issues,
             &self.results.boundary_violations,
@@ -1718,6 +1725,9 @@ impl CodeClimateBuilder<'_> {
             self.rules.boundary_violation,
         );
         push_policy_violation_issues(&mut self.issues, &self.results.policy_violations, self.root);
+    }
+
+    fn push_client_server_boundary_issues(&mut self) {
         push_invalid_client_export_issues(
             &mut self.issues,
             &self.results.invalid_client_exports,
@@ -1736,6 +1746,9 @@ impl CodeClimateBuilder<'_> {
             self.root,
             self.rules.misplaced_directive,
         );
+    }
+
+    fn push_component_boundary_issues(&mut self) {
         push_unprovided_inject_issues(
             &mut self.issues,
             &self.results.unprovided_injects,
@@ -1760,6 +1773,9 @@ impl CodeClimateBuilder<'_> {
             self.root,
             self.rules.unused_component_emits,
         );
+    }
+
+    fn push_framework_route_issues(&mut self) {
         push_unused_server_action_issues(
             &mut self.issues,
             &self.results.unused_server_actions,

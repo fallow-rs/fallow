@@ -160,6 +160,19 @@ struct HealthPipelineTimings {
     shared_parse: bool,
 }
 
+impl HealthPipelineTimings {
+    fn into_base_input(self, complexity_ms: f64) -> HealthTimingBaseInput {
+        HealthTimingBaseInput {
+            config_ms: self.config,
+            discover_ms: self.discover,
+            parse_ms: self.parse,
+            parse_cpu_ms: self.parse_cpu,
+            complexity_ms,
+            shared_parse: self.shared_parse,
+        }
+    }
+}
+
 struct HealthPipelineInput {
     config: ResolvedConfig,
     files: Vec<fallow_types::discover::DiscoveredFile>,
@@ -304,10 +317,6 @@ pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode
     )
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "health pipeline orchestration with many optional features"
-)]
 fn execute_health_inner(
     opts: &HealthOptions<'_>,
     input: HealthPipelineInput,
@@ -317,29 +326,11 @@ fn execute_health_inner(
         config,
         files,
         modules,
-        timings:
-            HealthPipelineTimings {
-                config: config_ms,
-                discover: discover_ms,
-                parse: parse_ms,
-                parse_cpu: parse_cpu_ms,
-                shared_parse,
-            },
+        timings,
         pre_computed_analysis,
     } = input;
 
-    let HealthScope {
-        max_cyclomatic,
-        max_cognitive,
-        max_crap,
-        enforce_crap,
-        ignore_set,
-        changed_files,
-        diff_index,
-        ws_roots,
-        group_resolver,
-        file_paths,
-    } = prepare_health_scope(opts, &config, &files)?;
+    let scope = prepare_health_scope(opts, &config, &files)?;
 
     let HealthCoverageSettings {
         report_coverage_gaps,
@@ -351,98 +342,59 @@ fn execute_health_inner(
         opts,
         report_coverage_gaps,
         enforce_coverage_gaps,
-        enforce_crap,
+        scope.enforce_crap,
     );
-    let mut analysis_data = prepare_health_analysis_data(
+    let analysis_data = prepare_health_analysis_data(
         opts,
         &config,
         &modules,
-        &file_paths,
-        &ignore_set,
-        changed_files.as_ref(),
-        ws_roots.as_deref(),
+        &scope.file_paths,
+        &scope.ignore_set,
+        scope.changed_files.as_ref(),
+        scope.ws_roots.as_deref(),
         istanbul_coverage.as_ref(),
         pre_computed_analysis,
         needs_file_scores,
     )?;
 
-    let file_scores_slice = health_file_scores_slice(analysis_data.score_output.as_ref());
-
-    let HealthFindingsData {
-        findings,
-        threshold_overrides,
-        files_analyzed,
-        total_functions,
-        complexity_ms,
-        total_above_threshold,
-        sev_critical,
-        sev_high,
-        sev_moderate,
-        loaded_baseline,
-    } = prepare_health_findings(
+    let findings_data = prepare_health_findings(
         opts,
         &config,
         &modules,
-        &file_paths,
-        &ignore_set,
-        changed_files.as_ref(),
-        ws_roots.as_deref(),
-        diff_index,
-        max_cyclomatic,
-        max_cognitive,
-        max_crap,
-        enforce_crap,
+        &scope.file_paths,
+        &scope.ignore_set,
+        scope.changed_files.as_ref(),
+        scope.ws_roots.as_deref(),
+        scope.diff_index,
+        scope.max_cyclomatic,
+        scope.max_cognitive,
+        scope.max_crap,
+        scope.enforce_crap,
         analysis_data.score_output.as_ref(),
     )?;
 
-    let derived_sections = prepare_health_derived_sections(
+    let HealthRuntimeSections {
+        analysis_data,
+        derived_sections,
+        vital_data,
+    } = prepare_health_runtime_sections(
         opts,
-        HealthDerivedSectionInput {
+        HealthRuntimeSectionsInput {
             config: &config,
             files: &files,
-            ignore_set: &ignore_set,
-            changed_files: changed_files.as_ref(),
-            ws_roots: ws_roots.as_deref(),
-            file_scores: file_scores_slice,
-            churn_fetch: analysis_data.churn_fetch.take(),
-            diff_index,
-            score_output: analysis_data.score_output.as_ref(),
-            loaded_baseline: loaded_baseline.as_ref(),
-        },
-    );
-
-    finalize_health_runtime_outputs(
-        opts,
-        HealthRuntimeFinalizeInput {
-            config: &config,
-            runtime_coverage: &mut analysis_data.runtime_coverage,
-            findings: &findings,
-            targets: &derived_sections.targets,
-            loaded_baseline: loaded_baseline.as_ref(),
-            changed_files: changed_files.as_ref(),
-            diff_index,
+            modules: &modules,
+            file_paths: &scope.file_paths,
+            ignore_set: &scope.ignore_set,
+            changed_files: scope.changed_files.as_ref(),
+            ws_roots: scope.ws_roots.as_deref(),
+            diff_index: scope.diff_index,
+            loaded_baseline: findings_data.loaded_baseline.as_ref(),
+            findings: &findings_data.findings,
+            analysis_data,
+            has_istanbul_coverage: istanbul_coverage.is_some(),
+            needs_file_scores,
         },
     )?;
-
-    let vital_data = prepare_health_vital_data(&HealthVitalDataInput {
-        opts,
-        modules: &modules,
-        file_paths: &file_paths,
-        score_output: analysis_data.score_output.as_ref(),
-        file_scores_slice,
-        hotspots: &derived_sections.hotspots,
-        dupes_report: derived_sections.dupes_report.as_ref(),
-        candidate_paths: &derived_sections.candidate_paths,
-        total_files: files.len(),
-        config: &config,
-        ignore_set: &ignore_set,
-        changed_files: changed_files.as_ref(),
-        ws_roots: ws_roots.as_deref(),
-        diff_index,
-        hotspot_summary: derived_sections.hotspot_summary.as_ref(),
-        has_istanbul_coverage: istanbul_coverage.is_some(),
-        needs_file_scores,
-    })?;
 
     let HealthOutputParts {
         mut report,
@@ -455,61 +407,78 @@ fn execute_health_inner(
             config: &config,
             files: &files,
             modules: &modules,
-            file_paths: &file_paths,
-            group_resolver: group_resolver.as_ref(),
+            file_paths: &scope.file_paths,
+            group_resolver: scope.group_resolver.as_ref(),
             needs_file_scores,
             report_coverage_gaps,
             has_istanbul_coverage: istanbul_coverage.is_some(),
-            threshold_overrides,
-            max_cyclomatic,
-            max_cognitive,
-            max_crap,
-            files_analyzed,
-            total_functions,
-            total_above_threshold,
-            sev_critical,
-            sev_high,
-            sev_moderate,
-            timing_base: HealthTimingBaseInput {
-                config_ms,
-                discover_ms,
-                parse_ms,
-                parse_cpu_ms,
-                complexity_ms,
-                shared_parse,
-            },
+            threshold_overrides: findings_data.threshold_overrides,
+            max_cyclomatic: scope.max_cyclomatic,
+            max_cognitive: scope.max_cognitive,
+            max_crap: scope.max_crap,
+            files_analyzed: findings_data.files_analyzed,
+            total_functions: findings_data.total_functions,
+            total_above_threshold: findings_data.total_above_threshold,
+            sev_critical: findings_data.sev_critical,
+            sev_high: findings_data.sev_high,
+            sev_moderate: findings_data.sev_moderate,
+            timing_base: timings.into_base_input(findings_data.complexity_ms),
             start: &start,
         },
         HealthOutputSectionInput {
             analysis_data,
             derived_sections,
             vital_data,
-            findings,
+            findings: findings_data.findings,
         },
     );
 
-    if opts.css {
-        report.css_analytics = compute_css_analytics_report(
-            &files,
-            &config,
-            &ignore_set,
-            changed_files.as_ref(),
-            ws_roots.as_deref(),
-        );
-    }
-
-    record_health_telemetry(&report, coverage_gaps_has_findings);
+    finalize_health_report_side_effects(&mut HealthReportSideEffectsInput {
+        opts,
+        report: &mut report,
+        files: &files,
+        config: &config,
+        ignore_set: &scope.ignore_set,
+        changed_files: scope.changed_files.as_ref(),
+        ws_roots: scope.ws_roots.as_deref(),
+        coverage_gaps_has_findings,
+    });
 
     Ok(build_health_result(HealthResultInput {
         config,
         report,
         grouping,
-        group_resolver,
+        group_resolver: scope.group_resolver,
         elapsed: start.elapsed(),
         timings,
         coverage_gaps_has_findings,
         should_fail_on_coverage_gaps: enforce_coverage_gaps,
     }))
+}
+
+struct HealthReportSideEffectsInput<'a> {
+    opts: &'a HealthOptions<'a>,
+    report: &'a mut crate::health_types::HealthReport,
+    files: &'a [fallow_types::discover::DiscoveredFile],
+    config: &'a ResolvedConfig,
+    ignore_set: &'a globset::GlobSet,
+    changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
+    ws_roots: Option<&'a [std::path::PathBuf]>,
+    coverage_gaps_has_findings: bool,
+}
+
+fn finalize_health_report_side_effects(input: &mut HealthReportSideEffectsInput<'_>) {
+    if input.opts.css {
+        input.report.css_analytics = compute_css_analytics_report(
+            input.files,
+            input.config,
+            input.ignore_set,
+            input.changed_files,
+            input.ws_roots,
+        );
+    }
+
+    record_health_telemetry(input.report, input.coverage_gaps_has_findings);
 }
 
 /// Compute structural CSS analytics, honoring the same ignore / changed-since /
@@ -1839,7 +1808,7 @@ fn scan_unreferenced_css_classes(
     ws_roots: Option<&[std::path::PathBuf]>,
     summary: &mut crate::health_types::CssAnalyticsSummary,
 ) -> Vec<crate::health_types::UnreferencedCssClass> {
-    use crate::health_types::{CssCandidateAction, UnreferencedCssClass};
+    use crate::health_types::UnreferencedCssClass;
 
     // Partial scope cannot prove a global class dead.
     if changed_files.is_some() || ws_roots.is_some() {
@@ -1851,65 +1820,7 @@ fn scan_unreferenced_css_classes(
         return Vec::new();
     }
 
-    // Build the in-project markup reference surface: every whole static class
-    // token, plus the raw source of files that construct classes dynamically
-    // (for the substring abstain).
-    let mut static_tokens: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
-    let mut dynamic_corpus = String::new();
-    for file in files {
-        let path = &file.path;
-        let extension = path.extension().and_then(|ext| ext.to_str());
-        if !matches!(
-            extension,
-            Some("jsx" | "tsx" | "html" | "astro" | "vue" | "svelte")
-        ) {
-            continue;
-        }
-        let relative = path.strip_prefix(&config.root).unwrap_or(path);
-        if ignore_set.is_match(relative) {
-            continue;
-        }
-        let Ok(source) = std::fs::read_to_string(path) else {
-            continue;
-        };
-        let scan = fallow_core::extract::scan_markup_class_tokens(&source);
-        for token in scan.static_tokens {
-            static_tokens.insert(token.value);
-        }
-        // Also credit a DASHED (compound) class applied outside a `class=` /
-        // `className=` attribute: a config-object `className: 'leveret-toast'`, a
-        // helper `return "today-highlight"`. Only dashed tokens from quoted
-        // strings are taken (not single words), so a generic word never breaks
-        // the whole-sheet abstain that protects classes used in a surface fallow
-        // cannot read (Phoenix `.heex`, server templates).
-        collect_quoted_class_tokens(&source, &mut static_tokens, true);
-        if scan.has_dynamic {
-            dynamic_corpus.push_str(&source);
-            dynamic_corpus.push('\n');
-        }
-    }
-
-    // A class assembled dynamically as `prefix-${...}` (e.g. `stagger-${i}`
-    // backing `.stagger-1`..`.stagger-6`) never appears as a full literal in the
-    // dynamic corpus, so credit it when its dash-prefix is immediately followed
-    // by an interpolation / concatenation boundary in a dynamic file. The dash
-    // AND the marker are both required, so `stagger` appearing in `add-stagger`
-    // does not credit `.stagger-1`.
-    let dynamic_prefix_referenced = |class: &str| -> bool {
-        let Some(dash) = class.rfind('-') else {
-            return false;
-        };
-        let head = &class[..=dash];
-        const INTERP_MARKERS: [&str; 6] = ["${", "' +", "'+", "\" +", "\"+", "` +"];
-        INTERP_MARKERS
-            .iter()
-            .any(|marker| dynamic_corpus.contains(&format!("{head}{marker}")))
-    };
-    let referenced = |class: &str| -> bool {
-        static_tokens.contains(class)
-            || dynamic_corpus.contains(class)
-            || dynamic_prefix_referenced(class)
-    };
+    let reference_surface = css_reference_surface(files, config, ignore_set);
 
     let published = published_css_paths(config);
     let dependency_prefixes = dependency_class_prefixes(config);
@@ -1917,28 +1828,14 @@ fn scan_unreferenced_css_classes(
 
     let mut out: Vec<UnreferencedCssClass> = Vec::new();
     for (rel, classes) in located {
-        if published.contains(&rel) {
-            continue;
-        }
-        // In-project-consumption gate: a stylesheet none of whose classes are
-        // referenced locally is a published / external surface, not a pile of
-        // dead classes. Abstain for the whole sheet.
-        if !classes.iter().any(|(c, _)| referenced(c)) {
-            continue;
-        }
-        for (class, line) in classes {
-            if class.len() >= MIN_UNREF_CLASS_LEN
-                && !referenced(&class)
-                && !class_matches_dependency_prefix(&class, &dependency_prefixes)
-            {
-                out.push(UnreferencedCssClass {
-                    actions: vec![CssCandidateAction::verify_unreferenced_class(&class)],
-                    class,
-                    path: rel.clone(),
-                    line,
-                });
-            }
-        }
+        push_unreferenced_css_class_candidates(
+            &mut out,
+            &rel,
+            classes,
+            &published,
+            &dependency_prefixes,
+            &reference_surface,
+        );
     }
 
     out.sort_by(|a, b| {
@@ -1949,6 +1846,109 @@ fn scan_unreferenced_css_classes(
     });
     summary.unreferenced_css_classes = saturate_len(out.len());
     out
+}
+
+struct CssReferenceSurface {
+    static_tokens: rustc_hash::FxHashSet<String>,
+    dynamic_corpus: String,
+}
+
+impl CssReferenceSurface {
+    fn references(&self, class: &str) -> bool {
+        self.static_tokens.contains(class)
+            || self.dynamic_corpus.contains(class)
+            || self.dynamic_prefix_referenced(class)
+    }
+
+    fn dynamic_prefix_referenced(&self, class: &str) -> bool {
+        let Some(dash) = class.rfind('-') else {
+            return false;
+        };
+        let head = &class[..=dash];
+        const INTERP_MARKERS: [&str; 6] = ["${", "' +", "'+", "\" +", "\"+", "` +"];
+        INTERP_MARKERS
+            .iter()
+            .any(|marker| self.dynamic_corpus.contains(&format!("{head}{marker}")))
+    }
+}
+
+fn css_reference_surface(
+    files: &[fallow_types::discover::DiscoveredFile],
+    config: &ResolvedConfig,
+    ignore_set: &globset::GlobSet,
+) -> CssReferenceSurface {
+    let mut surface = CssReferenceSurface {
+        static_tokens: rustc_hash::FxHashSet::default(),
+        dynamic_corpus: String::new(),
+    };
+    for file in files {
+        collect_css_reference_surface_file(&mut surface, file, config, ignore_set);
+    }
+    surface
+}
+
+fn collect_css_reference_surface_file(
+    surface: &mut CssReferenceSurface,
+    file: &fallow_types::discover::DiscoveredFile,
+    config: &ResolvedConfig,
+    ignore_set: &globset::GlobSet,
+) {
+    let path = &file.path;
+    let extension = path.extension().and_then(|ext| ext.to_str());
+    if !matches!(
+        extension,
+        Some("jsx" | "tsx" | "html" | "astro" | "vue" | "svelte")
+    ) {
+        return;
+    }
+    let relative = path.strip_prefix(&config.root).unwrap_or(path);
+    if ignore_set.is_match(relative) {
+        return;
+    }
+    let Ok(source) = std::fs::read_to_string(path) else {
+        return;
+    };
+    let scan = fallow_core::extract::scan_markup_class_tokens(&source);
+    for token in scan.static_tokens {
+        surface.static_tokens.insert(token.value);
+    }
+    collect_quoted_class_tokens(&source, &mut surface.static_tokens, true);
+    if scan.has_dynamic {
+        surface.dynamic_corpus.push_str(&source);
+        surface.dynamic_corpus.push('\n');
+    }
+}
+
+fn push_unreferenced_css_class_candidates(
+    out: &mut Vec<crate::health_types::UnreferencedCssClass>,
+    rel: &str,
+    classes: Vec<(String, u32)>,
+    published: &rustc_hash::FxHashSet<String>,
+    dependency_prefixes: &rustc_hash::FxHashSet<String>,
+    reference_surface: &CssReferenceSurface,
+) {
+    use crate::health_types::{CssCandidateAction, UnreferencedCssClass};
+
+    if published.contains(rel)
+        || !classes
+            .iter()
+            .any(|(class, _)| reference_surface.references(class))
+    {
+        return;
+    }
+    for (class, line) in classes {
+        if class.len() >= MIN_UNREF_CLASS_LEN
+            && !reference_surface.references(&class)
+            && !class_matches_dependency_prefix(&class, dependency_prefixes)
+        {
+            out.push(UnreferencedCssClass {
+                actions: vec![CssCandidateAction::verify_unreferenced_class(&class)],
+                class,
+                path: rel.to_string(),
+                line,
+            });
+        }
+    }
 }
 
 /// Source-file extensions scanned for Tailwind utility-class-shaped tokens when
@@ -2253,6 +2253,88 @@ fn scan_markup_css_candidates(
     }
 }
 
+fn css_report_scan_target<'a>(
+    file: &'a fallow_types::discover::DiscoveredFile,
+    config: &ResolvedConfig,
+    ignore_set: &globset::GlobSet,
+    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
+    ws_roots: Option<&[std::path::PathBuf]>,
+) -> Option<(&'a std::path::Path, bool)> {
+    let path = &file.path;
+    let extension = path.extension().and_then(|ext| ext.to_str());
+    let is_css = extension == Some("css");
+    let is_sfc = matches!(extension, Some("vue") | Some("svelte"));
+    if !is_css && !is_sfc {
+        return None;
+    }
+
+    let relative = path.strip_prefix(&config.root).unwrap_or(path);
+    if ignore_set.is_match(relative) {
+        return None;
+    }
+    if let Some(changed) = changed_files
+        && !changed.contains(path)
+    {
+        return None;
+    }
+    if let Some(roots) = ws_roots
+        && !roots.iter().any(|root| path.starts_with(root))
+    {
+        return None;
+    }
+    Some((relative, is_sfc))
+}
+
+fn record_scoped_unused_classes(
+    source: &str,
+    relative: &std::path::Path,
+    summary: &mut crate::health_types::CssAnalyticsSummary,
+    scoped_unused: &mut Vec<crate::health_types::ScopedUnusedClasses>,
+) {
+    let classes = fallow_core::extract::scoped_unused_classes(source);
+    if classes.is_empty() {
+        return;
+    }
+
+    summary.scoped_unused_classes = summary
+        .scoped_unused_classes
+        .saturating_add(u32::try_from(classes.len()).unwrap_or(u32::MAX));
+    scoped_unused.push(crate::health_types::ScopedUnusedClasses {
+        path: relative.to_string_lossy().replace('\\', "/"),
+        classes,
+        actions: vec![crate::health_types::CssCandidateAction::verify_scoped_classes()],
+    });
+}
+
+fn css_report_stylesheet_source(source: &str, is_sfc: bool) -> Option<std::borrow::Cow<'_, str>> {
+    if is_sfc {
+        return fallow_core::extract::sfc_virtual_stylesheet(source).map(std::borrow::Cow::Owned);
+    }
+
+    Some(std::borrow::Cow::Borrowed(source))
+}
+
+fn record_css_analytics_summary(
+    summary: &mut crate::health_types::CssAnalyticsSummary,
+    analytics: &fallow_types::extract::CssAnalytics,
+) {
+    summary.files_analyzed = summary.files_analyzed.saturating_add(1);
+    summary.total_rules = summary.total_rules.saturating_add(analytics.rule_count);
+    summary.total_declarations = summary
+        .total_declarations
+        .saturating_add(analytics.total_declarations);
+    summary.important_declarations = summary
+        .important_declarations
+        .saturating_add(analytics.important_declarations);
+    summary.empty_rules = summary
+        .empty_rules
+        .saturating_add(analytics.empty_rule_count);
+    summary.max_nesting_depth = summary.max_nesting_depth.max(analytics.max_nesting_depth);
+    if analytics.notable_truncated {
+        summary.notable_truncated_files = summary.notable_truncated_files.saturating_add(1);
+    }
+}
+
 fn compute_css_analytics_report(
     files: &[fallow_types::discover::DiscoveredFile],
     config: &ResolvedConfig,
@@ -2261,8 +2343,7 @@ fn compute_css_analytics_report(
     ws_roots: Option<&[std::path::PathBuf]>,
 ) -> Option<crate::health_types::CssAnalyticsReport> {
     use crate::health_types::{
-        CssAnalyticsReport, CssAnalyticsSummary, CssCandidateAction, CssFileAnalytics,
-        ScopedUnusedClasses,
+        CssAnalyticsReport, CssAnalyticsSummary, CssFileAnalytics, ScopedUnusedClasses,
     };
 
     let mut file_reports = Vec::new();
@@ -2274,76 +2355,31 @@ fn compute_css_analytics_report(
     let mut tokens = CssTokenSets::default();
 
     for file in files {
-        let path = &file.path;
-        let extension = path.extension().and_then(|ext| ext.to_str());
-        let is_css = extension == Some("css");
-        let is_sfc = matches!(extension, Some("vue") | Some("svelte"));
-        if !is_css && !is_sfc {
+        let Some((relative, is_sfc)) =
+            css_report_scan_target(file, config, ignore_set, changed_files, ws_roots)
+        else {
             continue;
-        }
-        let relative = path.strip_prefix(&config.root).unwrap_or(path);
-        if ignore_set.is_match(relative) {
-            continue;
-        }
-        if let Some(changed) = changed_files
-            && !changed.contains(path)
-        {
-            continue;
-        }
-        if let Some(roots) = ws_roots
-            && !roots.iter().any(|root| path.starts_with(root))
-        {
-            continue;
-        }
-        let Ok(source) = std::fs::read_to_string(path) else {
+        };
+        let Ok(source) = std::fs::read_to_string(&file.path) else {
             continue;
         };
 
         if is_sfc {
-            let classes = fallow_core::extract::scoped_unused_classes(&source);
-            if !classes.is_empty() {
-                summary.scoped_unused_classes = summary
-                    .scoped_unused_classes
-                    .saturating_add(u32::try_from(classes.len()).unwrap_or(u32::MAX));
-                scoped_unused.push(ScopedUnusedClasses {
-                    path: relative.to_string_lossy().replace('\\', "/"),
-                    classes,
-                    actions: vec![CssCandidateAction::verify_scoped_classes()],
-                });
-            }
+            record_scoped_unused_classes(&source, relative, &mut summary, &mut scoped_unused);
         }
 
         // Vue/Svelte SFC `<style>` blocks are folded into a virtual stylesheet so
         // their structural metrics (specificity, !important, design tokens) count
         // the same as a standalone .css file; SFCs with only SCSS blocks yield None.
-        let css_source = if is_sfc {
-            match fallow_core::extract::sfc_virtual_stylesheet(&source) {
-                Some(virtual_css) => std::borrow::Cow::Owned(virtual_css),
-                None => continue,
-            }
-        } else {
-            std::borrow::Cow::Borrowed(source.as_str())
+        let Some(css_source) = css_report_stylesheet_source(&source, is_sfc) else {
+            continue;
         };
         let Some(analytics) = fallow_core::extract::compute_css_analytics(&css_source) else {
             continue;
         };
 
         let rel = relative.to_string_lossy().replace('\\', "/");
-        summary.files_analyzed = summary.files_analyzed.saturating_add(1);
-        summary.total_rules = summary.total_rules.saturating_add(analytics.rule_count);
-        summary.total_declarations = summary
-            .total_declarations
-            .saturating_add(analytics.total_declarations);
-        summary.important_declarations = summary
-            .important_declarations
-            .saturating_add(analytics.important_declarations);
-        summary.empty_rules = summary
-            .empty_rules
-            .saturating_add(analytics.empty_rule_count);
-        summary.max_nesting_depth = summary.max_nesting_depth.max(analytics.max_nesting_depth);
-        if analytics.notable_truncated {
-            summary.notable_truncated_files = summary.notable_truncated_files.saturating_add(1);
-        }
+        record_css_analytics_summary(&mut summary, &analytics);
         tokens.record(&analytics, &rel);
         tokens.record_theme(css_source.as_ref(), &rel);
 
@@ -3721,6 +3757,103 @@ struct HealthAnalysisData {
     churn_fetch: Option<hotspots::ChurnFetchResult>,
 }
 
+struct HealthRuntimeSectionsInput<'a> {
+    config: &'a ResolvedConfig,
+    files: &'a [fallow_types::discover::DiscoveredFile],
+    modules: &'a [fallow_core::extract::ModuleInfo],
+    file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
+    ignore_set: &'a globset::GlobSet,
+    changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
+    ws_roots: Option<&'a [std::path::PathBuf]>,
+    diff_index: Option<&'a crate::report::ci::diff_filter::DiffIndex>,
+    loaded_baseline: Option<&'a HealthBaselineData>,
+    findings: &'a [ComplexityViolation],
+    analysis_data: HealthAnalysisData,
+    has_istanbul_coverage: bool,
+    needs_file_scores: bool,
+}
+
+struct HealthRuntimeSections {
+    analysis_data: HealthAnalysisData,
+    derived_sections: HealthDerivedSections,
+    vital_data: HealthVitalData,
+}
+
+fn prepare_health_runtime_sections(
+    opts: &HealthOptions<'_>,
+    mut input: HealthRuntimeSectionsInput<'_>,
+) -> Result<HealthRuntimeSections, ExitCode> {
+    let file_scores_slice = health_file_scores_slice(input.analysis_data.score_output.as_ref());
+    let derived_sections = prepare_health_derived_sections(
+        opts,
+        HealthDerivedSectionInput {
+            config: input.config,
+            files: input.files,
+            ignore_set: input.ignore_set,
+            changed_files: input.changed_files,
+            ws_roots: input.ws_roots,
+            file_scores: file_scores_slice,
+            churn_fetch: input.analysis_data.churn_fetch.take(),
+            diff_index: input.diff_index,
+            score_output: input.analysis_data.score_output.as_ref(),
+            loaded_baseline: input.loaded_baseline,
+        },
+    );
+
+    finalize_health_runtime_outputs(
+        opts,
+        HealthRuntimeFinalizeInput {
+            config: input.config,
+            runtime_coverage: &mut input.analysis_data.runtime_coverage,
+            findings: input.findings,
+            targets: &derived_sections.targets,
+            loaded_baseline: input.loaded_baseline,
+            changed_files: input.changed_files,
+            diff_index: input.diff_index,
+        },
+    )?;
+
+    let vital_data = prepare_health_vital_data_from_sections(
+        opts,
+        &input,
+        &derived_sections,
+        file_scores_slice,
+    )?;
+
+    Ok(HealthRuntimeSections {
+        analysis_data: input.analysis_data,
+        derived_sections,
+        vital_data,
+    })
+}
+
+fn prepare_health_vital_data_from_sections(
+    opts: &HealthOptions<'_>,
+    input: &HealthRuntimeSectionsInput<'_>,
+    derived_sections: &HealthDerivedSections,
+    file_scores_slice: &[FileHealthScore],
+) -> Result<HealthVitalData, ExitCode> {
+    prepare_health_vital_data(&HealthVitalDataInput {
+        opts,
+        modules: input.modules,
+        file_paths: input.file_paths,
+        score_output: input.analysis_data.score_output.as_ref(),
+        file_scores_slice,
+        hotspots: &derived_sections.hotspots,
+        dupes_report: derived_sections.dupes_report.as_ref(),
+        candidate_paths: &derived_sections.candidate_paths,
+        total_files: input.files.len(),
+        config: input.config,
+        ignore_set: input.ignore_set,
+        changed_files: input.changed_files,
+        ws_roots: input.ws_roots,
+        diff_index: input.diff_index,
+        hotspot_summary: derived_sections.hotspot_summary.as_ref(),
+        has_istanbul_coverage: input.has_istanbul_coverage,
+        needs_file_scores: input.needs_file_scores,
+    })
+}
+
 #[expect(
     clippy::too_many_arguments,
     reason = "health analysis preparation shares the active scope across runtime coverage and file scores"
@@ -4974,26 +5107,9 @@ fn collect_findings_with_resolver(
     let mut findings: Vec<ComplexityViolation> = Vec::new();
 
     for module in input.modules {
-        let Some(&path) = input.file_paths.get(&module.file_id) else {
+        let Some((path, relative)) = collect_findings_module_path(input, module) else {
             continue;
         };
-
-        let relative = path.strip_prefix(input.config_root).unwrap_or(path);
-        if input.ignore_set.is_match(relative) {
-            continue;
-        }
-
-        if let Some(changed) = input.changed_files
-            && !changed.contains(path)
-        {
-            continue;
-        }
-
-        if let Some(ws) = input.ws_roots
-            && !ws.iter().any(|r| path.starts_with(r))
-        {
-            continue;
-        }
 
         files_analyzed += 1;
         // Precompute the per-function React hook profile ONCE per module from the
@@ -5010,65 +5126,100 @@ fn collect_findings_with_resolver(
             ) {
                 continue;
             }
-            let (applied_thresholds, matched_overrides) =
-                input.threshold_resolver.resolve(relative, &fc.name);
-            input.threshold_state_tracker.record_complexity(
-                path,
-                &fc.name,
-                fc.cyclomatic,
-                fc.cognitive,
-                &matched_overrides,
-                input.threshold_resolver.global,
-            );
-            let exceeds_cyclomatic = fc.cyclomatic > applied_thresholds.effective.max_cyclomatic;
-            let exceeds_cognitive = fc.cognitive > applied_thresholds.effective.max_cognitive;
-            if exceeds_cyclomatic || exceeds_cognitive {
-                findings.push(ComplexityViolation {
-                    path: path.clone(),
-                    name: fc.name.clone(),
-                    line: fc.line,
-                    col: fc.col,
-                    cyclomatic: fc.cyclomatic,
-                    cognitive: fc.cognitive,
-                    line_count: fc.line_count,
-                    param_count: fc.param_count,
-                    react_hook_count: fc.react_hook_count,
-                    react_jsx_max_depth: fc.react_jsx_max_depth,
-                    react_prop_count: fc.react_prop_count,
-                    react_hook_profile: hook_profiles.get(fc_idx).cloned().flatten(),
-                    exceeded: ExceededThreshold::from_bools(
-                        exceeds_cyclomatic,
-                        exceeds_cognitive,
-                        false,
-                    ),
-                    severity: compute_finding_severity(
-                        fc.cognitive,
-                        fc.cyclomatic,
-                        None,
-                        DEFAULT_COGNITIVE_HIGH,
-                        DEFAULT_COGNITIVE_CRITICAL,
-                        DEFAULT_CYCLOMATIC_HIGH,
-                        DEFAULT_CYCLOMATIC_CRITICAL,
-                    ),
-                    crap: None,
-                    coverage_pct: None,
-                    coverage_tier: None,
-                    coverage_source: None,
-                    inherited_from: None,
-                    component_rollup: None,
-                    contributions: contributions_for(input.complexity_breakdown, fc),
-                    effective_thresholds: applied_thresholds
-                        .override_index
-                        .map(|_| applied_thresholds.effective),
-                    threshold_source: applied_thresholds
-                        .override_index
-                        .map(|_| crate::health_types::ThresholdSource::Override),
-                });
+            let react_hook_profile = hook_profiles.get(fc_idx).cloned().flatten();
+            if let Some(finding) =
+                collect_complexity_finding(input, path, relative, fc, react_hook_profile)
+            {
+                findings.push(finding);
             }
         }
     }
 
     (findings, files_analyzed, total_functions)
+}
+
+fn collect_findings_module_path<'a>(
+    input: &CollectFindingsInput<'a>,
+    module: &fallow_core::extract::ModuleInfo,
+) -> Option<(&'a std::path::PathBuf, &'a std::path::Path)> {
+    let &path = input.file_paths.get(&module.file_id)?;
+    let relative = path.strip_prefix(input.config_root).unwrap_or(path);
+    if input.ignore_set.is_match(relative) {
+        return None;
+    }
+    if let Some(changed) = input.changed_files
+        && !changed.contains(path)
+    {
+        return None;
+    }
+    if let Some(ws) = input.ws_roots
+        && !ws.iter().any(|root| path.starts_with(root))
+    {
+        return None;
+    }
+    Some((path, relative))
+}
+
+fn collect_complexity_finding(
+    input: &mut CollectFindingsInput<'_>,
+    path: &std::path::Path,
+    relative: &std::path::Path,
+    fc: &fallow_types::extract::FunctionComplexity,
+    react_hook_profile: Option<crate::health_types::ReactHookProfile>,
+) -> Option<ComplexityViolation> {
+    let (applied_thresholds, matched_overrides) =
+        input.threshold_resolver.resolve(relative, &fc.name);
+    input.threshold_state_tracker.record_complexity(
+        path,
+        &fc.name,
+        fc.cyclomatic,
+        fc.cognitive,
+        &matched_overrides,
+        input.threshold_resolver.global,
+    );
+    let exceeds_cyclomatic = fc.cyclomatic > applied_thresholds.effective.max_cyclomatic;
+    let exceeds_cognitive = fc.cognitive > applied_thresholds.effective.max_cognitive;
+    if !exceeds_cyclomatic && !exceeds_cognitive {
+        return None;
+    }
+
+    Some(ComplexityViolation {
+        path: path.to_path_buf(),
+        name: fc.name.clone(),
+        line: fc.line,
+        col: fc.col,
+        cyclomatic: fc.cyclomatic,
+        cognitive: fc.cognitive,
+        line_count: fc.line_count,
+        param_count: fc.param_count,
+        react_hook_count: fc.react_hook_count,
+        react_jsx_max_depth: fc.react_jsx_max_depth,
+        react_prop_count: fc.react_prop_count,
+        react_hook_profile,
+        exceeded: ExceededThreshold::from_bools(exceeds_cyclomatic, exceeds_cognitive, false),
+        severity: compute_finding_severity(
+            fc.cognitive,
+            fc.cyclomatic,
+            None,
+            DEFAULT_COGNITIVE_HIGH,
+            DEFAULT_COGNITIVE_CRITICAL,
+            DEFAULT_CYCLOMATIC_HIGH,
+            DEFAULT_CYCLOMATIC_CRITICAL,
+        ),
+        crap: None,
+        coverage_pct: None,
+        coverage_tier: None,
+        coverage_source: None,
+        inherited_from: None,
+        component_rollup: None,
+        contributions: contributions_for(input.complexity_breakdown, fc),
+        effective_thresholds: applied_thresholds
+            .override_index
+            .map(|_| applied_thresholds.effective),
+        threshold_source: applied_thresholds
+            .override_index
+            .map(|_| crate::health_types::ThresholdSource::Override),
+    })
 }
 
 /// Clone the per-decision-point breakdown onto a finding only when the caller
@@ -5414,39 +5565,17 @@ fn append_component_rollup_findings(
     max_cyclomatic: u16,
     max_cognitive: u16,
 ) {
-    use crate::health_types::{ComplexityViolation, ComponentRollup, ExceededThreshold};
+    use crate::health_types::ComplexityViolation;
 
     let mut by_owner: rustc_hash::FxHashMap<std::path::PathBuf, (Vec<usize>, Vec<usize>)> =
         rustc_hash::FxHashMap::default();
     for (idx, f) in findings.iter().enumerate() {
         if f.name == "<template>" {
-            let ext = f
-                .path
-                .extension()
-                .and_then(|e| e.to_str())
-                .map(str::to_ascii_lowercase);
-            let owner = match ext.as_deref() {
-                Some("html") => template_owner_lookup.and_then(|m| m.get(&f.path)).cloned(),
-                Some("ts" | "tsx" | "mts" | "cts") => Some(f.path.clone()),
-                _ => None,
-            };
-            if let Some(owner) = owner {
+            if let Some(owner) = component_template_owner(f, template_owner_lookup) {
                 by_owner.entry(owner).or_default().1.push(idx);
             }
-        } else if f.name != "<component>" {
-            let is_ts = f
-                .path
-                .extension()
-                .and_then(|e| e.to_str())
-                .is_some_and(|ext| {
-                    matches!(
-                        ext.to_ascii_lowercase().as_str(),
-                        "ts" | "tsx" | "mts" | "cts"
-                    )
-                });
-            if is_ts {
-                by_owner.entry(f.path.clone()).or_default().0.push(idx);
-            }
+        } else if is_component_class_finding(f) {
+            by_owner.entry(f.path.clone()).or_default().0.push(idx);
         }
     }
 
@@ -5467,19 +5596,79 @@ fn append_component_rollup_findings(
             continue;
         };
         let worst = &findings[worst_idx];
-        let component = owner.file_stem().map_or_else(
-            || "<unknown-component>".to_string(),
-            |stem| stem.to_string_lossy().into_owned(),
-        );
-        let worst_method = worst.name.clone();
-        let rollup_cyc = worst.cyclomatic.saturating_add(template.cyclomatic);
-        let rollup_cog = worst.cognitive.saturating_add(template.cognitive);
-        let exceeds_cyclomatic = rollup_cyc > max_cyclomatic;
-        let exceeds_cognitive = rollup_cog > max_cognitive;
-        if !exceeds_cyclomatic && !exceeds_cognitive {
-            continue;
+        if let Some(rollup) =
+            build_component_rollup(owner, worst, template, max_cyclomatic, max_cognitive)
+        {
+            to_push.push(rollup);
         }
-        let severity = compute_finding_severity(
+    }
+    findings.extend(to_push);
+}
+
+fn component_template_owner(
+    finding: &crate::health_types::ComplexityViolation,
+    template_owner_lookup: Option<&rustc_hash::FxHashMap<std::path::PathBuf, std::path::PathBuf>>,
+) -> Option<std::path::PathBuf> {
+    let ext = finding
+        .path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase);
+    match ext.as_deref() {
+        Some("html") => template_owner_lookup
+            .and_then(|m| m.get(&finding.path))
+            .cloned(),
+        Some("ts" | "tsx" | "mts" | "cts") => Some(finding.path.clone()),
+        _ => None,
+    }
+}
+
+fn is_component_class_finding(finding: &crate::health_types::ComplexityViolation) -> bool {
+    finding.name != "<component>"
+        && finding
+            .path
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|ext| {
+                matches!(
+                    ext.to_ascii_lowercase().as_str(),
+                    "ts" | "tsx" | "mts" | "cts"
+                )
+            })
+}
+
+fn build_component_rollup(
+    owner: std::path::PathBuf,
+    worst: &crate::health_types::ComplexityViolation,
+    template: &crate::health_types::ComplexityViolation,
+    max_cyclomatic: u16,
+    max_cognitive: u16,
+) -> Option<crate::health_types::ComplexityViolation> {
+    use crate::health_types::{ComponentRollup, ExceededThreshold};
+
+    let rollup_cyc = worst.cyclomatic.saturating_add(template.cyclomatic);
+    let rollup_cog = worst.cognitive.saturating_add(template.cognitive);
+    let exceeds_cyclomatic = rollup_cyc > max_cyclomatic;
+    let exceeds_cognitive = rollup_cog > max_cognitive;
+    if !exceeds_cyclomatic && !exceeds_cognitive {
+        return None;
+    }
+
+    let component = owner.file_stem().map_or_else(
+        || "<unknown-component>".to_string(),
+        |stem| stem.to_string_lossy().into_owned(),
+    );
+    Some(crate::health_types::ComplexityViolation {
+        path: owner,
+        name: "<component>".to_string(),
+        line: worst.line,
+        col: worst.col,
+        cyclomatic: rollup_cyc,
+        cognitive: rollup_cog,
+        line_count: worst.line_count.saturating_add(template.line_count),
+        param_count: 0,
+        exceeded: ExceededThreshold::from_bools(exceeds_cyclomatic, exceeds_cognitive, false),
+        severity: compute_finding_severity(
             rollup_cog,
             rollup_cyc,
             None,
@@ -5487,42 +5676,29 @@ fn append_component_rollup_findings(
             DEFAULT_COGNITIVE_CRITICAL,
             DEFAULT_CYCLOMATIC_HIGH,
             DEFAULT_CYCLOMATIC_CRITICAL,
-        );
-        to_push.push(ComplexityViolation {
-            path: owner,
-            name: "<component>".to_string(),
-            line: worst.line,
-            col: worst.col,
-            cyclomatic: rollup_cyc,
-            cognitive: rollup_cog,
-            line_count: worst.line_count.saturating_add(template.line_count),
-            param_count: 0,
-            react_hook_count: 0,
-            react_jsx_max_depth: 0,
-            react_prop_count: 0,
-            react_hook_profile: None,
-            exceeded: ExceededThreshold::from_bools(exceeds_cyclomatic, exceeds_cognitive, false),
-            severity,
-            crap: None,
-            coverage_pct: None,
-            coverage_tier: None,
-            coverage_source: None,
-            inherited_from: None,
-            component_rollup: Some(ComponentRollup {
-                component,
-                class_worst_function: worst_method,
-                class_cyclomatic: worst.cyclomatic,
-                class_cognitive: worst.cognitive,
-                template_path: template.path.clone(),
-                template_cyclomatic: template.cyclomatic,
-                template_cognitive: template.cognitive,
-            }),
-            contributions: Vec::new(),
-            effective_thresholds: None,
-            threshold_source: None,
-        });
-    }
-    findings.extend(to_push);
+        ),
+        crap: None,
+        coverage_pct: None,
+        coverage_tier: None,
+        coverage_source: None,
+        inherited_from: None,
+        react_hook_count: 0,
+        react_jsx_max_depth: 0,
+        react_prop_count: 0,
+        react_hook_profile: None,
+        component_rollup: Some(ComponentRollup {
+            component,
+            class_worst_function: worst.name.clone(),
+            class_cyclomatic: worst.cyclomatic,
+            class_cognitive: worst.cognitive,
+            template_path: template.path.clone(),
+            template_cyclomatic: template.cyclomatic,
+            template_cognitive: template.cognitive,
+        }),
+        contributions: Vec::new(),
+        effective_thresholds: None,
+        threshold_source: None,
+    })
 }
 
 /// Resolve the `inherited_from` provenance path for a CRAP finding.
@@ -5711,21 +5887,7 @@ pub struct HealthPrintOptions {
 }
 
 pub fn print_health_result(result: &HealthResult, options: HealthPrintOptions) -> ExitCode {
-    let ctx = report::ReportContext {
-        root: &result.config.root,
-        rules: &result.config.rules,
-        elapsed: result.elapsed,
-        quiet: options.quiet,
-        explain: options.explain,
-        group_by: None,
-        top: None,
-        summary: options.summary,
-        summary_heading: options.summary_heading,
-        show_explain_tip: options.show_explain_tip,
-        baseline_matched: None,
-        config_fixable: false,
-        skip_score_and_trend: options.skip_score_and_trend,
-    };
+    let ctx = health_report_context(result, options);
     let report_code = report::print_health_report(
         &result.report,
         result.grouping.as_ref(),
@@ -5741,55 +5903,101 @@ pub fn print_health_result(result: &HealthResult, options: HealthPrintOptions) -
         return ExitCode::SUCCESS;
     }
 
-    let mut score_gate_failed = false;
-    if let Some(threshold) = options.min_score
-        && let Some(ref hs) = result.report.health_score
-        && hs.score < threshold
-    {
-        score_gate_failed = true;
-        if !options.quiet {
-            eprintln!(
-                "Health score {:.1} ({}) is below minimum threshold {:.0}",
-                hs.score, hs.grade, threshold
-            );
-        }
+    if health_exit_gate_failed(result, options) {
+        return ExitCode::from(1);
+    }
+    if result.should_fail_on_coverage_gaps && result.coverage_gaps_has_findings {
+        return ExitCode::from(1);
+    }
+    maybe_print_score_gate_note(result, options);
+
+    ExitCode::SUCCESS
+}
+
+fn health_report_context(
+    result: &HealthResult,
+    options: HealthPrintOptions,
+) -> report::ReportContext<'_> {
+    report::ReportContext {
+        root: &result.config.root,
+        rules: &result.config.rules,
+        elapsed: result.elapsed,
+        quiet: options.quiet,
+        explain: options.explain,
+        group_by: None,
+        top: None,
+        summary: options.summary,
+        summary_heading: options.summary_heading,
+        show_explain_tip: options.show_explain_tip,
+        baseline_matched: None,
+        config_fixable: false,
+        skip_score_and_trend: options.skip_score_and_trend,
+    }
+}
+
+fn health_exit_gate_failed(result: &HealthResult, options: HealthPrintOptions) -> bool {
+    score_gate_failed(result, options)
+        || findings_gate_failed(result, options)
+        || has_failing_runtime_coverage(result)
+}
+
+fn score_gate_failed(result: &HealthResult, options: HealthPrintOptions) -> bool {
+    let Some(threshold) = options.min_score else {
+        return false;
+    };
+    let Some(ref hs) = result.report.health_score else {
+        return false;
+    };
+    if hs.score >= threshold {
+        return false;
     }
 
-    let findings_gate_failed = if let Some(min_sev) = options.min_severity {
+    if !options.quiet {
+        eprintln!(
+            "Health score {:.1} ({}) is below minimum threshold {:.0}",
+            hs.score, hs.grade, threshold
+        );
+    }
+    true
+}
+
+fn findings_gate_failed(result: &HealthResult, options: HealthPrintOptions) -> bool {
+    if let Some(min_sev) = options.min_severity {
         result.report.findings.iter().any(|f| f.severity >= min_sev)
     } else if options.min_score.is_none() {
         !result.report.findings.is_empty()
     } else {
         false
-    };
-    let has_failing_runtime_coverage =
-        result
-            .report
-            .runtime_coverage
-            .as_ref()
-            .is_some_and(|report| {
-                report.findings.iter().any(|finding| {
-                    matches!(
-                        finding.verdict,
-                        crate::health_types::RuntimeCoverageVerdict::SafeToDelete
-                            | crate::health_types::RuntimeCoverageVerdict::ReviewRequired
-                            | crate::health_types::RuntimeCoverageVerdict::LowTraffic
-                    )
-                })
-            });
-    if score_gate_failed || findings_gate_failed || has_failing_runtime_coverage {
-        return ExitCode::from(1);
+    }
+}
+
+fn has_failing_runtime_coverage(result: &HealthResult) -> bool {
+    result
+        .report
+        .runtime_coverage
+        .as_ref()
+        .is_some_and(|report| report.findings.iter().any(is_failing_runtime_coverage))
+}
+
+fn is_failing_runtime_coverage(finding: &crate::health_types::RuntimeCoverageFinding) -> bool {
+    matches!(
+        finding.verdict,
+        crate::health_types::RuntimeCoverageVerdict::SafeToDelete
+            | crate::health_types::RuntimeCoverageVerdict::ReviewRequired
+            | crate::health_types::RuntimeCoverageVerdict::LowTraffic
+    )
+}
+
+fn maybe_print_score_gate_note(result: &HealthResult, options: HealthPrintOptions) {
+    if options.min_score.is_none()
+        || options.min_severity.is_some()
+        || options.quiet
+        || result.report.findings.is_empty()
+        || !matches!(result.config.output, OutputFormat::Human)
+    {
+        return;
     }
 
-    if result.should_fail_on_coverage_gaps && result.coverage_gaps_has_findings {
-        return ExitCode::from(1);
-    }
-
-    if options.min_score.is_some()
-        && options.min_severity.is_none()
-        && !options.quiet
-        && !result.report.findings.is_empty()
-        && matches!(result.config.output, OutputFormat::Human)
     {
         eprintln!(
             "{}",
@@ -5797,8 +6005,6 @@ pub fn print_health_result(result: &HealthResult, options: HealthPrintOptions) -
                 .dimmed()
         );
     }
-
-    ExitCode::SUCCESS
 }
 
 #[cfg(test)]

@@ -464,10 +464,6 @@ fn push_dependency_override_diagnostics(
     }
 }
 
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "member name lengths are bounded by source size"
-)]
 pub fn push_member_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
@@ -506,7 +502,7 @@ pub fn push_member_diagnostics(
                         },
                         end: Position {
                             line,
-                            character: member.col + member.member_name.len() as u32,
+                            character: diagnostic_end_col(member.col, &member.member_name),
                         },
                     },
                     severity: Some(DiagnosticSeverity::HINT),
@@ -524,6 +520,21 @@ pub fn push_member_diagnostics(
         }
     }
 
+    push_unrendered_component_diagnostics(map, results);
+    push_unused_component_prop_diagnostics(map, results);
+    push_unused_component_emit_diagnostics(map, results);
+    push_unused_server_action_diagnostics(map, results);
+    push_unused_load_data_key_diagnostics(map, results);
+}
+
+fn diagnostic_end_col(start: u32, text: &str) -> u32 {
+    start.saturating_add(u32::try_from(text.len()).unwrap_or(u32::MAX))
+}
+
+fn push_unrendered_component_diagnostics(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+) {
     for finding in &results.unrendered_components {
         let c = &finding.component;
         if let Some(uri) = Uri::from_file_path(&c.path) {
@@ -536,7 +547,7 @@ pub fn push_member_diagnostics(
                     },
                     end: Position {
                         line,
-                        character: c.col + c.component_name.len() as u32,
+                        character: diagnostic_end_col(c.col, &c.component_name),
                     },
                 },
                 severity: Some(DiagnosticSeverity::HINT),
@@ -552,7 +563,12 @@ pub fn push_member_diagnostics(
             });
         }
     }
+}
 
+fn push_unused_component_prop_diagnostics(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+) {
     for finding in &results.unused_component_props {
         let p = &finding.prop;
         if let Some(uri) = Uri::from_file_path(&p.path) {
@@ -565,7 +581,7 @@ pub fn push_member_diagnostics(
                     },
                     end: Position {
                         line,
-                        character: p.col + p.prop_name.len() as u32,
+                        character: diagnostic_end_col(p.col, &p.prop_name),
                     },
                 },
                 severity: Some(DiagnosticSeverity::HINT),
@@ -581,7 +597,12 @@ pub fn push_member_diagnostics(
             });
         }
     }
+}
 
+fn push_unused_component_emit_diagnostics(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+) {
     for finding in &results.unused_component_emits {
         let e = &finding.emit;
         if let Some(uri) = Uri::from_file_path(&e.path) {
@@ -594,7 +615,7 @@ pub fn push_member_diagnostics(
                     },
                     end: Position {
                         line,
-                        character: e.col + e.emit_name.len() as u32,
+                        character: diagnostic_end_col(e.col, &e.emit_name),
                     },
                 },
                 severity: Some(DiagnosticSeverity::HINT),
@@ -610,9 +631,6 @@ pub fn push_member_diagnostics(
             });
         }
     }
-
-    push_unused_server_action_diagnostics(map, results);
-    push_unused_load_data_key_diagnostics(map, results);
 }
 
 /// Push HINT diagnostics for unused SvelteKit `load()` return-object keys

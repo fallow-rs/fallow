@@ -55,6 +55,25 @@ pub(super) struct FileScoreOutput {
     pub template_inherit_provenance: rustc_hash::FxHashMap<std::path::PathBuf, std::path::PathBuf>,
 }
 
+struct FileScoreOutputParts<'a> {
+    graph: &'a fallow_core::graph::ModuleGraph,
+    file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
+    results: &'a fallow_core::results::AnalysisResults,
+    scores: Vec<FileHealthScore>,
+    coverage: CoverageGapData,
+    circular_files: rustc_hash::FxHashSet<std::path::PathBuf>,
+    top_complex_fns: rustc_hash::FxHashMap<std::path::PathBuf, Vec<(String, u32, u16)>>,
+    entry_points: rustc_hash::FxHashSet<std::path::PathBuf>,
+    value_export_counts: rustc_hash::FxHashMap<std::path::PathBuf, usize>,
+    unused_export_names: rustc_hash::FxHashMap<std::path::PathBuf, Vec<String>>,
+    cycle_members: rustc_hash::FxHashMap<std::path::PathBuf, Vec<std::path::PathBuf>>,
+    direct_callers: rustc_hash::FxHashMap<std::path::PathBuf, Vec<DirectCallerEvidence>>,
+    istanbul_matched: usize,
+    istanbul_total: usize,
+    per_function_crap: rustc_hash::FxHashMap<std::path::PathBuf, Vec<PerFunctionCrap>>,
+    template_inherit: rustc_hash::FxHashMap<fallow_core::discover::FileId, TemplateInheritContext>,
+}
+
 /// Per-path snapshot of analysis-pipeline findings, retained alongside the
 /// pre-aggregated `analysis_counts` so that workspace- or group-scoped runs
 /// can recompute counts without re-running the full pipeline.
@@ -504,88 +523,125 @@ fn build_template_inherit_contexts(
 ) -> rustc_hash::FxHashMap<fallow_core::discover::FileId, TemplateInheritContext> {
     let mut out = rustc_hash::FxHashMap::default();
     for node in &graph.modules {
-        let Some(path) = file_paths.get(&node.file_id) else {
-            continue;
-        };
-        if !path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("html"))
+        if let Some(context) =
+            template_inherit_context_for_node(node, graph, module_by_id, file_paths)
         {
-            continue;
+            out.insert(node.file_id, context);
         }
-        let Some(module) = module_by_id.get(&node.file_id) else {
-            continue;
-        };
-        if !module
-            .complexity
-            .iter()
-            .any(|f| f.name.as_str() == "<template>")
-        {
-            continue;
-        }
-        let Some(importers) = graph.reverse_deps.get(node.file_id.0 as usize) else {
-            continue;
-        };
-
-        let mut any_reachable = false;
-        let mut combined_refs: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
-        let mut provenance: Option<std::path::PathBuf> = None;
-        let mut first_owner: Option<std::path::PathBuf> = None;
-        for &importer_id in importers {
-            let Some(owner_node) = graph.modules.get(importer_id.0 as usize) else {
-                continue;
-            };
-            let Some(owner_path) = file_paths.get(&importer_id) else {
-                continue;
-            };
-            if !owner_path
-                .extension()
-                .and_then(|ext| ext.to_str())
-                .is_some_and(|ext| {
-                    matches!(
-                        ext.to_ascii_lowercase().as_str(),
-                        "ts" | "tsx" | "mts" | "cts"
-                    )
-                })
-            {
-                continue;
-            }
-            if graph.test_entry_points.contains(&importer_id) {
-                continue;
-            }
-            let owner_has_component = module_by_id
-                .get(&importer_id)
-                .is_some_and(|m| m.has_angular_component_template_url);
-            if !owner_has_component {
-                continue;
-            }
-            if first_owner.is_none() {
-                first_owner = Some((**owner_path).clone());
-            }
-            let owner_reachable = owner_node.is_test_reachable();
-            if owner_reachable {
-                any_reachable = true;
-                if provenance.is_none() {
-                    provenance = Some((**owner_path).clone());
-                }
-                let refs = build_test_referenced_exports(&owner_node.exports, &graph.modules);
-                combined_refs.extend(refs);
-            }
-        }
-        let Some(provenance_owner) = provenance.or(first_owner) else {
-            continue;
-        };
-        out.insert(
-            node.file_id,
-            TemplateInheritContext {
-                is_test_reachable: any_reachable,
-                test_referenced_exports: combined_refs,
-                provenance_owner,
-            },
-        );
     }
     out
+}
+
+fn template_inherit_context_for_node(
+    node: &fallow_core::graph::ModuleNode,
+    graph: &fallow_core::graph::ModuleGraph,
+    module_by_id: &rustc_hash::FxHashMap<
+        fallow_core::discover::FileId,
+        &fallow_core::extract::ModuleInfo,
+    >,
+    file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
+) -> Option<TemplateInheritContext> {
+    if !is_template_inherit_candidate(node, module_by_id, file_paths) {
+        return None;
+    }
+    let importers = graph.reverse_deps.get(node.file_id.0 as usize)?;
+    template_inherit_context_from_importers(importers, graph, module_by_id, file_paths)
+}
+
+fn is_template_inherit_candidate(
+    node: &fallow_core::graph::ModuleNode,
+    module_by_id: &rustc_hash::FxHashMap<
+        fallow_core::discover::FileId,
+        &fallow_core::extract::ModuleInfo,
+    >,
+    file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
+) -> bool {
+    let Some(path) = file_paths.get(&node.file_id) else {
+        return false;
+    };
+    if !path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("html"))
+    {
+        return false;
+    }
+    module_by_id.get(&node.file_id).is_some_and(|module| {
+        module
+            .complexity
+            .iter()
+            .any(|finding| finding.name.as_str() == "<template>")
+    })
+}
+
+fn template_inherit_context_from_importers(
+    importers: &[fallow_core::discover::FileId],
+    graph: &fallow_core::graph::ModuleGraph,
+    module_by_id: &rustc_hash::FxHashMap<
+        fallow_core::discover::FileId,
+        &fallow_core::extract::ModuleInfo,
+    >,
+    file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
+) -> Option<TemplateInheritContext> {
+    let mut any_reachable = false;
+    let mut combined_refs = rustc_hash::FxHashSet::default();
+    let mut provenance: Option<std::path::PathBuf> = None;
+    let mut first_owner: Option<std::path::PathBuf> = None;
+
+    for &importer_id in importers {
+        let Some((owner_node, owner_path)) =
+            template_owner(importer_id, graph, module_by_id, file_paths)
+        else {
+            continue;
+        };
+        if first_owner.is_none() {
+            first_owner = Some((*owner_path).clone());
+        }
+        if owner_node.is_test_reachable() {
+            any_reachable = true;
+            provenance.get_or_insert_with(|| (*owner_path).clone());
+            let refs = build_test_referenced_exports(&owner_node.exports, &graph.modules);
+            combined_refs.extend(refs);
+        }
+    }
+
+    let provenance_owner = provenance.or(first_owner)?;
+    Some(TemplateInheritContext {
+        is_test_reachable: any_reachable,
+        test_referenced_exports: combined_refs,
+        provenance_owner,
+    })
+}
+
+fn template_owner<'a>(
+    importer_id: fallow_core::discover::FileId,
+    graph: &'a fallow_core::graph::ModuleGraph,
+    module_by_id: &rustc_hash::FxHashMap<
+        fallow_core::discover::FileId,
+        &fallow_core::extract::ModuleInfo,
+    >,
+    file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
+) -> Option<(&'a fallow_core::graph::ModuleNode, &'a std::path::PathBuf)> {
+    let owner_node = graph.modules.get(importer_id.0 as usize)?;
+    let owner_path = *file_paths.get(&importer_id)?;
+    if !is_template_owner_path(owner_path) || graph.test_entry_points.contains(&importer_id) {
+        return None;
+    }
+    let owner_has_component = module_by_id
+        .get(&importer_id)
+        .is_some_and(|module| module.has_angular_component_template_url);
+    owner_has_component.then_some((owner_node, owner_path))
+}
+
+fn is_template_owner_path(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| {
+            matches!(
+                ext.to_ascii_lowercase().as_str(),
+                "ts" | "tsx" | "mts" | "cts"
+            )
+        })
 }
 
 /// Build the set of export names that have at least one test-reachable reference.
@@ -1230,17 +1286,10 @@ pub(super) fn compute_file_scores(
 
     scores.sort_by(compare_file_score_triage);
 
-    let total_exports: usize = graph.modules.iter().map(|m| m.exports.len()).sum();
-    let dead_exports = results.unused_exports.len() + results.unused_types.len();
-    let unused_deps = results.unused_dependencies.len()
-        + results.unused_dev_dependencies.len()
-        + results.unused_optional_dependencies.len();
-    let total_deps = 0usize;
-
-    let analysis_snapshot =
-        build_analysis_counts_snapshot(&graph, file_paths, results, unused_deps);
-
-    Ok(FileScoreOutput {
+    Ok(build_file_score_output(FileScoreOutputParts {
+        graph: &graph,
+        file_paths,
+        results,
         scores,
         coverage,
         circular_files,
@@ -1250,29 +1299,73 @@ pub(super) fn compute_file_scores(
         unused_export_names,
         cycle_members,
         direct_callers,
-        analysis_counts: crate::vital_signs::AnalysisCounts {
-            total_exports,
-            dead_files: results.unused_files.len(),
-            dead_exports,
-            unused_deps,
-            circular_deps: results.circular_dependencies.len(),
-            total_deps,
-        },
-        prop_drilling_chains: results.prop_drilling_chains.clone(),
-        render_fan_in: results.render_fan_in.clone(),
-        analysis_snapshot,
         istanbul_matched,
         istanbul_total,
         per_function_crap,
-        template_inherit_provenance: template_inherit
-            .into_iter()
-            .filter_map(|(file_id, ctx)| {
-                file_paths
-                    .get(&file_id)
-                    .map(|p| ((**p).clone(), ctx.provenance_owner))
-            })
-            .collect(),
-    })
+        template_inherit,
+    }))
+}
+
+fn build_file_score_output(parts: FileScoreOutputParts<'_>) -> FileScoreOutput {
+    let total_exports: usize = parts.graph.modules.iter().map(|m| m.exports.len()).sum();
+    let unused_deps = parts.results.unused_dependencies.len()
+        + parts.results.unused_dev_dependencies.len()
+        + parts.results.unused_optional_dependencies.len();
+    let analysis_snapshot =
+        build_analysis_counts_snapshot(parts.graph, parts.file_paths, parts.results, unused_deps);
+    let analysis_counts =
+        build_file_score_analysis_counts(parts.results, total_exports, unused_deps);
+    let template_inherit_provenance =
+        build_template_inherit_provenance(parts.template_inherit, parts.file_paths);
+
+    FileScoreOutput {
+        scores: parts.scores,
+        coverage: parts.coverage,
+        circular_files: parts.circular_files,
+        top_complex_fns: parts.top_complex_fns,
+        entry_points: parts.entry_points,
+        value_export_counts: parts.value_export_counts,
+        unused_export_names: parts.unused_export_names,
+        cycle_members: parts.cycle_members,
+        direct_callers: parts.direct_callers,
+        analysis_counts,
+        prop_drilling_chains: parts.results.prop_drilling_chains.clone(),
+        render_fan_in: parts.results.render_fan_in.clone(),
+        analysis_snapshot,
+        istanbul_matched: parts.istanbul_matched,
+        istanbul_total: parts.istanbul_total,
+        per_function_crap: parts.per_function_crap,
+        template_inherit_provenance,
+    }
+}
+
+fn build_file_score_analysis_counts(
+    results: &fallow_core::results::AnalysisResults,
+    total_exports: usize,
+    unused_deps: usize,
+) -> crate::vital_signs::AnalysisCounts {
+    crate::vital_signs::AnalysisCounts {
+        total_exports,
+        dead_files: results.unused_files.len(),
+        dead_exports: results.unused_exports.len() + results.unused_types.len(),
+        unused_deps,
+        circular_deps: results.circular_dependencies.len(),
+        total_deps: 0usize,
+    }
+}
+
+fn build_template_inherit_provenance(
+    template_inherit: rustc_hash::FxHashMap<fallow_core::discover::FileId, TemplateInheritContext>,
+    file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
+) -> rustc_hash::FxHashMap<std::path::PathBuf, std::path::PathBuf> {
+    template_inherit
+        .into_iter()
+        .filter_map(|(file_id, ctx)| {
+            file_paths
+                .get(&file_id)
+                .map(|path| ((**path).clone(), ctx.provenance_owner))
+        })
+        .collect()
 }
 
 fn record_entry_point(

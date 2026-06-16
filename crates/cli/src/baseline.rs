@@ -274,86 +274,19 @@ fn baseline_file_export_keys(
             .iter()
             .map(|f| relative_path(&f.file.path, root))
             .collect(),
-        unused_exports: results
-            .unused_exports
-            .iter()
-            .map(|e| {
-                format!(
-                    "{}:{}",
-                    relative_path(&e.export.path, root),
-                    e.export.export_name
-                )
-            })
-            .collect(),
-        unused_types: results
-            .unused_types
-            .iter()
-            .map(|e| {
-                format!(
-                    "{}:{}",
-                    relative_path(&e.export.path, root),
-                    e.export.export_name
-                )
-            })
-            .collect(),
-        private_type_leaks: results
-            .private_type_leaks
-            .iter()
-            .map(|e| {
-                format!(
-                    "{}:{}->{}",
-                    relative_path(&e.leak.path, root),
-                    e.leak.export_name,
-                    e.leak.type_name
-                )
-            })
-            .collect(),
-        invalid_client_exports: results
-            .invalid_client_exports
-            .iter()
-            .map(|e| {
-                format!(
-                    "{}:{}",
-                    relative_path(&e.export.path, root),
-                    e.export.export_name
-                )
-            })
-            .collect(),
-        mixed_client_server_barrels: results
-            .mixed_client_server_barrels
-            .iter()
-            .map(|b| {
-                format!(
-                    "{}:{}:{}",
-                    relative_path(&b.barrel.path, root),
-                    b.barrel.client_origin,
-                    b.barrel.server_origin
-                )
-            })
-            .collect(),
-        misplaced_directives: results
-            .misplaced_directives
-            .iter()
-            .map(|d| {
-                format!(
-                    "{}:{}:{}",
-                    relative_path(&d.directive_site.path, root),
-                    d.directive_site.line,
-                    d.directive_site.directive
-                )
-            })
-            .collect(),
-        route_collisions: results
-            .route_collisions
-            .iter()
-            .map(|c| {
-                format!(
-                    "{}:{}",
-                    relative_path(&c.collision.path, root),
-                    c.collision.url
-                )
-            })
-            .collect(),
+        unused_exports: unused_export_baseline_keys(&results.unused_exports, root),
+        unused_types: unused_type_baseline_keys(&results.unused_types, root),
+        private_type_leaks: private_type_leak_baseline_keys(&results.private_type_leaks, root),
+        invalid_client_exports: invalid_client_export_baseline_keys(
+            &results.invalid_client_exports,
+            root,
+        ),
+        mixed_client_server_barrels: barrel_baseline_keys(
+            &results.mixed_client_server_barrels,
+            root,
+        ),
+        misplaced_directives: directive_baseline_keys(&results.misplaced_directives, root),
+        route_collisions: route_collision_baseline_keys(&results.route_collisions, root),
         dynamic_segment_name_conflicts: results
             .dynamic_segment_name_conflicts
             .iter()
@@ -366,6 +299,121 @@ fn baseline_file_export_keys(
             })
             .collect(),
     }
+}
+
+fn unused_export_baseline_keys(
+    items: &[fallow_core::results::UnusedExportFinding],
+    root: &Path,
+) -> Vec<String> {
+    items
+        .iter()
+        .map(|e| {
+            format!(
+                "{}:{}",
+                relative_path(&e.export.path, root),
+                e.export.export_name
+            )
+        })
+        .collect()
+}
+
+fn unused_type_baseline_keys(
+    items: &[fallow_core::results::UnusedTypeFinding],
+    root: &Path,
+) -> Vec<String> {
+    items
+        .iter()
+        .map(|e| {
+            format!(
+                "{}:{}",
+                relative_path(&e.export.path, root),
+                e.export.export_name
+            )
+        })
+        .collect()
+}
+
+fn invalid_client_export_baseline_keys(
+    items: &[fallow_core::results::InvalidClientExportFinding],
+    root: &Path,
+) -> Vec<String> {
+    items
+        .iter()
+        .map(|e| {
+            format!(
+                "{}:{}",
+                relative_path(&e.export.path, root),
+                e.export.export_name
+            )
+        })
+        .collect()
+}
+
+fn private_type_leak_baseline_keys(
+    items: &[fallow_core::results::PrivateTypeLeakFinding],
+    root: &Path,
+) -> Vec<String> {
+    items
+        .iter()
+        .map(|e| {
+            format!(
+                "{}:{}->{}",
+                relative_path(&e.leak.path, root),
+                e.leak.export_name,
+                e.leak.type_name
+            )
+        })
+        .collect()
+}
+
+fn barrel_baseline_keys(
+    items: &[fallow_core::results::MixedClientServerBarrelFinding],
+    root: &Path,
+) -> Vec<String> {
+    items
+        .iter()
+        .map(|b| {
+            format!(
+                "{}:{}:{}",
+                relative_path(&b.barrel.path, root),
+                b.barrel.client_origin,
+                b.barrel.server_origin
+            )
+        })
+        .collect()
+}
+
+fn directive_baseline_keys(
+    items: &[fallow_core::results::MisplacedDirectiveFinding],
+    root: &Path,
+) -> Vec<String> {
+    items
+        .iter()
+        .map(|d| {
+            format!(
+                "{}:{}:{}",
+                relative_path(&d.directive_site.path, root),
+                d.directive_site.line,
+                d.directive_site.directive
+            )
+        })
+        .collect()
+}
+
+fn route_collision_baseline_keys(
+    items: &[fallow_core::results::RouteCollisionFinding],
+    root: &Path,
+) -> Vec<String> {
+    items
+        .iter()
+        .map(|c| {
+            format!(
+                "{}:{}",
+                relative_path(&c.collision.path, root),
+                c.collision.url
+            )
+        })
+        .collect()
 }
 
 struct BaselineMemberImportKeys {
@@ -388,101 +436,16 @@ fn baseline_member_import_keys(
     root: &Path,
 ) -> BaselineMemberImportKeys {
     BaselineMemberImportKeys {
-        unused_enum_members: results
-            .unused_enum_members
-            .iter()
-            .map(|m| {
-                format!(
-                    "{}:{}.{}",
-                    relative_path(&m.member.path, root),
-                    m.member.parent_name,
-                    m.member.member_name
-                )
-            })
-            .collect(),
-        unused_class_members: results
-            .unused_class_members
-            .iter()
-            .map(|m| {
-                format!(
-                    "{}:{}.{}",
-                    relative_path(&m.member.path, root),
-                    m.member.parent_name,
-                    m.member.member_name
-                )
-            })
-            .collect(),
-        unused_store_members: results
-            .unused_store_members
-            .iter()
-            .map(|m| {
-                format!(
-                    "{}:{}.{}",
-                    relative_path(&m.member.path, root),
-                    m.member.parent_name,
-                    m.member.member_name
-                )
-            })
-            .collect(),
-        unprovided_injects: results
-            .unprovided_injects
-            .iter()
-            .map(|f| {
-                format!(
-                    "{}:{}",
-                    relative_path(&f.inject.path, root),
-                    f.inject.key_name
-                )
-            })
-            .collect(),
-        unrendered_components: results
-            .unrendered_components
-            .iter()
-            .map(|c| {
-                format!(
-                    "{}:{}",
-                    relative_path(&c.component.path, root),
-                    c.component.component_name
-                )
-            })
-            .collect(),
-        unused_component_props: results
-            .unused_component_props
-            .iter()
-            .map(|p| format!("{}:{}", relative_path(&p.prop.path, root), p.prop.prop_name))
-            .collect(),
-        unused_component_emits: results
-            .unused_component_emits
-            .iter()
-            .map(|e| format!("{}:{}", relative_path(&e.emit.path, root), e.emit.emit_name))
-            .collect(),
-        unused_server_actions: results
-            .unused_server_actions
-            .iter()
-            .map(|a| {
-                format!(
-                    "{}:{}",
-                    relative_path(&a.action.path, root),
-                    a.action.action_name
-                )
-            })
-            .collect(),
-        unused_load_data_keys: results
-            .unused_load_data_keys
-            .iter()
-            .map(|k| format!("{}:{}", relative_path(&k.key.path, root), k.key.key_name))
-            .collect(),
-        unresolved_imports: results
-            .unresolved_imports
-            .iter()
-            .map(|i| {
-                format!(
-                    "{}:{}",
-                    relative_path(&i.import.path, root),
-                    i.import.specifier
-                )
-            })
-            .collect(),
+        unused_enum_members: enum_member_baseline_keys(&results.unused_enum_members, root),
+        unused_class_members: class_member_baseline_keys(&results.unused_class_members, root),
+        unused_store_members: store_member_baseline_keys(&results.unused_store_members, root),
+        unprovided_injects: inject_baseline_keys(&results.unprovided_injects, root),
+        unrendered_components: component_baseline_keys(&results.unrendered_components, root),
+        unused_component_props: component_prop_baseline_keys(&results.unused_component_props, root),
+        unused_component_emits: component_emit_baseline_keys(&results.unused_component_emits, root),
+        unused_server_actions: server_action_baseline_keys(&results.unused_server_actions, root),
+        unused_load_data_keys: load_data_key_baseline_keys(&results.unused_load_data_keys, root),
+        unresolved_imports: unresolved_import_baseline_keys(&results.unresolved_imports, root),
         duplicate_exports: results
             .duplicate_exports
             .iter()
@@ -494,6 +457,139 @@ fn baseline_member_import_keys(
             .map(|s| format!("{}:{}", relative_path(&s.path, root), s.line))
             .collect(),
     }
+}
+
+fn enum_member_baseline_keys(
+    items: &[fallow_core::results::UnusedEnumMemberFinding],
+    root: &Path,
+) -> Vec<String> {
+    items
+        .iter()
+        .map(|m| unused_member_baseline_key(&m.member, root))
+        .collect()
+}
+
+fn class_member_baseline_keys(
+    items: &[fallow_core::results::UnusedClassMemberFinding],
+    root: &Path,
+) -> Vec<String> {
+    items
+        .iter()
+        .map(|m| unused_member_baseline_key(&m.member, root))
+        .collect()
+}
+
+fn store_member_baseline_keys(
+    items: &[fallow_core::results::UnusedStoreMemberFinding],
+    root: &Path,
+) -> Vec<String> {
+    items
+        .iter()
+        .map(|m| unused_member_baseline_key(&m.member, root))
+        .collect()
+}
+
+fn unused_member_baseline_key(member: &fallow_core::results::UnusedMember, root: &Path) -> String {
+    format!(
+        "{}:{}.{}",
+        relative_path(&member.path, root),
+        member.parent_name,
+        member.member_name
+    )
+}
+
+fn inject_baseline_keys(
+    items: &[fallow_core::results::UnprovidedInjectFinding],
+    root: &Path,
+) -> Vec<String> {
+    items
+        .iter()
+        .map(|f| {
+            format!(
+                "{}:{}",
+                relative_path(&f.inject.path, root),
+                f.inject.key_name
+            )
+        })
+        .collect()
+}
+
+fn component_baseline_keys(
+    items: &[fallow_core::results::UnrenderedComponentFinding],
+    root: &Path,
+) -> Vec<String> {
+    items
+        .iter()
+        .map(|c| {
+            format!(
+                "{}:{}",
+                relative_path(&c.component.path, root),
+                c.component.component_name
+            )
+        })
+        .collect()
+}
+
+fn component_prop_baseline_keys(
+    items: &[fallow_core::results::UnusedComponentPropFinding],
+    root: &Path,
+) -> Vec<String> {
+    items
+        .iter()
+        .map(|p| format!("{}:{}", relative_path(&p.prop.path, root), p.prop.prop_name))
+        .collect()
+}
+
+fn component_emit_baseline_keys(
+    items: &[fallow_core::results::UnusedComponentEmitFinding],
+    root: &Path,
+) -> Vec<String> {
+    items
+        .iter()
+        .map(|e| format!("{}:{}", relative_path(&e.emit.path, root), e.emit.emit_name))
+        .collect()
+}
+
+fn server_action_baseline_keys(
+    items: &[fallow_core::results::UnusedServerActionFinding],
+    root: &Path,
+) -> Vec<String> {
+    items
+        .iter()
+        .map(|a| {
+            format!(
+                "{}:{}",
+                relative_path(&a.action.path, root),
+                a.action.action_name
+            )
+        })
+        .collect()
+}
+
+fn load_data_key_baseline_keys(
+    items: &[fallow_core::results::UnusedLoadDataKeyFinding],
+    root: &Path,
+) -> Vec<String> {
+    items
+        .iter()
+        .map(|k| format!("{}:{}", relative_path(&k.key.path, root), k.key.key_name))
+        .collect()
+}
+
+fn unresolved_import_baseline_keys(
+    items: &[fallow_core::results::UnresolvedImportFinding],
+    root: &Path,
+) -> Vec<String> {
+    items
+        .iter()
+        .map(|i| {
+            format!(
+                "{}:{}",
+                relative_path(&i.import.path, root),
+                i.import.specifier
+            )
+        })
+        .collect()
 }
 
 struct BaselineDependencyKeys {
@@ -758,6 +854,12 @@ impl BaselineFilterContext<'_> {
     }
 
     fn filter_unused_members(&self, results: &mut fallow_core::results::AnalysisResults) {
+        self.filter_enum_class_store_members(results);
+        self.filter_component_surface_members(results);
+        self.filter_route_action_members(results);
+    }
+
+    fn filter_enum_class_store_members(&self, results: &mut fallow_core::results::AnalysisResults) {
         let baseline_enum_members: FxHashSet<&str> = self
             .baseline
             .unused_enum_members
@@ -805,7 +907,12 @@ impl BaselineFilterContext<'_> {
             );
             !baseline_store_members.contains(key.as_str())
         });
+    }
 
+    fn filter_component_surface_members(
+        &self,
+        results: &mut fallow_core::results::AnalysisResults,
+    ) {
         let baseline_unprovided_injects: FxHashSet<&str> = self
             .baseline
             .unprovided_injects
@@ -865,7 +972,9 @@ impl BaselineFilterContext<'_> {
             );
             !baseline_unused_component_emits.contains(key.as_str())
         });
+    }
 
+    fn filter_route_action_members(&self, results: &mut fallow_core::results::AnalysisResults) {
         let baseline_unused_server_actions: FxHashSet<&str> = self
             .baseline
             .unused_server_actions

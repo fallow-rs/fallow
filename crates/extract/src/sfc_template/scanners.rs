@@ -27,91 +27,30 @@ fn scan_delimited_section(
     let bytes = source.as_bytes();
     let mut index = start + opening_len;
     let mut nested_delimiters = 0_u32;
-    let mut in_single = false;
-    let mut in_double = false;
-    let mut in_backtick = false;
-    let mut escape = false;
-    let mut line_comment = false;
-    let mut block_comment = false;
+    let mut state = DelimitedScanState::default();
 
     while index < bytes.len() {
         let byte = bytes[index];
 
-        if line_comment {
-            if byte == b'\n' {
-                line_comment = false;
-            }
-            index += 1;
+        if let Some(next_index) = state.consume_context(bytes, index, byte) {
+            index = next_index;
             continue;
         }
 
-        if block_comment {
-            if byte == b'*' && bytes.get(index + 1) == Some(&b'/') {
-                block_comment = false;
-                index += 2;
-            } else {
-                index += 1;
-            }
-            continue;
-        }
-
-        if escape {
-            escape = false;
-            index += 1;
-            continue;
-        }
-
-        if in_single {
-            if byte == b'\\' {
-                escape = true;
-            } else if byte == b'\'' {
-                in_single = false;
-            }
-            index += 1;
-            continue;
-        }
-
-        if in_double {
-            if byte == b'\\' {
-                escape = true;
-            } else if byte == b'"' {
-                in_double = false;
-            }
-            index += 1;
-            continue;
-        }
-
-        if in_backtick {
-            if byte == b'\\' {
-                escape = true;
-            } else if byte == b'`' {
-                in_backtick = false;
-            }
-            index += 1;
-            continue;
-        }
-
-        if byte == b'/' && bytes.get(index + 1) == Some(&b'/') {
-            line_comment = true;
-            index += 2;
-            continue;
-        }
-
-        if byte == b'/' && bytes.get(index + 1) == Some(&b'*') {
-            block_comment = true;
-            index += 2;
+        if let Some(next_index) = state.start_comment(bytes, index, byte) {
+            index = next_index;
             continue;
         }
 
         match byte {
             b'\'' => {
-                in_single = true;
+                state.in_single = true;
             }
             b'"' => {
-                in_double = true;
+                state.in_double = true;
             }
             b'`' => {
-                in_backtick = true;
+                state.in_backtick = true;
             }
             b if b == open_byte => nested_delimiters += 1,
             b if b == close_byte => {
@@ -133,6 +72,92 @@ fn scan_delimited_section(
     }
 
     None
+}
+
+#[derive(Default)]
+struct DelimitedScanState {
+    in_single: bool,
+    in_double: bool,
+    in_backtick: bool,
+    escape: bool,
+    line_comment: bool,
+    block_comment: bool,
+}
+
+impl DelimitedScanState {
+    fn consume_context(&mut self, bytes: &[u8], index: usize, byte: u8) -> Option<usize> {
+        if self.line_comment {
+            if byte == b'\n' {
+                self.line_comment = false;
+            }
+            return Some(index + 1);
+        }
+        if self.block_comment {
+            return Some(self.consume_block_comment(bytes, index, byte));
+        }
+        if self.escape {
+            self.escape = false;
+            return Some(index + 1);
+        }
+        if self.in_single {
+            return Some(self.consume_single_quote(index, byte));
+        }
+        if self.in_double {
+            return Some(self.consume_double_quote(index, byte));
+        }
+        if self.in_backtick {
+            return Some(self.consume_backtick(index, byte));
+        }
+        None
+    }
+
+    fn start_comment(&mut self, bytes: &[u8], index: usize, byte: u8) -> Option<usize> {
+        if byte == b'/' && bytes.get(index + 1) == Some(&b'/') {
+            self.line_comment = true;
+            return Some(index + 2);
+        }
+        if byte == b'/' && bytes.get(index + 1) == Some(&b'*') {
+            self.block_comment = true;
+            return Some(index + 2);
+        }
+        None
+    }
+
+    fn consume_block_comment(&mut self, bytes: &[u8], index: usize, byte: u8) -> usize {
+        if byte == b'*' && bytes.get(index + 1) == Some(&b'/') {
+            self.block_comment = false;
+            index + 2
+        } else {
+            index + 1
+        }
+    }
+
+    fn consume_single_quote(&mut self, index: usize, byte: u8) -> usize {
+        if byte == b'\\' {
+            self.escape = true;
+        } else if byte == b'\'' {
+            self.in_single = false;
+        }
+        index + 1
+    }
+
+    fn consume_double_quote(&mut self, index: usize, byte: u8) -> usize {
+        if byte == b'\\' {
+            self.escape = true;
+        } else if byte == b'"' {
+            self.in_double = false;
+        }
+        index + 1
+    }
+
+    fn consume_backtick(&mut self, index: usize, byte: u8) -> usize {
+        if byte == b'\\' {
+            self.escape = true;
+        } else if byte == b'`' {
+            self.in_backtick = false;
+        }
+        index + 1
+    }
 }
 
 pub(super) fn scan_html_tag(source: &str, start: usize) -> Option<(&str, usize)> {

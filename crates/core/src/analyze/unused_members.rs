@@ -1792,10 +1792,24 @@ pub(super) struct UnusedMemberScanInput<'a> {
     pub(super) public_api_entry_points: &'a FxHashSet<FileId>,
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "the per-module member scan is a single cohesive pass; the propagation setup above it dominates the line count"
-)]
+struct PreparedMemberScan<'a> {
+    heritage_context: MemberHeritageContext<'a>,
+    accessed_members: FxHashMap<ExportKey, FxHashSet<String>>,
+    self_accessed_members: FxHashMap<FileId, FxHashSet<String>>,
+    whole_object_used_exports: FxHashSet<ExportKey>,
+    entry_star_targets: FxHashSet<FileId>,
+    error_subclass_keys: FxHashSet<ExportKey>,
+}
+
+type MemberScanBuckets = (Vec<UnusedMember>, Vec<UnusedMember>, Vec<UnusedMember>);
+
+struct MemberReportContext<'a, 'scan> {
+    input: UnusedMemberScanInput<'a>,
+    allowlist: &'scan ClassMemberAllowlist<'a>,
+    ignore_decorators: &'scan IgnoreDecoratorSet,
+    prepared: &'scan PreparedMemberScan<'a>,
+}
+
 pub(super) fn find_unused_members_with_public_api_entry_points(
     input: UnusedMemberScanInput<'_>,
 ) -> UnusedMemberResults {
@@ -1807,6 +1821,162 @@ pub(super) fn find_unused_members_with_public_api_entry_points(
 
     record_seen_ignore_decorators(input.graph, &ignore_decorators);
 
+    let prepared = prepare_member_scan(input);
+    let member_results = MemberReportContext {
+        input,
+        allowlist: &allowlist,
+        ignore_decorators: &ignore_decorators,
+        prepared: &prepared,
+    }
+    .collect();
+
+    for (enum_members, class_members, store_members) in member_results {
+        unused_enum_members.extend(enum_members);
+        unused_class_members.extend(class_members);
+        unused_store_members.extend(store_members);
+    }
+
+    allowlist.warn_unmatched_patterns();
+    ignore_decorators.warn_unmatched();
+
+    UnusedMemberResults {
+        enum_members: unused_enum_members,
+        class_members: unused_class_members,
+        store_members: unused_store_members,
+    }
+}
+
+impl MemberReportContext<'_, '_> {
+    fn collect(&self) -> Vec<MemberScanBuckets> {
+        self.input
+            .graph
+            .modules
+            .par_iter()
+            .map(|module| self.collect_module(module))
+            .collect()
+    }
+
+    fn collect_module(&self, module: &crate::graph::ModuleNode) -> MemberScanBuckets {
+        let mut buckets = (Vec::new(), Vec::new(), Vec::new());
+        if !module.is_reachable() {
+            return buckets;
+        }
+
+        let store_only_scan = module.is_entry_point();
+        for export in &module.exports {
+            self.collect_export(module, export, store_only_scan, &mut buckets);
+        }
+        buckets
+    }
+
+    fn collect_export(
+        &self,
+        module: &crate::graph::ModuleNode,
+        export: &crate::graph::ExportSymbol,
+        store_only_scan: bool,
+        buckets: &mut MemberScanBuckets,
+    ) {
+        if should_skip_export_member_scan(self.input.graph, module, export) {
+            return;
+        }
+        if store_only_scan
+            && !export
+                .members
+                .iter()
+                .any(|m| m.kind == MemberKind::StoreMember)
+        {
+            return;
+        }
+
+        let export_name = export.name.to_string();
+        let export_key = ExportKey::new(module.file_id, export_name.clone());
+        if self
+            .prepared
+            .whole_object_used_exports
+            .contains(&export_key)
+        {
+            return;
+        }
+
+        let file_self_accesses = self.prepared.self_accessed_members.get(&module.file_id);
+        let is_public_api_class_export = is_entry_point_public_class_export(
+            self.input.graph,
+            module,
+            export,
+            &self.prepared.entry_star_targets,
+            self.input.public_api_entry_points,
+        );
+        let (super_class, implemented_interfaces) = self
+            .prepared
+            .heritage_context
+            .class_heritage_by_export
+            .get(&export_key)
+            .map_or((None, &[][..]), |(super_class, interfaces)| {
+                (super_class.as_deref(), interfaces.as_slice())
+            });
+
+        for member in &export.members {
+            self.collect_member(
+                module,
+                member,
+                &export_name,
+                &MemberSkipContext {
+                    export_key: &export_key,
+                    accessed_members: &self.prepared.accessed_members,
+                    file_self_accesses,
+                    ignore_decorators: self.ignore_decorators,
+                    error_subclass_keys: &self.prepared.error_subclass_keys,
+                    allowlist: self.allowlist,
+                    super_class,
+                    implemented_interfaces,
+                    is_public_api_class_export,
+                },
+                store_only_scan,
+                buckets,
+            );
+        }
+    }
+
+    fn collect_member(
+        &self,
+        module: &crate::graph::ModuleNode,
+        member: &MemberInfo,
+        export_name: &str,
+        skip_context: &MemberSkipContext<'_>,
+        store_only_scan: bool,
+        buckets: &mut MemberScanBuckets,
+    ) {
+        if store_only_scan && member.kind != MemberKind::StoreMember {
+            return;
+        }
+        if should_skip_member_for_unused_report(member, skip_context) {
+            return;
+        }
+
+        let Some(unused) = build_unsuppressed_unused_member(
+            module.file_id,
+            &module.path,
+            export_name,
+            member,
+            self.input.suppressions,
+            self.input.line_offsets_by_file,
+        ) else {
+            return;
+        };
+        push_unused_member(buckets, unused, member.kind);
+    }
+}
+
+fn push_unused_member(buckets: &mut MemberScanBuckets, unused: UnusedMember, kind: MemberKind) {
+    match kind {
+        MemberKind::EnumMember => buckets.0.push(unused),
+        MemberKind::ClassMethod | MemberKind::ClassProperty => buckets.1.push(unused),
+        MemberKind::StoreMember => buckets.2.push(unused),
+        MemberKind::NamespaceMember => unreachable!(),
+    }
+}
+
+fn prepare_member_scan(input: UnusedMemberScanInput<'_>) -> PreparedMemberScan<'_> {
     let heritage_context =
         build_member_heritage_context(input.graph, input.resolved_modules, input.modules);
 
@@ -1869,135 +2039,13 @@ pub(super) fn find_unused_members_with_public_api_entry_points(
         &heritage_context.class_heritage_by_export,
     );
 
-    let member_results: Vec<(Vec<UnusedMember>, Vec<UnusedMember>, Vec<UnusedMember>)> = input
-        .graph
-        .modules
-        .par_iter()
-        .map(|module| {
-            let mut unused_enum_members = Vec::new();
-            let mut unused_class_members = Vec::new();
-            let mut unused_store_members = Vec::new();
-
-            if !module.is_reachable() {
-                return (
-                    unused_enum_members,
-                    unused_class_members,
-                    unused_store_members,
-                );
-            }
-            // Entry-point modules skip enum/class member detection (their
-            // exports are public API), but a Pinia store member is dead when no
-            // CONSUMER accesses it regardless of the module's entry-point status:
-            // a monorepo shared-store package (`packages/stores`) is an entry
-            // boundary yet its members are app-internal, not a published API.
-            // So scan such modules in STORE-ONLY mode (consumers across the
-            // project still credit used members; a member consumed only outside
-            // the analyzed scope is the rare published-store-library case, gated
-            // by the pinia dependency and reported at `warn`).
-            let store_only_scan = module.is_entry_point();
-
-            for export in &module.exports {
-                if should_skip_export_member_scan(input.graph, module, export) {
-                    continue;
-                }
-                if store_only_scan
-                    && !export
-                        .members
-                        .iter()
-                        .any(|m| m.kind == MemberKind::StoreMember)
-                {
-                    continue;
-                }
-
-                let export_name = export.name.to_string();
-                let export_key = ExportKey::new(module.file_id, export_name.clone());
-                let (super_class, implemented_interfaces) = heritage_context
-                    .class_heritage_by_export
-                    .get(&export_key)
-                    .map_or((None, &[][..]), |(super_class, interfaces)| {
-                        (super_class.as_deref(), interfaces.as_slice())
-                    });
-
-                if whole_object_used_exports.contains(&export_key) {
-                    continue;
-                }
-
-                let is_public_api_class_export = is_entry_point_public_class_export(
-                    input.graph,
-                    module,
-                    export,
-                    &entry_star_targets,
-                    input.public_api_entry_points,
-                );
-
-                let file_self_accesses = self_accessed_members.get(&module.file_id);
-
-                for member in &export.members {
-                    // In an entry-point module, only store members are scanned;
-                    // enum/class members keep their public-API skip.
-                    if store_only_scan && member.kind != MemberKind::StoreMember {
-                        continue;
-                    }
-                    if should_skip_member_for_unused_report(
-                        member,
-                        &MemberSkipContext {
-                            export_key: &export_key,
-                            accessed_members: &accessed_members,
-                            file_self_accesses,
-                            ignore_decorators: &ignore_decorators,
-                            error_subclass_keys: &error_subclass_keys,
-                            allowlist: &allowlist,
-                            super_class,
-                            implemented_interfaces,
-                            is_public_api_class_export,
-                        },
-                    ) {
-                        continue;
-                    }
-
-                    let Some(unused) = build_unsuppressed_unused_member(
-                        module.file_id,
-                        &module.path,
-                        &export_name,
-                        member,
-                        input.suppressions,
-                        input.line_offsets_by_file,
-                    ) else {
-                        continue;
-                    };
-
-                    match member.kind {
-                        MemberKind::EnumMember => unused_enum_members.push(unused),
-                        MemberKind::ClassMethod | MemberKind::ClassProperty => {
-                            unused_class_members.push(unused);
-                        }
-                        MemberKind::StoreMember => unused_store_members.push(unused),
-                        MemberKind::NamespaceMember => unreachable!(),
-                    }
-                }
-            }
-
-            (
-                unused_enum_members,
-                unused_class_members,
-                unused_store_members,
-            )
-        })
-        .collect();
-
-    for (enum_members, class_members, store_members) in member_results {
-        unused_enum_members.extend(enum_members);
-        unused_class_members.extend(class_members);
-        unused_store_members.extend(store_members);
-    }
-
-    allowlist.warn_unmatched_patterns();
-    ignore_decorators.warn_unmatched();
-
-    UnusedMemberResults {
-        enum_members: unused_enum_members,
-        class_members: unused_class_members,
-        store_members: unused_store_members,
+    PreparedMemberScan {
+        heritage_context,
+        accessed_members,
+        self_accessed_members,
+        whole_object_used_exports,
+        entry_star_targets,
+        error_subclass_keys,
     }
 }
 

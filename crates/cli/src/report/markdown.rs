@@ -23,12 +23,6 @@ pub(super) fn print_markdown(results: &AnalysisResults, root: &Path) {
 
 /// Build markdown output for analysis results.
 pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
-    let rel = |p: &Path| {
-        escape_backticks(&normalize_uri(
-            &relative_path(p, root).display().to_string(),
-        ))
-    };
-
     let total = results.total_issues();
     let mut out = String::new();
 
@@ -39,12 +33,35 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
 
     let _ = write!(out, "## Fallow: {total} issue{} found\n\n", plural(total));
 
-    markdown_section(&mut out, &results.unused_files, "Unused files", |file| {
-        vec![format!("- `{}`", rel(&file.file.path))]
+    push_markdown_primary_sections(&mut out, results, root);
+    push_markdown_import_sections(&mut out, results, root);
+    push_markdown_dependency_detail_sections(&mut out, results, root);
+    push_markdown_graph_sections(&mut out, results, &|path| {
+        markdown_relative_path(path, root)
+    });
+    push_markdown_catalog_sections(&mut out, results, &|path| {
+        markdown_relative_path(path, root)
+    });
+
+    out
+}
+
+fn markdown_relative_path(path: &Path, root: &Path) -> String {
+    escape_backticks(&normalize_uri(
+        &relative_path(path, root).display().to_string(),
+    ))
+}
+
+fn push_markdown_primary_sections(out: &mut String, results: &AnalysisResults, root: &Path) {
+    markdown_section(out, &results.unused_files, "Unused files", |file| {
+        vec![format!(
+            "- `{}`",
+            markdown_relative_path(&file.file.path, root)
+        )]
     });
 
     markdown_grouped_section(
-        &mut out,
+        out,
         &results.unused_exports,
         "Unused exports",
         root,
@@ -53,7 +70,7 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
     );
 
     markdown_grouped_section(
-        &mut out,
+        out,
         &results.unused_types,
         "Unused type exports",
         root,
@@ -62,7 +79,7 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
     );
 
     markdown_grouped_section(
-        &mut out,
+        out,
         &results.private_type_leaks,
         "Private type leaks",
         root,
@@ -70,11 +87,13 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
         format_private_type_leak,
     );
 
-    push_markdown_dependency_sections(&mut out, results, root);
-    push_markdown_member_sections(&mut out, results, root);
+    push_markdown_dependency_sections(out, results, root);
+    push_markdown_member_sections(out, results, root);
+}
 
+fn push_markdown_import_sections(out: &mut String, results: &AnalysisResults, root: &Path) {
     markdown_grouped_section(
-        &mut out,
+        out,
         &results.unresolved_imports,
         "Unresolved imports",
         root,
@@ -89,14 +108,14 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
     );
 
     markdown_section(
-        &mut out,
+        out,
         &results.unlisted_dependencies,
         "Unlisted dependencies",
         |dep| vec![format!("- `{}`", escape_backticks(&dep.dep.package_name))],
     );
 
     markdown_section(
-        &mut out,
+        out,
         &results.duplicate_exports,
         "Duplicate exports",
         |dup| {
@@ -104,7 +123,7 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
                 .export
                 .locations
                 .iter()
-                .map(|loc| format!("`{}`", rel(&loc.path)))
+                .map(|loc| format!("`{}`", markdown_relative_path(&loc.path, root)))
                 .collect();
             vec![format!(
                 "- `{}` in {}",
@@ -113,12 +132,6 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
             )]
         },
     );
-
-    push_markdown_dependency_detail_sections(&mut out, results, root);
-    push_markdown_graph_sections(&mut out, results, &rel);
-    push_markdown_catalog_sections(&mut out, results, &rel);
-
-    out
 }
 
 fn push_markdown_dependency_sections(out: &mut String, results: &AnalysisResults, root: &Path) {
@@ -214,6 +227,17 @@ fn push_markdown_graph_sections(
     results: &AnalysisResults,
     rel: &dyn Fn(&Path) -> String,
 ) {
+    push_markdown_structure_sections(out, results, rel);
+    push_markdown_framework_sections(out, results, rel);
+    push_markdown_component_sections(out, results, rel);
+    push_markdown_suppression_sections(out, results, rel);
+}
+
+fn push_markdown_structure_sections(
+    out: &mut String,
+    results: &AnalysisResults,
+    rel: &dyn Fn(&Path) -> String,
+) {
     markdown_section(
         out,
         &results.circular_dependencies,
@@ -247,6 +271,13 @@ fn push_markdown_graph_sections(
     markdown_section(out, &results.policy_violations, "Policy violations", |v| {
         format_markdown_policy_violation(v, rel)
     });
+}
+
+fn push_markdown_framework_sections(
+    out: &mut String,
+    results: &AnalysisResults,
+    rel: &dyn Fn(&Path) -> String,
+) {
     markdown_section(
         out,
         &results.invalid_client_exports,
@@ -280,6 +311,13 @@ fn push_markdown_graph_sections(
         "Unprovided injects",
         |i| format_markdown_unprovided_inject(i, rel),
     );
+}
+
+fn push_markdown_component_sections(
+    out: &mut String,
+    results: &AnalysisResults,
+    rel: &dyn Fn(&Path) -> String,
+) {
     markdown_section(
         out,
         &results.unrendered_components,
@@ -310,6 +348,13 @@ fn push_markdown_graph_sections(
         "Unused load data keys",
         |k| format_markdown_unused_load_data_key(k, rel),
     );
+}
+
+fn push_markdown_suppression_sections(
+    out: &mut String,
+    results: &AnalysisResults,
+    rel: &dyn Fn(&Path) -> String,
+) {
     markdown_section(
         out,
         &results.stale_suppressions,
@@ -1023,6 +1068,19 @@ fn write_css_analytics_section(out: &mut String, report: &crate::health_types::H
         s.unused_font_faces,
         s.unused_theme_tokens,
     );
+    write_css_candidate_details(out, css);
+    out.push('\n');
+}
+
+fn write_css_candidate_details(out: &mut String, css: &crate::health_types::CssAnalyticsReport) {
+    write_css_keyframe_details(out, css);
+    write_css_tailwind_details(out, css);
+    write_css_class_candidate_details(out, css);
+    write_css_font_candidate_details(out, css);
+    write_css_font_size_mix_details(out, css);
+}
+
+fn write_css_keyframe_details(out: &mut String, css: &crate::health_types::CssAnalyticsReport) {
     if !css.undefined_keyframes.is_empty() {
         let named: Vec<String> = css
             .undefined_keyframes
@@ -1036,6 +1094,9 @@ fn write_css_analytics_section(out: &mut String, report: &crate::health_types::H
             named.join(", "),
         );
     }
+}
+
+fn write_css_tailwind_details(out: &mut String, css: &crate::health_types::CssAnalyticsReport) {
     if !css.tailwind_arbitrary_values.is_empty() {
         let named: Vec<String> = css
             .tailwind_arbitrary_values
@@ -1045,6 +1106,12 @@ fn write_css_analytics_section(out: &mut String, report: &crate::health_types::H
             .collect();
         let _ = writeln!(out, "- Top Tailwind arbitrary values: {}", named.join(", "));
     }
+}
+
+fn write_css_class_candidate_details(
+    out: &mut String,
+    css: &crate::health_types::CssAnalyticsReport,
+) {
     if !css.unresolved_class_references.is_empty() {
         let named: Vec<String> = css
             .unresolved_class_references
@@ -1076,6 +1143,12 @@ fn write_css_analytics_section(out: &mut String, report: &crate::health_types::H
             named.join(", "),
         );
     }
+}
+
+fn write_css_font_candidate_details(
+    out: &mut String,
+    css: &crate::health_types::CssAnalyticsReport,
+) {
     if !css.unused_font_faces.is_empty() {
         let named: Vec<String> = css
             .unused_font_faces
@@ -1102,6 +1175,12 @@ fn write_css_analytics_section(out: &mut String, report: &crate::health_types::H
             named.join(", "),
         );
     }
+}
+
+fn write_css_font_size_mix_details(
+    out: &mut String,
+    css: &crate::health_types::CssAnalyticsReport,
+) {
     if let Some(mix) = &css.font_size_unit_mix {
         let breakdown: Vec<String> = mix
             .notations
@@ -1115,7 +1194,6 @@ fn write_css_analytics_section(out: &mut String, report: &crate::health_types::H
             breakdown.join(", "),
         );
     }
-    out.push('\n');
 }
 
 fn write_coverage_intelligence_section(
