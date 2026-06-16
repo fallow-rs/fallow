@@ -2434,6 +2434,123 @@ pub(in crate::report) struct PrintGroupedHumanInput<'a> {
     pub(in crate::report) explain: bool,
 }
 
+fn grouped_issue_counts(groups: &[crate::report::grouping::ResultGroup]) -> Vec<(&str, usize)> {
+    let mut group_counts: Vec<(&str, usize)> = groups
+        .iter()
+        .map(|g| (g.key.as_str(), g.results.total_issues()))
+        .filter(|(_, count)| *count > 0)
+        .collect();
+    group_counts.sort_by_key(|b| std::cmp::Reverse(b.1));
+    group_counts
+}
+
+fn emit_grouped_summary(group_counts: &[(&str, usize)]) {
+    if group_counts.is_empty() {
+        return;
+    }
+
+    let summary_parts: Vec<String> = group_counts
+        .iter()
+        .map(|(key, count)| format!("{key} {count}"))
+        .collect();
+    let summary = format!(
+        "{} group{}: {}",
+        group_counts.len(),
+        plural(group_counts.len()),
+        summary_parts.join(" \u{00b7} ")
+    );
+    outln!("{}", summary.dimmed());
+    outln!();
+}
+
+fn grouped_header_text(
+    group: &crate::report::grouping::ResultGroup,
+    root: &Path,
+    resolver: Option<&OwnershipResolver>,
+    total: usize,
+) -> String {
+    let issue_word = if total == 1 { "issue" } else { "issues" };
+    let breakdown = build_summary_footer(&group.results, 0, 0);
+    let header_text = if breakdown.is_empty() {
+        format!("{} ({total} {issue_word})", group.key)
+    } else {
+        format!("{} ({total} {issue_word}: {breakdown})", group.key)
+    };
+
+    match resolver {
+        Some(r @ OwnershipResolver::Owner(_)) => {
+            let matched = collect_matching_rules(&group.results, root, r);
+            if matched.is_empty() {
+                header_text
+            } else {
+                format!("{header_text}, matched by {}", matched.join(", "))
+            }
+        }
+        _ => header_text,
+    }
+}
+
+fn emit_grouped_body(
+    group: &crate::report::grouping::ResultGroup,
+    root: &Path,
+    rules: &RulesConfig,
+    seen_footers: &mut FxHashSet<String>,
+    explain: bool,
+) {
+    if let Some(ref owners) = group.owners
+        && !owners.is_empty()
+    {
+        outln!("  {} {}", "owners:".dimmed(), owners.join(" ").dimmed());
+    }
+
+    let lines = build_human_lines_with_explain(&group.results, root, rules, None, explain);
+    for line in &lines {
+        if line.contains("docs.fallow.tools") && !seen_footers.insert(line.clone()) {
+            continue;
+        }
+        outln!("{line}");
+    }
+
+    if group.key == crate::codeowners::UNOWNED_LABEL {
+        eprintln!(
+            "  {}",
+            "Files with no CODEOWNERS entry, add ownership or verify before removing".dimmed()
+        );
+        eprintln!();
+    }
+}
+
+fn emit_grouped_final_status(
+    groups: &[crate::report::grouping::ResultGroup],
+    grand_total: usize,
+    elapsed: Duration,
+) {
+    if grand_total == 0 {
+        eprintln!(
+            "{}",
+            format!("\u{2713} No issues found ({:.2}s)", elapsed.as_secs_f64())
+                .green()
+                .bold()
+        );
+    } else {
+        let non_empty_groups = groups
+            .iter()
+            .filter(|g| g.results.total_issues() > 0)
+            .count();
+        eprintln!(
+            "{}",
+            format!(
+                "\u{2717} {grand_total} issue{} across {non_empty_groups} group{} ({:.2}s)",
+                plural(grand_total),
+                plural(non_empty_groups),
+                elapsed.as_secs_f64()
+            )
+            .red()
+            .bold()
+        );
+    }
+}
+
 pub(in crate::report) fn print_grouped_human(input: &PrintGroupedHumanInput<'_>) {
     let groups = input.groups;
     let root = input.root;
@@ -2446,27 +2563,7 @@ pub(in crate::report) fn print_grouped_human(input: &PrintGroupedHumanInput<'_>)
         eprintln!();
     }
 
-    let mut group_counts: Vec<(&str, usize)> = groups
-        .iter()
-        .map(|g| (g.key.as_str(), g.results.total_issues()))
-        .filter(|(_, count)| *count > 0)
-        .collect();
-    group_counts.sort_by_key(|b| std::cmp::Reverse(b.1));
-
-    if !group_counts.is_empty() {
-        let summary_parts: Vec<String> = group_counts
-            .iter()
-            .map(|(key, count)| format!("{key} {count}"))
-            .collect();
-        let summary = format!(
-            "{} group{}: {}",
-            group_counts.len(),
-            plural(group_counts.len()),
-            summary_parts.join(" \u{00b7} ")
-        );
-        outln!("{}", summary.dimmed());
-        outln!();
-    }
+    emit_grouped_summary(&grouped_issue_counts(groups));
 
     let mut grand_total: usize = 0;
     let mut seen_footers: FxHashSet<String> = FxHashSet::default();
@@ -2478,82 +2575,13 @@ pub(in crate::report) fn print_grouped_human(input: &PrintGroupedHumanInput<'_>)
         }
         grand_total += total;
 
-        let issue_word = if total == 1 { "issue" } else { "issues" };
-        let breakdown = build_summary_footer(&group.results, 0, 0);
-        let header_text = if breakdown.is_empty() {
-            format!("{} ({total} {issue_word})", group.key)
-        } else {
-            format!("{} ({total} {issue_word}: {breakdown})", group.key)
-        };
-
-        let header_text = match resolver {
-            Some(r @ OwnershipResolver::Owner(_)) => {
-                let matched = collect_matching_rules(&group.results, root, r);
-                if matched.is_empty() {
-                    header_text
-                } else {
-                    format!("{header_text} \u{2014} matched by {}", matched.join(", "))
-                }
-            }
-            _ => header_text,
-        };
-
+        let header_text = grouped_header_text(group, root, resolver, total);
         outln!("{}", header_text.cyan().bold());
-
-        if let Some(ref owners) = group.owners
-            && !owners.is_empty()
-        {
-            outln!("  {} {}", "owners:".dimmed(), owners.join(" ").dimmed());
-        }
-
-        let lines = build_human_lines_with_explain(&group.results, root, rules, None, explain);
-        for line in &lines {
-            if line.contains("docs.fallow.tools") && !seen_footers.insert(line.clone()) {
-                continue;
-            }
-            outln!("{line}");
-        }
-
-        if group.key == crate::codeowners::UNOWNED_LABEL {
-            eprintln!(
-                "  {}",
-                "Files with no CODEOWNERS entry \u{2014} add ownership or verify before removing"
-                    .dimmed()
-            );
-            eprintln!();
-        }
+        emit_grouped_body(group, root, rules, &mut seen_footers, explain);
     }
 
     if !quiet {
-        if grand_total == 0 {
-            eprintln!(
-                "{}",
-                format!("\u{2713} No issues found ({:.2}s)", elapsed.as_secs_f64())
-                    .green()
-                    .bold()
-            );
-        } else {
-            eprintln!(
-                "{}",
-                format!(
-                    "\u{2717} {grand_total} issue{} across {} group{} ({:.2}s)",
-                    plural(grand_total),
-                    groups
-                        .iter()
-                        .filter(|g| g.results.total_issues() > 0)
-                        .count(),
-                    plural(
-                        groups
-                            .iter()
-                            .filter(|g| g.results.total_issues() > 0)
-                            .count()
-                    ),
-                    elapsed.as_secs_f64()
-                )
-                .red()
-                .bold()
-            );
-        }
+        emit_grouped_final_status(groups, grand_total, elapsed);
     }
 }
 
