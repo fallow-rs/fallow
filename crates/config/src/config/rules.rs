@@ -288,129 +288,89 @@ impl Default for RulesConfig {
     }
 }
 
+macro_rules! apply_partial_rules {
+    ($target:expr, $partial:expr, [$($field:ident),+ $(,)?]) => {
+        $(
+            if let Some(severity) = $partial.$field {
+                $target.$field = severity;
+            }
+        )+
+    };
+}
+
 impl RulesConfig {
     /// Apply a partial rules config on top. Only `Some` fields override.
     pub const fn apply_partial(&mut self, partial: &PartialRulesConfig) {
-        if let Some(s) = partial.unused_files {
-            self.unused_files = s;
-        }
-        if let Some(s) = partial.unused_exports {
-            self.unused_exports = s;
-        }
-        if let Some(s) = partial.unused_types {
-            self.unused_types = s;
-        }
-        if let Some(s) = partial.private_type_leaks {
-            self.private_type_leaks = s;
-        }
-        if let Some(s) = partial.unused_dependencies {
-            self.unused_dependencies = s;
-        }
-        if let Some(s) = partial.unused_dev_dependencies {
-            self.unused_dev_dependencies = s;
-        }
-        if let Some(s) = partial.unused_optional_dependencies {
-            self.unused_optional_dependencies = s;
-        }
-        if let Some(s) = partial.unused_enum_members {
-            self.unused_enum_members = s;
-        }
-        if let Some(s) = partial.unused_class_members {
-            self.unused_class_members = s;
-        }
-        if let Some(s) = partial.unused_store_members {
-            self.unused_store_members = s;
-        }
-        if let Some(s) = partial.unprovided_injects {
-            self.unprovided_injects = s;
-        }
-        if let Some(s) = partial.unrendered_components {
-            self.unrendered_components = s;
-        }
-        if let Some(s) = partial.unused_component_props {
-            self.unused_component_props = s;
-        }
-        if let Some(s) = partial.unused_component_emits {
-            self.unused_component_emits = s;
-        }
-        if let Some(s) = partial.unused_server_actions {
-            self.unused_server_actions = s;
-        }
-        if let Some(s) = partial.unused_load_data_keys {
-            self.unused_load_data_keys = s;
-        }
-        if let Some(s) = partial.unresolved_imports {
-            self.unresolved_imports = s;
-        }
-        if let Some(s) = partial.unlisted_dependencies {
-            self.unlisted_dependencies = s;
-        }
-        if let Some(s) = partial.duplicate_exports {
-            self.duplicate_exports = s;
-        }
-        if let Some(s) = partial.type_only_dependencies {
-            self.type_only_dependencies = s;
-        }
-        if let Some(s) = partial.test_only_dependencies {
-            self.test_only_dependencies = s;
-        }
-        if let Some(s) = partial.circular_dependencies {
-            self.circular_dependencies = s;
-        }
-        if let Some(s) = partial.re_export_cycle {
-            self.re_export_cycle = s;
-        }
-        if let Some(s) = partial.boundary_violation {
-            self.boundary_violation = s;
-        }
-        if let Some(s) = partial.coverage_gaps {
-            self.coverage_gaps = s;
-        }
-        if let Some(s) = partial.feature_flags {
-            self.feature_flags = s;
-        }
-        if let Some(s) = partial.stale_suppressions {
-            self.stale_suppressions = s;
-        }
-        if let Some(s) = partial.unused_catalog_entries {
-            self.unused_catalog_entries = s;
-        }
-        if let Some(s) = partial.empty_catalog_groups {
-            self.empty_catalog_groups = s;
-        }
-        if let Some(s) = partial.unresolved_catalog_references {
-            self.unresolved_catalog_references = s;
-        }
-        if let Some(s) = partial.unused_dependency_overrides {
-            self.unused_dependency_overrides = s;
-        }
-        if let Some(s) = partial.misconfigured_dependency_overrides {
-            self.misconfigured_dependency_overrides = s;
-        }
-        if let Some(s) = partial.security_client_server_leak {
-            self.security_client_server_leak = s;
-        }
-        if let Some(s) = partial.security_sink {
-            self.security_sink = s;
-        }
-        if let Some(s) = partial.policy_violation {
-            self.policy_violation = s;
-        }
-        if let Some(s) = partial.invalid_client_export {
-            self.invalid_client_export = s;
-        }
-        if let Some(s) = partial.mixed_client_server_barrel {
-            self.mixed_client_server_barrel = s;
-        }
-        if let Some(s) = partial.misplaced_directive {
-            self.misplaced_directive = s;
-        }
-        if let Some(s) = partial.route_collision {
-            self.route_collision = s;
-        }
-        if let Some(s) = partial.dynamic_segment_name_conflict {
-            self.dynamic_segment_name_conflict = s;
-        }
+        apply_partial_rules!(
+            self,
+            partial,
+            [
+                unused_files,
+                unused_exports,
+                unused_types,
+                private_type_leaks,
+                unused_dependencies,
+                unused_dev_dependencies,
+                unused_optional_dependencies,
+            ]
+        );
+        apply_partial_rules!(
+            self,
+            partial,
+            [
+                unused_enum_members,
+                unused_class_members,
+                unused_store_members,
+                unprovided_injects,
+                unrendered_components,
+                unused_component_props,
+                unused_component_emits,
+                unused_server_actions,
+                unused_load_data_keys,
+            ]
+        );
+        apply_partial_rules!(
+            self,
+            partial,
+            [
+                unresolved_imports,
+                unlisted_dependencies,
+                duplicate_exports,
+                type_only_dependencies,
+                test_only_dependencies,
+                circular_dependencies,
+                re_export_cycle,
+                boundary_violation,
+            ]
+        );
+        apply_partial_rules!(
+            self,
+            partial,
+            [
+                coverage_gaps,
+                feature_flags,
+                stale_suppressions,
+                unused_catalog_entries,
+                empty_catalog_groups,
+                unresolved_catalog_references,
+                unused_dependency_overrides,
+                misconfigured_dependency_overrides,
+            ]
+        );
+        apply_partial_rules!(
+            self,
+            partial,
+            [
+                security_client_server_leak,
+                security_sink,
+                policy_violation,
+                invalid_client_export,
+                mixed_client_server_barrel,
+                misplaced_directive,
+                route_collision,
+                dynamic_segment_name_conflict,
+            ]
+        );
     }
 }
 
