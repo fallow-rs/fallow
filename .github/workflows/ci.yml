@@ -656,7 +656,12 @@ jobs:
       - name: fallow-extract
         env:
           MIRIFLAGS: -Zmiri-tree-borrows
-        run: cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-extract --lib --tests -- --skip cache --skip visitor::tests --skip sfc_template --skip html --skip template_usage
+        # `react` skips the React JSX extraction tests (react_structural + the
+        # complexity React-fold tests): pure-safe AST/parse tests with no unsafe
+        # for Miri to check, but slow enough under the interpreter to push this
+        # step past the 45-min job budget. Same speed-skip rationale as the
+        # visitor::tests / sfc_template / html entries above.
+        run: cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-extract --lib --tests -- --skip cache --skip visitor::tests --skip sfc_template --skip html --skip template_usage --skip react
 
   ci-ok:
     name: CI
