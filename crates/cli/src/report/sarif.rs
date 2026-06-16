@@ -1458,6 +1458,19 @@ fn push_graph_sarif_results(
     rules: &RulesConfig,
     snippets: &mut SourceSnippetCache,
 ) {
+    push_structure_sarif_results(sarif_results, results, root, rules, snippets);
+    push_framework_sarif_results(sarif_results, results, root, rules, snippets);
+    push_route_sarif_results(sarif_results, results, root, rules, snippets);
+    push_suppression_sarif_results(sarif_results, results, root, rules, snippets);
+}
+
+fn push_structure_sarif_results(
+    sarif_results: &mut Vec<serde_json::Value>,
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+    snippets: &mut SourceSnippetCache,
+) {
     push_sarif_results(
         sarif_results,
         &results.circular_dependencies,
@@ -1511,6 +1524,15 @@ fn push_graph_sarif_results(
     push_sarif_results(sarif_results, &results.policy_violations, snippets, |v| {
         sarif_policy_violation_fields(&v.violation, root)
     });
+}
+
+fn push_framework_sarif_results(
+    sarif_results: &mut Vec<serde_json::Value>,
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+    snippets: &mut SourceSnippetCache,
+) {
     push_sarif_results(
         sarif_results,
         &results.invalid_client_exports,
@@ -1567,6 +1589,15 @@ fn push_graph_sarif_results(
         },
     );
     push_component_contract_sarif_results(sarif_results, results, root, rules, snippets);
+}
+
+fn push_route_sarif_results(
+    sarif_results: &mut Vec<serde_json::Value>,
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+    snippets: &mut SourceSnippetCache,
+) {
     push_sarif_results(sarif_results, &results.route_collisions, snippets, |c| {
         sarif_route_collision_fields(
             &c.collision,
@@ -1586,6 +1617,15 @@ fn push_graph_sarif_results(
             )
         },
     );
+}
+
+fn push_suppression_sarif_results(
+    sarif_results: &mut Vec<serde_json::Value>,
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+    snippets: &mut SourceSnippetCache,
+) {
     push_sarif_results(sarif_results, &results.stale_suppressions, snippets, |s| {
         sarif_stale_suppression_fields(s, root, severity_to_sarif_level(rules.stale_suppressions))
     });
