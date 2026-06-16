@@ -2020,6 +2020,10 @@ mod tests {
             render_edges: Vec::new(),
             svelte_dispatched_events: Vec::new(),
             svelte_listened_events: Vec::new(),
+            angular_component_selectors: Vec::new(),
+            angular_used_selectors: Vec::new(),
+            angular_entry_component_refs: Vec::new(),
+            has_dynamic_component_render: false,
             has_dynamic_dispatch: false,
         };
 
@@ -2094,6 +2098,10 @@ mod tests {
             render_edges: Vec::new(),
             svelte_dispatched_events: Vec::new(),
             svelte_listened_events: Vec::new(),
+            angular_component_selectors: Vec::new(),
+            angular_used_selectors: Vec::new(),
+            angular_entry_component_refs: Vec::new(),
+            has_dynamic_component_render: false,
             has_dynamic_dispatch: false,
             line_offsets: vec![0, 10, 20, 30, 40], // 5 lines
             complexity: vec![fallow_types::extract::FunctionComplexity {
@@ -2183,6 +2191,10 @@ mod tests {
             render_edges: Vec::new(),
             svelte_dispatched_events: Vec::new(),
             svelte_listened_events: Vec::new(),
+            angular_component_selectors: Vec::new(),
+            angular_used_selectors: Vec::new(),
+            angular_entry_component_refs: Vec::new(),
+            has_dynamic_component_render: false,
             has_dynamic_dispatch: false,
             line_offsets: vec![0, 10, 20], // 3 lines
             complexity: vec![
@@ -2494,6 +2506,10 @@ mod tests {
             render_edges: Vec::new(),
             svelte_dispatched_events: Vec::new(),
             svelte_listened_events: Vec::new(),
+            angular_component_selectors: Vec::new(),
+            angular_used_selectors: Vec::new(),
+            angular_entry_component_refs: Vec::new(),
+            has_dynamic_component_render: false,
             has_dynamic_dispatch: false,
         }
     }

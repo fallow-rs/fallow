@@ -176,6 +176,10 @@ fn module(file_id: u32, callee_uses: Vec<CalleeUse>, imports: Vec<ImportInfo>) -
         render_edges: Vec::new(),
         svelte_dispatched_events: Vec::new(),
         svelte_listened_events: Vec::new(),
+        angular_component_selectors: Vec::new(),
+        angular_used_selectors: Vec::new(),
+        angular_entry_component_refs: Vec::new(),
+        has_dynamic_component_render: false,
         has_dynamic_dispatch: false,
     }
 }

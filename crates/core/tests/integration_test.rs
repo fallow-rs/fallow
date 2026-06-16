@@ -13,6 +13,8 @@ mod common;
 
 #[path = "integration_test/angular_ng_package.rs"]
 mod angular_ng_package;
+#[path = "integration_test/angular_unrendered_component.rs"]
+mod angular_unrendered_component;
 #[path = "integration_test/barrel_exports.rs"]
 mod barrel_exports;
 #[path = "integration_test/basic_analysis.rs"]

@@ -1,0 +1,12 @@
+{
+  "name": "angular-unrendered-component",
+  "version": "0.0.0",
+  "private": true,
+  "main": "src/main.ts",
+  "dependencies": {
+    "@angular/core": "^19.0.0",
+    "@angular/common": "^19.0.0",
+    "@angular/platform-browser": "^19.0.0",
+    "@angular/router": "^19.0.0"
+  }
+}

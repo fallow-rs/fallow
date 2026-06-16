@@ -486,7 +486,18 @@ use crate::MemberKind;
 /// (a dynamic-dispatch / whole-`dispatch`-value abstain). A warm cache from 173
 /// lacks the dispatched/listened event IR and would report zero
 /// `unused-svelte-event` findings.
-pub(super) const CACHE_VERSION: u32 = 174;
+///
+/// Bumped to 175 (feat/angular-unrendered-component, W4.2): Angular extraction
+/// now records `angular_component_selectors` (each `@Component({ selector })`
+/// value split into a list plus the class name + span), `angular_used_selectors`
+/// (custom element tags scanned from inline + external Angular templates), and
+/// `angular_entry_component_refs` (route `component:` / `loadComponent`,
+/// `bootstrapApplication` / `bootstrap: [...]` class references), and
+/// `has_dynamic_component_render` (a `ViewContainerRef.createComponent` /
+/// `*ngComponentOutlet` / `createComponent(<ident>)` project-wide abstain). A
+/// warm cache from 174 lacks the selector IR and would report zero Angular
+/// `unrendered-component` findings.
+pub(super) const CACHE_VERSION: u32 = 175;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -532,7 +543,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 1160);
+assert_cached_type_size!(CachedModule, 1232);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 56);
@@ -697,6 +708,19 @@ pub struct CachedModule {
     /// `output()` / `outputFromObservable()` initializers). Round-trips so the
     /// `unused-component-output` detector sees them on warm-cache loads.
     pub angular_outputs: Vec<fallow_types::extract::AngularOutputMember>,
+    /// Angular `@Component` declarations with their `selector` value(s).
+    /// Round-trips so the Angular `unrendered-component` arm sees them on
+    /// warm-cache loads.
+    pub angular_component_selectors: Vec<fallow_types::extract::AngularComponentSelector>,
+    /// Custom element selector tags referenced in this file's Angular templates.
+    /// Round-trips for the Angular `unrendered-component` used-selector union.
+    pub angular_used_selectors: Vec<String>,
+    /// Angular route / bootstrap component class references. Round-trips for the
+    /// Angular `unrendered-component` entry-point abstain.
+    pub angular_entry_component_refs: Vec<String>,
+    /// Whether this file dynamically renders a component (project-wide abstain
+    /// signal for the Angular `unrendered-component` detector). Round-trips.
+    pub has_dynamic_component_render: bool,
     /// Whether `defineEmits` had an unharvestable argument. Round-trips for the
     /// abstain.
     pub has_unharvestable_emits: bool,

@@ -14,8 +14,8 @@ use crate::{
     MemberAccess, ReExportInfo, RequireCallInfo, VisibilityTag,
 };
 use fallow_types::extract::{
-    CalleeUse, ClassHeritageInfo, DiFramework, DiKeySite, DiRole, DispatchedEvent,
-    LocalTypeDeclaration, MemberInfo, MemberKind, MisplacedDirectiveSite,
+    AngularComponentSelector, CalleeUse, ClassHeritageInfo, DiFramework, DiKeySite, DiRole,
+    DispatchedEvent, LocalTypeDeclaration, MemberInfo, MemberKind, MisplacedDirectiveSite,
     PublicSignatureTypeReference, SanitizedSinkArg, SanitizerScope, SecurityControlKind,
     SecurityControlSite, SecurityUrlShape, SinkArgKind, SinkLiteralValue, SinkObjectProperty,
     SinkShape, SinkSite, SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason,
@@ -3692,6 +3692,8 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             self.capture_hardcoded_secret_literal_sink(name.as_ref(), &prop.value, prop.span);
         }
 
+        self.record_angular_entry_component_refs(prop);
+
         walk::walk_object_property(self, prop);
     }
 
@@ -3735,6 +3737,9 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.record_load_data_whole_arg_use(expr);
 
         self.capture_security_call_sites(expr);
+
+        self.record_angular_dynamic_component_render(expr);
+        self.record_angular_bootstrap_call(expr);
 
         self.record_callee_use(expr);
 
@@ -4076,6 +4081,35 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         }
 
         if let Some(meta) = extract_angular_component_metadata(class) {
+            // Harvest the `@Component` selector(s) + class name + span for the
+            // Angular arm of the `unrendered-component` detector. Only a
+            // `@Component` (never `@Directive`) carries a selector here. A
+            // multi-selector string is split on `,` into the list; the detector
+            // restricts first-cut scope to all-element-selector components.
+            if let Some(ref selector_raw) = meta.selector
+                && let Some(id) = class.id.as_ref()
+            {
+                let selectors = split_angular_selectors(selector_raw);
+                if !selectors.is_empty() {
+                    self.angular_component_selectors
+                        .push(AngularComponentSelector {
+                            selectors,
+                            span_start: class.span.start,
+                            class_name: id.name.to_string(),
+                        });
+                }
+            }
+
+            if let Some(ref template) = meta.inline_template {
+                self.angular_used_selectors
+                    .extend(crate::sfc_template::angular::collect_angular_used_selectors(template));
+                // `*ngComponentOutlet` dynamically renders a component from a
+                // non-literal class reference; abstain project-wide.
+                if template.contains("ngComponentOutlet") {
+                    self.has_dynamic_component_render = true;
+                }
+            }
+
             if let Some(ref template_url) = meta.template_url {
                 self.imports.push(ImportInfo {
                     source: normalize_asset_url(template_url),
@@ -4197,6 +4231,84 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         // renders and host-element nesting depth are still visited.
         self.react_record_jsx_element(element);
         walk::walk_jsx_element(self, element);
+    }
+}
+
+/// Split an Angular `@Component` selector string into its individual selectors.
+///
+/// A selector value can be a comma-separated list (`'app-foo, [appBar], .baz'`).
+/// Each part is trimmed; empty parts are dropped. The raw shape of each selector
+/// is preserved (element `app-foo`, attribute `[appFoo]`, class `.foo`,
+/// `:not(...)` etc.) so the detector can classify them and restrict its
+/// first-cut scope to all-element-selector components.
+fn split_angular_selectors(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
+/// Extract the class name from a route `loadComponent` value of the shape
+/// `() => import('./x').then(m => m.FooComponent)`. Returns the member name
+/// (`FooComponent`) accessed on the `.then` callback's parameter, which is the
+/// lazily-loaded component class. Returns `None` for any other shape (the
+/// `.then` already credits the named import elsewhere; this is the
+/// entry-point-abstain capture for the Angular `unrendered-component` rule).
+fn then_callback_member_class(value: &Expression<'_>) -> Option<String> {
+    // Unwrap the outer `() => <body>` arrow.
+    let body = arrow_expression_body(value)?;
+    // The body must be a `<expr>.then(<callback>)` call.
+    let Expression::CallExpression(call) = body else {
+        return None;
+    };
+    let Expression::StaticMemberExpression(member) = &call.callee else {
+        return None;
+    };
+    if member.property.name.as_str() != "then" {
+        return None;
+    }
+    // The callback is `m => m.FooComponent` (or `({ FooComponent }) => ...`,
+    // which is covered by the named-import credit elsewhere; here we only need the
+    // member-access shape).
+    let Some(Argument::ArrowFunctionExpression(_)) = call.arguments.first() else {
+        return None;
+    };
+    let Some(Argument::ArrowFunctionExpression(cb)) = call.arguments.first() else {
+        return None;
+    };
+    let cb_body = arrow_fn_expression_body(cb)?;
+    let Expression::StaticMemberExpression(member) = cb_body else {
+        return None;
+    };
+    Some(member.property.name.to_string())
+}
+
+/// The expression body of a `() => <expr>` arrow, unwrapping the optional
+/// parenthesized-expression-statement form. Returns `None` for a block body that
+/// is not a sole expression statement.
+fn arrow_expression_body<'a, 'b>(value: &'b Expression<'a>) -> Option<&'b Expression<'a>> {
+    let Expression::ArrowFunctionExpression(arrow) = value else {
+        return None;
+    };
+    arrow_fn_expression_body(arrow)
+}
+
+/// The sole expression of an arrow function's body (expression-bodied arrow, or a
+/// block body with a single `return <expr>` / `<expr>;` statement).
+fn arrow_fn_expression_body<'a, 'b>(
+    arrow: &'b oxc_ast::ast::ArrowFunctionExpression<'a>,
+) -> Option<&'b Expression<'a>> {
+    if arrow.expression {
+        return match arrow.body.statements.first() {
+            Some(Statement::ExpressionStatement(stmt)) => Some(&stmt.expression),
+            _ => None,
+        };
+    }
+    match arrow.body.statements.first() {
+        Some(Statement::ReturnStatement(ret)) => ret.argument.as_ref(),
+        Some(Statement::ExpressionStatement(stmt)) => Some(&stmt.expression),
+        _ => None,
     }
 }
 
@@ -7156,6 +7268,80 @@ impl ModuleInfoExtractor {
     /// detector consumes these at analyze time. Computed members, dynamic
     /// dispatch, and optional-chaining callees flatten to `None` and stay
     /// uncaptured (documented false negatives).
+    /// Capture Angular route / bootstrap component class references from an object
+    /// property: a route `component: FooComponent` (bare identifier value), a
+    /// route `loadComponent: () => import('./x').then(m => m.FooComponent)` (the
+    /// `.then` member class), or a `bootstrap: [AppComponent]` NgModule metadata
+    /// array. These are render-equivalent entry points the Angular
+    /// `unrendered-component` detector abstains on. A `declarations: [...]` /
+    /// `imports: [...]` registration is intentionally NOT captured (it is the dead
+    /// case the rule catches).
+    fn record_angular_entry_component_refs(&mut self, prop: &ObjectProperty<'_>) {
+        let Some(key) = prop.key.static_name() else {
+            return;
+        };
+        match key.as_ref() {
+            "component" => {
+                if let Expression::Identifier(ident) = &prop.value {
+                    self.angular_entry_component_refs
+                        .push(ident.name.to_string());
+                }
+            }
+            "loadComponent" => {
+                if let Some(name) = then_callback_member_class(&prop.value) {
+                    self.angular_entry_component_refs.push(name);
+                }
+            }
+            "bootstrap" => {
+                if let Expression::ArrayExpression(arr) = &prop.value {
+                    for elem in &arr.elements {
+                        if let ArrayExpressionElement::Identifier(ident) = elem {
+                            self.angular_entry_component_refs
+                                .push(ident.name.to_string());
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Flag a dynamic Angular component render (`*.createComponent(...)` or a
+    /// bare `createComponent(...)`), e.g. `viewContainerRef.createComponent(comp)`.
+    /// This drives the Angular `unrendered-component` detector's project-wide
+    /// abstain: a component could be rendered by a non-literal class reference the
+    /// selector scan cannot see. Conservative (matches any `createComponent`
+    /// callee), since over-abstaining only suppresses findings, never creates one.
+    fn record_angular_dynamic_component_render(&mut self, expr: &CallExpression<'_>) {
+        let is_create_component = match &expr.callee {
+            Expression::StaticMemberExpression(member) => {
+                member.property.name.as_str() == "createComponent"
+            }
+            Expression::Identifier(ident) => ident.name.as_str() == "createComponent",
+            _ => false,
+        };
+        if is_create_component {
+            self.has_dynamic_component_render = true;
+        }
+    }
+
+    /// Capture the bootstrapped component class from `bootstrapApplication(Foo,
+    /// ...)` (the standalone Angular bootstrap entry). The first-argument
+    /// identifier is a render-equivalent entry point the Angular
+    /// `unrendered-component` detector abstains on.
+    fn record_angular_bootstrap_call(&mut self, expr: &CallExpression<'_>) {
+        let Expression::Identifier(callee) = &expr.callee else {
+            return;
+        };
+        if callee.name.as_str() != "bootstrapApplication" {
+            return;
+        }
+        if let Some(Argument::Identifier(ident)) = expr.arguments.first() {
+            self.angular_entry_component_refs
+                .push(ident.name.to_string());
+        }
+    }
+
     fn record_callee_use(&mut self, expr: &CallExpression<'_>) {
         let Some(callee_path) = flatten_callee_path(&expr.callee) else {
             return;

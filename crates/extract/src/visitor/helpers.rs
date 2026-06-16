@@ -17,6 +17,11 @@ pub struct AngularComponentMetadata {
     pub decorator_span: Span,
     pub host_member_refs: Vec<String>,
     pub input_output_members: Vec<String>,
+    /// The raw `selector` string value (e.g. `'app-foo, [appBar]'`), present only
+    /// for `@Component` (never `@Directive`). Consumed by the Angular
+    /// `unrendered-component` detector. `None` when the decorator omits a
+    /// `selector`, when the value is non-literal, or when it is a `@Directive`.
+    pub selector: Option<String>,
 }
 
 const ANGULAR_SIGNAL_APIS: &[&str] = &[
@@ -41,6 +46,7 @@ pub fn extract_angular_component_metadata(class: &Class<'_>) -> Option<AngularCo
         if !matches!(id.name.as_str(), "Component" | "Directive") {
             continue;
         }
+        let is_component = id.name.as_str() == "Component";
         let Some(Argument::ObjectExpression(obj)) = call.arguments.first() else {
             continue;
         };
@@ -51,6 +57,7 @@ pub fn extract_angular_component_metadata(class: &Class<'_>) -> Option<AngularCo
         let mut inline_template_offset = None;
         let mut host_member_refs = Vec::new();
         let mut input_output_members = Vec::new();
+        let mut selector = None;
 
         for prop in &obj.properties {
             let ObjectPropertyKind::ObjectProperty(p) = prop else {
@@ -60,6 +67,11 @@ pub fn extract_angular_component_metadata(class: &Class<'_>) -> Option<AngularCo
                 continue;
             };
             match key_name.as_ref() {
+                "selector" if is_component => {
+                    if let Expression::StringLiteral(lit) = &p.value {
+                        selector = Some(lit.value.to_string());
+                    }
+                }
                 "templateUrl" => {
                     if let Expression::StringLiteral(lit) = &p.value {
                         template_url = Some(lit.value.to_string());
@@ -116,7 +128,8 @@ pub fn extract_angular_component_metadata(class: &Class<'_>) -> Option<AngularCo
             || !style_urls.is_empty()
             || inline_template.is_some()
             || !host_member_refs.is_empty()
-            || !input_output_members.is_empty();
+            || !input_output_members.is_empty()
+            || selector.is_some();
 
         if has_data {
             return Some(AngularComponentMetadata {
@@ -127,6 +140,7 @@ pub fn extract_angular_component_metadata(class: &Class<'_>) -> Option<AngularCo
                 decorator_span: decorator.span(),
                 host_member_refs,
                 input_output_members,
+                selector,
             });
         }
     }

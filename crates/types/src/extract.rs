@@ -194,6 +194,35 @@ pub struct ModuleInfo {
     /// own component. A `model()` is recorded as an input only (see
     /// `AngularOutputMember`). Empty for every non-Angular class.
     pub angular_outputs: Vec<AngularOutputMember>,
+    /// Angular `@Component` declarations with their `selector` value(s), harvested
+    /// from `@Component({ selector: '...' })` decorators. Consumed by the Angular
+    /// arm of the `unrendered-component` detector. Empty for every non-Angular
+    /// class and for `@Directive`. See `AngularComponentSelector`.
+    pub angular_component_selectors: Vec<AngularComponentSelector>,
+    /// Custom element selector tag names referenced in this file's Angular
+    /// templates (inline `@Component({ template })` and the linked external
+    /// `templateUrl` `.html` module), e.g. `<app-foo>` -> `app-foo`. Native HTML
+    /// tag names are excluded at harvest. The detector unions these project-wide
+    /// into the used-selector set. Empty for non-Angular files.
+    pub angular_used_selectors: Vec<String>,
+    /// Angular component class names referenced as a route entry or bootstrap
+    /// target: a route `component: Foo` / `loadComponent: () => import().then(m =>
+    /// m.Foo)` value, a `bootstrapApplication(Foo)` argument, or a
+    /// `bootstrap: [Foo]` NgModule entry. These are render-equivalent entry points
+    /// (Angular instantiates them without a template `<tag>`), so the Angular
+    /// `unrendered-component` detector abstains on a component whose class name is
+    /// in the project-wide union. A plain `declarations: [...]` / `imports: [...]`
+    /// registration is intentionally NOT harvested here (that is the dead case the
+    /// rule catches). Empty for non-Angular files.
+    pub angular_entry_component_refs: Vec<String>,
+    /// `true` when this file dynamically renders an Angular component fallow
+    /// cannot attribute to a literal class reference: a
+    /// `ViewContainerRef.createComponent(...)` / `*.createComponent(<ident>)`
+    /// call, or an `*ngComponentOutlet` template binding. The Angular
+    /// `unrendered-component` detector abstains project-wide when ANY reachable
+    /// module sets this (mirroring `unprovided-inject`'s `has_dynamic_provide`),
+    /// since a component could be rendered by a non-literal class reference.
+    pub has_dynamic_component_render: bool,
     /// `true` when `defineEmits` was called with an unharvestable argument (a
     /// type-reference type argument such as `defineEmits<MyEmits>()`, a
     /// non-literal runtime form, or an unbound `defineEmits([...])`). The
@@ -1451,6 +1480,32 @@ pub struct AngularOutputMember {
     pub span_start: u32,
 }
 
+/// A declared Angular `@Component` and its `selector` value(s), harvested from a
+/// `@Component({ selector: '...' })` decorator. Consumed by the Angular arm of
+/// the `unrendered-component` detector, which flags a component whose every
+/// element selector is used in NO template project-wide (and that is not
+/// referenced by class name anywhere, e.g. routed / bootstrapped / dynamically
+/// rendered). A multi-selector string (`'app-foo, [appBar]'`) is split into the
+/// `selectors` list. The span is stored as a byte offset (not an
+/// `oxc_span::Span`) so the type round-trips through the bitcode cache directly,
+/// mirroring `AngularInputMember::span_start`. `@Directive` is intentionally NOT
+/// harvested here (directives have no template render). `ModuleInfo` is not
+/// serialized, so no serde attrs are derived.
+#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode, PartialEq, Eq)]
+pub struct AngularComponentSelector {
+    /// The declared selector strings for this component, split on `,`. A purely
+    /// element-selector component has only `app-foo`-shaped entries; attribute
+    /// (`[appFoo]`) and class (`.foo`) selectors are retained verbatim so the
+    /// detector can abstain when ANY non-element selector is present.
+    pub selectors: Vec<String>,
+    /// Start byte offset of the component class declaration (anchors the
+    /// finding).
+    pub span_start: u32,
+    /// The component class name (used to credit routed / bootstrapped / dynamic
+    /// class-name references project-wide).
+    pub class_name: String,
+}
+
 /// A key returned from a SvelteKit route `load()` function's terminal return
 /// object literal. Harvested from `+page.{ts,server.ts,js,server.js}` files
 /// exporting a `load` function. Consumed by the `unused-load-data-key` detector,
@@ -1698,7 +1753,7 @@ const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 216);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1160);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1232);
 
 /// A re-export declaration.
 #[derive(Debug, Clone)]
@@ -1937,6 +1992,10 @@ mod tests {
             component_emits: Vec::new(),
             angular_inputs: Vec::new(),
             angular_outputs: Vec::new(),
+            angular_component_selectors: Vec::new(),
+            angular_used_selectors: Vec::new(),
+            angular_entry_component_refs: Vec::new(),
+            has_dynamic_component_render: false,
             has_unharvestable_emits: false,
             has_dynamic_emit: false,
             has_emit_whole_object_use: false,

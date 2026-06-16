@@ -84,6 +84,48 @@ impl AngularTemplateRefs {
 static HTML_COMMENT_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| crate::static_regex(r"(?s)<!--.*?-->"));
 
+/// Regex matching an opening HTML/Angular element tag name. Captures group 1 =
+/// the tag name. Closing tags (`</foo>`) are excluded by the negative lookahead
+/// is unavailable in `regex`, so the leading `[a-zA-Z]` after `<` (not `/`)
+/// rejects them; only an opening tag's first byte after `<` is an ASCII letter.
+static ELEMENT_TAG_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r"<([a-zA-Z][a-zA-Z0-9\-]*)"));
+
+/// Collect custom element selector tag names referenced in an Angular template.
+///
+/// Returns the deduplicated set of opening-tag names that contain a hyphen
+/// (`<app-foo>` -> `app-foo`). The hyphen requirement is the precise,
+/// FP-resistant discriminator between an Angular component element selector
+/// (which conventionally and, for custom elements, definitionally contains a
+/// hyphen) and a native HTML element (no native tag name contains a hyphen). Tag
+/// names are lowercased for case-insensitive matching against the declared
+/// selector set. HTML comments are masked first so a `<app-foo>` inside a comment
+/// is not credited.
+///
+/// First-cut scope is ELEMENT selectors only; attribute selectors
+/// (`<div appFoo>`) are intentionally NOT harvested here, and the detector
+/// abstains on any component with a non-element selector.
+#[must_use]
+pub fn collect_angular_used_selectors(source: &str) -> Vec<String> {
+    let masked = strip_html_comments_preserve_offsets(source);
+    let mut seen = FxHashSet::default();
+    let mut out = Vec::new();
+    for caps in ELEMENT_TAG_RE.captures_iter(&masked) {
+        let Some(name) = caps.get(1) else {
+            continue;
+        };
+        let tag = name.as_str();
+        if !tag.contains('-') {
+            continue;
+        }
+        let lowered = tag.to_ascii_lowercase();
+        if seen.insert(lowered.clone()) {
+            out.push(lowered);
+        }
+    }
+    out
+}
+
 /// Regex to extract attribute name-value pairs from an HTML tag.
 /// Captures: group 1 = attribute name (including prefix like `[`, `(`, `*`),
 ///           group 2 = value (inside quotes).

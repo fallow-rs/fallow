@@ -16,11 +16,11 @@ use crate::{
     MemberAccess, MemberInfo, MemberKind, ModuleInfo, ReExportInfo, RequireCallInfo, VisibilityTag,
 };
 use fallow_types::extract::{
-    AngularInputMember, AngularOutputMember, CalleeUse, ClassHeritageInfo, ComponentFunction,
-    ComponentProp, DiKeySite, DispatchedEvent, HookUse, LocalTypeDeclaration,
-    MisplacedDirectiveSite, PublicSignatureTypeReference, RenderEdge, SanitizedSinkArg,
-    SanitizerScope, SecurityControlSite, SinkLiteralValue, SinkSite, SkippedSecurityCalleeSite,
-    TaintedBinding,
+    AngularComponentSelector, AngularInputMember, AngularOutputMember, CalleeUse,
+    ClassHeritageInfo, ComponentFunction, ComponentProp, DiKeySite, DispatchedEvent, HookUse,
+    LocalTypeDeclaration, MisplacedDirectiveSite, PublicSignatureTypeReference, RenderEdge,
+    SanitizedSinkArg, SanitizerScope, SecurityControlSite, SinkLiteralValue, SinkSite,
+    SkippedSecurityCalleeSite, TaintedBinding,
 };
 use helpers::LitCustomElementDecorator;
 
@@ -346,6 +346,27 @@ pub(crate) struct ModuleInfoExtractor {
     /// this dedups the harvest and prevents one declared input/output from being
     /// flagged twice.
     pub(crate) harvested_angular_class_spans: FxHashSet<Span>,
+    /// Angular `@Component` declarations with their `selector` value(s), harvested
+    /// from `@Component({ selector })` decorators. Accumulated across every
+    /// Angular component class in the module and copied onto
+    /// `ModuleInfo.angular_component_selectors`. Consumed by the Angular arm of
+    /// the `unrendered-component` detector.
+    pub(crate) angular_component_selectors: Vec<AngularComponentSelector>,
+    /// Custom element selector tags referenced in this file's Angular templates
+    /// (inline `template:` blocks). External `templateUrl` `.html` files are
+    /// scanned separately when that file is parsed. Copied onto
+    /// `ModuleInfo.angular_used_selectors`.
+    pub(crate) angular_used_selectors: Vec<String>,
+    /// Angular component class names referenced as a route entry or bootstrap
+    /// target (route `component:` / `loadComponent`, `bootstrapApplication` /
+    /// `bootstrap: [...]`). Copied onto `ModuleInfo.angular_entry_component_refs`
+    /// (the Angular `unrendered-component` entry-point abstain).
+    pub(crate) angular_entry_component_refs: Vec<String>,
+    /// `true` when a dynamic component render was seen
+    /// (`*.createComponent(<ident>)`). Copied onto
+    /// `ModuleInfo.has_dynamic_component_render` (the Angular
+    /// `unrendered-component` project-wide abstain).
+    pub(crate) has_dynamic_component_render: bool,
     /// Local binding names bound from `const dispatch = createEventDispatcher()`
     /// (where `createEventDispatcher` is imported from `svelte`). A
     /// `dispatch('<name>')` call through one of these bindings records a
@@ -1061,6 +1082,10 @@ impl ModuleInfoExtractor {
             component_emits: Vec::new(),
             angular_inputs: self.angular_inputs,
             angular_outputs: self.angular_outputs,
+            angular_component_selectors: self.angular_component_selectors,
+            angular_used_selectors: self.angular_used_selectors,
+            angular_entry_component_refs: self.angular_entry_component_refs,
+            has_dynamic_component_render: self.has_dynamic_component_render,
             has_unharvestable_emits: false,
             has_dynamic_emit: false,
             has_emit_whole_object_use: false,
@@ -1142,6 +1167,14 @@ impl ModuleInfoExtractor {
         info.has_load_data_whole_use = info.has_load_data_whole_use || self.has_load_data_whole_use;
         info.angular_inputs.extend(self.angular_inputs);
         info.angular_outputs.extend(self.angular_outputs);
+        info.angular_component_selectors
+            .extend(self.angular_component_selectors);
+        info.angular_used_selectors
+            .extend(self.angular_used_selectors);
+        info.angular_entry_component_refs
+            .extend(self.angular_entry_component_refs);
+        info.has_dynamic_component_render =
+            info.has_dynamic_component_render || self.has_dynamic_component_render;
         info.svelte_dispatched_events
             .extend(self.svelte_dispatched_events);
         info.has_dynamic_dispatch = info.has_dynamic_dispatch || self.has_dynamic_dispatch;

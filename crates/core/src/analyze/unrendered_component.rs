@@ -41,6 +41,8 @@ use crate::resolve::{ResolvedImport, ResolvedModule};
 use crate::results::UnrenderedComponent;
 use crate::suppress::{IssueKind, SuppressionContext};
 
+use super::{LineOffsetsMap, byte_offset_to_line_col};
+
 /// 1-based line the finding anchors at. An SFC's default export is the file
 /// itself; there is no explicit default-export statement to point at, so the
 /// finding (and its inline suppression) anchors at the file head.
@@ -333,4 +335,198 @@ fn component_name(path: &Path) -> String {
         .and_then(|stem| stem.to_str())
         .unwrap_or("component")
         .to_string()
+}
+
+/// Whether a single Angular selector is an ELEMENT (type) selector.
+///
+/// First-cut scope is element selectors only: a component ALL of whose selectors
+/// are element selectors and none used is the only flaggable shape. Attribute
+/// (`[appFoo]`), class (`.foo`), `:not(...)`, and any compound / combinator
+/// selector are NOT element selectors, so a component carrying one abstains
+/// entirely. An element selector is a plain custom-element tag name: it must
+/// contain a hyphen (Angular / custom-element convention, matching the used-tag
+/// harvest) and consist only of tag-name characters.
+fn is_element_selector(selector: &str) -> bool {
+    let s = selector.trim();
+    !s.is_empty()
+        && s.contains('-')
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+/// Find Angular `@Component`s whose element selector is rendered in NO template
+/// project-wide and that are not routed / bootstrapped / dynamically rendered /
+/// public-API. The Angular arm of `unrendered-component` (framework
+/// `"angular"`), gated on the project declaring `@angular/core`.
+///
+/// First-cut scope: ELEMENT selectors only. A component is eligible only when
+/// ALL of its selectors are element selectors (`is_element_selector`); any
+/// attribute (`[appFoo]`) or class (`.foo`) selector, or `@Directive`, abstains
+/// (directives are never harvested into `angular_component_selectors`). The
+/// detector flags a reachable component when NONE of its element selectors is in
+/// the project-wide used-selector set AND its class name is referenced by NO
+/// other module (routed `component:` / `loadComponent().then(m => m.X)`,
+/// `bootstrapApplication` / `bootstrap: [...]`, `createComponent(Class)` all
+/// surface the class identifier as a referenced import binding) AND it is not
+/// lazily routed through the bare `loadComponent: () => import('./x')` /
+/// `loadChildren: () => import('./x.routes')` form (which carries no class name
+/// and instead credits the target's DEFAULT export via arrow-wrapped
+/// dynamic-import resolution, so a referenced default export abstains) AND no
+/// reachable module dynamically renders a component
+/// (`ViewContainerRef.createComponent` / `*ngComponentOutlet` /
+/// `createComponent(<ident>)`) AND the component is not public-API-exported.
+/// Over-crediting in any of the used / referenced / dynamic channels only
+/// suppresses a finding, never creates one.
+#[must_use]
+pub fn find_unrendered_angular_components(
+    graph: &ModuleGraph,
+    modules: &[ModuleInfo],
+    declared_deps: &FxHashSet<String>,
+    public_api_entry_points: &FxHashSet<FileId>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+    suppressions: &SuppressionContext<'_>,
+) -> Vec<UnrenderedComponent> {
+    if !declared_deps.contains("@angular/core") {
+        return Vec::new();
+    }
+
+    let modules_by_id: FxHashMap<FileId, &ModuleInfo> =
+        modules.iter().map(|m| (m.file_id, m)).collect();
+
+    // Pass 1: project-wide signals, built LIBERALLY (every signal credits toward
+    // "used", so only false negatives can result, never false positives).
+    let mut used_selectors: FxHashSet<String> = FxHashSet::default();
+    let mut entry_classes: FxHashSet<&str> = FxHashSet::default();
+    let mut dynamic_render = false;
+    for module in modules {
+        for selector in &module.angular_used_selectors {
+            used_selectors.insert(selector.clone());
+        }
+        for class_name in &module.angular_entry_component_refs {
+            entry_classes.insert(class_name.as_str());
+        }
+        dynamic_render = dynamic_render || module.has_dynamic_component_render;
+    }
+
+    // A component dynamically renderable from a non-literal class reference could
+    // be rendered anywhere: abstain on the WHOLE project (mirrors
+    // `unprovided-inject`'s `has_dynamic_provide`).
+    if dynamic_render {
+        return Vec::new();
+    }
+
+    // Public-API abstain: a component re-exported from a non-private package entry
+    // point (an Angular library surface) is rendered by a downstream consumer.
+    let public_api = public_api_reexported_files(graph, public_api_entry_points);
+
+    // Pass 2: emit.
+    //
+    // Unlike the Vue/Svelte arm, an entry-point component is NOT skipped here: the
+    // Angular plugin blanket-marks every `src/app/**/*.component.ts` as an entry
+    // point (Angular's DI/module graph is not import-traceable), so skipping entry
+    // points would make the rule never fire. Render-equivalence is established by
+    // the selector-used / route / bootstrap / dynamic / public-API abstains
+    // instead. A component not reachable at all is left to `unused-file`.
+    let mut findings = Vec::new();
+    for node in &graph.modules {
+        if !node.is_reachable() {
+            continue;
+        }
+        let Some(module) = modules_by_id.get(&node.file_id) else {
+            continue;
+        };
+        if module.angular_component_selectors.is_empty() {
+            continue;
+        }
+        if public_api.contains(&node.file_id) || public_api_entry_points.contains(&node.file_id) {
+            continue;
+        }
+        // A lazily-routed component declared with the bare loadComponent /
+        // loadChildren form (`loadComponent: () => import('./x')`, no
+        // `.then(m => m.X)`) is loaded through its module's DEFAULT export, which
+        // fallow's arrow-wrapped dynamic-import resolution credits as a
+        // `default` reference. Such a form has NO class name in the route config
+        // for `entry_classes` to capture, so the default-export reference is the
+        // only render-equivalence signal. Abstain when this file's default export
+        // carries any reference (or is side-effect registered): it is reached via
+        // a dynamic import, a default import, or a default-import render site. A
+        // genuinely-orphan component is a NAMED export (the `imports: [...]`
+        // registration is a named import, the dead case this rule catches), so a
+        // referenced NAMED export does NOT suppress it; only the default-export
+        // signal does.
+        let default_export_referenced = node.exports.iter().any(|export| {
+            matches!(export.name, fallow_types::extract::ExportName::Default)
+                && (!export.references.is_empty() || export.is_side_effect_used)
+        });
+        for component in &module.angular_component_selectors {
+            // First-cut scope: every selector must be an element selector.
+            if !component.selectors.iter().all(|s| is_element_selector(s)) {
+                continue;
+            }
+            // Used if ANY selector is in the project-wide used set.
+            if component
+                .selectors
+                .iter()
+                .any(|s| used_selectors.contains(&s.to_ascii_lowercase()))
+            {
+                continue;
+            }
+            // Referenced as a route / bootstrap entry point (render-equivalent:
+            // Angular instantiates these without a template `<tag>`).
+            if entry_classes.contains(component.class_name.as_str()) {
+                continue;
+            }
+            // Lazily routed via the bare `loadComponent` / `loadChildren` form
+            // (default-export dynamic-import credit).
+            if default_export_referenced {
+                continue;
+            }
+            let (line, col) =
+                byte_offset_to_line_col(line_offsets_by_file, node.file_id, component.span_start);
+            if suppressions.is_suppressed(node.file_id, line, IssueKind::UnrenderedComponent)
+                || suppressions.is_file_suppressed(node.file_id, IssueKind::UnrenderedComponent)
+            {
+                continue;
+            }
+            findings.push(UnrenderedComponent {
+                path: node.path.clone(),
+                component_name: component.class_name.clone(),
+                framework: "angular".to_string(),
+                reachable_via: None,
+                line,
+                col,
+            });
+        }
+    }
+
+    findings
+}
+
+/// Every source file reachable through ANY re-export chain (any imported name,
+/// including `*`) from a non-private package entry point. The extension-agnostic
+/// analogue of `public_api_reexported_sfcs`: an Angular component re-exported
+/// from a library `public-api.ts` is exposed for a downstream consumer to render,
+/// so it is never a project-internal unrendered component. Walks the full chain
+/// (entry -> sub-barrel -> ... -> leaf), cycle-safe via the visited set.
+fn public_api_reexported_files(
+    graph: &ModuleGraph,
+    public_api_entry_points: &FxHashSet<FileId>,
+) -> FxHashSet<FileId> {
+    let mut result: FxHashSet<FileId> = FxHashSet::default();
+    let mut visited: FxHashSet<FileId> = FxHashSet::default();
+    let mut stack: Vec<FileId> = public_api_entry_points.iter().copied().collect();
+    while let Some(file_id) = stack.pop() {
+        if !visited.insert(file_id) {
+            continue;
+        }
+        let Some(module) = graph.modules.get(file_id.0 as usize) else {
+            continue;
+        };
+        for re in &module.re_exports {
+            let source = re.source_file;
+            result.insert(source);
+            stack.push(source);
+        }
+    }
+    result
 }

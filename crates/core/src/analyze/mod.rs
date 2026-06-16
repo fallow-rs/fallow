@@ -88,7 +88,7 @@ use render_fan_in::compute_render_fan_in;
 use route_collision::find_route_collisions;
 use thin_wrapper::find_thin_wrappers;
 use unprovided_inject::{UnprovidedInjectInput, find_unprovided_injects};
-use unrendered_component::find_unrendered_components;
+use unrendered_component::{find_unrendered_angular_components, find_unrendered_components};
 #[expect(
     deprecated,
     reason = "ADR-008 deprecates detector helpers for external callers; core orchestration still calls them internally"
@@ -1060,6 +1060,22 @@ fn populate_unrendered_component_findings(input: &mut FrameworkSpecificFindingsI
     .into_iter()
     .map(UnrenderedComponentFinding::with_actions)
     .collect();
+    // Angular arm: a separate detection arm (selector-based) producing the SAME
+    // finding kind / result type with `framework: "angular"`, appended to the
+    // same vector. Gated on `@angular/core` inside the detector. Mirrors how the
+    // Vue Options-API arm extends the existing rule (no new IssueKind).
+    input.results.unrendered_components.extend(
+        find_unrendered_angular_components(
+            input.graph,
+            input.modules,
+            input.declared_deps,
+            input.public_api_entry_points,
+            input.line_offsets_by_file,
+            input.suppressions,
+        )
+        .into_iter()
+        .map(UnrenderedComponentFinding::with_actions),
+    );
 }
 
 /// Populate `unused_component_props` when the rule is enabled. Gated on the
@@ -2673,6 +2689,10 @@ mod tests {
                 render_edges: Vec::new(),
                 svelte_dispatched_events: Vec::new(),
                 svelte_listened_events: Vec::new(),
+                angular_component_selectors: Vec::new(),
+                angular_used_selectors: Vec::new(),
+                angular_entry_component_refs: Vec::new(),
+                has_dynamic_component_render: false,
                 has_dynamic_dispatch: false,
             }];
 

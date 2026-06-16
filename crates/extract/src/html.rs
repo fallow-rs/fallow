@@ -162,6 +162,13 @@ pub(crate) fn parse_html_to_module_with_complexity(
         .collect();
     member_accesses.extend(template_member_accesses);
 
+    // Angular external template (`templateUrl`): harvest the custom element
+    // selector tags rendered here so the Angular `unrendered-component` detector
+    // unions them into the project-wide used-selector set, and flag the
+    // `*ngComponentOutlet` dynamic-render escape hatch (project-wide abstain).
+    let angular_used_selectors = angular::collect_angular_used_selectors(source);
+    let has_dynamic_component_render = source.contains("ngComponentOutlet");
+
     let complexity = if need_complexity {
         crate::template_complexity::compute_angular_template_complexity(source)
             .into_iter()
@@ -221,6 +228,10 @@ pub(crate) fn parse_html_to_module_with_complexity(
         component_emits: Vec::new(),
         angular_inputs: Vec::new(),
         angular_outputs: Vec::new(),
+        angular_component_selectors: Vec::new(),
+        angular_used_selectors,
+        angular_entry_component_refs: Vec::new(),
+        has_dynamic_component_render,
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
