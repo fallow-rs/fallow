@@ -251,10 +251,6 @@ pub fn build_remove_export_actions(
 /// the deletion range consistent with what the user actually sees in
 /// their editor, even when there are unsaved edits to the YAML file.
 /// Empty `file_lines` short-circuits the function with no actions.
-#[expect(
-    clippy::disallowed_types,
-    reason = "WorkspaceEdit.changes is typed as std::collections::HashMap by ls-types"
-)]
 pub fn build_remove_catalog_entry_actions(
     results: &AnalysisResults,
     root: &Path,
@@ -270,108 +266,146 @@ pub fn build_remove_catalog_entry_actions(
 
     for entry in &results.unused_catalog_entries {
         let entry = &entry.entry;
-        if !entry.hardcoded_consumers.is_empty() {
-            continue;
-        }
-
-        let Some(entry_uri) = Uri::from_file_path(root.join(&entry.path)) else {
+        let Some((entry_line, start_idx, end_idx)) =
+            catalog_entry_delete_span(entry, root, uri, cursor_range, file_lines)
+        else {
             continue;
         };
-        if entry_uri != *uri {
-            continue;
-        }
-
-        let entry_line = entry.line.saturating_sub(1);
-        if entry_line < cursor_range.start.line || entry_line > cursor_range.end.line {
-            continue;
-        }
-
-        let start_idx = entry_line as usize;
-        if start_idx >= file_lines.len() {
-            continue;
-        }
-        let end_idx = compute_catalog_deletion_end(file_lines, start_idx);
-        if !line_matches_catalog_key(file_lines[start_idx], &entry.entry_name) {
-            continue;
-        }
-
-        let title = if entry.catalog_name == "default" {
-            format!("Remove unused catalog entry `{}`", entry.entry_name)
-        } else {
-            format!(
-                "Remove unused catalog entry `{}` from `{}`",
-                entry.entry_name, entry.catalog_name
-            )
-        };
-
-        let mut changes = HashMap::new();
-        let mut edits = vec![TextEdit {
-            range: Range {
-                start: Position {
-                    line: start_idx as u32,
-                    character: 0,
-                },
-                end: Position {
-                    #[expect(
-                        clippy::cast_possible_truncation,
-                        reason = "line index is bounded by source size"
-                    )]
-                    line: end_idx as u32,
-                    character: 0,
-                },
-            },
-            new_text: String::new(),
-        }];
-
-        if let Some(parent_edit) =
-            build_parent_rewrite_edit(file_lines, start_idx, end_idx, &entry.catalog_name)
-        {
-            edits.push(parent_edit);
-        }
-        changes.insert(uri.clone(), edits);
-
-        let diagnostic_message = if entry.catalog_name == "default" {
-            format!(
-                "Unused catalog entry: '{}' is not referenced by any workspace package",
-                entry.entry_name
-            )
-        } else {
-            format!(
-                "Unused catalog entry: '{}' in catalog '{}' is not referenced by any workspace package",
-                entry.entry_name, entry.catalog_name
-            )
-        };
-
-        actions.push(CodeActionOrCommand::CodeAction(CodeAction {
-            title,
-            kind: Some(CodeActionKind::QUICKFIX),
-            edit: Some(WorkspaceEdit {
-                changes: Some(changes),
-                ..Default::default()
-            }),
-            diagnostics: Some(vec![Diagnostic {
-                range: Range {
-                    start: Position {
-                        line: entry_line,
-                        character: 0,
-                    },
-                    end: Position {
-                        line: entry_line,
-                        character: u32::MAX,
-                    },
-                },
-                severity: Some(DiagnosticSeverity::WARNING),
-                source: Some("fallow".to_string()),
-                code: Some(NumberOrString::String("unused-catalog-entry".to_string())),
-                message: diagnostic_message,
-                tags: Some(vec![DiagnosticTag::UNNECESSARY]),
-                ..Default::default()
-            }]),
-            ..Default::default()
-        }));
+        actions.push(remove_catalog_entry_action(
+            entry, uri, file_lines, entry_line, start_idx, end_idx,
+        ));
     }
 
     actions
+}
+
+fn catalog_entry_delete_span(
+    entry: &fallow_core::results::UnusedCatalogEntry,
+    root: &Path,
+    uri: &Uri,
+    cursor_range: &Range,
+    file_lines: &[&str],
+) -> Option<(u32, usize, usize)> {
+    if !entry.hardcoded_consumers.is_empty() {
+        return None;
+    }
+
+    let entry_uri = Uri::from_file_path(root.join(&entry.path))?;
+    if entry_uri != *uri {
+        return None;
+    }
+
+    let entry_line = entry.line.saturating_sub(1);
+    if entry_line < cursor_range.start.line || entry_line > cursor_range.end.line {
+        return None;
+    }
+
+    let start_idx = entry_line as usize;
+    if start_idx >= file_lines.len() {
+        return None;
+    }
+    if !line_matches_catalog_key(file_lines[start_idx], &entry.entry_name) {
+        return None;
+    }
+
+    Some((
+        entry_line,
+        start_idx,
+        compute_catalog_deletion_end(file_lines, start_idx),
+    ))
+}
+
+#[expect(
+    clippy::disallowed_types,
+    reason = "WorkspaceEdit.changes is typed as std::collections::HashMap by ls-types"
+)]
+fn remove_catalog_entry_action(
+    entry: &fallow_core::results::UnusedCatalogEntry,
+    uri: &Uri,
+    file_lines: &[&str],
+    entry_line: u32,
+    start_idx: usize,
+    end_idx: usize,
+) -> CodeActionOrCommand {
+    let title = catalog_entry_action_title(entry);
+    let mut changes = HashMap::new();
+    let mut edits = vec![TextEdit {
+        range: Range {
+            start: Position {
+                line: start_idx as u32,
+                character: 0,
+            },
+            end: Position {
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "line index is bounded by source size"
+                )]
+                line: end_idx as u32,
+                character: 0,
+            },
+        },
+        new_text: String::new(),
+    }];
+
+    if let Some(parent_edit) =
+        build_parent_rewrite_edit(file_lines, start_idx, end_idx, &entry.catalog_name)
+    {
+        edits.push(parent_edit);
+    }
+    changes.insert(uri.clone(), edits);
+
+    CodeActionOrCommand::CodeAction(CodeAction {
+        title,
+        kind: Some(CodeActionKind::QUICKFIX),
+        edit: Some(WorkspaceEdit {
+            changes: Some(changes),
+            ..Default::default()
+        }),
+        diagnostics: Some(vec![Diagnostic {
+            range: Range {
+                start: Position {
+                    line: entry_line,
+                    character: 0,
+                },
+                end: Position {
+                    line: entry_line,
+                    character: u32::MAX,
+                },
+            },
+            severity: Some(DiagnosticSeverity::WARNING),
+            source: Some("fallow".to_string()),
+            code: Some(NumberOrString::String("unused-catalog-entry".to_string())),
+            message: catalog_entry_diagnostic_message(entry),
+            tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+            ..Default::default()
+        }]),
+        ..Default::default()
+    })
+}
+
+fn catalog_entry_action_title(entry: &fallow_core::results::UnusedCatalogEntry) -> String {
+    if entry.catalog_name == "default" {
+        format!("Remove unused catalog entry `{}`", entry.entry_name)
+    } else {
+        format!(
+            "Remove unused catalog entry `{}` from `{}`",
+            entry.entry_name, entry.catalog_name
+        )
+    }
+}
+
+fn catalog_entry_diagnostic_message(entry: &fallow_core::results::UnusedCatalogEntry) -> String {
+    if entry.catalog_name == "default" {
+        format!(
+            "Unused catalog entry: '{}' is not referenced by any workspace package",
+            entry.entry_name
+        )
+    } else {
+        format!(
+            "Unused catalog entry: '{}' in catalog '{}' is not referenced by any workspace package",
+            entry.entry_name, entry.catalog_name
+        )
+    }
 }
 
 /// Build quick-fix code actions for empty pnpm catalog groups (delete the
