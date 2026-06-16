@@ -232,6 +232,9 @@ pub(crate) fn parse_html_to_module_with_complexity(
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     }
 }
 

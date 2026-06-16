@@ -92,6 +92,9 @@ pub struct BaselineData {
     /// Unused component outputs, keyed by `file:output_name`.
     #[serde(default)]
     pub unused_component_outputs: Vec<String>,
+    /// Unused Svelte dispatched events, keyed by `file:event_name`.
+    #[serde(default)]
+    pub unused_svelte_events: Vec<String>,
     /// Unused server actions, keyed by `file:action_name`.
     #[serde(default)]
     pub unused_server_actions: Vec<String>,
@@ -192,6 +195,7 @@ impl BaselineData {
             unused_component_emits: member_imports.unused_component_emits,
             unused_component_inputs: member_imports.unused_component_inputs,
             unused_component_outputs: member_imports.unused_component_outputs,
+            unused_svelte_events: member_imports.unused_svelte_events,
             unused_server_actions: member_imports.unused_server_actions,
             unused_load_data_keys: member_imports.unused_load_data_keys,
             unresolved_imports: member_imports.unresolved_imports,
@@ -237,6 +241,7 @@ impl BaselineData {
             + self.unused_component_emits.len()
             + self.unused_component_inputs.len()
             + self.unused_component_outputs.len()
+            + self.unused_svelte_events.len()
             + self.unused_server_actions.len()
             + self.unused_load_data_keys.len()
             + self.unresolved_imports.len()
@@ -436,6 +441,7 @@ struct BaselineMemberImportKeys {
     unused_component_emits: Vec<String>,
     unused_component_inputs: Vec<String>,
     unused_component_outputs: Vec<String>,
+    unused_svelte_events: Vec<String>,
     unused_server_actions: Vec<String>,
     unused_load_data_keys: Vec<String>,
     unresolved_imports: Vec<String>,
@@ -463,6 +469,7 @@ fn baseline_member_import_keys(
             &results.unused_component_outputs,
             root,
         ),
+        unused_svelte_events: svelte_event_baseline_keys(&results.unused_svelte_events, root),
         unused_server_actions: server_action_baseline_keys(&results.unused_server_actions, root),
         unused_load_data_keys: load_data_key_baseline_keys(&results.unused_load_data_keys, root),
         unresolved_imports: unresolved_import_baseline_keys(&results.unresolved_imports, root),
@@ -597,6 +604,22 @@ fn component_output_baseline_keys(
                 "{}:{}",
                 relative_path(&o.output.path, root),
                 o.output.output_name
+            )
+        })
+        .collect()
+}
+
+fn svelte_event_baseline_keys(
+    items: &[fallow_core::results::UnusedSvelteEventFinding],
+    root: &Path,
+) -> Vec<String> {
+    items
+        .iter()
+        .map(|e| {
+            format!(
+                "{}:{}",
+                relative_path(&e.event.path, root),
+                e.event.event_name
             )
         })
         .collect()
@@ -1053,6 +1076,21 @@ impl BaselineFilterContext<'_> {
                 finding.output.output_name
             );
             !baseline_unused_component_outputs.contains(key.as_str())
+        });
+
+        let baseline_unused_svelte_events: FxHashSet<&str> = self
+            .baseline
+            .unused_svelte_events
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.unused_svelte_events.retain(|finding| {
+            let key = format!(
+                "{}:{}",
+                relative_path(&finding.event.path, self.root),
+                finding.event.event_name
+            );
+            !baseline_unused_svelte_events.contains(key.as_str())
         });
     }
 
@@ -2257,6 +2295,7 @@ mod tests {
             unused_component_emits: vec![],
             unused_component_inputs: vec![],
             unused_component_outputs: vec![],
+            unused_svelte_events: vec![],
             unused_server_actions: vec![],
             unused_load_data_keys: vec![],
             unresolved_imports: vec![],
@@ -2320,6 +2359,7 @@ mod tests {
             unused_component_emits: vec![],
             unused_component_inputs: vec![],
             unused_component_outputs: vec![],
+            unused_svelte_events: vec![],
             unused_server_actions: vec![],
             unused_load_data_keys: vec![],
             unresolved_imports: vec![],
@@ -2370,6 +2410,7 @@ mod tests {
             unused_component_emits: vec![],
             unused_component_inputs: vec![],
             unused_component_outputs: vec![],
+            unused_svelte_events: vec![],
             unused_server_actions: vec![],
             unused_load_data_keys: vec![],
             unresolved_imports: vec![],

@@ -5,13 +5,14 @@ expression: output
 <!-- fallow-id: fallow-results -->
 ### Fallow dead-code report
 
-Found **28** findings.
+Found **29** findings.
 
 <details>
-<summary>Dead code (12)</summary>
+<summary>Dead code (13)</summary>
 
 | Severity | Rule | Location | Description |
 | --- | --- | --- | --- |
+| minor | `fallow/unused-svelte-event` | `src/Child.svelte`:6 | event \`dead\` is dispatched by component \`Child\` but listened to nowhere in the project \(remove it or listen for it\) |
 | major | `fallow/unresolved-import` | `src/app.ts`:3 | Import './missing-module' could not be resolved |
 | major | `fallow/duplicate-export` | `src/config.ts`:15 | Export 'Config' appears in multiple modules |
 | major | `fallow/unused-file` | `src/dead.ts`:1 | File is not reachable from any entry point |

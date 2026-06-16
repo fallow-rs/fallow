@@ -174,6 +174,9 @@ fn module(file_id: u32, callee_uses: Vec<CalleeUse>, imports: Vec<ImportInfo>) -
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     }
 }
 

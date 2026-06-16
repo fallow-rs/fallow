@@ -128,6 +128,14 @@ fn unused_component_output_key(
     )
 }
 
+fn unused_svelte_event_key(item: &fallow_core::results::UnusedSvelteEvent, root: &Path) -> String {
+    format!(
+        "unused-svelte-event:{}:{}",
+        relative_key_path(&item.path, root),
+        item.event_name
+    )
+}
+
 fn unused_server_action_key(
     item: &fallow_core::results::UnusedServerAction,
     root: &Path,
@@ -426,6 +434,7 @@ pub(super) fn dead_code_keys(
         unused_component_emits,
         unused_component_inputs,
         unused_component_outputs,
+        unused_svelte_events,
         unused_server_actions,
         unused_load_data_keys,
         unused_load_data_keys_global_abstain: _unused_load_data_keys_global_abstain,
@@ -494,6 +503,7 @@ pub(super) fn dead_code_keys(
         unused_component_emits,
         unused_component_inputs,
         unused_component_outputs,
+        unused_svelte_events,
     );
     collector.add_graph_findings(
         unresolved_imports,
@@ -612,11 +622,13 @@ impl<'a> DeadCodeKeyCollector<'a> {
         unused_component_emits: &[fallow_core::results::UnusedComponentEmitFinding],
         unused_component_inputs: &[fallow_core::results::UnusedComponentInputFinding],
         unused_component_outputs: &[fallow_core::results::UnusedComponentOutputFinding],
+        unused_svelte_events: &[fallow_core::results::UnusedSvelteEventFinding],
     ) {
         self.add_unused_component_props(unused_component_props);
         self.add_unused_component_emits(unused_component_emits);
         self.add_unused_component_inputs(unused_component_inputs);
         self.add_unused_component_outputs(unused_component_outputs);
+        self.add_unused_svelte_events(unused_svelte_events);
     }
 
     fn add_graph_findings(
@@ -790,6 +802,15 @@ impl<'a> DeadCodeKeyCollector<'a> {
     ) {
         for item in items {
             self.insert(unused_component_output_key(&item.output, self.root));
+        }
+    }
+
+    fn add_unused_svelte_events(
+        &mut self,
+        items: &[fallow_core::results::UnusedSvelteEventFinding],
+    ) {
+        for item in items {
+            self.insert(unused_svelte_event_key(&item.event, self.root));
         }
     }
 
@@ -1111,6 +1132,7 @@ pub(super) fn retain_introduced_dead_code(
         unused_component_emits,
         unused_component_inputs,
         unused_component_outputs,
+        unused_svelte_events,
         unused_server_actions,
         unused_load_data_keys,
         unused_load_data_keys_global_abstain: _unused_load_data_keys_global_abstain,
@@ -1214,6 +1236,7 @@ pub(super) fn retain_introduced_dead_code(
     unused_component_emits.retain(|item| keep(unused_component_emit_key(&item.emit, root)));
     unused_component_inputs.retain(|item| keep(unused_component_input_key(&item.input, root)));
     unused_component_outputs.retain(|item| keep(unused_component_output_key(&item.output, root)));
+    unused_svelte_events.retain(|item| keep(unused_svelte_event_key(&item.event, root)));
     unused_server_actions.retain(|item| keep(unused_server_action_key(&item.action, root)));
     unused_load_data_keys.retain(|item| keep(unused_load_data_key_key(&item.key, root)));
     route_collisions.retain(|item| keep(route_collision_key(&item.collision, root)));
@@ -1538,6 +1561,13 @@ impl DeadCodeJsonAnnotator<'_> {
                     &unused_component_output_key(&item.output, self.root),
                     self.base,
                 )
+            }),
+        );
+        annotate_issue_array(
+            self.json,
+            "unused_svelte_events",
+            self.results.unused_svelte_events.iter().map(|item| {
+                issue_was_introduced(&unused_svelte_event_key(&item.event, self.root), self.base)
             }),
         );
         annotate_issue_array(

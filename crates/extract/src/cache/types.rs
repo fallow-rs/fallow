@@ -478,7 +478,15 @@ use crate::MemberKind;
 /// a warm cache from 172 lacks the Svelte prop IR. (`<svelte:component>` /
 /// `<svelte:element>` / `<svelte:self>` were verified already credited by the
 /// existing attribute-value scan, so no template-scanner change rides this bump.)
-pub(super) const CACHE_VERSION: u32 = 173;
+///
+/// Bumped to 174 (feat/svelte-dead-event): `.svelte` extraction now records
+/// `svelte_dispatched_events` (literal-arg `dispatch('<name>')` calls where
+/// `dispatch` is bound from `createEventDispatcher()`), `svelte_listened_events`
+/// (template `on:<name>` bindings on component tags), and `has_dynamic_dispatch`
+/// (a dynamic-dispatch / whole-`dispatch`-value abstain). A warm cache from 173
+/// lacks the dispatched/listened event IR and would report zero
+/// `unused-svelte-event` findings.
+pub(super) const CACHE_VERSION: u32 = 174;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -524,7 +532,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 1104);
+assert_cached_type_size!(CachedModule, 1160);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 56);
@@ -717,6 +725,15 @@ pub struct CachedModule {
     /// React render edges (child name captured; resolution deferred to graph
     /// build). Round-trips so the render graph survives a warm cache.
     pub render_edges: Vec<fallow_types::extract::RenderEdge>,
+    /// Svelte custom events dispatched via `dispatch('<name>')`. Round-trips so
+    /// the `unused-svelte-event` detector sees them on warm-cache loads.
+    pub svelte_dispatched_events: Vec<fallow_types::extract::DispatchedEvent>,
+    /// Svelte template `on:<name>` listener names on component tags. Round-trips
+    /// so the project-wide listened set is correct on warm-cache loads.
+    pub svelte_listened_events: Vec<String>,
+    /// Whether a `dispatch(<nonLiteral>)` call or whole-`dispatch`-value use was
+    /// seen. Round-trips for the `unused-svelte-event` abstain.
+    pub has_dynamic_dispatch: bool,
 }
 
 /// Cached namespace-object alias.

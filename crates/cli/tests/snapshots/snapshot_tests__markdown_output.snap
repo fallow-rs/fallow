@@ -2,7 +2,7 @@
 source: crates/cli/tests/snapshot_tests.rs
 expression: output
 ---
-## Fallow: 27 issues found
+## Fallow: 28 issues found
 
 ### Unused files (1)
 
@@ -93,6 +93,10 @@ expression: output
 ### Unused component outputs (1)
 
 - `src/user-card.component.ts`:15 `selected` is declared but emitted nowhere in this component (remove it or emit it)
+
+### Unused Svelte events (1)
+
+- `src/Child.svelte`:6 `dead` is dispatched but listened to nowhere in the project (remove it or listen for it)
 
 ### Unused catalog entries (2)
 

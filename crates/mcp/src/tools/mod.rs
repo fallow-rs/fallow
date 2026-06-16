@@ -122,6 +122,7 @@ pub const ISSUE_TYPE_FLAGS: &[(&str, &str)] = &[
     ("unused-component-emits", "--unused-component-emits"),
     ("unused-component-inputs", "--unused-component-inputs"),
     ("unused-component-outputs", "--unused-component-outputs"),
+    ("unused-svelte-events", "--unused-svelte-events"),
     ("unused-server-actions", "--unused-server-actions"),
     ("unused-load-data-keys", "--unused-load-data-keys"),
     ("unresolved-imports", "--unresolved-imports"),

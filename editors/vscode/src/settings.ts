@@ -22,6 +22,7 @@ export interface IssueTypeConfig {
   readonly "unused-component-emit": boolean;
   readonly "unused-component-input": boolean;
   readonly "unused-component-output": boolean;
+  readonly "unused-svelte-event": boolean;
   readonly "unrendered-component": boolean;
   readonly "unprovided-inject": boolean;
   readonly "invalid-client-export": boolean;

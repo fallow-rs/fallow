@@ -89,6 +89,8 @@ mod rules_config;
 mod safe_analysis;
 #[path = "integration_test/sfc_parsing.rs"]
 mod sfc_parsing;
+#[path = "integration_test/svelte_dead_event.rs"]
+mod svelte_dead_event;
 #[path = "integration_test/unreachable_exports.rs"]
 mod unreachable_exports;
 #[path = "integration_test/workspaces.rs"]

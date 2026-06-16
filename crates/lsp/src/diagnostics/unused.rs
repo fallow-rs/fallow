@@ -525,6 +525,7 @@ pub fn push_member_diagnostics(
     push_unused_component_emit_diagnostics(map, results);
     push_unused_component_input_diagnostics(map, results);
     push_unused_component_output_diagnostics(map, results);
+    push_unused_svelte_event_diagnostics(map, results);
     push_unused_server_action_diagnostics(map, results);
     push_unused_load_data_key_diagnostics(map, results);
 }
@@ -697,6 +698,40 @@ fn push_unused_component_output_diagnostics(
                 message: format!(
                     "Output '{}' is declared but emitted nowhere in this component",
                     o.output_name
+                ),
+                tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+                ..Default::default()
+            });
+        }
+    }
+}
+
+fn push_unused_svelte_event_diagnostics(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+) {
+    for finding in &results.unused_svelte_events {
+        let e = &finding.event;
+        if let Some(uri) = Uri::from_file_path(&e.path) {
+            let line = e.line.saturating_sub(1);
+            map.entry(uri).or_default().push(Diagnostic {
+                range: Range {
+                    start: Position {
+                        line,
+                        character: e.col,
+                    },
+                    end: Position {
+                        line,
+                        character: diagnostic_end_col(e.col, &e.event_name),
+                    },
+                },
+                severity: Some(DiagnosticSeverity::HINT),
+                source: Some("fallow".to_string()),
+                code: Some(NumberOrString::String("unused-svelte-event".to_string())),
+                code_description: doc_link("unused-svelte-events"),
+                message: format!(
+                    "Event '{}' is dispatched but listened to nowhere in this project",
+                    e.event_name
                 ),
                 tags: Some(vec![DiagnosticTag::UNNECESSARY]),
                 ..Default::default()

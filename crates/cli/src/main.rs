@@ -496,6 +496,10 @@ enum Command {
         #[arg(long)]
         unused_component_outputs: bool,
 
+        /// Only report unused Svelte dispatched events
+        #[arg(long)]
+        unused_svelte_events: bool,
+
         /// Only report unused server actions
         #[arg(long)]
         unused_server_actions: bool,
@@ -3198,6 +3202,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             unused_component_emits,
             unused_component_inputs,
             unused_component_outputs,
+            unused_svelte_events,
             unused_server_actions,
             unused_load_data_keys,
             unresolved_imports,
@@ -3237,6 +3242,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
                     unused_component_emits,
                     unused_component_inputs,
                     unused_component_outputs,
+                    unused_svelte_events,
                     unused_server_actions,
                     unused_load_data_keys,
                     unresolved_imports,

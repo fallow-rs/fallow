@@ -62,6 +62,7 @@ else
     table_row("Unused component inputs"; "unused_component_inputs"; "unused-component-input"),
     table_row("Unused component emits"; "unused_component_emits"; "unused-component-emit"),
     table_row("Unused component outputs"; "unused_component_outputs"; "unused-component-output"),
+    table_row("Unused Svelte events"; "unused_svelte_events"; "unused-svelte-event"),
     table_row("Unprovided injects"; "unprovided_injects"; "unprovided-inject"),
     table_row("Unused load data keys"; "unused_load_data_keys"; "unused-load-data-key"),
     table_row("Type-only dependencies"; "type_only_dependencies"; "type-only-dependencies"),
@@ -164,6 +165,9 @@ else
   section("Unused component outputs"; "unused_component_outputs";
     "Angular `@Output()` / signal `output()` declarations emitted nowhere inside their own component (no matching `emit()` call).\n\n| File | Component | Output |\n|------|-----------|--------|\n";
     "| `\(.path):\(.line)` | `\(.component_name)` | `\(.output_name)` |") +
+  section("Unused Svelte events"; "unused_svelte_events";
+    "Svelte components dispatching a `createEventDispatcher` event listened to nowhere in the project (cross-file dead-output direction).\n\n| File | Component | Event |\n|------|-----------|-------|\n";
+    "| `\(.path):\(.line)` | `\(.component_name)` | `\(.event_name)` |") +
   section("Unprovided injects"; "unprovided_injects";
     "Vue `inject` / Svelte `getContext` calls for a key that no ancestor `provide` / `setContext` supplies.\n\n| File | Key | Framework |\n|------|-----|-----------|\n";
     "| `\(.path):\(.line)` | `\(.key_name)` | \(.framework) |") +

@@ -69,6 +69,14 @@ pub fn collect_template_usage(
     }
 }
 
+/// Collect Svelte custom-event listener names from template `on:<name>`
+/// bindings on component tags (PascalCase). DOM-element `on:click` is excluded.
+/// Feeds the `unused-svelte-event` detector's liberal project-wide listened set.
+#[must_use]
+pub fn collect_svelte_listened_events(source: &str) -> Vec<String> {
+    svelte::collect_listened_events(source)
+}
+
 /// Collect template-visible usage, including framework template references to
 /// script-local instance bindings such as `const counter = new Counter()`.
 pub fn collect_template_usage_with_bound_targets(

@@ -293,6 +293,7 @@ export const countCheckIssues = (result: FallowCheckResult | null): number => {
     (result.unused_component_emits?.length ?? 0) +
     (result.unused_component_inputs?.length ?? 0) +
     (result.unused_component_outputs?.length ?? 0) +
+    (result.unused_svelte_events?.length ?? 0) +
     (result.unrendered_components?.length ?? 0) +
     (result.unprovided_injects?.length ?? 0) +
     (result.invalid_client_exports?.length ?? 0) +

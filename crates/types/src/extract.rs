@@ -251,6 +251,23 @@ pub struct ModuleInfo {
     /// child's written name; child-to-`FileId` resolution is deferred to graph
     /// build. Empty for non-React files.
     pub render_edges: Vec<RenderEdge>,
+    /// Svelte custom events dispatched via `dispatch('<name>')` where `dispatch`
+    /// is the binding from `const dispatch = createEventDispatcher()`. Consumed
+    /// by the `unused-svelte-event` detector to flag an event dispatched here but
+    /// listened to nowhere project-wide. Each entry carries the literal event
+    /// name and its span. Empty for every non-Svelte file.
+    pub svelte_dispatched_events: Vec<DispatchedEvent>,
+    /// Svelte custom-event listener names harvested from template `on:<name>`
+    /// bindings on COMPONENT tags (PascalCase tag names). Lowercase DOM-element
+    /// `on:click` is a DOM event, not a custom event, and is excluded. Unioned
+    /// project-wide by the `unused-svelte-event` detector to build the liberal
+    /// "listened" set. Empty for every non-Svelte file.
+    pub svelte_listened_events: Vec<String>,
+    /// `true` when a `dispatch(<nonLiteral>)` call was seen (the dispatched event
+    /// name cannot be known statically), or the `dispatch` binding was used as a
+    /// whole value (passed / returned). The `unused-svelte-event` detector
+    /// abstains on the whole component so an event is never falsely flagged.
+    pub has_dynamic_dispatch: bool,
 }
 
 impl ModuleInfo {
@@ -1386,6 +1403,22 @@ pub struct ComponentEmit {
     pub used: bool,
 }
 
+/// A Svelte custom event dispatched via `dispatch('<name>')`, where `dispatch`
+/// is the binding from a `const dispatch = createEventDispatcher()` call. Only
+/// literal-first-arg dispatches are recorded; a `dispatch(<nonLiteral>)` sets
+/// `ModuleInfo::has_dynamic_dispatch` instead. Consumed by the
+/// `unused-svelte-event` detector, which flags an event dispatched here but
+/// listened to nowhere project-wide (the cross-file dead-output direction). The
+/// span is a byte offset (not an `oxc_span::Span`) so the type round-trips
+/// through the bitcode cache directly, mirroring `ComponentEmit::span_start`.
+#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode, PartialEq, Eq)]
+pub struct DispatchedEvent {
+    /// The dispatched event name (the literal first argument).
+    pub name: String,
+    /// Start byte offset of the `dispatch(...)` call (anchors the finding).
+    pub span_start: u32,
+}
+
 /// A declared Angular component/directive input, harvested from an `@Input()`
 /// decorator or a signal `input()` / `input.required()` / `model()` initializer
 /// on an Angular-decorated class. Consumed by the `unused-component-input`
@@ -1665,7 +1698,7 @@ const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 216);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1112);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1160);
 
 /// A re-export declaration.
 #[derive(Debug, Clone)]
@@ -1915,6 +1948,9 @@ mod tests {
             react_props: Vec::new(),
             hook_uses: Vec::new(),
             render_edges: Vec::new(),
+            svelte_dispatched_events: Vec::new(),
+            svelte_listened_events: Vec::new(),
+            has_dynamic_dispatch: false,
         };
 
         module.release_resolution_payload();

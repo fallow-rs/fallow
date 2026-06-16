@@ -62,6 +62,7 @@ export const getIssueTypes = (): IssueTypeConfig =>
     "unused-component-emit": true,
     "unused-component-input": true,
     "unused-component-output": true,
+    "unused-svelte-event": true,
     "unrendered-component": true,
     "unprovided-inject": true,
     "invalid-client-export": true,

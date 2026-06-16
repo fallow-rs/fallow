@@ -45,6 +45,7 @@ use crate::results::{
     UnresolvedImport, UnusedCatalogEntry, UnusedComponentEmit, UnusedComponentInput,
     UnusedComponentOutput, UnusedComponentProp, UnusedDependency, UnusedDependencyOverride,
     UnusedExport, UnusedFile, UnusedLoadDataKey, UnusedMember, UnusedServerAction,
+    UnusedSvelteEvent,
 };
 
 /// Shared note for the `duplicate-exports` fix action. Mirrors the const used
@@ -1123,6 +1124,48 @@ impl UnusedComponentEmitFinding {
         })];
         Self {
             emit,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for an [`UnusedSvelteEvent`] finding. There is no safe
+/// auto-fix: removing a dispatched event is judgement-bearing (the event may be
+/// part of a deliberately-stable public component API, or a listener may be
+/// added later). The only action is a line-level suppress at the `dispatch`
+/// call.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedSvelteEventFinding {
+    /// The underlying finding.
+    #[serde(flatten)]
+    pub event: UnusedSvelteEvent,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl UnusedSvelteEventFinding {
+    /// Build the wrapper from a raw [`UnusedSvelteEvent`]. Emits only a
+    /// line-level suppress action: there is no safe auto-fix because removing a
+    /// dispatched event is a human decision (it may be part of a stable
+    /// component API, or a listener may be wired up later).
+    #[must_use]
+    pub fn with_actions(event: UnusedSvelteEvent) -> Self {
+        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
+            kind: SuppressLineKind::SuppressLine,
+            auto_fixable: false,
+            description: "Suppress with an inline comment above the line".to_string(),
+            comment: "// fallow-ignore-next-line unused-svelte-event".to_string(),
+            scope: None,
+        })];
+        Self {
+            event,
             actions,
             introduced: None,
         }

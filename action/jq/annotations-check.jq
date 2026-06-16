@@ -76,6 +76,8 @@ def dependency_action(pkg):
     "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Unused component input::Input '\(.input_name | san)' on component '\(.component_name | san)' is read nowhere in its own component (neither class body nor template).\(nl)\(nl)Remove the input, or use it. If it is part of a deliberately-stable public API, suppress this finding."),
   (.unused_component_outputs[]? |
     "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Unused component output::Output '\(.output_name | san)' on component '\(.component_name | san)' is emitted nowhere in its own component.\(nl)\(nl)Remove the output, or emit it. If it is part of a deliberately-stable public API, suppress this finding."),
+  (.unused_svelte_events[]? |
+    "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Unused Svelte event::Event '\(.event_name | san)' dispatched by component '\(.component_name | san)' is listened to nowhere in the project.\(nl)\(nl)Remove the dispatched event, or listen for it. If it is part of a deliberately-stable public API, suppress this finding."),
   (.unprovided_injects[]? |
     "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Unprovided inject::\(.framework | san) inject for key '\(.key_name | san)' has no matching provider in the project.\(nl)\(nl)Add a provide/setContext for this key, or remove the dead inject."),
   (.unused_load_data_keys[]? |

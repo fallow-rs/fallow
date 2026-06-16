@@ -162,6 +162,11 @@ pub enum IssueKind {
     /// rule defaults to `off` (opt-in). Cross-graph: the group spans multiple
     /// components / files.
     DuplicatePropShape,
+    /// A Svelte component dispatching a custom event via
+    /// `createEventDispatcher()` whose event name is listened to NOWHERE in the
+    /// analyzed project. Cross-file dead-output direction: the component fires an
+    /// event nothing handles.
+    UnusedSvelteEvent,
 }
 
 impl IssueKind {
@@ -233,6 +238,7 @@ impl IssueKind {
             "prop-drilling" => Some(Self::PropDrilling),
             "thin-wrapper" | "thin-wrappers" => Some(Self::ThinWrapper),
             "duplicate-prop-shape" | "duplicate-prop-shapes" => Some(Self::DuplicatePropShape),
+            "unused-svelte-event" | "unused-svelte-events" => Some(Self::UnusedSvelteEvent),
             _ => None,
         }
     }
@@ -287,6 +293,7 @@ impl IssueKind {
             Self::DuplicatePropShape => 44,
             Self::UnusedComponentInput => 45,
             Self::UnusedComponentOutput => 46,
+            Self::UnusedSvelteEvent => 47,
         }
     }
 
@@ -340,6 +347,7 @@ impl IssueKind {
             44 => Some(Self::DuplicatePropShape),
             45 => Some(Self::UnusedComponentInput),
             46 => Some(Self::UnusedComponentOutput),
+            47 => Some(Self::UnusedSvelteEvent),
             _ => None,
         }
     }
@@ -453,6 +461,7 @@ pub const fn issue_kind_to_kebab(kind: IssueKind) -> &'static str {
         IssueKind::PropDrilling => "prop-drilling",
         IssueKind::ThinWrapper => "thin-wrapper",
         IssueKind::DuplicatePropShape => "duplicate-prop-shape",
+        IssueKind::UnusedSvelteEvent => "unused-svelte-event",
     }
 }
 
@@ -718,6 +727,8 @@ pub const KNOWN_ISSUE_KIND_NAMES: &[&str] = &[
     "thin-wrappers",
     "duplicate-prop-shape",
     "duplicate-prop-shapes",
+    "unused-svelte-event",
+    "unused-svelte-events",
 ];
 
 /// CLI filter flags on `fallow dead-code` that scope output to a single
@@ -743,6 +754,7 @@ pub const DEAD_CODE_FILTER_FLAGS: &[&str] = &[
     "--unused-component-emits",
     "--unused-component-inputs",
     "--unused-component-outputs",
+    "--unused-svelte-events",
     "--unused-server-actions",
     "--unused-load-data-keys",
     "--unresolved-imports",
@@ -1062,6 +1074,14 @@ mod tests {
             IssueKind::parse("prop-drilling"),
             Some(IssueKind::PropDrilling)
         );
+        assert_eq!(
+            IssueKind::parse("unused-svelte-event"),
+            Some(IssueKind::UnusedSvelteEvent)
+        );
+        assert_eq!(
+            IssueKind::parse("unused-svelte-events"),
+            Some(IssueKind::UnusedSvelteEvent)
+        );
     }
 
     #[test]
@@ -1153,7 +1173,11 @@ mod tests {
             IssueKind::from_discriminant(46),
             Some(IssueKind::UnusedComponentOutput)
         );
-        assert_eq!(IssueKind::from_discriminant(47), None);
+        assert_eq!(
+            IssueKind::from_discriminant(47),
+            Some(IssueKind::UnusedSvelteEvent)
+        );
+        assert_eq!(IssueKind::from_discriminant(48), None);
         assert_eq!(IssueKind::from_discriminant(u8::MAX), None);
     }
 
@@ -1206,6 +1230,7 @@ mod tests {
             IssueKind::DuplicatePropShape,
             IssueKind::UnusedComponentInput,
             IssueKind::UnusedComponentOutput,
+            IssueKind::UnusedSvelteEvent,
         ] {
             assert_eq!(
                 IssueKind::from_discriminant(kind.to_discriminant()),
@@ -1213,7 +1238,7 @@ mod tests {
             );
         }
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(47), None);
+        assert_eq!(IssueKind::from_discriminant(48), None);
     }
 
     #[test]
@@ -1265,6 +1290,7 @@ mod tests {
             IssueKind::DuplicatePropShape,
             IssueKind::UnusedComponentInput,
             IssueKind::UnusedComponentOutput,
+            IssueKind::UnusedSvelteEvent,
         ];
         let discriminants: Vec<u8> = all_kinds.iter().map(|k| k.to_discriminant()).collect();
         let mut sorted = discriminants.clone();

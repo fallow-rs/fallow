@@ -2018,6 +2018,9 @@ mod tests {
             react_props: Vec::new(),
             hook_uses: Vec::new(),
             render_edges: Vec::new(),
+            svelte_dispatched_events: Vec::new(),
+            svelte_listened_events: Vec::new(),
+            has_dynamic_dispatch: false,
         };
 
         let (cyc, cog, funcs, lines) = aggregate_complexity(&module);
@@ -2089,6 +2092,9 @@ mod tests {
             react_props: Vec::new(),
             hook_uses: Vec::new(),
             render_edges: Vec::new(),
+            svelte_dispatched_events: Vec::new(),
+            svelte_listened_events: Vec::new(),
+            has_dynamic_dispatch: false,
             line_offsets: vec![0, 10, 20, 30, 40], // 5 lines
             complexity: vec![fallow_types::extract::FunctionComplexity {
                 name: "doStuff".into(),
@@ -2175,6 +2181,9 @@ mod tests {
             react_props: Vec::new(),
             hook_uses: Vec::new(),
             render_edges: Vec::new(),
+            svelte_dispatched_events: Vec::new(),
+            svelte_listened_events: Vec::new(),
+            has_dynamic_dispatch: false,
             line_offsets: vec![0, 10, 20], // 3 lines
             complexity: vec![
                 fallow_types::extract::FunctionComplexity {
@@ -2483,6 +2492,9 @@ mod tests {
             react_props: Vec::new(),
             hook_uses: Vec::new(),
             render_edges: Vec::new(),
+            svelte_dispatched_events: Vec::new(),
+            svelte_listened_events: Vec::new(),
+            has_dynamic_dispatch: false,
         }
     }
 

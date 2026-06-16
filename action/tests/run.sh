@@ -830,6 +830,14 @@ assert_contains "$OUT_UCO_ANN" "::warning file=src/widget.component.ts,line=14,c
 OUT_UCO_FILTERED=$(jq '.unused_component_outputs = [{"path": "src/widget.component.ts", "line": 14, "col": 0, "component_name": "Widget", "output_name": "submit", "actions": []}, {"path": "src/other.component.ts", "line": 5, "col": 0, "component_name": "Other", "output_name": "close", "actions": []}]' "$FIXTURES/check.json" | jq --argjson changed '["src/widget.component.ts"]' -f "$JQ_DIR/filter-changed.jq" 2>&1)
 assert_json_value "$OUT_UCO_FILTERED" '.unused_component_outputs | length' "1" "uco: filter-changed keeps only changed-file findings"
 
+OUT_USE=$(jq '.unused_svelte_events = [{"path": "src/Child.svelte", "line": 6, "col": 0, "component_name": "Child", "event_name": "dead", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_USE" "Unused Svelte events" "use: shows summary row and section"
+assert_contains "$OUT_USE" "dead" "use: shows event name in section"
+OUT_USE_ANN=$(jq '.unused_svelte_events = [{"path": "src/Child.svelte", "line": 6, "col": 4, "component_name": "Child", "event_name": "dead", "actions": []}]' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/annotations-check.jq" 2>&1)
+assert_contains "$OUT_USE_ANN" "::warning file=src/Child.svelte,line=6,col=5,title=Unused Svelte event::" "use: warning-severity annotation"
+OUT_USE_FILTERED=$(jq '.unused_svelte_events = [{"path": "src/Child.svelte", "line": 6, "col": 0, "component_name": "Child", "event_name": "dead", "actions": []}, {"path": "src/Other.svelte", "line": 5, "col": 0, "component_name": "Other", "event_name": "gone", "actions": []}]' "$FIXTURES/check.json" | jq --argjson changed '["src/Child.svelte"]' -f "$JQ_DIR/filter-changed.jq" 2>&1)
+assert_json_value "$OUT_USE_FILTERED" '.unused_svelte_events | length' "1" "use: filter-changed keeps only changed-file findings"
+
 OUT_UPI=$(jq '.unprovided_injects =[{"path": "src/useTheme.ts", "line": 7, "col": 0, "key_name": "themeKey", "framework": "vue", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/summary-check.jq" 2>&1)
 assert_contains "$OUT_UPI" "Unprovided injects" "upi: shows summary row and section"
 assert_contains "$OUT_UPI" "themeKey" "upi: shows inject key in section"
@@ -840,7 +848,7 @@ assert_json_value "$OUT_UPI_FILTERED" '.unprovided_injects | length' "1" "upi: f
 
 # Missing keys must never crash jq (defensive `// []` / null-safe helpers). Strip every
 # framework array and confirm the summary still renders.
-OUT_NO_FRAMEWORK_KEYS=$(jq 'del(.unused_server_actions, .unrendered_components, .unused_component_props, .unused_component_emits, .unused_component_inputs, .unused_component_outputs, .unprovided_injects, .route_collisions, .dynamic_segment_name_conflicts, .invalid_client_exports, .mixed_client_server_barrels, .misplaced_directives)' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/summary-check.jq" 2>&1)
+OUT_NO_FRAMEWORK_KEYS=$(jq 'del(.unused_server_actions, .unrendered_components, .unused_component_props, .unused_component_emits, .unused_component_inputs, .unused_component_outputs, .unused_svelte_events, .unprovided_injects, .route_collisions, .dynamic_segment_name_conflicts, .invalid_client_exports, .mixed_client_server_barrels, .misplaced_directives)' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/summary-check.jq" 2>&1)
 assert_contains "$OUT_NO_FRAMEWORK_KEYS" "Fallow Analysis" "missing-keys: summary-check survives absent framework keys"
 
 # filter-changed recalculates total_issues from the surviving arrays (synthetic minimal input
@@ -1090,13 +1098,14 @@ assert_contains "$OUT_ROUTING" "| [Route collisions](" "combined: route-collisio
 assert_contains "$OUT_ROUTING" "| [Dynamic segment conflicts](" "combined: dynamic-segment-conflicts row in breakdown"
 
 # Vue/Next framework keys appear in the combined-mode Code issues breakdown table.
-OUT_FRAMEWORK=$(jq '.check.unused_server_actions = [{"path": "src/actions.ts", "line": 9, "col": 0, "action_name": "submitForm", "actions": []}] | .check.unrendered_components = [{"path": "src/Foo.vue", "line": 1, "col": 0, "component_name": "Foo", "framework": "vue", "actions": []}] | .check.unused_component_props = [{"path": "src/Widget.vue", "line": 12, "col": 0, "component_name": "Widget", "prop_name": "variant", "actions": []}] | .check.unused_component_emits = [{"path": "src/Widget.vue", "line": 14, "col": 0, "component_name": "Widget", "emit_name": "submit", "actions": []}] | .check.unused_component_inputs = [{"path": "src/widget.component.ts", "line": 12, "col": 0, "component_name": "Widget", "input_name": "variant", "actions": []}] | .check.unused_component_outputs = [{"path": "src/widget.component.ts", "line": 14, "col": 0, "component_name": "Widget", "output_name": "submit", "actions": []}] | .check.unprovided_injects = [{"path": "src/useTheme.ts", "line": 7, "col": 0, "key_name": "themeKey", "framework": "vue", "actions": []}] | .check.total_issues = (.check.total_issues + 7)' "$FIXTURES/combined.json" | jq -r -f "$JQ_DIR/summary-combined.jq" 2>&1)
+OUT_FRAMEWORK=$(jq '.check.unused_server_actions = [{"path": "src/actions.ts", "line": 9, "col": 0, "action_name": "submitForm", "actions": []}] | .check.unrendered_components = [{"path": "src/Foo.vue", "line": 1, "col": 0, "component_name": "Foo", "framework": "vue", "actions": []}] | .check.unused_component_props = [{"path": "src/Widget.vue", "line": 12, "col": 0, "component_name": "Widget", "prop_name": "variant", "actions": []}] | .check.unused_component_emits = [{"path": "src/Widget.vue", "line": 14, "col": 0, "component_name": "Widget", "emit_name": "submit", "actions": []}] | .check.unused_component_inputs = [{"path": "src/widget.component.ts", "line": 12, "col": 0, "component_name": "Widget", "input_name": "variant", "actions": []}] | .check.unused_component_outputs = [{"path": "src/widget.component.ts", "line": 14, "col": 0, "component_name": "Widget", "output_name": "submit", "actions": []}] | .check.unused_svelte_events = [{"path": "src/Child.svelte", "line": 6, "col": 0, "component_name": "Child", "event_name": "dead", "actions": []}] | .check.unprovided_injects = [{"path": "src/useTheme.ts", "line": 7, "col": 0, "key_name": "themeKey", "framework": "vue", "actions": []}] | .check.total_issues = (.check.total_issues + 8)' "$FIXTURES/combined.json" | jq -r -f "$JQ_DIR/summary-combined.jq" 2>&1)
 assert_contains "$OUT_FRAMEWORK" "| [Unused server actions](" "combined: unused-server-actions row in breakdown"
 assert_contains "$OUT_FRAMEWORK" "| [Unrendered components](" "combined: unrendered-components row in breakdown"
 assert_contains "$OUT_FRAMEWORK" "| [Unused component props](" "combined: unused-component-props row in breakdown"
 assert_contains "$OUT_FRAMEWORK" "| [Unused component emits](" "combined: unused-component-emits row in breakdown"
 assert_contains "$OUT_FRAMEWORK" "| [Unused component inputs](" "combined: unused-component-inputs row in breakdown"
 assert_contains "$OUT_FRAMEWORK" "| [Unused component outputs](" "combined: unused-component-outputs row in breakdown"
+assert_contains "$OUT_FRAMEWORK" "| [Unused Svelte events](" "combined: unused-svelte-events row in breakdown"
 assert_contains "$OUT_FRAMEWORK" "| [Unprovided injects](" "combined: unprovided-injects row in breakdown"
 
 # Worst-case truncation: 50 groups synthesized (paths differentiated per-group via `. as $g |`),

@@ -38,6 +38,7 @@ pub struct IssueFilters {
     pub unused_component_emits: bool,
     pub unused_component_inputs: bool,
     pub unused_component_outputs: bool,
+    pub unused_svelte_events: bool,
     pub unused_server_actions: bool,
     pub unused_load_data_keys: bool,
     pub unresolved_imports: bool,
@@ -76,6 +77,7 @@ impl IssueFilters {
             || self.unused_component_emits
             || self.unused_component_inputs
             || self.unused_component_outputs
+            || self.unused_svelte_events
             || self.unused_server_actions
             || self.unused_load_data_keys
             || self.unresolved_imports
@@ -169,6 +171,9 @@ impl IssueFilters {
         }
         if !self.unused_component_outputs {
             results.unused_component_outputs.clear();
+        }
+        if !self.unused_svelte_events {
+            results.unused_svelte_events.clear();
         }
         if !self.unused_server_actions {
             results.unused_server_actions.clear();
@@ -894,6 +899,7 @@ mod tests {
             unused_component_emits: false,
             unused_component_inputs: false,
             unused_component_outputs: false,
+            unused_svelte_events: false,
             unused_server_actions: false,
             unused_load_data_keys: false,
             unresolved_imports: false,
@@ -1324,6 +1330,7 @@ mod tests {
             unused_component_emits: true,
             unused_component_inputs: true,
             unused_component_outputs: true,
+            unused_svelte_events: true,
             unused_server_actions: true,
             unused_load_data_keys: true,
             unresolved_imports: true,

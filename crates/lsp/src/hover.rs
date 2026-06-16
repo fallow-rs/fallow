@@ -60,6 +60,10 @@ pub fn build_hover(
         return Some(hover);
     }
 
+    if let Some(hover) = check_unused_svelte_event(results, file_path, position) {
+        return Some(hover);
+    }
+
     if let Some(hover) = check_unused_server_action(results, file_path, position) {
         return Some(hover);
     }
@@ -672,6 +676,56 @@ fn check_unused_component_output(
                 },
                 end: Position {
                     line: output_line,
+                    character: end_col,
+                },
+            }),
+        });
+    }
+
+    None
+}
+
+/// Check if the position is on an unused Svelte dispatched event anchor.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "event name lengths are bounded by source size"
+)]
+fn check_unused_svelte_event(
+    results: &AnalysisResults,
+    file_path: &Path,
+    position: Position,
+) -> Option<Hover> {
+    for finding in &results.unused_svelte_events {
+        let e = &finding.event;
+        if e.path != file_path {
+            continue;
+        }
+        let event_line = e.line.saturating_sub(1);
+        if event_line != position.line {
+            continue;
+        }
+        let end_col = e.col + e.event_name.len() as u32;
+        if position.character < e.col || position.character >= end_col {
+            continue;
+        }
+
+        let value = format!(
+            "**fallow**: Event {} is dispatched but listened to nowhere in this project.",
+            format_inline_code(&e.event_name),
+        );
+
+        return Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value,
+            }),
+            range: Some(Range {
+                start: Position {
+                    line: event_line,
+                    character: e.col,
+                },
+                end: Position {
+                    line: event_line,
                     character: end_col,
                 },
             }),

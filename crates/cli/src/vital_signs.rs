@@ -1170,6 +1170,9 @@ mod tests {
             react_props: Vec::new(),
             hook_uses: Vec::new(),
             render_edges: Vec::new(),
+            svelte_dispatched_events: Vec::new(),
+            svelte_listened_events: Vec::new(),
+            has_dynamic_dispatch: false,
             complexity: vec![fallow_types::extract::FunctionComplexity {
                 name: format!("fn_{id}"),
                 line: id + 1,

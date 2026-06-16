@@ -357,6 +357,22 @@ expression: json_str
   },
   {
     "type": "issue",
+    "check_name": "fallow/unused-svelte-event",
+    "description": "event `dead` is dispatched by component `Child` but listened to nowhere in the project (remove it or listen for it)",
+    "categories": [
+      "Bug Risk"
+    ],
+    "severity": "minor",
+    "fingerprint": "844a7c0e7c849332",
+    "location": {
+      "path": "src/Child.svelte",
+      "lines": {
+        "begin": 6
+      }
+    }
+  },
+  {
+    "type": "issue",
     "check_name": "fallow/unused-catalog-entry",
     "description": "Catalog entry 'is-even' is not referenced by any workspace package",
     "categories": [

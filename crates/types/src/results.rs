@@ -24,7 +24,7 @@ use crate::output_dead_code::{
     UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
     UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
     UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
-    UnusedTypeFinding,
+    UnusedSvelteEventFinding, UnusedTypeFinding,
 };
 use crate::serde_path;
 use crate::suppress::{IssueKind, closest_known_kind_name};
@@ -337,6 +337,13 @@ pub struct AnalysisResults {
     /// array natively. Default severity is `warn`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unused_component_outputs: Vec<UnusedComponentOutputFinding>,
+    /// Svelte components dispatching a custom event via `createEventDispatcher()`
+    /// whose event name is listened to nowhere project-wide (cross-file
+    /// dead-output direction). Wrapped in [`UnusedSvelteEventFinding`] so each
+    /// entry carries a typed `actions` array natively. Default severity is
+    /// `warn`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unused_svelte_events: Vec<UnusedSvelteEventFinding>,
     /// Next.js Server Actions (exports of `"use server"` files) that no code in
     /// the project references. Reclassified out of `unused_exports` for
     /// `"use server"` files. Wrapped in [`UnusedServerActionFinding`] so each
@@ -519,6 +526,7 @@ impl AnalysisResults {
             + self.unused_component_emits.len()
             + self.unused_component_inputs.len()
             + self.unused_component_outputs.len()
+            + self.unused_svelte_events.len()
             + self.unused_server_actions.len()
             + self.unused_load_data_keys.len()
     }
@@ -581,6 +589,7 @@ impl AnalysisResults {
             unused_component_emits,
             unused_component_inputs,
             unused_component_outputs,
+            unused_svelte_events,
             unused_server_actions,
             unused_load_data_keys,
             unused_load_data_keys_global_abstain,
@@ -646,6 +655,7 @@ impl AnalysisResults {
         self.unused_component_inputs.extend(unused_component_inputs);
         self.unused_component_outputs
             .extend(unused_component_outputs);
+        self.unused_svelte_events.extend(unused_svelte_events);
         self.unused_server_actions.extend(unused_server_actions);
         self.unused_load_data_keys.extend(unused_load_data_keys);
         self.unused_load_data_keys_global_abstain |= unused_load_data_keys_global_abstain;
@@ -874,6 +884,14 @@ impl AnalysisResults {
                 .cmp(&b.output.path)
                 .then(a.output.line.cmp(&b.output.line))
                 .then(a.output.output_name.cmp(&b.output.output_name))
+        });
+
+        self.unused_svelte_events.sort_by(|a, b| {
+            a.event
+                .path
+                .cmp(&b.event.path)
+                .then(a.event.line.cmp(&b.event.line))
+                .then(a.event.event_name.cmp(&b.event.event_name))
         });
 
         self.unused_server_actions.sort_by(|a, b| {
@@ -1387,6 +1405,28 @@ pub struct UnusedComponentEmit {
     /// 1-based line number of the emit declaration.
     pub line: u32,
     /// 0-based byte column offset of the emit declaration.
+    pub col: u32,
+}
+
+/// A Svelte component dispatching a custom event via `createEventDispatcher()`
+/// whose event name is listened to NOWHERE in the analyzed project. Cross-file
+/// dead-output direction: the component fires an event nothing handles.
+/// Zero-FP doctrine: the whole component abstains on any dynamic-dispatch or
+/// whole-`dispatch`-value signal, and a listener on ANY component anywhere
+/// credits the event name (the liberal over-credit direction).
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedSvelteEvent {
+    /// The `.svelte` component dispatching the unlistened event.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// The component name (the `.svelte` file stem).
+    pub component_name: String,
+    /// The dispatched event name that is listened to nowhere.
+    pub event_name: String,
+    /// 1-based line number of the `dispatch('<name>')` call.
+    pub line: u32,
+    /// 0-based byte column offset of the `dispatch('<name>')` call.
     pub col: u32,
 }
 

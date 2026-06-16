@@ -161,6 +161,7 @@
         "unused-component-emits": "warn",
         "unused-component-inputs": "warn",
         "unused-component-outputs": "warn",
+        "unused-svelte-events": "warn",
         "unused-server-actions": "warn",
         "unused-load-data-keys": "warn",
         "prop-drilling": "off",
@@ -1064,6 +1065,11 @@
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
+        "unused-svelte-events": {
+          "description": "Svelte component dispatching a custom event via `createEventDispatcher()`\nwhose event name is listened to nowhere in the analyzed project. The\ncross-file dead-output direction (no eslint-plugin-svelte / svelte-check\nrule covers the listener side). Defaults to `warn`, not `error`: a\ndispatched event can be part of a deliberately-stable public component\nAPI, or a listener may be added later, so analyzer confidence is lower;\nwarn encodes that without failing CI.",
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
+        },
         "unused-server-actions": {
           "description": "Next.js Server Action (an export of a `\"use server\"` file) referenced by\nno code in the project: no import-and-call, no `action={fn}` binding, no\n`<form action={fn}>`. Cross-graph dead-export direction, reclassified out\nof `unused-export` for `\"use server\"` files. Defaults to `warn`, not\n`error`: the rule is new and false-negative-preferring, and reflective\naction-dispatch shapes can hide a real consumer; warn encodes that\nwithout failing CI until corpus-validated.",
           "$ref": "#/$defs/Severity",
@@ -1754,6 +1760,16 @@
           ]
         },
         "unused-component-outputs": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unused-svelte-events": {
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"

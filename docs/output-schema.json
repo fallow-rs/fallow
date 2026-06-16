@@ -706,6 +706,13 @@
           },
           "description": "Angular `@Output()` / signal `output()` outputs emitted nowhere in their\nown component (no `this.<output>.emit(...)`). Wrapped in\n[`UnusedComponentOutputFinding`] so each entry carries a typed `actions`\narray natively. Default severity is `warn`."
         },
+        "unused_svelte_events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedSvelteEventFinding"
+          },
+          "description": "Svelte components dispatching a custom event via `createEventDispatcher()`\nwhose event name is listened to nowhere project-wide (cross-file\ndead-output direction). Wrapped in [`UnusedSvelteEventFinding`] so each\nentry carries a typed `actions` array natively. Default severity is\n`warn`."
+        },
         "unused_server_actions": {
           "type": "array",
           "items": {
@@ -1159,6 +1166,13 @@
             "$ref": "#/definitions/UnusedComponentOutputFinding"
           },
           "description": "Angular `@Output()` / signal `output()` outputs emitted nowhere in their\nown component (no `this.<output>.emit(...)`). Wrapped in\n[`UnusedComponentOutputFinding`] so each entry carries a typed `actions`\narray natively. Default severity is `warn`."
+        },
+        "unused_svelte_events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedSvelteEventFinding"
+          },
+          "description": "Svelte components dispatching a custom event via `createEventDispatcher()`\nwhose event name is listened to nowhere project-wide (cross-file\ndead-output direction). Wrapped in [`UnusedSvelteEventFinding`] so each\nentry carries a typed `actions` array natively. Default severity is\n`warn`."
         },
         "unused_server_actions": {
           "type": "array",
@@ -5032,6 +5046,10 @@
           "type": "integer",
           "description": "Angular `@Output()` bindings emitted nowhere inside their own component."
         },
+        "unused_svelte_events": {
+          "type": "integer",
+          "description": "Svelte components dispatching a custom event via `createEventDispatcher`\nwhose name is listened to nowhere in the project."
+        },
         "unused_server_actions": {
           "type": "integer",
           "description": "Next.js Server Actions (exports of `\"use server\"` files) referenced by no\ncode in the project."
@@ -5894,6 +5912,13 @@
             "$ref": "#/definitions/UnusedComponentOutputFinding"
           },
           "description": "Angular `@Output()` / signal `output()` outputs emitted nowhere in their\nown component (no `this.<output>.emit(...)`). Wrapped in\n[`UnusedComponentOutputFinding`] so each entry carries a typed `actions`\narray natively. Default severity is `warn`."
+        },
+        "unused_svelte_events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedSvelteEventFinding"
+          },
+          "description": "Svelte components dispatching a custom event via `createEventDispatcher()`\nwhose event name is listened to nowhere project-wide (cross-file\ndead-output direction). Wrapped in [`UnusedSvelteEventFinding`] so each\nentry carries a typed `actions` array natively. Default severity is\n`warn`."
         },
         "unused_server_actions": {
           "type": "array",
@@ -14630,6 +14655,58 @@
         "actions"
       ],
       "description": "Wire-shape envelope for an [`UnusedComponentOutput`] finding. There is no safe\nauto-fix: removing a declared output is judgement-bearing (the event may be\npart of a deliberately-stable public component API). The only action is a\nline-level suppress at the output declaration."
+    },
+    "UnusedSvelteEventFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The `.svelte` component dispatching the unlistened event."
+        },
+        "component_name": {
+          "type": "string",
+          "description": "The component name (the `.svelte` file stem)."
+        },
+        "event_name": {
+          "type": "string",
+          "description": "The dispatched event name that is listened to nowhere."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the `dispatch('<name>')` call."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset of the `dispatch('<name>')` call."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "path",
+        "component_name",
+        "event_name",
+        "line",
+        "col",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for an [`UnusedSvelteEvent`] finding. There is no safe\nauto-fix: removing a dispatched event is judgement-bearing (the event may be\npart of a deliberately-stable public component API, or a listener may be\nadded later). The only action is a line-level suppress at the `dispatch`\ncall."
     },
     "PropDrillingChainFinding": {
       "type": "object",

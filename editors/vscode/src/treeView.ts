@@ -40,6 +40,7 @@ const CATEGORY_ICONS: Record<IssueCategory, string> = {
   "unused-component-emit": "symbol-event",
   "unused-component-input": "symbol-property",
   "unused-component-output": "symbol-event",
+  "unused-svelte-event": "symbol-event",
   "unrendered-component": "symbol-misc",
   "unprovided-inject": "plug",
   "invalid-client-export": "error",
@@ -82,6 +83,7 @@ const ISSUE_ICONS: Record<IssueCategory, string> = {
   "unused-component-emit": "symbol-event",
   "unused-component-input": "symbol-property",
   "unused-component-output": "symbol-event",
+  "unused-svelte-event": "symbol-event",
   "unrendered-component": "symbol-misc",
   "unprovided-inject": "plug",
   "invalid-client-export": "error",
@@ -424,6 +426,22 @@ export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeIte
               o.line,
               o.col,
               "unused-component-output",
+            ),
+        ),
+      );
+    }
+
+    if (this.result.unused_svelte_events) {
+      addCategory(
+        "unused-svelte-event",
+        this.result.unused_svelte_events.map(
+          (e) =>
+            new IssueItem(
+              `${e.component_name}.${e.event_name}`,
+              e.path,
+              e.line,
+              e.col,
+              "unused-svelte-event",
             ),
         ),
       );

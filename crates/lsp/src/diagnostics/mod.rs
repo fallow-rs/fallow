@@ -377,6 +377,7 @@ mod severity_gate {
             unused_component_emits: _,
             unused_component_inputs: _,
             unused_component_outputs: _,
+            unused_svelte_events: _,
             unused_server_actions: _,
             unused_load_data_keys: _,
             prop_drilling_chains: _,
@@ -1093,6 +1094,23 @@ mod severity_gate {
                                 path: root.join("widget.component.ts"),
                                 component_name: "WidgetComponent".to_string(),
                                 output_name: "change".to_string(),
+                                line: 1,
+                                col: 0,
+                            },
+                        ),
+                    );
+                }),
+            ),
+            (
+                "unused-svelte-event",
+                S::HINT,
+                Box::new(|root, r| {
+                    r.unused_svelte_events.push(
+                        fallow_core::results::UnusedSvelteEventFinding::with_actions(
+                            fallow_core::results::UnusedSvelteEvent {
+                                path: root.join("Child.svelte"),
+                                component_name: "Child".to_string(),
+                                event_name: "dead".to_string(),
                                 line: 1,
                                 col: 0,
                             },

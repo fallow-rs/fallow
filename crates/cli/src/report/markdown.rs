@@ -350,6 +350,12 @@ fn push_markdown_component_sections(
     );
     markdown_section(
         out,
+        &results.unused_svelte_events,
+        "Unused Svelte events",
+        |e| format_markdown_unused_svelte_event(e, rel),
+    );
+    markdown_section(
+        out,
         &results.unused_server_actions,
         "Unused server actions",
         |a| format_markdown_unused_server_action(a, rel),
@@ -570,6 +576,18 @@ fn format_markdown_unused_component_emit(
         rel(&e.emit.path),
         e.emit.line,
         escape_backticks(&e.emit.emit_name),
+    )]
+}
+
+fn format_markdown_unused_svelte_event(
+    e: &fallow_core::results::UnusedSvelteEventFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    vec![format!(
+        "- `{}`:{} `{}` is dispatched but listened to nowhere in the project (remove it or listen for it)",
+        rel(&e.event.path),
+        e.event.line,
+        escape_backticks(&e.event.event_name),
     )]
 }
 

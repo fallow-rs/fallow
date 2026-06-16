@@ -21,6 +21,7 @@ export type IssueCategory =
   | "unused-component-emit"
   | "unused-component-input"
   | "unused-component-output"
+  | "unused-svelte-event"
   | "unrendered-component"
   | "unprovided-inject"
   | "invalid-client-export"
@@ -61,6 +62,7 @@ export const ISSUE_CATEGORY_LABELS: Record<IssueCategory, string> = {
   "unused-component-emit": "Unused Component Emits",
   "unused-component-input": "Unused Component Inputs",
   "unused-component-output": "Unused Component Outputs",
+  "unused-svelte-event": "Unused Svelte Events",
   "unrendered-component": "Unrendered Components",
   "unprovided-inject": "Unprovided Injects",
   "invalid-client-export": "Invalid Client Exports",

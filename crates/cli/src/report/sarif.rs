@@ -13,7 +13,7 @@ use fallow_core::results::{
     UnrenderedComponent, UnresolvedCatalogReferenceFinding, UnresolvedImport,
     UnusedCatalogEntryFinding, UnusedComponentEmit, UnusedComponentInput, UnusedComponentOutput,
     UnusedComponentProp, UnusedDependency, UnusedDependencyOverrideFinding, UnusedExport,
-    UnusedFile, UnusedMember, UnusedServerAction,
+    UnusedFile, UnusedMember, UnusedServerAction, UnusedSvelteEvent,
 };
 use rustc_hash::FxHashMap;
 
@@ -637,6 +637,25 @@ fn sarif_unused_component_emit_fields(
     }
 }
 
+fn sarif_unused_svelte_event_fields(
+    event: &UnusedSvelteEvent,
+    root: &Path,
+    level: &'static str,
+) -> SarifFields {
+    SarifFields {
+        rule_id: "fallow/unused-svelte-event",
+        level,
+        message: format!(
+            "event \"{}\" is dispatched by component \"{}\" but listened to nowhere in the project; remove it or listen for it",
+            event.event_name, event.component_name
+        ),
+        uri: relative_uri(&event.path, root),
+        region: Some((event.line, event.col + 1)),
+        source_path: Some(event.path.clone()),
+        properties: None,
+    }
+}
+
 fn sarif_unused_component_input_fields(
     input: &UnusedComponentInput,
     root: &Path,
@@ -1239,6 +1258,11 @@ fn sarif_component_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
             rules.unused_component_outputs,
         ),
         (
+            "fallow/unused-svelte-event",
+            "A Svelte component dispatching a createEventDispatcher event whose name is listened to nowhere in the project",
+            rules.unused_svelte_events,
+        ),
+        (
             "fallow/unused-server-action",
             "A Next.js Server Action exported from a \"use server\" file that no code in the project references",
             rules.unused_server_actions,
@@ -1611,6 +1635,18 @@ fn push_component_contract_sarif_results(
                 &o.output,
                 root,
                 severity_to_sarif_level(rules.unused_component_outputs),
+            )
+        },
+    );
+    push_sarif_results(
+        sarif_results,
+        &results.unused_svelte_events,
+        snippets,
+        |e| {
+            sarif_unused_svelte_event_fields(
+                &e.event,
+                root,
+                severity_to_sarif_level(rules.unused_svelte_events),
             )
         },
     );
@@ -2616,7 +2652,7 @@ mod tests {
         let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
             .as_array()
             .expect("rules should be an array");
-        assert_eq!(rules.len(), 43);
+        assert_eq!(rules.len(), 44);
 
         let rule_ids: Vec<&str> = rules.iter().map(|r| r["id"].as_str().unwrap()).collect();
         assert!(rule_ids.contains(&"fallow/duplicate-prop-shape"));
@@ -2626,6 +2662,7 @@ mod tests {
         assert!(rule_ids.contains(&"fallow/unused-component-emit"));
         assert!(rule_ids.contains(&"fallow/unused-component-input"));
         assert!(rule_ids.contains(&"fallow/unused-component-output"));
+        assert!(rule_ids.contains(&"fallow/unused-svelte-event"));
         assert!(rule_ids.contains(&"fallow/unused-server-action"));
         assert!(rule_ids.contains(&"fallow/unused-load-data-key"));
         assert!(rule_ids.contains(&"fallow/prop-drilling"));

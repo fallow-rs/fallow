@@ -348,6 +348,14 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#unused-component-outputs",
     },
     RuleDef {
+        id: "fallow/unused-svelte-event",
+        category: "Dead code",
+        name: "Unused Svelte events",
+        short: "A Svelte component dispatches a createEventDispatcher event whose name is listened to nowhere in the project",
+        full: "A Svelte component that dispatches a custom event via `createEventDispatcher` (`const dispatch = createEventDispatcher(); dispatch('save')`) whose event name is listened to NOWHERE in the analyzed project. This is the cross-file dead-OUTPUT direction: the component fires an event nothing handles. No native tool covers the listener side: eslint-plugin-svelte and svelte-check are single-file / type-only. fallow builds a project-wide listened-event set from every component-tag `on:<name>` binding (event forwarding, an `on:<name>` with no handler, counts as a listen), then flags a dispatched event whose name is in no listened set. Conservative (zero false positives): the whole component abstains on a dynamic `dispatch(<nonLiteral>)` (the event name is unknowable) or a `dispatch` reference forwarded as a value; a DOM `on:click` on a lowercase element is NOT a custom event and is ignored; and any listener on any component anywhere credits the name (the liberal over-credit, false-negative-safe direction). Default warn; remove the dispatched event or wire a listener. The check runs only when the project declares `svelte`.",
+        docs_path: "explanations/dead-code#unused-svelte-events",
+    },
+    RuleDef {
         id: "fallow/unused-server-action",
         category: "Dead code",
         name: "Unused server actions",
@@ -518,6 +526,7 @@ fn dead_code_alias_id(normalized: &str) -> Option<&'static str> {
         "unused-component-outputs" | "unused-component-output" => {
             Some("fallow/unused-component-output")
         }
+        "unused-svelte-events" | "unused-svelte-event" => Some("fallow/unused-svelte-event"),
         "unused-server-actions" | "unused-server-action" => Some("fallow/unused-server-action"),
         "unused-load-data-keys" | "unused-load-data-key" => Some("fallow/unused-load-data-key"),
         "prop-drilling" => Some("fallow/prop-drilling"),
@@ -681,6 +690,10 @@ fn member_import_rule_guide(id: &str) -> Option<RuleGuide> {
         "fallow/unused-component-output" => RuleGuide {
             example: "user-card.component.ts declares @Output() close = new EventEmitter<void>() (or close = output<void>()) but `this.close.emit(...)` is called nowhere in the class.",
             how_to_fix: "Remove the unused output, or emit it from the class. If the output is part of a deliberately-stable public component API, suppress the line with // fallow-ignore-next-line unused-component-output.",
+        },
+        "fallow/unused-svelte-event" => RuleGuide {
+            example: "Child.svelte calls const dispatch = createEventDispatcher(); dispatch('dead'), but no parent listens for it (no <Child on:dead> anywhere in the project).",
+            how_to_fix: "Remove the dispatched event, or listen for it on the component (<Child on:dead={...}> or forward it via <Child on:dead>). If the event is dispatched reflectively (a dynamic name) or is part of a deliberately-stable public component API, suppress the line with // fallow-ignore-next-line unused-svelte-event.",
         },
         "fallow/unused-server-action" => RuleGuide {
             example: "app/actions.ts has \"use server\" and exports submitForm, but no component imports it, binds it via action={submitForm}, or uses it in <form action={submitForm}>.",
@@ -2381,7 +2394,7 @@ mod tests {
 
     #[test]
     fn check_rules_count() {
-        assert_eq!(CHECK_RULES.len(), 43);
+        assert_eq!(CHECK_RULES.len(), 44);
     }
 
     #[test]

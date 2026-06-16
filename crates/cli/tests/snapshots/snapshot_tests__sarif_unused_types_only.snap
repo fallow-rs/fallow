@@ -404,6 +404,19 @@ expression: redact_sarif_version(&json_str)
               }
             },
             {
+              "id": "fallow/unused-svelte-event",
+              "shortDescription": {
+                "text": "A Svelte component dispatches a createEventDispatcher event whose name is listened to nowhere in the project"
+              },
+              "fullDescription": {
+                "text": "A Svelte component that dispatches a custom event via `createEventDispatcher` (`const dispatch = createEventDispatcher(); dispatch('save')`) whose event name is listened to NOWHERE in the analyzed project. This is the cross-file dead-OUTPUT direction: the component fires an event nothing handles. No native tool covers the listener side: eslint-plugin-svelte and svelte-check are single-file / type-only. fallow builds a project-wide listened-event set from every component-tag `on:<name>` binding (event forwarding, an `on:<name>` with no handler, counts as a listen), then flags a dispatched event whose name is in no listened set. Conservative (zero false positives): the whole component abstains on a dynamic `dispatch(<nonLiteral>)` (the event name is unknowable) or a `dispatch` reference forwarded as a value; a DOM `on:click` on a lowercase element is NOT a custom event and is ignored; and any listener on any component anywhere credits the name (the liberal over-credit, false-negative-safe direction). Default warn; remove the dispatched event or wire a listener. The check runs only when the project declares `svelte`."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-svelte-events",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
               "id": "fallow/unused-server-action",
               "shortDescription": {
                 "text": "A Next.js Server Action exported from a \"use server\" file is referenced by no code in the project"

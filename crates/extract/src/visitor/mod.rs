@@ -17,9 +17,10 @@ use crate::{
 };
 use fallow_types::extract::{
     AngularInputMember, AngularOutputMember, CalleeUse, ClassHeritageInfo, ComponentFunction,
-    ComponentProp, DiKeySite, HookUse, LocalTypeDeclaration, MisplacedDirectiveSite,
-    PublicSignatureTypeReference, RenderEdge, SanitizedSinkArg, SanitizerScope,
-    SecurityControlSite, SinkLiteralValue, SinkSite, SkippedSecurityCalleeSite, TaintedBinding,
+    ComponentProp, DiKeySite, DispatchedEvent, HookUse, LocalTypeDeclaration,
+    MisplacedDirectiveSite, PublicSignatureTypeReference, RenderEdge, SanitizedSinkArg,
+    SanitizerScope, SecurityControlSite, SinkLiteralValue, SinkSite, SkippedSecurityCalleeSite,
+    TaintedBinding,
 };
 use helpers::LitCustomElementDecorator;
 
@@ -345,6 +346,20 @@ pub(crate) struct ModuleInfoExtractor {
     /// this dedups the harvest and prevents one declared input/output from being
     /// flagged twice.
     pub(crate) harvested_angular_class_spans: FxHashSet<Span>,
+    /// Local binding names bound from `const dispatch = createEventDispatcher()`
+    /// (where `createEventDispatcher` is imported from `svelte`). A
+    /// `dispatch('<name>')` call through one of these bindings records a
+    /// `DispatchedEvent`. Working state, then copied as the gate for the dispatch
+    /// harvest. Not persisted.
+    pub(crate) event_dispatch_bindings: FxHashSet<String>,
+    /// Svelte custom events dispatched via `dispatch('<name>')` (literal arg).
+    /// Copied onto `ModuleInfo.svelte_dispatched_events`. Consumed by the
+    /// `unused-svelte-event` detector.
+    pub(crate) svelte_dispatched_events: Vec<DispatchedEvent>,
+    /// `true` when a `dispatch(<nonLiteral>)` call was seen, or a `dispatch`
+    /// binding was used as a whole value (passed / returned). Forces the
+    /// `unused-svelte-event` detector to abstain on the whole component.
+    pub(crate) has_dynamic_dispatch: bool,
 }
 
 /// Metadata for a named arrow / function-expression that may be a React
@@ -1058,6 +1073,9 @@ impl ModuleInfoExtractor {
             react_props: self.react_props,
             hook_uses: self.hook_uses,
             render_edges: self.render_edges,
+            svelte_dispatched_events: self.svelte_dispatched_events,
+            svelte_listened_events: Vec::new(),
+            has_dynamic_dispatch: self.has_dynamic_dispatch,
         }
     }
 
@@ -1124,6 +1142,9 @@ impl ModuleInfoExtractor {
         info.has_load_data_whole_use = info.has_load_data_whole_use || self.has_load_data_whole_use;
         info.angular_inputs.extend(self.angular_inputs);
         info.angular_outputs.extend(self.angular_outputs);
+        info.svelte_dispatched_events
+            .extend(self.svelte_dispatched_events);
+        info.has_dynamic_dispatch = info.has_dynamic_dispatch || self.has_dynamic_dispatch;
     }
 }
 

@@ -138,6 +138,15 @@ pub struct RulesConfig {
     /// warn encodes that without failing CI.
     #[serde(default, alias = "unused-component-output")]
     pub unused_component_outputs: Severity,
+    /// Svelte component dispatching a custom event via `createEventDispatcher()`
+    /// whose event name is listened to nowhere in the analyzed project. The
+    /// cross-file dead-output direction (no eslint-plugin-svelte / svelte-check
+    /// rule covers the listener side). Defaults to `warn`, not `error`: a
+    /// dispatched event can be part of a deliberately-stable public component
+    /// API, or a listener may be added later, so analyzer confidence is lower;
+    /// warn encodes that without failing CI.
+    #[serde(default = "Severity::default_warn", alias = "unused-svelte-event")]
+    pub unused_svelte_events: Severity,
     /// Next.js Server Action (an export of a `"use server"` file) referenced by
     /// no code in the project: no import-and-call, no `action={fn}` binding, no
     /// `<form action={fn}>`. Cross-graph dead-export direction, reclassified out
@@ -297,6 +306,7 @@ impl Default for RulesConfig {
             unused_component_emits: Severity::Warn,
             unused_component_inputs: Severity::Warn,
             unused_component_outputs: Severity::Warn,
+            unused_svelte_events: Severity::Warn,
             unused_server_actions: Severity::Warn,
             unused_load_data_keys: Severity::Warn,
             prop_drilling: Severity::Off,
@@ -369,6 +379,7 @@ impl RulesConfig {
                 unused_component_emits,
                 unused_component_inputs,
                 unused_component_outputs,
+                unused_svelte_events,
                 unused_server_actions,
                 unused_load_data_keys,
                 prop_drilling,
@@ -521,6 +532,12 @@ pub struct PartialRulesConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_component_outputs: Option<Severity>,
+    #[serde(
+        default,
+        alias = "unused-svelte-event",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub unused_svelte_events: Option<Severity>,
     #[serde(
         default,
         alias = "unused-server-action",
@@ -718,6 +735,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unused-component-emits",
     "unused-component-inputs",
     "unused-component-outputs",
+    "unused-svelte-events",
     "unused-server-actions",
     "unused-load-data-keys",
     "prop-drilling",
@@ -764,6 +782,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unused-component-emit",
     "unused-component-input",
     "unused-component-output",
+    "unused-svelte-event",
     "unused-server-action",
     "unused-load-data-key",
     "unresolved-import",
@@ -1069,6 +1088,7 @@ mod tests {
             unused_component_emits: Some(Severity::Off),
             unused_component_inputs: Some(Severity::Off),
             unused_component_outputs: Some(Severity::Off),
+            unused_svelte_events: Some(Severity::Off),
             unused_server_actions: Some(Severity::Off),
             unused_load_data_keys: Some(Severity::Off),
             prop_drilling: Some(Severity::Off),
@@ -1119,6 +1139,7 @@ mod tests {
         assert_eq!(rules.unused_component_emits, Severity::Off);
         assert_eq!(rules.unused_component_inputs, Severity::Off);
         assert_eq!(rules.unused_component_outputs, Severity::Off);
+        assert_eq!(rules.unused_svelte_events, Severity::Off);
         assert_eq!(rules.route_collision, Severity::Off);
         assert_eq!(rules.dynamic_segment_name_conflict, Severity::Off);
     }
@@ -1164,7 +1185,7 @@ mod tests {
 
     #[test]
     fn known_rule_names_count_matches_struct() {
-        assert_eq!(KNOWN_RULE_NAMES.len(), 87);
+        assert_eq!(KNOWN_RULE_NAMES.len(), 89);
     }
 
     #[test]
@@ -1205,8 +1226,8 @@ mod tests {
 
         assert_eq!(
             aliases_found.len(),
-            90,
-            "expected 90 source-level alias attrs (45 per struct); got {}: {:?}",
+            92,
+            "expected 92 source-level alias attrs (46 per struct); got {}: {:?}",
             aliases_found.len(),
             aliases_found
         );

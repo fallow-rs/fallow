@@ -306,6 +306,17 @@ fn sample_results(root: &Path) -> AnalysisResults {
             },
         ),
     );
+    r.unused_svelte_events.push(
+        fallow_core::results::UnusedSvelteEventFinding::with_actions(
+            fallow_core::results::UnusedSvelteEvent {
+                path: root.join("src/Child.svelte"),
+                component_name: "Child".to_string(),
+                event_name: "dead".to_string(),
+                line: 6,
+                col: 2,
+            },
+        ),
+    );
 
     r
 }
@@ -757,6 +768,7 @@ fn sarif_mixed_severity_snapshot() {
         unused_component_emits: fallow_config::Severity::Warn,
         unused_component_inputs: fallow_config::Severity::Warn,
         unused_component_outputs: fallow_config::Severity::Warn,
+        unused_svelte_events: fallow_config::Severity::Warn,
         unused_server_actions: fallow_config::Severity::Warn,
         unused_load_data_keys: fallow_config::Severity::Warn,
         prop_drilling: fallow_config::Severity::Off,
@@ -1636,6 +1648,7 @@ fn codeclimate_mixed_severity_snapshot() {
         unused_component_emits: fallow_config::Severity::Warn,
         unused_component_inputs: fallow_config::Severity::Warn,
         unused_component_outputs: fallow_config::Severity::Warn,
+        unused_svelte_events: fallow_config::Severity::Warn,
         unused_server_actions: fallow_config::Severity::Warn,
         unused_load_data_keys: fallow_config::Severity::Warn,
         prop_drilling: fallow_config::Severity::Off,

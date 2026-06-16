@@ -152,6 +152,12 @@ fn apply_dead_code_override_rules(
             .unused_component_outputs
             != Severity::Off
     });
+    results.unused_svelte_events.retain(|e| {
+        config
+            .resolve_rules_for_path(&e.event.path)
+            .unused_svelte_events
+            != Severity::Off
+    });
     results.unused_server_actions.retain(|a| {
         config
             .resolve_rules_for_path(&a.action.path)
@@ -292,6 +298,9 @@ fn apply_base_file_rules(results: &mut fallow_core::results::AnalysisResults, ru
     }
     if rules.unused_component_outputs == Severity::Off {
         results.unused_component_outputs.clear();
+    }
+    if rules.unused_svelte_events == Severity::Off {
+        results.unused_svelte_events.clear();
     }
     if rules.unused_server_actions == Severity::Off {
         results.unused_server_actions.clear();
@@ -457,6 +466,12 @@ fn has_override_dead_code_error(
                 .unused_component_outputs
                 == Severity::Error
         })
+        || results.unused_svelte_events.iter().any(|e| {
+            config
+                .resolve_rules_for_path(&e.event.path)
+                .unused_svelte_events
+                == Severity::Error
+        })
         || results.unused_server_actions.iter().any(|a| {
             config
                 .resolve_rules_for_path(&a.action.path)
@@ -572,6 +587,8 @@ fn has_default_file_scoped_error(
             && !results.unused_component_inputs.is_empty())
         || (rules.unused_component_outputs == Severity::Error
             && !results.unused_component_outputs.is_empty())
+        || (rules.unused_svelte_events == Severity::Error
+            && !results.unused_svelte_events.is_empty())
         || (rules.unused_server_actions == Severity::Error
             && !results.unused_server_actions.is_empty())
         || (rules.unused_load_data_keys == Severity::Error
@@ -660,6 +677,7 @@ pub fn promote_warns_to_errors(rules: &mut RulesConfig) {
         &mut rules.unused_component_emits,
         &mut rules.unused_component_inputs,
         &mut rules.unused_component_outputs,
+        &mut rules.unused_svelte_events,
         &mut rules.unused_server_actions,
         &mut rules.unused_load_data_keys,
         &mut rules.unresolved_imports,
@@ -928,6 +946,7 @@ mod tests {
             unused_component_emits: Severity::Off,
             unused_component_inputs: Severity::Off,
             unused_component_outputs: Severity::Off,
+            unused_svelte_events: Severity::Off,
             unused_server_actions: Severity::Off,
             unused_load_data_keys: Severity::Off,
             prop_drilling: Severity::Off,
@@ -1063,6 +1082,7 @@ mod tests {
             unused_component_emits: Severity::Warn,
             unused_component_inputs: Severity::Warn,
             unused_component_outputs: Severity::Warn,
+            unused_svelte_events: Severity::Warn,
             unused_server_actions: Severity::Warn,
             unused_load_data_keys: Severity::Warn,
             prop_drilling: Severity::Off,
@@ -1121,6 +1141,7 @@ mod tests {
             unused_component_emits: Severity::Warn,
             unused_component_inputs: Severity::Warn,
             unused_component_outputs: Severity::Warn,
+            unused_svelte_events: Severity::Warn,
             unused_server_actions: Severity::Warn,
             unused_load_data_keys: Severity::Warn,
             prop_drilling: Severity::Off,
@@ -1600,6 +1621,7 @@ mod tests {
             unused_component_emits: Severity::Warn,
             unused_component_inputs: Severity::Warn,
             unused_component_outputs: Severity::Warn,
+            unused_svelte_events: Severity::Warn,
             unused_server_actions: Severity::Warn,
             unused_load_data_keys: Severity::Warn,
             prop_drilling: Severity::Off,
@@ -1671,6 +1693,7 @@ mod tests {
             unused_component_emits: Severity::Off,
             unused_component_inputs: Severity::Off,
             unused_component_outputs: Severity::Off,
+            unused_svelte_events: Severity::Off,
             unused_server_actions: Severity::Off,
             unused_load_data_keys: Severity::Off,
             prop_drilling: Severity::Off,

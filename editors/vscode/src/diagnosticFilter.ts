@@ -52,6 +52,7 @@ export const DIAGNOSTIC_CATEGORIES: ReadonlyArray<DiagnosticCategory> = [
   { code: "unused-component-emit", label: "Unused Component Emits" },
   { code: "unused-component-input", label: "Unused Component Inputs" },
   { code: "unused-component-output", label: "Unused Component Outputs" },
+  { code: "unused-svelte-event", label: "Unused Svelte Events" },
   { code: "unrendered-component", label: "Unrendered Components" },
   { code: "unprovided-inject", label: "Unprovided Injects" },
   { code: "invalid-client-export", label: "Invalid Client Exports" },

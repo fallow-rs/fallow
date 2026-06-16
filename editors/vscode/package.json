@@ -232,6 +232,7 @@
             "unused-component-emit": true,
             "unused-component-input": true,
             "unused-component-output": true,
+            "unused-svelte-event": true,
             "unrendered-component": true,
             "unprovided-inject": true,
             "invalid-client-export": true,
@@ -302,6 +303,9 @@
               "type": "boolean"
             },
             "unused-component-output": {
+              "type": "boolean"
+            },
+            "unused-svelte-event": {
               "type": "boolean"
             },
             "unrendered-component": {

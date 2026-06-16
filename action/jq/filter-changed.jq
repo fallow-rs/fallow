@@ -91,6 +91,9 @@ def filter_check:
   (if .unused_component_outputs then
     .unused_component_outputs |= map(select(.path | in_changed))
   else . end) |
+  (if .unused_svelte_events then
+    .unused_svelte_events |= map(select(.path | in_changed))
+  else . end) |
   (if .unprovided_injects then
     .unprovided_injects |= map(select(.path | in_changed))
   else . end) |
@@ -138,6 +141,7 @@ def filter_check:
       (.unused_component_emits // [] | length) +
       (.unused_component_inputs // [] | length) +
       (.unused_component_outputs // [] | length) +
+      (.unused_svelte_events // [] | length) +
       (.unprovided_injects // [] | length) +
       (.unused_load_data_keys // [] | length)
     )

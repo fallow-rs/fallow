@@ -1149,6 +1149,14 @@ unused_component_inputs?: UnusedComponentInputFinding[]
  */
 unused_component_outputs?: UnusedComponentOutputFinding[]
 /**
+ * Svelte components dispatching a custom event via `createEventDispatcher()`
+ * whose event name is listened to nowhere project-wide (cross-file
+ * dead-output direction). Wrapped in [`UnusedSvelteEventFinding`] so each
+ * entry carries a typed `actions` array natively. Default severity is
+ * `warn`.
+ */
+unused_svelte_events?: UnusedSvelteEventFinding[]
+/**
  * Next.js Server Actions (exports of `"use server"` files) that no code in
  * the project references. Reclassified out of `unused_exports` for
  * `"use server"` files. Wrapped in [`UnusedServerActionFinding`] so each
@@ -1299,6 +1307,11 @@ unused_component_inputs?: number
  * Angular `@Output()` bindings emitted nowhere inside their own component.
  */
 unused_component_outputs?: number
+/**
+ * Svelte components dispatching a custom event via `createEventDispatcher`
+ * whose name is listened to nowhere in the project.
+ */
+unused_svelte_events?: number
 /**
  * Next.js Server Actions (exports of `"use server"` files) referenced by no
  * code in the project.
@@ -3073,6 +3086,45 @@ output_name: string
 line: number
 /**
  * 0-based byte column offset of the output declaration.
+ */
+col: number
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+}
+/**
+ * Wire-shape envelope for an [`UnusedSvelteEvent`] finding. There is no safe
+ * auto-fix: removing a dispatched event is judgement-bearing (the event may be
+ * part of a deliberately-stable public component API, or a listener may be
+ * added later). The only action is a line-level suppress at the `dispatch`
+ * call.
+ */
+export interface UnusedSvelteEventFinding {
+/**
+ * The `.svelte` component dispatching the unlistened event.
+ */
+path: string
+/**
+ * The component name (the `.svelte` file stem).
+ */
+component_name: string
+/**
+ * The dispatched event name that is listened to nowhere.
+ */
+event_name: string
+/**
+ * 1-based line number of the `dispatch('<name>')` call.
+ */
+line: number
+/**
+ * 0-based byte column offset of the `dispatch('<name>')` call.
  */
 col: number
 /**
@@ -7178,6 +7230,14 @@ unused_component_inputs?: UnusedComponentInputFinding[]
  * array natively. Default severity is `warn`.
  */
 unused_component_outputs?: UnusedComponentOutputFinding[]
+/**
+ * Svelte components dispatching a custom event via `createEventDispatcher()`
+ * whose event name is listened to nowhere project-wide (cross-file
+ * dead-output direction). Wrapped in [`UnusedSvelteEventFinding`] so each
+ * entry carries a typed `actions` array natively. Default severity is
+ * `warn`.
+ */
+unused_svelte_events?: UnusedSvelteEventFinding[]
 /**
  * Next.js Server Actions (exports of `"use server"` files) that no code in
  * the project references. Reclassified out of `unused_exports` for

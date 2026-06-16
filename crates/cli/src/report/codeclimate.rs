@@ -1120,6 +1120,42 @@ fn push_unused_component_emit_issues(
     }
 }
 
+fn push_unused_svelte_event_issues(
+    issues: &mut Vec<CodeClimateIssue>,
+    findings: &[fallow_types::output_dead_code::UnusedSvelteEventFinding],
+    root: &Path,
+    severity: Severity,
+) {
+    if findings.is_empty() {
+        return;
+    }
+    let level = severity_to_codeclimate(severity);
+    for entry in findings {
+        let e = &entry.event;
+        let path = cc_path(&e.path, root);
+        let fp = fingerprint_hash(&[
+            "fallow/unused-svelte-event",
+            &path,
+            &e.line.to_string(),
+            &e.event_name,
+        ]);
+        let line = if e.line > 0 { Some(e.line) } else { None };
+        let message = format!(
+            "event `{}` is dispatched by component `{}` but listened to nowhere in the project (remove it or listen for it)",
+            e.event_name, e.component_name
+        );
+        issues.push(cc_issue(
+            "fallow/unused-svelte-event",
+            &message,
+            level,
+            "Bug Risk",
+            &path,
+            line,
+            &fp,
+        ));
+    }
+}
+
 fn push_unused_component_input_issues(
     issues: &mut Vec<CodeClimateIssue>,
     findings: &[fallow_types::output_dead_code::UnusedComponentInputFinding],
@@ -1856,6 +1892,12 @@ impl CodeClimateBuilder<'_> {
             &self.results.unused_component_outputs,
             self.root,
             self.rules.unused_component_outputs,
+        );
+        push_unused_svelte_event_issues(
+            &mut self.issues,
+            &self.results.unused_svelte_events,
+            self.root,
+            self.rules.unused_svelte_events,
         );
     }
 

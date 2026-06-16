@@ -1348,6 +1348,7 @@ fn build_policy_section(
         && results.unused_component_emits.is_empty()
         && results.unused_component_inputs.is_empty()
         && results.unused_component_outputs.is_empty()
+        && results.unused_svelte_events.is_empty()
         && results.unused_server_actions.is_empty()
         && results.unused_load_data_keys.is_empty()
         && results.route_collisions.is_empty()
@@ -1495,6 +1496,19 @@ fn build_component_policy_section(
             o.output.path.as_path()
         },
         format_detail: &format_unused_component_output,
+    });
+
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.unused_svelte_events,
+        title: "Unused Svelte events",
+        level: severity_to_level(rules.unused_svelte_events),
+        root,
+        max_files: MAX_FLAT_ITEMS,
+        get_path: |e: &fallow_types::output_dead_code::UnusedSvelteEventFinding| {
+            e.event.path.as_path()
+        },
+        format_detail: &format_unused_svelte_event,
     });
 
     build_human_grouped_section(GroupedSectionInput {
@@ -1741,6 +1755,19 @@ fn format_unused_component_output(
         format!(":{}", o.line).dimmed(),
         o.output_name.bold(),
         "is declared but emitted nowhere in this component (remove it or emit it)".dimmed(),
+    )
+}
+
+fn format_unused_svelte_event(
+    entry: &fallow_types::output_dead_code::UnusedSvelteEventFinding,
+) -> String {
+    let e = &entry.event;
+    format!(
+        "{} {} {}",
+        format!(":{}", e.line).dimmed(),
+        e.event_name.bold(),
+        "is dispatched but listened to nowhere in the project (remove it or listen for it)"
+            .dimmed(),
     )
 }
 
@@ -2667,6 +2694,9 @@ fn collect_framework_rules(
     for o in &results.unused_component_outputs {
         insert_matching_rule(rules, &o.output.path, root, resolver);
     }
+    for e in &results.unused_svelte_events {
+        insert_matching_rule(rules, &e.event.path, root, resolver);
+    }
     for a in &results.unused_server_actions {
         insert_matching_rule(rules, &a.action.path, root, resolver);
     }
@@ -2996,6 +3026,7 @@ fn build_summary_footer(
         results.unused_component_outputs.len(),
         "unused component outputs",
     );
+    add(results.unused_svelte_events.len(), "unused Svelte events");
     add(results.unused_server_actions.len(), "unused server actions");
     add(results.unused_load_data_keys.len(), "unused load data keys");
     add(results.stale_suppressions.len(), "stale suppressions");
@@ -3191,6 +3222,11 @@ fn check_summary_framework_categories(
             "Unused component outputs",
             results.unused_component_outputs.len(),
             severity_to_level(rules.unused_component_outputs),
+        ),
+        (
+            "Unused Svelte events",
+            results.unused_svelte_events.len(),
+            severity_to_level(rules.unused_svelte_events),
         ),
         (
             "Unused server actions",

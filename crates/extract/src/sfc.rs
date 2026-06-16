@@ -396,6 +396,14 @@ pub(crate) fn parse_sfc_to_module(
         apply_template_emit_usage(source, emit_return_binding.as_deref(), &mut combined);
     }
 
+    // Harvest Svelte template `on:<name>` listener bindings on component tags
+    // into the per-file listened set; the `unused-svelte-event` detector unions
+    // these project-wide to decide which dispatched events are dead.
+    if kind == SfcKind::Svelte {
+        combined.svelte_listened_events =
+            crate::sfc_template::collect_svelte_listened_events(source);
+    }
+
     // Static relative asset references in markup (`<img src="./logo.png">`)
     // become SideEffect imports so a genuinely-missing asset surfaces as
     // `unresolved-import` (existing assets resolve to `ExternalFile`, no finding).
@@ -520,6 +528,9 @@ fn empty_sfc_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleI
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     }
 }
 
@@ -643,7 +654,15 @@ fn merge_script_into_module(input: &mut SfcScriptMergeInput<'_>) {
         );
     }
 
+    // Dispatched events recorded by the visitor carry body-relative spans, like
+    // props/emits above. Remap the entries this script contributes onto the SFC
+    // source via the script byte offset so the finding line/col points at the
+    // real `dispatch(...)` call, not a body-relative position.
+    let dispatch_base = input.combined.svelte_dispatched_events.len();
     extractor.merge_into(input.combined);
+    for event in &mut input.combined.svelte_dispatched_events[dispatch_base..] {
+        event.span_start += input.script.byte_offset as u32;
+    }
 }
 
 /// Harvest Svelte 5 `$props()` declared props from an instance `<script>`
@@ -1820,5 +1839,74 @@ export const foo = 1;
         )[0];
         // Only the instance script's `b` is harvested.
         assert_eq!(prop_names(info), vec!["b"]);
+    }
+
+    // -- Svelte custom-event dispatch harvest (unused-svelte-event) ------------
+
+    fn dispatched_names(info: &crate::ModuleInfo) -> Vec<String> {
+        let mut names: Vec<String> = info
+            .svelte_dispatched_events
+            .iter()
+            .map(|e| e.name.clone())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn svelte_dispatch_literal_event_is_harvested() {
+        let info = &svelte_props(
+            r"<script>import { createEventDispatcher } from 'svelte';
+              const dispatch = createEventDispatcher();
+              function save() { dispatch('save'); }</script>",
+        )[0];
+        assert_eq!(dispatched_names(info), vec!["save"]);
+        assert!(!info.has_dynamic_dispatch);
+    }
+
+    #[test]
+    fn svelte_dispatch_without_svelte_import_is_ignored() {
+        // A local `createEventDispatcher` not imported from `svelte` is not a
+        // dispatcher; the `dispatch('save')` call records nothing.
+        let info = &svelte_props(
+            r"<script>function createEventDispatcher() { return () => {}; }
+              const dispatch = createEventDispatcher();
+              dispatch('save');</script>",
+        )[0];
+        assert!(info.svelte_dispatched_events.is_empty());
+    }
+
+    #[test]
+    fn svelte_dynamic_dispatch_sets_abstain() {
+        let info = &svelte_props(
+            r"<script>import { createEventDispatcher } from 'svelte';
+              const dispatch = createEventDispatcher();
+              function fire(name) { dispatch(name); }</script>",
+        )[0];
+        assert!(
+            info.has_dynamic_dispatch,
+            "a non-literal dispatch arg must set the abstain flag"
+        );
+    }
+
+    #[test]
+    fn svelte_dispatch_whole_value_use_sets_abstain() {
+        let info = &svelte_props(
+            r"<script>import { createEventDispatcher } from 'svelte';
+              const dispatch = createEventDispatcher();
+              forward(dispatch);</script>",
+        )[0];
+        assert!(
+            info.has_dynamic_dispatch,
+            "passing the dispatch binding as a whole value must set the abstain flag"
+        );
+    }
+
+    #[test]
+    fn svelte_listened_event_on_component_is_harvested() {
+        let info =
+            &svelte_props(r"<script>import Child from './Child.svelte';</script><Child on:save />")
+                [0];
+        assert!(info.svelte_listened_events.contains(&"save".to_string()));
     }
 }

@@ -717,6 +717,7 @@ mod tests {
             unused_component_emits: 0,
             unused_component_inputs: 0,
             unused_component_outputs: 0,
+            unused_svelte_events: 0,
             unused_server_actions: 0,
             unused_load_data_keys: 0,
             unresolved_imports: 1,

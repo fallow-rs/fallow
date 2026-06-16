@@ -152,6 +152,7 @@ else
       (if ((.check.unused_component_inputs // []) | length) > 0 then "| [Unused component inputs](\(docs("unused-component-input"))) | \(.check.unused_component_inputs | length) |" else null end),
       (if ((.check.unused_component_emits // []) | length) > 0 then "| [Unused component emits](\(docs("unused-component-emit"))) | \(.check.unused_component_emits | length) |" else null end),
       (if ((.check.unused_component_outputs // []) | length) > 0 then "| [Unused component outputs](\(docs("unused-component-output"))) | \(.check.unused_component_outputs | length) |" else null end),
+      (if ((.check.unused_svelte_events // []) | length) > 0 then "| [Unused Svelte events](\(docs("unused-svelte-event"))) | \(.check.unused_svelte_events | length) |" else null end),
       (if ((.check.unprovided_injects // []) | length) > 0 then "| [Unprovided injects](\(docs("unprovided-inject"))) | \(.check.unprovided_injects | length) |" else null end),
       (if ((.check.unused_load_data_keys // []) | length) > 0 then "| [Unused load data keys](\(docs("unused-load-data-key"))) | \(.check.unused_load_data_keys | length) |" else null end),
       (if (.check.type_only_dependencies | length) > 0 then "| [Type-only dependencies](\(docs("type-only-dependencies"))) | \(.check.type_only_dependencies | length) |" else null end),

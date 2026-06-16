@@ -3,10 +3,10 @@ source: crates/cli/tests/snapshot_tests.rs
 expression: json_str
 ---
 {
-  "body": "### Fallow dead-code report\n\n26 inline findings selected for GitLab review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 3f327448a1eaa60b -->",
+  "body": "### Fallow dead-code report\n\n27 inline findings selected for GitLab review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 8ccee0a69dac5c32 -->",
   "summary": {
-    "body": "### Fallow dead-code report\n\n26 inline findings selected for GitLab review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 3f327448a1eaa60b -->",
-    "fingerprint": "3f327448a1eaa60b"
+    "body": "### Fallow dead-code report\n\n27 inline findings selected for GitLab review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 8ccee0a69dac5c32 -->",
+    "fingerprint": "8ccee0a69dac5c32"
   },
   "comments": [
     {
@@ -118,6 +118,16 @@ expression: json_str
         "new_line": 12
       },
       "fingerprint": "2d5072d3451b44dd"
+    },
+    {
+      "body": "**warn** `fallow/unused-svelte-event`: event \\`dead\\` is dispatched by component \\`Child\\` but listened to nowhere in the project \\(remove it or listen for it\\)\n\n<!-- fallow-fingerprint:v2: 844a7c0e7c849332 -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "src/Child.svelte",
+        "new_path": "src/Child.svelte",
+        "new_line": 6
+      },
+      "fingerprint": "844a7c0e7c849332"
     },
     {
       "body": "**error** `fallow/circular-dependency`: Circular dependency: src/a.ts → src/b.ts\n\n<!-- fallow-fingerprint:v2: 405f0abed155920d -->",

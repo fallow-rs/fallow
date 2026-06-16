@@ -14,11 +14,12 @@ use crate::{
     MemberAccess, ReExportInfo, RequireCallInfo, VisibilityTag,
 };
 use fallow_types::extract::{
-    CalleeUse, ClassHeritageInfo, DiFramework, DiKeySite, DiRole, LocalTypeDeclaration, MemberInfo,
-    MemberKind, MisplacedDirectiveSite, PublicSignatureTypeReference, SanitizedSinkArg,
-    SanitizerScope, SecurityControlKind, SecurityControlSite, SecurityUrlShape, SinkArgKind,
-    SinkLiteralValue, SinkObjectProperty, SinkShape, SinkSite, SkippedSecurityCalleeExpressionKind,
-    SkippedSecurityCalleeReason, SkippedSecurityCalleeSite, TaintedBinding,
+    CalleeUse, ClassHeritageInfo, DiFramework, DiKeySite, DiRole, DispatchedEvent,
+    LocalTypeDeclaration, MemberInfo, MemberKind, MisplacedDirectiveSite,
+    PublicSignatureTypeReference, SanitizedSinkArg, SanitizerScope, SecurityControlKind,
+    SecurityControlSite, SecurityUrlShape, SinkArgKind, SinkLiteralValue, SinkObjectProperty,
+    SinkShape, SinkSite, SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason,
+    SkippedSecurityCalleeSite, TaintedBinding,
 };
 
 use crate::asset_url::normalize_asset_url;
@@ -2248,6 +2249,7 @@ impl ModuleInfoExtractor {
             self.record_current_module_file_path_binding(id.name.as_str(), init);
             self.record_injection_token(id.name.as_str(), init);
             self.record_di_string_key_const(id.name.as_str(), decl, init);
+            self.record_event_dispatch_binding(id.name.as_str(), init);
             self.record_child_process_fork_target_binding(id.name.as_str(), init);
             self.record_tainted_source_binding(id.name.as_str(), init);
             self.record_tainted_helper_call_binding(id.name.as_str(), init);
@@ -3728,6 +3730,8 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.try_record_fluent_chain_access(expr);
         self.record_pinia_map_helpers(expr);
         self.record_di_key_site(expr);
+        self.record_svelte_dispatch_call(expr);
+        self.record_svelte_dispatch_whole_arg_use(expr);
         self.record_load_data_whole_arg_use(expr);
 
         self.capture_security_call_sites(expr);
@@ -6734,6 +6738,87 @@ impl ModuleInfoExtractor {
                 if role == DiRole::Provide {
                     self.has_dynamic_provide = true;
                 }
+            }
+        }
+    }
+
+    /// Track a `const dispatch = createEventDispatcher()` binding for the
+    /// `unused-svelte-event` detector. The callee must resolve to a named
+    /// `createEventDispatcher` import from `svelte` (the only shape Svelte
+    /// supports), so an unrelated local `createEventDispatcher` is ignored. The
+    /// local binding name (often `dispatch`, but any name) is recorded; a
+    /// `<binding>('<name>')` call then records a `DispatchedEvent`.
+    fn record_event_dispatch_binding(&mut self, local: &str, init: &Expression<'_>) {
+        let Expression::CallExpression(call) = init else {
+            return;
+        };
+        let Expression::Identifier(callee) = &call.callee else {
+            return;
+        };
+        if callee.name != "createEventDispatcher" {
+            return;
+        }
+        if !self.is_named_import_from(callee.name.as_str(), "svelte", "createEventDispatcher") {
+            return;
+        }
+        self.event_dispatch_bindings.insert(local.to_string());
+    }
+
+    /// Record a Svelte custom-event dispatch through a `createEventDispatcher()`
+    /// binding. A `dispatch('<name>')` literal-arg call records a
+    /// `DispatchedEvent`; a `dispatch(<nonLiteral>)` call sets
+    /// `has_dynamic_dispatch` (the event name is unknowable, so the whole
+    /// component abstains). Gated on the callee resolving to a tracked dispatch
+    /// binding, so an ordinary `foo('bar')` call is inert.
+    fn record_svelte_dispatch_call(&mut self, expr: &CallExpression<'_>) {
+        let Expression::Identifier(callee) = &expr.callee else {
+            return;
+        };
+        if !self.event_dispatch_bindings.contains(callee.name.as_str()) {
+            return;
+        }
+        match expr.arguments.first() {
+            Some(Argument::StringLiteral(lit)) => {
+                self.svelte_dispatched_events.push(DispatchedEvent {
+                    name: lit.value.to_string(),
+                    span_start: expr.span.start,
+                });
+            }
+            Some(Argument::TemplateLiteral(t)) if t.expressions.is_empty() => {
+                if let Some(quasi) = t.quasis.first() {
+                    self.svelte_dispatched_events.push(DispatchedEvent {
+                        name: quasi.value.raw.to_string(),
+                        span_start: expr.span.start,
+                    });
+                }
+            }
+            // No argument or a non-literal first arg: the event name is
+            // unknowable, so the whole component abstains.
+            _ => {
+                self.has_dynamic_dispatch = true;
+            }
+        }
+    }
+
+    /// Abstain when a tracked `dispatch` binding is passed as a whole value to
+    /// another call (`forwardEvents(dispatch)` / `wrap(...dispatch)`): the helper
+    /// can dispatch any event opaquely, so the whole component must abstain. The
+    /// callee position is the dispatch call itself (handled by
+    /// `record_svelte_dispatch_call`), so only ARGUMENT positions are inspected.
+    fn record_svelte_dispatch_whole_arg_use(&mut self, expr: &CallExpression<'_>) {
+        for arg in &expr.arguments {
+            let used_whole = match arg {
+                Argument::Identifier(id) => self.event_dispatch_bindings.contains(id.name.as_str()),
+                Argument::SpreadElement(spread) => matches!(
+                    &spread.argument,
+                    Expression::Identifier(id)
+                        if self.event_dispatch_bindings.contains(id.name.as_str())
+                ),
+                _ => false,
+            };
+            if used_whole {
+                self.has_dynamic_dispatch = true;
+                return;
             }
         }
     }

@@ -10,7 +10,7 @@ use fallow_types::output_dead_code::{
     UnusedComponentPropFinding, UnusedDependencyFinding, UnusedDevDependencyFinding,
     UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
     UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
-    UnusedTypeFinding,
+    UnusedSvelteEventFinding, UnusedTypeFinding,
 };
 
 /// Build an `AnalysisResults` populated with one issue of every type.
@@ -231,6 +231,14 @@ pub fn sample_results(root: &Path) -> AnalysisResults {
                 col: 2,
             },
         ));
+    r.unused_svelte_events
+        .push(UnusedSvelteEventFinding::with_actions(UnusedSvelteEvent {
+            path: root.join("src/Child.svelte"),
+            component_name: "Child".to_string(),
+            event_name: "dead".to_string(),
+            line: 6,
+            col: 2,
+        }));
     r.unused_server_actions
         .push(UnusedServerActionFinding::with_actions(
             UnusedServerAction {

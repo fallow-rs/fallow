@@ -142,6 +142,9 @@ fn cache_store_insert_and_get() {
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     };
     store.insert(Path::new("test.ts"), module);
     assert_eq!(store.len(), 1);
@@ -214,6 +217,9 @@ fn cache_store_hash_mismatch_returns_none() {
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     };
     store.insert(Path::new("test.ts"), module);
     assert!(store.get(Path::new("test.ts"), 99).is_none());
@@ -290,6 +296,9 @@ fn cache_store_overwrite_entry() {
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     };
     let m2 = CachedModule {
         content_hash: 2,
@@ -353,6 +362,9 @@ fn cache_store_overwrite_entry() {
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     };
     store.insert(Path::new("test.ts"), m1);
     store.insert(Path::new("test.ts"), m2);
@@ -434,6 +446,9 @@ fn module_to_cached_roundtrip_named_export() {
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -535,6 +550,9 @@ fn module_to_cached_roundtrip_side_effect_used_export() {
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -621,6 +639,9 @@ fn module_to_cached_roundtrip_default_export() {
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -730,6 +751,9 @@ fn module_to_cached_roundtrip_imports() {
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -823,6 +847,9 @@ fn module_to_cached_roundtrip_re_exports() {
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -914,6 +941,9 @@ fn module_to_cached_roundtrip_dynamic_imports() {
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1034,6 +1064,9 @@ fn module_to_cached_roundtrip_members() {
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1131,6 +1164,9 @@ fn cache_save_and_load_roundtrip() {
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     };
     store.insert(Path::new("test.ts"), module);
     store.save(&dir, 0, DEFAULT_CACHE_MAX_SIZE).unwrap();
@@ -1214,6 +1250,9 @@ fn cache_version_mismatch_returns_none() {
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     };
     store.insert(Path::new("test.ts"), module);
     store.save(&dir, 0, DEFAULT_CACHE_MAX_SIZE).unwrap();
@@ -1304,6 +1343,9 @@ fn module_to_cached_roundtrip_type_only_import() {
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1379,6 +1421,9 @@ fn get_by_path_only_returns_entry_regardless_of_hash() {
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     };
     store.insert(Path::new("test.ts"), module);
 
@@ -1465,6 +1510,9 @@ fn retain_paths_removes_stale_entries() {
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     };
 
     store.insert(Path::new("/project/a.ts"), m());
@@ -1557,6 +1605,9 @@ fn retain_paths_with_empty_files_clears_cache() {
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     };
     store.insert(Path::new("a.ts"), m);
     assert_eq!(store.len(), 1);
@@ -1630,6 +1681,9 @@ fn get_by_metadata_returns_entry_on_match() {
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     };
     store.insert(Path::new("test.ts"), module);
 
@@ -1703,6 +1757,9 @@ fn get_by_metadata_returns_none_on_mtime_mismatch() {
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     };
     store.insert(Path::new("test.ts"), module);
 
@@ -1778,6 +1835,9 @@ fn get_by_metadata_returns_none_on_size_mismatch() {
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     };
     store.insert(Path::new("test.ts"), module);
 
@@ -1853,6 +1913,9 @@ fn get_by_metadata_returns_none_for_zero_mtime() {
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     };
     store.insert(Path::new("test.ts"), module);
 
@@ -1937,6 +2000,9 @@ fn module_to_cached_stores_mtime_and_size() {
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     };
 
     let cached = module_to_cached(&module, 12345, 6789);
@@ -2009,6 +2075,9 @@ fn module_to_cached_roundtrip_line_offsets() {
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     };
     let cached = module_to_cached(&module, 0, 0);
     let restored = cached_to_module(&cached, FileId(0));
@@ -2086,6 +2155,9 @@ fn module_to_cached_roundtrip_suppressions_with_kinds() {
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -2189,6 +2261,9 @@ fn module_to_cached_roundtrip_unknown_suppression_kinds() {
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -2279,6 +2354,9 @@ fn module_to_cached_roundtrip_visibility() {
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -2360,6 +2438,9 @@ fn module_to_cached_roundtrip_visibility_internal() {
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -2441,6 +2522,9 @@ fn module_to_cached_roundtrip_visibility_beta() {
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -2522,6 +2606,9 @@ fn module_to_cached_roundtrip_visibility_alpha() {
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -2605,6 +2692,9 @@ fn module_to_cached_roundtrip_dynamic_import_patterns() {
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -2686,6 +2776,9 @@ fn module_to_cached_roundtrip_unused_import_bindings() {
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -2800,6 +2893,9 @@ fn module_to_cached_roundtrip_complexity() {
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -2885,6 +2981,9 @@ fn module_to_cached_roundtrip_require_with_destructured() {
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -2969,6 +3068,9 @@ fn module_to_cached_roundtrip_dynamic_import_with_local() {
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -3052,6 +3154,9 @@ fn module_to_cached_roundtrip_source_span() {
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -3142,6 +3247,9 @@ fn module_to_cached_roundtrip_member_decorators() {
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -3219,6 +3327,9 @@ fn synthetic_module(content_hash: u64, last_access_secs: u64, payload_kb: usize)
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     }
 }
 

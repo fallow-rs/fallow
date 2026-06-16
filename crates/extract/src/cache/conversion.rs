@@ -527,6 +527,9 @@ pub fn cached_to_module_opts(
         react_props: cached.react_props.clone(),
         hook_uses: cached.hook_uses.clone(),
         render_edges: cached.render_edges.clone(),
+        svelte_dispatched_events: cached.svelte_dispatched_events.clone(),
+        svelte_listened_events: cached.svelte_listened_events.clone(),
+        has_dynamic_dispatch: cached.has_dynamic_dispatch,
     }
 }
 
@@ -609,5 +612,8 @@ pub fn module_to_cached(
         react_props: module.react_props.clone(),
         hook_uses: module.hook_uses.clone(),
         render_edges: module.render_edges.clone(),
+        svelte_dispatched_events: module.svelte_dispatched_events.clone(),
+        svelte_listened_events: module.svelte_listened_events.clone(),
+        has_dynamic_dispatch: module.has_dynamic_dispatch,
     }
 }

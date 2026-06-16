@@ -66,6 +66,9 @@ fn filter_workspace_source_findings(
         .unused_component_outputs
         .retain(|o| any_under(&o.output.path));
     results
+        .unused_svelte_events
+        .retain(|e| any_under(&e.event.path));
+    results
         .unused_server_actions
         .retain(|a| any_under(&a.action.path));
     results
@@ -466,6 +469,9 @@ fn filter_diff_source_findings(
     results
         .unused_component_outputs
         .retain(|o| line_in_diff(&o.output.path, o.output.line));
+    results
+        .unused_svelte_events
+        .retain(|e| line_in_diff(&e.event.path, e.event.line));
     results
         .unused_server_actions
         .retain(|a| line_in_diff(&a.action.path, a.action.line));

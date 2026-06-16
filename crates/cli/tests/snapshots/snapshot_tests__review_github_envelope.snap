@@ -4,10 +4,10 @@ expression: json_str
 ---
 {
   "event": "COMMENT",
-  "body": "### Fallow dead-code report\n\n26 inline findings selected for GitHub review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: a71c249256520ee3 -->",
+  "body": "### Fallow dead-code report\n\n27 inline findings selected for GitHub review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 581bc9a364403daa -->",
   "summary": {
-    "body": "### Fallow dead-code report\n\n26 inline findings selected for GitHub review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: a71c249256520ee3 -->",
-    "fingerprint": "a71c249256520ee3"
+    "body": "### Fallow dead-code report\n\n27 inline findings selected for GitHub review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 581bc9a364403daa -->",
+    "fingerprint": "581bc9a364403daa"
   },
   "comments": [
     {
@@ -86,6 +86,13 @@ expression: json_str
       "side": "RIGHT",
       "body": "**warn** `fallow/unused-catalog-entry`: Catalog entry 'old-thing' \\(catalog 'legacy'\\) is not referenced by any workspace package\n\n<!-- fallow-fingerprint:v2: 2d5072d3451b44dd -->",
       "fingerprint": "2d5072d3451b44dd"
+    },
+    {
+      "path": "src/Child.svelte",
+      "line": 6,
+      "side": "RIGHT",
+      "body": "**warn** `fallow/unused-svelte-event`: event \\`dead\\` is dispatched by component \\`Child\\` but listened to nowhere in the project \\(remove it or listen for it\\)\n\n<!-- fallow-fingerprint:v2: 844a7c0e7c849332 -->",
+      "fingerprint": "844a7c0e7c849332"
     },
     {
       "path": "src/a.ts",

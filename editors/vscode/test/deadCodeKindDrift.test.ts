@@ -149,6 +149,11 @@ const DEAD_CODE_WIRING = {
     category: "unused-component-output",
     finding: { ...loc, component_name: "Btn", output_name: "change", actions: [] },
   },
+  "unused-svelte-event": {
+    field: "unused_svelte_events",
+    category: "unused-svelte-event",
+    finding: { ...loc, component_name: "Btn", event_name: "change", actions: [] },
+  },
   "unrendered-component": {
     field: "unrendered_components",
     category: "unrendered-component",

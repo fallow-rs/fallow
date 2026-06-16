@@ -79,6 +79,9 @@ fn cache_roundtrip() {
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     };
 
     store.insert(std::path::Path::new("test.ts"), cached);
@@ -316,6 +319,9 @@ fn incremental_cache_prune_stale_entries() {
         react_props: Vec::new(),
         hook_uses: Vec::new(),
         render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     };
 
     store.insert(std::path::Path::new("/project/existing.ts"), make_module());

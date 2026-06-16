@@ -34,6 +34,7 @@ mod unused_load_data_key;
 mod unused_members;
 mod unused_overrides;
 mod unused_server_action;
+mod unused_svelte_event;
 
 #[cfg(test)]
 pub(crate) mod test_support;
@@ -69,7 +70,8 @@ use fallow_types::output_dead_code::{
     UnusedComponentOutputFinding, UnusedComponentPropFinding, UnusedDependencyFinding,
     UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
     UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
-    UnusedOptionalDependencyFinding, UnusedStoreMemberFinding, UnusedTypeFinding,
+    UnusedOptionalDependencyFinding, UnusedStoreMemberFinding, UnusedSvelteEventFinding,
+    UnusedTypeFinding,
 };
 
 use crate::results::{AnalysisResults, CircularDependency, CircularDependencyEdge};
@@ -131,6 +133,7 @@ use unused_overrides::{
     gather_pnpm_override_state,
 };
 use unused_server_action::reclassify_unused_server_actions;
+use unused_svelte_event::find_unused_svelte_events;
 
 /// Pre-computed line offset tables indexed by `FileId`, built during parse and
 /// carried through the cache. Eliminates redundant file reads during analysis.
@@ -858,6 +861,14 @@ fn populate_framework_specific_findings(input: &mut FrameworkSpecificFindingsInp
         input.line_offsets_by_file,
         input.results,
     );
+    populate_unused_svelte_event_findings(
+        input.graph,
+        input.modules,
+        input.config,
+        input.declared_deps,
+        input.line_offsets_by_file,
+        input.results,
+    );
     populate_unused_load_data_key_findings(
         input.graph,
         input.modules,
@@ -1357,6 +1368,27 @@ fn populate_unused_component_output_findings(
         find_unused_component_outputs(graph, modules, declared_deps, line_offsets_by_file)
             .into_iter()
             .map(UnusedComponentOutputFinding::with_actions)
+            .collect();
+}
+
+/// Populate `unused_svelte_events` when the rule is enabled. Gated on the
+/// project declaring `svelte` inside the detector (see
+/// [`find_unused_svelte_events`]).
+fn populate_unused_svelte_event_findings(
+    graph: &ModuleGraph,
+    modules: &[ModuleInfo],
+    config: &ResolvedConfig,
+    declared_deps: &FxHashSet<String>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+    results: &mut AnalysisResults,
+) {
+    if config.rules.unused_svelte_events == Severity::Off {
+        return;
+    }
+    results.unused_svelte_events =
+        find_unused_svelte_events(graph, modules, declared_deps, line_offsets_by_file)
+            .into_iter()
+            .map(UnusedSvelteEventFinding::with_actions)
             .collect();
 }
 
@@ -2359,6 +2391,7 @@ mod tests {
                 unused_component_emits: Severity::Off,
                 unused_component_inputs: Severity::Off,
                 unused_component_outputs: Severity::Off,
+                unused_svelte_events: Severity::Off,
                 unused_server_actions: Severity::Off,
                 unused_load_data_keys: Severity::Off,
                 prop_drilling: Severity::Off,
@@ -2638,6 +2671,9 @@ mod tests {
                 react_props: Vec::new(),
                 hook_uses: Vec::new(),
                 render_edges: Vec::new(),
+                svelte_dispatched_events: Vec::new(),
+                svelte_listened_events: Vec::new(),
+                has_dynamic_dispatch: false,
             }];
 
             let rules = RulesConfig {

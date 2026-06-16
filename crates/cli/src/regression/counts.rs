@@ -71,6 +71,8 @@ pub struct CheckCounts {
     #[serde(default)]
     pub unused_component_outputs: usize,
     #[serde(default)]
+    pub unused_svelte_events: usize,
+    #[serde(default)]
     pub unused_server_actions: usize,
     #[serde(default)]
     pub unused_load_data_keys: usize,
@@ -118,6 +120,7 @@ impl CheckCounts {
             unused_component_emits: results.unused_component_emits.len(),
             unused_component_inputs: results.unused_component_inputs.len(),
             unused_component_outputs: results.unused_component_outputs.len(),
+            unused_svelte_events: results.unused_svelte_events.len(),
             unused_server_actions: results.unused_server_actions.len(),
             unused_load_data_keys: results.unused_load_data_keys.len(),
             unresolved_imports: results.unresolved_imports.len(),
@@ -168,6 +171,9 @@ impl CheckCounts {
             // `fallow_config::RegressionBaseline` has no `unused_component_outputs`
             // field; default to 0 until the config baseline schema gains one.
             unused_component_outputs: 0,
+            // `fallow_config::RegressionBaseline` has no `unused_svelte_events`
+            // field; default to 0 until the config baseline schema gains one.
+            unused_svelte_events: 0,
             // `fallow_config::RegressionBaseline` has no `unused_server_actions`
             // field; default to 0 until the config baseline schema gains one.
             unused_server_actions: 0,
@@ -239,6 +245,7 @@ impl CheckCounts {
         push_delta!(unused_component_emits);
         push_delta!(unused_component_inputs);
         push_delta!(unused_component_outputs);
+        push_delta!(unused_svelte_events);
         push_delta!(unused_server_actions);
         push_delta!(unused_load_data_keys);
         push_delta!(unresolved_imports);
@@ -328,6 +335,7 @@ mod tests {
             unused_component_emits: 0,
             unused_component_inputs: 0,
             unused_component_outputs: 0,
+            unused_svelte_events: 0,
             unused_server_actions: 0,
             unused_load_data_keys: 0,
             unresolved_imports: 0,
@@ -378,6 +386,7 @@ mod tests {
                 unused_component_emits: 0,
                 unused_component_inputs: 0,
                 unused_component_outputs: 0,
+                unused_svelte_events: 0,
                 unused_server_actions: 0,
                 unused_load_data_keys: 0,
                 unresolved_imports: 0,
@@ -423,6 +432,7 @@ mod tests {
             unused_component_emits: 0,
             unused_component_inputs: 0,
             unused_component_outputs: 0,
+            unused_svelte_events: 0,
             unused_server_actions: 0,
             unused_load_data_keys: 0,
             unresolved_imports: 0,
@@ -475,6 +485,7 @@ mod tests {
             unused_component_emits: 0,
             unused_component_inputs: 0,
             unused_component_outputs: 0,
+            unused_svelte_events: 0,
             unused_server_actions: 0,
             unused_load_data_keys: 0,
             unresolved_imports: 0,
@@ -514,6 +525,7 @@ mod tests {
             unused_component_emits: 0,
             unused_component_inputs: 0,
             unused_component_outputs: 0,
+            unused_svelte_events: 0,
             unused_server_actions: 0,
             unused_load_data_keys: 0,
             unresolved_imports: 0,
@@ -551,6 +563,7 @@ mod tests {
             unused_component_emits: 0,
             unused_component_inputs: 0,
             unused_component_outputs: 0,
+            unused_svelte_events: 0,
             unused_server_actions: 0,
             unused_load_data_keys: 0,
             unresolved_imports: 0,
@@ -582,6 +595,7 @@ mod tests {
             unused_component_emits: 0,
             unused_component_inputs: 0,
             unused_component_outputs: 0,
+            unused_svelte_events: 0,
             unused_server_actions: 0,
             unused_load_data_keys: 0,
             unresolved_imports: 1,
@@ -622,6 +636,7 @@ mod tests {
             unused_component_emits: 0,
             unused_component_inputs: 0,
             unused_component_outputs: 0,
+            unused_svelte_events: 0,
             unused_server_actions: 0,
             unused_load_data_keys: 0,
             unresolved_imports: 0,

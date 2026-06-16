@@ -444,6 +444,7 @@ pub fn filter_results_by_changed_files(
         unused_component_emits,
         unused_component_inputs,
         unused_component_outputs,
+        unused_svelte_events,
         unused_server_actions,
         unused_load_data_keys,
         // Observability flag, not an issue collection.
@@ -535,6 +536,7 @@ pub fn filter_results_by_changed_files(
     unused_component_emits.retain(|e| contains_normalized(&cf, &e.emit.path));
     unused_component_inputs.retain(|i| contains_normalized(&cf, &i.input.path));
     unused_component_outputs.retain(|o| contains_normalized(&cf, &o.output.path));
+    unused_svelte_events.retain(|e| contains_normalized(&cf, &e.event.path));
     unused_server_actions.retain(|a| contains_normalized(&cf, &a.action.path));
     unused_load_data_keys.retain(|k| contains_normalized(&cf, &k.key.path));
     // Anchor a chain on its source hop's file (the finding anchor).

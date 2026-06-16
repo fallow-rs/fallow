@@ -123,6 +123,10 @@ pub struct CheckSummary {
     /// Angular `@Output()` bindings emitted nowhere inside their own component.
     #[serde(default)]
     pub unused_component_outputs: usize,
+    /// Svelte components dispatching a custom event via `createEventDispatcher`
+    /// whose name is listened to nowhere in the project.
+    #[serde(default)]
+    pub unused_svelte_events: usize,
     /// Next.js Server Actions (exports of `"use server"` files) referenced by no
     /// code in the project.
     #[serde(default)]
