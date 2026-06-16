@@ -410,6 +410,18 @@ pub fn filter_results_by_diff(
         }
     };
 
+    filter_diff_source_findings(results, &touches_file, &line_in_diff);
+    filter_diff_security_findings(results, &touches_file, &line_in_diff);
+    filter_diff_dependency_findings(results, &line_in_diff);
+    filter_diff_graph_findings(results, &touches_file, &line_in_diff);
+    filter_diff_framework_findings(results, &line_in_diff);
+}
+
+fn filter_diff_source_findings(
+    results: &mut fallow_core::results::AnalysisResults,
+    touches_file: &dyn Fn(&Path) -> bool,
+    line_in_diff: &dyn Fn(&Path, u32) -> bool,
+) {
     results.unused_files.retain(|f| touches_file(&f.file.path));
 
     results
@@ -451,6 +463,13 @@ pub fn filter_results_by_diff(
     results
         .unresolved_imports
         .retain(|i| line_in_diff(&i.import.path, i.import.line));
+}
+
+fn filter_diff_security_findings(
+    results: &mut fallow_core::results::AnalysisResults,
+    touches_file: &dyn Fn(&Path) -> bool,
+    line_in_diff: &dyn Fn(&Path, u32) -> bool,
+) {
     results.security_findings.retain(|f| {
         line_in_diff(&f.path, f.line)
             || f.trace.iter().any(|hop| {
@@ -473,7 +492,12 @@ pub fn filter_results_by_diff(
     results
         .security_unresolved_callee_diagnostics
         .retain(|d| line_in_diff(&d.path, d.line));
+}
 
+fn filter_diff_dependency_findings(
+    results: &mut fallow_core::results::AnalysisResults,
+    line_in_diff: &dyn Fn(&Path, u32) -> bool,
+) {
     for unlisted in &mut results.unlisted_dependencies {
         unlisted
             .dep
@@ -483,7 +507,13 @@ pub fn filter_results_by_diff(
     results
         .unlisted_dependencies
         .retain(|d| !d.dep.imported_from.is_empty());
+}
 
+fn filter_diff_graph_findings(
+    results: &mut fallow_core::results::AnalysisResults,
+    touches_file: &dyn Fn(&Path) -> bool,
+    line_in_diff: &dyn Fn(&Path, u32) -> bool,
+) {
     results.duplicate_exports.retain(|d| {
         d.export
             .locations
@@ -506,7 +536,12 @@ pub fn filter_results_by_diff(
     results
         .stale_suppressions
         .retain(|s| line_in_diff(&s.path, s.line));
+}
 
+fn filter_diff_framework_findings(
+    results: &mut fallow_core::results::AnalysisResults,
+    line_in_diff: &dyn Fn(&Path, u32) -> bool,
+) {
     results
         .invalid_client_exports
         .retain(|e| line_in_diff(&e.export.path, e.export.line));
