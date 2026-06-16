@@ -6,7 +6,7 @@
 
 use rustc_hash::FxHashMap;
 
-use fallow_types::extract::{ModuleInfo, SinkLiteralValue, SinkShape};
+use fallow_types::extract::{ModuleInfo, SinkLiteralValue, SinkShape, SinkSite};
 use fallow_types::results::{
     SecurityCandidate, SecurityCandidateBoundary, SecurityCandidateSink, SecurityFinding,
     SecurityFindingKind, SecuritySeverity, TraceHop, TraceHopRole,
@@ -16,7 +16,7 @@ use fallow_types::suppress::IssueKind;
 use super::tainted_sink::{CategoryFilter, build_actions, is_low_value_anchor};
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 use crate::discover::FileId;
-use crate::graph::ModuleGraph;
+use crate::graph::{ModuleGraph, ModuleNode};
 use crate::suppress::SuppressionContext;
 
 pub const CATEGORY_ID: &str = "hardcoded-secret";
@@ -46,89 +46,137 @@ pub fn find_hardcoded_secret_candidates(
 
     let modules_by_id: FxHashMap<FileId, &ModuleInfo> =
         modules.iter().map(|m| (m.file_id, m)).collect();
+    let ctx = HardcodedSecretContext {
+        suppressions,
+        line_offsets_by_file,
+        root,
+    };
 
     let mut findings = Vec::new();
     for node in &graph.modules {
         let Some(module) = modules_by_id.get(&node.file_id) else {
             continue;
         };
-        if module.security_sinks.is_empty() {
-            continue;
-        }
-        let rel_path = node.path.strip_prefix(root).unwrap_or(&node.path);
-        if is_low_value_anchor(rel_path) {
-            continue;
-        }
-        let file_id = node.file_id;
-        if suppressions.is_file_suppressed(file_id, IssueKind::SecuritySink) {
-            continue;
-        }
-
-        for sink in &module.security_sinks {
-            if sink.sink_shape != SinkShape::SecretLiteral {
-                continue;
-            }
-            let Some(SinkLiteralValue::String(value)) = sink.arg_literal.as_ref() else {
-                continue;
-            };
-            let Some(signal) = classify_secret_literal(&sink.callee_path, value) else {
-                continue;
-            };
-            let (line, col) =
-                byte_offset_to_line_col(line_offsets_by_file, file_id, sink.span_start);
-            if suppressions.is_suppressed(file_id, line, IssueKind::SecuritySink) {
-                continue;
-            }
-
-            let evidence = redacted_evidence(signal, &sink.callee_path);
-            // No untrusted source: the secret is a hardcoded literal, so slot 1
-            // is null. The sink slot names the assignment target / callee.
-            let candidate = SecurityCandidate {
-                source_kind: None,
-                sink: SecurityCandidateSink {
-                    path: node.path.clone(),
-                    line,
-                    col,
-                    category: Some(CATEGORY_ID.to_string()),
-                    cwe: Some(CWE_ID),
-                    callee: Some(sink.callee_path.clone()),
-                    url_shape: None,
-                },
-                boundary: SecurityCandidateBoundary::default(),
-                network: None,
-            };
-            let path = node.path.clone();
-            findings.push(SecurityFinding {
-                finding_id: String::new(),
-                kind: SecurityFindingKind::TaintedSink,
-                category: Some(CATEGORY_ID.to_string()),
-                cwe: Some(CWE_ID),
-                path: path.clone(),
-                line,
-                col,
-                evidence,
-                source_backed: false,
-                // The hardcoded value IS the secret; there is no upstream
-                // source-read to anchor, so no arg-level trace node.
-                source_read: None,
-                severity: SecuritySeverity::Low,
-                trace: vec![TraceHop {
-                    path,
-                    line,
-                    col,
-                    role: TraceHopRole::Sink,
-                }],
-                actions: build_actions(),
-                reachability: None,
-                dead_code: None,
-                candidate,
-                taint_flow: None,
-                runtime: None,
-                attack_surface: None,
-            });
-        }
+        collect_module_secret_candidates(&mut findings, node, module, &ctx);
     }
 
+    sort_security_findings(&mut findings);
+    findings
+}
+
+struct HardcodedSecretContext<'a> {
+    suppressions: &'a SuppressionContext<'a>,
+    line_offsets_by_file: &'a LineOffsetsMap<'a>,
+    root: &'a std::path::Path,
+}
+
+fn collect_module_secret_candidates(
+    findings: &mut Vec<SecurityFinding>,
+    node: &ModuleNode,
+    module: &ModuleInfo,
+    ctx: &HardcodedSecretContext<'_>,
+) {
+    if module.security_sinks.is_empty() {
+        return;
+    }
+    let rel_path = node.path.strip_prefix(ctx.root).unwrap_or(&node.path);
+    if is_low_value_anchor(rel_path) {
+        return;
+    }
+    let file_id = node.file_id;
+    if ctx
+        .suppressions
+        .is_file_suppressed(file_id, IssueKind::SecuritySink)
+    {
+        return;
+    }
+
+    for sink in &module.security_sinks {
+        if let Some(finding) = build_hardcoded_secret_finding(node, file_id, sink, ctx) {
+            findings.push(finding);
+        }
+    }
+}
+
+fn build_hardcoded_secret_finding(
+    node: &ModuleNode,
+    file_id: FileId,
+    sink: &SinkSite,
+    ctx: &HardcodedSecretContext<'_>,
+) -> Option<SecurityFinding> {
+    if sink.sink_shape != SinkShape::SecretLiteral {
+        return None;
+    }
+    let Some(SinkLiteralValue::String(value)) = sink.arg_literal.as_ref() else {
+        return None;
+    };
+    let signal = classify_secret_literal(&sink.callee_path, value)?;
+    let (line, col) = byte_offset_to_line_col(ctx.line_offsets_by_file, file_id, sink.span_start);
+    if ctx
+        .suppressions
+        .is_suppressed(file_id, line, IssueKind::SecuritySink)
+    {
+        return None;
+    }
+
+    Some(create_hardcoded_secret_finding(
+        node, sink, signal, line, col,
+    ))
+}
+
+fn create_hardcoded_secret_finding(
+    node: &ModuleNode,
+    sink: &SinkSite,
+    signal: SecretSignal,
+    line: u32,
+    col: u32,
+) -> SecurityFinding {
+    let evidence = redacted_evidence(signal, &sink.callee_path);
+    let candidate = SecurityCandidate {
+        source_kind: None,
+        sink: SecurityCandidateSink {
+            path: node.path.clone(),
+            line,
+            col,
+            category: Some(CATEGORY_ID.to_string()),
+            cwe: Some(CWE_ID),
+            callee: Some(sink.callee_path.clone()),
+            url_shape: None,
+        },
+        boundary: SecurityCandidateBoundary::default(),
+        network: None,
+    };
+    let path = node.path.clone();
+
+    SecurityFinding {
+        finding_id: String::new(),
+        kind: SecurityFindingKind::TaintedSink,
+        category: Some(CATEGORY_ID.to_string()),
+        cwe: Some(CWE_ID),
+        path: path.clone(),
+        line,
+        col,
+        evidence,
+        source_backed: false,
+        source_read: None,
+        severity: SecuritySeverity::Low,
+        trace: vec![TraceHop {
+            path,
+            line,
+            col,
+            role: TraceHopRole::Sink,
+        }],
+        actions: build_actions(),
+        reachability: None,
+        dead_code: None,
+        candidate,
+        taint_flow: None,
+        runtime: None,
+        attack_surface: None,
+    }
+}
+
+fn sort_security_findings(findings: &mut [SecurityFinding]) {
     findings.sort_by(|a, b| {
         a.path
             .cmp(&b.path)
@@ -136,7 +184,6 @@ pub fn find_hardcoded_secret_candidates(
             .then(a.col.cmp(&b.col))
             .then(a.category.cmp(&b.category))
     });
-    findings
 }
 
 fn classify_secret_literal(context_name: &str, value: &str) -> Option<SecretSignal> {
