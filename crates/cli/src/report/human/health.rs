@@ -1506,8 +1506,8 @@ fn push_finding_metric_rows(
 
 /// Render the descriptive React-shape context line for a complexity finding:
 /// `react: 14 props, 9 hooks (3 state, 4 effect, 2 memo), max effect deps 5,
-/// JSX depth 7`. Purely descriptive (the same counts already fed the cognitive
-/// fold); never a threshold. Returns `None` when the finding has no React
+/// JSX depth 7`. Purely descriptive, never a threshold. Returns `None` when the
+/// finding has no React
 /// signals, so non-React findings render unchanged. The per-kind breakdown and
 /// max effect deps come from the cached `hook_uses` IR (component-scope hooks
 /// only) and are shown only when a profile was attributed; `react_hook_count`

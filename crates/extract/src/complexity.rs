@@ -11,22 +11,13 @@
 //! Counts control flow breaks weighted by nesting depth. Boolean operator sequences
 //! add +1 per operator kind change. Optional chaining (`?.`) is NOT counted (Principle 3).
 //!
-//! **React folding** (anti-numerology): deeply-nested JSX subtrees and React hook
-//! density fold into the EXISTING cognitive metric rather than minting a new
-//! tunable rule. A JSX element nested past [`JSX_DEPTH_FLOOR`] accrues the same
-//! nesting penalty a nested control-flow construct does (so a ternary inside a
-//! deep JSX tree reads deeper too), recorded as a `JsxDepth` contribution; each
-//! React hook call in a component body adds a flat `HookDensity` contribution.
-//! Both surface in `--complexity-breakdown` and the raw counts surface as
-//! descriptive hotspot context. No new threshold knob: a god component surfaces
-//! through `max_cognitive` / `max_crap` like any other complex function.
-
-/// JSX nesting depth at or below which no cognitive penalty accrues. Shallow
-/// host markup (`<div><span/></div>`) is free; only genuinely deep render trees
-/// (the god-component shape) accrue the nesting penalty. A JSX element opens its
-/// penalty once its depth EXCEEDS this floor, so depth 1 and 2 are free and
-/// depth 3 is the first penalized level.
-const JSX_DEPTH_FLOOR: u16 = 2;
+//! **React context**: JSX max depth is tracked as descriptive render-layout
+//! context and does not alter cognitive complexity. React hook density and wide
+//! prop interfaces still fold into the EXISTING cognitive metric rather than
+//! minting new tunable rules. These fold as `HookDensity` / `PropCount`
+//! contributions and the raw counts surface as descriptive hotspot context. No
+//! new threshold knob: a god component surfaces through `max_cognitive` /
+//! `max_crap` like any other complex function.
 
 /// Prop count at or below which no cognitive penalty accrues. A handful of props
 /// is normal; a wide prop interface (the god-component shape) folds its excess
@@ -238,36 +229,19 @@ impl<'a> ComplexityVisitor<'a> {
         }
     }
 
-    /// Open a JSX element/fragment: bump the frame's JSX depth, track the max for
-    /// descriptive output, and once the depth EXCEEDS [`JSX_DEPTH_FLOOR`] fold the
-    /// nesting penalty into cognitive (recorded as `JsxDepth`) AND into the shared
-    /// `nesting_level`, so a ternary or `&&` rendered inside this deep subtree
-    /// inherits the deeper penalty through the existing machinery. Returns whether
-    /// the structural nesting was bumped, so the caller restores it on close.
-    fn open_jsx(&mut self, span: Span) -> bool {
+    /// Open a JSX element/fragment: bump the frame's JSX depth and track the max
+    /// for descriptive output only. Markup nesting is layout shape, not control
+    /// flow, so it does not add cognitive weight or deepen structural nesting.
+    fn open_jsx(&mut self) {
         let new_depth = self.stack.last().map_or(0, |frame| frame.jsx_depth) + 1;
-        let penalized = new_depth > JSX_DEPTH_FLOOR;
         if let Some(frame) = self.stack.last_mut() {
             frame.jsx_depth = new_depth;
             frame.jsx_max_depth = frame.jsx_max_depth.max(new_depth);
         }
-        if penalized {
-            // The JSX element is one level deeper than the floor; weight it like a
-            // nested structural construct (+1 base + current structural nesting),
-            // mirroring `inc_cognitive_with_nesting`, then deepen the structural
-            // nesting for whatever this element renders.
-            self.inc_cognitive_with_nesting(span, ComplexityContributionKind::JsxDepth);
-            self.inc_nesting();
-        }
-        penalized
     }
 
-    /// Close a JSX element/fragment opened by [`Self::open_jsx`], restoring the
-    /// structural nesting bumped when the element was penalized.
-    fn close_jsx(&mut self, penalized: bool) {
-        if penalized {
-            self.dec_nesting();
-        }
+    /// Close a JSX element/fragment opened by [`Self::open_jsx`].
+    fn close_jsx(&mut self) {
         if let Some(frame) = self.stack.last_mut() {
             frame.jsx_depth = frame.jsx_depth.saturating_sub(1);
         }
@@ -683,18 +657,17 @@ impl<'ast> Visit<'ast> for ComplexityVisitor<'_> {
     }
 
     fn visit_jsx_element(&mut self, element: &JSXElement<'ast>) {
-        // A JSX element is a nesting level: open the depth (folding the nesting
-        // penalty past the floor), walk the opening element + children, then close.
-        let penalized = self.open_jsx(element.span);
+        // JSX depth is descriptive context for render layout.
+        self.open_jsx();
         walk::walk_jsx_element(self, element);
-        self.close_jsx(penalized);
+        self.close_jsx();
     }
 
     fn visit_jsx_fragment(&mut self, fragment: &JSXFragment<'ast>) {
-        // A `<>...</>` fragment is also a nesting level for its children.
-        let penalized = self.open_jsx(fragment.span);
+        // A `<>...</>` fragment also contributes to descriptive JSX depth.
+        self.open_jsx();
         walk::walk_jsx_fragment(self, fragment);
-        self.close_jsx(penalized);
+        self.close_jsx();
     }
 
     fn visit_call_expression(&mut self, call: &CallExpression<'ast>) {
@@ -1435,8 +1408,8 @@ mod tests {
 
     #[test]
     fn shallow_jsx_is_free() {
-        // A component with host markup at or below the floor (depth 2) accrues no
-        // JSX cognitive penalty: a normal component must not surface as a hotspot.
+        // A component with shallow host markup accrues no JSX cognitive penalty:
+        // a normal component must not surface as a hotspot.
         let results = analyze("function App() { return <div><span/></div>; }");
         let f = find_fn(&results, "App");
         assert_eq!(f.cognitive, 0, "shallow JSX adds no cognitive load");
@@ -1445,38 +1418,32 @@ mod tests {
     }
 
     #[test]
-    fn deep_jsx_folds_into_cognitive_with_nesting_penalty() {
-        // A deeply-nested JSX tree past the floor accrues cognitive load via the
-        // nesting penalty, surfaced as JsxDepth contributions.
+    fn deep_jsx_is_descriptive_only() {
+        // A deeply nested JSX tree records max depth for context, but pure layout
+        // depth must not score as cognitive control flow.
         let deep = analyze("function App() { return <a><b><c><d><e/></d></c></b></a>; }");
         let f = find_fn(&deep, "App");
-        assert!(
-            f.cognitive > 0,
-            "a deep JSX tree must accrue cognitive load: {:?}",
-            f.contributions
-        );
-        assert!(count_kind(f, ComplexityContributionKind::JsxDepth) > 0);
+        assert_eq!(f.cognitive, 0, "deep JSX adds no cognitive load");
+        assert_eq!(count_kind(f, ComplexityContributionKind::JsxDepth), 0);
         assert_eq!(f.react_jsx_max_depth, 5);
     }
 
     #[test]
-    fn deep_jsx_scores_higher_cognitive_than_flat() {
-        // The headline property: a deeply-nested component scores strictly higher
-        // cognitive than a flat one with the same return shape otherwise.
+    fn deep_jsx_does_not_score_higher_than_flat() {
+        // Layout depth alone is not cognitive complexity, so a deeply nested
+        // component and a flat one with no control flow score the same.
         let flat = analyze("function Flat() { return <div><span/></div>; }");
         let deep = analyze("function Deep() { return <a><b><c><d><e><f/></e></d></c></b></a>; }");
         let flat_cog = find_fn(&flat, "Flat").cognitive;
         let deep_cog = find_fn(&deep, "Deep").cognitive;
-        assert!(
-            deep_cog > flat_cog,
-            "deep JSX ({deep_cog}) must score higher than flat ({flat_cog})"
-        );
+        assert_eq!(deep_cog, flat_cog);
+        assert_eq!(find_fn(&deep, "Deep").react_jsx_max_depth, 6);
     }
 
     #[test]
-    fn ternary_inside_deep_jsx_inherits_nesting_penalty() {
-        // A ternary rendered inside a deep JSX subtree inherits the deeper nesting
-        // penalty through the shared machinery (the fold deepens nesting_level).
+    fn ternary_inside_deep_jsx_keeps_normal_weight() {
+        // A ternary rendered inside JSX keeps normal cognitive weight. Markup
+        // depth does not deepen the structural nesting level.
         let shallow = analyze("function A({ x }) { return <div>{x ? <p/> : <span/>}</div>; }");
         let deep = analyze(
             "function B({ x }) { return <a><b><c><d>{x ? <p/> : <span/>}</d></c></b></a>; }",
@@ -1499,10 +1466,25 @@ mod tests {
             })
             .expect("ternary in deep")
             .weight;
-        assert!(
-            deep_tern > shallow_tern,
-            "ternary inside deep JSX (weight {deep_tern}) must out-weigh the shallow one ({shallow_tern})"
+        assert_eq!(shallow_tern, 1);
+        assert_eq!(deep_tern, shallow_tern);
+        assert_eq!(
+            count_kind(find_fn(&deep, "B"), ComplexityContributionKind::JsxDepth),
+            0
         );
+    }
+
+    #[test]
+    fn presentational_skeleton_jsx_does_not_emit_complexity() {
+        let results = analyze(
+            "function SkeletonTable() { return <Card><CardContent><Table><TableBody><TableRow><TableCell><Skeleton/></TableCell></TableRow></TableBody></Table></CardContent></Card>; }",
+        );
+        let f = find_fn(&results, "SkeletonTable");
+        assert_eq!(f.cyclomatic, 1);
+        assert_eq!(f.cognitive, 0);
+        assert_eq!(f.react_jsx_max_depth, 7);
+        assert_eq!(count_kind(f, ComplexityContributionKind::JsxDepth), 0);
+        assert!(f.contributions.is_empty());
     }
 
     #[test]
@@ -1619,7 +1601,8 @@ mod tests {
 
     #[test]
     fn arrow_component_folds_react_signals() {
-        // Arrow-bound components are covered identically to function declarations.
+        // Arrow-bound components keep descriptive JSX depth while hook density
+        // and prop count still fold into cognitive complexity.
         let results = analyze(
             "const App = ({ a, b, c, d, e, f }) => { useState(); return <ul><li><span><b/></span></li></ul>; };",
         );
@@ -1629,7 +1612,7 @@ mod tests {
         assert!(f.react_jsx_max_depth >= 4);
         assert!(count_kind(f, ComplexityContributionKind::PropCount) > 0);
         assert!(count_kind(f, ComplexityContributionKind::HookDensity) > 0);
-        assert!(count_kind(f, ComplexityContributionKind::JsxDepth) > 0);
+        assert_eq!(count_kind(f, ComplexityContributionKind::JsxDepth), 0);
     }
 
     #[test]

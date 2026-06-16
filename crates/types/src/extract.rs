@@ -1059,10 +1059,9 @@ pub enum ComplexityContributionKind {
     LabeledBreak,
     /// A labeled `continue` (cognitive only).
     LabeledContinue,
-    /// A deeply-nested JSX element subtree (cognitive only). React-specific: a
-    /// JSX element nested past the first level accrues the same nesting penalty
-    /// a nested control-flow construct does, so a deep JSX/ternary tree reads as
-    /// a god component through the existing cognitive metric.
+    /// Legacy JSX-depth contribution kind kept for schema compatibility. Current
+    /// extraction records JSX nesting as descriptive `react_jsx_max_depth`
+    /// context and does not emit this kind for layout depth.
     JsxDepth,
     /// React hook density (cognitive only). One contribution per hook call in a
     /// component body (`useState` / `useEffect` / `useMemo` / `useCallback` /

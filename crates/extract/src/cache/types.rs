@@ -528,7 +528,11 @@ use crate::MemberKind;
 /// member uses reached through branch-selected local fixture aliases. Warm
 /// caches from 178 can miss those synthetic `member_accesses` and surface false
 /// `unused-class-member` findings.
-pub(super) const CACHE_VERSION: u32 = 179;
+///
+/// Bumped to 180 for issue #1281: JSX nesting depth is now descriptive
+/// `react_jsx_max_depth` context only, so warm caches from 179 may carry stale
+/// cognitive scores and `JsxDepth` contribution entries for React components.
+pub(super) const CACHE_VERSION: u32 = 180;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

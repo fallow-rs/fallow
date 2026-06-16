@@ -11307,7 +11307,7 @@
         {
           "type": "string",
           "const": "jsx-depth",
-          "description": "A deeply-nested JSX element subtree (cognitive only). React-specific: a\nJSX element nested past the first level accrues the same nesting penalty\na nested control-flow construct does, so a deep JSX/ternary tree reads as\na god component through the existing cognitive metric."
+          "description": "Legacy JSX-depth contribution kind kept for schema compatibility. Current\nextraction records JSX nesting as descriptive `react_jsx_max_depth`\ncontext and does not emit this kind for layout depth."
         },
         {
           "type": "string",
