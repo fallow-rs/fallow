@@ -1187,54 +1187,7 @@ pub fn build_sarif(
     let mut sarif_results = Vec::new();
     let mut snippets = SourceSnippetCache::default();
 
-    push_sarif_results(
-        &mut sarif_results,
-        &results.unused_files,
-        &mut snippets,
-        |f| sarif_unused_file_fields(&f.file, root, severity_to_sarif_level(rules.unused_files)),
-    );
-    push_sarif_results(
-        &mut sarif_results,
-        &results.unused_exports,
-        &mut snippets,
-        |e| {
-            sarif_export_fields(
-                &e.export,
-                root,
-                "fallow/unused-export",
-                severity_to_sarif_level(rules.unused_exports),
-                "Export",
-                "Re-export",
-            )
-        },
-    );
-    push_sarif_results(
-        &mut sarif_results,
-        &results.unused_types,
-        &mut snippets,
-        |e| {
-            sarif_export_fields(
-                &e.export,
-                root,
-                "fallow/unused-type",
-                severity_to_sarif_level(rules.unused_types),
-                "Type export",
-                "Type re-export",
-            )
-        },
-    );
-    push_sarif_results(
-        &mut sarif_results,
-        &results.private_type_leaks,
-        &mut snippets,
-        |e| {
-            sarif_private_type_leak_fields(
-                &e.leak,
-                root,
-                severity_to_sarif_level(rules.private_type_leaks),
-            )
-        },
-    );
+    push_primary_dead_code_sarif_results(&mut sarif_results, results, root, rules, &mut snippets);
     push_dependency_sarif_results(&mut sarif_results, results, root, rules, &mut snippets);
     push_member_sarif_results(&mut sarif_results, results, root, rules, &mut snippets);
     push_sarif_results(
@@ -1253,6 +1206,67 @@ pub fn build_sarif(
     push_graph_sarif_results(&mut sarif_results, results, root, rules, &mut snippets);
     push_catalog_sarif_results(&mut sarif_results, results, root, rules, &mut snippets);
 
+    let sarif_rules = build_sarif_rules(rules);
+    sarif_document(&sarif_results, &sarif_rules)
+}
+
+fn push_primary_dead_code_sarif_results(
+    sarif_results: &mut Vec<serde_json::Value>,
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+    snippets: &mut SourceSnippetCache,
+) {
+    push_sarif_results(sarif_results, &results.unused_files, snippets, |finding| {
+        sarif_unused_file_fields(
+            &finding.file,
+            root,
+            severity_to_sarif_level(rules.unused_files),
+        )
+    });
+    push_sarif_results(
+        sarif_results,
+        &results.unused_exports,
+        snippets,
+        |finding| {
+            sarif_export_fields(
+                &finding.export,
+                root,
+                "fallow/unused-export",
+                severity_to_sarif_level(rules.unused_exports),
+                "Export",
+                "Re-export",
+            )
+        },
+    );
+    push_sarif_results(sarif_results, &results.unused_types, snippets, |finding| {
+        sarif_export_fields(
+            &finding.export,
+            root,
+            "fallow/unused-type",
+            severity_to_sarif_level(rules.unused_types),
+            "Type export",
+            "Type re-export",
+        )
+    });
+    push_sarif_results(
+        sarif_results,
+        &results.private_type_leaks,
+        snippets,
+        |finding| {
+            sarif_private_type_leak_fields(
+                &finding.leak,
+                root,
+                severity_to_sarif_level(rules.private_type_leaks),
+            )
+        },
+    );
+}
+
+fn sarif_document(
+    sarif_results: &[serde_json::Value],
+    sarif_rules: &[serde_json::Value],
+) -> serde_json::Value {
     serde_json::json!({
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
         "version": "2.1.0",
@@ -1262,7 +1276,7 @@ pub fn build_sarif(
                     "name": "fallow",
                     "version": env!("CARGO_PKG_VERSION"),
                     "informationUri": "https://github.com/fallow-rs/fallow",
-                    "rules": build_sarif_rules(rules)
+                    "rules": sarif_rules
                 }
             },
             "results": sarif_results
