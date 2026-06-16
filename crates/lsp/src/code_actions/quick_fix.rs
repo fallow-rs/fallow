@@ -114,14 +114,6 @@ fn declares_export_name(line_content: &str, prefix: &str, expected_name: &str) -
 }
 
 /// Build quick-fix code actions for unused exports (remove the `export` keyword).
-#[expect(
-    clippy::disallowed_types,
-    reason = "serde JSON deserialization produces std HashMap"
-)]
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "identifier/indent lengths are bounded by source size"
-)]
 pub fn build_remove_export_actions(
     results: &AnalysisResults,
     file_path: &Path,
@@ -144,87 +136,131 @@ pub fn build_remove_export_actions(
         ),
     ] {
         for export in exports {
-            if export.path != file_path {
-                continue;
-            }
-
-            let export_line = export.line.saturating_sub(1);
-
-            if export_line < cursor_range.start.line || export_line > cursor_range.end.line {
-                continue;
-            }
-
-            let line_content = file_lines.get(export_line as usize).copied().unwrap_or("");
-            let trimmed = line_content.trim_start();
-            let indent_len = line_content.len() - trimmed.len();
-
-            let prefix_to_remove = if trimmed.starts_with("export default ") {
-                Some("export default ")
-            } else if trimmed.starts_with("export ") {
-                Some("export ")
-            } else {
-                None
-            };
-
-            let Some(prefix) = prefix_to_remove else {
-                continue;
-            };
-
-            if prefix != "export default "
-                && !declares_export_name(line_content, prefix, &export.export_name)
+            if let Some(action) =
+                remove_export_action(export, msg_prefix, file_path, uri, cursor_range, file_lines)
             {
-                continue;
+                actions.push(action);
             }
-
-            let title = format!("Remove unused export `{}`", export.export_name);
-            let mut changes = HashMap::new();
-
-            let edit = TextEdit {
-                range: Range {
-                    start: Position {
-                        line: export_line,
-                        character: indent_len as u32,
-                    },
-                    end: Position {
-                        line: export_line,
-                        character: (indent_len + prefix.len()) as u32,
-                    },
-                },
-                new_text: String::new(),
-            };
-
-            changes.insert(uri.clone(), vec![edit]);
-
-            actions.push(CodeActionOrCommand::CodeAction(CodeAction {
-                title,
-                kind: Some(CodeActionKind::QUICKFIX),
-                edit: Some(WorkspaceEdit {
-                    changes: Some(changes),
-                    ..Default::default()
-                }),
-                diagnostics: Some(vec![Diagnostic {
-                    range: Range {
-                        start: Position {
-                            line: export_line,
-                            character: export.col,
-                        },
-                        end: Position {
-                            line: export_line,
-                            character: export.col + export.export_name.len() as u32,
-                        },
-                    },
-                    severity: Some(DiagnosticSeverity::HINT),
-                    source: Some("fallow".to_string()),
-                    message: format!("{msg_prefix} '{}' is unused", export.export_name),
-                    tags: Some(vec![DiagnosticTag::UNNECESSARY]),
-                    ..Default::default()
-                }]),
-                ..Default::default()
-            }));
         }
     }
 
     actions
+}
+
+#[expect(
+    clippy::disallowed_types,
+    reason = "serde JSON deserialization produces std HashMap"
+)]
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "identifier/indent lengths are bounded by source size"
+)]
+fn remove_export_action(
+    export: &fallow_core::results::UnusedExport,
+    msg_prefix: &str,
+    file_path: &Path,
+    uri: &Uri,
+    cursor_range: &Range,
+    file_lines: &[&str],
+) -> Option<CodeActionOrCommand> {
+    let (export_line, indent_len, prefix) =
+        remove_export_span(export, file_path, cursor_range, file_lines)?;
+    let mut changes = HashMap::new();
+    changes.insert(
+        uri.clone(),
+        vec![TextEdit {
+            range: Range {
+                start: Position {
+                    line: export_line,
+                    character: indent_len as u32,
+                },
+                end: Position {
+                    line: export_line,
+                    character: (indent_len + prefix.len()) as u32,
+                },
+            },
+            new_text: String::new(),
+        }],
+    );
+
+    Some(CodeActionOrCommand::CodeAction(CodeAction {
+        title: format!("Remove unused export `{}`", export.export_name),
+        kind: Some(CodeActionKind::QUICKFIX),
+        edit: Some(WorkspaceEdit {
+            changes: Some(changes),
+            ..Default::default()
+        }),
+        diagnostics: Some(vec![remove_export_diagnostic(
+            export,
+            msg_prefix,
+            export_line,
+        )]),
+        ..Default::default()
+    }))
+}
+
+fn remove_export_span(
+    export: &fallow_core::results::UnusedExport,
+    file_path: &Path,
+    cursor_range: &Range,
+    file_lines: &[&str],
+) -> Option<(u32, usize, &'static str)> {
+    if export.path != file_path {
+        return None;
+    }
+    let export_line = export.line.saturating_sub(1);
+    if export_line < cursor_range.start.line || export_line > cursor_range.end.line {
+        return None;
+    }
+
+    let line_content = file_lines.get(export_line as usize).copied().unwrap_or("");
+    let trimmed = line_content.trim_start();
+    let indent_len = line_content.len() - trimmed.len();
+    let prefix = export_prefix_to_remove(trimmed)?;
+    if prefix != "export default "
+        && !declares_export_name(line_content, prefix, &export.export_name)
+    {
+        return None;
+    }
+    Some((export_line, indent_len, prefix))
+}
+
+fn export_prefix_to_remove(trimmed: &str) -> Option<&'static str> {
+    if trimmed.starts_with("export default ") {
+        Some("export default ")
+    } else if trimmed.starts_with("export ") {
+        Some("export ")
+    } else {
+        None
+    }
+}
+
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "identifier lengths are bounded by source size"
+)]
+fn remove_export_diagnostic(
+    export: &fallow_core::results::UnusedExport,
+    msg_prefix: &str,
+    export_line: u32,
+) -> Diagnostic {
+    Diagnostic {
+        range: Range {
+            start: Position {
+                line: export_line,
+                character: export.col,
+            },
+            end: Position {
+                line: export_line,
+                character: export.col + export.export_name.len() as u32,
+            },
+        },
+        severity: Some(DiagnosticSeverity::HINT),
+        source: Some("fallow".to_string()),
+        message: format!("{msg_prefix} '{}' is unused", export.export_name),
+        tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+        ..Default::default()
+    }
 }
 
 /// Build quick-fix code actions for unused pnpm catalog entries
