@@ -22,6 +22,16 @@ pub fn filter_to_workspaces(
     let pkg_jsons: Vec<PathBuf> = ws_roots.iter().map(|r| r.join("package.json")).collect();
     let in_pkg_jsons = |p: &Path| pkg_jsons.iter().any(|pkg| p == pkg);
 
+    filter_workspace_source_findings(results, &any_under);
+    filter_workspace_dependency_findings(results, &any_under, &in_pkg_jsons);
+    filter_workspace_graph_findings(results, &any_under);
+    filter_workspace_policy_findings(results, &any_under);
+}
+
+fn filter_workspace_source_findings(
+    results: &mut fallow_core::results::AnalysisResults,
+    any_under: &dyn Fn(&Path) -> bool,
+) {
     results.unused_files.retain(|f| any_under(&f.file.path));
     results.unused_exports.retain(|e| any_under(&e.export.path));
     results.unused_types.retain(|e| any_under(&e.export.path));
@@ -58,7 +68,13 @@ pub fn filter_to_workspaces(
     results
         .unresolved_imports
         .retain(|i| any_under(&i.import.path));
+}
 
+fn filter_workspace_dependency_findings(
+    results: &mut fallow_core::results::AnalysisResults,
+    any_under: &dyn Fn(&Path) -> bool,
+    in_pkg_jsons: &dyn Fn(&Path) -> bool,
+) {
     results
         .unused_dependencies
         .retain(|d| in_pkg_jsons(&d.dep.path));
@@ -78,7 +94,14 @@ pub fn filter_to_workspaces(
     results
         .unlisted_dependencies
         .retain(|d| d.dep.imported_from.iter().any(|s| any_under(&s.path)));
+    results.unused_dependency_overrides.clear();
+    results.misconfigured_dependency_overrides.clear();
+}
 
+fn filter_workspace_graph_findings(
+    results: &mut fallow_core::results::AnalysisResults,
+    any_under: &dyn Fn(&Path) -> bool,
+) {
     for dup in &mut results.duplicate_exports {
         dup.export.locations.retain(|loc| any_under(&loc.path));
     }
@@ -93,7 +116,12 @@ pub fn filter_to_workspaces(
     results
         .re_export_cycles
         .retain(|c| c.cycle.files.iter().any(|f| any_under(f)));
+}
 
+fn filter_workspace_policy_findings(
+    results: &mut fallow_core::results::AnalysisResults,
+    any_under: &dyn Fn(&Path) -> bool,
+) {
     results
         .boundary_violations
         .retain(|v| any_under(&v.violation.from_path));
@@ -119,8 +147,6 @@ pub fn filter_to_workspaces(
     results
         .unresolved_catalog_references
         .retain(|r| any_under(&r.reference.path));
-    results.unused_dependency_overrides.clear();
-    results.misconfigured_dependency_overrides.clear();
 
     results
         .invalid_client_exports
