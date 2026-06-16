@@ -249,6 +249,7 @@ const PENALTY_LABELS: Record<keyof HealthScorePenalties, string> = {
   unit_size: "Unit size",
   coupling: "Coupling",
   duplication: "Duplication",
+  prop_drilling: "Prop drilling",
 };
 
 /**

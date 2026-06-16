@@ -140,6 +140,27 @@ pub struct RulesConfig {
     /// that without failing CI until corpus-validated.
     #[serde(default = "Severity::default_warn", alias = "unused-load-data-key")]
     pub unused_load_data_keys: Severity,
+    /// React/Preact prop forwarded unchanged through `>= N` intermediate
+    /// pass-through components until a component that substantively consumes it.
+    /// A graph-derived health signal. Defaults to `off` (opt-in), like
+    /// `private-type-leak` / `security-*`: the located per-chain records and the
+    /// small capped health penalty are dormant until the user enables the rule.
+    #[serde(default = "Severity::default_off", alias = "prop-drilling")]
+    pub prop_drilling: Severity,
+    /// A React/Preact component whose entire body is `return <Child {...props}/>`
+    /// (pure structural indirection, a candidate for inlining). A graph-derived
+    /// health signal. Defaults to `off` (opt-in), like `prop-drilling`: the
+    /// located per-wrapper records are dormant until the user enables the rule.
+    #[serde(default = "Severity::default_off", alias = "thin-wrapper")]
+    pub thin_wrapper: Severity,
+    /// Three or more React/Preact components across two or more files whose
+    /// statically-harvested prop NAME set is identical after stripping ubiquitous
+    /// DOM / passthrough names (a missing shared `Props` type / base component).
+    /// A graph-derived structural-refactor health signal. Defaults to `off`
+    /// (opt-in), like `thin-wrapper`: the located per-component records are
+    /// dormant until the user enables the rule.
+    #[serde(default = "Severity::default_off", alias = "duplicate-prop-shape")]
+    pub duplicate_prop_shape: Severity,
     #[serde(default, alias = "unresolved-import")]
     pub unresolved_imports: Severity,
     #[serde(default, alias = "unlisted-dependency")]
@@ -260,6 +281,9 @@ impl Default for RulesConfig {
             unused_component_emits: Severity::Warn,
             unused_server_actions: Severity::Warn,
             unused_load_data_keys: Severity::Warn,
+            prop_drilling: Severity::Off,
+            thin_wrapper: Severity::Off,
+            duplicate_prop_shape: Severity::Off,
             unresolved_imports: Severity::Error,
             unlisted_dependencies: Severity::Error,
             duplicate_exports: Severity::Error,
@@ -338,6 +362,15 @@ impl RulesConfig {
         }
         if let Some(s) = partial.unused_load_data_keys {
             self.unused_load_data_keys = s;
+        }
+        if let Some(s) = partial.prop_drilling {
+            self.prop_drilling = s;
+        }
+        if let Some(s) = partial.thin_wrapper {
+            self.thin_wrapper = s;
+        }
+        if let Some(s) = partial.duplicate_prop_shape {
+            self.duplicate_prop_shape = s;
         }
         if let Some(s) = partial.unresolved_imports {
             self.unresolved_imports = s;
@@ -516,6 +549,24 @@ pub struct PartialRulesConfig {
     pub unused_load_data_keys: Option<Severity>,
     #[serde(
         default,
+        alias = "prop-drilling",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub prop_drilling: Option<Severity>,
+    #[serde(
+        default,
+        alias = "thin-wrapper",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub thin_wrapper: Option<Severity>,
+    #[serde(
+        default,
+        alias = "duplicate-prop-shape",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub duplicate_prop_shape: Option<Severity>,
+    #[serde(
+        default,
         alias = "unresolved-import",
         skip_serializing_if = "Option::is_none"
     )]
@@ -681,6 +732,9 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unused-component-emits",
     "unused-server-actions",
     "unused-load-data-keys",
+    "prop-drilling",
+    "thin-wrapper",
+    "duplicate-prop-shape",
     "unresolved-imports",
     "unlisted-dependencies",
     "duplicate-exports",
@@ -1025,6 +1079,9 @@ mod tests {
             unused_component_emits: Some(Severity::Off),
             unused_server_actions: Some(Severity::Off),
             unused_load_data_keys: Some(Severity::Off),
+            prop_drilling: Some(Severity::Off),
+            thin_wrapper: Some(Severity::Off),
+            duplicate_prop_shape: Some(Severity::Off),
             unresolved_imports: Some(Severity::Off),
             unlisted_dependencies: Some(Severity::Off),
             duplicate_exports: Some(Severity::Off),
@@ -1113,7 +1170,7 @@ mod tests {
 
     #[test]
     fn known_rule_names_count_matches_struct() {
-        assert_eq!(KNOWN_RULE_NAMES.len(), 80);
+        assert_eq!(KNOWN_RULE_NAMES.len(), 83);
     }
 
     #[test]
@@ -1154,8 +1211,8 @@ mod tests {
 
         assert_eq!(
             aliases_found.len(),
-            80,
-            "expected 80 source-level alias attrs (40 per struct); got {}: {:?}",
+            86,
+            "expected 86 source-level alias attrs (43 per struct); got {}: {:?}",
             aliases_found.len(),
             aliases_found
         );

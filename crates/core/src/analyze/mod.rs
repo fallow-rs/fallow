@@ -1,6 +1,7 @@
 mod boundary;
 mod boundary_calls;
 mod boundary_coverage;
+mod duplicate_prop_shape;
 mod dynamic_segment_name_conflict;
 pub mod feature_flags;
 mod iconify;
@@ -10,11 +11,15 @@ mod mixed_barrel;
 mod package_json_utils;
 mod policy;
 mod predicates;
+mod prop_drilling;
 mod re_export_cycles;
+mod react_resolve;
+mod render_fan_in;
 mod route_collision;
 mod route_tree;
 mod security;
 mod server_only;
+mod thin_wrapper;
 mod unprovided_inject;
 mod unrendered_component;
 mod unused_catalog;
@@ -47,28 +52,33 @@ use crate::graph::ModuleGraph;
 use crate::resolve::ResolvedModule;
 use fallow_types::output_dead_code::{
     BoundaryCallViolationFinding, BoundaryCoverageViolationFinding, BoundaryViolationFinding,
-    CircularDependencyFinding, DuplicateExportFinding, DynamicSegmentNameConflictFinding,
-    EmptyCatalogGroupFinding, InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding,
-    MisplacedDirectiveFinding, MixedClientServerBarrelFinding, PolicyViolationFinding,
-    PrivateTypeLeakFinding, ReExportCycleFinding, RouteCollisionFinding, TestOnlyDependencyFinding,
-    TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
-    UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
-    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentEmitFinding,
-    UnusedComponentPropFinding, UnusedDependencyFinding, UnusedDependencyOverrideFinding,
-    UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
-    UnusedLoadDataKeyFinding, UnusedOptionalDependencyFinding, UnusedStoreMemberFinding,
-    UnusedTypeFinding,
+    CircularDependencyFinding, DuplicateExportFinding, DuplicatePropShapeFinding,
+    DynamicSegmentNameConflictFinding, EmptyCatalogGroupFinding, InvalidClientExportFinding,
+    MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
+    MixedClientServerBarrelFinding, PolicyViolationFinding, PrivateTypeLeakFinding,
+    PropDrillingChainFinding, ReExportCycleFinding, RouteCollisionFinding,
+    TestOnlyDependencyFinding, ThinWrapperFinding, TypeOnlyDependencyFinding,
+    UnlistedDependencyFinding, UnprovidedInjectFinding, UnrenderedComponentFinding,
+    UnresolvedCatalogReferenceFinding, UnresolvedImportFinding, UnusedCatalogEntryFinding,
+    UnusedClassMemberFinding, UnusedComponentEmitFinding, UnusedComponentPropFinding,
+    UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
+    UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
+    UnusedOptionalDependencyFinding, UnusedStoreMemberFinding, UnusedTypeFinding,
 };
 
 use crate::results::{AnalysisResults, CircularDependency, CircularDependencyEdge};
 use crate::suppress::{IssueKind, SuppressionContext};
 
+use duplicate_prop_shape::find_duplicate_prop_shapes;
 use dynamic_segment_name_conflict::find_dynamic_segment_name_conflicts;
 use invalid_client_exports::find_invalid_client_exports;
 use misplaced_directive::find_misplaced_directives;
 use mixed_barrel::find_mixed_client_server_barrels;
+use prop_drilling::find_prop_drilling_chains;
 use re_export_cycles::find_re_export_cycles;
+use render_fan_in::compute_render_fan_in;
 use route_collision::find_route_collisions;
+use thin_wrapper::find_thin_wrappers;
 use unprovided_inject::{UnprovidedInjectInput, find_unprovided_injects};
 use unrendered_component::find_unrendered_components;
 #[expect(
@@ -80,7 +90,7 @@ use unused_catalog::{
     gather_pnpm_catalog_state,
 };
 use unused_component_emit::find_unused_component_emits;
-use unused_component_prop::find_unused_component_props;
+use unused_component_prop::{find_unused_component_props, find_unused_react_props};
 #[expect(
     deprecated,
     reason = "ADR-008 deprecates detector helpers for external callers; core orchestration still calls them internally"
@@ -734,14 +744,11 @@ pub fn find_dead_code_full(
         &mut results,
     );
 
-    if config.rules.stale_suppressions != Severity::Off {
-        results
-            .stale_suppressions
-            .extend(suppressions.find_stale(graph, config));
-    }
-    results.suppression_count = suppressions.used_count();
-    results.active_suppressions = suppressions.all_suppressions(graph);
-
+    // Framework-convention detectors run BEFORE stale-suppression detection so
+    // any inline suppression they consume (e.g. a `// fallow-ignore-next-line
+    // unused-component-prop` honored by the prop/emit/component detectors) is
+    // recorded consumed and not falsely reported stale. These detectors gate on
+    // their own rule severity and dep presence, so they are no-ops when inactive.
     populate_pnpm_catalog_findings(config, workspaces, &mut results);
     populate_pnpm_override_findings(config, workspaces, &mut results);
     populate_framework_specific_findings(&mut FrameworkSpecificFindingsInput {
@@ -756,6 +763,14 @@ pub fn find_dead_code_full(
         line_offsets_by_file: &line_offsets_by_file,
         results: &mut results,
     });
+
+    if config.rules.stale_suppressions != Severity::Off {
+        results
+            .stale_suppressions
+            .extend(suppressions.find_stale(graph, config));
+    }
+    results.suppression_count = suppressions.used_count();
+    results.active_suppressions = suppressions.all_suppressions(graph);
 
     results.sort();
 
@@ -808,6 +823,7 @@ fn populate_framework_specific_findings(input: &mut FrameworkSpecificFindingsInp
         input.config,
         input.declared_deps,
         input.line_offsets_by_file,
+        input.suppressions,
         input.results,
     );
     populate_unused_component_emit_findings(
@@ -827,6 +843,10 @@ fn populate_framework_specific_findings(input: &mut FrameworkSpecificFindingsInp
         input.line_offsets_by_file,
         input.results,
     );
+    populate_prop_drilling_findings(input);
+    populate_thin_wrapper_findings(input);
+    populate_render_fan_in(input);
+    populate_duplicate_prop_shape_findings(input);
     populate_nextjs_route_tree_findings(
         input.graph,
         input.config,
@@ -834,6 +854,22 @@ fn populate_framework_specific_findings(input: &mut FrameworkSpecificFindingsInp
         input.declared_deps,
         input.suppressions,
         input.results,
+    );
+}
+
+/// Populate the descriptive component render fan-in metric (the component-graph
+/// analogue of module fan-in). UNLIKE the prop-drilling / thin-wrapper detectors
+/// this is NOT rule-gated: it is a descriptive blast-radius signal that runs
+/// whenever React is declared (the dep gate lives inside
+/// [`compute_render_fan_in`]). The field is `#[serde(skip)]` on
+/// [`AnalysisResults`], so it never serializes under bare `fallow` / `audit`; it
+/// is read in-process by the health vital-signs computation only.
+fn populate_render_fan_in(input: &mut FrameworkSpecificFindingsInput<'_>) {
+    input.results.render_fan_in = compute_render_fan_in(
+        input.graph,
+        input.modules,
+        input.resolved_modules,
+        input.declared_deps,
     );
 }
 
@@ -999,16 +1035,59 @@ fn populate_unused_component_prop_findings(
     config: &ResolvedConfig,
     declared_deps: &FxHashSet<String>,
     line_offsets_by_file: &LineOffsetsMap<'_>,
+    suppressions: &SuppressionContext<'_>,
     results: &mut AnalysisResults,
 ) {
     if config.rules.unused_component_props == Severity::Off {
         return;
     }
+    // Vue arm: one component per `.vue` SFC, flagged from `component_props`.
     results.unused_component_props =
         find_unused_component_props(graph, modules, declared_deps, line_offsets_by_file)
             .into_iter()
             .map(UnusedComponentPropFinding::with_actions)
             .collect();
+    // React/Preact arm: another producer of the SAME finding kind, emitting into
+    // the same vector. Gated on `react` / `react-dom` / `next` / `preact` inside
+    // the producer.
+    let react = find_unused_react_props(graph, modules, declared_deps, line_offsets_by_file);
+    if react.components_scanned > 0 {
+        // Observability: make a silent dep-gate or silent abstain visible (a
+        // scanned-but-zero-finding run is a clean bill, not a no-op). Surfaced at
+        // info level so `RUST_LOG=fallow_core=info` shows it.
+        tracing::info!(
+            components_scanned = react.components_scanned,
+            unused_props = react.findings.len(),
+            "React detected, {} component(s) scanned for unused props",
+            react.components_scanned
+        );
+    }
+    results.unused_component_props.extend(
+        react
+            .findings
+            .into_iter()
+            .map(UnusedComponentPropFinding::with_actions),
+    );
+
+    // Inline-suppression filter over BOTH arms: a `// fallow-ignore-next-line
+    // unused-component-prop` above the prop (or a file-level
+    // `// fallow-ignore-file unused-component-prop`) drops the finding. The
+    // finding's `path` is the absolute graph node path, so it maps directly to a
+    // FileId for the line-anchored suppression check.
+    let path_to_id: FxHashMap<&std::path::Path, FileId> = graph
+        .modules
+        .iter()
+        .map(|node| (node.path.as_path(), node.file_id))
+        .collect();
+    results.unused_component_props.retain(|finding| {
+        let Some(&file_id) = path_to_id.get(finding.prop.path.as_path()) else {
+            return true;
+        };
+        let suppressed =
+            suppressions.is_suppressed(file_id, finding.prop.line, IssueKind::UnusedComponentProp)
+                || suppressions.is_file_suppressed(file_id, IssueKind::UnusedComponentProp);
+        !suppressed
+    });
 }
 
 /// Populate `unused_component_emits` when the rule is enabled. Gated on the
@@ -1030,6 +1109,188 @@ fn populate_unused_component_emit_findings(
             .into_iter()
             .map(UnusedComponentEmitFinding::with_actions)
             .collect();
+}
+
+/// Populate `prop_drilling_chains` when the rule is enabled. The rule defaults to
+/// `off` (opt-in health signal), so this is dormant by default: the located
+/// per-chain records and the small capped health penalty appear only once the
+/// user sets `prop-drilling` to `warn`/`error`. Gated on the project declaring
+/// `react` / `react-dom` / `next` / `preact` inside the detector (see
+/// [`find_prop_drilling_chains`]).
+fn populate_prop_drilling_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
+    if input.config.rules.prop_drilling == Severity::Off {
+        return;
+    }
+    let scan = find_prop_drilling_chains(
+        input.graph,
+        input.modules,
+        input.resolved_modules,
+        input.declared_deps,
+        input.line_offsets_by_file,
+    );
+    if scan.components_scanned > 0 {
+        // Observability: a scanned-but-zero run is a clean bill, not a no-op.
+        tracing::info!(
+            components_scanned = scan.components_scanned,
+            prop_drilling_chains = scan.chains.len(),
+            "React detected, {} component(s) scanned for prop drilling",
+            scan.components_scanned
+        );
+    }
+    input.results.prop_drilling_chains = scan
+        .chains
+        .into_iter()
+        .map(PropDrillingChainFinding::with_actions)
+        .collect();
+
+    // Inline-suppression filter: a `// fallow-ignore-next-line prop-drilling`
+    // above the source prop declaration (or a file-level
+    // `// fallow-ignore-file prop-drilling` on the source file) drops the chain.
+    // The source hop's `file` is the absolute graph node path, so it maps to a
+    // FileId for the line-anchored check.
+    let path_to_id: FxHashMap<&std::path::Path, FileId> = input
+        .graph
+        .modules
+        .iter()
+        .map(|node| (node.path.as_path(), node.file_id))
+        .collect();
+    input.results.prop_drilling_chains.retain(|finding| {
+        let Some(source) = finding.chain.hops.first() else {
+            return true;
+        };
+        let Some(&file_id) = path_to_id.get(source.file.as_path()) else {
+            return true;
+        };
+        let suppressed =
+            input
+                .suppressions
+                .is_suppressed(file_id, source.line, IssueKind::PropDrilling)
+                || input
+                    .suppressions
+                    .is_file_suppressed(file_id, IssueKind::PropDrilling);
+        !suppressed
+    });
+}
+
+/// Populate `thin_wrappers` when the rule is enabled. The rule defaults to `off`
+/// (opt-in health signal), so this is dormant by default: the located
+/// per-wrapper records appear only once the user sets `thin-wrapper` to
+/// `warn`/`error`. Gated on the project declaring `react` / `react-dom` / `next`
+/// / `preact` inside the detector (see [`find_thin_wrappers`]).
+fn populate_thin_wrapper_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
+    if input.config.rules.thin_wrapper == Severity::Off {
+        return;
+    }
+    let scan = find_thin_wrappers(
+        input.graph,
+        input.modules,
+        input.resolved_modules,
+        input.declared_deps,
+        input.line_offsets_by_file,
+    );
+    if scan.components_scanned > 0 {
+        // Observability: a scanned-but-zero run is a clean bill, not a no-op.
+        tracing::info!(
+            components_scanned = scan.components_scanned,
+            thin_wrappers = scan.wrappers.len(),
+            "React detected, {} component(s) scanned for thin wrappers",
+            scan.components_scanned
+        );
+    }
+    input.results.thin_wrappers = scan
+        .wrappers
+        .into_iter()
+        .map(ThinWrapperFinding::with_actions)
+        .collect();
+
+    // Inline-suppression filter: a `// fallow-ignore-next-line thin-wrapper`
+    // above the wrapper component definition (or a file-level
+    // `// fallow-ignore-file thin-wrapper` on the wrapper's file) drops it. The
+    // wrapper's `file` is the absolute graph node path, so it maps to a FileId
+    // for the line-anchored check.
+    let path_to_id: FxHashMap<&std::path::Path, FileId> = input
+        .graph
+        .modules
+        .iter()
+        .map(|node| (node.path.as_path(), node.file_id))
+        .collect();
+    input.results.thin_wrappers.retain(|finding| {
+        let Some(&file_id) = path_to_id.get(finding.wrapper.file.as_path()) else {
+            return true;
+        };
+        let suppressed =
+            input
+                .suppressions
+                .is_suppressed(file_id, finding.wrapper.line, IssueKind::ThinWrapper)
+                || input
+                    .suppressions
+                    .is_file_suppressed(file_id, IssueKind::ThinWrapper);
+        !suppressed
+    });
+}
+
+/// Populate `duplicate_prop_shapes` when the rule is enabled. The rule defaults
+/// to `off` (opt-in structural-refactor health signal), so this is dormant by
+/// default: the located per-component records appear only once the user sets
+/// `duplicate-prop-shape` to `warn`/`error`. Gated on the project declaring
+/// `react` / `react-dom` / `next` / `preact` inside the detector (see
+/// [`find_duplicate_prop_shapes`]).
+///
+/// Multi-file suppress model (copied from route-collision): a per-member finding
+/// is dropped by a line-level (`// fallow-ignore-next-line duplicate-prop-shape`
+/// at its component definition) or a file-level
+/// (`// fallow-ignore-file duplicate-prop-shape`) suppress, but the suppressed
+/// member STILL appears in its siblings' `sharing_components`, because the
+/// `sharing_components` roster is built at emit time (before this filter) and
+/// the group is real regardless of suppression.
+fn populate_duplicate_prop_shape_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
+    if input.config.rules.duplicate_prop_shape == Severity::Off {
+        return;
+    }
+    let scan = find_duplicate_prop_shapes(
+        input.graph,
+        input.modules,
+        input.declared_deps,
+        input.line_offsets_by_file,
+    );
+    if scan.components_scanned > 0 {
+        // Observability: a scanned-but-zero run is a clean bill, not a no-op.
+        tracing::info!(
+            components_scanned = scan.components_scanned,
+            duplicate_prop_shapes = scan.groups.len(),
+            "React detected, {} component(s) scanned for duplicate prop shapes",
+            scan.components_scanned
+        );
+    }
+    input.results.duplicate_prop_shapes = scan
+        .groups
+        .into_iter()
+        .map(DuplicatePropShapeFinding::with_actions)
+        .collect();
+
+    // Inline-suppression filter: a line-level marker above the component
+    // definition or a file-level marker on the component's file drops THIS
+    // member; its slot in the siblings' `sharing_components` is unaffected (the
+    // roster was built at emit time).
+    let path_to_id: FxHashMap<&std::path::Path, FileId> = input
+        .graph
+        .modules
+        .iter()
+        .map(|node| (node.path.as_path(), node.file_id))
+        .collect();
+    input.results.duplicate_prop_shapes.retain(|finding| {
+        let Some(&file_id) = path_to_id.get(finding.shape.file.as_path()) else {
+            return true;
+        };
+        let suppressed = input.suppressions.is_suppressed(
+            file_id,
+            finding.shape.line,
+            IssueKind::DuplicatePropShape,
+        ) || input
+            .suppressions
+            .is_file_suppressed(file_id, IssueKind::DuplicatePropShape);
+        !suppressed
+    });
 }
 
 /// Populate `route_collisions` when the rule is enabled. Gated on the project
@@ -2031,6 +2292,9 @@ mod tests {
                 unused_component_emits: Severity::Off,
                 unused_server_actions: Severity::Off,
                 unused_load_data_keys: Severity::Off,
+                prop_drilling: Severity::Off,
+                thin_wrapper: Severity::Off,
+                duplicate_prop_shape: Severity::Off,
                 unresolved_imports: Severity::Off,
                 unlisted_dependencies: Severity::Off,
                 duplicate_exports: Severity::Off,
@@ -2299,6 +2563,10 @@ mod tests {
                 has_unharvestable_load: false,
                 has_load_data_whole_use: false,
                 has_page_data_store_whole_use: false,
+                component_functions: Vec::new(),
+                react_props: Vec::new(),
+                hook_uses: Vec::new(),
+                render_edges: Vec::new(),
             }];
 
             let rules = RulesConfig {

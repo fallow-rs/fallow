@@ -37,13 +37,14 @@ use crate::output::{
 };
 use crate::results::{
     BoundaryCallViolation, BoundaryCoverageViolation, BoundaryViolation, CircularDependency,
-    DependencyOverrideSource, DuplicateExport, DynamicSegmentNameConflict, EmptyCatalogGroup,
-    InvalidClientExport, MisconfiguredDependencyOverride, MisplacedDirective,
-    MixedClientServerBarrel, PolicyViolation, PrivateTypeLeak, ReExportCycle, ReExportCycleKind,
-    RouteCollision, TestOnlyDependency, TypeOnlyDependency, UnlistedDependency, UnprovidedInject,
-    UnrenderedComponent, UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry,
-    UnusedComponentEmit, UnusedComponentProp, UnusedDependency, UnusedDependencyOverride,
-    UnusedExport, UnusedFile, UnusedLoadDataKey, UnusedMember, UnusedServerAction,
+    DependencyOverrideSource, DuplicateExport, DuplicatePropShape, DynamicSegmentNameConflict,
+    EmptyCatalogGroup, InvalidClientExport, MisconfiguredDependencyOverride, MisplacedDirective,
+    MixedClientServerBarrel, PolicyViolation, PrivateTypeLeak, PropDrillingChain, ReExportCycle,
+    ReExportCycleKind, RouteCollision, TestOnlyDependency, ThinWrapper, TypeOnlyDependency,
+    UnlistedDependency, UnprovidedInject, UnrenderedComponent, UnresolvedCatalogReference,
+    UnresolvedImport, UnusedCatalogEntry, UnusedComponentEmit, UnusedComponentProp,
+    UnusedDependency, UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedLoadDataKey,
+    UnusedMember, UnusedServerAction,
 };
 
 /// Shared note for the `duplicate-exports` fix action. Mirrors the const used
@@ -1122,6 +1123,153 @@ impl UnusedComponentEmitFinding {
         })];
         Self {
             emit,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for a [`PropDrillingChain`] finding. There is no safe
+/// auto-fix: collapsing a drilling chain (colocate the consumer, lift to a
+/// context, or compose the component) is a design decision. The only action is a
+/// line-level suppress at the source hop's prop declaration. The rule defaults
+/// to `off` (opt-in health signal), so this finding is dormant by default.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PropDrillingChainFinding {
+    /// The underlying located chain.
+    #[serde(flatten)]
+    pub chain: PropDrillingChain,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl PropDrillingChainFinding {
+    /// Build the wrapper from a raw [`PropDrillingChain`]. Emits only a
+    /// line-level suppress action anchored at the source hop: there is no safe
+    /// auto-fix because collapsing the chain is a design decision (colocate,
+    /// lift to context, or compose).
+    #[must_use]
+    pub fn with_actions(chain: PropDrillingChain) -> Self {
+        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
+            kind: SuppressLineKind::SuppressLine,
+            auto_fixable: false,
+            description: "Suppress with an inline comment above the source prop declaration"
+                .to_string(),
+            comment: "// fallow-ignore-next-line prop-drilling".to_string(),
+            scope: None,
+        })];
+        Self {
+            chain,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for a [`ThinWrapper`] finding. There is no safe
+/// auto-fix: inlining a thin wrapper at its call sites (or deleting it) is a
+/// design decision. The only action is a line-level suppress at the wrapper's
+/// definition. The rule defaults to `off` (opt-in health signal), so this
+/// finding is dormant by default.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ThinWrapperFinding {
+    /// The underlying located thin wrapper.
+    #[serde(flatten)]
+    pub wrapper: ThinWrapper,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl ThinWrapperFinding {
+    /// Build the wrapper from a raw [`ThinWrapper`]. Emits only a line-level
+    /// suppress action anchored at the wrapper definition: there is no safe
+    /// auto-fix because inlining or deleting the wrapper is a design decision.
+    #[must_use]
+    pub fn with_actions(wrapper: ThinWrapper) -> Self {
+        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
+            kind: SuppressLineKind::SuppressLine,
+            auto_fixable: false,
+            description: "Suppress with an inline comment above the component definition"
+                .to_string(),
+            comment: "// fallow-ignore-next-line thin-wrapper".to_string(),
+            scope: None,
+        })];
+        Self {
+            wrapper,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for a [`DuplicatePropShape`] finding. There is no safe
+/// auto-fix: extracting a shared `Props` type or a base component for a group of
+/// same-shaped components is a design decision. The actions are manual guidance
+/// (extract the shared shape) plus a line-level suppress at the component
+/// definition and a file-level suppress escape hatch (mirroring the
+/// route-collision multi-file model). The rule defaults to `off` (opt-in health
+/// signal), so this finding is dormant by default.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct DuplicatePropShapeFinding {
+    /// The underlying duplicate-prop-shape entry.
+    #[serde(flatten)]
+    pub shape: DuplicatePropShape,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl DuplicatePropShapeFinding {
+    /// Build the wrapper from a raw [`DuplicatePropShape`]. Manual guidance is
+    /// the primary action (extract a shared shape); a line-level suppress at the
+    /// component definition and a file-level suppress escape hatch follow,
+    /// mirroring the multi-file route-collision suppress model. There is no safe
+    /// auto-fix because extracting a shared type or base component is a design
+    /// decision.
+    #[must_use]
+    pub fn with_actions(shape: DuplicatePropShape) -> Self {
+        let actions = vec![
+            IssueAction::SuppressLine(SuppressLineAction {
+                kind: SuppressLineKind::SuppressLine,
+                auto_fixable: false,
+                description: "Three or more components share this exact prop shape. Extract one \
+                              shared `Props` type (or a base component) that every member reuses, \
+                              or keep them separate if a per-variant divergence is planned. \
+                              Suppress one member with an inline comment above the component \
+                              definition."
+                    .to_string(),
+                comment: "// fallow-ignore-next-line duplicate-prop-shape".to_string(),
+                scope: None,
+            }),
+            IssueAction::SuppressFile(SuppressFileAction {
+                kind: SuppressFileKind::SuppressFile,
+                auto_fixable: false,
+                description: "Escape hatch: a file-level suppress silences this member but it \
+                              still appears in its siblings' `sharing_components` (the group is \
+                              real regardless of suppression)."
+                    .to_string(),
+                comment: "// fallow-ignore-file duplicate-prop-shape".to_string(),
+            }),
+        ];
+        Self {
+            shape,
             actions,
             introduced: None,
         }

@@ -17,6 +17,16 @@ pub const MI_DENSITY_MIN_LINES: f64 = 50.0;
 
 pub const HEALTH_SCORE_FORMULA_VERSION: u32 = 2;
 
+/// `skip_serializing_if` predicate: drop a `u16` field from JSON when zero, so
+/// the React descriptive counts never bloat non-React complexity findings.
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde skip_serializing_if requires a by-reference predicate"
+)]
+fn is_zero_u16(value: &u16) -> bool {
+    *value == 0
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HealthScore {
@@ -50,6 +60,10 @@ pub struct HealthScorePenalties {
     pub coupling: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duplication: Option<f64>,
+    /// Small capped penalty for prop-drilling chains. `None` unless the opt-in
+    /// `prop-drilling` rule is enabled; sized like the coupling penalty (~5pt cap).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prop_drilling: Option<f64>,
 }
 
 /// Map a numeric score (0–100) to a letter grade.
@@ -137,6 +151,58 @@ pub fn summarize_coverage_source_consistency(
     first.map(|_| CoverageSourceConsistency::Uniform)
 }
 
+/// Per-component React hook profile derived from the cached `hook_uses` IR at
+/// the health layer. Descriptive context that refines the bare
+/// [`ComplexityViolation::react_hook_count`] headline with a per-kind breakdown
+/// and the maximum `useEffect` dependency-array arity.
+///
+/// Attached only when at least one component-scope hook was attributed to the
+/// function, so non-React findings stay byte-identical on the wire. The
+/// per-kind counts cover hooks recorded by the React visitor (calls inside an
+/// identified component); a `use*` call inside a plain helper function is
+/// counted in `react_hook_count` but NOT here, so the breakdown can sum to LESS
+/// than `react_hook_count`. `react_hook_count` remains the headline total; this
+/// is an additive refinement.
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ReactHookProfile {
+    /// `useState` call count attributed to this component.
+    pub state: u16,
+    /// `useEffect` call count attributed to this component.
+    pub effect: u16,
+    /// `useMemo` call count attributed to this component.
+    pub memo: u16,
+    /// `useCallback` call count attributed to this component.
+    pub callback: u16,
+    /// Custom `use*` hook call count attributed to this component.
+    pub custom: u16,
+    /// Largest `useEffect` dependency-array arity over the attributed effects
+    /// that carry a literal deps array. `None` when no attributed `useEffect`
+    /// had a literal array (absent or non-literal deps; ADR-001 syntactic-only,
+    /// so absence does NOT mean "no coupling").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_effect_dep_arity: Option<u32>,
+}
+
+impl ReactHookProfile {
+    /// Total component-scope hooks attributed (state + effect + memo + callback
+    /// + custom). Used to gate whether the profile is surfaced at all.
+    #[must_use]
+    pub fn total(&self) -> u16 {
+        self.state
+            .saturating_add(self.effect)
+            .saturating_add(self.memo)
+            .saturating_add(self.callback)
+            .saturating_add(self.custom)
+    }
+
+    /// `true` when no hook was attributed, so the profile carries no signal.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.total() == 0
+    }
+}
+
 /// Inner complexity-violation payload.
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -150,6 +216,26 @@ pub struct ComplexityViolation {
     pub cognitive: u16,
     pub line_count: u32,
     pub param_count: u8,
+    /// Number of React hook calls in this function's body (`useState` /
+    /// `useEffect` / `useMemo` / `useCallback` / custom `use*`). Descriptive
+    /// hotspot context for React components; omitted when zero (non-React).
+    #[serde(default, skip_serializing_if = "is_zero_u16")]
+    pub react_hook_count: u16,
+    /// Deepest JSX element nesting reached in this function's body. Descriptive
+    /// hotspot context; omitted when zero (renders no JSX).
+    #[serde(default, skip_serializing_if = "is_zero_u16")]
+    pub react_jsx_max_depth: u16,
+    /// Number of props destructured from this component's first parameter.
+    /// Descriptive hotspot context; omitted when zero.
+    #[serde(default, skip_serializing_if = "is_zero_u16")]
+    pub react_prop_count: u16,
+    /// Per-kind React hook breakdown (state/effect/memo/callback/custom) plus
+    /// the max `useEffect` dependency-array arity, derived from the cached
+    /// `hook_uses` IR at the health layer. Descriptive refinement of
+    /// `react_hook_count`; present only when at least one component-scope hook
+    /// was attributed, so non-React findings stay byte-identical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub react_hook_profile: Option<ReactHookProfile>,
     pub exceeded: ExceededThreshold,
     pub severity: FindingSeverity,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -674,6 +760,7 @@ mod tests {
                 unit_size: None,
                 coupling: None,
                 duplication: None,
+                prop_drilling: None,
             },
         };
         let json = serde_json::to_string(&score).unwrap();

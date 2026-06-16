@@ -1273,6 +1273,52 @@ fn build_structure_section(
     );
 }
 
+/// Render the three opt-in React/Preact component-health grouped sections
+/// (prop-drilling, thin-wrapper, duplicate-prop-shape). Each defaults to `off`,
+/// so an empty collection renders nothing. Extracted from `build_policy_section`
+/// to keep that function under the unit-size ceiling.
+fn push_react_component_health_sections(
+    lines: &mut Vec<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+) {
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.prop_drilling_chains,
+        title: "Prop drilling",
+        level: severity_to_level(rules.prop_drilling),
+        root,
+        max_files: MAX_FLAT_ITEMS,
+        get_path: prop_drilling_anchor,
+        format_detail: &format_prop_drilling_chain,
+    });
+
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.thin_wrappers,
+        title: "Thin wrappers",
+        level: severity_to_level(rules.thin_wrapper),
+        root,
+        max_files: MAX_FLAT_ITEMS,
+        get_path: |w: &fallow_types::output_dead_code::ThinWrapperFinding| w.wrapper.file.as_path(),
+        format_detail: &format_thin_wrapper,
+    });
+
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.duplicate_prop_shapes,
+        title: "Duplicate prop shapes",
+        level: severity_to_level(rules.duplicate_prop_shape),
+        root,
+        max_files: MAX_FLAT_ITEMS,
+        get_path: |d: &fallow_types::output_dead_code::DuplicatePropShapeFinding| {
+            d.shape.file.as_path()
+        },
+        format_detail: &format_duplicate_prop_shape,
+    });
+}
+
 /// Build the Policy category (rule-pack findings). Separate from Structure
 /// because policy is user-authored project rules, not architecture analysis.
 fn build_policy_section(
@@ -1294,6 +1340,9 @@ fn build_policy_section(
         && results.unused_load_data_keys.is_empty()
         && results.route_collisions.is_empty()
         && results.dynamic_segment_name_conflicts.is_empty()
+        && results.prop_drilling_chains.is_empty()
+        && results.thin_wrappers.is_empty()
+        && results.duplicate_prop_shapes.is_empty()
     {
         return;
     }
@@ -1378,6 +1427,8 @@ fn build_policy_section(
         format_detail: &format_unused_component_prop,
     });
 
+    push_react_component_health_sections(lines, results, root, rules);
+
     build_human_grouped_section(GroupedSectionInput {
         lines,
         items: &results.unused_component_emits,
@@ -1417,6 +1468,18 @@ fn build_policy_section(
         format_detail: &format_unused_load_data_key,
     });
 
+    build_route_tree_policy_sections(lines, results, root, rules);
+}
+
+/// Render the Next.js App Router route-tree policy sections (route collisions
+/// and dynamic-segment name conflicts). Split out of `build_policy_section` to
+/// keep that orchestrator under the unit-size limit.
+fn build_route_tree_policy_sections(
+    lines: &mut Vec<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+) {
     build_human_grouped_section(GroupedSectionInput {
         lines,
         items: &results.route_collisions,
@@ -1524,6 +1587,71 @@ fn format_unused_component_prop(
         format!(":{}", p.line).dimmed(),
         p.prop_name.bold(),
         "is declared but referenced nowhere in this component (remove it or use it)".dimmed(),
+    )
+}
+
+/// Anchor a prop-drilling chain to its SOURCE hop file for grouped display.
+fn prop_drilling_anchor(
+    c: &fallow_types::output_dead_code::PropDrillingChainFinding,
+) -> &std::path::Path {
+    c.chain
+        .hops
+        .first()
+        .map_or_else(|| std::path::Path::new(""), |h| h.file.as_path())
+}
+
+fn format_prop_drilling_chain(
+    entry: &fallow_types::output_dead_code::PropDrillingChainFinding,
+) -> String {
+    let c = &entry.chain;
+    let trail = c
+        .hops
+        .iter()
+        .map(|h| h.component.as_str())
+        .collect::<Vec<_>>()
+        .join(" \u{2192} ");
+    let line = c.hops.first().map_or(0, |h| h.line);
+    format!(
+        "{} {} {}",
+        format!(":{line}").dimmed(),
+        c.prop.bold(),
+        format!(
+            "is forwarded unused through {trail} (depth {}); colocate the consumer or lift it to a \
+             context at a mid-chain hop",
+            c.depth
+        )
+        .dimmed(),
+    )
+}
+
+fn format_thin_wrapper(entry: &fallow_types::output_dead_code::ThinWrapperFinding) -> String {
+    let w = &entry.wrapper;
+    format!(
+        "{} {} {}",
+        format!(":{}", w.line).dimmed(),
+        w.component.bold(),
+        format!(
+            "is a thin wrapper around {} (candidate for inlining at call sites or deleting)",
+            w.child_component
+        )
+        .dimmed(),
+    )
+}
+
+fn format_duplicate_prop_shape(
+    entry: &fallow_types::output_dead_code::DuplicatePropShapeFinding,
+) -> String {
+    let d = &entry.shape;
+    format!(
+        "{} {} {}",
+        format!(":{}", d.line).dimmed(),
+        d.component.bold(),
+        format!(
+            "shares an identical prop shape {{{}}} with {} other component(s) (extract a shared Props type)",
+            d.shape.join(", "),
+            d.group_size.saturating_sub(1)
+        )
+        .dimmed(),
     )
 }
 

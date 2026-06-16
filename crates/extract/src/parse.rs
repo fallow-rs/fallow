@@ -103,6 +103,10 @@ fn parse_source_to_module_inner(
         crate::suppress::parse_suppressions(&parser_return.program.comments, source);
 
     let mut extractor = ModuleInfoExtractor::new();
+    // Gate the React/JSX structural walk on a JSX-capable parse so it is a
+    // no-op on non-JSX files (perf: the `audit` hot path on non-React repos
+    // must not regress).
+    extractor.jsx_capable = source_type.is_jsx();
     extractor.visit_program(&parser_return.program);
     extractor.resolve_pending_local_export_specifiers();
 
@@ -208,6 +212,9 @@ fn parse_with_jsx_retry(input: &JsxRetryInput<'_>) -> Option<JsxRetryParse> {
     let allocator = Allocator::default();
     let retry_return = Parser::new(&allocator, input.parser_source, jsx_type).parse();
     let mut extractor = ModuleInfoExtractor::new();
+    // The retry re-parses a `.js`/`.ts` file that turned out to contain JSX, so
+    // the JSX structural walk applies here too.
+    extractor.jsx_capable = true;
     extractor.visit_program(&retry_return.program);
     extractor.resolve_pending_local_export_specifiers();
     let retry_total =

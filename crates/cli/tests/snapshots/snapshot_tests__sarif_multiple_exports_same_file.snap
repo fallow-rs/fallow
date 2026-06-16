@@ -354,10 +354,10 @@ expression: redact_sarif_version(&json_str)
             {
               "id": "fallow/unused-component-prop",
               "shortDescription": {
-                "text": "A Vue <script setup> defineProps prop is referenced nowhere in its own component"
+                "text": "A Vue defineProps prop or React component prop is referenced nowhere in its own component"
               },
               "fullDescription": {
-                "text": "A Vue `<script setup>` defineProps declared prop that is referenced nowhere in its own component (neither script nor template). vue-tsc / Volar check caller-side prop correctness, not this in-component dead-input direction. Conservative: abstains on `$attrs` fallthrough, whole-object props use, defineExpose, defineModel, and imported prop-type aliases. Default warn; suppress or remove the prop."
+                "text": "A declared component prop referenced nowhere inside its own component, in either of two framework shapes: a Vue `<script setup>` defineProps prop (unused in neither script nor template), or a React/Preact prop destructured from a component's first parameter and read nowhere in its body. vue-tsc / Volar / tsc check caller-side prop correctness, not this in-component dead-input direction. Conservative: Vue abstains on `$attrs` fallthrough, whole-object props use, defineExpose, defineModel, and imported prop-type aliases; React abstains on rest spread (`{...rest}`), props forwarded by spread, props passed wholesale to a hook, `forwardRef` / imported-interface props, and exported public-API component props. Default warn; suppress or remove the prop."
               },
               "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-component-props",
               "defaultConfiguration": {
@@ -401,6 +401,45 @@ expression: redact_sarif_version(&json_str)
               "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-load-data-keys",
               "defaultConfiguration": {
                 "level": "warning"
+              }
+            },
+            {
+              "id": "fallow/prop-drilling",
+              "shortDescription": {
+                "text": "A React/Preact prop is forwarded unchanged through 3+ pass-through components to a distant consumer"
+              },
+              "fullDescription": {
+                "text": "A React/Preact prop is received by a component, forwarded UNCHANGED to a child, and forwarded again through two or more intermediate \"pass-through\" components until a component that substantively uses it. The high-confidence signal is that the received identifier appears ONLY as the root of forwarded child-JSX attribute values (so `<Child userName={user.name}/>` counts: the prop `user` is projected forward), not the attribute name matching. fallow emits located per-chain records (the source, each pass-through hop, and the consumer with file + line + component name) so CI and an agent can act: colocate the consumer with the data, lift the value to a React context/provider at a mid-chain hop, or compose the component so the intermediates no longer thread the prop. This is a graph-derived health signal, not a correctness error. The rule defaults to OFF (opt-in), like private-type-leak and the security rules: enable it with `prop-drilling: \"warn\"` in `rules`. Zero false positives by construction: any `{...props}` spread, `cloneElement`, element-as-prop / render-prop / children-as-function, or context `*.Provider` anywhere in the chain abstains the whole chain, as does an ambiguous or unresolvable hop. The check runs only when the project declares `react` / `react-dom` / `next` / `preact`."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#prop-drilling",
+              "defaultConfiguration": {
+                "level": "none"
+              }
+            },
+            {
+              "id": "fallow/thin-wrapper",
+              "shortDescription": {
+                "text": "A React/Preact component whose whole body is a single spread-forwarded child render (a candidate for inlining)"
+              },
+              "fullDescription": {
+                "text": "A React/Preact component whose ENTIRE body is structural indirection: it returns exactly one capitalized component element that forwards the component's own props via a bare spread (`return <Child {...props}/>`), with no host-element wrapper, no extra children, no named attributes alongside the spread, no hooks, no branching, and no other statements. Such a component adds nothing of its own: it is a CANDIDATE for inlining at its call sites or deleting, not a correctness error. fallow emits a located per-wrapper record (file + line + the wrapper and child component names) so CI and an agent can act. The rule defaults to OFF (opt-in), like prop-drilling and the security rules: enable it with `thin-wrapper: \"warn\"` in `rules`. Zero false positives by construction: a `forwardRef` / `memo` wrapper (the sanctioned way to make a child ref-able or set a perf boundary), an EXPORTED component (a public-API re-brand / encapsulation), a context `*.Provider` wrapper, a `cloneElement` / render-prop forward, a wrapper that passes ANY named attribute alongside the spread (a fixed configuration), a self-render, or an unresolvable / member-expression child all abstain. A TypeScript-only type-narrowing wrapper (`const StrictButton = (p: StrictProps) => <Button {...p}/>`) is a known limitation under ADR-001's syntactic analysis; suppress it with the inline comment. The check runs only when the project declares `react` / `react-dom` / `next` / `preact`."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#thin-wrapper",
+              "defaultConfiguration": {
+                "level": "none"
+              }
+            },
+            {
+              "id": "fallow/duplicate-prop-shape",
+              "shortDescription": {
+                "text": "Three or more React/Preact components across two or more files declare an identical prop-name set (a missing shared Props type)"
+              },
+              "fullDescription": {
+                "text": "Three or more distinct React/Preact components, living in two or more files, whose statically-harvested prop NAME set is byte-for-byte IDENTICAL after (a) excluding a fixed denylist of ubiquitous DOM / render-passthrough prop names (className, style, id, children, key, ref, the common event handlers, plus data-* / aria-* by prefix) and (b) requiring the REMAINING significant set to have four or more members. Identity is over NAMES only, never types (ADR-001 cannot resolve types). This is a structural-refactor health signal: the recurring shape is a missing shared abstraction, so extract one shared `Props` type (or a base component) that every member reuses. It is never a correctness error and never an auto-fix. fallow emits one located record per participating component, each naming the shared `shape`, the `group_size`, and the OTHER members in `sharing_components`. The rule defaults to OFF (opt-in), like thin-wrapper and the security rules: enable it with `duplicate-prop-shape: \"warn\"` in `rules`. Anti-noise gates (defended as rule-of-three plus a denylist-survivor floor, not tuned magic): the four-significant-prop floor turns `{label, onClick}` buttons into non-findings; the three-component floor is the rule-of-three abstraction trigger; the two-file floor keeps a local same-shaped variant pair (a render-prop pair, a Foo/FooImpl split) unflagged. A component whose props are not fully harvestable (a rest/spread signature, a forwardRef/memo over an imported interface) ABSTAINS, because a partial prop set can never be proven identical. Exact full-set identity ONLY: a superset / subset relationship does NOT group, so a four-prop group and a five-prop superset form TWO findings (the price of zero invalid groups: the finding always fits one extracted shared type). The check runs only when the project declares `react` / `react-dom` / `next` / `preact`."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#duplicate-prop-shape",
+              "defaultConfiguration": {
+                "level": "none"
               }
             },
             {

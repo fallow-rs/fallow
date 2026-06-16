@@ -5,14 +5,14 @@ use fallow_config::{RulesConfig, Severity};
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::{
     AnalysisResults, BoundaryCallViolation, BoundaryCoverageViolation, BoundaryViolation,
-    CircularDependency, DuplicateExportFinding, DynamicSegmentNameConflict,
+    CircularDependency, DuplicateExportFinding, DuplicatePropShape, DynamicSegmentNameConflict,
     EmptyCatalogGroupFinding, InvalidClientExport, MisconfiguredDependencyOverrideFinding,
     MisplacedDirective, MixedClientServerBarrel, PolicyViolation, PolicyViolationSeverity,
-    PrivateTypeLeak, RouteCollision, StaleSuppression, TestOnlyDependency, TypeOnlyDependency,
-    UnlistedDependencyFinding, UnprovidedInject, UnrenderedComponent,
-    UnresolvedCatalogReferenceFinding, UnresolvedImport, UnusedCatalogEntryFinding,
-    UnusedComponentEmit, UnusedComponentProp, UnusedDependency, UnusedDependencyOverrideFinding,
-    UnusedExport, UnusedFile, UnusedMember, UnusedServerAction,
+    PrivateTypeLeak, PropDrillingChain, RouteCollision, StaleSuppression, TestOnlyDependency,
+    ThinWrapper, TypeOnlyDependency, UnlistedDependencyFinding, UnprovidedInject,
+    UnrenderedComponent, UnresolvedCatalogReferenceFinding, UnresolvedImport,
+    UnusedCatalogEntryFinding, UnusedComponentEmit, UnusedComponentProp, UnusedDependency,
+    UnusedDependencyOverrideFinding, UnusedExport, UnusedFile, UnusedMember, UnusedServerAction,
 };
 use rustc_hash::FxHashMap;
 
@@ -674,6 +674,71 @@ fn sarif_unused_load_data_key_fields(
     }
 }
 
+fn sarif_prop_drilling_fields(
+    chain: &PropDrillingChain,
+    root: &Path,
+    level: &'static str,
+) -> SarifFields {
+    // Anchor at the source hop (the prop owner). Path / line come from the first
+    // hop; the message names the depth and the consumer at the chain tail.
+    let source = chain.hops.first();
+    let consumer = chain.hops.last();
+    let (path, line) = source.map_or((std::path::PathBuf::new(), 1), |h| (h.file.clone(), h.line));
+    let consumer_name = consumer.map_or("a distant component", |h| h.component.as_str());
+    SarifFields {
+        rule_id: "fallow/prop-drilling",
+        level,
+        message: format!(
+            "prop \"{}\" is forwarded unchanged through {} component(s) before \"{}\" consumes it; colocate, lift to context, or compose",
+            chain.prop, chain.depth, consumer_name
+        ),
+        uri: relative_uri(&path, root),
+        region: Some((line, 1)),
+        source_path: Some(path),
+        properties: None,
+    }
+}
+
+fn sarif_thin_wrapper_fields(
+    wrapper: &ThinWrapper,
+    root: &Path,
+    level: &'static str,
+) -> SarifFields {
+    SarifFields {
+        rule_id: "fallow/thin-wrapper",
+        level,
+        message: format!(
+            "\"{}\" is a thin wrapper: its whole body forwards props to \"{}\"; inline it at call sites or delete it",
+            wrapper.component, wrapper.child_component
+        ),
+        uri: relative_uri(&wrapper.file, root),
+        region: Some((wrapper.line, 1)),
+        source_path: Some(wrapper.file.clone()),
+        properties: None,
+    }
+}
+
+fn sarif_duplicate_prop_shape_fields(
+    shape: &DuplicatePropShape,
+    root: &Path,
+    level: &'static str,
+) -> SarifFields {
+    SarifFields {
+        rule_id: "fallow/duplicate-prop-shape",
+        level,
+        message: format!(
+            "\"{}\" shares an identical prop shape {{{}}} with {} other component(s); extract a shared Props type or base component",
+            shape.component,
+            shape.shape.join(", "),
+            shape.group_size.saturating_sub(1)
+        ),
+        uri: relative_uri(&shape.file, root),
+        region: Some((shape.line, 1)),
+        source_path: Some(shape.file.clone()),
+        properties: None,
+    }
+}
+
 fn sarif_route_collision_fields(
     collision: &RouteCollision,
     root: &Path,
@@ -1107,6 +1172,21 @@ fn sarif_graph_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
             rules.unused_load_data_keys,
         ),
         (
+            "fallow/prop-drilling",
+            "A React/Preact prop forwarded unchanged through 3+ pass-through components to a distant consumer",
+            rules.prop_drilling,
+        ),
+        (
+            "fallow/thin-wrapper",
+            "A React/Preact component whose whole body is a single spread-forwarded child render (a candidate for inlining)",
+            rules.thin_wrapper,
+        ),
+        (
+            "fallow/duplicate-prop-shape",
+            "Three or more React/Preact components across two or more files declare an identical prop-name set (a missing shared Props type)",
+            rules.duplicate_prop_shape,
+        ),
+        (
             "fallow/route-collision",
             "Two or more Next.js App Router route files resolve to the same URL",
             rules.route_collision,
@@ -1446,6 +1526,33 @@ fn push_component_contract_sarif_results(
                 &k.key,
                 root,
                 severity_to_sarif_level(rules.unused_load_data_keys),
+            )
+        },
+    );
+    push_sarif_results(
+        sarif_results,
+        &results.prop_drilling_chains,
+        snippets,
+        |c| {
+            sarif_prop_drilling_fields(&c.chain, root, severity_to_sarif_level(rules.prop_drilling))
+        },
+    );
+    push_sarif_results(sarif_results, &results.thin_wrappers, snippets, |w| {
+        sarif_thin_wrapper_fields(
+            &w.wrapper,
+            root,
+            severity_to_sarif_level(rules.thin_wrapper),
+        )
+    });
+    push_sarif_results(
+        sarif_results,
+        &results.duplicate_prop_shapes,
+        snippets,
+        |d| {
+            sarif_duplicate_prop_shape_fields(
+                &d.shape,
+                root,
+                severity_to_sarif_level(rules.duplicate_prop_shape),
             )
         },
     );
@@ -2343,14 +2450,17 @@ mod tests {
         let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
             .as_array()
             .expect("rules should be an array");
-        assert_eq!(rules.len(), 38);
+        assert_eq!(rules.len(), 41);
 
         let rule_ids: Vec<&str> = rules.iter().map(|r| r["id"].as_str().unwrap()).collect();
+        assert!(rule_ids.contains(&"fallow/duplicate-prop-shape"));
+        assert!(rule_ids.contains(&"fallow/thin-wrapper"));
         assert!(rule_ids.contains(&"fallow/unrendered-component"));
         assert!(rule_ids.contains(&"fallow/unused-component-prop"));
         assert!(rule_ids.contains(&"fallow/unused-component-emit"));
         assert!(rule_ids.contains(&"fallow/unused-server-action"));
         assert!(rule_ids.contains(&"fallow/unused-load-data-key"));
+        assert!(rule_ids.contains(&"fallow/prop-drilling"));
         assert!(rule_ids.contains(&"fallow/route-collision"));
         assert!(rule_ids.contains(&"fallow/dynamic-segment-name-conflict"));
         assert!(rule_ids.contains(&"fallow/unused-file"));
@@ -2741,6 +2851,10 @@ mod tests {
                     cognitive: 10,
                     line_count: 80,
                     param_count: 0,
+                    react_hook_count: 0,
+                    react_jsx_max_depth: 0,
+                    react_prop_count: 0,
+                    react_hook_profile: None,
                     exceeded: crate::health_types::ExceededThreshold::Cyclomatic,
                     severity: crate::health_types::FindingSeverity::High,
                     crap: None,
@@ -2796,6 +2910,10 @@ mod tests {
                     cognitive: 20,
                     line_count: 40,
                     param_count: 0,
+                    react_hook_count: 0,
+                    react_jsx_max_depth: 0,
+                    react_prop_count: 0,
+                    react_hook_profile: None,
                     exceeded: crate::health_types::ExceededThreshold::Cognitive,
                     severity: crate::health_types::FindingSeverity::High,
                     crap: None,
@@ -2845,6 +2963,10 @@ mod tests {
                     cognitive: 45,
                     line_count: 100,
                     param_count: 0,
+                    react_hook_count: 0,
+                    react_jsx_max_depth: 0,
+                    react_prop_count: 0,
+                    react_hook_profile: None,
                     exceeded: crate::health_types::ExceededThreshold::Both,
                     severity: crate::health_types::FindingSeverity::High,
                     crap: None,
@@ -2889,6 +3011,10 @@ mod tests {
                     cognitive: 10,
                     line_count: 20,
                     param_count: 1,
+                    react_hook_count: 0,
+                    react_jsx_max_depth: 0,
+                    react_prop_count: 0,
+                    react_hook_profile: None,
                     exceeded: crate::health_types::ExceededThreshold::Crap,
                     severity: crate::health_types::FindingSeverity::High,
                     crap: Some(82.2),
@@ -2933,6 +3059,10 @@ mod tests {
                     cognitive: 12,
                     line_count: 80,
                     param_count: 1,
+                    react_hook_count: 0,
+                    react_jsx_max_depth: 0,
+                    react_prop_count: 0,
+                    react_hook_profile: None,
                     exceeded: crate::health_types::ExceededThreshold::CyclomaticCrap,
                     severity: crate::health_types::FindingSeverity::Critical,
                     crap: Some(182.0),

@@ -243,6 +243,33 @@ fn apply_source_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
             m.filter_flag = Some("--unused-load-data-keys");
             m.suppress = Some(("unused-load-data-key", false));
         }
+        "prop-drilling" => {
+            // Dormant health signal (rule defaults to off); suppress-only, no
+            // dead-code filter flag. The line-level suppress anchors at the
+            // source prop declaration (the first hop).
+            m.suppress = Some(("prop-drilling", false));
+            m.note = Some(
+                "Opt-in: set rules.prop-drilling to warn or error to enable. Defaults to off.",
+            );
+        }
+        "thin-wrapper" => {
+            // Dormant health signal (rule defaults to off); suppress-only, no
+            // dead-code filter flag. The line-level suppress anchors at the
+            // wrapper component definition.
+            m.suppress = Some(("thin-wrapper", false));
+            m.note =
+                Some("Opt-in: set rules.thin-wrapper to warn or error to enable. Defaults to off.");
+        }
+        "duplicate-prop-shape" => {
+            // Dormant multi-file health signal (rule defaults to off);
+            // suppress-only, no dead-code filter flag. The line-level suppress
+            // anchors at a member's component definition; a suppressed member
+            // still appears in siblings' sharing_components.
+            m.suppress = Some(("duplicate-prop-shape", false));
+            m.note = Some(
+                "Opt-in: set rules.duplicate-prop-shape to warn or error to enable. Defaults to off.",
+            );
+        }
         "unresolved-import" => {
             m.filter_flag = Some("--unresolved-imports");
             m.suppress = Some(("unresolved-import", false));

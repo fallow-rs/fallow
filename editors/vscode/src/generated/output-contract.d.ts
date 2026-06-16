@@ -391,7 +391,7 @@ export type ComplexityMetric = ("cyclomatic" | "cognitive")
  * `Case` means a `case` label carrying a test; a bare `default` adds nothing
  * to cyclomatic complexity and so produces no contribution.
  */
-export type ComplexityContributionKind = ("if" | "else" | "else-if" | "ternary" | "logical-and" | "logical-or" | "nullish-coalescing" | "logical-assignment" | "optional-chain" | "for" | "for-in" | "for-of" | "while" | "do-while" | "switch" | "case" | "catch" | "labeled-break" | "labeled-continue")
+export type ComplexityContributionKind = ("if" | "else" | "else-if" | "ternary" | "logical-and" | "logical-or" | "nullish-coalescing" | "logical-assignment" | "optional-chain" | "for" | "for-in" | "for-of" | "while" | "do-while" | "switch" | "case" | "catch" | "labeled-break" | "labeled-continue" | "jsx-depth" | "hook-density" | "prop-count")
 /**
  * Source for a finding's effective thresholds.
  */
@@ -1156,6 +1156,34 @@ unused_load_data_keys?: UnusedLoadDataKeyFinding[]
  * Serialized only when `true` so the default JSON contract is unchanged.
  */
 unused_load_data_keys_global_abstain?: boolean
+/**
+ * React/Preact props forwarded unchanged through `>= N` intermediate
+ * pass-through components until a consumer (located per-chain records).
+ * Wrapped in [`PropDrillingChainFinding`] so each entry carries a typed
+ * `actions` array natively. Health signal: the rule defaults to `off`
+ * (opt-in), so this is dormant and populated ONLY when the user enables it.
+ */
+prop_drilling_chains?: PropDrillingChainFinding[]
+/**
+ * React/Preact components whose entire body is a single spread-forwarded
+ * child render (`return <Child {...props}/>`): pure structural indirection,
+ * a candidate for inlining at call sites. Wrapped in [`ThinWrapperFinding`]
+ * so each entry carries a typed `actions` array natively. Health signal: the
+ * rule defaults to `off` (opt-in), so this is dormant and populated ONLY
+ * when the user enables it.
+ */
+thin_wrappers?: ThinWrapperFinding[]
+/**
+ * React/Preact components that participate in a duplicate-prop-shape group:
+ * three or more components across two or more files whose statically-known
+ * prop NAME set is identical after stripping ubiquitous DOM / passthrough
+ * names (a missing shared `Props` type / base component). Wrapped in
+ * [`DuplicatePropShapeFinding`] so each entry carries a typed `actions`
+ * array and its sibling roster natively. Health signal: the rule defaults to
+ * `off` (opt-in), so this is dormant and populated ONLY when the user
+ * enables it.
+ */
+duplicate_prop_shapes?: DuplicatePropShapeFinding[]
 baseline_deltas?: (BaselineDeltas | null)
 baseline?: (BaselineMatch | null)
 regression?: (RegressionResult | null)
@@ -3033,6 +3061,167 @@ actions: IssueAction[]
 introduced?: (AuditIntroduced | null)
 }
 /**
+ * Wire-shape envelope for a [`PropDrillingChain`] finding. There is no safe
+ * auto-fix: collapsing a drilling chain (colocate the consumer, lift to a
+ * context, or compose the component) is a design decision. The only action is a
+ * line-level suppress at the source hop's prop declaration. The rule defaults
+ * to `off` (opt-in health signal), so this finding is dormant by default.
+ */
+export interface PropDrillingChainFinding {
+/**
+ * The drilled prop name as declared at the chain SOURCE.
+ */
+prop: string
+/**
+ * The chain depth = the number of components the prop is forwarded THROUGH
+ * (source + intermediates + consumer = `hops.len()`). Always `>= N`.
+ */
+depth: number
+/**
+ * The ordered hop trail from source to consumer. The first hop owns the
+ * prop, the middle hops are pass-throughs, the last hop consumes it. The
+ * finding anchor is the first hop (`path` / `line` for suppression + CI).
+ */
+hops: PropDrillHop[]
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+}
+/**
+ * One hop in a prop-drilling chain: a component that received the prop and
+ * passed it along (or, at the chain ends, the source that owns it and the
+ * consumer that substantively reads it).
+ */
+export interface PropDrillHop {
+/**
+ * The file containing this hop's component.
+ */
+file: string
+/**
+ * 1-based line of the component definition (or the prop declaration at the
+ * source hop). Anchors a jump-to-source for the agent.
+ */
+line: number
+/**
+ * The component name at this hop.
+ */
+component: string
+}
+/**
+ * Wire-shape envelope for a [`ThinWrapper`] finding. There is no safe
+ * auto-fix: inlining a thin wrapper at its call sites (or deleting it) is a
+ * design decision. The only action is a line-level suppress at the wrapper's
+ * definition. The rule defaults to `off` (opt-in health signal), so this
+ * finding is dormant by default.
+ */
+export interface ThinWrapperFinding {
+/**
+ * The file containing the wrapper component.
+ */
+file: string
+/**
+ * 1-based line of the wrapper component definition (the finding anchor for
+ * jump-to-source and line-level suppression).
+ */
+line: number
+/**
+ * The wrapper component name.
+ */
+component: string
+/**
+ * The single child component the wrapper forwards its props to (as written
+ * at the render site).
+ */
+child_component: string
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+}
+/**
+ * Wire-shape envelope for a [`DuplicatePropShape`] finding. There is no safe
+ * auto-fix: extracting a shared `Props` type or a base component for a group of
+ * same-shaped components is a design decision. The actions are manual guidance
+ * (extract the shared shape) plus a line-level suppress at the component
+ * definition and a file-level suppress escape hatch (mirroring the
+ * route-collision multi-file model). The rule defaults to `off` (opt-in health
+ * signal), so this finding is dormant by default.
+ */
+export interface DuplicatePropShapeFinding {
+/**
+ * The file containing this component.
+ */
+file: string
+/**
+ * 1-based line of this component definition (the finding anchor for
+ * jump-to-source and line-level suppression).
+ */
+line: number
+/**
+ * This component name.
+ */
+component: string
+/**
+ * The shared SIGNIFICANT prop-name set (sorted, denylist-stripped). The
+ * unit being grouped; identical across every member of the group.
+ */
+shape: string[]
+/**
+ * The total number of components in this group (this one plus every
+ * sibling).
+ */
+group_size: number
+/**
+ * The OTHER components sharing this exact prop shape (path-sorted). A
+ * file-level-suppressed member drops from its own finding but still appears
+ * here, because the group is real regardless of suppression.
+ */
+sharing_components: DuplicatePropShapeMember[]
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+}
+/**
+ * One member of a duplicate-prop-shape group: the OTHER components that share
+ * the same significant prop-name set, listed in each member's
+ * `sharing_components`. Path-sorted for stable output. A located reference (no
+ * `shape`, which is carried once on the owning [`DuplicatePropShape`]).
+ */
+export interface DuplicatePropShapeMember {
+/**
+ * The file containing the sibling component.
+ */
+file: string
+/**
+ * 1-based line of the sibling component definition.
+ */
+line: number
+/**
+ * The sibling component name.
+ */
+component: string
+}
+/**
  * Per-category delta comparison against a saved baseline. Only present in
  * `CheckOutput` when `--baseline` is used.
  */
@@ -3501,6 +3690,15 @@ file_scores?: FileHealthScore[]
  */
 coverage_gaps?: (CoverageGaps | null)
 /**
+ * Located prop-drilling chains (React/Preact props forwarded unchanged
+ * through 3+ pass-through components). Only present when the opt-in
+ * `prop-drilling` rule is enabled (it defaults to off). Each entry carries
+ * the source, every pass-through hop, and the consumer with file + line +
+ * component, so CI / an agent can act. Surfaced alongside hotspots as a
+ * graph-derived health signal.
+ */
+prop_drilling_chains?: PropDrillingChainFinding[]
+/**
  * Hotspot entries combining git churn with complexity. Only present when
  * --hotspots is used. Sorted by score descending (highest risk first).
  * Each entry wraps its inner [`HotspotEntry`] payload (flattened on the
@@ -3567,6 +3765,30 @@ cyclomatic: number
 cognitive: number
 line_count: number
 param_count: number
+/**
+ * Number of React hook calls in this function's body (`useState` /
+ * `useEffect` / `useMemo` / `useCallback` / custom `use*`). Descriptive
+ * hotspot context for React components; omitted when zero (non-React).
+ */
+react_hook_count?: number
+/**
+ * Deepest JSX element nesting reached in this function's body. Descriptive
+ * hotspot context; omitted when zero (renders no JSX).
+ */
+react_jsx_max_depth?: number
+/**
+ * Number of props destructured from this component's first parameter.
+ * Descriptive hotspot context; omitted when zero.
+ */
+react_prop_count?: number
+/**
+ * Per-kind React hook breakdown (state/effect/memo/callback/custom) plus
+ * the max `useEffect` dependency-array arity, derived from the cached
+ * `hook_uses` IR at the health layer. Descriptive refinement of
+ * `react_hook_count`; present only when at least one component-scope hook
+ * was attributed, so non-React findings stay byte-identical.
+ */
+react_hook_profile?: (ReactHookProfile | null)
 exceeded: ExceededThreshold
 severity: FindingSeverity
 crap?: (number | null)
@@ -3600,6 +3822,49 @@ actions: HealthFindingAction[]
  * snapshot.
  */
 introduced?: (boolean | null)
+}
+/**
+ * Per-component React hook profile derived from the cached `hook_uses` IR at
+ * the health layer. Descriptive context that refines the bare
+ * [`ComplexityViolation::react_hook_count`] headline with a per-kind breakdown
+ * and the maximum `useEffect` dependency-array arity.
+ *
+ * Attached only when at least one component-scope hook was attributed to the
+ * function, so non-React findings stay byte-identical on the wire. The
+ * per-kind counts cover hooks recorded by the React visitor (calls inside an
+ * identified component); a `use*` call inside a plain helper function is
+ * counted in `react_hook_count` but NOT here, so the breakdown can sum to LESS
+ * than `react_hook_count`. `react_hook_count` remains the headline total; this
+ * is an additive refinement.
+ */
+export interface ReactHookProfile {
+/**
+ * `useState` call count attributed to this component.
+ */
+state: number
+/**
+ * `useEffect` call count attributed to this component.
+ */
+effect: number
+/**
+ * `useMemo` call count attributed to this component.
+ */
+memo: number
+/**
+ * `useCallback` call count attributed to this component.
+ */
+callback: number
+/**
+ * Custom `use*` hook call count attributed to this component.
+ */
+custom: number
+/**
+ * Largest `useEffect` dependency-array arity over the attributed effects
+ * that carry a literal deps array. `None` when no attributed `useEffect`
+ * had a literal array (absent or non-literal deps; ADR-001 syntactic-only,
+ * so absence does NOT mean "no coupling").
+ */
+max_effect_dep_arity?: (number | null)
 }
 export interface ComponentRollup {
 component: string
@@ -3855,6 +4120,37 @@ p95_fan_in?: (number | null)
  */
 coupling_high_pct?: (number | null)
 /**
+ * Number of located prop-drilling chains (React/Preact props forwarded
+ * unchanged through 3+ pass-through components). `None` unless the opt-in
+ * `prop-drilling` rule is enabled (it defaults to off), so the small capped
+ * penalty and the hotspot surface are dormant by default.
+ */
+prop_drilling_chain_count?: (number | null)
+/**
+ * The deepest located prop-drilling chain's depth (forwarding hops). `None`
+ * when no chains were found or the rule is off. Descriptive context only.
+ */
+prop_drilling_max_depth?: (number | null)
+/**
+ * 95th-percentile DISTINCT-PARENTS render fan-in across React/Preact
+ * components (the component-graph analogue of `p95_fan_in`, which percentiles
+ * per-FILE module fan-in). `None` on non-React runs. Descriptive
+ * blast-radius context, NOT a gate. Mirrors `compute_coupling_concentration`.
+ */
+p95_render_fan_in?: (number | null)
+/**
+ * Percentage of components whose render fan-in exceeds the project's
+ * `max(p95, 10)` threshold (reuses the coupling-concentration floor; NO new
+ * tunable constant). `None` on non-React runs. Mirrors `coupling_high_pct`.
+ */
+render_fan_in_high_pct?: (number | null)
+/**
+ * The single highest render-SITE count across all components (the headline
+ * blast-radius number: a shared `<Button>` rendered in N places). `None` on
+ * non-React runs. Descriptive context, no threshold.
+ */
+max_render_fan_in?: (number | null)
+/**
  * Total lines of code across all parsed modules.
  */
 total_loc?: number
@@ -3929,6 +4225,11 @@ circular_deps?: (number | null)
 unit_size?: (number | null)
 coupling?: (number | null)
 duplication?: (number | null)
+/**
+ * Small capped penalty for prop-drilling chains. `None` unless the opt-in
+ * `prop-drilling` rule is enabled; sized like the coupling penalty (~5pt cap).
+ */
+prop_drilling?: (number | null)
 }
 /**
  * Per-file health score combining complexity, coupling, and dead code metrics.
@@ -6127,6 +6428,15 @@ file_scores?: FileHealthScore[]
  */
 coverage_gaps?: (CoverageGaps | null)
 /**
+ * Located prop-drilling chains (React/Preact props forwarded unchanged
+ * through 3+ pass-through components). Only present when the opt-in
+ * `prop-drilling` rule is enabled (it defaults to off). Each entry carries
+ * the source, every pass-through hop, and the consumer with file + line +
+ * component, so CI / an agent can act. Surfaced alongside hotspots as a
+ * graph-derived health signal.
+ */
+prop_drilling_chains?: PropDrillingChainFinding[]
+/**
  * Hotspot entries combining git churn with complexity. Only present when
  * --hotspots is used. Sorted by score descending (highest risk first).
  * Each entry wraps its inner [`HotspotEntry`] payload (flattened on the
@@ -6732,6 +7042,34 @@ unused_load_data_keys?: UnusedLoadDataKeyFinding[]
  * Serialized only when `true` so the default JSON contract is unchanged.
  */
 unused_load_data_keys_global_abstain?: boolean
+/**
+ * React/Preact props forwarded unchanged through `>= N` intermediate
+ * pass-through components until a consumer (located per-chain records).
+ * Wrapped in [`PropDrillingChainFinding`] so each entry carries a typed
+ * `actions` array natively. Health signal: the rule defaults to `off`
+ * (opt-in), so this is dormant and populated ONLY when the user enables it.
+ */
+prop_drilling_chains?: PropDrillingChainFinding[]
+/**
+ * React/Preact components whose entire body is a single spread-forwarded
+ * child render (`return <Child {...props}/>`): pure structural indirection,
+ * a candidate for inlining at call sites. Wrapped in [`ThinWrapperFinding`]
+ * so each entry carries a typed `actions` array natively. Health signal: the
+ * rule defaults to `off` (opt-in), so this is dormant and populated ONLY
+ * when the user enables it.
+ */
+thin_wrappers?: ThinWrapperFinding[]
+/**
+ * React/Preact components that participate in a duplicate-prop-shape group:
+ * three or more components across two or more files whose statically-known
+ * prop NAME set is identical after stripping ubiquitous DOM / passthrough
+ * names (a missing shared `Props` type / base component). Wrapped in
+ * [`DuplicatePropShapeFinding`] so each entry carries a typed `actions`
+ * array and its sibling roster natively. Health signal: the rule defaults to
+ * `off` (opt-in), so this is dormant and populated ONLY when the user
+ * enables it.
+ */
+duplicate_prop_shapes?: DuplicatePropShapeFinding[]
 }
 /**
  * The rendered impact report, derived purely from the store (no analysis run).

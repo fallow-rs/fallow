@@ -173,8 +173,20 @@ fn section_footer_text(title: &str) -> Option<(&'static str, &'static str)> {
             "https://docs.fallow.tools/explanations/dead-code#unrendered-components",
         )),
         "Unused component props" => Some((
-            "A Vue <script setup> defineProps prop referenced nowhere inside its own component (remove it or use it)",
+            "A Vue defineProps prop or React component prop referenced nowhere inside its own component (remove it or use it)",
             "https://docs.fallow.tools/explanations/dead-code#unused-component-props",
+        )),
+        "Prop drilling" => Some((
+            "A React/Preact prop forwarded unused through two or more intermediate components before a component consumes it (colocate the consumer or lift it to a context); opt-in, off by default",
+            "https://docs.fallow.tools/explanations/dead-code#prop-drilling",
+        )),
+        "Thin wrappers" => Some((
+            "A React/Preact component whose whole body forwards props to a single child (return <Child {...props}/>); inline it at call sites or delete it; opt-in, off by default",
+            "https://docs.fallow.tools/explanations/dead-code#thin-wrapper",
+        )),
+        "Duplicate prop shapes" => Some((
+            "Three or more React/Preact components across two or more files declaring an identical prop-name set (after stripping common DOM props); extract a shared Props type or base component; opt-in, off by default",
+            "https://docs.fallow.tools/explanations/dead-code#duplicate-prop-shape",
         )),
         "Unused component emits" => Some((
             "A Vue <script setup> defineEmits event emitted nowhere inside its own component (remove it or emit it)",
@@ -224,6 +236,9 @@ fn section_suppress_rule(title: &str) -> Option<&'static str> {
         "Unprovided injects" => Some("unprovided-injects"),
         "Unrendered components" => Some("unrendered-components"),
         "Unused component props" => Some("unused-component-props"),
+        "Prop drilling" => Some("prop-drilling"),
+        "Thin wrappers" => Some("thin-wrapper"),
+        "Duplicate prop shapes" => Some("duplicate-prop-shape"),
         "Unused component emits" => Some("unused-component-emits"),
         "Unused server actions" => Some("unused-server-actions"),
         "Unused load data keys" => Some("unused-load-data-keys"),

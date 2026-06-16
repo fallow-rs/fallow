@@ -407,22 +407,52 @@ use crate::MemberKind;
 /// previously dropped the key, keeping only `page.data`). A warm cache from 163
 /// lacks those project-wide global-store accesses.
 ///
-/// Bumped to 165 for the `unused-load-data-key` detector: SvelteKit page-load
-/// producers now harvest `load_return_keys` + `has_unharvestable_load`, and
-/// every file records `has_load_data_whole_use` (the FP-1 whole-`data` pass
+/// Bumped (origin/main) for the `unused-load-data-key` detector: SvelteKit
+/// page-load producers now harvest `load_return_keys` + `has_unharvestable_load`,
+/// and every file records `has_load_data_whole_use` (the FP-1 whole-`data` pass
 /// signal). A warm cache from 164 lacks all three.
 ///
-/// Bumped to 166 for the typed-`data` template fix: a SvelteKit route component
-/// whose `data` prop is typed (`export let data: PageData`) no longer remaps its
-/// template `data.<key>` accesses onto the generated `$types` alias, keeping them
-/// keyed on `data` for the load-data join. A warm cache from 165 carries the
+/// Bumped (origin/main) for the typed-`data` template fix: a SvelteKit route
+/// component whose `data` prop is typed (`export let data: PageData`) no longer
+/// remaps its template `data.<key>` accesses onto the generated `$types` alias,
+/// keeping them keyed on `data` for the load-data join. A warm cache carries the
 /// remapped (`PageData.<key>`) accesses and would miss real consumer reads.
 ///
-/// Bumped to 167 for #550: CSS Module class extraction now derives its class set
-/// from a real CSS AST (lightningcss) for standard CSS, so warm caches written
-/// by the regex-only extractor can differ on escaped class names and malformed
-/// at-rule preludes.
-pub(super) const CACHE_VERSION: u32 = 168;
+/// Bumped (origin/main) for #550: CSS Module class extraction now derives its
+/// class set from a real CSS AST (lightningcss) for standard CSS, so warm caches
+/// written by the regex-only extractor can differ on escaped class names and
+/// malformed at-rule preludes.
+///
+/// Bumped (feat/react-health) for React/JSX structural extraction (Phase 0
+/// foundation): `.jsx`/`.tsx` files now record `component_functions`,
+/// `react_props`, `hook_uses`, and `render_edges`, so a warm cache lacks the
+/// React IR the later React-health phases consume.
+///
+/// Bumped (feat/react-health) for the React `unused-component-prop` arm
+/// (Phase 1): each `ComponentProp` gained a `component` field (the enclosing
+/// React component name) and `react_props[].used_in_script` is now populated
+/// from a used-in-body pass, so a warm cache carries props with an empty
+/// `component` and always-false usage.
+///
+/// Bumped (feat/react-health) for React-aware complexity (Phase 2):
+/// `FunctionComplexity` now carries `react_hook_count`, `react_jsx_max_depth`,
+/// and `react_prop_count` descriptive fields, and the cognitive metric folds
+/// deep JSX nesting, hook density, and prop count (recorded as `JsxDepth` /
+/// `HookDensity` / `PropCount` contributions). A warm cache carries the pre-fold
+/// cognitive scores and lacks the React descriptive counts until re-extraction.
+///
+/// Bumped (feat/react-health) for the prop-drilling forward signal (Phase 3):
+/// `RenderEdge` gained `attr_value_roots` / `has_complex_forward`,
+/// `ComponentFunction` gained `uses_clone_element` / `renders_provider` /
+/// `has_children_as_function`, and `ComponentProp` gained `used_outside_forward`.
+/// A warm cache lacks the per-render attribute-value roots and the
+/// per-component / per-prop forward classification the prop-drilling detector
+/// consumes.
+///
+/// Bumped to 170: `ComponentFunction` gained `is_pure_passthrough` (the
+/// thin-wrapper extraction flag), a new bitcode field on a cached struct
+/// persisted via `ModuleInfo`.
+pub(super) const CACHE_VERSION: u32 = 170;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -468,7 +498,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 960);
+assert_cached_type_size!(CachedModule, 1056);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 56);
@@ -642,6 +672,17 @@ pub struct CachedModule {
     /// Whether this file passes the whole `data` object opaquely. Round-trips
     /// for the `unused-load-data-key` abstain.
     pub has_load_data_whole_use: bool,
+    /// React/JSX component definitions. Round-trips so the React-health phases
+    /// see them on warm-cache loads.
+    pub component_functions: Vec<fallow_types::extract::ComponentFunction>,
+    /// React component props. Round-trips so the React `unused-component-prop`
+    /// arm sees them on warm-cache loads.
+    pub react_props: Vec<fallow_types::extract::ComponentProp>,
+    /// React hook call sites. Round-trips for the complexity-fold phase.
+    pub hook_uses: Vec<fallow_types::extract::HookUse>,
+    /// React render edges (child name captured; resolution deferred to graph
+    /// build). Round-trips so the render graph survives a warm cache.
+    pub render_edges: Vec<fallow_types::extract::RenderEdge>,
 }
 
 /// Cached namespace-object alias.

@@ -417,10 +417,23 @@ pub(super) fn dead_code_keys(
         security_unresolved_edge_files: _security_unresolved_edge_files,
         security_unresolved_callee_sites: _security_unresolved_callee_sites,
         security_unresolved_callee_diagnostics: _security_unresolved_callee_diagnostics,
+        // Prop-drilling is a dormant multi-file health signal (rule defaults to
+        // `off`); like security findings it has no dead-code attribution key.
+        prop_drilling_chains: _prop_drilling_chains,
+        // Thin wrappers are a dormant health signal (rule defaults to `off`); a
+        // candidate-for-inlining record, not a dead-code attribution key.
+        thin_wrappers: _thin_wrappers,
+        // Duplicate prop shapes are a dormant multi-file health signal (rule
+        // defaults to `off`); a missing-abstraction record, not a dead-code
+        // attribution key.
+        duplicate_prop_shapes: _duplicate_prop_shapes,
         // Export usages and entry-point summary are metadata, not issue
         // collections; no key needed.
         export_usages: _export_usages,
         entry_point_summary: _entry_point_summary,
+        // Render fan-in is a whole-project descriptive metric, not an issue
+        // collection; no attribution key needed.
+        render_fan_in: _render_fan_in,
     } = results;
 
     let mut collector = DeadCodeKeyCollector::new(root);
@@ -919,10 +932,22 @@ pub(super) fn retain_introduced_dead_code(
         security_unresolved_edge_files: _security_unresolved_edge_files,
         security_unresolved_callee_sites: _security_unresolved_callee_sites,
         security_unresolved_callee_diagnostics: _security_unresolved_callee_diagnostics,
+        // Prop-drilling is a dormant multi-file health signal (rule defaults to
+        // `off`); it carries no dead-code key and is not base-filtered here.
+        prop_drilling_chains: _prop_drilling_chains,
+        // Thin wrappers are a dormant health signal (rule defaults to `off`);
+        // no dead-code key and not base-filtered here.
+        thin_wrappers: _thin_wrappers,
+        // Duplicate prop shapes are a dormant multi-file health signal (rule
+        // defaults to `off`); no dead-code key and not base-filtered here.
+        duplicate_prop_shapes: _duplicate_prop_shapes,
         // Export usages and entry-point summary are metadata, not issue
         // collections; no key needed.
         export_usages: _export_usages,
         entry_point_summary: _entry_point_summary,
+        // Render fan-in is a whole-project descriptive metric, not an issue
+        // collection; no key needed.
+        render_fan_in: _render_fan_in,
     } = results;
 
     // The three "fast path" retains use a direct base-lookup rather than the

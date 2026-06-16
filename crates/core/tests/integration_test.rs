@@ -23,6 +23,8 @@ mod caching;
 mod css_modules;
 #[path = "integration_test/dependencies.rs"]
 mod dependencies;
+#[path = "integration_test/duplicate_prop_shape.rs"]
+mod duplicate_prop_shape;
 #[path = "integration_test/duplicates.rs"]
 mod duplicates;
 #[path = "integration_test/dynamic_import_then.rs"]
@@ -114,8 +116,12 @@ mod policy_violations;
 mod private_type_leaks;
 #[path = "integration_test/production_mode.rs"]
 mod production_mode;
+#[path = "integration_test/prop_drilling.rs"]
+mod prop_drilling;
 #[path = "integration_test/re_export_chains.rs"]
 mod re_export_chains;
+#[path = "integration_test/render_fan_in.rs"]
+mod render_fan_in;
 #[path = "integration_test/security_catalogue_categories.rs"]
 mod security_catalogue_categories;
 #[path = "integration_test/security_client_server_leak.rs"]
@@ -150,6 +156,8 @@ mod stale_suppressions;
 mod suppression_comments;
 #[path = "integration_test/test_only_deps.rs"]
 mod test_only_deps;
+#[path = "integration_test/thin_wrapper.rs"]
+mod thin_wrapper;
 #[path = "integration_test/type_only_deps.rs"]
 mod type_only_deps;
 #[path = "integration_test/unprovided_injects.rs"]
@@ -164,6 +172,8 @@ mod unused_component_props;
 mod unused_enum_members;
 #[path = "integration_test/unused_load_data_keys.rs"]
 mod unused_load_data_keys;
+#[path = "integration_test/unused_react_props.rs"]
+mod unused_react_props;
 #[path = "integration_test/unused_server_actions.rs"]
 mod unused_server_actions;
 #[path = "integration_test/unused_store_members.rs"]

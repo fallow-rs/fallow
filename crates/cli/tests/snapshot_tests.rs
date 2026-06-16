@@ -735,6 +735,9 @@ fn sarif_mixed_severity_snapshot() {
         unused_component_emits: fallow_config::Severity::Warn,
         unused_server_actions: fallow_config::Severity::Warn,
         unused_load_data_keys: fallow_config::Severity::Warn,
+        prop_drilling: fallow_config::Severity::Off,
+        thin_wrapper: fallow_config::Severity::Off,
+        duplicate_prop_shape: fallow_config::Severity::Off,
         unresolved_imports: fallow_config::Severity::Error,
         unlisted_dependencies: fallow_config::Severity::Error,
         duplicate_exports: fallow_config::Severity::Warn,
@@ -1609,6 +1612,9 @@ fn codeclimate_mixed_severity_snapshot() {
         unused_component_emits: fallow_config::Severity::Warn,
         unused_server_actions: fallow_config::Severity::Warn,
         unused_load_data_keys: fallow_config::Severity::Warn,
+        prop_drilling: fallow_config::Severity::Off,
+        thin_wrapper: fallow_config::Severity::Off,
+        duplicate_prop_shape: fallow_config::Severity::Off,
         unresolved_imports: fallow_config::Severity::Error,
         unlisted_dependencies: fallow_config::Severity::Error,
         duplicate_exports: fallow_config::Severity::Warn,
@@ -2391,6 +2397,10 @@ fn sample_health_report(root: &Path) -> HealthReport {
                 cognitive: 30,
                 line_count: 120,
                 param_count: 0,
+                react_hook_count: 0,
+                react_jsx_max_depth: 0,
+                react_prop_count: 0,
+                react_hook_profile: None,
                 exceeded: ExceededThreshold::Both,
                 severity: FindingSeverity::High,
                 crap: None,
@@ -2427,6 +2437,7 @@ fn sample_health_report(root: &Path) -> HealthReport {
         file_scores: vec![],
         coverage_gaps: None,
         threshold_overrides: vec![],
+        prop_drilling_chains: vec![],
         hotspots: vec![],
         hotspot_summary: None,
         large_functions: vec![],
@@ -2437,6 +2448,7 @@ fn sample_health_report(root: &Path) -> HealthReport {
         coverage_intelligence: None,
         actions_meta: None,
         css_analytics: None,
+        render_fan_in_top: rustc_hash::FxHashMap::default(),
     }
 }
 
@@ -2664,7 +2676,7 @@ fn codeclimate_health_with_coverage_intelligence_snapshot() {
 }
 
 /// Build an empty health report (no findings).
-const fn empty_health_report() -> HealthReport {
+fn empty_health_report() -> HealthReport {
     HealthReport {
         findings: vec![],
         summary: HealthSummary {
@@ -2689,6 +2701,7 @@ const fn empty_health_report() -> HealthReport {
         file_scores: vec![],
         coverage_gaps: None,
         threshold_overrides: vec![],
+        prop_drilling_chains: vec![],
         hotspots: vec![],
         hotspot_summary: None,
         large_functions: vec![],
@@ -2699,6 +2712,7 @@ const fn empty_health_report() -> HealthReport {
         coverage_intelligence: None,
         actions_meta: None,
         css_analytics: None,
+        render_fan_in_top: rustc_hash::FxHashMap::default(),
     }
 }
 
@@ -2924,6 +2938,7 @@ fn health_report_with_score(root: &Path) -> HealthReport {
             unit_size: None,
             coupling: None,
             duplication: None,
+            prop_drilling: None,
         },
     });
     report

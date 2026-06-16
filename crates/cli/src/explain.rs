@@ -319,8 +319,8 @@ pub const CHECK_RULES: &[RuleDef] = &[
         id: "fallow/unused-component-prop",
         category: "Dead code",
         name: "Unused component props",
-        short: "A Vue <script setup> defineProps prop is referenced nowhere in its own component",
-        full: "A Vue `<script setup>` defineProps declared prop that is referenced nowhere in its own component (neither script nor template). vue-tsc / Volar check caller-side prop correctness, not this in-component dead-input direction. Conservative: abstains on `$attrs` fallthrough, whole-object props use, defineExpose, defineModel, and imported prop-type aliases. Default warn; suppress or remove the prop.",
+        short: "A Vue defineProps prop or React component prop is referenced nowhere in its own component",
+        full: "A declared component prop referenced nowhere inside its own component, in either of two framework shapes: a Vue `<script setup>` defineProps prop (unused in neither script nor template), or a React/Preact prop destructured from a component's first parameter and read nowhere in its body. vue-tsc / Volar / tsc check caller-side prop correctness, not this in-component dead-input direction. Conservative: Vue abstains on `$attrs` fallthrough, whole-object props use, defineExpose, defineModel, and imported prop-type aliases; React abstains on rest spread (`{...rest}`), props forwarded by spread, props passed wholesale to a hook, `forwardRef` / imported-interface props, and exported public-API component props. Default warn; suppress or remove the prop.",
         docs_path: "explanations/dead-code#unused-component-props",
     },
     RuleDef {
@@ -346,6 +346,30 @@ pub const CHECK_RULES: &[RuleDef] = &[
         short: "A SvelteKit load() return-object key is read by no consumer",
         full: "A SvelteKit route `load()` (in `+page.ts` / `+page.server.ts` and the `.js` variants) returns an object whose keys become the route's `data` prop. A returned key that NO consumer reads is dead: it runs a real server-side fetch / DB cost on every request for data nothing renders. fallow checks two channels: the sibling `+page.svelte`'s `data.<key>` reads (route-pinned), and project-wide `page.data.<key>` (Svelte 5 `$app/state`) / `$page.data.<key>` (Svelte 4 `$app/stores`) reads in any component. `svelte-check` types `data` via generated `$types` but never flags an unread RETURNED key. The detector abstains (never false-flags) on a spread / non-literal / multi-return / computed-key / wrapped `load`, on a sibling that passes the whole `data` object opaquely, on a `+page.server.ts` whose universal `+page.ts` sibling forwards its `data`, and project-wide when any whole-object use of `page.data` / `$page.data` is seen. Default warn; delete the key or wire a consumer. A load fetch can have side effects, so there is no safe auto-fix. The check runs only when the project declares `@sveltejs/kit`.",
         docs_path: "explanations/dead-code#unused-load-data-keys",
+    },
+    RuleDef {
+        id: "fallow/prop-drilling",
+        category: "Dead code",
+        name: "Prop drilling",
+        short: "A React/Preact prop is forwarded unchanged through 3+ pass-through components to a distant consumer",
+        full: "A React/Preact prop is received by a component, forwarded UNCHANGED to a child, and forwarded again through two or more intermediate \"pass-through\" components until a component that substantively uses it. The high-confidence signal is that the received identifier appears ONLY as the root of forwarded child-JSX attribute values (so `<Child userName={user.name}/>` counts: the prop `user` is projected forward), not the attribute name matching. fallow emits located per-chain records (the source, each pass-through hop, and the consumer with file + line + component name) so CI and an agent can act: colocate the consumer with the data, lift the value to a React context/provider at a mid-chain hop, or compose the component so the intermediates no longer thread the prop. This is a graph-derived health signal, not a correctness error. The rule defaults to OFF (opt-in), like private-type-leak and the security rules: enable it with `prop-drilling: \"warn\"` in `rules`. Zero false positives by construction: any `{...props}` spread, `cloneElement`, element-as-prop / render-prop / children-as-function, or context `*.Provider` anywhere in the chain abstains the whole chain, as does an ambiguous or unresolvable hop. The check runs only when the project declares `react` / `react-dom` / `next` / `preact`.",
+        docs_path: "explanations/dead-code#prop-drilling",
+    },
+    RuleDef {
+        id: "fallow/thin-wrapper",
+        category: "Dead code",
+        name: "Thin wrapper",
+        short: "A React/Preact component whose whole body is a single spread-forwarded child render (a candidate for inlining)",
+        full: "A React/Preact component whose ENTIRE body is structural indirection: it returns exactly one capitalized component element that forwards the component's own props via a bare spread (`return <Child {...props}/>`), with no host-element wrapper, no extra children, no named attributes alongside the spread, no hooks, no branching, and no other statements. Such a component adds nothing of its own: it is a CANDIDATE for inlining at its call sites or deleting, not a correctness error. fallow emits a located per-wrapper record (file + line + the wrapper and child component names) so CI and an agent can act. The rule defaults to OFF (opt-in), like prop-drilling and the security rules: enable it with `thin-wrapper: \"warn\"` in `rules`. Zero false positives by construction: a `forwardRef` / `memo` wrapper (the sanctioned way to make a child ref-able or set a perf boundary), an EXPORTED component (a public-API re-brand / encapsulation), a context `*.Provider` wrapper, a `cloneElement` / render-prop forward, a wrapper that passes ANY named attribute alongside the spread (a fixed configuration), a self-render, or an unresolvable / member-expression child all abstain. A TypeScript-only type-narrowing wrapper (`const StrictButton = (p: StrictProps) => <Button {...p}/>`) is a known limitation under ADR-001's syntactic analysis; suppress it with the inline comment. The check runs only when the project declares `react` / `react-dom` / `next` / `preact`.",
+        docs_path: "explanations/dead-code#thin-wrapper",
+    },
+    RuleDef {
+        id: "fallow/duplicate-prop-shape",
+        category: "Dead code",
+        name: "Duplicate prop shape",
+        short: "Three or more React/Preact components across two or more files declare an identical prop-name set (a missing shared Props type)",
+        full: "Three or more distinct React/Preact components, living in two or more files, whose statically-harvested prop NAME set is byte-for-byte IDENTICAL after (a) excluding a fixed denylist of ubiquitous DOM / render-passthrough prop names (className, style, id, children, key, ref, the common event handlers, plus data-* / aria-* by prefix) and (b) requiring the REMAINING significant set to have four or more members. Identity is over NAMES only, never types (ADR-001 cannot resolve types). This is a structural-refactor health signal: the recurring shape is a missing shared abstraction, so extract one shared `Props` type (or a base component) that every member reuses. It is never a correctness error and never an auto-fix. fallow emits one located record per participating component, each naming the shared `shape`, the `group_size`, and the OTHER members in `sharing_components`. The rule defaults to OFF (opt-in), like thin-wrapper and the security rules: enable it with `duplicate-prop-shape: \"warn\"` in `rules`. Anti-noise gates (defended as rule-of-three plus a denylist-survivor floor, not tuned magic): the four-significant-prop floor turns `{label, onClick}` buttons into non-findings; the three-component floor is the rule-of-three abstraction trigger; the two-file floor keeps a local same-shaped variant pair (a render-prop pair, a Foo/FooImpl split) unflagged. A component whose props are not fully harvestable (a rest/spread signature, a forwardRef/memo over an imported interface) ABSTAINS, because a partial prop set can never be proven identical. Exact full-set identity ONLY: a superset / subset relationship does NOT group, so a four-prop group and a five-prop superset form TWO findings (the price of zero invalid groups: the finding always fits one extracted shared type). The check runs only when the project declares `react` / `react-dom` / `next` / `preact`.",
+        docs_path: "explanations/dead-code#duplicate-prop-shape",
     },
     RuleDef {
         id: "fallow/route-collision",
@@ -474,6 +498,9 @@ fn dead_code_alias_id(normalized: &str) -> Option<&'static str> {
         "unused-component-emits" | "unused-component-emit" => Some("fallow/unused-component-emit"),
         "unused-server-actions" | "unused-server-action" => Some("fallow/unused-server-action"),
         "unused-load-data-keys" | "unused-load-data-key" => Some("fallow/unused-load-data-key"),
+        "prop-drilling" => Some("fallow/prop-drilling"),
+        "thin-wrapper" | "thin-wrappers" => Some("fallow/thin-wrapper"),
+        "duplicate-prop-shape" | "duplicate-prop-shapes" => Some("fallow/duplicate-prop-shape"),
         "unresolved-imports" => Some("fallow/unresolved-import"),
         "unlisted-deps" | "unlisted-dependencies" => Some("fallow/unlisted-dependency"),
         "duplicate-exports" => Some("fallow/duplicate-export"),
@@ -618,8 +645,8 @@ fn member_import_rule_guide(id: &str) -> Option<RuleGuide> {
             how_to_fix: "Render the component where it belongs, or delete it and remove the dead barrel re-export. If it is rendered reflectively (a dynamic <component :is> from a non-literal value), suppress the line with // fallow-ignore-next-line unrendered-component.",
         },
         "fallow/unused-component-prop" => RuleGuide {
-            example: "Widget.vue declares defineProps<{ size: string }>() but `size` is referenced nowhere in the component's script or template.",
-            how_to_fix: "Remove the unused prop, or reference it in the script / template. If the prop is part of a deliberately-stable public component API, suppress the line with // fallow-ignore-next-line unused-component-prop.",
+            example: "Widget.vue declares defineProps<{ size: string }>(), or a React Widget({ size }) destructures `size`, but `size` is referenced nowhere in the component (Vue: its script or template; React: its function body or JSX).",
+            how_to_fix: "Remove the unused prop, or reference it in the component (Vue: the script / template; React: the function body or JSX). If the prop is part of a deliberately-stable public component API, suppress the line with // fallow-ignore-next-line unused-component-prop.",
         },
         "fallow/unused-component-emit" => RuleGuide {
             example: "Widget.vue declares defineEmits<{ close: [] }>() but `emit('close')` is called nowhere in the component's script.",
@@ -632,6 +659,18 @@ fn member_import_rule_guide(id: &str) -> Option<RuleGuide> {
         "fallow/unused-load-data-key" => RuleGuide {
             example: "src/routes/blog/+page.ts returns { posts, draftCount } but +page.svelte only reads data.posts and no component reads page.data.draftCount.",
             how_to_fix: "Delete the unused key from the load() return (and skip its fetch), or wire a consumer (read data.<key> in +page.svelte, or page.data.<key> in a shared component). If the load fetch has a side effect you must keep, suppress the line with // fallow-ignore-next-line unused-load-data-key.",
+        },
+        "fallow/prop-drilling" => RuleGuide {
+            example: "Page receives `user` and renders <Layout user={user}/>; Layout only re-passes it to <Sidebar user={user}/>; Sidebar only re-passes it to <Profile user={user}/>, which finally reads user.name. The prop is drilled through Layout and Sidebar untouched.",
+            how_to_fix: "Collapse the chain: colocate the consumer with the data, lift the value into a React context/provider at a mid-chain hop and consume it there, or compose the component (pass the rendered child as children) so the intermediates no longer thread the prop. Enable the rule with rules.prop-drilling = \"warn\" (it defaults to off). To accept one chain, suppress the source prop with // fallow-ignore-next-line prop-drilling.",
+        },
+        "fallow/thin-wrapper" => RuleGuide {
+            example: "const ButtonWrapper = (props) => <Button {...props}/>; the wrapper has no own markup, hooks, or logic, so it only re-points at Button.",
+            how_to_fix: "Inline the wrapper at its call sites (use <Button .../> directly) or delete it. Keep it only if it is a deliberate seam (a planned divergence point, a public-API re-brand): an exported wrapper already abstains. Enable the rule with rules.thin-wrapper = \"warn\" (it defaults to off). To accept one wrapper, suppress it with // fallow-ignore-next-line thin-wrapper above the component definition.",
+        },
+        "fallow/duplicate-prop-shape" => RuleGuide {
+            example: "FieldText, FieldNumber, and FieldSelect (across three files) each declare exactly { name, label, value, onChange, error }. The five significant prop names are identical, so they form one duplicate-prop-shape group.",
+            how_to_fix: "Extract one shared Props type (e.g. type FieldProps = { name; label; value; onChange; error }) that every member reuses, or a base component the variants compose. Keep them separate only if a per-variant prop divergence is planned. Enable the rule with rules.duplicate-prop-shape = \"warn\" (it defaults to off). To accept one member, suppress it with // fallow-ignore-next-line duplicate-prop-shape above the component definition; the suppressed member still appears in its siblings' sharing_components because the group is real regardless of suppression.",
         },
         "fallow/unresolved-import" => RuleGuide {
             example: "src/app.ts imports ./routes/admin, but no matching file exists after extension and index resolution.",
@@ -2300,7 +2339,7 @@ mod tests {
 
     #[test]
     fn check_rules_count() {
-        assert_eq!(CHECK_RULES.len(), 38);
+        assert_eq!(CHECK_RULES.len(), 41);
     }
 
     #[test]

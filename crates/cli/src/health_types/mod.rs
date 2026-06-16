@@ -24,6 +24,8 @@ pub use targets::*;
 pub use trends::*;
 pub use vital_signs::*;
 
+use fallow_types::output_dead_code::PropDrillingChainFinding;
+
 /// Detailed timing breakdown for the health pipeline.
 ///
 /// Only populated when `--performance` is passed.
@@ -839,6 +841,14 @@ pub struct HealthReport {
     /// default report.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coverage_gaps: Option<CoverageGaps>,
+    /// Located prop-drilling chains (React/Preact props forwarded unchanged
+    /// through 3+ pass-through components). Only present when the opt-in
+    /// `prop-drilling` rule is enabled (it defaults to off). Each entry carries
+    /// the source, every pass-through hop, and the consumer with file + line +
+    /// component, so CI / an agent can act. Surfaced alongside hotspots as a
+    /// graph-derived health signal.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prop_drilling_chains: Vec<PropDrillingChainFinding>,
     /// Hotspot entries combining git churn with complexity. Only present when
     /// --hotspots is used. Sorted by score descending (highest risk first).
     /// Each entry wraps its inner [`HotspotEntry`] payload (flattened on the
@@ -883,6 +893,14 @@ pub struct HealthReport {
     /// over-complex selectors, deep nesting). Present only with `--css`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub css_analytics: Option<CssAnalyticsReport>,
+    /// Per-file top render fan-in for the descriptive human drill-down only:
+    /// maps a component file's absolute path to its highest-fan-in component
+    /// `(component name, render SITES)`. Drives the `rendered in N places`
+    /// blast-radius line on the React hotspot/complexity surface. INTERNAL: the
+    /// public render-fan-in surface is the `VitalSigns` aggregate, so this is
+    /// `#[serde(skip)]` and never widens the JSON contract.
+    #[serde(skip)]
+    pub render_fan_in_top: rustc_hash::FxHashMap<std::path::PathBuf, (String, u32)>,
 }
 
 #[cfg(test)]
@@ -900,6 +918,7 @@ impl Default for HealthReport {
             health_score: None,
             file_scores: vec![],
             coverage_gaps: None,
+            prop_drilling_chains: vec![],
             hotspots: vec![],
             hotspot_summary: None,
             runtime_coverage: None,
@@ -910,6 +929,7 @@ impl Default for HealthReport {
             health_trend: None,
             actions_meta: None,
             css_analytics: None,
+            render_fan_in_top: rustc_hash::FxHashMap::default(),
         }
     }
 }

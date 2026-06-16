@@ -211,6 +211,16 @@ pub fn compute_vital_signs(input: &VitalSignsInput<'_>) -> VitalSigns {
         unit_interfacing_profile,
         p95_fan_in,
         coupling_high_pct,
+        // Set post-construction from the whole-project analysis results (only
+        // when the opt-in prop-drilling rule is enabled); see health/mod.rs.
+        prop_drilling_chain_count: None,
+        prop_drilling_max_depth: None,
+        // Set post-construction from the whole-project render fan-in metric
+        // (whenever React is declared, the core metric carries the aggregates);
+        // see health/mod.rs.
+        p95_render_fan_in: None,
+        render_fan_in_high_pct: None,
+        max_render_fan_in: None,
         total_loc,
     }
 }
@@ -357,6 +367,14 @@ fn compute_interfacing_risk_profile(param_counts: &[u8]) -> RiskProfile {
 ///
 /// Returns (p95_fan_in, coupling_high_pct) where coupling_high_pct is the
 /// percentage of files with fan-in above the effective threshold (max(p95_fan_in, 10)).
+///
+/// The component-graph analogue (render fan-in concentration:
+/// `p95_render_fan_in` / `render_fan_in_high_pct` / `max_render_fan_in`) is
+/// computed in core (`fallow_core::analyze::render_fan_in`), which has the
+/// resolved-module graph the CLI lacks. It mirrors this helper verbatim (p95 +
+/// `high_pct` over the per-component distinct-parents distribution, reusing the
+/// same `max(p95, 10)` floor) and is assigned onto `VitalSigns` in
+/// `health/mod.rs::prepare_health_vital_data`.
 #[expect(
     clippy::cast_possible_truncation,
     reason = "fan-in values are bounded by project size"
@@ -427,6 +445,9 @@ pub fn compute_health_score(vs: &VitalSigns, total_files: usize) -> HealthScore 
         .map(|dp| round1((dp - 5.0).clamp(0.0, 10.0)));
     subtract_optional_penalty(&mut score, duplication_penalty);
 
+    let prop_drilling_penalty = prop_drilling_penalty(vs);
+    subtract_optional_penalty(&mut score, prop_drilling_penalty);
+
     let score = round1(score).clamp(0.0, 100.0);
     let grade = letter_grade(score);
 
@@ -446,8 +467,19 @@ pub fn compute_health_score(vs: &VitalSigns, total_files: usize) -> HealthScore 
             unit_size: unit_size_penalty,
             coupling: coupling_penalty,
             duplication: duplication_penalty,
+            prop_drilling: prop_drilling_penalty,
         },
     }
+}
+
+/// Small capped penalty for prop-drilling chains, sized like the coupling
+/// penalty (~5pt cap). Each located chain costs 1pt up to the cap; a deeper
+/// chain does not cost more (depth is descriptive, not a tunable threshold).
+/// `None` (no penalty) unless the opt-in `prop-drilling` rule populated the
+/// count, so the score is unchanged by default.
+fn prop_drilling_penalty(vs: &VitalSigns) -> Option<f64> {
+    vs.prop_drilling_chain_count
+        .map(|count| round1((f64::from(count) * 1.0).min(5.0)))
 }
 
 fn round1(value: f64) -> f64 {
@@ -1131,6 +1163,10 @@ mod tests {
             has_unharvestable_load: false,
             has_load_data_whole_use: false,
             has_page_data_store_whole_use: false,
+            component_functions: Vec::new(),
+            react_props: Vec::new(),
+            hook_uses: Vec::new(),
+            render_edges: Vec::new(),
             complexity: vec![fallow_types::extract::FunctionComplexity {
                 name: format!("fn_{id}"),
                 line: id + 1,
@@ -1139,6 +1175,9 @@ mod tests {
                 cognitive: 0,
                 line_count: 10,
                 param_count: 0,
+                react_hook_count: 0,
+                react_jsx_max_depth: 0,
+                react_prop_count: 0,
                 source_hash: None,
                 contributions: Vec::new(),
             }],
@@ -1423,6 +1462,39 @@ mod tests {
     }
 
     #[test]
+    fn health_score_prop_drilling_penalty_opt_in() {
+        let base = || VitalSigns {
+            avg_cyclomatic: 1.0,
+            p90_cyclomatic: 2,
+            ..Default::default()
+        };
+        let base_score = compute_health_score(&base(), 100).score;
+
+        // Each located chain costs 1pt (depth is descriptive, not a multiplier).
+        let three = VitalSigns {
+            prop_drilling_chain_count: Some(3),
+            prop_drilling_max_depth: Some(5),
+            ..base()
+        };
+        assert!((base_score - compute_health_score(&three, 100).score - 3.0).abs() < 0.1);
+
+        // Capped at 5pt regardless of chain count.
+        let many = VitalSigns {
+            prop_drilling_chain_count: Some(20),
+            ..base()
+        };
+        assert!((base_score - compute_health_score(&many, 100).score - 5.0).abs() < 0.1);
+
+        // Dormant by default: the opt-in rule is off, so the count is `None` and
+        // the score is unchanged.
+        let off = VitalSigns {
+            prop_drilling_chain_count: None,
+            ..base()
+        };
+        assert!((base_score - compute_health_score(&off, 100).score).abs() < f64::EPSILON);
+    }
+
+    #[test]
     fn health_score_clamped_at_zero() {
         let vs = VitalSigns {
             dead_file_pct: Some(100.0),
@@ -1492,6 +1564,11 @@ mod tests {
             unit_interfacing_profile: None,
             p95_fan_in: None,
             coupling_high_pct: None,
+            prop_drilling_chain_count: None,
+            prop_drilling_max_depth: None,
+            p95_render_fan_in: None,
+            render_fan_in_high_pct: None,
+            max_render_fan_in: None,
             total_loc: 0,
         };
         let score = compute_health_score(&vs, 100);

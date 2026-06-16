@@ -223,6 +223,23 @@ pub struct ModuleInfo {
     /// (`const all = $page.data`) are not whole-object-tracked and stay out of
     /// scope, matching the syntactic analyzer's conservative posture.
     pub has_page_data_store_whole_use: bool,
+    /// React/JSX component definitions: functions/arrows whose body returns JSX.
+    /// Captured only for `.jsx`/`.tsx` files when a React/Preact dependency is
+    /// plausible. Consumed by the React `unused-component-prop` arm and the
+    /// complexity-fold phase. Empty for non-React files.
+    pub component_functions: Vec<ComponentFunction>,
+    /// React component props (reuses the shared `ComponentProp` struct). For
+    /// React, `used_in_template` is always false and `used_in_script` means
+    /// used-in-body. Empty for non-React files.
+    pub react_props: Vec<ComponentProp>,
+    /// React hook call sites (`useState` / `useEffect` / `useMemo` /
+    /// `useCallback` / custom `use*`). Drives hook-density complexity context.
+    /// Empty for non-React files.
+    pub hook_uses: Vec<HookUse>,
+    /// React render edges: one component rendering another. Captured with the
+    /// child's written name; child-to-`FileId` resolution is deferred to graph
+    /// build. Empty for non-React files.
+    pub render_edges: Vec<RenderEdge>,
 }
 
 impl ModuleInfo {
@@ -773,6 +790,22 @@ pub struct FunctionComplexity {
     pub line_count: u32,
     /// Number of parameters (excluding TypeScript's `this` parameter).
     pub param_count: u8,
+    /// Number of React hook calls (`useState` / `useEffect` / `useMemo` /
+    /// `useCallback` / custom `use*`) made directly in this function's body.
+    /// Non-zero only for React components/hooks; descriptive context surfaced in
+    /// the hotspot drill-down, never a tunable threshold (anti-numerology).
+    pub react_hook_count: u16,
+    /// Maximum JSX element nesting depth reached in this function's body (the
+    /// deepest chain of element-inside-element). `0` when the function renders
+    /// no JSX. Descriptive context surfaced in the hotspot drill-down, never a
+    /// tunable threshold (anti-numerology).
+    pub react_jsx_max_depth: u16,
+    /// Number of props destructured from this component's first parameter (the
+    /// `{ a, b, c }` props object). `0` for non-component functions and for
+    /// components taking a bare `props` identifier (not statically countable).
+    /// Descriptive context surfaced in the hotspot drill-down, never a tunable
+    /// threshold (anti-numerology).
+    pub react_prop_count: u16,
     /// Content digest of the function's full-span source slice.
     pub source_hash: Option<String>,
     /// Per-decision-point breakdown explaining WHICH constructs drove the
@@ -963,6 +996,20 @@ pub enum ComplexityContributionKind {
     LabeledBreak,
     /// A labeled `continue` (cognitive only).
     LabeledContinue,
+    /// A deeply-nested JSX element subtree (cognitive only). React-specific: a
+    /// JSX element nested past the first level accrues the same nesting penalty
+    /// a nested control-flow construct does, so a deep JSX/ternary tree reads as
+    /// a god component through the existing cognitive metric.
+    JsxDepth,
+    /// React hook density (cognitive only). One contribution per hook call in a
+    /// component body (`useState` / `useEffect` / `useMemo` / `useCallback` /
+    /// custom `use*`); a hook-heavy component accrues cognitive load the same way
+    /// branching does.
+    HookDensity,
+    /// React prop count past the comfortable floor (cognitive only). A component
+    /// destructuring many props is doing many things; the props beyond the floor
+    /// fold into cognitive so a wide-interface component surfaces as a hotspot.
+    PropCount,
 }
 
 /// A single complexity increment, located at its source line/column.
@@ -1289,11 +1336,26 @@ pub struct ComponentProp {
     pub span_start: u32,
     /// Whether this prop is referenced in the component's `<script>` (a
     /// destructured local binding with a resolved reference, or a `props.<name>`
-    /// member access).
+    /// member access). For React, this is set-in-body: a resolved reference to the
+    /// destructured local anywhere in the component function body.
     pub used_in_script: bool,
     /// Whether this prop name is referenced in the component's `<template>`.
     /// Set by `apply_template_usage` when the template scanner credits the name.
+    /// Always false for React (no template; React uses `used_in_script`).
     pub used_in_template: bool,
+    /// The enclosing component name. Empty for Vue SFCs (one component per file,
+    /// the file stem is the component, set by the detector). For React this is the
+    /// component function/arrow name a prop was declared on, so the detector can
+    /// emit the right `component_name` and apply the per-component abstain ladder
+    /// (a file can declare several React components).
+    pub component: String,
+    /// React-only: `true` when the destructured prop local is referenced at least
+    /// once OUTSIDE a child-JSX attribute value expression (a substantive
+    /// consumption: a hook arg, a host-element child, a non-JSX-attr read). When
+    /// `used_in_script` is true but this is false, the prop is referenced ONLY as
+    /// the root of forwarded child attribute values, i.e. a pure pass-through.
+    /// Always `false` for Vue (no forward-vs-consume distinction is computed).
+    pub used_outside_forward: bool,
 }
 
 /// A Vue `<script setup>` `defineEmits` declared event, harvested from the type
@@ -1327,6 +1389,151 @@ pub struct LoadReturnKey {
     pub span_start: u32,
     /// End byte offset of the key.
     pub span_end: u32,
+}
+
+/// The syntactic shape of an identified React component definition. Drives the
+/// abstain ladder later phases apply: a `forwardRef` / `memo` wrapper whose
+/// props come from an imported interface fallow cannot resolve must abstain
+/// (ADR-001), not guess.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, bitcode::Encode, bitcode::Decode)]
+pub enum ComponentFunctionKind {
+    /// A `function Foo() { return <.../> }` declaration.
+    FnDecl,
+    /// A `const Foo = () => <.../>` arrow (or function-expression) binding.
+    Arrow,
+    /// A `const Foo = forwardRef((props, ref) => <.../>)` wrapper.
+    ForwardRefWrapper,
+    /// A `const Foo = memo((props) => <.../>)` wrapper.
+    MemoWrapper,
+}
+
+/// An identified React component: a function/arrow whose body returns JSX.
+/// Captured by `visit_jsx_element`'s enclosing-component tracking. The
+/// `unused-component-prop` (React arm) and complexity-fold phases consume this;
+/// the abstain flags keep zero-FP on the cases ADR-001 cannot resolve.
+#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode)]
+pub struct ComponentFunction {
+    /// The component name (the binding or declaration identifier).
+    pub name: String,
+    /// Start byte offset of the component definition (anchors findings).
+    pub span_start: u32,
+    /// The syntactic shape of the definition.
+    pub kind: ComponentFunctionKind,
+    /// Whether the component is exported from its module (a named export, a
+    /// `export default`, or re-exported in the same module). Public-API
+    /// components abstain in the prop phase.
+    pub is_exported: bool,
+    /// `true` when the component's props are not statically harvestable: a
+    /// rest/spread in the signature (`{ ...rest }`), props passed wholesale to a
+    /// hook/helper, or a `forwardRef` / `memo` wrapper whose props come from an
+    /// imported interface generic fallow cannot resolve (ADR-001). The prop
+    /// phase abstains on the whole component when set.
+    pub has_unharvestable_props: bool,
+    /// `true` when the component body calls `cloneElement` / `React.cloneElement`.
+    /// `cloneElement` injects props by reflection, so the static forward-set is
+    /// incomplete; the prop-drilling phase abstains on any chain through this
+    /// component (ADR-001, zero-FP).
+    pub uses_clone_element: bool,
+    /// `true` when the component renders a `*.Provider` member-expression tag
+    /// (`<FooContext.Provider>`). A context provider in the subtree means the
+    /// drilling may be a deliberate non-context choice (or the prop is about to
+    /// be provided); the prop-drilling phase downgrades/abstains.
+    pub renders_provider: bool,
+    /// `true` when the component passes a function as a child render value
+    /// (render-props / children-as-function: `<Foo>{() => ...}</Foo>` or
+    /// `<Foo render={() => ...}/>`). The forwarded shape is dynamic; the
+    /// prop-drilling phase abstains on chains through this component.
+    pub has_children_as_function: bool,
+    /// `true` when the component body is pure structural indirection: a single
+    /// statement returning exactly one capitalized/member-expression JSX element
+    /// (no host wrapper, no extra children, optionally a fragment wrapping a
+    /// single element) that forwards props via a bare spread of the component's
+    /// own props binding / rest local (`<Child {...props}/>`), with NO named
+    /// attributes alongside the spread and NO self-render. The cross-component
+    /// `thin-wrapper` phase joins this with hook-density / cyclomatic checks and
+    /// the resolved single render edge to flag a component that is a candidate
+    /// for inlining. Computed from the component's own AST only, so it caches
+    /// byte-identity-safe (ADR-001).
+    pub is_pure_passthrough: bool,
+}
+
+/// The kind of a React hook call. `Custom` covers any `use*`-named call that is
+/// not one of the built-in hooks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, bitcode::Encode, bitcode::Decode)]
+pub enum HookUseKind {
+    /// `useState(...)`.
+    UseState,
+    /// `useEffect(...)`.
+    UseEffect,
+    /// `useMemo(...)`.
+    UseMemo,
+    /// `useCallback(...)`.
+    UseCallback,
+    /// Any other `use*`-named call (a custom hook).
+    Custom,
+}
+
+/// A React hook call site inside a component. Consumed by the complexity-fold
+/// phase (hook density) and surfaced as descriptive hotspot context.
+#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode)]
+pub struct HookUse {
+    /// The hook kind.
+    pub kind: HookUseKind,
+    /// The dependency-array arity, recorded ONLY when a literal array is present
+    /// at the dependency-array position (`[a, b]` -> `Some(2)`, `[]` ->
+    /// `Some(0)`). `None` when the call has no dependency array argument or the
+    /// argument is not a literal array (ADR-001: do not guess).
+    pub dep_array_arity: Option<u32>,
+    /// Start byte offset of the hook call (anchors findings).
+    pub span_start: u32,
+}
+
+/// A render edge: one component rendering another (a capitalized or
+/// member-expression JSX tag). Captured at extraction time with the child's
+/// written name; resolution of `child_component_name` to a `FileId`/export is
+/// deferred to graph build via the existing import map.
+#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode)]
+pub struct RenderEdge {
+    /// The name of the component that renders the child (the enclosing
+    /// component). Empty when the JSX is not inside an identified component (a
+    /// top-level render expression).
+    pub parent_component: String,
+    /// The rendered child component name as written (`Foo` or the full
+    /// member-expression path `Foo.Bar`).
+    pub child_component_name: String,
+    /// The attribute (prop) names passed at the render site, in source order.
+    pub attr_names: Vec<String>,
+    /// `true` when the render site contains a JSX spread (`{...x}`), so the
+    /// passed-prop set is not statically complete.
+    pub has_spread: bool,
+    /// The forwarded attributes at this render site: each pairs the child
+    /// attribute NAME with the identifier ROOT of its value expression
+    /// (`userName={user.name}` -> `{ attr: "userName", root: "user" }`;
+    /// `value={x}` -> `{ attr: "value", root: "x" }`). ONLY plain identifier or
+    /// member-root access values are recorded (`{x}`, `{x.y}`, `{x.y.z}`); a value
+    /// that is a call, an arrow/function, a conditional, a JSX element, or any
+    /// other complex expression is NOT recorded here (its root would not be a pure
+    /// forward) and sets `has_complex_forward` instead. The prop-drilling chain
+    /// walk uses this pairing to map "this component forwards prop P" to "the
+    /// child receives it as attribute A".
+    pub forward_attrs: Vec<ForwardAttr>,
+    /// `true` when at least one attribute value at this render site is a complex
+    /// expression (a call, an arrow/function render-prop, a conditional, a JSX
+    /// element-as-prop, a template literal, etc.) whose identifier root was NOT
+    /// recorded in `forward_attrs`. The prop-drilling phase abstains on a chain
+    /// whose forwarded prop flows through such a value (ADR-001, zero-FP).
+    pub has_complex_forward: bool,
+}
+
+/// One forwarded JSX attribute: the child attribute name plus the identifier
+/// root of its value expression. See [`RenderEdge::forward_attrs`].
+#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode)]
+pub struct ForwardAttr {
+    /// The child attribute (prop) name as written (`userName`).
+    pub attr: String,
+    /// The identifier root of the attribute value expression (`user` for
+    /// `userName={user.name}`).
+    pub root: String,
 }
 
 #[expect(
@@ -1415,7 +1622,7 @@ const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 216);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 968);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1064);
 
 /// A re-export declaration.
 #[derive(Debug, Clone)]
@@ -1594,6 +1801,9 @@ mod tests {
                 cognitive: 3,
                 line_count: 4,
                 param_count: 1,
+                react_hook_count: 0,
+                react_jsx_max_depth: 0,
+                react_prop_count: 0,
                 source_hash: Some("hash".to_string()),
                 contributions: Vec::new(),
             }],
@@ -1656,6 +1866,10 @@ mod tests {
             has_unharvestable_load: false,
             has_load_data_whole_use: false,
             has_page_data_store_whole_use: false,
+            component_functions: Vec::new(),
+            react_props: Vec::new(),
+            hook_uses: Vec::new(),
+            render_edges: Vec::new(),
         };
 
         module.release_resolution_payload();
@@ -2025,6 +2239,9 @@ mod tests {
             cognitive: 25,
             line_count: 80,
             param_count: 3,
+            react_hook_count: 0,
+            react_jsx_max_depth: 0,
+            react_prop_count: 0,
             source_hash: Some("0123456789abcdef".to_string()),
             contributions: vec![
                 ComplexityContribution {

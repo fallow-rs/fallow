@@ -11,17 +11,19 @@ use crate::extract::{
 use crate::output::IssueAction;
 use crate::output_dead_code::{
     BoundaryCallViolationFinding, BoundaryCoverageViolationFinding, BoundaryViolationFinding,
-    CircularDependencyFinding, DuplicateExportFinding, DynamicSegmentNameConflictFinding,
-    EmptyCatalogGroupFinding, InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding,
-    MisplacedDirectiveFinding, MixedClientServerBarrelFinding, PolicyViolationFinding,
-    PrivateTypeLeakFinding, ReExportCycleFinding, RouteCollisionFinding, TestOnlyDependencyFinding,
-    TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
-    UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
-    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentEmitFinding,
-    UnusedComponentPropFinding, UnusedDependencyFinding, UnusedDependencyOverrideFinding,
-    UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
-    UnusedLoadDataKeyFinding, UnusedOptionalDependencyFinding, UnusedServerActionFinding,
-    UnusedStoreMemberFinding, UnusedTypeFinding,
+    CircularDependencyFinding, DuplicateExportFinding, DuplicatePropShapeFinding,
+    DynamicSegmentNameConflictFinding, EmptyCatalogGroupFinding, InvalidClientExportFinding,
+    MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
+    MixedClientServerBarrelFinding, PolicyViolationFinding, PrivateTypeLeakFinding,
+    PropDrillingChainFinding, ReExportCycleFinding, RouteCollisionFinding,
+    TestOnlyDependencyFinding, ThinWrapperFinding, TypeOnlyDependencyFinding,
+    UnlistedDependencyFinding, UnprovidedInjectFinding, UnrenderedComponentFinding,
+    UnresolvedCatalogReferenceFinding, UnresolvedImportFinding, UnusedCatalogEntryFinding,
+    UnusedClassMemberFinding, UnusedComponentEmitFinding, UnusedComponentPropFinding,
+    UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
+    UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
+    UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
+    UnusedTypeFinding,
 };
 use crate::serde_path;
 use crate::suppress::{IssueKind, closest_known_kind_name};
@@ -38,6 +40,64 @@ pub struct EntryPointSummary {
     /// Breakdown by source category (e.g., "package.json" -> 3, "plugin" -> 12).
     /// Sorted by key for deterministic output.
     pub by_source: Vec<(String, usize)>,
+}
+
+/// Per-component render fan-in counts plus the precomputed concentration
+/// aggregates.
+///
+/// DESCRIPTIVE blast-radius signal (NOT a rule, finding, or threshold): the
+/// component-graph analogue of module-level fan-in. Module fan-in counts
+/// importing MODULES; render fan-in counts JSX render CALL SITES (a shared
+/// `<Button>` is rendered in far more places than it is imported).
+///
+/// `per_component` is the internal carrier (keyed for hotspot path annotation),
+/// `#[serde(skip)]` on [`AnalysisResults`] so it never appears under bare
+/// `fallow` / `audit`; the aggregates feed the descriptive `VitalSigns` block
+/// (`p95_render_fan_in` / `render_fan_in_high_pct` / `max_render_fan_in`).
+///
+/// UNDERCOUNT is the documented safe direction: a child rendered via a JSX
+/// spread, a dynamic / `createElement(var)` form, or a member-expression tag
+/// (`<Lib.Button/>`) is not resolved by the shared `ChildResolver` and so
+/// increments no component's fan-in. A true high-fan-in component can only be
+/// undersold, never falsely flagged. A rare name-collision over-credit is
+/// possible via the default-import sole-component fallback (inherited verbatim
+/// from the prop-drilling / thin-wrapper resolver); low-harm for a descriptive,
+/// non-gating metric.
+#[derive(Debug, Clone, Default)]
+pub struct RenderFanInMetric {
+    /// Per-component render-site + distinct-parent counts. Keyed by
+    /// `(component file path, component name)` so the hotspot surface can map a
+    /// file back to its top component's fan-in. Components rendered nowhere ARE
+    /// included as a real `0` so the percentile distribution is not skewed.
+    pub per_component: Vec<RenderFanInComponent>,
+    /// 95th-percentile DISTINCT-PARENTS render fan-in across components (the
+    /// per-component distribution analogue of the module-fan-in p95). `None` on
+    /// an empty population. Mirrors `compute_coupling_concentration`.
+    pub p95_distinct_parents: Option<u32>,
+    /// Percentage of components whose distinct-parents render fan-in exceeds the
+    /// `max(p95, 10)` threshold (the same floor coupling concentration uses).
+    /// `None` on an empty population.
+    pub high_pct: Option<f64>,
+    /// The single highest render-SITE count across all components (the headline
+    /// blast-radius number). `None` on an empty population.
+    pub max_render_sites: Option<u32>,
+}
+
+/// One component's render fan-in detail: how many JSX render SITES target it and
+/// how many DISTINCT parent components render it.
+#[derive(Debug, Clone)]
+pub struct RenderFanInComponent {
+    /// Absolute path of the file declaring the component.
+    pub file: PathBuf,
+    /// The component name.
+    pub component: String,
+    /// Total JSX render SITES that resolve to this component across the project
+    /// (each capitalized / member JSX tag is one site). The headline
+    /// blast-radius number per component.
+    pub render_sites: u32,
+    /// Distinct `(parent_file, parent_component)` keys that render this
+    /// component. The percentiled distribution analogue of "distinct importers".
+    pub distinct_parents: u32,
 }
 
 /// Complete analysis results.
@@ -277,6 +337,31 @@ pub struct AnalysisResults {
     /// Serialized only when `true` so the default JSON contract is unchanged.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub unused_load_data_keys_global_abstain: bool,
+    /// React/Preact props forwarded unchanged through `>= N` intermediate
+    /// pass-through components until a consumer (located per-chain records).
+    /// Wrapped in [`PropDrillingChainFinding`] so each entry carries a typed
+    /// `actions` array natively. Health signal: the rule defaults to `off`
+    /// (opt-in), so this is dormant and populated ONLY when the user enables it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prop_drilling_chains: Vec<PropDrillingChainFinding>,
+    /// React/Preact components whose entire body is a single spread-forwarded
+    /// child render (`return <Child {...props}/>`): pure structural indirection,
+    /// a candidate for inlining at call sites. Wrapped in [`ThinWrapperFinding`]
+    /// so each entry carries a typed `actions` array natively. Health signal: the
+    /// rule defaults to `off` (opt-in), so this is dormant and populated ONLY
+    /// when the user enables it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub thin_wrappers: Vec<ThinWrapperFinding>,
+    /// React/Preact components that participate in a duplicate-prop-shape group:
+    /// three or more components across two or more files whose statically-known
+    /// prop NAME set is identical after stripping ubiquitous DOM / passthrough
+    /// names (a missing shared `Props` type / base component). Wrapped in
+    /// [`DuplicatePropShapeFinding`] so each entry carries a typed `actions`
+    /// array and its sibling roster natively. Health signal: the rule defaults to
+    /// `off` (opt-in), so this is dormant and populated ONLY when the user
+    /// enables it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub duplicate_prop_shapes: Vec<DuplicatePropShapeFinding>,
     /// Number of suppression entries that matched an issue during analysis.
     /// Human output uses this for the suppression footer; it is skipped in
     /// machine output to avoid changing the public JSON issue contract.
@@ -332,6 +417,16 @@ pub struct AnalysisResults {
     /// Skipped during serialization: rendered separately in JSON output.
     #[serde(skip)]
     pub entry_point_summary: Option<EntryPointSummary>,
+    /// Per-component render fan-in (JSX render SITES + distinct parents) plus the
+    /// precomputed concentration aggregates. DESCRIPTIVE blast-radius signal, not
+    /// an issue type: the component-graph analogue of module fan-in. `None` on
+    /// non-React projects (the dep gate fails and `render_edges` is empty).
+    /// Skipped during serialization (internal carrier, like
+    /// [`Self::export_usages`]); the public surface is the `VitalSigns`
+    /// aggregate, so bare `fallow` / `audit` never serialize it. See
+    /// [`RenderFanInMetric`].
+    #[serde(skip)]
+    pub render_fan_in: Option<RenderFanInMetric>,
 }
 
 impl AnalysisResults {
@@ -466,6 +561,9 @@ impl AnalysisResults {
             unused_server_actions,
             unused_load_data_keys,
             unused_load_data_keys_global_abstain,
+            prop_drilling_chains,
+            thin_wrappers,
+            duplicate_prop_shapes,
             suppression_count,
             active_suppressions,
             feature_flags,
@@ -475,6 +573,7 @@ impl AnalysisResults {
             security_unresolved_callee_diagnostics,
             export_usages,
             entry_point_summary,
+            render_fan_in,
         } = other;
 
         self.unused_files.extend(unused_files);
@@ -524,6 +623,9 @@ impl AnalysisResults {
         self.unused_server_actions.extend(unused_server_actions);
         self.unused_load_data_keys.extend(unused_load_data_keys);
         self.unused_load_data_keys_global_abstain |= unused_load_data_keys_global_abstain;
+        self.prop_drilling_chains.extend(prop_drilling_chains);
+        self.thin_wrappers.extend(thin_wrappers);
+        self.duplicate_prop_shapes.extend(duplicate_prop_shapes);
         self.feature_flags.extend(feature_flags);
         self.security_findings.extend(security_findings);
         self.security_unresolved_edge_files += security_unresolved_edge_files;
@@ -535,6 +637,9 @@ impl AnalysisResults {
         self.suppression_count += suppression_count;
         if self.entry_point_summary.is_none() {
             self.entry_point_summary = entry_point_summary;
+        }
+        if self.render_fan_in.is_none() {
+            self.render_fan_in = render_fan_in;
         }
     }
 
@@ -739,6 +844,49 @@ impl AnalysisResults {
         });
     }
 
+    /// Sort prop-drilling chains by their source hop (first hop): file, line,
+    /// prop, depth, for deterministic output. Split out of `sort_core_findings`
+    /// to keep that function under the unit-size ceiling.
+    fn sort_prop_drilling_chains(&mut self) {
+        self.prop_drilling_chains.sort_by(|a, b| {
+            let a_src = a.chain.hops.first();
+            let b_src = b.chain.hops.first();
+            let a_file = a_src.map(|h| &h.file);
+            let b_file = b_src.map(|h| &h.file);
+            a_file
+                .cmp(&b_file)
+                .then_with(|| a_src.map(|h| h.line).cmp(&b_src.map(|h| h.line)))
+                .then(a.chain.prop.cmp(&b.chain.prop))
+                .then(a.chain.depth.cmp(&b.chain.depth))
+        });
+    }
+
+    /// Sort thin-wrapper findings by file, line, then component for
+    /// deterministic output.
+    fn sort_thin_wrappers(&mut self) {
+        self.thin_wrappers.sort_by(|a, b| {
+            a.wrapper
+                .file
+                .cmp(&b.wrapper.file)
+                .then(a.wrapper.line.cmp(&b.wrapper.line))
+                .then(a.wrapper.component.cmp(&b.wrapper.component))
+        });
+    }
+
+    /// Sort duplicate-prop-shape findings by the shared shape first (so a
+    /// group's members stay adjacent), then file, line, and component, for
+    /// deterministic output.
+    fn sort_duplicate_prop_shapes(&mut self) {
+        self.duplicate_prop_shapes.sort_by(|a, b| {
+            a.shape
+                .shape
+                .cmp(&b.shape.shape)
+                .then(a.shape.file.cmp(&b.shape.file))
+                .then(a.shape.line.cmp(&b.shape.line))
+                .then(a.shape.component.cmp(&b.shape.component))
+        });
+    }
+
     fn sort_dependency_findings(&mut self) {
         self.unlisted_dependencies
             .sort_by(|a, b| a.dep.package_name.cmp(&b.dep.package_name));
@@ -883,6 +1031,10 @@ impl AnalysisResults {
     }
 
     fn sort_metadata_findings(&mut self) {
+        self.sort_prop_drilling_chains();
+        self.sort_thin_wrappers();
+        self.sort_duplicate_prop_shapes();
+
         self.misconfigured_dependency_overrides.sort_by(|a, b| {
             a.entry
                 .path
@@ -1185,6 +1337,121 @@ pub struct UnusedComponentEmit {
     pub line: u32,
     /// 0-based byte column offset of the emit declaration.
     pub col: u32,
+}
+
+/// One hop in a prop-drilling chain: a component that received the prop and
+/// passed it along (or, at the chain ends, the source that owns it and the
+/// consumer that substantively reads it).
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PropDrillHop {
+    /// The file containing this hop's component.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub file: PathBuf,
+    /// 1-based line of the component definition (or the prop declaration at the
+    /// source hop). Anchors a jump-to-source for the agent.
+    pub line: u32,
+    /// The component name at this hop.
+    pub component: String,
+}
+
+/// A located prop-drilling chain: a received prop forwarded unchanged through
+/// `>= N` intermediate pass-through components, each of which only re-passes it,
+/// until a component that substantively consumes it. The high-confidence signal
+/// is "the received identifier is used ONLY as the root of forwarded child-JSX
+/// attribute values", not the attribute name matching. Health signal (rule
+/// defaults to `off`, opt-in): a small capped penalty plus a `health --hotspots`
+/// surface, and located per-chain records so CI / an agent can act ("colocate or
+/// lift to context at hop B"). Zero-FP doctrine: any spread / `cloneElement` /
+/// element-as-prop / render-prop / context-provider / dynamic shape in the path
+/// abstains the whole chain.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PropDrillingChain {
+    /// The drilled prop name as declared at the chain SOURCE.
+    pub prop: String,
+    /// The chain depth = the number of components the prop is forwarded THROUGH
+    /// (source + intermediates + consumer = `hops.len()`). Always `>= N`.
+    pub depth: u32,
+    /// The ordered hop trail from source to consumer. The first hop owns the
+    /// prop, the middle hops are pass-throughs, the last hop consumes it. The
+    /// finding anchor is the first hop (`path` / `line` for suppression + CI).
+    pub hops: Vec<PropDrillHop>,
+}
+
+/// A located thin-wrapper / passthrough component: a React/Preact component
+/// whose entire body is `return <Child {...props}/>` (a single spread-forwarded
+/// child render, no host wrapper, no own value-add). It is pure structural
+/// indirection, a CANDIDATE for inlining at call sites or deleting. Health
+/// signal (rule defaults to `off`, opt-in): never a correctness error. Zero-FP
+/// doctrine: `forwardRef` / `memo` / exported / context-provider /
+/// `cloneElement` / render-prop / named-attr / unresolved-child wrappers all
+/// abstain (each is an intentional indirection or unprovable shape).
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ThinWrapper {
+    /// The file containing the wrapper component.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub file: PathBuf,
+    /// 1-based line of the wrapper component definition (the finding anchor for
+    /// jump-to-source and line-level suppression).
+    pub line: u32,
+    /// The wrapper component name.
+    pub component: String,
+    /// The single child component the wrapper forwards its props to (as written
+    /// at the render site).
+    pub child_component: String,
+}
+
+/// One member of a duplicate-prop-shape group: the OTHER components that share
+/// the same significant prop-name set, listed in each member's
+/// `sharing_components`. Path-sorted for stable output. A located reference (no
+/// `shape`, which is carried once on the owning [`DuplicatePropShape`]).
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct DuplicatePropShapeMember {
+    /// The file containing the sibling component.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub file: PathBuf,
+    /// 1-based line of the sibling component definition.
+    pub line: u32,
+    /// The sibling component name.
+    pub component: String,
+}
+
+/// A React/Preact component that participates in a duplicate-prop-shape GROUP:
+/// three or more distinct components across two or more files whose
+/// statically-harvested, fully-known prop NAME set is byte-for-byte IDENTICAL
+/// after excluding a fixed denylist of ubiquitous DOM / render-passthrough prop
+/// names, with the REMAINING significant set holding four or more members. This
+/// is a structural-refactor health signal (extract a shared `Props` type or a
+/// base component), never a correctness error and never an auto-fix. One finding
+/// is emitted per participating component; `sharing_components` lists the other
+/// members of the same group. Health signal: the rule defaults to `off`
+/// (opt-in), so this is dormant until enabled. Exact full-set identity only: a
+/// superset / subset relationship does NOT group (so the finding always fits one
+/// extracted shared type).
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct DuplicatePropShape {
+    /// The file containing this component.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub file: PathBuf,
+    /// 1-based line of this component definition (the finding anchor for
+    /// jump-to-source and line-level suppression).
+    pub line: u32,
+    /// This component name.
+    pub component: String,
+    /// The shared SIGNIFICANT prop-name set (sorted, denylist-stripped). The
+    /// unit being grouped; identical across every member of the group.
+    pub shape: Vec<String>,
+    /// The total number of components in this group (this one plus every
+    /// sibling).
+    pub group_size: u32,
+    /// The OTHER components sharing this exact prop shape (path-sorted). A
+    /// file-level-suppressed member drops from its own finding but still appears
+    /// here, because the group is real regardless of suppression.
+    pub sharing_components: Vec<DuplicatePropShapeMember>,
 }
 
 /// Two or more Next.js App Router route files that resolve to the SAME URL

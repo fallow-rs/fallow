@@ -337,6 +337,9 @@ pub fn compute_angular_template_complexity(source: &str) -> Option<FunctionCompl
         cognitive: complexity.cognitive,
         line_count,
         param_count: 0,
+        react_hook_count: 0,
+        react_jsx_max_depth: 0,
+        react_prop_count: 0,
         source_hash: None,
         // The hand-rolled Angular template scanner emits only aggregate metrics;
         // per-construct contributions are out of scope for the first cut.

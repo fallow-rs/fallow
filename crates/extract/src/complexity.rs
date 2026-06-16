@@ -10,6 +10,28 @@
 //! **Cognitive complexity** (SonarSource): structural increments with nesting penalty.
 //! Counts control flow breaks weighted by nesting depth. Boolean operator sequences
 //! add +1 per operator kind change. Optional chaining (`?.`) is NOT counted (Principle 3).
+//!
+//! **React folding** (anti-numerology): deeply-nested JSX subtrees and React hook
+//! density fold into the EXISTING cognitive metric rather than minting a new
+//! tunable rule. A JSX element nested past [`JSX_DEPTH_FLOOR`] accrues the same
+//! nesting penalty a nested control-flow construct does (so a ternary inside a
+//! deep JSX tree reads deeper too), recorded as a `JsxDepth` contribution; each
+//! React hook call in a component body adds a flat `HookDensity` contribution.
+//! Both surface in `--complexity-breakdown` and the raw counts surface as
+//! descriptive hotspot context. No new threshold knob: a god component surfaces
+//! through `max_cognitive` / `max_crap` like any other complex function.
+
+/// JSX nesting depth at or below which no cognitive penalty accrues. Shallow
+/// host markup (`<div><span/></div>`) is free; only genuinely deep render trees
+/// (the god-component shape) accrue the nesting penalty. A JSX element opens its
+/// penalty once its depth EXCEEDS this floor, so depth 1 and 2 are free and
+/// depth 3 is the first penalized level.
+const JSX_DEPTH_FLOOR: u16 = 2;
+
+/// Prop count at or below which no cognitive penalty accrues. A handful of props
+/// is normal; a wide prop interface (the god-component shape) folds its excess
+/// into cognitive. Only props beyond this floor are counted.
+const PROP_COUNT_FLOOR: u16 = 4;
 
 #[allow(clippy::wildcard_imports, reason = "many AST types used")]
 use oxc_ast::ast::*;
@@ -34,6 +56,19 @@ struct FunctionFrame {
     last_logical_operator: Option<LogicalOperator>,
     /// Number of parameters (excluding TypeScript's `this` parameter).
     param_count: u8,
+    /// Current JSX element nesting depth: how many JSX elements/fragments are
+    /// open above the cursor in this frame's own body. Reset per frame so a
+    /// nested render-prop arrow starts its own depth.
+    jsx_depth: u16,
+    /// Deepest JSX nesting reached in this frame (descriptive context).
+    jsx_max_depth: u16,
+    /// Count of React hook calls made directly in this frame's body.
+    hook_count: u16,
+    /// Number of props destructured from this function's first parameter, if it
+    /// is a flat object pattern (`{ a, b, c }`). `0` for a bare `props`
+    /// identifier or no parameter. Folded into cognitive only once the frame is
+    /// known to render JSX (a component), at pop time.
+    prop_count: u16,
     /// Per-increment breakdown accumulated as the function body is walked.
     contributions: Vec<ComplexityContribution>,
 }
@@ -77,7 +112,7 @@ impl<'a> ComplexityVisitor<'a> {
         Some(fallow_cov_protocol::source_hash_for(slice.as_bytes()))
     }
 
-    fn push_function(&mut self, name: String, span: Span, param_count: u8) {
+    fn push_function(&mut self, name: String, span: Span, param_count: u8, prop_count: u16) {
         self.stack.push(FunctionFrame {
             name,
             span,
@@ -86,11 +121,19 @@ impl<'a> ComplexityVisitor<'a> {
             nesting_level: 0,
             last_logical_operator: None,
             param_count,
+            jsx_depth: 0,
+            jsx_max_depth: 0,
+            hook_count: 0,
+            prop_count,
             contributions: Vec::new(),
         });
     }
 
     fn pop_function(&mut self) {
+        // Fold the component prop count into cognitive before popping, so the
+        // contribution lands on the still-current frame (a prop fold only fires
+        // for a JSX-rendering frame, i.e. a real component).
+        self.fold_component_prop_count();
         if let Some(frame) = self.stack.pop() {
             let (line, col) =
                 fallow_types::extract::byte_offset_to_line_col(self.line_offsets, frame.span.start);
@@ -105,9 +148,39 @@ impl<'a> ComplexityVisitor<'a> {
                 cognitive: frame.cognitive,
                 line_count: end_line.saturating_sub(line) + 1,
                 param_count: frame.param_count,
+                react_hook_count: frame.hook_count,
+                react_jsx_max_depth: frame.jsx_max_depth,
+                react_prop_count: frame.prop_count,
                 source_hash,
                 contributions: frame.contributions,
             });
+        }
+    }
+
+    /// Fold a component's prop count past [`PROP_COUNT_FLOOR`] into cognitive,
+    /// recorded as a single `PropCount` contribution anchored at the function
+    /// span. Fires only when the frame rendered JSX (`jsx_max_depth > 0`), so a
+    /// plain function destructuring an options bag is never penalized. The fold
+    /// is one increment carrying the excess as its weight (a 14-prop component
+    /// with floor 4 adds `+10`), keeping the breakdown reconstructable.
+    fn fold_component_prop_count(&mut self) {
+        let Some(frame) = self.stack.last() else {
+            return;
+        };
+        if frame.jsx_max_depth == 0 || frame.prop_count <= PROP_COUNT_FLOOR {
+            return;
+        }
+        let excess = frame.prop_count - PROP_COUNT_FLOOR;
+        let span = frame.span;
+        self.push_contribution(
+            span,
+            ComplexityMetric::Cognitive,
+            ComplexityContributionKind::PropCount,
+            excess,
+            0,
+        );
+        if let Some(frame) = self.stack.last_mut() {
+            frame.cognitive = frame.cognitive.saturating_add(excess);
         }
     }
 
@@ -165,6 +238,60 @@ impl<'a> ComplexityVisitor<'a> {
         }
     }
 
+    /// Open a JSX element/fragment: bump the frame's JSX depth, track the max for
+    /// descriptive output, and once the depth EXCEEDS [`JSX_DEPTH_FLOOR`] fold the
+    /// nesting penalty into cognitive (recorded as `JsxDepth`) AND into the shared
+    /// `nesting_level`, so a ternary or `&&` rendered inside this deep subtree
+    /// inherits the deeper penalty through the existing machinery. Returns whether
+    /// the structural nesting was bumped, so the caller restores it on close.
+    fn open_jsx(&mut self, span: Span) -> bool {
+        let new_depth = self.stack.last().map_or(0, |frame| frame.jsx_depth) + 1;
+        let penalized = new_depth > JSX_DEPTH_FLOOR;
+        if let Some(frame) = self.stack.last_mut() {
+            frame.jsx_depth = new_depth;
+            frame.jsx_max_depth = frame.jsx_max_depth.max(new_depth);
+        }
+        if penalized {
+            // The JSX element is one level deeper than the floor; weight it like a
+            // nested structural construct (+1 base + current structural nesting),
+            // mirroring `inc_cognitive_with_nesting`, then deepen the structural
+            // nesting for whatever this element renders.
+            self.inc_cognitive_with_nesting(span, ComplexityContributionKind::JsxDepth);
+            self.inc_nesting();
+        }
+        penalized
+    }
+
+    /// Close a JSX element/fragment opened by [`Self::open_jsx`], restoring the
+    /// structural nesting bumped when the element was penalized.
+    fn close_jsx(&mut self, penalized: bool) {
+        if penalized {
+            self.dec_nesting();
+        }
+        if let Some(frame) = self.stack.last_mut() {
+            frame.jsx_depth = frame.jsx_depth.saturating_sub(1);
+        }
+    }
+
+    /// Record one React hook call in the current frame: bump the descriptive hook
+    /// count and, when the frame is React-shaped (a component or custom hook by
+    /// naming convention), fold a flat cognitive increment (recorded as
+    /// `HookDensity`). A hook-heavy component accrues cognitive load the same way
+    /// branching does. Gating on the name convention keeps a `use*` call inside an
+    /// ordinary non-React function from accruing the penalty (zero-FP posture).
+    fn record_hook(&mut self, span: Span) {
+        let react_shaped = self
+            .stack
+            .last()
+            .is_some_and(|frame| frame_name_is_react_shaped(&frame.name));
+        if let Some(frame) = self.stack.last_mut() {
+            frame.hook_count = frame.hook_count.saturating_add(1);
+        }
+        if react_shaped {
+            self.inc_cognitive_flat(span, ComplexityContributionKind::HookDensity);
+        }
+    }
+
     /// Count function parameters, excluding TypeScript's `this` parameter.
     #[expect(
         clippy::cast_possible_truncation,
@@ -182,6 +309,27 @@ impl<'a> ComplexityVisitor<'a> {
             count += 1;
         }
         count as u8
+    }
+
+    /// Count the props destructured from a function's first parameter, when it
+    /// is a flat object pattern (`{ a, b, c }`, with or without a type
+    /// annotation), the React component-props shape. A bare `props` identifier,
+    /// a rest element, or no first parameter yields `0` (not statically
+    /// countable, or not a props-destructuring component). Mirrors the
+    /// statically-harvestable prop shape the React extractor uses, but counts
+    /// only (it does not need to resolve names).
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "components with >65535 destructured props are impossible"
+    )]
+    fn count_props(params: &FormalParameters<'_>) -> u16 {
+        let Some(first) = params.items.first() else {
+            return 0;
+        };
+        let BindingPattern::ObjectPattern(obj) = &first.pattern else {
+            return 0;
+        };
+        obj.properties.len().min(u16::MAX as usize) as u16
     }
 
     /// Increase nesting level for the current function.
@@ -303,7 +451,8 @@ impl<'ast> Visit<'ast> for ComplexityVisitor<'_> {
         }
 
         let param_count = Self::count_params(&func.params);
-        self.push_function(name, func.span, param_count);
+        let prop_count = Self::count_props(&func.params);
+        self.push_function(name, func.span, param_count, prop_count);
         walk::walk_function(self, func, flags);
         self.pop_function();
 
@@ -324,7 +473,8 @@ impl<'ast> Visit<'ast> for ComplexityVisitor<'_> {
         }
 
         let param_count = Self::count_params(&arrow.params);
-        self.push_function(name, arrow.span, param_count);
+        let prop_count = Self::count_props(&arrow.params);
+        self.push_function(name, arrow.span, param_count, prop_count);
         walk::walk_arrow_function_expression(self, arrow);
         self.pop_function();
 
@@ -531,6 +681,53 @@ impl<'ast> Visit<'ast> for ComplexityVisitor<'_> {
         }
         walk::walk_continue_statement(self, stmt);
     }
+
+    fn visit_jsx_element(&mut self, element: &JSXElement<'ast>) {
+        // A JSX element is a nesting level: open the depth (folding the nesting
+        // penalty past the floor), walk the opening element + children, then close.
+        let penalized = self.open_jsx(element.span);
+        walk::walk_jsx_element(self, element);
+        self.close_jsx(penalized);
+    }
+
+    fn visit_jsx_fragment(&mut self, fragment: &JSXFragment<'ast>) {
+        // A `<>...</>` fragment is also a nesting level for its children.
+        let penalized = self.open_jsx(fragment.span);
+        walk::walk_jsx_fragment(self, fragment);
+        self.close_jsx(penalized);
+    }
+
+    fn visit_call_expression(&mut self, call: &CallExpression<'ast>) {
+        if let Expression::Identifier(callee) = &call.callee
+            && is_hook_callee(callee.name.as_str())
+        {
+            self.record_hook(call.span);
+        }
+        walk::walk_call_expression(self, call);
+    }
+}
+
+/// Whether a function-frame name marks a React component (capitalized) or a
+/// custom hook (`use<Uppercase>`). Used to gate the hook-density cognitive fold
+/// so only React-shaped frames accrue it.
+fn frame_name_is_react_shaped(name: &str) -> bool {
+    let first = name.chars().next();
+    if first.is_some_and(char::is_uppercase) {
+        return true;
+    }
+    name.strip_prefix("use")
+        .and_then(|rest| rest.chars().next())
+        .is_some_and(char::is_uppercase)
+}
+
+/// Whether a callee identifier names a React hook: a built-in
+/// (`useState` / `useEffect` / `useMemo` / `useCallback`) or any custom `use*`
+/// hook (`use` followed by an uppercase letter, so a bare `use` / `used` is not
+/// a hook). Mirrors the React extractor's `hook_kind` / `is_custom_hook_name`.
+fn is_hook_callee(name: &str) -> bool {
+    name.strip_prefix("use")
+        .and_then(|rest| rest.chars().next())
+        .is_some_and(char::is_uppercase)
 }
 
 /// Compute per-function complexity metrics from a parsed Oxc program.
@@ -1123,6 +1320,12 @@ mod tests {
             "function f(a,b){ if(a){ if(b){} else if(a){} else {} } else if(b){ for(;;){} } }",
             "const f = (a) => a ? (a ? 1 : 2) : 3;",
             "function f(a){ do { if(a){} } while(a); }",
+            // React shapes: the JSX-depth, hook-density, and prop-count folds
+            // must reconstruct cognitive exactly like every other increment.
+            "function App({ a, b, c, d, e, f, g }) { return <div><span><b><i/></b></span></div>; }",
+            "function App() { useState(); useEffect(() => {}); return <div/>; }",
+            "const App = ({ a, b }) => (<ul><li><a><img/></a></li></ul>);",
+            "function App({ x }) { return x ? <div><p><em/></p></div> : <span/>; }",
         ];
         for src in corpus {
             for func in analyze(src) {
@@ -1222,5 +1425,225 @@ mod tests {
             .filter(|c| c.kind == ComplexityContributionKind::Case)
             .count();
         assert_eq!(cases, 1, "only the `case 1` test, not `default`");
+    }
+
+    // --- React-aware complexity folding (Phase 2) ---
+
+    fn count_kind(f: &FunctionComplexity, kind: ComplexityContributionKind) -> usize {
+        f.contributions.iter().filter(|c| c.kind == kind).count()
+    }
+
+    #[test]
+    fn shallow_jsx_is_free() {
+        // A component with host markup at or below the floor (depth 2) accrues no
+        // JSX cognitive penalty: a normal component must not surface as a hotspot.
+        let results = analyze("function App() { return <div><span/></div>; }");
+        let f = find_fn(&results, "App");
+        assert_eq!(f.cognitive, 0, "shallow JSX adds no cognitive load");
+        assert_eq!(count_kind(f, ComplexityContributionKind::JsxDepth), 0);
+        assert_eq!(f.react_jsx_max_depth, 2);
+    }
+
+    #[test]
+    fn deep_jsx_folds_into_cognitive_with_nesting_penalty() {
+        // A deeply-nested JSX tree past the floor accrues cognitive load via the
+        // nesting penalty, surfaced as JsxDepth contributions.
+        let deep = analyze("function App() { return <a><b><c><d><e/></d></c></b></a>; }");
+        let f = find_fn(&deep, "App");
+        assert!(
+            f.cognitive > 0,
+            "a deep JSX tree must accrue cognitive load: {:?}",
+            f.contributions
+        );
+        assert!(count_kind(f, ComplexityContributionKind::JsxDepth) > 0);
+        assert_eq!(f.react_jsx_max_depth, 5);
+    }
+
+    #[test]
+    fn deep_jsx_scores_higher_cognitive_than_flat() {
+        // The headline property: a deeply-nested component scores strictly higher
+        // cognitive than a flat one with the same return shape otherwise.
+        let flat = analyze("function Flat() { return <div><span/></div>; }");
+        let deep = analyze("function Deep() { return <a><b><c><d><e><f/></e></d></c></b></a>; }");
+        let flat_cog = find_fn(&flat, "Flat").cognitive;
+        let deep_cog = find_fn(&deep, "Deep").cognitive;
+        assert!(
+            deep_cog > flat_cog,
+            "deep JSX ({deep_cog}) must score higher than flat ({flat_cog})"
+        );
+    }
+
+    #[test]
+    fn ternary_inside_deep_jsx_inherits_nesting_penalty() {
+        // A ternary rendered inside a deep JSX subtree inherits the deeper nesting
+        // penalty through the shared machinery (the fold deepens nesting_level).
+        let shallow = analyze("function A({ x }) { return <div>{x ? <p/> : <span/>}</div>; }");
+        let deep = analyze(
+            "function B({ x }) { return <a><b><c><d>{x ? <p/> : <span/>}</d></c></b></a>; }",
+        );
+        let shallow_tern = find_fn(&shallow, "A")
+            .contributions
+            .iter()
+            .find(|c| {
+                c.kind == ComplexityContributionKind::Ternary
+                    && c.metric == ComplexityMetric::Cognitive
+            })
+            .expect("ternary in shallow")
+            .weight;
+        let deep_tern = find_fn(&deep, "B")
+            .contributions
+            .iter()
+            .find(|c| {
+                c.kind == ComplexityContributionKind::Ternary
+                    && c.metric == ComplexityMetric::Cognitive
+            })
+            .expect("ternary in deep")
+            .weight;
+        assert!(
+            deep_tern > shallow_tern,
+            "ternary inside deep JSX (weight {deep_tern}) must out-weigh the shallow one ({shallow_tern})"
+        );
+    }
+
+    #[test]
+    fn hook_density_folds_into_cognitive() {
+        // Each hook call in a component body adds a flat HookDensity cognitive
+        // increment and is counted descriptively.
+        let results = analyze(
+            "function App() { const [a, setA] = useState(0); useEffect(() => {}, []); const v = useMemo(() => 1, []); return <div/>; }",
+        );
+        let f = find_fn(&results, "App");
+        assert_eq!(f.react_hook_count, 3, "three hook calls counted");
+        assert_eq!(count_kind(f, ComplexityContributionKind::HookDensity), 3);
+        assert!(f.cognitive >= 3, "three hooks add at least +3 cognitive");
+    }
+
+    #[test]
+    fn hook_heavy_component_scores_higher_than_flat() {
+        // The headline property for hooks: a hook-heavy component scores strictly
+        // higher cognitive than one with no hooks.
+        let flat = analyze("function Flat() { return <div/>; }");
+        let heavy = analyze(
+            "function Heavy() { useState(); useState(); useEffect(() => {}); useMemo(() => 1); return <div/>; }",
+        );
+        let flat_cog = find_fn(&flat, "Flat").cognitive;
+        let heavy_cog = find_fn(&heavy, "Heavy").cognitive;
+        assert!(
+            heavy_cog > flat_cog,
+            "hook-heavy ({heavy_cog}) must score higher than flat ({flat_cog})"
+        );
+    }
+
+    #[test]
+    fn custom_hook_callee_counts() {
+        // A custom `use*` hook call is folded just like a built-in hook.
+        let results = analyze("function App() { const data = useFetchUser(); return <div/>; }");
+        let f = find_fn(&results, "App");
+        assert_eq!(f.react_hook_count, 1);
+        assert_eq!(count_kind(f, ComplexityContributionKind::HookDensity), 1);
+    }
+
+    #[test]
+    fn use_prefixed_non_hook_not_counted() {
+        // `use` / `used` (no following uppercase) is not a hook and must not fold.
+        let results = analyze("function App() { use(); used(); return <div/>; }");
+        let f = find_fn(&results, "App");
+        assert_eq!(f.react_hook_count, 0);
+        assert_eq!(count_kind(f, ComplexityContributionKind::HookDensity), 0);
+    }
+
+    #[test]
+    fn hook_in_non_react_function_counts_but_does_not_fold() {
+        // A `use*` call inside an ordinary non-React function (not capitalized, not
+        // hook-named) is counted descriptively but does NOT fold into cognitive,
+        // keeping the zero-FP posture for non-React code.
+        let results = analyze("function helper() { useState(); return 1; }");
+        let f = find_fn(&results, "helper");
+        assert_eq!(f.react_hook_count, 1, "still counted for context");
+        assert_eq!(
+            count_kind(f, ComplexityContributionKind::HookDensity),
+            0,
+            "but not folded into cognitive"
+        );
+        assert_eq!(f.cognitive, 0);
+    }
+
+    #[test]
+    fn prop_count_under_floor_is_free() {
+        // A component with a small prop interface accrues no prop penalty.
+        let results = analyze("function App({ a, b, c }) { return <div/>; }");
+        let f = find_fn(&results, "App");
+        assert_eq!(f.react_prop_count, 3);
+        assert_eq!(count_kind(f, ComplexityContributionKind::PropCount), 0);
+        assert_eq!(f.cognitive, 0);
+    }
+
+    #[test]
+    fn wide_prop_interface_folds_excess_into_cognitive() {
+        // A wide prop interface folds the props past the floor into cognitive.
+        let results = analyze("function App({ a, b, c, d, e, f, g, h }) { return <div/>; }");
+        let f = find_fn(&results, "App");
+        assert_eq!(f.react_prop_count, 8);
+        let prop = f
+            .contributions
+            .iter()
+            .find(|c| c.kind == ComplexityContributionKind::PropCount)
+            .expect("a PropCount contribution");
+        assert_eq!(prop.weight, 8 - PROP_COUNT_FLOOR, "excess over the floor");
+        assert!(f.cognitive >= prop.weight);
+    }
+
+    #[test]
+    fn prop_count_not_folded_without_jsx() {
+        // A plain function destructuring a wide options bag (no JSX) is NOT a
+        // component and must not accrue the prop penalty.
+        let results = analyze("function configure({ a, b, c, d, e, f, g, h }) { return a + b; }");
+        let f = find_fn(&results, "configure");
+        assert_eq!(f.react_prop_count, 8, "still counted descriptively");
+        assert_eq!(
+            count_kind(f, ComplexityContributionKind::PropCount),
+            0,
+            "but not folded: not a component"
+        );
+    }
+
+    #[test]
+    fn bare_props_identifier_counts_zero_props() {
+        // A component taking a bare `props` identifier is not statically
+        // prop-countable; prop_count is 0 and nothing folds.
+        let results = analyze("function App(props) { return <div>{props.title}</div>; }");
+        let f = find_fn(&results, "App");
+        assert_eq!(f.react_prop_count, 0);
+        assert_eq!(count_kind(f, ComplexityContributionKind::PropCount), 0);
+    }
+
+    #[test]
+    fn arrow_component_folds_react_signals() {
+        // Arrow-bound components are covered identically to function declarations.
+        let results = analyze(
+            "const App = ({ a, b, c, d, e, f }) => { useState(); return <ul><li><span><b/></span></li></ul>; };",
+        );
+        let f = find_fn(&results, "App");
+        assert_eq!(f.react_prop_count, 6);
+        assert_eq!(f.react_hook_count, 1);
+        assert!(f.react_jsx_max_depth >= 4);
+        assert!(count_kind(f, ComplexityContributionKind::PropCount) > 0);
+        assert!(count_kind(f, ComplexityContributionKind::HookDensity) > 0);
+        assert!(count_kind(f, ComplexityContributionKind::JsxDepth) > 0);
+    }
+
+    #[test]
+    fn non_react_function_unaffected() {
+        // A plain function with no JSX/hooks/props is byte-identical to before:
+        // no React fields, no React contributions.
+        let results = analyze("function add(a, b) { if (a) { return a + b; } return b; }");
+        let f = find_fn(&results, "add");
+        assert_eq!(f.react_hook_count, 0);
+        assert_eq!(f.react_jsx_max_depth, 0);
+        assert_eq!(f.react_prop_count, 0);
+        assert_eq!(count_kind(f, ComplexityContributionKind::JsxDepth), 0);
+        assert_eq!(count_kind(f, ComplexityContributionKind::HookDensity), 0);
+        assert_eq!(count_kind(f, ComplexityContributionKind::PropCount), 0);
+        assert_eq!(f.cognitive, 1, "just the single if");
     }
 }

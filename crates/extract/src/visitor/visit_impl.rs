@@ -3146,7 +3146,9 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.record_next_function_param_sources(func);
         self.push_function_declaration_scope(&func.params);
         self.function_depth += 1;
+        let component_pushed = self.react_enter_function(func);
         walk::walk_function(self, func, flags);
+        self.react_exit_component(component_pushed);
         self.function_depth -= 1;
         self.pop_function_declaration_scope();
     }
@@ -3155,7 +3157,9 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.record_next_arrow_param_sources(expr);
         self.push_function_declaration_scope(&expr.params);
         self.function_depth += 1;
+        let component_pushed = self.react_enter_arrow(expr);
         walk::walk_arrow_function_expression(self, expr);
+        self.react_exit_component(component_pushed);
         self.function_depth -= 1;
         self.pop_function_declaration_scope();
     }
@@ -3515,6 +3519,10 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_variable_declaration(&mut self, decl: &VariableDeclaration<'a>) {
+        // Pre-register named arrow / function-expression component bindings so
+        // the function-body walk (below) can push the component stack with the
+        // binding name. Runs before the body is walked. No-op on non-JSX files.
+        self.react_prescan_variable_declaration(decl);
         for declarator in &decl.declarations {
             self.record_variable_declarator_metadata(declarator);
 
@@ -3665,6 +3673,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.record_structural_class_call_candidate(expr);
         self.clear_literal_allowlist_on_mutating_member_call(expr);
         self.record_framework_callback_param_sources(expr);
+        self.react_record_hook_call(expr);
 
         if let Some(test_name) = playwright_test_callee_name(&expr.callee) {
             self.member_accesses
@@ -4137,6 +4146,16 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     fn visit_jsx_attribute(&mut self, attr: &oxc_ast::ast::JSXAttribute<'a>) {
         self.capture_jsx_attr_sink(attr);
         walk::walk_jsx_attribute(self, attr);
+    }
+
+    fn visit_jsx_element(&mut self, element: &oxc_ast::ast::JSXElement<'a>) {
+        // Record a render edge for a component tag (capitalized or
+        // member-expression) plus the passed attribute names + spread presence.
+        // Lowercase host elements are skipped for render purposes. No-op on
+        // non-JSX files (perf gate). The walk continues into children so nested
+        // renders and host-element nesting depth are still visited.
+        self.react_record_jsx_element(element);
+        walk::walk_jsx_element(self, element);
     }
 }
 

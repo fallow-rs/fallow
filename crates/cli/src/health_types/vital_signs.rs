@@ -9,7 +9,11 @@
 /// v6: Added `total_loc` to vital signs (always computed from parsed modules).
 /// v7: MI formula dampening for small files (values change for files < 50 lines).
 /// v8: Added scale-invariant tail/density metrics for health score calibration.
-pub const SNAPSHOT_SCHEMA_VERSION: u32 = 8;
+/// v9: Added render fan-in concentration (`p95_render_fan_in`,
+///     `render_fan_in_high_pct`, `max_render_fan_in`), the component-graph
+///     analogue of module fan-in / coupling concentration. Additive optional
+///     fields (matches the v4 precedent that added coupling concentration).
+pub const SNAPSHOT_SCHEMA_VERSION: u32 = 9;
 
 /// Project-wide vital signs — a fixed set of metrics for trend tracking.
 ///
@@ -83,6 +87,32 @@ pub struct VitalSigns {
     /// Percentage of files with fan-in above the project's p95 threshold.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub coupling_high_pct: Option<f64>,
+    /// Number of located prop-drilling chains (React/Preact props forwarded
+    /// unchanged through 3+ pass-through components). `None` unless the opt-in
+    /// `prop-drilling` rule is enabled (it defaults to off), so the small capped
+    /// penalty and the hotspot surface are dormant by default.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub prop_drilling_chain_count: Option<u32>,
+    /// The deepest located prop-drilling chain's depth (forwarding hops). `None`
+    /// when no chains were found or the rule is off. Descriptive context only.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub prop_drilling_max_depth: Option<u32>,
+    /// 95th-percentile DISTINCT-PARENTS render fan-in across React/Preact
+    /// components (the component-graph analogue of `p95_fan_in`, which percentiles
+    /// per-FILE module fan-in). `None` on non-React runs. Descriptive
+    /// blast-radius context, NOT a gate. Mirrors `compute_coupling_concentration`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub p95_render_fan_in: Option<u32>,
+    /// Percentage of components whose render fan-in exceeds the project's
+    /// `max(p95, 10)` threshold (reuses the coupling-concentration floor; NO new
+    /// tunable constant). `None` on non-React runs. Mirrors `coupling_high_pct`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub render_fan_in_high_pct: Option<f64>,
+    /// The single highest render-SITE count across all components (the headline
+    /// blast-radius number: a shared `<Button>` rendered in N places). `None` on
+    /// non-React runs. Descriptive context, no threshold.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub max_render_fan_in: Option<u32>,
     /// Total lines of code across all parsed modules.
     #[serde(default)]
     pub total_loc: u64,
@@ -194,11 +224,18 @@ mod tests {
             unit_interfacing_profile: None,
             p95_fan_in: None,
             coupling_high_pct: None,
+            prop_drilling_chain_count: None,
+            prop_drilling_max_depth: None,
+            p95_render_fan_in: Some(3),
+            render_fan_in_high_pct: Some(4.5),
+            max_render_fan_in: Some(6),
             total_loc: 42_000,
         };
         let json = serde_json::to_string(&vs).unwrap();
         let deserialized: VitalSigns = serde_json::from_str(&json).unwrap();
         assert!((deserialized.avg_cyclomatic - 4.7).abs() < f64::EPSILON);
+        assert_eq!(deserialized.p95_render_fan_in, Some(3));
+        assert_eq!(deserialized.max_render_fan_in, Some(6));
         assert_eq!(deserialized.p90_cyclomatic, 12);
         assert_eq!(deserialized.hotspot_count, Some(5));
         assert!(!json.contains("duplication_pct"));
@@ -235,6 +272,11 @@ mod tests {
                 unit_interfacing_profile: None,
                 p95_fan_in: None,
                 coupling_high_pct: None,
+                prop_drilling_chain_count: None,
+                prop_drilling_max_depth: None,
+                p95_render_fan_in: None,
+                render_fan_in_high_pct: None,
+                max_render_fan_in: None,
                 total_loc: 42_000,
             },
             counts: VitalSignsCounts {
@@ -284,10 +326,18 @@ mod tests {
             unit_interfacing_profile: None,
             p95_fan_in: None,
             coupling_high_pct: None,
+            prop_drilling_chain_count: None,
+            prop_drilling_max_depth: None,
+            p95_render_fan_in: None,
+            render_fan_in_high_pct: None,
+            max_render_fan_in: None,
             total_loc: 0,
         };
         let json = serde_json::to_string(&vs).unwrap();
         assert!(!json.contains("dead_file_pct"));
+        assert!(!json.contains("p95_render_fan_in"));
+        assert!(!json.contains("render_fan_in_high_pct"));
+        assert!(!json.contains("max_render_fan_in"));
         assert!(!json.contains("dead_export_pct"));
         assert!(!json.contains("duplication_pct"));
         assert!(!json.contains("hotspot_count"));
@@ -299,8 +349,8 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_schema_version_is_eight() {
-        assert_eq!(SNAPSHOT_SCHEMA_VERSION, 8);
+    fn snapshot_schema_version_is_nine() {
+        assert_eq!(SNAPSHOT_SCHEMA_VERSION, 9);
     }
 
     #[test]

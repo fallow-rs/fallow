@@ -55,6 +55,27 @@ pub(super) fn assemble_health_report(
     } = assembly;
     let coverage_gaps = build_report_coverage_gaps(report_coverage_gaps, score_output.as_ref());
     let (ist_matched, ist_total) = istanbul_counts_from_score_output(score_output.as_ref());
+    // Prop-drilling chains ride on the whole-project score output. Surfaced in
+    // the report (unless score-only output) so `health --hotspots` and the JSON
+    // envelope carry the located records. Empty unless the opt-in rule is on.
+    let prop_drilling_chains = if opts.score_only_output {
+        Vec::new()
+    } else {
+        score_output
+            .as_ref()
+            .map(|o| o.prop_drilling_chains.clone())
+            .unwrap_or_default()
+    };
+    // Render fan-in is a descriptive blast-radius signal. Build the per-file
+    // top-component lookup BEFORE moving `score_output` into the file-scores
+    // builder, so the human hotspot/complexity drill-down can show `rendered in N
+    // places` for the top component of a file. Empty on non-React runs. The
+    // public surface stays the VitalSigns aggregate; this map is `#[serde(skip)]`.
+    let render_fan_in_top = if opts.score_only_output {
+        rustc_hash::FxHashMap::default()
+    } else {
+        build_render_fan_in_top(score_output.as_ref())
+    };
     let file_scores = build_report_file_scores(opts, score_output);
     let (report_hotspots, report_hotspot_summary) =
         report_hotspot_data(opts, hotspots, hotspot_summary);
@@ -96,6 +117,7 @@ pub(super) fn assemble_health_report(
         } else {
             coverage_gaps
         },
+        prop_drilling_chains,
         hotspots: build_report_hotspots(opts, report_hotspots),
         hotspot_summary: if opts.score_only_output {
             None
@@ -118,6 +140,7 @@ pub(super) fn assemble_health_report(
         health_trend,
         actions_meta: build_health_actions_meta(action_ctx),
         css_analytics: None,
+        render_fan_in_top,
     };
     if !opts.score_only_output {
         report.coverage_intelligence = coverage_intelligence::build_coverage_intelligence(
@@ -144,6 +167,30 @@ fn istanbul_counts_from_score_output(
     score_output: Option<&super::scoring::FileScoreOutput>,
 ) -> (usize, usize) {
     score_output.map_or((0, 0), |o| (o.istanbul_matched, o.istanbul_total))
+}
+
+/// Build the per-file top-render-fan-in lookup for the human drill-down: maps a
+/// component file's absolute path to its highest-render-SITE component
+/// `(component name, render sites)`. A file with several components keeps only
+/// its most-rendered one (the file's blast-radius headline). Empty on non-React
+/// runs (the core metric is `None`). Descriptive only; never serialized.
+fn build_render_fan_in_top(
+    score_output: Option<&super::scoring::FileScoreOutput>,
+) -> rustc_hash::FxHashMap<std::path::PathBuf, (String, u32)> {
+    let mut top: rustc_hash::FxHashMap<std::path::PathBuf, (String, u32)> =
+        rustc_hash::FxHashMap::default();
+    let Some(metric) = score_output.and_then(|o| o.render_fan_in.as_ref()) else {
+        return top;
+    };
+    for component in &metric.per_component {
+        let entry = top
+            .entry(component.file.clone())
+            .or_insert_with(|| (component.component.clone(), component.render_sites));
+        if component.render_sites > entry.1 {
+            *entry = (component.component.clone(), component.render_sites);
+        }
+    }
+    top
 }
 
 fn report_hotspot_data(

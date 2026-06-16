@@ -73,6 +73,10 @@ fn cache_roundtrip() {
         load_return_keys: Vec::new(),
         has_unharvestable_load: false,
         has_load_data_whole_use: false,
+        component_functions: Vec::new(),
+        react_props: Vec::new(),
+        hook_uses: Vec::new(),
+        render_edges: Vec::new(),
     };
 
     store.insert(std::path::Path::new("test.ts"), cached);
@@ -304,6 +308,10 @@ fn incremental_cache_prune_stale_entries() {
         load_return_keys: Vec::new(),
         has_unharvestable_load: false,
         has_load_data_whole_use: false,
+        component_functions: Vec::new(),
+        react_props: Vec::new(),
+        hook_uses: Vec::new(),
+        render_edges: Vec::new(),
     };
 
     store.insert(std::path::Path::new("/project/existing.ts"), make_module());

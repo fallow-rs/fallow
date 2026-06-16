@@ -377,6 +377,9 @@ mod severity_gate {
             unused_component_emits: _,
             unused_server_actions: _,
             unused_load_data_keys: _,
+            prop_drilling_chains: _,
+            thin_wrappers: _,
+            duplicate_prop_shapes: _,
             route_collisions: _,
             dynamic_segment_name_conflicts: _,
             // ---- non-diagnostic fields (destructured-and-ignored) ----
@@ -396,6 +399,10 @@ mod severity_gate {
             feature_flags: _,
             export_usages: _,
             entry_point_summary: _,
+            // Whole-project descriptive render fan-in metric (component-graph
+            // analogue of module fan-in); surfaced via health vital signs, not a
+            // per-finding LSP diagnostic.
+            render_fan_in: _,
             // Project-wide abstain flag for the `unused-load-data-key` detector;
             // an observability bool, not a per-finding diagnostic.
             unused_load_data_keys_global_abstain: _,

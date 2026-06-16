@@ -5,6 +5,7 @@ mod coverage_intelligence;
 mod grouping;
 mod hotspots;
 pub mod ownership;
+mod react_hooks;
 mod runtime_filter;
 pub mod scoring;
 mod tailwind_theme;
@@ -4159,6 +4160,37 @@ fn prepare_health_vital_data(
     };
     let (mut vital_signs, mut counts) = compute_vital_signs_and_counts(&vital_signs_input);
 
+    // Prop drilling is a whole-project graph signal (the chains live in
+    // AnalysisResults, surfaced via FileScoreOutput). Only populated when the
+    // opt-in `prop-drilling` rule is enabled (the detector emits no chains
+    // otherwise), so the small capped penalty stays dormant by default. `None`
+    // when the count is zero so the penalty / score is unchanged.
+    if let Some(score_output) = input.score_output
+        && !score_output.prop_drilling_chains.is_empty()
+    {
+        vital_signs.prop_drilling_chain_count =
+            u32::try_from(score_output.prop_drilling_chains.len()).ok();
+        vital_signs.prop_drilling_max_depth = score_output
+            .prop_drilling_chains
+            .iter()
+            .map(|c| c.chain.depth)
+            .max();
+    }
+
+    // Render fan-in is a descriptive whole-project blast-radius metric (the
+    // component-graph analogue of module fan-in). The aggregates are precomputed
+    // in core (it has the resolved-module graph) and ride on the
+    // `AnalysisResults` carrier surfaced via `FileScoreOutput`; assign them onto
+    // the descriptive vital signs whenever React was declared. Non-React runs
+    // leave them `None` (skip_serializing_if), so the JSON contract is unchanged.
+    if let Some(score_output) = input.score_output
+        && let Some(metric) = score_output.render_fan_in.as_ref()
+    {
+        vital_signs.p95_render_fan_in = metric.p95_distinct_parents;
+        vital_signs.render_fan_in_high_pct = metric.high_pct;
+        vital_signs.max_render_fan_in = metric.max_render_sites;
+    }
+
     let health_score = compute_health_score_metrics(
         input.opts,
         input.dupes_report,
@@ -4925,7 +4957,12 @@ fn collect_findings_with_resolver(
         }
 
         files_analyzed += 1;
-        for fc in &module.complexity {
+        // Precompute the per-function React hook profile ONCE per module from the
+        // cached `hook_uses` IR (the sole reader of `module.hook_uses`). Aligned
+        // by index to `module.complexity`; all-`None` at zero cost for non-React
+        // files (empty `hook_uses`).
+        let hook_profiles = react_hooks::build_module_hook_profiles(module);
+        for (fc_idx, fc) in module.complexity.iter().enumerate() {
             total_functions += 1;
             if fallow_core::suppress::is_suppressed(
                 &module.suppressions,
@@ -4956,6 +4993,10 @@ fn collect_findings_with_resolver(
                     cognitive: fc.cognitive,
                     line_count: fc.line_count,
                     param_count: fc.param_count,
+                    react_hook_count: fc.react_hook_count,
+                    react_jsx_max_depth: fc.react_jsx_max_depth,
+                    react_prop_count: fc.react_prop_count,
+                    react_hook_profile: hook_profiles.get(fc_idx).cloned().flatten(),
                     exceeded: ExceededThreshold::from_bools(
                         exceeds_cyclomatic,
                         exceeds_cognitive,
@@ -5037,6 +5078,7 @@ fn merge_crap_findings(
 ) {
     let finding_index = build_complexity_finding_index(findings);
     let complexity_by_pos = build_complexity_by_position(input.modules, input.file_paths);
+    let hook_profiles_by_pos = build_hook_profiles_by_position(input.modules, input.file_paths);
     let suppressions_by_path =
         build_complexity_suppressions_by_path(input.modules, input.file_paths);
 
@@ -5081,7 +5123,17 @@ fn merge_crap_findings(
                     applied_thresholds,
                 );
             } else {
-                new_findings.push(new_crap_finding(path, pf, fc, input, applied_thresholds));
+                let hook_profile = hook_profiles_by_pos
+                    .get(path.as_path())
+                    .and_then(|m| m.get(&(pf.line, pf.col)).cloned());
+                new_findings.push(new_crap_finding(
+                    path,
+                    pf,
+                    fc,
+                    hook_profile,
+                    input,
+                    applied_thresholds,
+                ));
             }
         }
     }
@@ -5113,6 +5165,40 @@ fn build_complexity_by_position<'a>(
         }
     }
     complexity_by_pos
+}
+
+/// Build a `path -> (line, col) -> ReactHookProfile` map by precomputing each
+/// module's per-function hook profile ONCE (the CRAP path keys findings by
+/// `(line, col)`, so the profile must be addressable the same way). Frames with
+/// no attributed component-scope hook are omitted; non-React modules contribute
+/// nothing.
+fn build_hook_profiles_by_position<'a>(
+    modules: &'a [fallow_core::extract::ModuleInfo],
+    file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
+) -> rustc_hash::FxHashMap<
+    &'a std::path::Path,
+    rustc_hash::FxHashMap<(u32, u32), crate::health_types::ReactHookProfile>,
+> {
+    let mut by_pos: rustc_hash::FxHashMap<
+        &'a std::path::Path,
+        rustc_hash::FxHashMap<(u32, u32), crate::health_types::ReactHookProfile>,
+    > = rustc_hash::FxHashMap::default();
+    for module in modules {
+        let Some(&path) = file_paths.get(&module.file_id) else {
+            continue;
+        };
+        let profiles = react_hooks::build_module_hook_profiles(module);
+        let mut frame_profiles = rustc_hash::FxHashMap::default();
+        for (fc, profile) in module.complexity.iter().zip(profiles) {
+            if let Some(profile) = profile {
+                frame_profiles.insert((fc.line, fc.col), profile);
+            }
+        }
+        if !frame_profiles.is_empty() {
+            by_pos.insert(path.as_path(), frame_profiles);
+        }
+    }
+    by_pos
 }
 
 fn build_complexity_suppressions_by_path<'a>(
@@ -5199,6 +5285,7 @@ fn new_crap_finding(
     path: &std::path::Path,
     pf: &scoring::PerFunctionCrap,
     fc: &fallow_types::extract::FunctionComplexity,
+    hook_profile: Option<crate::health_types::ReactHookProfile>,
     input: &CrapFindingMergeInput<'_>,
     applied_thresholds: AppliedHealthThresholds,
 ) -> ComplexityViolation {
@@ -5213,6 +5300,10 @@ fn new_crap_finding(
         cognitive: fc.cognitive,
         line_count: fc.line_count,
         param_count: fc.param_count,
+        react_hook_count: fc.react_hook_count,
+        react_jsx_max_depth: fc.react_jsx_max_depth,
+        react_prop_count: fc.react_prop_count,
+        react_hook_profile: hook_profile,
         exceeded: ExceededThreshold::from_bools(exceeds_cyclomatic, exceeds_cognitive, true),
         severity: compute_finding_severity(
             fc.cognitive,
@@ -5367,6 +5458,10 @@ fn append_component_rollup_findings(
             cognitive: rollup_cog,
             line_count: worst.line_count.saturating_add(template.line_count),
             param_count: 0,
+            react_hook_count: 0,
+            react_jsx_max_depth: 0,
+            react_prop_count: 0,
+            react_hook_profile: None,
             exceeded: ExceededThreshold::from_bools(exceeds_cyclomatic, exceeds_cognitive, false),
             severity,
             crap: None,
@@ -5735,6 +5830,10 @@ mod tests {
             has_unharvestable_load: false,
             has_load_data_whole_use: false,
             has_page_data_store_whole_use: false,
+            component_functions: Vec::new(),
+            react_props: Vec::new(),
+            hook_uses: Vec::new(),
+            render_edges: Vec::new(),
         }
     }
 
@@ -5747,6 +5846,9 @@ mod tests {
             cognitive,
             line_count,
             param_count: 0,
+            react_hook_count: 0,
+            react_jsx_max_depth: 0,
+            react_prop_count: 0,
             source_hash: None,
             contributions: Vec::new(),
         }
@@ -6038,6 +6140,10 @@ mod tests {
             },
             line_count: 10,
             param_count: 0,
+            react_hook_count: 0,
+            react_jsx_max_depth: 0,
+            react_prop_count: 0,
+            react_hook_profile: None,
             exceeded,
             severity: FindingSeverity::Moderate,
             crap: exceeded.includes_crap().then_some(30.0),
@@ -6298,6 +6404,10 @@ mod tests {
             cognitive: 30,
             line_count: 110,
             param_count: 0,
+            react_hook_count: 0,
+            react_jsx_max_depth: 0,
+            react_prop_count: 0,
+            react_hook_profile: None,
             exceeded: ExceededThreshold::Both,
             severity: FindingSeverity::High,
             crap: None,
@@ -6333,6 +6443,10 @@ mod tests {
             cognitive: 30,
             line_count: 5,
             param_count: 0,
+            react_hook_count: 0,
+            react_jsx_max_depth: 0,
+            react_prop_count: 0,
+            react_hook_profile: None,
             exceeded: ExceededThreshold::Both,
             severity: FindingSeverity::High,
             crap: None,
@@ -6368,6 +6482,10 @@ mod tests {
             cognitive: 30,
             line_count: 0,
             param_count: 0,
+            react_hook_count: 0,
+            react_jsx_max_depth: 0,
+            react_prop_count: 0,
+            react_hook_profile: None,
             exceeded: ExceededThreshold::Both,
             severity: FindingSeverity::High,
             crap: None,
@@ -6522,6 +6640,9 @@ mod tests {
                 cognitive: 18,
                 line_count: 75,
                 param_count: 2,
+                react_hook_count: 0,
+                react_jsx_max_depth: 0,
+                react_prop_count: 0,
                 source_hash: None,
                 contributions: Vec::new(),
             }],
@@ -6562,6 +6683,9 @@ mod tests {
             cognitive: 0,
             line_count: 11,
             param_count: 1,
+            react_hook_count: 0,
+            react_jsx_max_depth: 0,
+            react_prop_count: 0,
             source_hash: None,
             contributions: Vec::new(),
         };
@@ -6573,6 +6697,9 @@ mod tests {
             cognitive: 0,
             line_count: 10,
             param_count: 1,
+            react_hook_count: 0,
+            react_jsx_max_depth: 0,
+            react_prop_count: 0,
             source_hash: None,
             contributions: Vec::new(),
         };
@@ -6663,6 +6790,9 @@ mod tests {
             cognitive: 0,
             line_count: 20,
             param_count: 1,
+            react_hook_count: 0,
+            react_jsx_max_depth: 0,
+            react_prop_count: 0,
             source_hash: None,
             contributions: Vec::new(),
         };
@@ -6674,6 +6804,9 @@ mod tests {
             cognitive: 0,
             line_count: 1,
             param_count: 1,
+            react_hook_count: 0,
+            react_jsx_max_depth: 0,
+            react_prop_count: 0,
             source_hash: None,
             contributions: Vec::new(),
         };
@@ -7505,6 +7638,7 @@ mod tests {
                 unit_size: None,
                 coupling: None,
                 duplication: None,
+                prop_drilling: None,
             },
         }
     }
@@ -7683,6 +7817,10 @@ mod tests {
             cognitive,
             line_count: 20,
             param_count: 0,
+            react_hook_count: 0,
+            react_jsx_max_depth: 0,
+            react_prop_count: 0,
+            react_hook_profile: None,
             exceeded: ExceededThreshold::Both,
             severity: FindingSeverity::Moderate,
             crap: None,
@@ -7712,6 +7850,10 @@ mod tests {
             cognitive,
             line_count: 30,
             param_count: 0,
+            react_hook_count: 0,
+            react_jsx_max_depth: 0,
+            react_prop_count: 0,
+            react_hook_profile: None,
             exceeded: ExceededThreshold::Both,
             severity: FindingSeverity::Moderate,
             crap: None,

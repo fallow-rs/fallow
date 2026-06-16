@@ -132,6 +132,11 @@ pub fn harvest_define_props(program: &Program<'_>) -> DefinePropsHarvest {
             span_start,
             used_in_script,
             used_in_template: false,
+            // Vue: one component per `.vue` file; the detector derives the
+            // component name from the file stem, so this stays empty.
+            component: String::new(),
+            // React-only forward-vs-consume signal; Vue does not compute it.
+            used_outside_forward: false,
         });
     }
 

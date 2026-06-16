@@ -1,5 +1,6 @@
 mod declarations;
 mod helpers;
+mod react;
 mod visit_impl;
 
 use oxc_ast::ast::{
@@ -15,9 +16,10 @@ use crate::{
     MemberAccess, MemberInfo, MemberKind, ModuleInfo, ReExportInfo, RequireCallInfo, VisibilityTag,
 };
 use fallow_types::extract::{
-    CalleeUse, ClassHeritageInfo, DiKeySite, LocalTypeDeclaration, MisplacedDirectiveSite,
-    PublicSignatureTypeReference, SanitizedSinkArg, SanitizerScope, SecurityControlSite,
-    SinkLiteralValue, SinkSite, SkippedSecurityCalleeSite, TaintedBinding,
+    CalleeUse, ClassHeritageInfo, ComponentFunction, ComponentProp, DiKeySite, HookUse,
+    LocalTypeDeclaration, MisplacedDirectiveSite, PublicSignatureTypeReference, RenderEdge,
+    SanitizedSinkArg, SanitizerScope, SecurityControlSite, SinkLiteralValue, SinkSite,
+    SkippedSecurityCalleeSite, TaintedBinding,
 };
 use helpers::LitCustomElementDecorator;
 
@@ -298,6 +300,45 @@ pub(crate) struct ModuleInfoExtractor {
     /// (`const X = data`, `fn(data)` / `fn(...data)`). Name-gated on `data`.
     /// Consumed only by the `unused-load-data-key` detector (FP-1).
     pub(crate) has_load_data_whole_use: bool,
+    /// `true` when the parse is JSX-capable (`.jsx`/`.tsx`, or a `.js`/`.ts`
+    /// file re-parsed through the JSX retry). Gates the React/JSX structural
+    /// walk so it is a no-op on non-JSX files (perf: `audit` hot path on
+    /// non-React repos must not regress). Set by `parse.rs` after construction.
+    pub(crate) jsx_capable: bool,
+    /// React component definitions captured during the JSX walk. Empty unless
+    /// `jsx_capable`.
+    pub(crate) component_functions: Vec<ComponentFunction>,
+    /// React component props (reuses `ComponentProp`; `used_in_template` always
+    /// false, `used_in_script` = used-in-body). Empty unless `jsx_capable`.
+    pub(crate) react_props: Vec<ComponentProp>,
+    /// React hook call sites. Empty unless `jsx_capable`.
+    pub(crate) hook_uses: Vec<HookUse>,
+    /// React render edges (child name captured; resolution deferred to graph
+    /// build). Empty unless `jsx_capable`.
+    pub(crate) render_edges: Vec<RenderEdge>,
+    /// Stack of enclosing React component names, pushed when a component
+    /// function/arrow is entered and popped on exit. The top is the
+    /// `parent_component` for any render edge or hook captured inside.
+    pub(crate) component_stack: Vec<String>,
+    /// Pending React-component metadata for a named arrow / function-expression
+    /// binding, keyed by the arrow/function span. Populated in
+    /// `visit_variable_declaration` BEFORE the walk descends into the init, then
+    /// consumed by `visit_arrow_function_expression` /
+    /// `visit_function` to push the component stack with the binding name. Working
+    /// state only (not persisted, not merged across SFC blocks).
+    pub(crate) pending_component_arrows: FxHashMap<Span, PendingComponentArrow>,
+}
+
+/// Metadata for a named arrow / function-expression that may be a React
+/// component, captured at the declarator before the function body is walked.
+#[derive(Debug, Clone)]
+pub(crate) struct PendingComponentArrow {
+    /// The binding name.
+    pub(crate) name: String,
+    /// The component kind (`Arrow`, or a `forwardRef` / `memo` wrapper).
+    pub(crate) kind: fallow_types::extract::ComponentFunctionKind,
+    /// Whether the binding is exported.
+    pub(crate) is_exported: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -993,6 +1034,10 @@ impl ModuleInfoExtractor {
             has_load_data_whole_use: self.has_load_data_whole_use,
             // Derived in `release_resolution_payload` from `whole_object_uses`.
             has_page_data_store_whole_use: false,
+            component_functions: self.component_functions,
+            react_props: self.react_props,
+            hook_uses: self.hook_uses,
+            render_edges: self.render_edges,
         }
     }
 

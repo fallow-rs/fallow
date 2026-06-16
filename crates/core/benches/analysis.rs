@@ -657,6 +657,10 @@ fn bench_cache_round_trip(c: &mut Criterion) {
         has_unharvestable_load: false,
         has_load_data_whole_use: false,
         has_page_data_store_whole_use: false,
+        component_functions: Vec::new(),
+        react_props: Vec::new(),
+        hook_uses: Vec::new(),
+        render_edges: Vec::new(),
     };
 
     c.bench_function("cache_round_trip", |b| {

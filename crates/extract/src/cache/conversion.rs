@@ -521,6 +521,10 @@ pub fn cached_to_module_opts(
         has_load_data_whole_use: cached.has_load_data_whole_use,
         // Derived in `release_resolution_payload` from `whole_object_uses`.
         has_page_data_store_whole_use: false,
+        component_functions: cached.component_functions.clone(),
+        react_props: cached.react_props.clone(),
+        hook_uses: cached.hook_uses.clone(),
+        render_edges: cached.render_edges.clone(),
     }
 }
 
@@ -597,5 +601,9 @@ pub fn module_to_cached(
         load_return_keys: module.load_return_keys.clone(),
         has_unharvestable_load: module.has_unharvestable_load,
         has_load_data_whole_use: module.has_load_data_whole_use,
+        component_functions: module.component_functions.clone(),
+        react_props: module.react_props.clone(),
+        hook_uses: module.hook_uses.clone(),
+        render_edges: module.render_edges.clone(),
     }
 }

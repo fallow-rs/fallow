@@ -334,6 +334,7 @@ mod tests {
                 unit_size: None,
                 coupling: None,
                 duplication: None,
+                prop_drilling: None,
             },
         });
         let code = print_health_badge(&report);

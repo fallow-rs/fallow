@@ -446,6 +446,9 @@ pub fn filter_results_by_changed_files(
         unused_load_data_keys,
         // Observability flag, not an issue collection.
         unused_load_data_keys_global_abstain: _unused_load_data_keys_global_abstain,
+        prop_drilling_chains,
+        thin_wrappers,
+        duplicate_prop_shapes,
         // Non-finding fields: counts and metadata, not issue collections.
         suppression_count: _suppression_count,
         active_suppressions: _active_suppressions,
@@ -458,6 +461,10 @@ pub fn filter_results_by_changed_files(
         // collections; they are not changed-files filtered.
         export_usages: _export_usages,
         entry_point_summary: _entry_point_summary,
+        // Render fan-in is a whole-project descriptive metric (the
+        // component-graph analogue of module fan-in), not an issue collection;
+        // it is not changed-files filtered.
+        render_fan_in: _render_fan_in,
     } = &mut *results;
 
     let cf = normalize_changed_files_set(changed_files);
@@ -526,6 +533,17 @@ pub fn filter_results_by_changed_files(
     unused_component_emits.retain(|e| contains_normalized(&cf, &e.emit.path));
     unused_server_actions.retain(|a| contains_normalized(&cf, &a.action.path));
     unused_load_data_keys.retain(|k| contains_normalized(&cf, &k.key.path));
+    // Anchor a chain on its source hop's file (the finding anchor).
+    prop_drilling_chains.retain(|c| {
+        c.chain
+            .hops
+            .first()
+            .is_some_and(|h| contains_normalized(&cf, &h.file))
+    });
+    // Anchor a thin wrapper on its component definition file.
+    thin_wrappers.retain(|w| contains_normalized(&cf, &w.wrapper.file));
+    // Anchor a duplicate-prop-shape member on its component definition file.
+    duplicate_prop_shapes.retain(|d| contains_normalized(&cf, &d.shape.file));
 }
 
 /// Pre-normalise a `changed_files` set through `dunce::simplified` so each

@@ -136,6 +136,22 @@ pub enum IssueKind {
     /// nor project-wide via `page.data.<key>` / `$page.data.<key>`. A dead load
     /// key runs a real server/DB fetch cost for data nothing renders.
     UnusedLoadDataKey,
+    /// A React/Preact prop forwarded unchanged through `>= N` intermediate
+    /// pass-through components until a component that substantively consumes it.
+    /// Health signal, rule defaults to `off` (opt-in). Cross-graph: the chain
+    /// spans multiple components / files.
+    PropDrilling,
+    /// A React/Preact component whose entire body is `return <Child {...props}/>`
+    /// (a single spread-forwarded child render, no own value-add): pure
+    /// structural indirection, a candidate for inlining. Health signal, rule
+    /// defaults to `off` (opt-in).
+    ThinWrapper,
+    /// Three or more React/Preact components across two or more files whose
+    /// statically-harvested prop NAME set is identical after stripping ubiquitous
+    /// DOM / passthrough names (a missing shared `Props` type). Health signal,
+    /// rule defaults to `off` (opt-in). Cross-graph: the group spans multiple
+    /// components / files.
+    DuplicatePropShape,
 }
 
 impl IssueKind {
@@ -198,6 +214,9 @@ impl IssueKind {
             "unused-component-emit" | "unused-component-emits" => Some(Self::UnusedComponentEmit),
             "unused-server-action" | "unused-server-actions" => Some(Self::UnusedServerAction),
             "unused-load-data-key" | "unused-load-data-keys" => Some(Self::UnusedLoadDataKey),
+            "prop-drilling" => Some(Self::PropDrilling),
+            "thin-wrapper" | "thin-wrappers" => Some(Self::ThinWrapper),
+            "duplicate-prop-shape" | "duplicate-prop-shapes" => Some(Self::DuplicatePropShape),
             _ => None,
         }
     }
@@ -247,6 +266,9 @@ impl IssueKind {
             Self::UnusedComponentEmit => 39,
             Self::UnusedServerAction => 40,
             Self::UnusedLoadDataKey => 41,
+            Self::PropDrilling => 42,
+            Self::ThinWrapper => 43,
+            Self::DuplicatePropShape => 44,
         }
     }
 
@@ -295,6 +317,9 @@ impl IssueKind {
             39 => Some(Self::UnusedComponentEmit),
             40 => Some(Self::UnusedServerAction),
             41 => Some(Self::UnusedLoadDataKey),
+            42 => Some(Self::PropDrilling),
+            43 => Some(Self::ThinWrapper),
+            44 => Some(Self::DuplicatePropShape),
             _ => None,
         }
     }
@@ -403,6 +428,9 @@ pub const fn issue_kind_to_kebab(kind: IssueKind) -> &'static str {
         IssueKind::UnusedComponentEmit => "unused-component-emit",
         IssueKind::UnusedServerAction => "unused-server-action",
         IssueKind::UnusedLoadDataKey => "unused-load-data-key",
+        IssueKind::PropDrilling => "prop-drilling",
+        IssueKind::ThinWrapper => "thin-wrapper",
+        IssueKind::DuplicatePropShape => "duplicate-prop-shape",
     }
 }
 
@@ -659,6 +687,11 @@ pub const KNOWN_ISSUE_KIND_NAMES: &[&str] = &[
     "unused-server-actions",
     "unused-load-data-key",
     "unused-load-data-keys",
+    "prop-drilling",
+    "thin-wrapper",
+    "thin-wrappers",
+    "duplicate-prop-shape",
+    "duplicate-prop-shapes",
 ];
 
 /// CLI filter flags on `fallow dead-code` that scope output to a single
@@ -981,6 +1014,10 @@ mod tests {
             IssueKind::parse("unused-load-data-keys"),
             Some(IssueKind::UnusedLoadDataKey)
         );
+        assert_eq!(
+            IssueKind::parse("prop-drilling"),
+            Some(IssueKind::PropDrilling)
+        );
     }
 
     #[test]
@@ -1052,7 +1089,19 @@ mod tests {
             IssueKind::from_discriminant(41),
             Some(IssueKind::UnusedLoadDataKey)
         );
-        assert_eq!(IssueKind::from_discriminant(42), None);
+        assert_eq!(
+            IssueKind::from_discriminant(42),
+            Some(IssueKind::PropDrilling)
+        );
+        assert_eq!(
+            IssueKind::from_discriminant(43),
+            Some(IssueKind::ThinWrapper)
+        );
+        assert_eq!(
+            IssueKind::from_discriminant(44),
+            Some(IssueKind::DuplicatePropShape)
+        );
+        assert_eq!(IssueKind::from_discriminant(45), None);
         assert_eq!(IssueKind::from_discriminant(u8::MAX), None);
     }
 
@@ -1100,6 +1149,9 @@ mod tests {
             IssueKind::UnusedComponentEmit,
             IssueKind::UnusedServerAction,
             IssueKind::UnusedLoadDataKey,
+            IssueKind::PropDrilling,
+            IssueKind::ThinWrapper,
+            IssueKind::DuplicatePropShape,
         ] {
             assert_eq!(
                 IssueKind::from_discriminant(kind.to_discriminant()),
@@ -1107,7 +1159,7 @@ mod tests {
             );
         }
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(42), None);
+        assert_eq!(IssueKind::from_discriminant(45), None);
     }
 
     #[test]
@@ -1154,6 +1206,9 @@ mod tests {
             IssueKind::UnusedComponentEmit,
             IssueKind::UnusedServerAction,
             IssueKind::UnusedLoadDataKey,
+            IssueKind::PropDrilling,
+            IssueKind::ThinWrapper,
+            IssueKind::DuplicatePropShape,
         ];
         let discriminants: Vec<u8> = all_kinds.iter().map(|k| k.to_discriminant()).collect();
         let mut sorted = discriminants.clone();

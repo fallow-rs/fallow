@@ -1203,6 +1203,64 @@ fn health_score_flag_shows_score() {
 }
 
 #[test]
+fn health_vital_signs_carry_render_fan_in_on_react_project() {
+    // Descriptive component render fan-in (the component-graph analogue of module
+    // fan-in) is computed whenever React is declared and surfaced under the
+    // existing `vital_signs` block (no flag, no rule).
+    let output = run_fallow("health", "render-fan-in", &["--format", "json", "--quiet"]);
+    let json = parse_json(&output);
+    let vital = json
+        .get("vital_signs")
+        .expect("health renders vital_signs by default");
+    assert_eq!(
+        vital
+            .get("max_render_fan_in")
+            .and_then(serde_json::Value::as_u64),
+        Some(6),
+        "the shared <Button> is the headline blast radius (6 render sites): {vital}"
+    );
+    assert!(
+        vital.get("p95_render_fan_in").is_some(),
+        "p95_render_fan_in is present on a React project: {vital}"
+    );
+    let high_pct = vital
+        .get("render_fan_in_high_pct")
+        .and_then(serde_json::Value::as_f64)
+        .expect("render_fan_in_high_pct present on a React project");
+    assert!(
+        high_pct.is_finite() && (0.0..=100.0).contains(&high_pct),
+        "render_fan_in_high_pct is a finite percentage: {high_pct}"
+    );
+}
+
+#[test]
+fn health_vital_signs_omit_render_fan_in_on_non_react_project() {
+    // A non-React project computes no render fan-in; the three fields are
+    // skip_serializing_if-omitted so the JSON contract is unchanged.
+    let output = run_fallow(
+        "health",
+        "complexity-project",
+        &["--format", "json", "--quiet"],
+    );
+    let json = parse_json(&output);
+    let vital = json
+        .get("vital_signs")
+        .expect("health renders vital_signs by default");
+    assert!(
+        vital.get("max_render_fan_in").is_none(),
+        "max_render_fan_in is omitted on a non-React project: {vital}"
+    );
+    assert!(
+        vital.get("p95_render_fan_in").is_none(),
+        "p95_render_fan_in is omitted on a non-React project: {vital}"
+    );
+    assert!(
+        vital.get("render_fan_in_high_pct").is_none(),
+        "render_fan_in_high_pct is omitted on a non-React project: {vital}"
+    );
+}
+
+#[test]
 fn health_score_save_snapshot_keeps_hotspot_vital_signs() {
     let temp = tempdir().expect("create temp dir");
     let root = temp.path();

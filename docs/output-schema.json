@@ -710,6 +710,27 @@
           "type": "boolean",
           "description": "`true` when the `unused-load-data-key` detector abstained project-wide\nbecause a whole-object use of `page.data` / `$page.data` was seen\nsomewhere (S1 observability: an empty `unused_load_data_keys` with this\nflag set is NOT a clean bill, it means the rule could not run safely).\nSerialized only when `true` so the default JSON contract is unchanged."
         },
+        "prop_drilling_chains": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PropDrillingChainFinding"
+          },
+          "description": "React/Preact props forwarded unchanged through `>= N` intermediate\npass-through components until a consumer (located per-chain records).\nWrapped in [`PropDrillingChainFinding`] so each entry carries a typed\n`actions` array natively. Health signal: the rule defaults to `off`\n(opt-in), so this is dormant and populated ONLY when the user enables it."
+        },
+        "thin_wrappers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ThinWrapperFinding"
+          },
+          "description": "React/Preact components whose entire body is a single spread-forwarded\nchild render (`return <Child {...props}/>`): pure structural indirection,\na candidate for inlining at call sites. Wrapped in [`ThinWrapperFinding`]\nso each entry carries a typed `actions` array natively. Health signal: the\nrule defaults to `off` (opt-in), so this is dormant and populated ONLY\nwhen the user enables it."
+        },
+        "duplicate_prop_shapes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DuplicatePropShapeFinding"
+          },
+          "description": "React/Preact components that participate in a duplicate-prop-shape group:\nthree or more components across two or more files whose statically-known\nprop NAME set is identical after stripping ubiquitous DOM / passthrough\nnames (a missing shared `Props` type / base component). Wrapped in\n[`DuplicatePropShapeFinding`] so each entry carries a typed `actions`\narray and its sibling roster natively. Health signal: the rule defaults to\n`off` (opt-in), so this is dormant and populated ONLY when the user\nenables it."
+        },
         "baseline_deltas": {
           "anyOf": [
             {
@@ -1128,6 +1149,27 @@
         "unused_load_data_keys_global_abstain": {
           "type": "boolean",
           "description": "`true` when the `unused-load-data-key` detector abstained project-wide\nbecause a whole-object use of `page.data` / `$page.data` was seen\nsomewhere (S1 observability: an empty `unused_load_data_keys` with this\nflag set is NOT a clean bill, it means the rule could not run safely).\nSerialized only when `true` so the default JSON contract is unchanged."
+        },
+        "prop_drilling_chains": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PropDrillingChainFinding"
+          },
+          "description": "React/Preact props forwarded unchanged through `>= N` intermediate\npass-through components until a consumer (located per-chain records).\nWrapped in [`PropDrillingChainFinding`] so each entry carries a typed\n`actions` array natively. Health signal: the rule defaults to `off`\n(opt-in), so this is dormant and populated ONLY when the user enables it."
+        },
+        "thin_wrappers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ThinWrapperFinding"
+          },
+          "description": "React/Preact components whose entire body is a single spread-forwarded\nchild render (`return <Child {...props}/>`): pure structural indirection,\na candidate for inlining at call sites. Wrapped in [`ThinWrapperFinding`]\nso each entry carries a typed `actions` array natively. Health signal: the\nrule defaults to `off` (opt-in), so this is dormant and populated ONLY\nwhen the user enables it."
+        },
+        "duplicate_prop_shapes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DuplicatePropShapeFinding"
+          },
+          "description": "React/Preact components that participate in a duplicate-prop-shape group:\nthree or more components across two or more files whose statically-known\nprop NAME set is identical after stripping ubiquitous DOM / passthrough\nnames (a missing shared `Props` type / base component). Wrapped in\n[`DuplicatePropShapeFinding`] so each entry carries a typed `actions`\narray and its sibling roster natively. Health signal: the rule defaults to\n`off` (opt-in), so this is dormant and populated ONLY when the user\nenables it."
         }
       },
       "required": [
@@ -1219,6 +1261,13 @@
             }
           ],
           "description": "Static coverage gaps.\n\nPopulated when coverage gaps are explicitly requested, or when the\ntop-level `health` command allows config severity to surface them in the\ndefault report."
+        },
+        "prop_drilling_chains": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PropDrillingChainFinding"
+          },
+          "description": "Located prop-drilling chains (React/Preact props forwarded unchanged\nthrough 3+ pass-through components). Only present when the opt-in\n`prop-drilling` rule is enabled (it defaults to off). Each entry carries\nthe source, every pass-through hop, and the consumer with file + line +\ncomponent, so CI / an agent can act. Surfaced alongside hotspots as a\ngraph-derived health signal."
         },
         "hotspots": {
           "type": "array",
@@ -2168,6 +2217,13 @@
           ],
           "description": "Static coverage gaps.\n\nPopulated when coverage gaps are explicitly requested, or when the\ntop-level `health` command allows config severity to surface them in the\ndefault report."
         },
+        "prop_drilling_chains": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PropDrillingChainFinding"
+          },
+          "description": "Located prop-drilling chains (React/Preact props forwarded unchanged\nthrough 3+ pass-through components). Only present when the opt-in\n`prop-drilling` rule is enabled (it defaults to off). Each entry carries\nthe source, every pass-through hop, and the consumer with file + line +\ncomponent, so CI / an agent can act. Surfaced alongside hotspots as a\ngraph-derived health signal."
+        },
         "hotspots": {
           "type": "array",
           "items": {
@@ -2560,6 +2616,29 @@
         },
         "param_count": {
           "type": "integer"
+        },
+        "react_hook_count": {
+          "type": "integer",
+          "description": "Number of React hook calls in this function's body (`useState` /\n`useEffect` / `useMemo` / `useCallback` / custom `use*`). Descriptive\nhotspot context for React components; omitted when zero (non-React)."
+        },
+        "react_jsx_max_depth": {
+          "type": "integer",
+          "description": "Deepest JSX element nesting reached in this function's body. Descriptive\nhotspot context; omitted when zero (renders no JSX)."
+        },
+        "react_prop_count": {
+          "type": "integer",
+          "description": "Number of props destructured from this component's first parameter.\nDescriptive hotspot context; omitted when zero."
+        },
+        "react_hook_profile": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ReactHookProfile"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Per-kind React hook breakdown (state/effect/memo/callback/custom) plus\nthe max `useEffect` dependency-array arity, derived from the cached\n`hook_uses` IR at the health layer. Descriptive refinement of\n`react_hook_count`; present only when at least one component-scope hook\nwas attributed, so non-React findings stay byte-identical."
         },
         "exceeded": {
           "$ref": "#/definitions/ExceededThreshold"
@@ -3324,6 +3403,13 @@
             "number",
             "null"
           ]
+        },
+        "prop_drilling": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Small capped penalty for prop-drilling chains. `None` unless the opt-in\n`prop-drilling` rule is enabled; sized like the coupling penalty (~5pt cap)."
         }
       },
       "required": [
@@ -3480,6 +3566,41 @@
             "null"
           ],
           "description": "Percentage of files with fan-in above the project's p95 threshold."
+        },
+        "prop_drilling_chain_count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Number of located prop-drilling chains (React/Preact props forwarded\nunchanged through 3+ pass-through components). `None` unless the opt-in\n`prop-drilling` rule is enabled (it defaults to off), so the small capped\npenalty and the hotspot surface are dormant by default."
+        },
+        "prop_drilling_max_depth": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "The deepest located prop-drilling chain's depth (forwarding hops). `None`\nwhen no chains were found or the rule is off. Descriptive context only."
+        },
+        "p95_render_fan_in": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "95th-percentile DISTINCT-PARENTS render fan-in across React/Preact\ncomponents (the component-graph analogue of `p95_fan_in`, which percentiles\nper-FILE module fan-in). `None` on non-React runs. Descriptive\nblast-radius context, NOT a gate. Mirrors `compute_coupling_concentration`."
+        },
+        "render_fan_in_high_pct": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Percentage of components whose render fan-in exceeds the project's\n`max(p95, 10)` threshold (reuses the coupling-concentration floor; NO new\ntunable constant). `None` on non-React runs. Mirrors `coupling_high_pct`."
+        },
+        "max_render_fan_in": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "The single highest render-SITE count across all components (the headline\nblast-radius number: a shared `<Button>` rendered in N places). `None` on\nnon-React runs. Descriptive context, no threshold."
         },
         "total_loc": {
           "type": "integer",
@@ -5734,6 +5855,27 @@
         "unused_load_data_keys_global_abstain": {
           "type": "boolean",
           "description": "`true` when the `unused-load-data-key` detector abstained project-wide\nbecause a whole-object use of `page.data` / `$page.data` was seen\nsomewhere (S1 observability: an empty `unused_load_data_keys` with this\nflag set is NOT a clean bill, it means the rule could not run safely).\nSerialized only when `true` so the default JSON contract is unchanged."
+        },
+        "prop_drilling_chains": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PropDrillingChainFinding"
+          },
+          "description": "React/Preact props forwarded unchanged through `>= N` intermediate\npass-through components until a consumer (located per-chain records).\nWrapped in [`PropDrillingChainFinding`] so each entry carries a typed\n`actions` array natively. Health signal: the rule defaults to `off`\n(opt-in), so this is dormant and populated ONLY when the user enables it."
+        },
+        "thin_wrappers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ThinWrapperFinding"
+          },
+          "description": "React/Preact components whose entire body is a single spread-forwarded\nchild render (`return <Child {...props}/>`): pure structural indirection,\na candidate for inlining at call sites. Wrapped in [`ThinWrapperFinding`]\nso each entry carries a typed `actions` array natively. Health signal: the\nrule defaults to `off` (opt-in), so this is dormant and populated ONLY\nwhen the user enables it."
+        },
+        "duplicate_prop_shapes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DuplicatePropShapeFinding"
+          },
+          "description": "React/Preact components that participate in a duplicate-prop-shape group:\nthree or more components across two or more files whose statically-known\nprop NAME set is identical after stripping ubiquitous DOM / passthrough\nnames (a missing shared `Props` type / base component). Wrapped in\n[`DuplicatePropShapeFinding`] so each entry carries a typed `actions`\narray and its sibling roster natively. Health signal: the rule defaults to\n`off` (opt-in), so this is dormant and populated ONLY when the user\nenables it."
         }
       },
       "required": [
@@ -9240,6 +9382,29 @@
         "param_count": {
           "type": "integer"
         },
+        "react_hook_count": {
+          "type": "integer",
+          "description": "Number of React hook calls in this function's body (`useState` /\n`useEffect` / `useMemo` / `useCallback` / custom `use*`). Descriptive\nhotspot context for React components; omitted when zero (non-React)."
+        },
+        "react_jsx_max_depth": {
+          "type": "integer",
+          "description": "Deepest JSX element nesting reached in this function's body. Descriptive\nhotspot context; omitted when zero (renders no JSX)."
+        },
+        "react_prop_count": {
+          "type": "integer",
+          "description": "Number of props destructured from this component's first parameter.\nDescriptive hotspot context; omitted when zero."
+        },
+        "react_hook_profile": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ReactHookProfile"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Per-kind React hook breakdown (state/effect/memo/callback/custom) plus\nthe max `useEffect` dependency-array arity, derived from the cached\n`hook_uses` IR at the health layer. Descriptive refinement of\n`react_hook_count`; present only when at least one component-scope hook\nwas attributed, so non-React findings stay byte-identical."
+        },
         "exceeded": {
           "$ref": "#/definitions/ExceededThreshold"
         },
@@ -11056,6 +11221,21 @@
           "type": "string",
           "const": "labeled-continue",
           "description": "A labeled `continue` (cognitive only)."
+        },
+        {
+          "type": "string",
+          "const": "jsx-depth",
+          "description": "A deeply-nested JSX element subtree (cognitive only). React-specific: a\nJSX element nested past the first level accrues the same nesting penalty\na nested control-flow construct does, so a deep JSX/ternary tree reads as\na god component through the existing cognitive metric."
+        },
+        {
+          "type": "string",
+          "const": "hook-density",
+          "description": "React hook density (cognitive only). One contribution per hook call in a\ncomponent body (`useState` / `useEffect` / `useMemo` / `useCallback` /\ncustom `use*`); a hook-heavy component accrues cognitive load the same way\nbranching does."
+        },
+        {
+          "type": "string",
+          "const": "prop-count",
+          "description": "React prop count past the comfortable floor (cognitive only). A component\ndestructuring many props is doing many things; the props beyond the floor\nfold into cognitive so a wide-interface component surfaces as a hotspot."
         }
       ],
       "description": "The syntactic construct that produced a single complexity increment.\n\nMirrors `SonarSource` cognitive-complexity vocabulary where it overlaps.\n`Case` means a `case` label carrying a test; a bare `default` adds nothing\nto cyclomatic complexity and so produces no contribution."
@@ -14289,6 +14469,247 @@
         "actions"
       ],
       "description": "A Tailwind v4 `@theme` design token defined in a stylesheet whose generated\nutility, `var()` reads, and arbitrary-value references appear nowhere in the\nproject: a dead design token (the `unused-export` of the token era). A\ncandidate, never a gated finding: the token could be consumed by a Tailwind\nplugin, a published design-system surface, or a non-CSS-aware build step the\nscan cannot see (those cases are gated out before this is emitted)."
+    },
+    "PropDrillingChainFinding": {
+      "type": "object",
+      "properties": {
+        "prop": {
+          "type": "string",
+          "description": "The drilled prop name as declared at the chain SOURCE."
+        },
+        "depth": {
+          "type": "integer",
+          "description": "The chain depth = the number of components the prop is forwarded THROUGH\n(source + intermediates + consumer = `hops.len()`). Always `>= N`."
+        },
+        "hops": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PropDrillHop"
+          },
+          "description": "The ordered hop trail from source to consumer. The first hop owns the\nprop, the middle hops are pass-throughs, the last hop consumes it. The\nfinding anchor is the first hop (`path` / `line` for suppression + CI)."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "prop",
+        "depth",
+        "hops",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for a [`PropDrillingChain`] finding. There is no safe\nauto-fix: collapsing a drilling chain (colocate the consumer, lift to a\ncontext, or compose the component) is a design decision. The only action is a\nline-level suppress at the source hop's prop declaration. The rule defaults\nto `off` (opt-in health signal), so this finding is dormant by default."
+    },
+    "PropDrillHop": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "The file containing this hop's component."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line of the component definition (or the prop declaration at the\nsource hop). Anchors a jump-to-source for the agent."
+        },
+        "component": {
+          "type": "string",
+          "description": "The component name at this hop."
+        }
+      },
+      "required": [
+        "file",
+        "line",
+        "component"
+      ],
+      "description": "One hop in a prop-drilling chain: a component that received the prop and\npassed it along (or, at the chain ends, the source that owns it and the\nconsumer that substantively reads it)."
+    },
+    "ReactHookProfile": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "type": "integer",
+          "description": "`useState` call count attributed to this component."
+        },
+        "effect": {
+          "type": "integer",
+          "description": "`useEffect` call count attributed to this component."
+        },
+        "memo": {
+          "type": "integer",
+          "description": "`useMemo` call count attributed to this component."
+        },
+        "callback": {
+          "type": "integer",
+          "description": "`useCallback` call count attributed to this component."
+        },
+        "custom": {
+          "type": "integer",
+          "description": "Custom `use*` hook call count attributed to this component."
+        },
+        "max_effect_dep_arity": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Largest `useEffect` dependency-array arity over the attributed effects\nthat carry a literal deps array. `None` when no attributed `useEffect`\nhad a literal array (absent or non-literal deps; ADR-001 syntactic-only,\nso absence does NOT mean \"no coupling\")."
+        }
+      },
+      "required": [
+        "state",
+        "effect",
+        "memo",
+        "callback",
+        "custom"
+      ],
+      "description": "Per-component React hook profile derived from the cached `hook_uses` IR at\nthe health layer. Descriptive context that refines the bare\n[`ComplexityViolation::react_hook_count`] headline with a per-kind breakdown\nand the maximum `useEffect` dependency-array arity.\n\nAttached only when at least one component-scope hook was attributed to the\nfunction, so non-React findings stay byte-identical on the wire. The\nper-kind counts cover hooks recorded by the React visitor (calls inside an\nidentified component); a `use*` call inside a plain helper function is\ncounted in `react_hook_count` but NOT here, so the breakdown can sum to LESS\nthan `react_hook_count`. `react_hook_count` remains the headline total; this\nis an additive refinement."
+    },
+    "ThinWrapperFinding": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "The file containing the wrapper component."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line of the wrapper component definition (the finding anchor for\njump-to-source and line-level suppression)."
+        },
+        "component": {
+          "type": "string",
+          "description": "The wrapper component name."
+        },
+        "child_component": {
+          "type": "string",
+          "description": "The single child component the wrapper forwards its props to (as written\nat the render site)."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "file",
+        "line",
+        "component",
+        "child_component",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for a [`ThinWrapper`] finding. There is no safe\nauto-fix: inlining a thin wrapper at its call sites (or deleting it) is a\ndesign decision. The only action is a line-level suppress at the wrapper's\ndefinition. The rule defaults to `off` (opt-in health signal), so this\nfinding is dormant by default."
+    },
+    "DuplicatePropShapeFinding": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "The file containing this component."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line of this component definition (the finding anchor for\njump-to-source and line-level suppression)."
+        },
+        "component": {
+          "type": "string",
+          "description": "This component name."
+        },
+        "shape": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The shared SIGNIFICANT prop-name set (sorted, denylist-stripped). The\nunit being grouped; identical across every member of the group."
+        },
+        "group_size": {
+          "type": "integer",
+          "description": "The total number of components in this group (this one plus every\nsibling)."
+        },
+        "sharing_components": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DuplicatePropShapeMember"
+          },
+          "description": "The OTHER components sharing this exact prop shape (path-sorted). A\nfile-level-suppressed member drops from its own finding but still appears\nhere, because the group is real regardless of suppression."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "file",
+        "line",
+        "component",
+        "shape",
+        "group_size",
+        "sharing_components",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for a [`DuplicatePropShape`] finding. There is no safe\nauto-fix: extracting a shared `Props` type or a base component for a group of\nsame-shaped components is a design decision. The actions are manual guidance\n(extract the shared shape) plus a line-level suppress at the component\ndefinition and a file-level suppress escape hatch (mirroring the\nroute-collision multi-file model). The rule defaults to `off` (opt-in health\nsignal), so this finding is dormant by default."
+    },
+    "DuplicatePropShapeMember": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "The file containing the sibling component."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line of the sibling component definition."
+        },
+        "component": {
+          "type": "string",
+          "description": "The sibling component name."
+        }
+      },
+      "required": [
+        "file",
+        "line",
+        "component"
+      ],
+      "description": "One member of a duplicate-prop-shape group: the OTHER components that share\nthe same significant prop-name set, listed in each member's\n`sharing_components`. Path-sorted for stable output. A located reference (no\n`shape`, which is carried once on the owning [`DuplicatePropShape`])."
     }
   }
 }

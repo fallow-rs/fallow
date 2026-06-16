@@ -1,0 +1,1 @@
+{ "name": "thin-wrapper-fixture", "version": "0.0.0", "private": true, "main": "src/App.tsx", "dependencies": { "react": "^18.3.0", "react-dom": "^18.3.0" } }

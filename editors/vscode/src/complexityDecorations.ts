@@ -42,6 +42,9 @@ const KIND_LABELS: Record<ComplexityContributionKind, string> = {
   catch: "catch",
   "labeled-break": "labeled break",
   "labeled-continue": "labeled continue",
+  "jsx-depth": "JSX depth",
+  "hook-density": "hook density",
+  "prop-count": "prop count",
 };
 
 const kindLabel = (kind: ComplexityContributionKind): string => KIND_LABELS[kind] ?? kind;

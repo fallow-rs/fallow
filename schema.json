@@ -161,6 +161,9 @@
         "unused-component-emits": "warn",
         "unused-server-actions": "warn",
         "unused-load-data-keys": "warn",
+        "prop-drilling": "off",
+        "thin-wrapper": "off",
+        "duplicate-prop-shape": "off",
         "unresolved-imports": "error",
         "unlisted-dependencies": "error",
         "duplicate-exports": "error",
@@ -1059,6 +1062,21 @@
           "$ref": "#/$defs/Severity",
           "default": "warn"
         },
+        "prop-drilling": {
+          "description": "React/Preact prop forwarded unchanged through `>= N` intermediate\npass-through components until a component that substantively consumes it.\nA graph-derived health signal. Defaults to `off` (opt-in), like\n`private-type-leak` / `security-*`: the located per-chain records and the\nsmall capped health penalty are dormant until the user enables the rule.",
+          "$ref": "#/$defs/Severity",
+          "default": "off"
+        },
+        "thin-wrapper": {
+          "description": "A React/Preact component whose entire body is `return <Child {...props}/>`\n(pure structural indirection, a candidate for inlining). A graph-derived\nhealth signal. Defaults to `off` (opt-in), like `prop-drilling`: the\nlocated per-wrapper records are dormant until the user enables the rule.",
+          "$ref": "#/$defs/Severity",
+          "default": "off"
+        },
+        "duplicate-prop-shape": {
+          "description": "Three or more React/Preact components across two or more files whose\nstatically-harvested prop NAME set is identical after stripping ubiquitous\nDOM / passthrough names (a missing shared `Props` type / base component).\nA graph-derived structural-refactor health signal. Defaults to `off`\n(opt-in), like `thin-wrapper`: the located per-component records are\ndormant until the user enables the rule.",
+          "$ref": "#/$defs/Severity",
+          "default": "off"
+        },
         "unresolved-imports": {
           "$ref": "#/$defs/Severity",
           "default": "error"
@@ -1724,6 +1742,36 @@
           ]
         },
         "unused-load-data-keys": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "prop-drilling": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "thin-wrapper": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "duplicate-prop-shape": {
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"

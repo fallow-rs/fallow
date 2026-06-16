@@ -2361,6 +2361,29 @@ mod tests {
             cognitive: u16::try_from(value["cognitive"].as_u64().unwrap_or(0)).unwrap_or(0),
             line_count: u32::try_from(value["line_count"].as_u64().unwrap_or(0)).unwrap_or(0),
             param_count: u8::try_from(value["param_count"].as_u64().unwrap_or(0)).unwrap_or(0),
+            react_hook_count: u16::try_from(value["react_hook_count"].as_u64().unwrap_or(0))
+                .unwrap_or(0),
+            react_jsx_max_depth: u16::try_from(value["react_jsx_max_depth"].as_u64().unwrap_or(0))
+                .unwrap_or(0),
+            react_prop_count: u16::try_from(value["react_prop_count"].as_u64().unwrap_or(0))
+                .unwrap_or(0),
+            react_hook_profile: value.get("react_hook_profile").map(|p| {
+                let read_u16 = |key: &str| {
+                    u16::try_from(p.get(key).and_then(serde_json::Value::as_u64).unwrap_or(0))
+                        .unwrap_or(0)
+                };
+                crate::health_types::ReactHookProfile {
+                    state: read_u16("state"),
+                    effect: read_u16("effect"),
+                    memo: read_u16("memo"),
+                    callback: read_u16("callback"),
+                    custom: read_u16("custom"),
+                    max_effect_dep_arity: p
+                        .get("max_effect_dep_arity")
+                        .and_then(serde_json::Value::as_u64)
+                        .and_then(|v| u32::try_from(v).ok()),
+                }
+            }),
             exceeded,
             severity,
             crap: value.get("crap").and_then(|v| v.as_f64()),
@@ -2602,6 +2625,10 @@ mod tests {
             cognitive,
             line_count: 40,
             param_count: 0,
+            react_hook_count: 0,
+            react_jsx_max_depth: 0,
+            react_prop_count: 0,
+            react_hook_profile: None,
             exceeded: crate::health_types::ExceededThreshold::Crap,
             severity: crate::health_types::FindingSeverity::Moderate,
             crap: Some(35.5),
@@ -2774,6 +2801,10 @@ mod tests {
             cognitive: 10,
             line_count: 40,
             param_count: 0,
+            react_hook_count: 0,
+            react_jsx_max_depth: 0,
+            react_prop_count: 0,
+            react_hook_profile: None,
             exceeded: crate::health_types::ExceededThreshold::Crap,
             severity: crate::health_types::FindingSeverity::Moderate,
             crap: Some(35.5),
