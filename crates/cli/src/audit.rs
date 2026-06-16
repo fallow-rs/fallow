@@ -1111,6 +1111,25 @@ struct HeadAnalyses {
     health: Option<HealthResult>,
 }
 
+struct AuditResultParts {
+    verdict: AuditVerdict,
+    summary: AuditSummary,
+    attribution: AuditAttribution,
+    base_snapshot: Option<AuditKeySnapshot>,
+    base_snapshot_skipped: bool,
+    changed_files_count: usize,
+    changed_files: FxHashSet<PathBuf>,
+    base_ref: String,
+    base_description: Option<String>,
+    head_sha: Option<String>,
+    output: OutputFormat,
+    performance: bool,
+    check: Option<CheckResult>,
+    dupes: Option<DupesResult>,
+    health: Option<HealthResult>,
+    elapsed: Duration,
+}
+
 /// Run the three HEAD-side analyses with intra-pipeline sharing intact:
 /// check first (so its parsed modules are available), then dupes (which can
 /// reuse check's discovered file list when production settings match), then
@@ -1273,14 +1292,14 @@ pub fn execute_audit(opts: &AuditOptions<'_>) -> Result<AuditResult, ExitCode> {
         summary.dead_code_issues + summary.complexity_findings + summary.duplication_clone_groups,
     );
 
-    Ok(AuditResult {
+    Ok(build_audit_result(AuditResultParts {
         verdict,
         summary,
         attribution,
         base_snapshot,
         base_snapshot_skipped,
         changed_files_count,
-        changed_files: changed_files.into_iter().collect(),
+        changed_files,
         base_ref,
         base_description,
         head_sha: get_head_sha(opts.root),
@@ -1290,7 +1309,28 @@ pub fn execute_audit(opts: &AuditOptions<'_>) -> Result<AuditResult, ExitCode> {
         dupes: dupes_result,
         health: health_result,
         elapsed: start.elapsed(),
-    })
+    }))
+}
+
+fn build_audit_result(parts: AuditResultParts) -> AuditResult {
+    AuditResult {
+        verdict: parts.verdict,
+        summary: parts.summary,
+        attribution: parts.attribution,
+        base_snapshot: parts.base_snapshot,
+        base_snapshot_skipped: parts.base_snapshot_skipped,
+        changed_files_count: parts.changed_files_count,
+        changed_files: parts.changed_files.into_iter().collect(),
+        base_ref: parts.base_ref,
+        base_description: parts.base_description,
+        head_sha: parts.head_sha,
+        output: parts.output,
+        performance: parts.performance,
+        check: parts.check,
+        dupes: parts.dupes,
+        health: parts.health,
+        elapsed: parts.elapsed,
+    }
 }
 
 /// Parse a raw `FALLOW_AUDIT_BASE` value: trim, treat empty / whitespace-only as
