@@ -424,44 +424,62 @@ pub(super) fn dead_code_keys(
     } = results;
 
     let mut collector = DeadCodeKeyCollector::new(root);
-    collector.add_unused_files(unused_files);
-    collector.add_unused_exports(unused_exports);
-    collector.add_unused_types(unused_types);
-    collector.add_private_type_leaks(private_type_leaks);
-    collector.add_unused_dependencies(unused_dependencies);
-    collector.add_unused_dev_dependencies(unused_dev_dependencies);
-    collector.add_unused_optional_dependencies(unused_optional_dependencies);
-    collector.add_unused_enum_members(unused_enum_members);
-    collector.add_unused_class_members(unused_class_members);
-    collector.add_unused_store_members(unused_store_members);
-    collector.add_unresolved_imports(unresolved_imports);
-    collector.add_unlisted_dependencies(unlisted_dependencies);
-    collector.add_duplicate_exports(duplicate_exports);
-    collector.add_type_only_dependencies(type_only_dependencies);
-    collector.add_test_only_dependencies(test_only_dependencies);
-    collector.add_circular_dependencies(circular_dependencies);
-    collector.add_re_export_cycles(re_export_cycles);
-    collector.add_boundary_violations(boundary_violations);
-    collector.add_boundary_coverage_violations(boundary_coverage_violations);
-    collector.add_boundary_call_violations(boundary_call_violations);
-    collector.add_policy_violations(policy_violations);
-    collector.add_stale_suppressions(stale_suppressions);
-    collector.add_unresolved_catalog_references(unresolved_catalog_references);
-    collector.add_unused_catalog_entries(unused_catalog_entries);
-    collector.add_empty_catalog_groups(empty_catalog_groups);
-    collector.add_unused_dependency_overrides(unused_dependency_overrides);
-    collector.add_misconfigured_dependency_overrides(misconfigured_dependency_overrides);
-    collector.add_invalid_client_exports(invalid_client_exports);
-    collector.add_mixed_client_server_barrels(mixed_client_server_barrels);
-    collector.add_misplaced_directives(misplaced_directives);
-    collector.add_unprovided_injects(unprovided_injects);
-    collector.add_unrendered_components(unrendered_components);
-    collector.add_unused_component_props(unused_component_props);
-    collector.add_unused_component_emits(unused_component_emits);
-    collector.add_unused_server_actions(unused_server_actions);
-    collector.add_unused_load_data_keys(unused_load_data_keys);
-    collector.add_route_collisions(route_collisions);
-    collector.add_dynamic_segment_name_conflicts(dynamic_segment_name_conflicts);
+    collector.add_core_findings(
+        unused_files,
+        unused_exports,
+        unused_types,
+        private_type_leaks,
+    );
+    collector.add_client_directive_findings(
+        invalid_client_exports,
+        mixed_client_server_barrels,
+        misplaced_directives,
+    );
+    collector.add_dependency_findings(
+        unused_dependencies,
+        unused_dev_dependencies,
+        unused_optional_dependencies,
+        unlisted_dependencies,
+        type_only_dependencies,
+        test_only_dependencies,
+    );
+    collector.add_dependency_override_findings(
+        unused_dependency_overrides,
+        misconfigured_dependency_overrides,
+    );
+    collector.add_member_findings(
+        unused_enum_members,
+        unused_class_members,
+        unused_store_members,
+        unused_component_props,
+        unused_component_emits,
+    );
+    collector.add_graph_findings(
+        unresolved_imports,
+        duplicate_exports,
+        circular_dependencies,
+        re_export_cycles,
+    );
+    collector.add_boundary_findings(
+        boundary_violations,
+        boundary_coverage_violations,
+        boundary_call_violations,
+        policy_violations,
+        stale_suppressions,
+    );
+    collector.add_catalog_findings(
+        unresolved_catalog_references,
+        unused_catalog_entries,
+        empty_catalog_groups,
+    );
+    collector.add_framework_findings(
+        unprovided_injects,
+        unrendered_components,
+        unused_server_actions,
+        unused_load_data_keys,
+        route_collisions,
+        dynamic_segment_name_conflicts,
+    );
     collector.into_keys()
 }
 
@@ -484,6 +502,127 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn insert(&mut self, key: String) {
         self.keys.insert(key);
+    }
+
+    fn add_core_findings(
+        &mut self,
+        unused_files: &[fallow_core::results::UnusedFileFinding],
+        unused_exports: &[fallow_core::results::UnusedExportFinding],
+        unused_types: &[fallow_core::results::UnusedTypeFinding],
+        private_type_leaks: &[fallow_core::results::PrivateTypeLeakFinding],
+    ) {
+        self.add_unused_files(unused_files);
+        self.add_unused_exports(unused_exports);
+        self.add_unused_types(unused_types);
+        self.add_private_type_leaks(private_type_leaks);
+    }
+
+    fn add_client_directive_findings(
+        &mut self,
+        invalid_client_exports: &[fallow_core::results::InvalidClientExportFinding],
+        mixed_client_server_barrels: &[fallow_core::results::MixedClientServerBarrelFinding],
+        misplaced_directives: &[fallow_core::results::MisplacedDirectiveFinding],
+    ) {
+        self.add_invalid_client_exports(invalid_client_exports);
+        self.add_mixed_client_server_barrels(mixed_client_server_barrels);
+        self.add_misplaced_directives(misplaced_directives);
+    }
+
+    fn add_dependency_findings(
+        &mut self,
+        unused_dependencies: &[fallow_core::results::UnusedDependencyFinding],
+        unused_dev_dependencies: &[fallow_core::results::UnusedDevDependencyFinding],
+        unused_optional_dependencies: &[fallow_core::results::UnusedOptionalDependencyFinding],
+        unlisted_dependencies: &[fallow_core::results::UnlistedDependencyFinding],
+        type_only_dependencies: &[fallow_core::results::TypeOnlyDependencyFinding],
+        test_only_dependencies: &[fallow_core::results::TestOnlyDependencyFinding],
+    ) {
+        self.add_unused_dependencies(unused_dependencies);
+        self.add_unused_dev_dependencies(unused_dev_dependencies);
+        self.add_unused_optional_dependencies(unused_optional_dependencies);
+        self.add_unlisted_dependencies(unlisted_dependencies);
+        self.add_type_only_dependencies(type_only_dependencies);
+        self.add_test_only_dependencies(test_only_dependencies);
+    }
+
+    fn add_dependency_override_findings(
+        &mut self,
+        unused_dependency_overrides: &[fallow_core::results::UnusedDependencyOverrideFinding],
+        misconfigured_dependency_overrides: &[fallow_core::results::MisconfiguredDependencyOverrideFinding],
+    ) {
+        self.add_unused_dependency_overrides(unused_dependency_overrides);
+        self.add_misconfigured_dependency_overrides(misconfigured_dependency_overrides);
+    }
+
+    fn add_member_findings(
+        &mut self,
+        unused_enum_members: &[fallow_core::results::UnusedEnumMemberFinding],
+        unused_class_members: &[fallow_core::results::UnusedClassMemberFinding],
+        unused_store_members: &[fallow_core::results::UnusedStoreMemberFinding],
+        unused_component_props: &[fallow_core::results::UnusedComponentPropFinding],
+        unused_component_emits: &[fallow_core::results::UnusedComponentEmitFinding],
+    ) {
+        self.add_unused_enum_members(unused_enum_members);
+        self.add_unused_class_members(unused_class_members);
+        self.add_unused_store_members(unused_store_members);
+        self.add_unused_component_props(unused_component_props);
+        self.add_unused_component_emits(unused_component_emits);
+    }
+
+    fn add_graph_findings(
+        &mut self,
+        unresolved_imports: &[fallow_core::results::UnresolvedImportFinding],
+        duplicate_exports: &[fallow_core::results::DuplicateExportFinding],
+        circular_dependencies: &[fallow_core::results::CircularDependencyFinding],
+        re_export_cycles: &[fallow_core::results::ReExportCycleFinding],
+    ) {
+        self.add_unresolved_imports(unresolved_imports);
+        self.add_duplicate_exports(duplicate_exports);
+        self.add_circular_dependencies(circular_dependencies);
+        self.add_re_export_cycles(re_export_cycles);
+    }
+
+    fn add_boundary_findings(
+        &mut self,
+        boundary_violations: &[fallow_core::results::BoundaryViolationFinding],
+        boundary_coverage_violations: &[fallow_core::results::BoundaryCoverageViolationFinding],
+        boundary_call_violations: &[fallow_core::results::BoundaryCallViolationFinding],
+        policy_violations: &[fallow_core::results::PolicyViolationFinding],
+        stale_suppressions: &[fallow_core::results::StaleSuppression],
+    ) {
+        self.add_boundary_violations(boundary_violations);
+        self.add_boundary_coverage_violations(boundary_coverage_violations);
+        self.add_boundary_call_violations(boundary_call_violations);
+        self.add_policy_violations(policy_violations);
+        self.add_stale_suppressions(stale_suppressions);
+    }
+
+    fn add_catalog_findings(
+        &mut self,
+        unresolved_catalog_references: &[fallow_core::results::UnresolvedCatalogReferenceFinding],
+        unused_catalog_entries: &[fallow_core::results::UnusedCatalogEntryFinding],
+        empty_catalog_groups: &[fallow_core::results::EmptyCatalogGroupFinding],
+    ) {
+        self.add_unresolved_catalog_references(unresolved_catalog_references);
+        self.add_unused_catalog_entries(unused_catalog_entries);
+        self.add_empty_catalog_groups(empty_catalog_groups);
+    }
+
+    fn add_framework_findings(
+        &mut self,
+        unprovided_injects: &[fallow_core::results::UnprovidedInjectFinding],
+        unrendered_components: &[fallow_core::results::UnrenderedComponentFinding],
+        unused_server_actions: &[fallow_core::results::UnusedServerActionFinding],
+        unused_load_data_keys: &[fallow_core::results::UnusedLoadDataKeyFinding],
+        route_collisions: &[fallow_core::results::RouteCollisionFinding],
+        dynamic_segment_name_conflicts: &[fallow_core::results::DynamicSegmentNameConflictFinding],
+    ) {
+        self.add_unprovided_injects(unprovided_injects);
+        self.add_unrendered_components(unrendered_components);
+        self.add_unused_server_actions(unused_server_actions);
+        self.add_unused_load_data_keys(unused_load_data_keys);
+        self.add_route_collisions(route_collisions);
+        self.add_dynamic_segment_name_conflicts(dynamic_segment_name_conflicts);
     }
 
     fn add_unused_files(&mut self, items: &[fallow_core::results::UnusedFileFinding]) {
