@@ -23,12 +23,6 @@ pub(super) fn print_markdown(results: &AnalysisResults, root: &Path) {
 
 /// Build markdown output for analysis results.
 pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
-    let rel = |p: &Path| {
-        escape_backticks(&normalize_uri(
-            &relative_path(p, root).display().to_string(),
-        ))
-    };
-
     let total = results.total_issues();
     let mut out = String::new();
 
@@ -39,12 +33,35 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
 
     let _ = write!(out, "## Fallow: {total} issue{} found\n\n", plural(total));
 
-    markdown_section(&mut out, &results.unused_files, "Unused files", |file| {
-        vec![format!("- `{}`", rel(&file.file.path))]
+    push_markdown_primary_sections(&mut out, results, root);
+    push_markdown_import_sections(&mut out, results, root);
+    push_markdown_dependency_detail_sections(&mut out, results, root);
+    push_markdown_graph_sections(&mut out, results, &|path| {
+        markdown_relative_path(path, root)
+    });
+    push_markdown_catalog_sections(&mut out, results, &|path| {
+        markdown_relative_path(path, root)
+    });
+
+    out
+}
+
+fn markdown_relative_path(path: &Path, root: &Path) -> String {
+    escape_backticks(&normalize_uri(
+        &relative_path(path, root).display().to_string(),
+    ))
+}
+
+fn push_markdown_primary_sections(out: &mut String, results: &AnalysisResults, root: &Path) {
+    markdown_section(out, &results.unused_files, "Unused files", |file| {
+        vec![format!(
+            "- `{}`",
+            markdown_relative_path(&file.file.path, root)
+        )]
     });
 
     markdown_grouped_section(
-        &mut out,
+        out,
         &results.unused_exports,
         "Unused exports",
         root,
@@ -53,7 +70,7 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
     );
 
     markdown_grouped_section(
-        &mut out,
+        out,
         &results.unused_types,
         "Unused type exports",
         root,
@@ -62,7 +79,7 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
     );
 
     markdown_grouped_section(
-        &mut out,
+        out,
         &results.private_type_leaks,
         "Private type leaks",
         root,
@@ -70,11 +87,13 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
         format_private_type_leak,
     );
 
-    push_markdown_dependency_sections(&mut out, results, root);
-    push_markdown_member_sections(&mut out, results, root);
+    push_markdown_dependency_sections(out, results, root);
+    push_markdown_member_sections(out, results, root);
+}
 
+fn push_markdown_import_sections(out: &mut String, results: &AnalysisResults, root: &Path) {
     markdown_grouped_section(
-        &mut out,
+        out,
         &results.unresolved_imports,
         "Unresolved imports",
         root,
@@ -89,14 +108,14 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
     );
 
     markdown_section(
-        &mut out,
+        out,
         &results.unlisted_dependencies,
         "Unlisted dependencies",
         |dep| vec![format!("- `{}`", escape_backticks(&dep.dep.package_name))],
     );
 
     markdown_section(
-        &mut out,
+        out,
         &results.duplicate_exports,
         "Duplicate exports",
         |dup| {
@@ -104,7 +123,7 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
                 .export
                 .locations
                 .iter()
-                .map(|loc| format!("`{}`", rel(&loc.path)))
+                .map(|loc| format!("`{}`", markdown_relative_path(&loc.path, root)))
                 .collect();
             vec![format!(
                 "- `{}` in {}",
@@ -113,12 +132,6 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
             )]
         },
     );
-
-    push_markdown_dependency_detail_sections(&mut out, results, root);
-    push_markdown_graph_sections(&mut out, results, &rel);
-    push_markdown_catalog_sections(&mut out, results, &rel);
-
-    out
 }
 
 fn push_markdown_dependency_sections(out: &mut String, results: &AnalysisResults, root: &Path) {
