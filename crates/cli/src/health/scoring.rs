@@ -493,88 +493,125 @@ fn build_template_inherit_contexts(
 ) -> rustc_hash::FxHashMap<fallow_core::discover::FileId, TemplateInheritContext> {
     let mut out = rustc_hash::FxHashMap::default();
     for node in &graph.modules {
-        let Some(path) = file_paths.get(&node.file_id) else {
-            continue;
-        };
-        if !path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("html"))
+        if let Some(context) =
+            template_inherit_context_for_node(node, graph, module_by_id, file_paths)
         {
-            continue;
+            out.insert(node.file_id, context);
         }
-        let Some(module) = module_by_id.get(&node.file_id) else {
-            continue;
-        };
-        if !module
-            .complexity
-            .iter()
-            .any(|f| f.name.as_str() == "<template>")
-        {
-            continue;
-        }
-        let Some(importers) = graph.reverse_deps.get(node.file_id.0 as usize) else {
-            continue;
-        };
-
-        let mut any_reachable = false;
-        let mut combined_refs: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
-        let mut provenance: Option<std::path::PathBuf> = None;
-        let mut first_owner: Option<std::path::PathBuf> = None;
-        for &importer_id in importers {
-            let Some(owner_node) = graph.modules.get(importer_id.0 as usize) else {
-                continue;
-            };
-            let Some(owner_path) = file_paths.get(&importer_id) else {
-                continue;
-            };
-            if !owner_path
-                .extension()
-                .and_then(|ext| ext.to_str())
-                .is_some_and(|ext| {
-                    matches!(
-                        ext.to_ascii_lowercase().as_str(),
-                        "ts" | "tsx" | "mts" | "cts"
-                    )
-                })
-            {
-                continue;
-            }
-            if graph.test_entry_points.contains(&importer_id) {
-                continue;
-            }
-            let owner_has_component = module_by_id
-                .get(&importer_id)
-                .is_some_and(|m| m.has_angular_component_template_url);
-            if !owner_has_component {
-                continue;
-            }
-            if first_owner.is_none() {
-                first_owner = Some((**owner_path).clone());
-            }
-            let owner_reachable = owner_node.is_test_reachable();
-            if owner_reachable {
-                any_reachable = true;
-                if provenance.is_none() {
-                    provenance = Some((**owner_path).clone());
-                }
-                let refs = build_test_referenced_exports(&owner_node.exports, &graph.modules);
-                combined_refs.extend(refs);
-            }
-        }
-        let Some(provenance_owner) = provenance.or(first_owner) else {
-            continue;
-        };
-        out.insert(
-            node.file_id,
-            TemplateInheritContext {
-                is_test_reachable: any_reachable,
-                test_referenced_exports: combined_refs,
-                provenance_owner,
-            },
-        );
     }
     out
+}
+
+fn template_inherit_context_for_node(
+    node: &fallow_core::graph::ModuleNode,
+    graph: &fallow_core::graph::ModuleGraph,
+    module_by_id: &rustc_hash::FxHashMap<
+        fallow_core::discover::FileId,
+        &fallow_core::extract::ModuleInfo,
+    >,
+    file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
+) -> Option<TemplateInheritContext> {
+    if !is_template_inherit_candidate(node, module_by_id, file_paths) {
+        return None;
+    }
+    let importers = graph.reverse_deps.get(node.file_id.0 as usize)?;
+    template_inherit_context_from_importers(importers, graph, module_by_id, file_paths)
+}
+
+fn is_template_inherit_candidate(
+    node: &fallow_core::graph::ModuleNode,
+    module_by_id: &rustc_hash::FxHashMap<
+        fallow_core::discover::FileId,
+        &fallow_core::extract::ModuleInfo,
+    >,
+    file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
+) -> bool {
+    let Some(path) = file_paths.get(&node.file_id) else {
+        return false;
+    };
+    if !path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("html"))
+    {
+        return false;
+    }
+    module_by_id.get(&node.file_id).is_some_and(|module| {
+        module
+            .complexity
+            .iter()
+            .any(|finding| finding.name.as_str() == "<template>")
+    })
+}
+
+fn template_inherit_context_from_importers(
+    importers: &[fallow_core::discover::FileId],
+    graph: &fallow_core::graph::ModuleGraph,
+    module_by_id: &rustc_hash::FxHashMap<
+        fallow_core::discover::FileId,
+        &fallow_core::extract::ModuleInfo,
+    >,
+    file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
+) -> Option<TemplateInheritContext> {
+    let mut any_reachable = false;
+    let mut combined_refs = rustc_hash::FxHashSet::default();
+    let mut provenance: Option<std::path::PathBuf> = None;
+    let mut first_owner: Option<std::path::PathBuf> = None;
+
+    for &importer_id in importers {
+        let Some((owner_node, owner_path)) =
+            template_owner(importer_id, graph, module_by_id, file_paths)
+        else {
+            continue;
+        };
+        if first_owner.is_none() {
+            first_owner = Some((*owner_path).clone());
+        }
+        if owner_node.is_test_reachable() {
+            any_reachable = true;
+            provenance.get_or_insert_with(|| (*owner_path).clone());
+            let refs = build_test_referenced_exports(&owner_node.exports, &graph.modules);
+            combined_refs.extend(refs);
+        }
+    }
+
+    let provenance_owner = provenance.or(first_owner)?;
+    Some(TemplateInheritContext {
+        is_test_reachable: any_reachable,
+        test_referenced_exports: combined_refs,
+        provenance_owner,
+    })
+}
+
+fn template_owner<'a>(
+    importer_id: fallow_core::discover::FileId,
+    graph: &'a fallow_core::graph::ModuleGraph,
+    module_by_id: &rustc_hash::FxHashMap<
+        fallow_core::discover::FileId,
+        &fallow_core::extract::ModuleInfo,
+    >,
+    file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
+) -> Option<(&'a fallow_core::graph::ModuleNode, &'a std::path::PathBuf)> {
+    let owner_node = graph.modules.get(importer_id.0 as usize)?;
+    let owner_path = *file_paths.get(&importer_id)?;
+    if !is_template_owner_path(owner_path) || graph.test_entry_points.contains(&importer_id) {
+        return None;
+    }
+    let owner_has_component = module_by_id
+        .get(&importer_id)
+        .is_some_and(|module| module.has_angular_component_template_url);
+    owner_has_component.then_some((owner_node, owner_path))
+}
+
+fn is_template_owner_path(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| {
+            matches!(
+                ext.to_ascii_lowercase().as_str(),
+                "ts" | "tsx" | "mts" | "cts"
+            )
+        })
 }
 
 /// Build the set of export names that have at least one test-reachable reference.
