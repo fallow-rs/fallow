@@ -3602,6 +3602,13 @@
           ],
           "description": "The single highest render-SITE count across all components (the headline\nblast-radius number: a shared `<Button>` rendered in N places). `None` on\nnon-React runs. Descriptive context, no threshold."
         },
+        "top_render_fan_in": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/RenderFanInTopComponent"
+          },
+          "description": "The highest-fan-in React/Preact components, located (component name +\nproject-relative path + render-site / distinct-parent counts), sorted by\nrender sites descending and capped at a small N. Lets a consumer see\nWHICH component carries the headline `max_render_fan_in`, not just the\nnumber. Empty (and omitted from JSON) on non-React runs, so the contract\nstays byte-identical there. Descriptive blast-radius context, NOT a gate."
+        },
         "total_loc": {
           "type": "integer",
           "description": "Total lines of code across all parsed modules."
@@ -14710,6 +14717,34 @@
         "component"
       ],
       "description": "One member of a duplicate-prop-shape group: the OTHER components that share\nthe same significant prop-name set, listed in each member's\n`sharing_components`. Path-sorted for stable output. A located reference (no\n`shape`, which is carried once on the owning [`DuplicatePropShape`])."
+    },
+    "RenderFanInTopComponent": {
+      "type": "object",
+      "properties": {
+        "component": {
+          "type": "string",
+          "description": "The component name."
+        },
+        "path": {
+          "type": "string",
+          "description": "Project-relative path of the file declaring the component. Serialized with\nforward slashes (same serializer the other relativized health paths use)."
+        },
+        "render_sites": {
+          "type": "integer",
+          "description": "Total JSX render SITES that resolve to this component across the project."
+        },
+        "distinct_parents": {
+          "type": "integer",
+          "description": "Distinct `(parent_file, parent_component)` keys that render this component."
+        }
+      },
+      "required": [
+        "component",
+        "path",
+        "render_sites",
+        "distinct_parents"
+      ],
+      "description": "One located high-fan-in React/Preact component for the descriptive\n`top_render_fan_in` blast-radius list on [`VitalSigns`].\n\nThe component-graph analogue of a high-fan-in module: `render_sites` counts\nJSX render SITES targeting this component project-wide (the headline\nblast-radius number, since a shared `<Button>` is rendered in far more places\nthan it is imported), `distinct_parents` counts the distinct parent\ncomponents that render it. Undercount-safe like the underlying metric: a\nchild rendered via a JSX spread / dynamic / member-expression tag resolves to\nno component, so a true high-fan-in component can only be undersold."
     }
   }
 }

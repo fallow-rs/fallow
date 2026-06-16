@@ -4189,6 +4189,39 @@ fn prepare_health_vital_data(
         vital_signs.p95_render_fan_in = metric.p95_distinct_parents;
         vital_signs.render_fan_in_high_pct = metric.high_pct;
         vital_signs.max_render_fan_in = metric.max_render_sites;
+
+        // Located top-N list so a consumer sees WHICH component carries the
+        // headline fan-in, not just the number. The core carrier is sorted by
+        // (path, component) for run-stability and INCLUDES rendered-nowhere `0`
+        // entries (for the percentile distribution), so re-sort by render_sites
+        // descending and drop the `0`-fan-in entries here. Tie-break on
+        // (path, component) so the cap is deterministic. Cap at a small N.
+        const MAX_TOP_RENDER_FAN_IN: usize = 20;
+        let mut top: Vec<&fallow_types::results::RenderFanInComponent> = metric
+            .per_component
+            .iter()
+            .filter(|c| c.render_sites > 0)
+            .collect();
+        top.sort_by(|a, b| {
+            b.render_sites
+                .cmp(&a.render_sites)
+                .then_with(|| a.file.cmp(&b.file))
+                .then_with(|| a.component.cmp(&b.component))
+        });
+        vital_signs.top_render_fan_in = top
+            .into_iter()
+            .take(MAX_TOP_RENDER_FAN_IN)
+            .map(|c| crate::health_types::RenderFanInTopComponent {
+                component: c.component.clone(),
+                path: c
+                    .file
+                    .strip_prefix(&input.config.root)
+                    .unwrap_or(&c.file)
+                    .to_path_buf(),
+                render_sites: c.render_sites,
+                distinct_parents: c.distinct_parents,
+            })
+            .collect();
     }
 
     let health_score = compute_health_score_metrics(

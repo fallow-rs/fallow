@@ -157,6 +157,7 @@ fn build_health_human_lines_with_explain(
     render_coverage_intelligence(&mut lines, report, root);
     render_vital_signs(&mut lines, report);
     render_risk_profiles(&mut lines, report);
+    render_render_fan_in(&mut lines, report);
     render_large_functions(&mut lines, report, root);
     render_findings(&mut lines, report, root);
     render_threshold_overrides(&mut lines, report, root);
@@ -1172,6 +1173,47 @@ fn render_risk_profiles(lines: &mut Vec<String>, report: &crate::health_types::H
     if lines.len() > before {
         lines.push(String::new());
     }
+}
+
+/// Render the descriptive render-fan-in (blast-radius) list of the highest
+/// fan-in React/Preact components, e.g.
+/// `Render fan-in: <QueryClientProvider> 146 sites (31 parents) ...`.
+///
+/// Mirrors `render_risk_profiles`: descriptive vital-sign context, gated on a
+/// non-empty `top_render_fan_in` so non-React output is byte-identical. The
+/// list is already sorted by render sites descending and project-relativized in
+/// the health layer; this only renders a capped, dimmed summary line.
+fn render_render_fan_in(lines: &mut Vec<String>, report: &crate::health_types::HealthReport) {
+    let Some(ref vs) = report.vital_signs else {
+        return;
+    };
+    if vs.top_render_fan_in.is_empty() {
+        return;
+    }
+
+    const MAX_SHOWN: usize = 5;
+    let shown: Vec<String> = vs
+        .top_render_fan_in
+        .iter()
+        .take(MAX_SHOWN)
+        .map(|c| {
+            format!(
+                "<{}> {} site{} ({} parent{})",
+                c.component,
+                c.render_sites,
+                plural(c.render_sites as usize),
+                c.distinct_parents,
+                plural(c.distinct_parents as usize),
+            )
+        })
+        .collect();
+
+    lines.push(format!(
+        "  {} {}",
+        "Render fan-in:".dimmed(),
+        shown.join(" \u{00b7} ").dimmed()
+    ));
+    lines.push(String::new());
 }
 
 fn render_large_functions(

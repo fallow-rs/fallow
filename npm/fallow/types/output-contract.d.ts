@@ -4151,6 +4151,15 @@ render_fan_in_high_pct?: (number | null)
  */
 max_render_fan_in?: (number | null)
 /**
+ * The highest-fan-in React/Preact components, located (component name +
+ * project-relative path + render-site / distinct-parent counts), sorted by
+ * render sites descending and capped at a small N. Lets a consumer see
+ * WHICH component carries the headline `max_render_fan_in`, not just the
+ * number. Empty (and omitted from JSON) on non-React runs, so the contract
+ * stays byte-identical there. Descriptive blast-radius context, NOT a gate.
+ */
+top_render_fan_in?: RenderFanInTopComponent[]
+/**
  * Total lines of code across all parsed modules.
  */
 total_loc?: number
@@ -4203,6 +4212,37 @@ high_risk: number
  * Percentage of functions in the very-high-risk bin.
  */
 very_high_risk: number
+}
+/**
+ * One located high-fan-in React/Preact component for the descriptive
+ * `top_render_fan_in` blast-radius list on [`VitalSigns`].
+ *
+ * The component-graph analogue of a high-fan-in module: `render_sites` counts
+ * JSX render SITES targeting this component project-wide (the headline
+ * blast-radius number, since a shared `<Button>` is rendered in far more places
+ * than it is imported), `distinct_parents` counts the distinct parent
+ * components that render it. Undercount-safe like the underlying metric: a
+ * child rendered via a JSX spread / dynamic / member-expression tag resolves to
+ * no component, so a true high-fan-in component can only be undersold.
+ */
+export interface RenderFanInTopComponent {
+/**
+ * The component name.
+ */
+component: string
+/**
+ * Project-relative path of the file declaring the component. Serialized with
+ * forward slashes (same serializer the other relativized health paths use).
+ */
+path: string
+/**
+ * Total JSX render SITES that resolve to this component across the project.
+ */
+render_sites: number
+/**
+ * Distinct `(parent_file, parent_component)` keys that render this component.
+ */
+distinct_parents: number
 }
 export interface HealthScore {
 formula_version: number

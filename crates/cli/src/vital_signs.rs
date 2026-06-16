@@ -221,6 +221,7 @@ pub fn compute_vital_signs(input: &VitalSignsInput<'_>) -> VitalSigns {
         p95_render_fan_in: None,
         render_fan_in_high_pct: None,
         max_render_fan_in: None,
+        top_render_fan_in: Vec::new(),
         total_loc,
     }
 }
@@ -1569,6 +1570,7 @@ mod tests {
             p95_render_fan_in: None,
             render_fan_in_high_pct: None,
             max_render_fan_in: None,
+            top_render_fan_in: Vec::new(),
             total_loc: 0,
         };
         let score = compute_health_score(&vs, 100);

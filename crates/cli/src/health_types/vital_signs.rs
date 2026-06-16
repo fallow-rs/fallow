@@ -113,9 +113,42 @@ pub struct VitalSigns {
     /// non-React runs. Descriptive context, no threshold.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub max_render_fan_in: Option<u32>,
+    /// The highest-fan-in React/Preact components, located (component name +
+    /// project-relative path + render-site / distinct-parent counts), sorted by
+    /// render sites descending and capped at a small N. Lets a consumer see
+    /// WHICH component carries the headline `max_render_fan_in`, not just the
+    /// number. Empty (and omitted from JSON) on non-React runs, so the contract
+    /// stays byte-identical there. Descriptive blast-radius context, NOT a gate.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub top_render_fan_in: Vec<RenderFanInTopComponent>,
     /// Total lines of code across all parsed modules.
     #[serde(default)]
     pub total_loc: u64,
+}
+
+/// One located high-fan-in React/Preact component for the descriptive
+/// `top_render_fan_in` blast-radius list on [`VitalSigns`].
+///
+/// The component-graph analogue of a high-fan-in module: `render_sites` counts
+/// JSX render SITES targeting this component project-wide (the headline
+/// blast-radius number, since a shared `<Button>` is rendered in far more places
+/// than it is imported), `distinct_parents` counts the distinct parent
+/// components that render it. Undercount-safe like the underlying metric: a
+/// child rendered via a JSX spread / dynamic / member-expression tag resolves to
+/// no component, so a true high-fan-in component can only be undersold.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct RenderFanInTopComponent {
+    /// The component name.
+    pub component: String,
+    /// Project-relative path of the file declaring the component. Serialized with
+    /// forward slashes (same serializer the other relativized health paths use).
+    #[serde(serialize_with = "fallow_types::serde_path::serialize")]
+    pub path: std::path::PathBuf,
+    /// Total JSX render SITES that resolve to this component across the project.
+    pub render_sites: u32,
+    /// Distinct `(parent_file, parent_component)` keys that render this component.
+    pub distinct_parents: u32,
 }
 
 /// Risk profile: percentage of functions in each risk bin.
@@ -229,6 +262,7 @@ mod tests {
             p95_render_fan_in: Some(3),
             render_fan_in_high_pct: Some(4.5),
             max_render_fan_in: Some(6),
+            top_render_fan_in: Vec::new(),
             total_loc: 42_000,
         };
         let json = serde_json::to_string(&vs).unwrap();
@@ -277,6 +311,7 @@ mod tests {
                 p95_render_fan_in: None,
                 render_fan_in_high_pct: None,
                 max_render_fan_in: None,
+                top_render_fan_in: Vec::new(),
                 total_loc: 42_000,
             },
             counts: VitalSignsCounts {
@@ -331,11 +366,13 @@ mod tests {
             p95_render_fan_in: None,
             render_fan_in_high_pct: None,
             max_render_fan_in: None,
+            top_render_fan_in: Vec::new(),
             total_loc: 0,
         };
         let json = serde_json::to_string(&vs).unwrap();
         assert!(!json.contains("dead_file_pct"));
         assert!(!json.contains("p95_render_fan_in"));
+        assert!(!json.contains("top_render_fan_in"));
         assert!(!json.contains("render_fan_in_high_pct"));
         assert!(!json.contains("max_render_fan_in"));
         assert!(!json.contains("dead_export_pct"));
