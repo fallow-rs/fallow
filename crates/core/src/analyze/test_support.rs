@@ -1,0 +1,70 @@
+//! Shared test fixtures for the analyze detectors.
+
+use fallow_types::discover::FileId;
+use fallow_types::extract::ModuleInfo;
+
+/// A fully-zeroed [`ModuleInfo`] with `file_id == FileId(1)` for detector unit
+/// tests. Construct with struct-update syntax: `ModuleInfo { angular_inputs:
+/// vec![..], ..empty_module() }`.
+#[must_use]
+pub fn empty_module() -> ModuleInfo {
+    ModuleInfo {
+        file_id: FileId(1),
+        exports: Vec::new(),
+        imports: Vec::new(),
+        re_exports: Vec::new(),
+        dynamic_imports: Vec::new(),
+        dynamic_import_patterns: Vec::new(),
+        require_calls: Vec::new(),
+        package_path_references: Vec::new(),
+        member_accesses: Vec::new(),
+        whole_object_uses: Vec::new(),
+        has_cjs_exports: false,
+        has_angular_component_template_url: false,
+        content_hash: 0,
+        suppressions: Vec::new(),
+        unknown_suppression_kinds: Vec::new(),
+        unused_import_bindings: Vec::new(),
+        type_referenced_import_bindings: Vec::new(),
+        value_referenced_import_bindings: Vec::new(),
+        line_offsets: Vec::new(),
+        complexity: Vec::new(),
+        flag_uses: Vec::new(),
+        class_heritage: Vec::new(),
+        injection_tokens: Vec::new(),
+        local_type_declarations: Vec::new(),
+        public_signature_type_references: Vec::new(),
+        namespace_object_aliases: Vec::new(),
+        iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
+        auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        referenced_import_bindings: Vec::new(),
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        angular_inputs: Vec::new(),
+        angular_outputs: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
+        has_page_data_store_whole_use: false,
+    }
+}

@@ -106,6 +106,28 @@ fn unused_component_emit_key(
     )
 }
 
+fn unused_component_input_key(
+    item: &fallow_core::results::UnusedComponentInput,
+    root: &Path,
+) -> String {
+    format!(
+        "unused-component-input:{}:{}",
+        relative_key_path(&item.path, root),
+        item.input_name
+    )
+}
+
+fn unused_component_output_key(
+    item: &fallow_core::results::UnusedComponentOutput,
+    root: &Path,
+) -> String {
+    format!(
+        "unused-component-output:{}:{}",
+        relative_key_path(&item.path, root),
+        item.output_name
+    )
+}
+
 fn unused_server_action_key(
     item: &fallow_core::results::UnusedServerAction,
     root: &Path,
@@ -402,6 +424,8 @@ pub(super) fn dead_code_keys(
         unrendered_components,
         unused_component_props,
         unused_component_emits,
+        unused_component_inputs,
+        unused_component_outputs,
         unused_server_actions,
         unused_load_data_keys,
         unused_load_data_keys_global_abstain: _unused_load_data_keys_global_abstain,
@@ -464,8 +488,12 @@ pub(super) fn dead_code_keys(
         unused_enum_members,
         unused_class_members,
         unused_store_members,
+    );
+    collector.add_component_contract_findings(
         unused_component_props,
         unused_component_emits,
+        unused_component_inputs,
+        unused_component_outputs,
     );
     collector.add_graph_findings(
         unresolved_imports,
@@ -572,14 +600,23 @@ impl<'a> DeadCodeKeyCollector<'a> {
         unused_enum_members: &[fallow_core::results::UnusedEnumMemberFinding],
         unused_class_members: &[fallow_core::results::UnusedClassMemberFinding],
         unused_store_members: &[fallow_core::results::UnusedStoreMemberFinding],
-        unused_component_props: &[fallow_core::results::UnusedComponentPropFinding],
-        unused_component_emits: &[fallow_core::results::UnusedComponentEmitFinding],
     ) {
         self.add_unused_enum_members(unused_enum_members);
         self.add_unused_class_members(unused_class_members);
         self.add_unused_store_members(unused_store_members);
+    }
+
+    fn add_component_contract_findings(
+        &mut self,
+        unused_component_props: &[fallow_core::results::UnusedComponentPropFinding],
+        unused_component_emits: &[fallow_core::results::UnusedComponentEmitFinding],
+        unused_component_inputs: &[fallow_core::results::UnusedComponentInputFinding],
+        unused_component_outputs: &[fallow_core::results::UnusedComponentOutputFinding],
+    ) {
         self.add_unused_component_props(unused_component_props);
         self.add_unused_component_emits(unused_component_emits);
+        self.add_unused_component_inputs(unused_component_inputs);
+        self.add_unused_component_outputs(unused_component_outputs);
     }
 
     fn add_graph_findings(
@@ -735,6 +772,24 @@ impl<'a> DeadCodeKeyCollector<'a> {
     ) {
         for item in items {
             self.insert(unused_component_emit_key(&item.emit, self.root));
+        }
+    }
+
+    fn add_unused_component_inputs(
+        &mut self,
+        items: &[fallow_core::results::UnusedComponentInputFinding],
+    ) {
+        for item in items {
+            self.insert(unused_component_input_key(&item.input, self.root));
+        }
+    }
+
+    fn add_unused_component_outputs(
+        &mut self,
+        items: &[fallow_core::results::UnusedComponentOutputFinding],
+    ) {
+        for item in items {
+            self.insert(unused_component_output_key(&item.output, self.root));
         }
     }
 
@@ -1054,6 +1109,8 @@ pub(super) fn retain_introduced_dead_code(
         unrendered_components,
         unused_component_props,
         unused_component_emits,
+        unused_component_inputs,
+        unused_component_outputs,
         unused_server_actions,
         unused_load_data_keys,
         unused_load_data_keys_global_abstain: _unused_load_data_keys_global_abstain,
@@ -1155,6 +1212,8 @@ pub(super) fn retain_introduced_dead_code(
     unrendered_components.retain(|item| keep(unrendered_component_key(&item.component, root)));
     unused_component_props.retain(|item| keep(unused_component_prop_key(&item.prop, root)));
     unused_component_emits.retain(|item| keep(unused_component_emit_key(&item.emit, root)));
+    unused_component_inputs.retain(|item| keep(unused_component_input_key(&item.input, root)));
+    unused_component_outputs.retain(|item| keep(unused_component_output_key(&item.output, root)));
     unused_server_actions.retain(|item| keep(unused_server_action_key(&item.action, root)));
     unused_load_data_keys.retain(|item| keep(unused_load_data_key_key(&item.key, root)));
     route_collisions.retain(|item| keep(route_collision_key(&item.collision, root)));
@@ -1459,6 +1518,26 @@ impl DeadCodeJsonAnnotator<'_> {
             "unused_component_emits",
             self.results.unused_component_emits.iter().map(|item| {
                 issue_was_introduced(&unused_component_emit_key(&item.emit, self.root), self.base)
+            }),
+        );
+        annotate_issue_array(
+            self.json,
+            "unused_component_inputs",
+            self.results.unused_component_inputs.iter().map(|item| {
+                issue_was_introduced(
+                    &unused_component_input_key(&item.input, self.root),
+                    self.base,
+                )
+            }),
+        );
+        annotate_issue_array(
+            self.json,
+            "unused_component_outputs",
+            self.results.unused_component_outputs.iter().map(|item| {
+                issue_was_introduced(
+                    &unused_component_output_key(&item.output, self.root),
+                    self.base,
+                )
             }),
         );
         annotate_issue_array(

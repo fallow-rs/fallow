@@ -281,6 +281,8 @@ fn build_check_summary(results: &AnalysisResults) -> CheckSummary {
         unrendered_components: results.unrendered_components.len(),
         unused_component_props: results.unused_component_props.len(),
         unused_component_emits: results.unused_component_emits.len(),
+        unused_component_inputs: results.unused_component_inputs.len(),
+        unused_component_outputs: results.unused_component_outputs.len(),
         unused_server_actions: results.unused_server_actions.len(),
         unused_load_data_keys: results.unused_load_data_keys.len(),
         route_collisions: results.route_collisions.len(),

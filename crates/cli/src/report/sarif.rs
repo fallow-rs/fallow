@@ -11,8 +11,9 @@ use fallow_core::results::{
     PrivateTypeLeak, PropDrillingChain, RouteCollision, StaleSuppression, TestOnlyDependency,
     ThinWrapper, TypeOnlyDependency, UnlistedDependencyFinding, UnprovidedInject,
     UnrenderedComponent, UnresolvedCatalogReferenceFinding, UnresolvedImport,
-    UnusedCatalogEntryFinding, UnusedComponentEmit, UnusedComponentProp, UnusedDependency,
-    UnusedDependencyOverrideFinding, UnusedExport, UnusedFile, UnusedMember, UnusedServerAction,
+    UnusedCatalogEntryFinding, UnusedComponentEmit, UnusedComponentInput, UnusedComponentOutput,
+    UnusedComponentProp, UnusedDependency, UnusedDependencyOverrideFinding, UnusedExport,
+    UnusedFile, UnusedMember, UnusedServerAction,
 };
 use rustc_hash::FxHashMap;
 
@@ -636,6 +637,44 @@ fn sarif_unused_component_emit_fields(
     }
 }
 
+fn sarif_unused_component_input_fields(
+    input: &UnusedComponentInput,
+    root: &Path,
+    level: &'static str,
+) -> SarifFields {
+    SarifFields {
+        rule_id: "fallow/unused-component-input",
+        level,
+        message: format!(
+            "input \"{}\" is declared but read nowhere inside component \"{}\"; remove it or use it",
+            input.input_name, input.component_name
+        ),
+        uri: relative_uri(&input.path, root),
+        region: Some((input.line, input.col + 1)),
+        source_path: Some(input.path.clone()),
+        properties: None,
+    }
+}
+
+fn sarif_unused_component_output_fields(
+    output: &UnusedComponentOutput,
+    root: &Path,
+    level: &'static str,
+) -> SarifFields {
+    SarifFields {
+        rule_id: "fallow/unused-component-output",
+        level,
+        message: format!(
+            "output \"{}\" is declared but emitted nowhere inside component \"{}\"; remove it or emit it",
+            output.output_name, output.component_name
+        ),
+        uri: relative_uri(&output.path, root),
+        region: Some((output.line, output.col + 1)),
+        source_path: Some(output.path.clone()),
+        properties: None,
+    }
+}
+
 fn sarif_unused_server_action_fields(
     action: &UnusedServerAction,
     root: &Path,
@@ -1190,6 +1229,16 @@ fn sarif_component_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
             rules.unused_component_emits,
         ),
         (
+            "fallow/unused-component-input",
+            "An Angular @Input() / signal input() / model() input read nowhere inside its own component",
+            rules.unused_component_inputs,
+        ),
+        (
+            "fallow/unused-component-output",
+            "An Angular @Output() / signal output() output emitted nowhere inside its own component",
+            rules.unused_component_outputs,
+        ),
+        (
             "fallow/unused-server-action",
             "A Next.js Server Action exported from a \"use server\" file that no code in the project references",
             rules.unused_server_actions,
@@ -1538,6 +1587,30 @@ fn push_component_contract_sarif_results(
                 &e.emit,
                 root,
                 severity_to_sarif_level(rules.unused_component_emits),
+            )
+        },
+    );
+    push_sarif_results(
+        sarif_results,
+        &results.unused_component_inputs,
+        snippets,
+        |i| {
+            sarif_unused_component_input_fields(
+                &i.input,
+                root,
+                severity_to_sarif_level(rules.unused_component_inputs),
+            )
+        },
+    );
+    push_sarif_results(
+        sarif_results,
+        &results.unused_component_outputs,
+        snippets,
+        |o| {
+            sarif_unused_component_output_fields(
+                &o.output,
+                root,
+                severity_to_sarif_level(rules.unused_component_outputs),
             )
         },
     );
@@ -2543,7 +2616,7 @@ mod tests {
         let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
             .as_array()
             .expect("rules should be an array");
-        assert_eq!(rules.len(), 41);
+        assert_eq!(rules.len(), 43);
 
         let rule_ids: Vec<&str> = rules.iter().map(|r| r["id"].as_str().unwrap()).collect();
         assert!(rule_ids.contains(&"fallow/duplicate-prop-shape"));
@@ -2551,6 +2624,8 @@ mod tests {
         assert!(rule_ids.contains(&"fallow/unrendered-component"));
         assert!(rule_ids.contains(&"fallow/unused-component-prop"));
         assert!(rule_ids.contains(&"fallow/unused-component-emit"));
+        assert!(rule_ids.contains(&"fallow/unused-component-input"));
+        assert!(rule_ids.contains(&"fallow/unused-component-output"));
         assert!(rule_ids.contains(&"fallow/unused-server-action"));
         assert!(rule_ids.contains(&"fallow/unused-load-data-key"));
         assert!(rule_ids.contains(&"fallow/prop-drilling"));

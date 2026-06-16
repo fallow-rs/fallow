@@ -38,6 +38,8 @@ const CATEGORY_ICONS: Record<IssueCategory, string> = {
   "unused-load-data-keys": "symbol-property",
   "unused-component-prop": "symbol-property",
   "unused-component-emit": "symbol-event",
+  "unused-component-input": "symbol-property",
+  "unused-component-output": "symbol-event",
   "unrendered-component": "symbol-misc",
   "unprovided-inject": "plug",
   "invalid-client-export": "error",
@@ -78,6 +80,8 @@ const ISSUE_ICONS: Record<IssueCategory, string> = {
   "unused-load-data-keys": "symbol-property",
   "unused-component-prop": "symbol-property",
   "unused-component-emit": "symbol-event",
+  "unused-component-input": "symbol-property",
+  "unused-component-output": "symbol-event",
   "unrendered-component": "symbol-misc",
   "unprovided-inject": "plug",
   "invalid-client-export": "error",
@@ -388,6 +392,38 @@ export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeIte
               e.line,
               e.col,
               "unused-component-emit",
+            ),
+        ),
+      );
+    }
+
+    if (this.result.unused_component_inputs) {
+      addCategory(
+        "unused-component-input",
+        this.result.unused_component_inputs.map(
+          (i) =>
+            new IssueItem(
+              `${i.component_name}.${i.input_name}`,
+              i.path,
+              i.line,
+              i.col,
+              "unused-component-input",
+            ),
+        ),
+      );
+    }
+
+    if (this.result.unused_component_outputs) {
+      addCategory(
+        "unused-component-output",
+        this.result.unused_component_outputs.map(
+          (o) =>
+            new IssueItem(
+              `${o.component_name}.${o.output_name}`,
+              o.path,
+              o.line,
+              o.col,
+              "unused-component-output",
             ),
         ),
       );

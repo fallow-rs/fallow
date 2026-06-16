@@ -19,9 +19,10 @@ use crate::output_dead_code::{
     TestOnlyDependencyFinding, ThinWrapperFinding, TypeOnlyDependencyFinding,
     UnlistedDependencyFinding, UnprovidedInjectFinding, UnrenderedComponentFinding,
     UnresolvedCatalogReferenceFinding, UnresolvedImportFinding, UnusedCatalogEntryFinding,
-    UnusedClassMemberFinding, UnusedComponentEmitFinding, UnusedComponentPropFinding,
-    UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
-    UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
+    UnusedClassMemberFinding, UnusedComponentEmitFinding, UnusedComponentInputFinding,
+    UnusedComponentOutputFinding, UnusedComponentPropFinding, UnusedDependencyFinding,
+    UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
+    UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
     UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
     UnusedTypeFinding,
 };
@@ -324,6 +325,18 @@ pub struct AnalysisResults {
     /// `warn`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unused_component_emits: Vec<UnusedComponentEmitFinding>,
+    /// Angular `@Input()` / signal `input()` / `model()` inputs read nowhere in
+    /// their own component (neither the template nor the class body). Wrapped in
+    /// [`UnusedComponentInputFinding`] so each entry carries a typed `actions`
+    /// array natively. Default severity is `warn`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unused_component_inputs: Vec<UnusedComponentInputFinding>,
+    /// Angular `@Output()` / signal `output()` outputs emitted nowhere in their
+    /// own component (no `this.<output>.emit(...)`). Wrapped in
+    /// [`UnusedComponentOutputFinding`] so each entry carries a typed `actions`
+    /// array natively. Default severity is `warn`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unused_component_outputs: Vec<UnusedComponentOutputFinding>,
     /// Next.js Server Actions (exports of `"use server"` files) that no code in
     /// the project references. Reclassified out of `unused_exports` for
     /// `"use server"` files. Wrapped in [`UnusedServerActionFinding`] so each
@@ -504,6 +517,8 @@ impl AnalysisResults {
             + self.dynamic_segment_name_conflicts.len()
             + self.unused_component_props.len()
             + self.unused_component_emits.len()
+            + self.unused_component_inputs.len()
+            + self.unused_component_outputs.len()
             + self.unused_server_actions.len()
             + self.unused_load_data_keys.len()
     }
@@ -564,6 +579,8 @@ impl AnalysisResults {
             dynamic_segment_name_conflicts,
             unused_component_props,
             unused_component_emits,
+            unused_component_inputs,
+            unused_component_outputs,
             unused_server_actions,
             unused_load_data_keys,
             unused_load_data_keys_global_abstain,
@@ -626,6 +643,9 @@ impl AnalysisResults {
             .extend(dynamic_segment_name_conflicts);
         self.unused_component_props.extend(unused_component_props);
         self.unused_component_emits.extend(unused_component_emits);
+        self.unused_component_inputs.extend(unused_component_inputs);
+        self.unused_component_outputs
+            .extend(unused_component_outputs);
         self.unused_server_actions.extend(unused_server_actions);
         self.unused_load_data_keys.extend(unused_load_data_keys);
         self.unused_load_data_keys_global_abstain |= unused_load_data_keys_global_abstain;
@@ -838,6 +858,22 @@ impl AnalysisResults {
                 .cmp(&b.emit.path)
                 .then(a.emit.line.cmp(&b.emit.line))
                 .then(a.emit.emit_name.cmp(&b.emit.emit_name))
+        });
+
+        self.unused_component_inputs.sort_by(|a, b| {
+            a.input
+                .path
+                .cmp(&b.input.path)
+                .then(a.input.line.cmp(&b.input.line))
+                .then(a.input.input_name.cmp(&b.input.input_name))
+        });
+
+        self.unused_component_outputs.sort_by(|a, b| {
+            a.output
+                .path
+                .cmp(&b.output.path)
+                .then(a.output.line.cmp(&b.output.line))
+                .then(a.output.output_name.cmp(&b.output.output_name))
         });
 
         self.unused_server_actions.sort_by(|a, b| {
@@ -1467,6 +1503,49 @@ pub struct DuplicatePropShape {
     /// file-level-suppressed member drops from its own finding but still appears
     /// here, because the group is real regardless of suppression.
     pub sharing_components: Vec<DuplicatePropShapeMember>,
+}
+
+/// An Angular `@Input()` / signal `input()` / `model()` declared input that is
+/// read NOWHERE inside its own component (neither the inline/external template
+/// nor the class body). Single-file dead-input direction; the Angular analogue
+/// of [`UnusedComponentProp`]. The whole component abstains on an unresolved
+/// `extends` heritage clause (a base class in another file may read `this.foo`).
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedComponentInput {
+    /// The Angular component/directive `.ts` file declaring the unused input.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// The component name (the `.ts` file stem).
+    pub component_name: String,
+    /// The declared input name that is never read.
+    pub input_name: String,
+    /// 1-based line number of the input declaration.
+    pub line: u32,
+    /// 0-based byte column offset of the input declaration.
+    pub col: u32,
+}
+
+/// An Angular `@Output()` / signal `output()` declared output that is EMITTED
+/// nowhere inside its own component (no `this.<output>.emit(...)`). Single-file
+/// dead-output direction; the Angular analogue of [`UnusedComponentEmit`]. A
+/// `model()` is recorded as an input only, so its framework-driven `update:`
+/// emit is never flagged here. The whole component abstains on an unresolved
+/// `extends` heritage clause.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedComponentOutput {
+    /// The Angular component/directive `.ts` file declaring the unused output.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// The component name (the `.ts` file stem).
+    pub component_name: String,
+    /// The declared output name that is never emitted.
+    pub output_name: String,
+    /// 1-based line number of the output declaration.
+    pub line: u32,
+    /// 0-based byte column offset of the output declaration.
+    pub col: u32,
 }
 
 /// Two or more Next.js App Router route files that resolve to the SAME URL

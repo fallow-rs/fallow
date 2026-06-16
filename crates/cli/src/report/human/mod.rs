@@ -221,6 +221,14 @@ fn section_component_footer_text(title: &str) -> Option<(&'static str, &'static 
             "A Vue <script setup> defineEmits event emitted nowhere inside its own component (remove it or emit it)",
             "https://docs.fallow.tools/explanations/dead-code#unused-component-emits",
         )),
+        "Unused component inputs" => Some((
+            "An Angular @Input() / signal input() declaration read nowhere inside its own component (remove it or use it)",
+            "https://docs.fallow.tools/explanations/dead-code#unused-component-inputs",
+        )),
+        "Unused component outputs" => Some((
+            "An Angular @Output() / signal output() declaration emitted nowhere inside its own component (remove it or emit it)",
+            "https://docs.fallow.tools/explanations/dead-code#unused-component-outputs",
+        )),
         "Unused server actions" => Some((
             "A Next.js Server Action exported from a \"use server\" file that no code in the project references (wire it to a consumer or remove it)",
             "https://docs.fallow.tools/explanations/dead-code#unused-server-actions",
@@ -265,6 +273,8 @@ fn section_suppress_rule(title: &str) -> Option<&'static str> {
         "Thin wrappers" => Some("thin-wrapper"),
         "Duplicate prop shapes" => Some("duplicate-prop-shape"),
         "Unused component emits" => Some("unused-component-emits"),
+        "Unused component inputs" => Some("unused-component-inputs"),
+        "Unused component outputs" => Some("unused-component-outputs"),
         "Unused server actions" => Some("unused-server-actions"),
         "Unused load data keys" => Some("unused-load-data-keys"),
         _ => None,

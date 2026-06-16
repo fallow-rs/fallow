@@ -5,10 +5,10 @@ expression: output
 <!-- fallow-id: fallow-results -->
 ### Fallow dead-code report
 
-Found **26** findings.
+Found **28** findings.
 
 <details>
-<summary>Dead code (10)</summary>
+<summary>Dead code (12)</summary>
 
 | Severity | Rule | Location | Description |
 | --- | --- | --- | --- |
@@ -21,6 +21,8 @@ Found **26** findings.
 | major | `fallow/unused-type` | `src/types.ts`:5 | Type export 'OldType' is never imported by other modules |
 | major | `fallow/duplicate-export` | `src/types.ts`:30 | Export 'Config' appears in multiple modules |
 | minor | `fallow/unprovided-inject` | `src/useTheme.ts`:5 | inject\(\`THEME\_KEY\`\) has no matching provide\(\`THEME\_KEY\`\) in this project; at runtime it returns undefined \(provide the key or remove this inject\) |
+| minor | `fallow/unused-component-input` | `src/user-card.component.ts`:12 | input \`variant\` is declared but referenced nowhere in component \`UserCardComponent\` \(remove it or use it\) |
+| minor | `fallow/unused-component-output` | `src/user-card.component.ts`:15 | output \`selected\` is declared but emitted nowhere in component \`UserCardComponent\` \(remove it or emit it\) |
 | major | `fallow/unused-export` | `src/utils.ts`:10 | Export 'helperFn' is never imported by other modules |
 
 </details>

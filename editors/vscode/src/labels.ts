@@ -19,6 +19,8 @@ export type IssueCategory =
   | "unused-load-data-keys"
   | "unused-component-prop"
   | "unused-component-emit"
+  | "unused-component-input"
+  | "unused-component-output"
   | "unrendered-component"
   | "unprovided-inject"
   | "invalid-client-export"
@@ -57,6 +59,8 @@ export const ISSUE_CATEGORY_LABELS: Record<IssueCategory, string> = {
   "unused-load-data-keys": "Unused Load Data Keys",
   "unused-component-prop": "Unused Component Props",
   "unused-component-emit": "Unused Component Emits",
+  "unused-component-input": "Unused Component Inputs",
+  "unused-component-output": "Unused Component Outputs",
   "unrendered-component": "Unrendered Components",
   "unprovided-inject": "Unprovided Injects",
   "invalid-client-export": "Invalid Client Exports",

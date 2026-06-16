@@ -7,6 +7,7 @@ use oxc_span::{GetSpan, Span};
 use rustc_hash::FxHashMap;
 
 use crate::{MemberInfo, MemberKind};
+use fallow_types::extract::{AngularInputMember, AngularOutputMember};
 
 pub struct AngularComponentMetadata {
     pub template_url: Option<String>,
@@ -181,19 +182,62 @@ fn extract_input_output_members(value: &Expression<'_>, members: &mut Vec<String
     }
 }
 
+/// Extract every member-identifier referenced anywhere in a host-binding
+/// expression. Scans the whole string (not just the leading token), so a complex
+/// expression such as `'"mat-" + (color || "primary")'` credits `color`, and a
+/// member tail in `'foo.bar'` credits only the root `foo` (segments after `.` are
+/// skipped). String-literal contents are skipped so `"mat-"` / `"primary"` are
+/// not mistaken for identifiers. Over-credits by design (a host ref is a use), so
+/// scanning more of the expression can only reduce false positives.
 fn extract_identifiers_from_host_expr(expr: &str, refs: &mut Vec<String>) {
-    let expr = expr.trim();
-    if expr.is_empty() {
-        return;
+    let bytes = expr.as_bytes();
+    let mut i = 0;
+    let mut in_string: Option<u8> = None;
+    let mut prev_significant: Option<u8> = None;
+    while i < bytes.len() {
+        let c = bytes[i];
+        // Skip string-literal bodies (single, double, backtick).
+        if let Some(quote) = in_string {
+            if c == quote {
+                in_string = None;
+            }
+            i += 1;
+            continue;
+        }
+        if c == b'"' || c == b'\'' || c == b'`' {
+            in_string = Some(c);
+            prev_significant = Some(c);
+            i += 1;
+            continue;
+        }
+        let is_ident_start = c.is_ascii_alphabetic() || c == b'_' || c == b'$';
+        if is_ident_start {
+            let start = i;
+            while i < bytes.len() {
+                let cc = bytes[i];
+                if cc.is_ascii_alphanumeric() || cc == b'_' || cc == b'$' {
+                    i += 1;
+                } else {
+                    break;
+                }
+            }
+            // A member tail (`foo.bar` -> skip `bar`) is not a component member.
+            let is_member_tail = prev_significant == Some(b'.');
+            let ident = &expr[start..i];
+            if !is_member_tail
+                && is_valid_member_identifier(ident)
+                && !refs.iter().any(|r| r == ident)
+            {
+                refs.push(ident.to_string());
+            }
+            prev_significant = Some(b'a'); // any non-`.` significant byte
+            continue;
+        }
+        if !c.is_ascii_whitespace() {
+            prev_significant = Some(c);
+        }
+        i += 1;
     }
-    let ident: String = expr
-        .chars()
-        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '$')
-        .collect();
-    if !is_valid_member_identifier(&ident) || refs.contains(&ident) {
-        return;
-    }
-    refs.push(ident);
 }
 
 fn is_valid_member_identifier(ident: &str) -> bool {
@@ -296,20 +340,36 @@ pub fn extract_custom_elements_define(
 }
 
 fn is_angular_signal_initializer(value: &Expression<'_>) -> bool {
+    angular_signal_initializer_name(value).is_some()
+}
+
+/// Returns the Angular signal-API call name for a signal-member initializer:
+/// `input` for `input(...)` / `input.required(...)`, `output` for `output(...)`,
+/// `model` for `model(...)` / `model.required(...)`, `outputFromObservable` for
+/// `outputFromObservable(...)`, and so on. Mirrors the matching logic in
+/// `is_angular_signal_initializer` (identifier callee `foo(...)` and the
+/// `foo.required(...)` static-member callee form) but surfaces the callee name so
+/// the input/output harvester can classify the member's role. Returns `None` for
+/// any non-signal-API initializer.
+fn angular_signal_initializer_name<'a>(value: &'a Expression<'a>) -> Option<&'a str> {
     let Expression::CallExpression(call) = value else {
-        return false;
+        return None;
     };
     match &call.callee {
-        Expression::Identifier(id) => ANGULAR_SIGNAL_APIS.contains(&id.name.as_str()),
+        Expression::Identifier(id) => {
+            let name = id.name.as_str();
+            ANGULAR_SIGNAL_APIS.contains(&name).then_some(name)
+        }
         Expression::StaticMemberExpression(member) => {
             if let Expression::Identifier(obj) = &member.object {
-                ANGULAR_SIGNAL_APIS.contains(&obj.name.as_str())
-                    && member.property.name == "required"
+                let name = obj.name.as_str();
+                (ANGULAR_SIGNAL_APIS.contains(&name) && member.property.name == "required")
+                    .then_some(name)
             } else {
-                false
+                None
             }
         }
-        _ => false,
+        _ => None,
     }
 }
 
@@ -477,6 +537,117 @@ pub fn extract_class_members(class: &Class<'_>, is_angular_class: bool) -> Vec<M
         }
     }
     members
+}
+
+/// Harvest declared Angular component/directive inputs and outputs from a class.
+///
+/// Walks the class body's property definitions and classifies each member by:
+/// - decorator path: `@Input()` (decorator name `Input`) is an input,
+///   `@Output()` (decorator name `Output`) is an output;
+/// - signal initializer: `input()` / `model()` are inputs, `output()` /
+///   `outputFromObservable()` are outputs.
+///
+/// A `model()` is recorded as an INPUT ONLY (its implicit `update:` emit is
+/// framework-driven, never a dead output). Accessor members (getter / setter
+/// `@Input()`) are skipped per-member: a setter body runs on binding, so it is
+/// inherently used and never a dead input. The caller gates this on the class
+/// carrying an Angular component/directive decorator, so a non-Angular class with
+/// a same-named `input` / `Input` helper never contributes.
+pub fn extract_angular_inputs_outputs(
+    class: &Class<'_>,
+) -> (Vec<AngularInputMember>, Vec<AngularOutputMember>) {
+    let mut inputs = Vec::new();
+    let mut outputs = Vec::new();
+    for element in &class.body.body {
+        // Accessor inputs (`@Input() set foo(v)` / getter) are inherently used;
+        // skip the whole method-definition arm so they never reach the flag path.
+        let ClassElement::PropertyDefinition(prop) = element else {
+            continue;
+        };
+        let Some(name) = prop.key.static_name() else {
+            continue;
+        };
+        let span_start = prop.key.span().start;
+
+        // Decorator-based: `@Input()` -> input, `@Output()` -> output.
+        let mut decorator_role = None;
+        for decorator in &prop.decorators {
+            match decorator_path(&decorator.expression).as_str() {
+                "Input" => decorator_role = Some(AngularMemberRole::Input),
+                "Output" => decorator_role = Some(AngularMemberRole::Output),
+                _ => {}
+            }
+        }
+        if let Some(role) = decorator_role {
+            match role {
+                AngularMemberRole::Input => inputs.push(AngularInputMember {
+                    name: name.to_string(),
+                    span_start,
+                }),
+                // Only an `@Output()` initialized by `new EventEmitter(...)` emits
+                // through `this.bar.emit()`, the shape the syntactic scan can see.
+                // An output typed as an `Observable` / `Subject` driven by an
+                // external stream (e.g. `getLazyEmitter('bounds_changed')`) emits
+                // without `.emit()`, so harvesting it would be a false positive.
+                AngularMemberRole::Output => {
+                    if output_is_event_emitter(prop.value.as_ref()) {
+                        outputs.push(AngularOutputMember {
+                            name: name.to_string(),
+                            span_start,
+                        });
+                    }
+                }
+            }
+            continue;
+        }
+
+        // Signal-based: `input` / `model` -> input, `output` /
+        // `outputFromObservable` -> output. `model()` is input-only.
+        if let Some(signal_name) = prop
+            .value
+            .as_ref()
+            .and_then(|value| angular_signal_initializer_name(value))
+        {
+            match signal_name {
+                "input" | "model" => inputs.push(AngularInputMember {
+                    name: name.to_string(),
+                    span_start,
+                }),
+                "output" | "outputFromObservable" => outputs.push(AngularOutputMember {
+                    name: name.to_string(),
+                    span_start,
+                }),
+                _ => {}
+            }
+        }
+    }
+    (inputs, outputs)
+}
+
+enum AngularMemberRole {
+    Input,
+    Output,
+}
+
+/// Whether an `@Output()` property initializer is a `new EventEmitter(...)`
+/// construction, the only shape that emits through `this.<name>.emit()` and is
+/// therefore visible to the syntactic emit scan. An `@Output()` with no
+/// initializer, or one initialized by an `Observable` / `Subject` / lazy-emitter
+/// call (driven by an external stream, e.g. `getLazyEmitter('bounds_changed')`),
+/// emits without `.emit()`, so it must not be harvested as a dead-output
+/// candidate. Conservative: only the literal `new EventEmitter` callee qualifies
+/// (bare identifier or a `Foo.EventEmitter` member tail).
+fn output_is_event_emitter(value: Option<&Expression<'_>>) -> bool {
+    let Some(Expression::NewExpression(new_expr)) = value else {
+        return false;
+    };
+    match &new_expr.callee {
+        Expression::Identifier(ident) => ident.name.as_str() == "EventEmitter",
+        Expression::StaticMemberExpression(member) => {
+            member.property.name.as_str() == "EventEmitter"
+        }
+        _ => false,
+    }
 }
 
 fn is_instance_returning_static_method(

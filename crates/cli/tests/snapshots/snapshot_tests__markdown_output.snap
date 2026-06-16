@@ -2,7 +2,7 @@
 source: crates/cli/tests/snapshot_tests.rs
 expression: output
 ---
-## Fallow: 25 issues found
+## Fallow: 27 issues found
 
 ### Unused files (1)
 
@@ -85,6 +85,14 @@ expression: output
 ### Unprovided injects (1)
 
 - `src/useTheme.ts`:5 `THEME_KEY` has no matching provide(`THEME_KEY`) in this project; at runtime it returns undefined
+
+### Unused component inputs (1)
+
+- `src/user-card.component.ts`:12 `variant` is declared but referenced nowhere in this component (remove it or use it)
+
+### Unused component outputs (1)
+
+- `src/user-card.component.ts`:15 `selected` is declared but emitted nowhere in this component (remove it or emit it)
 
 ### Unused catalog entries (2)
 

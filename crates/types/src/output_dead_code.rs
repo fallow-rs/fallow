@@ -42,9 +42,9 @@ use crate::results::{
     MixedClientServerBarrel, PolicyViolation, PrivateTypeLeak, PropDrillingChain, ReExportCycle,
     ReExportCycleKind, RouteCollision, TestOnlyDependency, ThinWrapper, TypeOnlyDependency,
     UnlistedDependency, UnprovidedInject, UnrenderedComponent, UnresolvedCatalogReference,
-    UnresolvedImport, UnusedCatalogEntry, UnusedComponentEmit, UnusedComponentProp,
-    UnusedDependency, UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedLoadDataKey,
-    UnusedMember, UnusedServerAction,
+    UnresolvedImport, UnusedCatalogEntry, UnusedComponentEmit, UnusedComponentInput,
+    UnusedComponentOutput, UnusedComponentProp, UnusedDependency, UnusedDependencyOverride,
+    UnusedExport, UnusedFile, UnusedLoadDataKey, UnusedMember, UnusedServerAction,
 };
 
 /// Shared note for the `duplicate-exports` fix action. Mirrors the const used
@@ -1270,6 +1270,86 @@ impl DuplicatePropShapeFinding {
         ];
         Self {
             shape,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for an [`UnusedComponentInput`] finding. There is no safe
+/// auto-fix: removing a declared input is judgement-bearing (the input may be
+/// part of a deliberately-stable public component API). The only action is a
+/// line-level suppress at the input declaration.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedComponentInputFinding {
+    /// The underlying finding.
+    #[serde(flatten)]
+    pub input: UnusedComponentInput,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl UnusedComponentInputFinding {
+    /// Build the wrapper from a raw [`UnusedComponentInput`]. Emits only a
+    /// line-level suppress action: there is no safe auto-fix because removing an
+    /// input is a human decision (it may be part of a stable component API).
+    #[must_use]
+    pub fn with_actions(input: UnusedComponentInput) -> Self {
+        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
+            kind: SuppressLineKind::SuppressLine,
+            auto_fixable: false,
+            description: "Suppress with an inline comment above the line".to_string(),
+            comment: "// fallow-ignore-next-line unused-component-input".to_string(),
+            scope: None,
+        })];
+        Self {
+            input,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for an [`UnusedComponentOutput`] finding. There is no safe
+/// auto-fix: removing a declared output is judgement-bearing (the event may be
+/// part of a deliberately-stable public component API). The only action is a
+/// line-level suppress at the output declaration.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedComponentOutputFinding {
+    /// The underlying finding.
+    #[serde(flatten)]
+    pub output: UnusedComponentOutput,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl UnusedComponentOutputFinding {
+    /// Build the wrapper from a raw [`UnusedComponentOutput`]. Emits only a
+    /// line-level suppress action: there is no safe auto-fix because removing an
+    /// output is a human decision (it may be part of a stable component API).
+    #[must_use]
+    pub fn with_actions(output: UnusedComponentOutput) -> Self {
+        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
+            kind: SuppressLineKind::SuppressLine,
+            auto_fixable: false,
+            description: "Suppress with an inline comment above the line".to_string(),
+            comment: "// fallow-ignore-next-line unused-component-output".to_string(),
+            scope: None,
+        })];
+        Self {
+            output,
             actions,
             introduced: None,
         }

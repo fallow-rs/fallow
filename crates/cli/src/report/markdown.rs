@@ -338,6 +338,18 @@ fn push_markdown_component_sections(
     );
     markdown_section(
         out,
+        &results.unused_component_inputs,
+        "Unused component inputs",
+        |i| format_markdown_unused_component_input(i, rel),
+    );
+    markdown_section(
+        out,
+        &results.unused_component_outputs,
+        "Unused component outputs",
+        |o| format_markdown_unused_component_output(o, rel),
+    );
+    markdown_section(
+        out,
         &results.unused_server_actions,
         "Unused server actions",
         |a| format_markdown_unused_server_action(a, rel),
@@ -558,6 +570,30 @@ fn format_markdown_unused_component_emit(
         rel(&e.emit.path),
         e.emit.line,
         escape_backticks(&e.emit.emit_name),
+    )]
+}
+
+fn format_markdown_unused_component_input(
+    i: &fallow_core::results::UnusedComponentInputFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    vec![format!(
+        "- `{}`:{} `{}` is declared but referenced nowhere in this component (remove it or use it)",
+        rel(&i.input.path),
+        i.input.line,
+        escape_backticks(&i.input.input_name),
+    )]
+}
+
+fn format_markdown_unused_component_output(
+    o: &fallow_core::results::UnusedComponentOutputFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    vec![format!(
+        "- `{}`:{} `{}` is declared but emitted nowhere in this component (remove it or emit it)",
+        rel(&o.output.path),
+        o.output.line,
+        escape_backticks(&o.output.output_name),
     )]
 }
 

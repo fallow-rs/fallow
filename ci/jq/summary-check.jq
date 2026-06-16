@@ -59,7 +59,9 @@ else
     table_row("Dynamic segment conflicts"; "dynamic_segment_name_conflicts"; "dynamic-segment-name-conflicts"),
     table_row("Unrendered components"; "unrendered_components"; "unrendered-component"),
     table_row("Unused component props"; "unused_component_props"; "unused-component-prop"),
+    table_row("Unused component inputs"; "unused_component_inputs"; "unused-component-input"),
     table_row("Unused component emits"; "unused_component_emits"; "unused-component-emit"),
+    table_row("Unused component outputs"; "unused_component_outputs"; "unused-component-output"),
     table_row("Unprovided injects"; "unprovided_injects"; "unprovided-inject"),
     table_row("Unused load data keys"; "unused_load_data_keys"; "unused-load-data-key"),
     table_row("Type-only dependencies"; "type_only_dependencies"; "type-only-dependencies"),
@@ -153,9 +155,15 @@ else
   section("Unused component props"; "unused_component_props";
     "Vue `defineProps` props referenced nowhere inside their own single-file component (neither script nor template).\n\n| File | Component | Prop |\n|------|-----------|------|\n";
     "| `\(.path):\(.line)` | `\(.component_name)` | `\(.prop_name)` |") +
+  section("Unused component inputs"; "unused_component_inputs";
+    "Angular `@Input()` / signal `input()` declarations read nowhere inside their own component (neither class body nor template).\n\n| File | Component | Input |\n|------|-----------|-------|\n";
+    "| `\(.path):\(.line)` | `\(.component_name)` | `\(.input_name)` |") +
   section("Unused component emits"; "unused_component_emits";
     "Vue `defineEmits` events emitted nowhere inside their own single-file component (no matching `emit()` call).\n\n| File | Component | Event |\n|------|-----------|-------|\n";
     "| `\(.path):\(.line)` | `\(.component_name)` | `\(.emit_name)` |") +
+  section("Unused component outputs"; "unused_component_outputs";
+    "Angular `@Output()` / signal `output()` declarations emitted nowhere inside their own component (no matching `emit()` call).\n\n| File | Component | Output |\n|------|-----------|--------|\n";
+    "| `\(.path):\(.line)` | `\(.component_name)` | `\(.output_name)` |") +
   section("Unprovided injects"; "unprovided_injects";
     "Vue `inject` / Svelte `getContext` calls for a key that no ancestor `provide` / `setContext` supplies.\n\n| File | Key | Framework |\n|------|-----|-----------|\n";
     "| `\(.path):\(.line)` | `\(.key_name)` | \(.framework) |") +

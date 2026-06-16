@@ -140,6 +140,18 @@ fn apply_dead_code_override_rules(
             .unused_component_emits
             != Severity::Off
     });
+    results.unused_component_inputs.retain(|i| {
+        config
+            .resolve_rules_for_path(&i.input.path)
+            .unused_component_inputs
+            != Severity::Off
+    });
+    results.unused_component_outputs.retain(|o| {
+        config
+            .resolve_rules_for_path(&o.output.path)
+            .unused_component_outputs
+            != Severity::Off
+    });
     results.unused_server_actions.retain(|a| {
         config
             .resolve_rules_for_path(&a.action.path)
@@ -274,6 +286,12 @@ fn apply_base_file_rules(results: &mut fallow_core::results::AnalysisResults, ru
     }
     if rules.unused_component_emits == Severity::Off {
         results.unused_component_emits.clear();
+    }
+    if rules.unused_component_inputs == Severity::Off {
+        results.unused_component_inputs.clear();
+    }
+    if rules.unused_component_outputs == Severity::Off {
+        results.unused_component_outputs.clear();
     }
     if rules.unused_server_actions == Severity::Off {
         results.unused_server_actions.clear();
@@ -427,6 +445,18 @@ fn has_override_dead_code_error(
                 .unused_component_emits
                 == Severity::Error
         })
+        || results.unused_component_inputs.iter().any(|i| {
+            config
+                .resolve_rules_for_path(&i.input.path)
+                .unused_component_inputs
+                == Severity::Error
+        })
+        || results.unused_component_outputs.iter().any(|o| {
+            config
+                .resolve_rules_for_path(&o.output.path)
+                .unused_component_outputs
+                == Severity::Error
+        })
         || results.unused_server_actions.iter().any(|a| {
             config
                 .resolve_rules_for_path(&a.action.path)
@@ -538,6 +568,10 @@ fn has_default_file_scoped_error(
             && !results.unused_component_props.is_empty())
         || (rules.unused_component_emits == Severity::Error
             && !results.unused_component_emits.is_empty())
+        || (rules.unused_component_inputs == Severity::Error
+            && !results.unused_component_inputs.is_empty())
+        || (rules.unused_component_outputs == Severity::Error
+            && !results.unused_component_outputs.is_empty())
         || (rules.unused_server_actions == Severity::Error
             && !results.unused_server_actions.is_empty())
         || (rules.unused_load_data_keys == Severity::Error
@@ -624,6 +658,8 @@ pub fn promote_warns_to_errors(rules: &mut RulesConfig) {
         &mut rules.unrendered_components,
         &mut rules.unused_component_props,
         &mut rules.unused_component_emits,
+        &mut rules.unused_component_inputs,
+        &mut rules.unused_component_outputs,
         &mut rules.unused_server_actions,
         &mut rules.unused_load_data_keys,
         &mut rules.unresolved_imports,
@@ -890,6 +926,8 @@ mod tests {
             unrendered_components: Severity::Off,
             unused_component_props: Severity::Off,
             unused_component_emits: Severity::Off,
+            unused_component_inputs: Severity::Off,
+            unused_component_outputs: Severity::Off,
             unused_server_actions: Severity::Off,
             unused_load_data_keys: Severity::Off,
             prop_drilling: Severity::Off,
@@ -1023,6 +1061,8 @@ mod tests {
             unrendered_components: Severity::Warn,
             unused_component_props: Severity::Warn,
             unused_component_emits: Severity::Warn,
+            unused_component_inputs: Severity::Warn,
+            unused_component_outputs: Severity::Warn,
             unused_server_actions: Severity::Warn,
             unused_load_data_keys: Severity::Warn,
             prop_drilling: Severity::Off,
@@ -1079,6 +1119,8 @@ mod tests {
             unrendered_components: Severity::Warn,
             unused_component_props: Severity::Warn,
             unused_component_emits: Severity::Warn,
+            unused_component_inputs: Severity::Warn,
+            unused_component_outputs: Severity::Warn,
             unused_server_actions: Severity::Warn,
             unused_load_data_keys: Severity::Warn,
             prop_drilling: Severity::Off,
@@ -1556,6 +1598,8 @@ mod tests {
             unrendered_components: Severity::Warn,
             unused_component_props: Severity::Warn,
             unused_component_emits: Severity::Warn,
+            unused_component_inputs: Severity::Warn,
+            unused_component_outputs: Severity::Warn,
             unused_server_actions: Severity::Warn,
             unused_load_data_keys: Severity::Warn,
             prop_drilling: Severity::Off,
@@ -1625,6 +1669,8 @@ mod tests {
             unrendered_components: Severity::Off,
             unused_component_props: Severity::Off,
             unused_component_emits: Severity::Off,
+            unused_component_inputs: Severity::Off,
+            unused_component_outputs: Severity::Off,
             unused_server_actions: Severity::Off,
             unused_load_data_keys: Severity::Off,
             prop_drilling: Severity::Off,

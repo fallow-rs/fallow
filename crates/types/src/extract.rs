@@ -183,6 +183,17 @@ pub struct ModuleInfo {
     /// `unused-component-emit` detector to flag an event emitted nowhere in its
     /// own SFC. Each entry carries `used`.
     pub component_emits: Vec<ComponentEmit>,
+    /// Angular component/directive inputs declared via `@Input()` decorators or
+    /// signal `input()` / `input.required()` / `model()` initializers. Consumed
+    /// by the `unused-component-input` detector to flag an input read nowhere in
+    /// its own component. Empty for every non-Angular class.
+    pub angular_inputs: Vec<AngularInputMember>,
+    /// Angular component/directive outputs declared via `@Output()` decorators or
+    /// signal `output()` / `outputFromObservable()` initializers. Consumed by the
+    /// `unused-component-output` detector to flag an output emitted nowhere in its
+    /// own component. A `model()` is recorded as an input only (see
+    /// `AngularOutputMember`). Empty for every non-Angular class.
+    pub angular_outputs: Vec<AngularOutputMember>,
     /// `true` when `defineEmits` was called with an unharvestable argument (a
     /// type-reference type argument such as `defineEmits<MyEmits>()`, a
     /// non-literal runtime form, or an unbound `defineEmits([...])`). The
@@ -1375,6 +1386,38 @@ pub struct ComponentEmit {
     pub used: bool,
 }
 
+/// A declared Angular component/directive input, harvested from an `@Input()`
+/// decorator or a signal `input()` / `input.required()` / `model()` initializer
+/// on an Angular-decorated class. Consumed by the `unused-component-input`
+/// detector, which flags an input read nowhere in its own component (neither the
+/// template nor the class body). The span is stored as a byte offset (not an
+/// `oxc_span::Span`) so the type is cheap to mirror onto the cache, matching
+/// `ComponentEmit::span_start`. `ModuleInfo` is not serialized, so no serde
+/// attrs are derived here. `bitcode` derives let the type be mirrored directly
+/// onto `CachedModule` (the same pattern as `ComponentEmit`).
+#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode, PartialEq, Eq)]
+pub struct AngularInputMember {
+    /// The declared input name (the property key).
+    pub name: String,
+    /// Start byte offset of the property key (anchors the finding).
+    pub span_start: u32,
+}
+
+/// A declared Angular component/directive output, harvested from an `@Output()`
+/// decorator or a signal `output()` / `outputFromObservable()` initializer on an
+/// Angular-decorated class. Consumed by the `unused-component-output` detector,
+/// which flags an output emitted nowhere in its own component. A `model()` is an
+/// input and a framework-driven output, so it is recorded ONLY as an input and
+/// never appears here (the implicit `update:` emit is framework-managed). The
+/// span is a byte offset for the same reason as `AngularInputMember`.
+#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode, PartialEq, Eq)]
+pub struct AngularOutputMember {
+    /// The declared output name (the property key).
+    pub name: String,
+    /// Start byte offset of the property key (anchors the finding).
+    pub span_start: u32,
+}
+
 /// A key returned from a SvelteKit route `load()` function's terminal return
 /// object literal. Harvested from `+page.{ts,server.ts,js,server.js}` files
 /// exporting a `load` function. Consumed by the `unused-load-data-key` detector,
@@ -1859,6 +1902,8 @@ mod tests {
             has_define_model: false,
             has_unharvestable_props: false,
             component_emits: Vec::new(),
+            angular_inputs: Vec::new(),
+            angular_outputs: Vec::new(),
             has_unharvestable_emits: false,
             has_dynamic_emit: false,
             has_emit_whole_object_use: false,

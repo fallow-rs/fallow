@@ -375,6 +375,8 @@ mod severity_gate {
             unrendered_components: _,
             unused_component_props: _,
             unused_component_emits: _,
+            unused_component_inputs: _,
+            unused_component_outputs: _,
             unused_server_actions: _,
             unused_load_data_keys: _,
             prop_drilling_chains: _,
@@ -1057,6 +1059,40 @@ mod severity_gate {
                                 path: root.join("Widget.vue"),
                                 component_name: "Widget".to_string(),
                                 emit_name: "change".to_string(),
+                                line: 1,
+                                col: 0,
+                            },
+                        ),
+                    );
+                }),
+            ),
+            (
+                "unused-component-input",
+                S::HINT,
+                Box::new(|root, r| {
+                    r.unused_component_inputs.push(
+                        fallow_core::results::UnusedComponentInputFinding::with_actions(
+                            fallow_core::results::UnusedComponentInput {
+                                path: root.join("widget.component.ts"),
+                                component_name: "WidgetComponent".to_string(),
+                                input_name: "size".to_string(),
+                                line: 1,
+                                col: 0,
+                            },
+                        ),
+                    );
+                }),
+            ),
+            (
+                "unused-component-output",
+                S::HINT,
+                Box::new(|root, r| {
+                    r.unused_component_outputs.push(
+                        fallow_core::results::UnusedComponentOutputFinding::with_actions(
+                            fallow_core::results::UnusedComponentOutput {
+                                path: root.join("widget.component.ts"),
+                                component_name: "WidgetComponent".to_string(),
+                                output_name: "change".to_string(),
                                 line: 1,
                                 col: 0,
                             },

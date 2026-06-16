@@ -235,6 +235,14 @@ fn apply_source_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
             m.filter_flag = Some("--unused-component-emits");
             m.suppress = Some(("unused-component-emit", false));
         }
+        "unused-component-input" => {
+            m.filter_flag = Some("--unused-component-inputs");
+            m.suppress = Some(("unused-component-input", false));
+        }
+        "unused-component-output" => {
+            m.filter_flag = Some("--unused-component-outputs");
+            m.suppress = Some(("unused-component-output", false));
+        }
         "unused-server-action" => {
             m.filter_flag = Some("--unused-server-actions");
             m.suppress = Some(("unused-server-action", false));

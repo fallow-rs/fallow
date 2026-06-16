@@ -50,6 +50,8 @@ export const DIAGNOSTIC_CATEGORIES: ReadonlyArray<DiagnosticCategory> = [
   { code: "unused-load-data-key", label: "Unused Load Data Keys" },
   { code: "unused-component-prop", label: "Unused Component Props" },
   { code: "unused-component-emit", label: "Unused Component Emits" },
+  { code: "unused-component-input", label: "Unused Component Inputs" },
+  { code: "unused-component-output", label: "Unused Component Outputs" },
   { code: "unrendered-component", label: "Unrendered Components" },
   { code: "unprovided-inject", label: "Unprovided Injects" },
   { code: "invalid-client-export", label: "Invalid Client Exports" },

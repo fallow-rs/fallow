@@ -364,6 +364,16 @@ where
                 .unused_component_emits
                 .push(item.clone());
         }
+        for item in &results.unused_component_inputs {
+            self.entry_for_path(&item.input.path)
+                .unused_component_inputs
+                .push(item.clone());
+        }
+        for item in &results.unused_component_outputs {
+            self.entry_for_path(&item.output.path)
+                .unused_component_outputs
+                .push(item.clone());
+        }
         for item in &results.unused_server_actions {
             self.entry_for_path(&item.action.path)
                 .unused_server_actions

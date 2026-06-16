@@ -86,6 +86,12 @@ pub struct BaselineData {
     /// Unused component emits, keyed by `file:emit_name`.
     #[serde(default)]
     pub unused_component_emits: Vec<String>,
+    /// Unused component inputs, keyed by `file:input_name`.
+    #[serde(default)]
+    pub unused_component_inputs: Vec<String>,
+    /// Unused component outputs, keyed by `file:output_name`.
+    #[serde(default)]
+    pub unused_component_outputs: Vec<String>,
     /// Unused server actions, keyed by `file:action_name`.
     #[serde(default)]
     pub unused_server_actions: Vec<String>,
@@ -184,6 +190,8 @@ impl BaselineData {
             unrendered_components: member_imports.unrendered_components,
             unused_component_props: member_imports.unused_component_props,
             unused_component_emits: member_imports.unused_component_emits,
+            unused_component_inputs: member_imports.unused_component_inputs,
+            unused_component_outputs: member_imports.unused_component_outputs,
             unused_server_actions: member_imports.unused_server_actions,
             unused_load_data_keys: member_imports.unused_load_data_keys,
             unresolved_imports: member_imports.unresolved_imports,
@@ -227,6 +235,8 @@ impl BaselineData {
             + self.unrendered_components.len()
             + self.unused_component_props.len()
             + self.unused_component_emits.len()
+            + self.unused_component_inputs.len()
+            + self.unused_component_outputs.len()
             + self.unused_server_actions.len()
             + self.unused_load_data_keys.len()
             + self.unresolved_imports.len()
@@ -424,6 +434,8 @@ struct BaselineMemberImportKeys {
     unrendered_components: Vec<String>,
     unused_component_props: Vec<String>,
     unused_component_emits: Vec<String>,
+    unused_component_inputs: Vec<String>,
+    unused_component_outputs: Vec<String>,
     unused_server_actions: Vec<String>,
     unused_load_data_keys: Vec<String>,
     unresolved_imports: Vec<String>,
@@ -443,6 +455,14 @@ fn baseline_member_import_keys(
         unrendered_components: component_baseline_keys(&results.unrendered_components, root),
         unused_component_props: component_prop_baseline_keys(&results.unused_component_props, root),
         unused_component_emits: component_emit_baseline_keys(&results.unused_component_emits, root),
+        unused_component_inputs: component_input_baseline_keys(
+            &results.unused_component_inputs,
+            root,
+        ),
+        unused_component_outputs: component_output_baseline_keys(
+            &results.unused_component_outputs,
+            root,
+        ),
         unused_server_actions: server_action_baseline_keys(&results.unused_server_actions, root),
         unused_load_data_keys: load_data_key_baseline_keys(&results.unused_load_data_keys, root),
         unresolved_imports: unresolved_import_baseline_keys(&results.unresolved_imports, root),
@@ -547,6 +567,38 @@ fn component_emit_baseline_keys(
     items
         .iter()
         .map(|e| format!("{}:{}", relative_path(&e.emit.path, root), e.emit.emit_name))
+        .collect()
+}
+
+fn component_input_baseline_keys(
+    items: &[fallow_core::results::UnusedComponentInputFinding],
+    root: &Path,
+) -> Vec<String> {
+    items
+        .iter()
+        .map(|i| {
+            format!(
+                "{}:{}",
+                relative_path(&i.input.path, root),
+                i.input.input_name
+            )
+        })
+        .collect()
+}
+
+fn component_output_baseline_keys(
+    items: &[fallow_core::results::UnusedComponentOutputFinding],
+    root: &Path,
+) -> Vec<String> {
+    items
+        .iter()
+        .map(|o| {
+            format!(
+                "{}:{}",
+                relative_path(&o.output.path, root),
+                o.output.output_name
+            )
+        })
         .collect()
 }
 
@@ -971,6 +1023,36 @@ impl BaselineFilterContext<'_> {
                 finding.emit.emit_name
             );
             !baseline_unused_component_emits.contains(key.as_str())
+        });
+
+        let baseline_unused_component_inputs: FxHashSet<&str> = self
+            .baseline
+            .unused_component_inputs
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.unused_component_inputs.retain(|finding| {
+            let key = format!(
+                "{}:{}",
+                relative_path(&finding.input.path, self.root),
+                finding.input.input_name
+            );
+            !baseline_unused_component_inputs.contains(key.as_str())
+        });
+
+        let baseline_unused_component_outputs: FxHashSet<&str> = self
+            .baseline
+            .unused_component_outputs
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.unused_component_outputs.retain(|finding| {
+            let key = format!(
+                "{}:{}",
+                relative_path(&finding.output.path, self.root),
+                finding.output.output_name
+            );
+            !baseline_unused_component_outputs.contains(key.as_str())
         });
     }
 
@@ -2173,6 +2255,8 @@ mod tests {
             unrendered_components: vec![],
             unused_component_props: vec![],
             unused_component_emits: vec![],
+            unused_component_inputs: vec![],
+            unused_component_outputs: vec![],
             unused_server_actions: vec![],
             unused_load_data_keys: vec![],
             unresolved_imports: vec![],
@@ -2234,6 +2318,8 @@ mod tests {
             unrendered_components: vec![],
             unused_component_props: vec![],
             unused_component_emits: vec![],
+            unused_component_inputs: vec![],
+            unused_component_outputs: vec![],
             unused_server_actions: vec![],
             unused_load_data_keys: vec![],
             unresolved_imports: vec![],
@@ -2282,6 +2368,8 @@ mod tests {
             unrendered_components: vec![],
             unused_component_props: vec![],
             unused_component_emits: vec![],
+            unused_component_inputs: vec![],
+            unused_component_outputs: vec![],
             unused_server_actions: vec![],
             unused_load_data_keys: vec![],
             unresolved_imports: vec![],

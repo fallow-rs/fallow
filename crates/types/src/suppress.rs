@@ -126,6 +126,16 @@ pub enum IssueKind {
     /// nowhere inside its own single-file component (no `emit('<name>')` call).
     /// Single-file dead-input direction.
     UnusedComponentEmit,
+    /// An Angular `@Input()` / signal `input()` / `model()` declared input that
+    /// is read NOWHERE inside its own component (neither the inline/external
+    /// template nor the class body). Single-file dead-input direction; the
+    /// Angular analogue of `unused-component-prop`.
+    UnusedComponentInput,
+    /// An Angular `@Output()` / signal `output()` declared output that is
+    /// EMITTED nowhere inside its own component (no `this.<output>.emit(...)`).
+    /// Single-file dead-output direction; the Angular analogue of
+    /// `unused-component-emit`.
+    UnusedComponentOutput,
     /// A Next.js Server Action (an export of a `"use server"` file) that no code
     /// in the project references (no import-and-call, no `action={fn}` binding,
     /// no `<form action={fn}>`). Cross-graph dead-export direction, reclassified
@@ -212,6 +222,12 @@ impl IssueKind {
             "unrendered-component" | "unrendered-components" => Some(Self::UnrenderedComponent),
             "unused-component-prop" | "unused-component-props" => Some(Self::UnusedComponentProp),
             "unused-component-emit" | "unused-component-emits" => Some(Self::UnusedComponentEmit),
+            "unused-component-input" | "unused-component-inputs" => {
+                Some(Self::UnusedComponentInput)
+            }
+            "unused-component-output" | "unused-component-outputs" => {
+                Some(Self::UnusedComponentOutput)
+            }
             "unused-server-action" | "unused-server-actions" => Some(Self::UnusedServerAction),
             "unused-load-data-key" | "unused-load-data-keys" => Some(Self::UnusedLoadDataKey),
             "prop-drilling" => Some(Self::PropDrilling),
@@ -269,6 +285,8 @@ impl IssueKind {
             Self::PropDrilling => 42,
             Self::ThinWrapper => 43,
             Self::DuplicatePropShape => 44,
+            Self::UnusedComponentInput => 45,
+            Self::UnusedComponentOutput => 46,
         }
     }
 
@@ -320,6 +338,8 @@ impl IssueKind {
             42 => Some(Self::PropDrilling),
             43 => Some(Self::ThinWrapper),
             44 => Some(Self::DuplicatePropShape),
+            45 => Some(Self::UnusedComponentInput),
+            46 => Some(Self::UnusedComponentOutput),
             _ => None,
         }
     }
@@ -426,6 +446,8 @@ pub const fn issue_kind_to_kebab(kind: IssueKind) -> &'static str {
         IssueKind::UnrenderedComponent => "unrendered-component",
         IssueKind::UnusedComponentProp => "unused-component-prop",
         IssueKind::UnusedComponentEmit => "unused-component-emit",
+        IssueKind::UnusedComponentInput => "unused-component-input",
+        IssueKind::UnusedComponentOutput => "unused-component-output",
         IssueKind::UnusedServerAction => "unused-server-action",
         IssueKind::UnusedLoadDataKey => "unused-load-data-key",
         IssueKind::PropDrilling => "prop-drilling",
@@ -683,6 +705,10 @@ pub const KNOWN_ISSUE_KIND_NAMES: &[&str] = &[
     "unused-component-props",
     "unused-component-emit",
     "unused-component-emits",
+    "unused-component-input",
+    "unused-component-inputs",
+    "unused-component-output",
+    "unused-component-outputs",
     "unused-server-action",
     "unused-server-actions",
     "unused-load-data-key",
@@ -715,6 +741,8 @@ pub const DEAD_CODE_FILTER_FLAGS: &[&str] = &[
     "--unrendered-components",
     "--unused-component-props",
     "--unused-component-emits",
+    "--unused-component-inputs",
+    "--unused-component-outputs",
     "--unused-server-actions",
     "--unused-load-data-keys",
     "--unresolved-imports",
@@ -1007,6 +1035,22 @@ mod tests {
             Some(IssueKind::UnusedComponentEmit)
         );
         assert_eq!(
+            IssueKind::parse("unused-component-input"),
+            Some(IssueKind::UnusedComponentInput)
+        );
+        assert_eq!(
+            IssueKind::parse("unused-component-inputs"),
+            Some(IssueKind::UnusedComponentInput)
+        );
+        assert_eq!(
+            IssueKind::parse("unused-component-output"),
+            Some(IssueKind::UnusedComponentOutput)
+        );
+        assert_eq!(
+            IssueKind::parse("unused-component-outputs"),
+            Some(IssueKind::UnusedComponentOutput)
+        );
+        assert_eq!(
             IssueKind::parse("unused-load-data-key"),
             Some(IssueKind::UnusedLoadDataKey)
         );
@@ -1101,7 +1145,15 @@ mod tests {
             IssueKind::from_discriminant(44),
             Some(IssueKind::DuplicatePropShape)
         );
-        assert_eq!(IssueKind::from_discriminant(45), None);
+        assert_eq!(
+            IssueKind::from_discriminant(45),
+            Some(IssueKind::UnusedComponentInput)
+        );
+        assert_eq!(
+            IssueKind::from_discriminant(46),
+            Some(IssueKind::UnusedComponentOutput)
+        );
+        assert_eq!(IssueKind::from_discriminant(47), None);
         assert_eq!(IssueKind::from_discriminant(u8::MAX), None);
     }
 
@@ -1152,6 +1204,8 @@ mod tests {
             IssueKind::PropDrilling,
             IssueKind::ThinWrapper,
             IssueKind::DuplicatePropShape,
+            IssueKind::UnusedComponentInput,
+            IssueKind::UnusedComponentOutput,
         ] {
             assert_eq!(
                 IssueKind::from_discriminant(kind.to_discriminant()),
@@ -1159,7 +1213,7 @@ mod tests {
             );
         }
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(45), None);
+        assert_eq!(IssueKind::from_discriminant(47), None);
     }
 
     #[test]
@@ -1209,6 +1263,8 @@ mod tests {
             IssueKind::PropDrilling,
             IssueKind::ThinWrapper,
             IssueKind::DuplicatePropShape,
+            IssueKind::UnusedComponentInput,
+            IssueKind::UnusedComponentOutput,
         ];
         let discriminants: Vec<u8> = all_kinds.iter().map(|k| k.to_discriminant()).collect();
         let mut sorted = discriminants.clone();

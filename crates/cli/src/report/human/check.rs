@@ -1346,6 +1346,8 @@ fn build_policy_section(
         && results.unrendered_components.is_empty()
         && results.unused_component_props.is_empty()
         && results.unused_component_emits.is_empty()
+        && results.unused_component_inputs.is_empty()
+        && results.unused_component_outputs.is_empty()
         && results.unused_server_actions.is_empty()
         && results.unused_load_data_keys.is_empty()
         && results.route_collisions.is_empty()
@@ -1467,6 +1469,32 @@ fn build_component_policy_section(
             e.emit.path.as_path()
         },
         format_detail: &format_unused_component_emit,
+    });
+
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.unused_component_inputs,
+        title: "Unused component inputs",
+        level: severity_to_level(rules.unused_component_inputs),
+        root,
+        max_files: MAX_FLAT_ITEMS,
+        get_path: |i: &fallow_types::output_dead_code::UnusedComponentInputFinding| {
+            i.input.path.as_path()
+        },
+        format_detail: &format_unused_component_input,
+    });
+
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.unused_component_outputs,
+        title: "Unused component outputs",
+        level: severity_to_level(rules.unused_component_outputs),
+        root,
+        max_files: MAX_FLAT_ITEMS,
+        get_path: |o: &fallow_types::output_dead_code::UnusedComponentOutputFinding| {
+            o.output.path.as_path()
+        },
+        format_detail: &format_unused_component_output,
     });
 
     build_human_grouped_section(GroupedSectionInput {
@@ -1688,6 +1716,30 @@ fn format_unused_component_emit(
         "{} {} {}",
         format!(":{}", e.line).dimmed(),
         e.emit_name.bold(),
+        "is declared but emitted nowhere in this component (remove it or emit it)".dimmed(),
+    )
+}
+
+fn format_unused_component_input(
+    entry: &fallow_types::output_dead_code::UnusedComponentInputFinding,
+) -> String {
+    let i = &entry.input;
+    format!(
+        "{} {} {}",
+        format!(":{}", i.line).dimmed(),
+        i.input_name.bold(),
+        "is declared but read nowhere in this component (remove it or use it)".dimmed(),
+    )
+}
+
+fn format_unused_component_output(
+    entry: &fallow_types::output_dead_code::UnusedComponentOutputFinding,
+) -> String {
+    let o = &entry.output;
+    format!(
+        "{} {} {}",
+        format!(":{}", o.line).dimmed(),
+        o.output_name.bold(),
         "is declared but emitted nowhere in this component (remove it or emit it)".dimmed(),
     )
 }
@@ -2609,6 +2661,12 @@ fn collect_framework_rules(
     for e in &results.unused_component_emits {
         insert_matching_rule(rules, &e.emit.path, root, resolver);
     }
+    for i in &results.unused_component_inputs {
+        insert_matching_rule(rules, &i.input.path, root, resolver);
+    }
+    for o in &results.unused_component_outputs {
+        insert_matching_rule(rules, &o.output.path, root, resolver);
+    }
     for a in &results.unused_server_actions {
         insert_matching_rule(rules, &a.action.path, root, resolver);
     }
@@ -2930,6 +2988,14 @@ fn build_summary_footer(
         results.unused_component_emits.len(),
         "unused component emits",
     );
+    add(
+        results.unused_component_inputs.len(),
+        "unused component inputs",
+    );
+    add(
+        results.unused_component_outputs.len(),
+        "unused component outputs",
+    );
     add(results.unused_server_actions.len(), "unused server actions");
     add(results.unused_load_data_keys.len(), "unused load data keys");
     add(results.stale_suppressions.len(), "stale suppressions");
@@ -3115,6 +3181,16 @@ fn check_summary_framework_categories(
             "Unused component emits",
             results.unused_component_emits.len(),
             severity_to_level(rules.unused_component_emits),
+        ),
+        (
+            "Unused component inputs",
+            results.unused_component_inputs.len(),
+            severity_to_level(rules.unused_component_inputs),
+        ),
+        (
+            "Unused component outputs",
+            results.unused_component_outputs.len(),
+            severity_to_level(rules.unused_component_outputs),
         ),
         (
             "Unused server actions",

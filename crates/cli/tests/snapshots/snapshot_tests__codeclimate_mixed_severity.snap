@@ -325,6 +325,38 @@ expression: json_str
   },
   {
     "type": "issue",
+    "check_name": "fallow/unused-component-input",
+    "description": "input `variant` is declared but referenced nowhere in component `UserCardComponent` (remove it or use it)",
+    "categories": [
+      "Bug Risk"
+    ],
+    "severity": "minor",
+    "fingerprint": "43da4dfe078e4765",
+    "location": {
+      "path": "src/user-card.component.ts",
+      "lines": {
+        "begin": 12
+      }
+    }
+  },
+  {
+    "type": "issue",
+    "check_name": "fallow/unused-component-output",
+    "description": "output `selected` is declared but emitted nowhere in component `UserCardComponent` (remove it or emit it)",
+    "categories": [
+      "Bug Risk"
+    ],
+    "severity": "minor",
+    "fingerprint": "48412c022e3ac5ab",
+    "location": {
+      "path": "src/user-card.component.ts",
+      "lines": {
+        "begin": 15
+      }
+    }
+  },
+  {
+    "type": "issue",
     "check_name": "fallow/unused-catalog-entry",
     "description": "Catalog entry 'is-even' is not referenced by any workspace package",
     "categories": [

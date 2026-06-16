@@ -1431,6 +1431,20 @@ fn collect_unused_symbol_findings(
             Some(f.emit.emit_name.clone()),
         );
     }
+    for f in &results.unused_component_inputs {
+        push(
+            &f.input.path,
+            "unused-component-input",
+            Some(f.input.input_name.clone()),
+        );
+    }
+    for f in &results.unused_component_outputs {
+        push(
+            &f.output.path,
+            "unused-component-output",
+            Some(f.output.output_name.clone()),
+        );
+    }
     for f in &results.unresolved_imports {
         push(
             &f.import.path,

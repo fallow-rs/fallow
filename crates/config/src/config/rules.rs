@@ -122,6 +122,22 @@ pub struct RulesConfig {
     /// lower; warn encodes that without failing CI.
     #[serde(default, alias = "unused-component-emit")]
     pub unused_component_emits: Severity,
+    /// Angular `@Input()` / signal `input()` / `model()` declared input read
+    /// nowhere inside its own component (neither the inline/external template nor
+    /// the class body). The single-file dead-input direction, the Angular
+    /// analogue of `unused-component-prop`. Defaults to `warn`, not `error`: an
+    /// input can be part of a deliberately-stable public component API, so
+    /// analyzer confidence is lower; warn encodes that without failing CI.
+    #[serde(default, alias = "unused-component-input")]
+    pub unused_component_inputs: Severity,
+    /// Angular `@Output()` / signal `output()` declared output emitted nowhere
+    /// inside its own component (no `this.<output>.emit(...)`). The single-file
+    /// dead-output direction, the Angular analogue of `unused-component-emit`.
+    /// Defaults to `warn`, not `error`: an output can be part of a
+    /// deliberately-stable public component API, so analyzer confidence is lower;
+    /// warn encodes that without failing CI.
+    #[serde(default, alias = "unused-component-output")]
+    pub unused_component_outputs: Severity,
     /// Next.js Server Action (an export of a `"use server"` file) referenced by
     /// no code in the project: no import-and-call, no `action={fn}` binding, no
     /// `<form action={fn}>`. Cross-graph dead-export direction, reclassified out
@@ -279,6 +295,8 @@ impl Default for RulesConfig {
             unrendered_components: Severity::Warn,
             unused_component_props: Severity::Warn,
             unused_component_emits: Severity::Warn,
+            unused_component_inputs: Severity::Warn,
+            unused_component_outputs: Severity::Warn,
             unused_server_actions: Severity::Warn,
             unused_load_data_keys: Severity::Warn,
             prop_drilling: Severity::Off,
@@ -349,6 +367,8 @@ impl RulesConfig {
                 unrendered_components,
                 unused_component_props,
                 unused_component_emits,
+                unused_component_inputs,
+                unused_component_outputs,
                 unused_server_actions,
                 unused_load_data_keys,
                 prop_drilling,
@@ -489,6 +509,18 @@ pub struct PartialRulesConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_component_emits: Option<Severity>,
+    #[serde(
+        default,
+        alias = "unused-component-input",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub unused_component_inputs: Option<Severity>,
+    #[serde(
+        default,
+        alias = "unused-component-output",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub unused_component_outputs: Option<Severity>,
     #[serde(
         default,
         alias = "unused-server-action",
@@ -684,6 +716,8 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unrendered-components",
     "unused-component-props",
     "unused-component-emits",
+    "unused-component-inputs",
+    "unused-component-outputs",
     "unused-server-actions",
     "unused-load-data-keys",
     "prop-drilling",
@@ -728,6 +762,8 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unrendered-component",
     "unused-component-prop",
     "unused-component-emit",
+    "unused-component-input",
+    "unused-component-output",
     "unused-server-action",
     "unused-load-data-key",
     "unresolved-import",
@@ -1031,6 +1067,8 @@ mod tests {
             unrendered_components: Some(Severity::Off),
             unused_component_props: Some(Severity::Off),
             unused_component_emits: Some(Severity::Off),
+            unused_component_inputs: Some(Severity::Off),
+            unused_component_outputs: Some(Severity::Off),
             unused_server_actions: Some(Severity::Off),
             unused_load_data_keys: Some(Severity::Off),
             prop_drilling: Some(Severity::Off),
@@ -1079,6 +1117,8 @@ mod tests {
         assert_eq!(rules.unrendered_components, Severity::Off);
         assert_eq!(rules.unused_component_props, Severity::Off);
         assert_eq!(rules.unused_component_emits, Severity::Off);
+        assert_eq!(rules.unused_component_inputs, Severity::Off);
+        assert_eq!(rules.unused_component_outputs, Severity::Off);
         assert_eq!(rules.route_collision, Severity::Off);
         assert_eq!(rules.dynamic_segment_name_conflict, Severity::Off);
     }
@@ -1124,7 +1164,7 @@ mod tests {
 
     #[test]
     fn known_rule_names_count_matches_struct() {
-        assert_eq!(KNOWN_RULE_NAMES.len(), 83);
+        assert_eq!(KNOWN_RULE_NAMES.len(), 87);
     }
 
     #[test]
@@ -1165,8 +1205,8 @@ mod tests {
 
         assert_eq!(
             aliases_found.len(),
-            86,
-            "expected 86 source-level alias attrs (43 per struct); got {}: {:?}",
+            90,
+            "expected 90 source-level alias attrs (45 per struct); got {}: {:?}",
             aliases_found.len(),
             aliases_found
         );

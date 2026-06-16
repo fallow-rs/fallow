@@ -39,7 +39,9 @@ def dead_code_rows:
    [ (.dead_code.dynamic_segment_name_conflicts // [])[] | {kind:"Dynamic segment conflict", location:("`\(.path | rel_path)`"), item:("`\(.conflicting_segments | join(", "))`"), introduced:.introduced} ] +
    [ (.dead_code.unrendered_components // [])[] | {kind:"Unrendered component", location:path_line, item:("`\(.component_name)` (\(.framework))"), introduced:.introduced} ] +
    [ (.dead_code.unused_component_props // [])[] | {kind:"Unused component prop", location:path_line, item:("`\(.component_name).\(.prop_name)`"), introduced:.introduced} ] +
+   [ (.dead_code.unused_component_inputs // [])[] | {kind:"Unused component input", location:path_line, item:("`\(.component_name).\(.input_name)`"), introduced:.introduced} ] +
    [ (.dead_code.unused_component_emits // [])[] | {kind:"Unused component emit", location:path_line, item:("`\(.component_name)` emit `\(.emit_name)`"), introduced:.introduced} ] +
+   [ (.dead_code.unused_component_outputs // [])[] | {kind:"Unused component output", location:path_line, item:("`\(.component_name)` output `\(.output_name)`"), introduced:.introduced} ] +
    [ (.dead_code.unprovided_injects // [])[] | {kind:"Unprovided inject", location:path_line, item:("`\(.key_name)` (\(.framework))"), introduced:.introduced} ] +
    [ (.dead_code.unused_load_data_keys // [])[] | {kind:"Unused load data key", location:path_line, item:("`\(.key_name)`"), introduced:.introduced} ] +
    [ (.dead_code.type_only_dependencies // [])[] | {kind:"Type-only dependency", location:path_line, item:("`\(.package_name)`"), introduced:.introduced} ] +

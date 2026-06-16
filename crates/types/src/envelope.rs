@@ -117,6 +117,12 @@ pub struct CheckSummary {
     /// Vue `<script setup>` emits emitted nowhere inside their own SFC.
     #[serde(default)]
     pub unused_component_emits: usize,
+    /// Angular `@Input()` bindings referenced nowhere inside their own component.
+    #[serde(default)]
+    pub unused_component_inputs: usize,
+    /// Angular `@Output()` bindings emitted nowhere inside their own component.
+    #[serde(default)]
+    pub unused_component_outputs: usize,
     /// Next.js Server Actions (exports of `"use server"` files) referenced by no
     /// code in the project.
     #[serde(default)]

@@ -139,6 +139,16 @@ const DEAD_CODE_WIRING = {
     category: "unused-component-emit",
     finding: { ...loc, component_name: "Btn", emit_name: "click", actions: [] },
   },
+  "unused-component-input": {
+    field: "unused_component_inputs",
+    category: "unused-component-input",
+    finding: { ...loc, component_name: "Btn", input_name: "size", actions: [] },
+  },
+  "unused-component-output": {
+    field: "unused_component_outputs",
+    category: "unused-component-output",
+    finding: { ...loc, component_name: "Btn", output_name: "change", actions: [] },
+  },
   "unrendered-component": {
     field: "unrendered_components",
     category: "unrendered-component",

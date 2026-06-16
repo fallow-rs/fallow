@@ -3,10 +3,10 @@ source: crates/cli/tests/snapshot_tests.rs
 expression: json_str
 ---
 {
-  "body": "### Fallow dead-code report\n\n24 inline findings selected for GitLab review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 3ad34d0c6a956d1d -->",
+  "body": "### Fallow dead-code report\n\n26 inline findings selected for GitLab review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 3f327448a1eaa60b -->",
   "summary": {
-    "body": "### Fallow dead-code report\n\n24 inline findings selected for GitLab review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 3ad34d0c6a956d1d -->",
-    "fingerprint": "3ad34d0c6a956d1d"
+    "body": "### Fallow dead-code report\n\n26 inline findings selected for GitLab review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 3f327448a1eaa60b -->",
+    "fingerprint": "3f327448a1eaa60b"
   },
   "comments": [
     {
@@ -238,6 +238,26 @@ expression: json_str
         "new_line": 5
       },
       "fingerprint": "82ebf4620cc2bba5"
+    },
+    {
+      "body": "**warn** `fallow/unused-component-input`: input \\`variant\\` is declared but referenced nowhere in component \\`UserCardComponent\\` \\(remove it or use it\\)\n\n<!-- fallow-fingerprint:v2: 43da4dfe078e4765 -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "src/user-card.component.ts",
+        "new_path": "src/user-card.component.ts",
+        "new_line": 12
+      },
+      "fingerprint": "43da4dfe078e4765"
+    },
+    {
+      "body": "**warn** `fallow/unused-component-output`: output \\`selected\\` is declared but emitted nowhere in component \\`UserCardComponent\\` \\(remove it or emit it\\)\n\n<!-- fallow-fingerprint:v2: 48412c022e3ac5ab -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "src/user-card.component.ts",
+        "new_path": "src/user-card.component.ts",
+        "new_line": 15
+      },
+      "fingerprint": "48412c022e3ac5ab"
     },
     {
       "body": "**error** `fallow/unused-export`: Export 'helperFn' is never imported by other modules\n\n<!-- fallow-fingerprint:v2: ebe2360218821412 -->",

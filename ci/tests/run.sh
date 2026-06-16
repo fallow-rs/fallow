@@ -511,16 +511,24 @@ OUT_UCP=$(jq '.unused_component_props = [{"path": "src/Widget.vue", "line": 12, 
 assert_contains "$OUT_UCP" "Unused component props" "ucp: shows summary row and section"
 assert_contains "$OUT_UCP" "variant" "ucp: shows prop name in section"
 
+OUT_UCI=$(jq '.unused_component_inputs = [{"path": "src/widget.component.ts", "line": 12, "col": 0, "component_name": "Widget", "input_name": "variant", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$CI_JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_UCI" "Unused component inputs" "uci: shows summary row and section"
+assert_contains "$OUT_UCI" "variant" "uci: shows input name in section"
+
 OUT_UCE=$(jq '.unused_component_emits = [{"path": "src/Widget.vue", "line": 14, "col": 0, "component_name": "Widget", "emit_name": "submit", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$CI_JQ_DIR/summary-check.jq" 2>&1)
 assert_contains "$OUT_UCE" "Unused component emits" "uce: shows summary row and section"
 assert_contains "$OUT_UCE" "submit" "uce: shows emit name in section"
+
+OUT_UCO=$(jq '.unused_component_outputs = [{"path": "src/widget.component.ts", "line": 14, "col": 0, "component_name": "Widget", "output_name": "submit", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$CI_JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_UCO" "Unused component outputs" "uco: shows summary row and section"
+assert_contains "$OUT_UCO" "submit" "uco: shows output name in section"
 
 OUT_UPI=$(jq '.unprovided_injects = [{"path": "src/useTheme.ts", "line": 7, "col": 0, "key_name": "themeKey", "framework": "vue", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$CI_JQ_DIR/summary-check.jq" 2>&1)
 assert_contains "$OUT_UPI" "Unprovided injects" "upi: shows summary row and section"
 assert_contains "$OUT_UPI" "themeKey" "upi: shows inject key in section"
 
 # Missing keys must never crash jq (defensive `// []` / null-safe helpers).
-OUT_NO_FRAMEWORK_KEYS=$(jq 'del(.unused_server_actions, .unrendered_components, .unused_component_props, .unused_component_emits, .unprovided_injects, .route_collisions, .dynamic_segment_name_conflicts, .invalid_client_exports, .mixed_client_server_barrels, .misplaced_directives)' "$FIXTURES/check.json" | jq -r -f "$CI_JQ_DIR/summary-check.jq" 2>&1)
+OUT_NO_FRAMEWORK_KEYS=$(jq 'del(.unused_server_actions, .unrendered_components, .unused_component_props, .unused_component_inputs, .unused_component_emits, .unused_component_outputs, .unprovided_injects, .route_collisions, .dynamic_segment_name_conflicts, .invalid_client_exports, .mixed_client_server_barrels, .misplaced_directives)' "$FIXTURES/check.json" | jq -r -f "$CI_JQ_DIR/summary-check.jq" 2>&1)
 assert_contains "$OUT_NO_FRAMEWORK_KEYS" "Fallow Analysis" "missing-keys: GitLab summary-check survives absent framework keys"
 
 OUT_CLEAN=$(jq -r -f "$CI_JQ_DIR/summary-check.jq" "$FIXTURES/check-clean.json" 2>&1)
@@ -692,11 +700,13 @@ assert_contains "$OUT_ROUTING_GL" "| [Route collisions](" "combined: route-colli
 assert_contains "$OUT_ROUTING_GL" "| [Dynamic segment conflicts](" "combined: dynamic-segment-conflicts row in breakdown"
 
 # Vue/Next framework keys appear in the GitLab combined-mode Code issues breakdown table.
-OUT_FRAMEWORK_GL=$(jq '.check.unused_server_actions = [{"path": "src/actions.ts", "line": 9, "col": 0, "action_name": "submitForm", "actions": []}] | .check.unrendered_components = [{"path": "src/Foo.vue", "line": 1, "col": 0, "component_name": "Foo", "framework": "vue", "actions": []}] | .check.unused_component_props = [{"path": "src/Widget.vue", "line": 12, "col": 0, "component_name": "Widget", "prop_name": "variant", "actions": []}] | .check.unused_component_emits = [{"path": "src/Widget.vue", "line": 14, "col": 0, "component_name": "Widget", "emit_name": "submit", "actions": []}] | .check.unprovided_injects = [{"path": "src/useTheme.ts", "line": 7, "col": 0, "key_name": "themeKey", "framework": "vue", "actions": []}] | .check.total_issues = (.check.total_issues + 5)' "$FIXTURES/combined.json" | jq -r -f "$CI_JQ_DIR/summary-combined.jq" 2>&1)
+OUT_FRAMEWORK_GL=$(jq '.check.unused_server_actions = [{"path": "src/actions.ts", "line": 9, "col": 0, "action_name": "submitForm", "actions": []}] | .check.unrendered_components = [{"path": "src/Foo.vue", "line": 1, "col": 0, "component_name": "Foo", "framework": "vue", "actions": []}] | .check.unused_component_props = [{"path": "src/Widget.vue", "line": 12, "col": 0, "component_name": "Widget", "prop_name": "variant", "actions": []}] | .check.unused_component_inputs = [{"path": "src/widget.component.ts", "line": 12, "col": 0, "component_name": "Widget", "input_name": "variant", "actions": []}] | .check.unused_component_emits = [{"path": "src/Widget.vue", "line": 14, "col": 0, "component_name": "Widget", "emit_name": "submit", "actions": []}] | .check.unused_component_outputs = [{"path": "src/widget.component.ts", "line": 14, "col": 0, "component_name": "Widget", "output_name": "submit", "actions": []}] | .check.unprovided_injects = [{"path": "src/useTheme.ts", "line": 7, "col": 0, "key_name": "themeKey", "framework": "vue", "actions": []}] | .check.total_issues = (.check.total_issues + 7)' "$FIXTURES/combined.json" | jq -r -f "$CI_JQ_DIR/summary-combined.jq" 2>&1)
 assert_contains "$OUT_FRAMEWORK_GL" "| [Unused server actions](" "combined: unused-server-actions row in breakdown"
 assert_contains "$OUT_FRAMEWORK_GL" "| [Unrendered components](" "combined: unrendered-components row in breakdown"
 assert_contains "$OUT_FRAMEWORK_GL" "| [Unused component props](" "combined: unused-component-props row in breakdown"
+assert_contains "$OUT_FRAMEWORK_GL" "| [Unused component inputs](" "combined: unused-component-inputs row in breakdown"
 assert_contains "$OUT_FRAMEWORK_GL" "| [Unused component emits](" "combined: unused-component-emits row in breakdown"
+assert_contains "$OUT_FRAMEWORK_GL" "| [Unused component outputs](" "combined: unused-component-outputs row in breakdown"
 assert_contains "$OUT_FRAMEWORK_GL" "| [Unprovided injects](" "combined: unprovided-injects row in breakdown"
 
 # Worst-case truncation: 50 groups (paths differentiated per-group via `. as $g |`),

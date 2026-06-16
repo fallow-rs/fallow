@@ -452,7 +452,16 @@ use crate::MemberKind;
 /// Bumped to 170: `ComponentFunction` gained `is_pure_passthrough` (the
 /// thin-wrapper extraction flag), a new bitcode field on a cached struct
 /// persisted via `ModuleInfo`.
-pub(super) const CACHE_VERSION: u32 = 170;
+///
+/// Bumped to 171 (feat/angular): Angular input/output IR
+/// (`angular_inputs` / `angular_outputs` on `ModuleInfo`) plus the
+/// `unused-component-input` / `unused-component-output` suppression tokens, and
+/// the Angular `{ ...this }` spread now records an
+/// `ANGULAR_THIS_SPREAD_SENTINEL` member access (whole-component abstain for the
+/// input/output detectors); a warm cache from 170 lacks the Angular IR and the
+/// sentinel and would report zero input/output findings or false-flag
+/// spread-forwarded inputs/outputs.
+pub(super) const CACHE_VERSION: u32 = 171;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -655,6 +664,14 @@ pub struct CachedModule {
     /// Vue `<script setup>` `defineEmits` declared events. Round-trips so the
     /// `unused-component-emit` detector sees them on warm-cache loads.
     pub component_emits: Vec<fallow_types::extract::ComponentEmit>,
+    /// Angular component/directive inputs (`@Input()` decorators and signal
+    /// `input()` / `model()` initializers). Round-trips so the
+    /// `unused-component-input` detector sees them on warm-cache loads.
+    pub angular_inputs: Vec<fallow_types::extract::AngularInputMember>,
+    /// Angular component/directive outputs (`@Output()` decorators and signal
+    /// `output()` / `outputFromObservable()` initializers). Round-trips so the
+    /// `unused-component-output` detector sees them on warm-cache loads.
+    pub angular_outputs: Vec<fallow_types::extract::AngularOutputMember>,
     /// Whether `defineEmits` had an unharvestable argument. Round-trips for the
     /// abstain.
     pub has_unharvestable_emits: bool,

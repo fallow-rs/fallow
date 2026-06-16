@@ -378,6 +378,32 @@ expression: redact_sarif_version(&json_str)
               }
             },
             {
+              "id": "fallow/unused-component-input",
+              "shortDescription": {
+                "text": "An Angular @Input() / signal input() / model() input is read nowhere in its own component"
+              },
+              "fullDescription": {
+                "text": "An Angular `@Input()` / signal `input()` / `model()` declared input that is read nowhere in its own component (neither the inline / external template nor the class body). The Angular compiler never flags a declared-but-unread `@Input`, and there is no `@angular-eslint` rule for it. Conservative: usage detection over-credits by design (a template sentinel ref, any class-body member access by that name, or a bare identifier read counts as used), and the whole component abstains on an unresolved `extends` heritage clause (a base class in another file may read the input). A `model()` is recorded as an input only. Default warn; suppress or remove the input. The check runs only when the project declares `@angular/core`."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-component-inputs",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "fallow/unused-component-output",
+              "shortDescription": {
+                "text": "An Angular @Output() / signal output() output is emitted nowhere in its own component"
+              },
+              "fullDescription": {
+                "text": "An Angular `@Output()` / signal `output()` declared output that is emitted nowhere in its own component (no `this.<output>.emit(...)`). The Angular compiler never flags a declared-but-unemitted `@Output`, and there is no `@angular-eslint` rule for it. Conservative: usage detection over-credits by design (a `this.<output>.emit` call site, or any value read of `this.<output>` that might forward it, counts as used), and the whole component abstains on an unresolved `extends` heritage clause. A `model()`-derived implicit output is never flagged. Default warn; suppress or remove the output. The check runs only when the project declares `@angular/core`."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-component-outputs",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
               "id": "fallow/unused-server-action",
               "shortDescription": {
                 "text": "A Next.js Server Action exported from a \"use server\" file is referenced by no code in the project"

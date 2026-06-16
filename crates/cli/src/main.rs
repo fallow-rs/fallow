@@ -488,6 +488,14 @@ enum Command {
         #[arg(long)]
         unused_component_emits: bool,
 
+        /// Only report unused component inputs
+        #[arg(long)]
+        unused_component_inputs: bool,
+
+        /// Only report unused component outputs
+        #[arg(long)]
+        unused_component_outputs: bool,
+
         /// Only report unused server actions
         #[arg(long)]
         unused_server_actions: bool,
@@ -3188,6 +3196,8 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             unrendered_components,
             unused_component_props,
             unused_component_emits,
+            unused_component_inputs,
+            unused_component_outputs,
             unused_server_actions,
             unused_load_data_keys,
             unresolved_imports,
@@ -3225,6 +3235,8 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
                     unrendered_components,
                     unused_component_props,
                     unused_component_emits,
+                    unused_component_inputs,
+                    unused_component_outputs,
                     unused_server_actions,
                     unused_load_data_keys,
                     unresolved_imports,

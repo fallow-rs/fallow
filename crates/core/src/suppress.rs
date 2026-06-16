@@ -70,6 +70,8 @@ fn severity_for_kind(rules: &RulesConfig, kind: IssueKind) -> Severity {
         IssueKind::UnrenderedComponent => rules.unrendered_components,
         IssueKind::UnusedComponentProp => rules.unused_component_props,
         IssueKind::UnusedComponentEmit => rules.unused_component_emits,
+        IssueKind::UnusedComponentInput => rules.unused_component_inputs,
+        IssueKind::UnusedComponentOutput => rules.unused_component_outputs,
         IssueKind::UnusedServerAction => rules.unused_server_actions,
         IssueKind::UnusedLoadDataKey => rules.unused_load_data_keys,
         IssueKind::PropDrilling => rules.prop_drilling,
@@ -556,6 +558,8 @@ mod tests {
             IssueKind::PropDrilling,
             IssueKind::ThinWrapper,
             IssueKind::DuplicatePropShape,
+            IssueKind::UnusedComponentInput,
+            IssueKind::UnusedComponentOutput,
         ] {
             assert_eq!(
                 IssueKind::from_discriminant(kind.to_discriminant()),
@@ -563,7 +567,7 @@ mod tests {
             );
         }
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(45), None);
+        assert_eq!(IssueKind::from_discriminant(47), None);
     }
 
     #[test]

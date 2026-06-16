@@ -332,6 +332,22 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#unused-component-emits",
     },
     RuleDef {
+        id: "fallow/unused-component-input",
+        category: "Dead code",
+        name: "Unused component inputs",
+        short: "An Angular @Input() / signal input() / model() input is read nowhere in its own component",
+        full: "An Angular `@Input()` / signal `input()` / `model()` declared input that is read nowhere in its own component (neither the inline / external template nor the class body). The Angular compiler never flags a declared-but-unread `@Input`, and there is no `@angular-eslint` rule for it. Conservative: usage detection over-credits by design (a template sentinel ref, any class-body member access by that name, or a bare identifier read counts as used), and the whole component abstains on an unresolved `extends` heritage clause (a base class in another file may read the input). A `model()` is recorded as an input only. Default warn; suppress or remove the input. The check runs only when the project declares `@angular/core`.",
+        docs_path: "explanations/dead-code#unused-component-inputs",
+    },
+    RuleDef {
+        id: "fallow/unused-component-output",
+        category: "Dead code",
+        name: "Unused component outputs",
+        short: "An Angular @Output() / signal output() output is emitted nowhere in its own component",
+        full: "An Angular `@Output()` / signal `output()` declared output that is emitted nowhere in its own component (no `this.<output>.emit(...)`). The Angular compiler never flags a declared-but-unemitted `@Output`, and there is no `@angular-eslint` rule for it. Conservative: usage detection over-credits by design (a `this.<output>.emit` call site, or any value read of `this.<output>` that might forward it, counts as used), and the whole component abstains on an unresolved `extends` heritage clause. A `model()`-derived implicit output is never flagged. Default warn; suppress or remove the output. The check runs only when the project declares `@angular/core`.",
+        docs_path: "explanations/dead-code#unused-component-outputs",
+    },
+    RuleDef {
         id: "fallow/unused-server-action",
         category: "Dead code",
         name: "Unused server actions",
@@ -496,6 +512,12 @@ fn dead_code_alias_id(normalized: &str) -> Option<&'static str> {
         "unrendered-components" | "unrendered-component" => Some("fallow/unrendered-component"),
         "unused-component-props" | "unused-component-prop" => Some("fallow/unused-component-prop"),
         "unused-component-emits" | "unused-component-emit" => Some("fallow/unused-component-emit"),
+        "unused-component-inputs" | "unused-component-input" => {
+            Some("fallow/unused-component-input")
+        }
+        "unused-component-outputs" | "unused-component-output" => {
+            Some("fallow/unused-component-output")
+        }
         "unused-server-actions" | "unused-server-action" => Some("fallow/unused-server-action"),
         "unused-load-data-keys" | "unused-load-data-key" => Some("fallow/unused-load-data-key"),
         "prop-drilling" => Some("fallow/prop-drilling"),
@@ -651,6 +673,14 @@ fn member_import_rule_guide(id: &str) -> Option<RuleGuide> {
         "fallow/unused-component-emit" => RuleGuide {
             example: "Widget.vue declares defineEmits<{ close: [] }>() but `emit('close')` is called nowhere in the component's script.",
             how_to_fix: "Remove the unused emit, or emit it in the script. If the emit is part of a deliberately-stable public component API, suppress the line with // fallow-ignore-next-line unused-component-emit.",
+        },
+        "fallow/unused-component-input" => RuleGuide {
+            example: "user-card.component.ts declares @Input() size: string (or size = input<string>()) but `size` is read nowhere in the template or the class body.",
+            how_to_fix: "Remove the unused input, or read it in the template or class body. If the input is part of a deliberately-stable public component API, suppress the line with // fallow-ignore-next-line unused-component-input.",
+        },
+        "fallow/unused-component-output" => RuleGuide {
+            example: "user-card.component.ts declares @Output() close = new EventEmitter<void>() (or close = output<void>()) but `this.close.emit(...)` is called nowhere in the class.",
+            how_to_fix: "Remove the unused output, or emit it from the class. If the output is part of a deliberately-stable public component API, suppress the line with // fallow-ignore-next-line unused-component-output.",
         },
         "fallow/unused-server-action" => RuleGuide {
             example: "app/actions.ts has \"use server\" and exports submitForm, but no component imports it, binds it via action={submitForm}, or uses it in <form action={submitForm}>.",
@@ -2351,7 +2381,7 @@ mod tests {
 
     #[test]
     fn check_rules_count() {
-        assert_eq!(CHECK_RULES.len(), 41);
+        assert_eq!(CHECK_RULES.len(), 43);
     }
 
     #[test]

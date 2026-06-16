@@ -166,6 +166,8 @@ mod unprovided_injects;
 mod unrendered_components;
 #[path = "integration_test/unused_component_emits.rs"]
 mod unused_component_emits;
+#[path = "integration_test/unused_component_io_angular.rs"]
+mod unused_component_io_angular;
 #[path = "integration_test/unused_component_props.rs"]
 mod unused_component_props;
 #[path = "integration_test/unused_enum_members.rs"]

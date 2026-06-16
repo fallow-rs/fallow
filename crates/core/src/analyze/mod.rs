@@ -24,6 +24,8 @@ mod unprovided_inject;
 mod unrendered_component;
 mod unused_catalog;
 mod unused_component_emit;
+mod unused_component_input;
+mod unused_component_output;
 mod unused_component_prop;
 mod unused_deps;
 mod unused_exports;
@@ -32,6 +34,9 @@ mod unused_load_data_key;
 mod unused_members;
 mod unused_overrides;
 mod unused_server_action;
+
+#[cfg(test)]
+pub(crate) mod test_support;
 
 #[cfg(test)]
 pub(crate) use unused_deps::matches_virtual_prefix;
@@ -60,9 +65,10 @@ use fallow_types::output_dead_code::{
     TestOnlyDependencyFinding, ThinWrapperFinding, TypeOnlyDependencyFinding,
     UnlistedDependencyFinding, UnprovidedInjectFinding, UnrenderedComponentFinding,
     UnresolvedCatalogReferenceFinding, UnresolvedImportFinding, UnusedCatalogEntryFinding,
-    UnusedClassMemberFinding, UnusedComponentEmitFinding, UnusedComponentPropFinding,
-    UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
-    UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
+    UnusedClassMemberFinding, UnusedComponentEmitFinding, UnusedComponentInputFinding,
+    UnusedComponentOutputFinding, UnusedComponentPropFinding, UnusedDependencyFinding,
+    UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
+    UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
     UnusedOptionalDependencyFinding, UnusedStoreMemberFinding, UnusedTypeFinding,
 };
 
@@ -90,6 +96,8 @@ use unused_catalog::{
     gather_pnpm_catalog_state,
 };
 use unused_component_emit::find_unused_component_emits;
+use unused_component_input::find_unused_component_inputs;
+use unused_component_output::find_unused_component_outputs;
 use unused_component_prop::{find_unused_component_props, find_unused_react_props};
 #[expect(
     deprecated,
@@ -834,6 +842,22 @@ fn populate_framework_specific_findings(input: &mut FrameworkSpecificFindingsInp
         input.line_offsets_by_file,
         input.results,
     );
+    populate_unused_component_input_findings(
+        input.graph,
+        input.modules,
+        input.config,
+        input.declared_deps,
+        input.line_offsets_by_file,
+        input.results,
+    );
+    populate_unused_component_output_findings(
+        input.graph,
+        input.modules,
+        input.config,
+        input.declared_deps,
+        input.line_offsets_by_file,
+        input.results,
+    );
     populate_unused_load_data_key_findings(
         input.graph,
         input.modules,
@@ -1292,6 +1316,48 @@ fn populate_duplicate_prop_shape_findings(input: &mut FrameworkSpecificFindingsI
             .is_file_suppressed(file_id, IssueKind::DuplicatePropShape);
         !suppressed
     });
+}
+
+/// Populate `unused_component_inputs` when the rule is enabled. Gated on the
+/// project declaring `@angular/core` inside the detector (see
+/// [`find_unused_component_inputs`]).
+fn populate_unused_component_input_findings(
+    graph: &ModuleGraph,
+    modules: &[ModuleInfo],
+    config: &ResolvedConfig,
+    declared_deps: &FxHashSet<String>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+    results: &mut AnalysisResults,
+) {
+    if config.rules.unused_component_inputs == Severity::Off {
+        return;
+    }
+    results.unused_component_inputs =
+        find_unused_component_inputs(graph, modules, declared_deps, line_offsets_by_file)
+            .into_iter()
+            .map(UnusedComponentInputFinding::with_actions)
+            .collect();
+}
+
+/// Populate `unused_component_outputs` when the rule is enabled. Gated on the
+/// project declaring `@angular/core` inside the detector (see
+/// [`find_unused_component_outputs`]).
+fn populate_unused_component_output_findings(
+    graph: &ModuleGraph,
+    modules: &[ModuleInfo],
+    config: &ResolvedConfig,
+    declared_deps: &FxHashSet<String>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+    results: &mut AnalysisResults,
+) {
+    if config.rules.unused_component_outputs == Severity::Off {
+        return;
+    }
+    results.unused_component_outputs =
+        find_unused_component_outputs(graph, modules, declared_deps, line_offsets_by_file)
+            .into_iter()
+            .map(UnusedComponentOutputFinding::with_actions)
+            .collect();
 }
 
 /// Populate `route_collisions` when the rule is enabled. Gated on the project
@@ -2291,6 +2357,8 @@ mod tests {
                 unrendered_components: Severity::Off,
                 unused_component_props: Severity::Off,
                 unused_component_emits: Severity::Off,
+                unused_component_inputs: Severity::Off,
+                unused_component_outputs: Severity::Off,
                 unused_server_actions: Severity::Off,
                 unused_load_data_keys: Severity::Off,
                 prop_drilling: Severity::Off,
@@ -2557,6 +2625,8 @@ mod tests {
                 has_define_model: false,
                 has_unharvestable_props: false,
                 component_emits: Vec::new(),
+                angular_inputs: Vec::new(),
+                angular_outputs: Vec::new(),
                 has_unharvestable_emits: false,
                 has_dynamic_emit: false,
                 has_emit_whole_object_use: false,

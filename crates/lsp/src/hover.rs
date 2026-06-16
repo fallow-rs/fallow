@@ -52,6 +52,14 @@ pub fn build_hover(
         return Some(hover);
     }
 
+    if let Some(hover) = check_unused_component_input(results, file_path, position) {
+        return Some(hover);
+    }
+
+    if let Some(hover) = check_unused_component_output(results, file_path, position) {
+        return Some(hover);
+    }
+
     if let Some(hover) = check_unused_server_action(results, file_path, position) {
         return Some(hover);
     }
@@ -564,6 +572,106 @@ fn check_unused_component_emit(
                 },
                 end: Position {
                     line: emit_line,
+                    character: end_col,
+                },
+            }),
+        });
+    }
+
+    None
+}
+
+/// Check if the position is on an unused Angular component input anchor.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "input name lengths are bounded by source size"
+)]
+fn check_unused_component_input(
+    results: &AnalysisResults,
+    file_path: &Path,
+    position: Position,
+) -> Option<Hover> {
+    for finding in &results.unused_component_inputs {
+        let i = &finding.input;
+        if i.path != file_path {
+            continue;
+        }
+        let input_line = i.line.saturating_sub(1);
+        if input_line != position.line {
+            continue;
+        }
+        let end_col = i.col + i.input_name.len() as u32;
+        if position.character < i.col || position.character >= end_col {
+            continue;
+        }
+
+        let value = format!(
+            "**fallow**: Input {} is declared but read nowhere in this component.",
+            format_inline_code(&i.input_name),
+        );
+
+        return Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value,
+            }),
+            range: Some(Range {
+                start: Position {
+                    line: input_line,
+                    character: i.col,
+                },
+                end: Position {
+                    line: input_line,
+                    character: end_col,
+                },
+            }),
+        });
+    }
+
+    None
+}
+
+/// Check if the position is on an unused Angular component output anchor.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "output name lengths are bounded by source size"
+)]
+fn check_unused_component_output(
+    results: &AnalysisResults,
+    file_path: &Path,
+    position: Position,
+) -> Option<Hover> {
+    for finding in &results.unused_component_outputs {
+        let o = &finding.output;
+        if o.path != file_path {
+            continue;
+        }
+        let output_line = o.line.saturating_sub(1);
+        if output_line != position.line {
+            continue;
+        }
+        let end_col = o.col + o.output_name.len() as u32;
+        if position.character < o.col || position.character >= end_col {
+            continue;
+        }
+
+        let value = format!(
+            "**fallow**: Output {} is declared but emitted nowhere in this component.",
+            format_inline_code(&o.output_name),
+        );
+
+        return Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value,
+            }),
+            range: Some(Range {
+                start: Position {
+                    line: output_line,
+                    character: o.col,
+                },
+                end: Position {
+                    line: output_line,
                     character: end_col,
                 },
             }),

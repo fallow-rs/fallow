@@ -6,10 +6,11 @@ use fallow_types::output_dead_code::{
     BoundaryViolationFinding, CircularDependencyFinding, TestOnlyDependencyFinding,
     TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
     UnrenderedComponentFinding, UnresolvedImportFinding, UnusedClassMemberFinding,
-    UnusedComponentEmitFinding, UnusedComponentPropFinding, UnusedDependencyFinding,
-    UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
-    UnusedLoadDataKeyFinding, UnusedOptionalDependencyFinding, UnusedServerActionFinding,
-    UnusedStoreMemberFinding, UnusedTypeFinding,
+    UnusedComponentEmitFinding, UnusedComponentInputFinding, UnusedComponentOutputFinding,
+    UnusedComponentPropFinding, UnusedDependencyFinding, UnusedDevDependencyFinding,
+    UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
+    UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
+    UnusedTypeFinding,
 };
 
 /// Build an `AnalysisResults` populated with one issue of every type.
@@ -206,6 +207,26 @@ pub fn sample_results(root: &Path) -> AnalysisResults {
                 path: root.join("src/components/Widget.vue"),
                 component_name: "Widget".to_string(),
                 emit_name: "unusedClose".to_string(),
+                line: 5,
+                col: 2,
+            },
+        ));
+    r.unused_component_inputs
+        .push(UnusedComponentInputFinding::with_actions(
+            UnusedComponentInput {
+                path: root.join("src/user-card.component.ts"),
+                component_name: "UserCardComponent".to_string(),
+                input_name: "unusedVariant".to_string(),
+                line: 4,
+                col: 2,
+            },
+        ));
+    r.unused_component_outputs
+        .push(UnusedComponentOutputFinding::with_actions(
+            UnusedComponentOutput {
+                path: root.join("src/user-card.component.ts"),
+                component_name: "UserCardComponent".to_string(),
+                output_name: "unusedSelected".to_string(),
                 line: 5,
                 col: 2,
             },

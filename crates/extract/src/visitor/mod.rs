@@ -16,10 +16,10 @@ use crate::{
     MemberAccess, MemberInfo, MemberKind, ModuleInfo, ReExportInfo, RequireCallInfo, VisibilityTag,
 };
 use fallow_types::extract::{
-    CalleeUse, ClassHeritageInfo, ComponentFunction, ComponentProp, DiKeySite, HookUse,
-    LocalTypeDeclaration, MisplacedDirectiveSite, PublicSignatureTypeReference, RenderEdge,
-    SanitizedSinkArg, SanitizerScope, SecurityControlSite, SinkLiteralValue, SinkSite,
-    SkippedSecurityCalleeSite, TaintedBinding,
+    AngularInputMember, AngularOutputMember, CalleeUse, ClassHeritageInfo, ComponentFunction,
+    ComponentProp, DiKeySite, HookUse, LocalTypeDeclaration, MisplacedDirectiveSite,
+    PublicSignatureTypeReference, RenderEdge, SanitizedSinkArg, SanitizerScope, SecurityControlSite,
+    SinkLiteralValue, SinkSite, SkippedSecurityCalleeSite, TaintedBinding,
 };
 use helpers::LitCustomElementDecorator;
 
@@ -327,6 +327,24 @@ pub(crate) struct ModuleInfoExtractor {
     /// `visit_function` to push the component stack with the binding name. Working
     /// state only (not persisted, not merged across SFC blocks).
     pub(crate) pending_component_arrows: FxHashMap<Span, PendingComponentArrow>,
+    /// Angular component/directive inputs harvested from Angular-decorated
+    /// classes (`@Input()` decorators and signal `input()` / `model()`
+    /// initializers). Accumulated across every Angular class in the module and
+    /// copied onto `ModuleInfo.angular_inputs`. Consumed by the
+    /// `unused-component-input` detector.
+    pub(crate) angular_inputs: Vec<AngularInputMember>,
+    /// Angular component/directive outputs harvested from Angular-decorated
+    /// classes (`@Output()` decorators and signal `output()` /
+    /// `outputFromObservable()` initializers). Accumulated across every Angular
+    /// class in the module and copied onto `ModuleInfo.angular_outputs`. Consumed
+    /// by the `unused-component-output` detector.
+    pub(crate) angular_outputs: Vec<AngularOutputMember>,
+    /// Spans of Angular classes already harvested into `angular_inputs` /
+    /// `angular_outputs`. An `export class FooComponent` is visited by both the
+    /// named-export declaration path and the top-level class-declaration path, so
+    /// this dedups the harvest and prevents one declared input/output from being
+    /// flagged twice.
+    pub(crate) harvested_angular_class_spans: FxHashSet<Span>,
 }
 
 /// Metadata for a named arrow / function-expression that may be a React
@@ -1026,6 +1044,8 @@ impl ModuleInfoExtractor {
             has_define_model: false,
             has_unharvestable_props: false,
             component_emits: Vec::new(),
+            angular_inputs: self.angular_inputs,
+            angular_outputs: self.angular_outputs,
             has_unharvestable_emits: false,
             has_dynamic_emit: false,
             has_emit_whole_object_use: false,
@@ -1102,6 +1122,8 @@ impl ModuleInfoExtractor {
         info.load_return_keys.extend(self.load_return_keys);
         info.has_unharvestable_load = info.has_unharvestable_load || self.has_unharvestable_load;
         info.has_load_data_whole_use = info.has_load_data_whole_use || self.has_load_data_whole_use;
+        info.angular_inputs.extend(self.angular_inputs);
+        info.angular_outputs.extend(self.angular_outputs);
     }
 }
 

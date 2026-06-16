@@ -25,8 +25,9 @@ use crate::asset_url::normalize_asset_url;
 use crate::html::is_remote_url;
 
 use super::helpers::{
-    extract_angular_component_metadata, extract_angular_signal_query, extract_class_members,
-    extract_concat_parts, extract_custom_elements_define, extract_implemented_interface_names,
+    extract_angular_component_metadata, extract_angular_inputs_outputs,
+    extract_angular_signal_query, extract_class_members, extract_concat_parts,
+    extract_custom_elements_define, extract_implemented_interface_names,
     extract_nested_type_bindings, extract_query_list_element_type, extract_super_class_name,
     extract_type_annotation_name, has_angular_class_decorator, has_angular_plural_query_decorator,
     is_meta_url_arg, lit_custom_element_decorator, regex_pattern_to_suffix,
@@ -2758,6 +2759,7 @@ impl ModuleInfoExtractor {
             self.record_path_relative_binding(id.name.as_str(), None);
             self.record_local_type_declaration(&id.name, id.span);
             let is_angular = has_angular_class_decorator(class);
+            self.record_angular_inputs_outputs(class, is_angular);
             let instance_bindings = super::helpers::extract_class_instance_bindings(
                 class,
                 |local_name, source, imported_name| {
@@ -2774,6 +2776,27 @@ impl ModuleInfoExtractor {
             let refs = Self::collect_class_signature_refs(class);
             self.record_local_signature_refs(&id.name, refs);
         }
+    }
+
+    /// Harvest Angular `@Input()` / `@Output()` / signal `input()` / `output()` /
+    /// `model()` members from an Angular-decorated class onto the module-level
+    /// input/output accumulators. Gated on `is_angular` so a non-Angular class
+    /// with a same-named `input` / `Input` helper never contributes. Called from
+    /// every class-extraction site (named export, default export, local
+    /// declaration) so the SFC and plain-`.ts` paths both populate it.
+    pub(super) fn record_angular_inputs_outputs(&mut self, class: &Class<'_>, is_angular: bool) {
+        if !is_angular {
+            return;
+        }
+        // An `export class FooComponent` reaches this from both the named-export
+        // declaration path and the top-level class-declaration path; dedup on the
+        // class span so each declared input/output is harvested exactly once.
+        if !self.harvested_angular_class_spans.insert(class.span) {
+            return;
+        }
+        let (inputs, outputs) = extract_angular_inputs_outputs(class);
+        self.angular_inputs.extend(inputs);
+        self.angular_outputs.extend(outputs);
     }
 
     fn record_top_level_function_declaration(&mut self, function: &Function<'_>) {
@@ -3351,6 +3374,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         let (members, super_class, implemented_interfaces, instance_bindings) =
             if let ExportDefaultDeclarationKind::ClassDeclaration(class) = &decl.declaration {
                 let is_angular = has_angular_class_decorator(class);
+                self.record_angular_inputs_outputs(class, is_angular);
                 let bindings = super::helpers::extract_class_instance_bindings(
                     class,
                     |local_name, source, imported_name| {
@@ -4009,8 +4033,21 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_spread_element(&mut self, elem: &SpreadElement<'a>) {
-        if let Expression::Identifier(ident) = &elem.argument {
-            self.whole_object_uses.push(ident.name.to_string());
+        match &elem.argument {
+            Expression::Identifier(ident) => {
+                self.whole_object_uses.push(ident.name.to_string());
+            }
+            // `{ ...this }` forwards every member opaquely (the Angular "headless
+            // pattern" convention spreads `this` into a behavior pattern). Record
+            // a sentinel member access so the Angular input/output detectors
+            // abstain the whole component instead of false-flagging spread inputs.
+            Expression::ThisExpression(_) => {
+                self.member_accesses.push(MemberAccess {
+                    object: crate::sfc_template::angular::ANGULAR_THIS_SPREAD_SENTINEL.to_string(),
+                    member: String::new(),
+                });
+            }
+            _ => {}
         }
         walk::walk_spread_element(self, elem);
     }

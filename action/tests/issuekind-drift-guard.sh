@@ -79,6 +79,8 @@ issuekind_json_key() {
     unrendered-component) echo "unrendered_components" ;;
     unused-component-prop) echo "unused_component_props" ;;
     unused-component-emit) echo "unused_component_emits" ;;
+    unused-component-input) echo "unused_component_inputs" ;;
+    unused-component-output) echo "unused_component_outputs" ;;
     unused-server-action) echo "unused_server_actions" ;;
     unused-load-data-key) echo "unused_load_data_keys" ;;
     route-collision) echo "route_collisions" ;;

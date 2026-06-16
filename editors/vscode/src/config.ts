@@ -60,6 +60,8 @@ export const getIssueTypes = (): IssueTypeConfig =>
     "unused-load-data-key": true,
     "unused-component-prop": true,
     "unused-component-emit": true,
+    "unused-component-input": true,
+    "unused-component-output": true,
     "unrendered-component": true,
     "unprovided-inject": true,
     "invalid-client-export": true,

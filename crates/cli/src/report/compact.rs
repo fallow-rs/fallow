@@ -418,6 +418,22 @@ impl<'a> CompactLineBuilder<'a> {
                 finding.emit.emit_name,
             ));
         }
+        for finding in &self.results.unused_component_inputs {
+            self.lines.push(format!(
+                "unused-component-input:{}:{}:{}",
+                self.rel(&finding.input.path),
+                finding.input.line,
+                finding.input.input_name,
+            ));
+        }
+        for finding in &self.results.unused_component_outputs {
+            self.lines.push(format!(
+                "unused-component-output:{}:{}:{}",
+                self.rel(&finding.output.path),
+                finding.output.line,
+                finding.output.output_name,
+            ));
+        }
         for finding in &self.results.unused_server_actions {
             self.lines.push(format!(
                 "unused-server-action:{}:{}:{}",
@@ -1233,7 +1249,7 @@ mod tests {
         let results = sample_results(&root);
         let lines = build_compact_lines(&results, &root);
 
-        assert_eq!(lines.len(), 23);
+        assert_eq!(lines.len(), 25);
 
         assert!(lines[0].starts_with("unused-file:"));
         assert!(lines[1].starts_with("unused-export:"));
@@ -1262,6 +1278,16 @@ mod tests {
             lines
                 .iter()
                 .any(|l| l.starts_with("unused-component-emit:"))
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.starts_with("unused-component-input:"))
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.starts_with("unused-component-output:"))
         );
         assert!(lines.iter().any(|l| l.starts_with("unused-server-action:")));
         assert!(lines.iter().any(|l| l.starts_with("unused-load-data-key:")));

@@ -20,6 +20,8 @@ export interface IssueTypeConfig {
   readonly "unused-load-data-key": boolean;
   readonly "unused-component-prop": boolean;
   readonly "unused-component-emit": boolean;
+  readonly "unused-component-input": boolean;
+  readonly "unused-component-output": boolean;
   readonly "unrendered-component": boolean;
   readonly "unprovided-inject": boolean;
   readonly "invalid-client-export": boolean;

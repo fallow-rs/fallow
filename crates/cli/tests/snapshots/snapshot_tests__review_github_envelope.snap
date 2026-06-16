@@ -4,10 +4,10 @@ expression: json_str
 ---
 {
   "event": "COMMENT",
-  "body": "### Fallow dead-code report\n\n24 inline findings selected for GitHub review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: a78073edbce3547d -->",
+  "body": "### Fallow dead-code report\n\n26 inline findings selected for GitHub review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: a71c249256520ee3 -->",
   "summary": {
-    "body": "### Fallow dead-code report\n\n24 inline findings selected for GitHub review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: a78073edbce3547d -->",
-    "fingerprint": "a78073edbce3547d"
+    "body": "### Fallow dead-code report\n\n26 inline findings selected for GitHub review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: a71c249256520ee3 -->",
+    "fingerprint": "a71c249256520ee3"
   },
   "comments": [
     {
@@ -170,6 +170,20 @@ expression: json_str
       "side": "RIGHT",
       "body": "**warn** `fallow/unprovided-inject`: inject\\(\\`THEME\\_KEY\\`\\) has no matching provide\\(\\`THEME\\_KEY\\`\\) in this project; at runtime it returns undefined \\(provide the key or remove this inject\\)\n\n<!-- fallow-fingerprint:v2: 82ebf4620cc2bba5 -->",
       "fingerprint": "82ebf4620cc2bba5"
+    },
+    {
+      "path": "src/user-card.component.ts",
+      "line": 12,
+      "side": "RIGHT",
+      "body": "**warn** `fallow/unused-component-input`: input \\`variant\\` is declared but referenced nowhere in component \\`UserCardComponent\\` \\(remove it or use it\\)\n\n<!-- fallow-fingerprint:v2: 43da4dfe078e4765 -->",
+      "fingerprint": "43da4dfe078e4765"
+    },
+    {
+      "path": "src/user-card.component.ts",
+      "line": 15,
+      "side": "RIGHT",
+      "body": "**warn** `fallow/unused-component-output`: output \\`selected\\` is declared but emitted nowhere in component \\`UserCardComponent\\` \\(remove it or emit it\\)\n\n<!-- fallow-fingerprint:v2: 48412c022e3ac5ab -->",
+      "fingerprint": "48412c022e3ac5ab"
     },
     {
       "path": "src/utils.ts",

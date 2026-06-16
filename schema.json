@@ -159,6 +159,8 @@
         "unrendered-components": "warn",
         "unused-component-props": "warn",
         "unused-component-emits": "warn",
+        "unused-component-inputs": "warn",
+        "unused-component-outputs": "warn",
         "unused-server-actions": "warn",
         "unused-load-data-keys": "warn",
         "prop-drilling": "off",
@@ -1052,6 +1054,16 @@
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
+        "unused-component-inputs": {
+          "description": "Angular `@Input()` / signal `input()` / `model()` declared input read\nnowhere inside its own component (neither the inline/external template nor\nthe class body). The single-file dead-input direction, the Angular\nanalogue of `unused-component-prop`. Defaults to `warn`, not `error`: an\ninput can be part of a deliberately-stable public component API, so\nanalyzer confidence is lower; warn encodes that without failing CI.",
+          "$ref": "#/$defs/Severity",
+          "default": "error"
+        },
+        "unused-component-outputs": {
+          "description": "Angular `@Output()` / signal `output()` declared output emitted nowhere\ninside its own component (no `this.<output>.emit(...)`). The single-file\ndead-output direction, the Angular analogue of `unused-component-emit`.\nDefaults to `warn`, not `error`: an output can be part of a\ndeliberately-stable public component API, so analyzer confidence is lower;\nwarn encodes that without failing CI.",
+          "$ref": "#/$defs/Severity",
+          "default": "error"
+        },
         "unused-server-actions": {
           "description": "Next.js Server Action (an export of a `\"use server\"` file) referenced by\nno code in the project: no import-and-call, no `action={fn}` binding, no\n`<form action={fn}>`. Cross-graph dead-export direction, reclassified out\nof `unused-export` for `\"use server\"` files. Defaults to `warn`, not\n`error`: the rule is new and false-negative-preferring, and reflective\naction-dispatch shapes can hide a real consumer; warn encodes that\nwithout failing CI until corpus-validated.",
           "$ref": "#/$defs/Severity",
@@ -1722,6 +1734,26 @@
           ]
         },
         "unused-component-emits": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unused-component-inputs": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unused-component-outputs": {
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"

@@ -72,6 +72,10 @@ def dependency_action(pkg):
     "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Unused component prop::Prop '\(.prop_name | san)' on component '\(.component_name | san)' is referenced nowhere in its own component (neither script nor template).\(nl)\(nl)Remove the prop, or use it. If it is part of a deliberately-stable public API, suppress this finding."),
   (.unused_component_emits[]? |
     "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Unused component emit::Emit '\(.emit_name | san)' on component '\(.component_name | san)' is emitted nowhere in its own component.\(nl)\(nl)Remove the emit, or emit it. If it is part of a deliberately-stable public API, suppress this finding."),
+  (.unused_component_inputs[]? |
+    "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Unused component input::Input '\(.input_name | san)' on component '\(.component_name | san)' is read nowhere in its own component (neither class body nor template).\(nl)\(nl)Remove the input, or use it. If it is part of a deliberately-stable public API, suppress this finding."),
+  (.unused_component_outputs[]? |
+    "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Unused component output::Output '\(.output_name | san)' on component '\(.component_name | san)' is emitted nowhere in its own component.\(nl)\(nl)Remove the output, or emit it. If it is part of a deliberately-stable public API, suppress this finding."),
   (.unprovided_injects[]? |
     "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Unprovided inject::\(.framework | san) inject for key '\(.key_name | san)' has no matching provider in the project.\(nl)\(nl)Add a provide/setContext for this key, or remove the dead inject."),
   (.unused_load_data_keys[]? |

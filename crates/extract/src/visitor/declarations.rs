@@ -93,6 +93,7 @@ impl ModuleInfoExtractor {
             return;
         };
         let is_angular = has_angular_class_decorator(class);
+        self.record_angular_inputs_outputs(class, is_angular);
         let members = extract_class_members(class, is_angular);
         let super_class = extract_super_class_name(class);
         let implemented_interfaces = extract_implemented_interface_names(class);

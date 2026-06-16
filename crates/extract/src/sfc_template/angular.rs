@@ -29,6 +29,14 @@ use super::scanners::{scan_curly_section, scan_html_tag};
 /// `self_accessed_members` set.
 pub const ANGULAR_TPL_SENTINEL: &str = "__angular_tpl__";
 
+/// Sentinel `object` for a `MemberAccess` recorded when a class body spreads
+/// `this` into an object literal (`{ ...this }`, the Angular "headless pattern"
+/// convention that forwards every signal input/output into a behavior pattern).
+/// The `unused-component-input` / `unused-component-output` detectors treat its
+/// presence as a whole-component abstain, since every member is consumed
+/// opaquely through the spread.
+pub const ANGULAR_THIS_SPREAD_SENTINEL: &str = "__angular_this_spread__";
+
 /// Result of scanning an Angular template for member references.
 #[derive(Debug, Default)]
 pub struct AngularTemplateRefs {

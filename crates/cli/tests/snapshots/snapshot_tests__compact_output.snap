@@ -21,6 +21,8 @@ re-export-cycle:src/api/index.ts:src/api/index.ts <-> src/api/internal/index.ts
 invalid-client-export:app/page.tsx:3:metadata (from "use client")
 mixed-client-server-barrel:app/components/index.ts:2:./Button (server-only "./fetchUser")
 unprovided-inject:src/useTheme.ts:5:THEME_KEY
+unused-component-input:src/user-card.component.ts:12:variant
+unused-component-output:src/user-card.component.ts:15:selected
 unused-catalog-entry:pnpm-workspace.yaml:6:default:is-even
 unused-catalog-entry:pnpm-workspace.yaml:12:legacy:old-thing
 empty-catalog-group:pnpm-workspace.yaml:10:react17
