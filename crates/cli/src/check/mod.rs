@@ -106,6 +106,14 @@ impl IssueFilters {
         if !self.any_active() {
             return;
         }
+        self.apply_core_filters(results);
+        self.apply_component_filters(results);
+        self.apply_graph_filters(results);
+        self.apply_policy_filters(results);
+        self.apply_catalog_filters(results);
+    }
+
+    fn apply_core_filters(&self, results: &mut fallow_core::results::AnalysisResults) {
         if !self.unused_files {
             results.unused_files.clear();
         }
@@ -134,6 +142,12 @@ impl IssueFilters {
         if !self.unused_store_members {
             results.unused_store_members.clear();
         }
+        if !self.unlisted_deps {
+            results.unlisted_dependencies.clear();
+        }
+    }
+
+    fn apply_component_filters(&self, results: &mut fallow_core::results::AnalysisResults) {
         if !self.unprovided_injects {
             results.unprovided_injects.clear();
         }
@@ -155,44 +169,6 @@ impl IssueFilters {
         if !self.unresolved_imports {
             results.unresolved_imports.clear();
         }
-        if !self.unlisted_deps {
-            results.unlisted_dependencies.clear();
-        }
-        if !self.duplicate_exports {
-            results.duplicate_exports.clear();
-        }
-        if !self.circular_deps {
-            results.circular_dependencies.clear();
-        }
-        if !self.re_export_cycles {
-            results.re_export_cycles.clear();
-        }
-        if !self.boundary_violations {
-            results.boundary_violations.clear();
-            results.boundary_coverage_violations.clear();
-            results.boundary_call_violations.clear();
-        }
-        if !self.policy_violations {
-            results.policy_violations.clear();
-        }
-        if !self.stale_suppressions {
-            results.stale_suppressions.clear();
-        }
-        if !self.unused_catalog_entries {
-            results.unused_catalog_entries.clear();
-        }
-        if !self.empty_catalog_groups {
-            results.empty_catalog_groups.clear();
-        }
-        if !self.unresolved_catalog_references {
-            results.unresolved_catalog_references.clear();
-        }
-        if !self.unused_dependency_overrides {
-            results.unused_dependency_overrides.clear();
-        }
-        if !self.misconfigured_dependency_overrides {
-            results.misconfigured_dependency_overrides.clear();
-        }
         if !self.invalid_client_exports {
             results.invalid_client_exports.clear();
         }
@@ -207,6 +183,50 @@ impl IssueFilters {
         }
         if !self.dynamic_segment_name_conflicts {
             results.dynamic_segment_name_conflicts.clear();
+        }
+    }
+
+    fn apply_graph_filters(&self, results: &mut fallow_core::results::AnalysisResults) {
+        if !self.duplicate_exports {
+            results.duplicate_exports.clear();
+        }
+        if !self.circular_deps {
+            results.circular_dependencies.clear();
+        }
+        if !self.re_export_cycles {
+            results.re_export_cycles.clear();
+        }
+        if !self.boundary_violations {
+            results.boundary_violations.clear();
+            results.boundary_coverage_violations.clear();
+            results.boundary_call_violations.clear();
+        }
+    }
+
+    fn apply_policy_filters(&self, results: &mut fallow_core::results::AnalysisResults) {
+        if !self.policy_violations {
+            results.policy_violations.clear();
+        }
+        if !self.stale_suppressions {
+            results.stale_suppressions.clear();
+        }
+    }
+
+    fn apply_catalog_filters(&self, results: &mut fallow_core::results::AnalysisResults) {
+        if !self.unused_catalog_entries {
+            results.unused_catalog_entries.clear();
+        }
+        if !self.empty_catalog_groups {
+            results.empty_catalog_groups.clear();
+        }
+        if !self.unresolved_catalog_references {
+            results.unresolved_catalog_references.clear();
+        }
+        if !self.unused_dependency_overrides {
+            results.unused_dependency_overrides.clear();
+        }
+        if !self.misconfigured_dependency_overrides {
+            results.misconfigured_dependency_overrides.clear();
         }
     }
 }
