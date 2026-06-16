@@ -854,6 +854,12 @@ impl BaselineFilterContext<'_> {
     }
 
     fn filter_unused_members(&self, results: &mut fallow_core::results::AnalysisResults) {
+        self.filter_enum_class_store_members(results);
+        self.filter_component_surface_members(results);
+        self.filter_route_action_members(results);
+    }
+
+    fn filter_enum_class_store_members(&self, results: &mut fallow_core::results::AnalysisResults) {
         let baseline_enum_members: FxHashSet<&str> = self
             .baseline
             .unused_enum_members
@@ -901,7 +907,12 @@ impl BaselineFilterContext<'_> {
             );
             !baseline_store_members.contains(key.as_str())
         });
+    }
 
+    fn filter_component_surface_members(
+        &self,
+        results: &mut fallow_core::results::AnalysisResults,
+    ) {
         let baseline_unprovided_injects: FxHashSet<&str> = self
             .baseline
             .unprovided_injects
@@ -961,7 +972,9 @@ impl BaselineFilterContext<'_> {
             );
             !baseline_unused_component_emits.contains(key.as_str())
         });
+    }
 
+    fn filter_route_action_members(&self, results: &mut fallow_core::results::AnalysisResults) {
         let baseline_unused_server_actions: FxHashSet<&str> = self
             .baseline
             .unused_server_actions
