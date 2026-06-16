@@ -44,6 +44,25 @@ pub(super) struct FileScoreOutput {
     pub template_inherit_provenance: rustc_hash::FxHashMap<std::path::PathBuf, std::path::PathBuf>,
 }
 
+struct FileScoreOutputParts<'a> {
+    graph: &'a fallow_core::graph::ModuleGraph,
+    file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
+    results: &'a fallow_core::results::AnalysisResults,
+    scores: Vec<FileHealthScore>,
+    coverage: CoverageGapData,
+    circular_files: rustc_hash::FxHashSet<std::path::PathBuf>,
+    top_complex_fns: rustc_hash::FxHashMap<std::path::PathBuf, Vec<(String, u32, u16)>>,
+    entry_points: rustc_hash::FxHashSet<std::path::PathBuf>,
+    value_export_counts: rustc_hash::FxHashMap<std::path::PathBuf, usize>,
+    unused_export_names: rustc_hash::FxHashMap<std::path::PathBuf, Vec<String>>,
+    cycle_members: rustc_hash::FxHashMap<std::path::PathBuf, Vec<std::path::PathBuf>>,
+    direct_callers: rustc_hash::FxHashMap<std::path::PathBuf, Vec<DirectCallerEvidence>>,
+    istanbul_matched: usize,
+    istanbul_total: usize,
+    per_function_crap: rustc_hash::FxHashMap<std::path::PathBuf, Vec<PerFunctionCrap>>,
+    template_inherit: rustc_hash::FxHashMap<fallow_core::discover::FileId, TemplateInheritContext>,
+}
+
 /// Per-path snapshot of analysis-pipeline findings, retained alongside the
 /// pre-aggregated `analysis_counts` so that workspace- or group-scoped runs
 /// can recompute counts without re-running the full pipeline.
@@ -1256,17 +1275,10 @@ pub(super) fn compute_file_scores(
 
     scores.sort_by(compare_file_score_triage);
 
-    let total_exports: usize = graph.modules.iter().map(|m| m.exports.len()).sum();
-    let dead_exports = results.unused_exports.len() + results.unused_types.len();
-    let unused_deps = results.unused_dependencies.len()
-        + results.unused_dev_dependencies.len()
-        + results.unused_optional_dependencies.len();
-    let total_deps = 0usize;
-
-    let analysis_snapshot =
-        build_analysis_counts_snapshot(&graph, file_paths, results, unused_deps);
-
-    Ok(FileScoreOutput {
+    Ok(build_file_score_output(FileScoreOutputParts {
+        graph: &graph,
+        file_paths,
+        results,
         scores,
         coverage,
         circular_files,
@@ -1276,27 +1288,71 @@ pub(super) fn compute_file_scores(
         unused_export_names,
         cycle_members,
         direct_callers,
-        analysis_counts: crate::vital_signs::AnalysisCounts {
-            total_exports,
-            dead_files: results.unused_files.len(),
-            dead_exports,
-            unused_deps,
-            circular_deps: results.circular_dependencies.len(),
-            total_deps,
-        },
-        analysis_snapshot,
         istanbul_matched,
         istanbul_total,
         per_function_crap,
-        template_inherit_provenance: template_inherit
-            .into_iter()
-            .filter_map(|(file_id, ctx)| {
-                file_paths
-                    .get(&file_id)
-                    .map(|p| ((**p).clone(), ctx.provenance_owner))
-            })
-            .collect(),
-    })
+        template_inherit,
+    }))
+}
+
+fn build_file_score_output(parts: FileScoreOutputParts<'_>) -> FileScoreOutput {
+    let total_exports: usize = parts.graph.modules.iter().map(|m| m.exports.len()).sum();
+    let unused_deps = parts.results.unused_dependencies.len()
+        + parts.results.unused_dev_dependencies.len()
+        + parts.results.unused_optional_dependencies.len();
+    let analysis_snapshot =
+        build_analysis_counts_snapshot(parts.graph, parts.file_paths, parts.results, unused_deps);
+    let analysis_counts =
+        build_file_score_analysis_counts(parts.results, total_exports, unused_deps);
+    let template_inherit_provenance =
+        build_template_inherit_provenance(parts.template_inherit, parts.file_paths);
+
+    FileScoreOutput {
+        scores: parts.scores,
+        coverage: parts.coverage,
+        circular_files: parts.circular_files,
+        top_complex_fns: parts.top_complex_fns,
+        entry_points: parts.entry_points,
+        value_export_counts: parts.value_export_counts,
+        unused_export_names: parts.unused_export_names,
+        cycle_members: parts.cycle_members,
+        direct_callers: parts.direct_callers,
+        analysis_counts,
+        analysis_snapshot,
+        istanbul_matched: parts.istanbul_matched,
+        istanbul_total: parts.istanbul_total,
+        per_function_crap: parts.per_function_crap,
+        template_inherit_provenance,
+    }
+}
+
+fn build_file_score_analysis_counts(
+    results: &fallow_core::results::AnalysisResults,
+    total_exports: usize,
+    unused_deps: usize,
+) -> crate::vital_signs::AnalysisCounts {
+    crate::vital_signs::AnalysisCounts {
+        total_exports,
+        dead_files: results.unused_files.len(),
+        dead_exports: results.unused_exports.len() + results.unused_types.len(),
+        unused_deps,
+        circular_deps: results.circular_dependencies.len(),
+        total_deps: 0usize,
+    }
+}
+
+fn build_template_inherit_provenance(
+    template_inherit: rustc_hash::FxHashMap<fallow_core::discover::FileId, TemplateInheritContext>,
+    file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
+) -> rustc_hash::FxHashMap<std::path::PathBuf, std::path::PathBuf> {
+    template_inherit
+        .into_iter()
+        .filter_map(|(file_id, ctx)| {
+            file_paths
+                .get(&file_id)
+                .map(|path| ((**path).clone(), ctx.provenance_owner))
+        })
+        .collect()
 }
 
 fn record_entry_point(
