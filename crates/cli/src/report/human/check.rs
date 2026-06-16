@@ -1727,6 +1727,26 @@ fn build_dir_rollup_section(
     let level = severity_to_level(rules.unused_files);
     lines.push(build_section_header(title, unused_files.len(), level));
 
+    let dir_counts = unused_file_dir_counts(unused_files, root);
+
+    let total = unused_files.len();
+    let dominant = dir_counts
+        .iter()
+        .find(|(_, count, is_dir)| *is_dir && count * 100 / total.max(1) > 80)
+        .map(|(dir, _, _)| dir.clone());
+
+    let display_entries =
+        unused_file_display_entries(unused_files, root, &dir_counts, dominant.as_deref());
+
+    render_dir_rollup_entries(lines, &display_entries, total_issues);
+    push_section_footer_rollup(lines, title, unused_files.len());
+    lines.push(String::new());
+}
+
+fn unused_file_dir_counts(
+    unused_files: &[fallow_types::output_dead_code::UnusedFileFinding],
+    root: &Path,
+) -> Vec<(String, usize, bool)> {
     let mut dir_counts: Vec<(String, usize, bool)> = Vec::new();
     let mut dir_map: FxHashMap<String, usize> = FxHashMap::default();
     for f in unused_files {
@@ -1750,47 +1770,55 @@ fn build_dir_rollup_section(
         }
     }
     dir_counts.sort_by_key(|b| std::cmp::Reverse(b.1));
+    dir_counts
+}
 
-    let total = unused_files.len();
-    let dominant = dir_counts
-        .iter()
-        .find(|(_, count, is_dir)| *is_dir && count * 100 / total.max(1) > 80)
-        .map(|(dir, _, _)| dir.clone());
-
-    let display_entries: Vec<(String, usize, bool)> = if let Some(ref dom_dir) = dominant {
-        let mut sub_counts: Vec<(String, usize, bool)> = Vec::new();
-        let mut sub_map: FxHashMap<String, usize> = FxHashMap::default();
-        for f in unused_files {
-            let rel = relative_path(&f.file.path, root);
-            let mut components = rel.components();
-            let first = components
-                .next()
-                .map(|c| c.as_os_str().to_string_lossy().to_string());
-            if first.as_deref() == Some(dom_dir.as_str()) {
-                let sub_key = components.next().map_or_else(
-                    || dom_dir.clone(),
-                    |c| format!("{}/{}", dom_dir, c.as_os_str().to_string_lossy()),
-                );
-                if let Some(&idx) = sub_map.get(&sub_key) {
-                    sub_counts[idx].1 += 1;
-                } else {
-                    sub_map.insert(sub_key.clone(), sub_counts.len());
-                    sub_counts.push((sub_key, 1, true));
-                }
-            }
-        }
-        sub_counts.sort_by_key(|b| std::cmp::Reverse(b.1));
-        let mut combined = sub_counts;
-        for entry in &dir_counts {
-            if entry.0 != *dom_dir {
-                combined.push(entry.clone());
-            }
-        }
-        combined
-    } else {
-        dir_counts.clone()
+fn unused_file_display_entries(
+    unused_files: &[fallow_types::output_dead_code::UnusedFileFinding],
+    root: &Path,
+    dir_counts: &[(String, usize, bool)],
+    dominant: Option<&str>,
+) -> Vec<(String, usize, bool)> {
+    let Some(dom_dir) = dominant else {
+        return dir_counts.to_vec();
     };
 
+    let mut sub_counts: Vec<(String, usize, bool)> = Vec::new();
+    let mut sub_map: FxHashMap<String, usize> = FxHashMap::default();
+    for f in unused_files {
+        let rel = relative_path(&f.file.path, root);
+        let mut components = rel.components();
+        let first = components
+            .next()
+            .map(|c| c.as_os_str().to_string_lossy().to_string());
+        if first.as_deref() == Some(dom_dir) {
+            let sub_key = components.next().map_or_else(
+                || dom_dir.to_string(),
+                |c| format!("{}/{}", dom_dir, c.as_os_str().to_string_lossy()),
+            );
+            if let Some(&idx) = sub_map.get(&sub_key) {
+                sub_counts[idx].1 += 1;
+            } else {
+                sub_map.insert(sub_key.clone(), sub_counts.len());
+                sub_counts.push((sub_key, 1, true));
+            }
+        }
+    }
+    sub_counts.sort_by_key(|b| std::cmp::Reverse(b.1));
+    let mut combined = sub_counts;
+    for entry in dir_counts {
+        if entry.0 != dom_dir {
+            combined.push(entry.clone());
+        }
+    }
+    combined
+}
+
+fn render_dir_rollup_entries(
+    lines: &mut Vec<String>,
+    display_entries: &[(String, usize, bool)],
+    total_issues: usize,
+) {
     let shown = display_entries.len().min(MAX_FLAT_ITEMS);
     for (dir, count, is_dir) in &display_entries[..shown] {
         let label = if *is_dir {
@@ -1804,7 +1832,7 @@ fn build_dir_rollup_section(
         let remaining = display_entries.len() - MAX_FLAT_ITEMS;
         let hint = if remaining > SCOPING_HINT_THRESHOLD || total_issues > SCOPING_HINT_THRESHOLD {
             format!(
-                "... and {remaining} more director{} \u{2014} try --workspace <name> or --changed-since main to scope",
+                "... and {remaining} more director{}, try --workspace <name> or --changed-since main to scope",
                 if remaining == 1 { "y" } else { "ies" }
             )
         } else {
@@ -1815,8 +1843,6 @@ fn build_dir_rollup_section(
         };
         lines.push(format!("  {}", hint.dimmed()));
     }
-    push_section_footer_rollup(lines, title, unused_files.len());
-    lines.push(String::new());
 }
 
 /// Append a non-empty section with a header, doc-link footer, and truncated items.
