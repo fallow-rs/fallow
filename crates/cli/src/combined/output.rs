@@ -32,6 +32,32 @@ pub(super) fn print_combined_report(
     let resolver =
         crate::build_ownership_resolver(opts.group_by, opts.root, codeowners_cfg, opts.output)?;
 
+    if let Some(code) = print_machine_combined_report(
+        opts,
+        check_result,
+        dupes_result,
+        health_result,
+        total_elapsed,
+    )? {
+        return Ok(code);
+    }
+
+    Ok(print_human_sections(
+        opts,
+        check_result,
+        dupes_result,
+        health_result,
+        resolver,
+    ))
+}
+
+fn print_machine_combined_report(
+    opts: &CombinedOptions<'_>,
+    check_result: Option<&CheckResult>,
+    dupes_result: Option<&DupesResult>,
+    health_result: Option<&HealthResult>,
+    total_elapsed: std::time::Duration,
+) -> Result<Option<u8>, ExitCode> {
     match opts.output {
         OutputFormat::Json => {
             let code = print_combined_json(
@@ -47,18 +73,21 @@ pub(super) fn print_combined_report(
             if code != ExitCode::SUCCESS {
                 return Err(code);
             }
+            Ok(Some(0))
         }
         OutputFormat::Sarif => {
             let code = print_combined_sarif(check_result, dupes_result, health_result);
             if code != ExitCode::SUCCESS {
                 return Err(code);
             }
+            Ok(Some(0))
         }
         OutputFormat::CodeClimate => {
             let code = print_combined_codeclimate(check_result, dupes_result, health_result);
             if code != ExitCode::SUCCESS {
                 return Err(code);
             }
+            Ok(Some(0))
         }
         OutputFormat::PrCommentGithub => {
             let issues =
@@ -71,6 +100,7 @@ pub(super) fn print_combined_report(
             if code != ExitCode::SUCCESS {
                 return Err(code);
             }
+            Ok(Some(0))
         }
         OutputFormat::PrCommentGitlab => {
             let issues =
@@ -83,6 +113,7 @@ pub(super) fn print_combined_report(
             if code != ExitCode::SUCCESS {
                 return Err(code);
             }
+            Ok(Some(0))
         }
         OutputFormat::ReviewGithub => {
             let issues =
@@ -95,6 +126,7 @@ pub(super) fn print_combined_report(
             if code != ExitCode::SUCCESS {
                 return Err(code);
             }
+            Ok(Some(0))
         }
         OutputFormat::ReviewGitlab => {
             let issues =
@@ -107,18 +139,10 @@ pub(super) fn print_combined_report(
             if code != ExitCode::SUCCESS {
                 return Err(code);
             }
+            Ok(Some(0))
         }
-        _ => {
-            return Ok(print_human_sections(
-                opts,
-                check_result,
-                dupes_result,
-                health_result,
-                resolver,
-            ));
-        }
+        _ => Ok(None),
     }
-    Ok(0)
 }
 
 /// Print human/compact/markdown sections with optional section headers.
