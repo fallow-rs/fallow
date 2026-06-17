@@ -13,7 +13,7 @@ description = "CodSpeed benchmark suites for fallow"
 name = "programmatic_commands"
 harness = false
 
-[dependencies]
+[dev-dependencies]
 divan = { workspace = true }
 fallow-cli = { workspace = true }
 tempfile = { workspace = true }
