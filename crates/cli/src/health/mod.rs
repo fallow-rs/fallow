@@ -2070,33 +2070,37 @@ fn project_uses_tailwind_plugin(any_plugin_directive: bool, root: &std::path::Pa
 ///
 /// The usage test is false-negative-leaning by design: every check CREDITS usage,
 /// so a genuinely-dead token is missed before a live one is flagged.
+struct UnusedThemeTokenScanInput<'a> {
+    tokens: &'a CssTokenSets,
+    files: &'a [fallow_types::discover::DiscoveredFile],
+    config: &'a ResolvedConfig,
+    ignore_set: &'a globset::GlobSet,
+    changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
+    ws_roots: Option<&'a [std::path::PathBuf]>,
+    summary: &'a mut crate::health_types::CssAnalyticsSummary,
+}
+
 fn scan_unused_theme_tokens(
-    tokens: &CssTokenSets,
-    files: &[fallow_types::discover::DiscoveredFile],
-    config: &ResolvedConfig,
-    ignore_set: &globset::GlobSet,
-    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
-    ws_roots: Option<&[std::path::PathBuf]>,
-    summary: &mut crate::health_types::CssAnalyticsSummary,
+    input: UnusedThemeTokenScanInput<'_>,
 ) -> Vec<crate::health_types::UnusedThemeToken> {
     use crate::health_types::{CssCandidateAction, UnusedThemeToken};
 
     // Partial scope cannot prove a token dead.
-    if changed_files.is_some() || ws_roots.is_some() {
+    if input.changed_files.is_some() || input.ws_roots.is_some() {
         return Vec::new();
     }
     // v4 gate: a Tailwind dependency AND at least one @theme token present.
-    if tokens.theme_token_definers.is_empty() || !project_uses_tailwind(&config.root) {
+    if input.tokens.theme_token_definers.is_empty() || !project_uses_tailwind(&input.config.root) {
         return Vec::new();
     }
     // Tailwind-plugin abstain (DI blind spot).
-    if project_uses_tailwind_plugin(tokens.any_plugin_directive, &config.root) {
+    if project_uses_tailwind_plugin(input.tokens.any_plugin_directive, &input.config.root) {
         return Vec::new();
     }
 
     // Classify candidate tokens; drop variant namespaces, published-library
     // stylesheets, and anything that does not match a known namespace.
-    let published = published_css_paths(config);
+    let published = published_css_paths(input.config);
     struct Candidate {
         token: String,
         namespace: String,
@@ -2105,7 +2109,7 @@ fn scan_unused_theme_tokens(
         line: u32,
     }
     let mut candidates: Vec<Candidate> = Vec::new();
-    for (raw, (path, line)) in &tokens.theme_token_definers {
+    for (raw, (path, line)) in &input.tokens.theme_token_definers {
         if published.contains(path) {
             continue;
         }
@@ -2124,7 +2128,7 @@ fn scan_unused_theme_tokens(
         });
     }
     if candidates.is_empty() {
-        summary.unused_theme_tokens = 0;
+        input.summary.unused_theme_tokens = 0;
         return Vec::new();
     }
 
@@ -2132,17 +2136,17 @@ fn scan_unused_theme_tokens(
     // and from non-CSS source (markup class attributes, `clsx` args, CSS-in-JS),
     // plus the `var()` reads (CSS-side, including `@theme` interiors).
     let mut utility_tokens: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
-    for apply in &tokens.apply_tokens {
+    for apply in &input.tokens.apply_tokens {
         collect_class_shaped_tokens(apply, &mut utility_tokens);
     }
-    for file in files {
+    for file in input.files {
         let path = &file.path;
         let extension = path.extension().and_then(|ext| ext.to_str());
         if !extension.is_some_and(|ext| THEME_USAGE_SOURCE_EXTS.contains(&ext)) {
             continue;
         }
-        let relative = path.strip_prefix(&config.root).unwrap_or(path);
-        if ignore_set.is_match(relative) {
+        let relative = path.strip_prefix(&input.config.root).unwrap_or(path);
+        if input.ignore_set.is_match(relative) {
             continue;
         }
         if let Ok(source) = std::fs::read_to_string(path) {
@@ -2150,8 +2154,8 @@ fn scan_unused_theme_tokens(
         }
     }
 
-    let mut var_reads: rustc_hash::FxHashSet<String> = tokens.theme_var_reads.clone();
-    for referenced in &tokens.referenced_custom_props {
+    let mut var_reads: rustc_hash::FxHashSet<String> = input.tokens.theme_var_reads.clone();
+    for referenced in &input.tokens.referenced_custom_props {
         var_reads.insert(referenced.trim_start_matches('-').to_owned());
     }
 
@@ -2185,7 +2189,7 @@ fn scan_unused_theme_tokens(
             .then_with(|| a.line.cmp(&b.line))
             .then_with(|| a.token.cmp(&b.token))
     });
-    summary.unused_theme_tokens = saturate_len(out.len());
+    input.summary.unused_theme_tokens = saturate_len(out.len());
     out
 }
 
@@ -2243,15 +2247,15 @@ fn scan_markup_css_candidates(input: MarkupCssCandidateInput<'_>) -> MarkupCssCa
         ),
         // Tailwind v4 @theme design tokens used by no utility / var() / @apply
         // anywhere (heavily gated: v4 + non-plugin + non-published + whole-scope).
-        unused_theme_tokens: scan_unused_theme_tokens(
-            input.tokens,
-            input.files,
-            input.config,
-            input.ignore_set,
-            input.changed_files,
-            input.ws_roots,
-            input.summary,
-        ),
+        unused_theme_tokens: scan_unused_theme_tokens(UnusedThemeTokenScanInput {
+            tokens: input.tokens,
+            files: input.files,
+            config: input.config,
+            ignore_set: input.ignore_set,
+            changed_files: input.changed_files,
+            ws_roots: input.ws_roots,
+            summary: input.summary,
+        }),
     }
 }
 
