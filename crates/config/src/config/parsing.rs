@@ -470,15 +470,15 @@ fn resolve_extends_file(
     let mut merged = serde_json::Value::Object(serde_json::Map::new());
 
     for extend_path_str in &extends {
-        let base = resolve_extends_file_entry(
+        let base = resolve_extends_file_entry(ExtendsFileEntryInput {
             path,
             config_dir,
-            extend_path_str,
+            entry: extend_path_str,
             sealed,
-            sealed_dir_canonical.as_deref(),
+            sealed_dir_canonical: sealed_dir_canonical.as_deref(),
             visited,
             depth,
-        )?;
+        })?;
         deep_merge_json(&mut merged, base);
     }
 
@@ -520,39 +520,43 @@ fn sealed_config_dir(config_dir: &Path, sealed: bool) -> Result<Option<PathBuf>,
     })
 }
 
-fn resolve_extends_file_entry(
-    path: &Path,
-    config_dir: &Path,
-    entry: &str,
+struct ExtendsFileEntryInput<'a> {
+    path: &'a Path,
+    config_dir: &'a Path,
+    entry: &'a str,
     sealed: bool,
-    sealed_dir_canonical: Option<&Path>,
-    visited: &mut FxHashSet<String>,
+    sealed_dir_canonical: Option<&'a Path>,
+    visited: &'a mut FxHashSet<String>,
     depth: usize,
+}
+
+fn resolve_extends_file_entry(
+    input: ExtendsFileEntryInput<'_>,
 ) -> Result<serde_json::Value, miette::Report> {
-    if entry.starts_with(HTTPS_PREFIX) {
-        reject_sealed_remote_extends(path, entry, sealed, "URL")?;
-        return resolve_url_extends(entry, visited, depth + 1);
+    if input.entry.starts_with(HTTPS_PREFIX) {
+        reject_sealed_remote_extends(input.path, input.entry, input.sealed, "URL")?;
+        return resolve_url_extends(input.entry, input.visited, input.depth + 1);
     }
-    if entry.starts_with(HTTP_PREFIX) {
+    if input.entry.starts_with(HTTP_PREFIX) {
         return Err(miette::miette!(
             "URL extends must use https://, got http:// URL '{}' (in {}). \
              Change the URL to use https:// instead",
-            entry,
-            path.display()
+            input.entry,
+            input.path.display()
         ));
     }
-    if let Some(npm_specifier) = entry.strip_prefix(NPM_PREFIX) {
-        reject_sealed_remote_extends(path, entry, sealed, "npm")?;
-        let npm_path = resolve_npm_package(config_dir, npm_specifier, path)?;
-        return resolve_extends_file(&npm_path, visited, depth + 1);
+    if let Some(npm_specifier) = input.entry.strip_prefix(NPM_PREFIX) {
+        reject_sealed_remote_extends(input.path, input.entry, input.sealed, "npm")?;
+        let npm_path = resolve_npm_package(input.config_dir, npm_specifier, input.path)?;
+        return resolve_extends_file(&npm_path, input.visited, input.depth + 1);
     }
     resolve_relative_extends_file(
-        path,
-        config_dir,
-        entry,
-        sealed_dir_canonical,
-        visited,
-        depth,
+        input.path,
+        input.config_dir,
+        input.entry,
+        input.sealed_dir_canonical,
+        input.visited,
+        input.depth,
     )
 }
 
