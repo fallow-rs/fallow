@@ -1262,20 +1262,20 @@ pub(super) fn compute_file_scores(
         istanbul_total += crap.istanbul_total;
         record_per_function_crap(&mut per_function_crap, &path_owned, crap.per_function);
 
-        scores.push(build_file_health_score(
-            path_owned,
+        scores.push(FileHealthScore {
+            path: path_owned,
             fan_in,
             fan_out,
-            dead_code_ratio_rounded,
-            complexity_density_rounded,
-            maintainability_index,
+            dead_code_ratio: dead_code_ratio_rounded,
+            complexity_density: complexity_density_rounded,
+            maintainability_index: (maintainability_index * 10.0).round() / 10.0,
             total_cyclomatic,
             total_cognitive,
             function_count,
             lines,
-            crap.max,
-            crap.above_threshold,
-        ));
+            crap_max: crap.max,
+            crap_above_threshold: crap.above_threshold,
+        });
     }
 
     if let Some(changed) = changed_files {
@@ -1515,40 +1515,6 @@ fn record_per_function_crap(
 ) {
     if !per_function.is_empty() {
         per_function_crap.insert(path.to_path_buf(), per_function);
-    }
-}
-
-#[expect(
-    clippy::too_many_arguments,
-    reason = "constructs a typed score row from already named per-file metrics"
-)]
-fn build_file_health_score(
-    path: std::path::PathBuf,
-    fan_in: usize,
-    fan_out: usize,
-    dead_code_ratio: f64,
-    complexity_density: f64,
-    maintainability_index: f64,
-    total_cyclomatic: u32,
-    total_cognitive: u32,
-    function_count: usize,
-    lines: u32,
-    crap_max: f64,
-    crap_above_threshold: usize,
-) -> FileHealthScore {
-    FileHealthScore {
-        path,
-        fan_in,
-        fan_out,
-        dead_code_ratio,
-        complexity_density,
-        maintainability_index: (maintainability_index * 10.0).round() / 10.0,
-        total_cyclomatic,
-        total_cognitive,
-        function_count,
-        lines,
-        crap_max,
-        crap_above_threshold,
     }
 }
 
