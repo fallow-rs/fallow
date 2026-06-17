@@ -527,38 +527,42 @@ pub(super) fn export_key_with_origins(graph: &ModuleGraph, key: &ExportKey) -> V
 /// binding resolves to; the member is credited on every class implementing any
 /// candidate interface (and directly on the resolved export, harmless for a
 /// memberless token const).
-fn credit_angular_token_chain_member<'a>(
-    graph: &ModuleGraph,
+struct AngularTokenChainCreditInput<'a, 'b> {
+    graph: &'a ModuleGraph,
     type_name: &'a str,
-    member: &str,
-    local_to_export_keys: &FxHashMap<&str, Vec<ExportKey>>,
-    token_to_interface: &FxHashMap<ExportKey, &'a str>,
-    implementers_by_name: &FxHashMap<&'a str, Vec<ExportKey>>,
-    accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
-) {
-    let mut interface_names: Vec<&str> = vec![type_name];
-    if let Some(export_keys) = local_to_export_keys.get(type_name) {
+    member: &'a str,
+    local_to_export_keys: &'a FxHashMap<&'b str, Vec<ExportKey>>,
+    token_to_interface: &'a FxHashMap<ExportKey, &'a str>,
+    implementers_by_name: &'a FxHashMap<&'a str, Vec<ExportKey>>,
+    accessed_members: &'a mut FxHashMap<ExportKey, FxHashSet<String>>,
+}
+
+fn credit_angular_token_chain_member(input: AngularTokenChainCreditInput<'_, '_>) {
+    let mut interface_names: Vec<&str> = vec![input.type_name];
+    if let Some(export_keys) = input.local_to_export_keys.get(input.type_name) {
         for export_key in export_keys {
-            accessed_members
+            input
+                .accessed_members
                 .entry(export_key.clone())
                 .or_default()
-                .insert(member.to_string());
-            for resolved in export_key_with_origins(graph, export_key) {
-                if let Some(interface) = token_to_interface.get(&resolved) {
+                .insert(input.member.to_string());
+            for resolved in export_key_with_origins(input.graph, export_key) {
+                if let Some(interface) = input.token_to_interface.get(&resolved) {
                     interface_names.push(interface);
                 }
             }
         }
     }
     for interface in interface_names {
-        let Some(implementers) = implementers_by_name.get(interface) else {
+        let Some(implementers) = input.implementers_by_name.get(interface) else {
             continue;
         };
         for implementer_key in implementers {
-            accessed_members
+            input
+                .accessed_members
                 .entry(implementer_key.clone())
                 .or_default()
-                .insert(member.to_string());
+                .insert(input.member.to_string());
         }
     }
 }
@@ -804,15 +808,15 @@ impl<'a> AngularTemplateChainContext<'a, '_> {
             let Some(type_name) = component.component_bindings.get(object) else {
                 continue;
             };
-            credit_angular_token_chain_member(
-                self.graph,
+            credit_angular_token_chain_member(AngularTokenChainCreditInput {
+                graph: self.graph,
                 type_name,
                 member,
-                &component.local_to_export_keys,
-                self.token_to_interface,
-                self.implementers_by_name,
-                self.accessed_members,
-            );
+                local_to_export_keys: &component.local_to_export_keys,
+                token_to_interface: self.token_to_interface,
+                implementers_by_name: self.implementers_by_name,
+                accessed_members: self.accessed_members,
+            });
         }
     }
 
