@@ -578,22 +578,24 @@ impl NamedPkgDep for TestOnlyDependencyFinding {
     }
 }
 
-fn push_human_pkg_dep_section<T: NamedPkgDep>(
-    lines: &mut Vec<String>,
-    items: &[T],
+struct HumanPkgDepSectionInput<'a, T> {
+    lines: &'a mut Vec<String>,
+    items: &'a [T],
     title: &'static str,
     severity: Severity,
     max_items: usize,
     total_issues: usize,
-    root: &Path,
-) {
+    root: &'a Path,
+}
+
+fn push_human_pkg_dep_section<T: NamedPkgDep>(input: HumanPkgDepSectionInput<'_, T>) {
     build_human_section_ex(
-        lines,
-        items,
-        title,
-        severity_to_level(severity),
-        max_items,
-        total_issues,
+        input.lines,
+        input.items,
+        input.title,
+        severity_to_level(input.severity),
+        input.max_items,
+        input.total_issues,
         |dep| {
             vec![format!(
                 "  {}",
@@ -601,7 +603,7 @@ fn push_human_pkg_dep_section<T: NamedPkgDep>(
                     dep.pkg_name(),
                     dep.pkg_path(),
                     dep.used_in_workspaces(),
-                    root
+                    input.root
                 )
             )]
         },
@@ -840,33 +842,33 @@ fn push_package_dependency_sections(
     max_items: usize,
     total_issues: usize,
 ) {
-    push_human_pkg_dep_section(
+    push_human_pkg_dep_section(HumanPkgDepSectionInput {
         lines,
-        &results.unused_dependencies,
-        "Unused dependencies",
-        rules.unused_dependencies,
+        items: &results.unused_dependencies,
+        title: "Unused dependencies",
+        severity: rules.unused_dependencies,
         max_items,
         total_issues,
         root,
-    );
-    push_human_pkg_dep_section(
+    });
+    push_human_pkg_dep_section(HumanPkgDepSectionInput {
         lines,
-        &results.unused_dev_dependencies,
-        "Unused devDependencies",
-        rules.unused_dev_dependencies,
+        items: &results.unused_dev_dependencies,
+        title: "Unused devDependencies",
+        severity: rules.unused_dev_dependencies,
         max_items,
         total_issues,
         root,
-    );
-    push_human_pkg_dep_section(
+    });
+    push_human_pkg_dep_section(HumanPkgDepSectionInput {
         lines,
-        &results.unused_optional_dependencies,
-        "Unused optionalDependencies",
-        rules.unused_optional_dependencies,
+        items: &results.unused_optional_dependencies,
+        title: "Unused optionalDependencies",
+        severity: rules.unused_optional_dependencies,
         max_items,
         total_issues,
         root,
-    );
+    });
 }
 
 struct ImportDependencySectionInput<'a> {
@@ -915,24 +917,24 @@ fn push_import_dependency_sections(input: ImportDependencySectionInput<'_>) {
         total_issues,
         |dep| vec![format!("  {}", dep.dep.package_name.bold())],
     );
-    push_human_pkg_dep_section(
+    push_human_pkg_dep_section(HumanPkgDepSectionInput {
         lines,
-        &results.type_only_dependencies,
-        "Type-only dependencies (consider moving to devDependencies)",
-        rules.type_only_dependencies,
+        items: &results.type_only_dependencies,
+        title: "Type-only dependencies (consider moving to devDependencies)",
+        severity: rules.type_only_dependencies,
         max_items,
         total_issues,
         root,
-    );
-    push_human_pkg_dep_section(
+    });
+    push_human_pkg_dep_section(HumanPkgDepSectionInput {
         lines,
-        &results.test_only_dependencies,
-        "Test-only production dependencies (consider moving to devDependencies)",
-        rules.test_only_dependencies,
+        items: &results.test_only_dependencies,
+        title: "Test-only production dependencies (consider moving to devDependencies)",
+        severity: rules.test_only_dependencies,
         max_items,
         total_issues,
         root,
-    );
+    });
 }
 
 fn push_catalog_dependency_sections(
