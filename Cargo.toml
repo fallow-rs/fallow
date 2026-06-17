@@ -95,7 +95,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "io-st
 notify = "8"
 
 # Testing
-divan = { package = "codspeed-divan-compat", version = "4.7" }
+criterion2 = { version = "3.0.3", default-features = false }
 dhat = "0.3"
 insta = { version = "1", features = ["yaml"] }
 proptest = "1"
@@ -114,7 +114,7 @@ pedantic = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
 cargo = { level = "warn", priority = -1 }
 
-# Restriction lints — catch common mistakes and enforce discipline
+# Restriction lints, catch common mistakes and enforce discipline
 dbg_macro = "warn"
 todo = "warn"
 print_stdout = "warn"
@@ -137,7 +137,7 @@ pathbuf_init_then_push = "warn"         # Use PathBuf::from() directly
 excessive_nesting = "warn"              # Catch deeply nested control flow (threshold in .clippy.toml)
 allow_attributes_without_reason = "warn" # Force reason on #[allow] to catch unjustified suppressions
 unimplemented = "warn"                  # Catch leftover unimplemented!() calls
-filetype_is_file = "warn"               # FileType::is_file() misses symlinks — use !is_dir()
+filetype_is_file = "warn"               # FileType::is_file() misses symlinks, use !is_dir()
 rest_pat_in_fully_bound_structs = "warn" # Catch `..` in patterns where all fields are already bound
 pub_underscore_fields = "warn"           # Catch accidentally public _-prefixed fields
 non_zero_suggestions = "warn"            # Suggest NonZero types for naturally non-zero values
@@ -165,7 +165,7 @@ cast_possible_truncation = "allow"
 cast_sign_loss = "allow"
 cast_precision_loss = "allow"
 cast_possible_wrap = "allow"
-too_many_lines = "warn"                 # SIG unit size — threshold in .clippy.toml
+too_many_lines = "warn"                 # SIG unit size, threshold in .clippy.toml
 items_after_statements = "allow"
 single_match_else = "allow"
 if_not_else = "allow"
@@ -226,7 +226,7 @@ lto = true
 codegen-units = 1
 strip = "symbols"
 opt-level = 3
-panic = "abort"                         # Smaller binary — no unwind tables needed
+panic = "abort"                         # Smaller binary, no unwind tables needed
 
 # Profile-with-debug: release-equivalent codegen + debuginfo retained.
 # Use for samply / Instruments / perf without enabling LTO+strip in the
@@ -246,7 +246,7 @@ lto = "thin"
 debug-assertions = true
 overflow-checks = true
 
-# Optimize heavy deps for size — not in the hot path
+# Optimize heavy deps for size, not in the hot path
 [profile.release.package.regex-syntax]
 opt-level = "z"
 [profile.release.package.clap_builder]

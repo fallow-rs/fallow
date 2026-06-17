@@ -7,7 +7,7 @@
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
-use divan::Bencher;
+use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use fallow_cli::programmatic::{
     AnalysisOptions, ComplexityOptions, DeadCodeOptions, DuplicationMode, DuplicationOptions,
     compute_health, detect_circular_dependencies, detect_dead_code, detect_duplication,
@@ -15,10 +15,6 @@ use fallow_cli::programmatic::{
 use tempfile::TempDir;
 
 const BENCH_THREADS: usize = 4;
-
-fn main() {
-    divan::main();
-}
 
 struct CommandInput {
     _temp_dir: TempDir,
@@ -697,114 +693,159 @@ fn create_warm_workspace_project() -> CommandInput {
     input
 }
 
-#[divan::bench]
-fn dead_code_package_library_exports(bencher: Bencher) {
-    bencher
-        .with_inputs(create_library_project)
-        .bench_refs(|input| {
-            let options = DeadCodeOptions {
-                analysis: analysis_options(&input.root, true),
-                ..DeadCodeOptions::default()
-            };
-            detect_dead_code(&options)
-        });
-}
-
-#[divan::bench]
-fn dead_code_next_app_router_segments(bencher: Bencher) {
-    bencher
-        .with_inputs(create_next_app_project)
-        .bench_refs(|input| {
-            let options = DeadCodeOptions {
-                analysis: analysis_options(&input.root, true),
-                ..DeadCodeOptions::default()
-            };
-            detect_dead_code(&options)
-        });
-}
-
-#[divan::bench]
-fn dead_code_workspace_monorepo_cross_package(bencher: Bencher) {
-    bencher
-        .with_inputs(create_workspace_project)
-        .bench_refs(|input| {
-            let options = DeadCodeOptions {
-                analysis: analysis_options(&input.root, true),
-                ..DeadCodeOptions::default()
-            };
-            detect_dead_code(&options)
-        });
-}
-
-#[divan::bench]
-fn dead_code_workspace_monorepo_cross_package_warm_cache(bencher: Bencher) {
-    bencher
-        .with_inputs(create_warm_workspace_project)
-        .bench_refs(|input| {
-            let options = DeadCodeOptions {
-                analysis: analysis_options(&input.root, false),
-                ..DeadCodeOptions::default()
-            };
-            detect_dead_code(&options)
-        });
-}
-
-#[divan::bench]
-fn duplication_next_route_callbacks_repeated_auth(bencher: Bencher) {
-    bencher
-        .with_inputs(create_duplication_project)
-        .bench_refs(|input| {
-            let options = DuplicationOptions {
-                analysis: analysis_options(&input.root, true),
-                mode: DuplicationMode::Mild,
-                min_tokens: 35,
-                min_lines: 5,
-                min_occurrences: 2,
-                ..DuplicationOptions::default()
-            };
-            detect_duplication(&options)
-        });
-}
-
-#[divan::bench]
-fn circular_dependencies_domain_graph_cycles(bencher: Bencher) {
-    bencher
-        .with_inputs(create_circular_project)
-        .bench_refs(|input| {
-            let options = DeadCodeOptions {
-                analysis: analysis_options(&input.root, true),
-                ..DeadCodeOptions::default()
-            };
-            detect_circular_dependencies(&options)
-        });
-}
-
-#[divan::bench]
-fn health_complex_service_scoring(bencher: Bencher) {
-    bencher
-        .with_inputs(create_health_project)
-        .bench_refs(|input| {
-            let options = ComplexityOptions {
-                analysis: analysis_options(&input.root, true),
-                complexity: true,
-                file_scores: true,
-                hotspots: true,
-                targets: true,
-                ..ComplexityOptions::default()
-            };
-            compute_health(&options)
-        });
-}
-
-#[divan::bench]
-fn health_css_tailwind_design_system(bencher: Bencher) {
-    bencher.with_inputs(create_css_project).bench_refs(|input| {
-        let options = ComplexityOptions {
-            analysis: analysis_options(&input.root, true),
-            css: true,
-            score: true,
-            ..ComplexityOptions::default()
-        };
-        compute_health(&options)
+fn dead_code_package_library_exports(c: &mut Criterion) {
+    c.bench_function("dead_code_package_library_exports", |bencher| {
+        bencher.iter_batched_ref(
+            create_library_project,
+            |input| {
+                let options = DeadCodeOptions {
+                    analysis: analysis_options(&input.root, true),
+                    ..DeadCodeOptions::default()
+                };
+                detect_dead_code(&options)
+            },
+            BatchSize::LargeInput,
+        );
     });
 }
+
+fn dead_code_next_app_router_segments(c: &mut Criterion) {
+    c.bench_function("dead_code_next_app_router_segments", |bencher| {
+        bencher.iter_batched_ref(
+            create_next_app_project,
+            |input| {
+                let options = DeadCodeOptions {
+                    analysis: analysis_options(&input.root, true),
+                    ..DeadCodeOptions::default()
+                };
+                detect_dead_code(&options)
+            },
+            BatchSize::LargeInput,
+        );
+    });
+}
+
+fn dead_code_workspace_monorepo_cross_package(c: &mut Criterion) {
+    c.bench_function("dead_code_workspace_monorepo_cross_package", |bencher| {
+        bencher.iter_batched_ref(
+            create_workspace_project,
+            |input| {
+                let options = DeadCodeOptions {
+                    analysis: analysis_options(&input.root, true),
+                    ..DeadCodeOptions::default()
+                };
+                detect_dead_code(&options)
+            },
+            BatchSize::LargeInput,
+        );
+    });
+}
+
+fn dead_code_workspace_monorepo_cross_package_warm_cache(c: &mut Criterion) {
+    c.bench_function(
+        "dead_code_workspace_monorepo_cross_package_warm_cache",
+        |bencher| {
+            bencher.iter_batched_ref(
+                create_warm_workspace_project,
+                |input| {
+                    let options = DeadCodeOptions {
+                        analysis: analysis_options(&input.root, false),
+                        ..DeadCodeOptions::default()
+                    };
+                    detect_dead_code(&options)
+                },
+                BatchSize::LargeInput,
+            );
+        },
+    );
+}
+
+fn duplication_next_route_callbacks_repeated_auth(c: &mut Criterion) {
+    c.bench_function(
+        "duplication_next_route_callbacks_repeated_auth",
+        |bencher| {
+            bencher.iter_batched_ref(
+                create_duplication_project,
+                |input| {
+                    let options = DuplicationOptions {
+                        analysis: analysis_options(&input.root, true),
+                        mode: DuplicationMode::Mild,
+                        min_tokens: 35,
+                        min_lines: 5,
+                        min_occurrences: 2,
+                        ..DuplicationOptions::default()
+                    };
+                    detect_duplication(&options)
+                },
+                BatchSize::LargeInput,
+            );
+        },
+    );
+}
+
+fn circular_dependencies_domain_graph_cycles(c: &mut Criterion) {
+    c.bench_function("circular_dependencies_domain_graph_cycles", |bencher| {
+        bencher.iter_batched_ref(
+            create_circular_project,
+            |input| {
+                let options = DeadCodeOptions {
+                    analysis: analysis_options(&input.root, true),
+                    ..DeadCodeOptions::default()
+                };
+                detect_circular_dependencies(&options)
+            },
+            BatchSize::LargeInput,
+        );
+    });
+}
+
+fn health_complex_service_scoring(c: &mut Criterion) {
+    c.bench_function("health_complex_service_scoring", |bencher| {
+        bencher.iter_batched_ref(
+            create_health_project,
+            |input| {
+                let options = ComplexityOptions {
+                    analysis: analysis_options(&input.root, true),
+                    complexity: true,
+                    file_scores: true,
+                    hotspots: true,
+                    targets: true,
+                    ..ComplexityOptions::default()
+                };
+                compute_health(&options)
+            },
+            BatchSize::LargeInput,
+        );
+    });
+}
+
+fn health_css_tailwind_design_system(c: &mut Criterion) {
+    c.bench_function("health_css_tailwind_design_system", |bencher| {
+        bencher.iter_batched_ref(
+            create_css_project,
+            |input| {
+                let options = ComplexityOptions {
+                    analysis: analysis_options(&input.root, true),
+                    css: true,
+                    score: true,
+                    ..ComplexityOptions::default()
+                };
+                compute_health(&options)
+            },
+            BatchSize::LargeInput,
+        );
+    });
+}
+
+criterion_group!(
+    benches,
+    dead_code_package_library_exports,
+    dead_code_next_app_router_segments,
+    dead_code_workspace_monorepo_cross_package,
+    dead_code_workspace_monorepo_cross_package_warm_cache,
+    duplication_next_route_callbacks_repeated_auth,
+    circular_dependencies_domain_graph_cycles,
+    health_complex_service_scoring,
+    health_css_tailwind_design_system
+);
+criterion_main!(benches);

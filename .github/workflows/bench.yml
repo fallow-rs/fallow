@@ -60,7 +60,7 @@ jobs:
       - name: Build benchmark shard
         # Keep PR feedback focused: split simulation shards without adding a noisy suite.
         # large_analysis stays out because it exceeds the fast benchmark budget.
-        run: cargo codspeed build -p ${{ matrix.package }} --bench ${{ matrix.bench }}
+        run: cargo codspeed build -p ${{ matrix.package }} --bench ${{ matrix.bench }} --features codspeed
 
       - name: Run benchmark shard
         uses: CodSpeedHQ/action@c145068895e045cc725ee76fcd2307624b65c3af # v4.17.5

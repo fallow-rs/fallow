@@ -8,13 +8,9 @@
     reason = "ADR-008: benchmark exercises the workspace path-dep fallow_core::analyze surface"
 )]
 
-use divan::Bencher;
+use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 
 mod helpers;
-
-fn main() {
-    divan::main();
-}
 
 struct ConfigInput {
     temp_dir: std::path::PathBuf,
@@ -63,41 +59,55 @@ fn create_dupes_input(name: &str, file_count: usize) -> DupesInput {
     }
 }
 
-#[divan::bench]
-fn full_pipeline_5000_files(bencher: Bencher) {
-    bencher
-        .with_inputs(|| create_config_input("5000", 5000, true))
-        .bench_refs(|input| fallow_core::analyze(&input.config));
+fn bench_large_analysis(c: &mut Criterion) {
+    let mut group = c.benchmark_group("large_analysis");
+
+    group.bench_function("full_pipeline_5000_files", |bencher| {
+        bencher.iter_batched_ref(
+            || create_config_input("5000", 5000, true),
+            |input| fallow_core::analyze(&input.config),
+            BatchSize::LargeInput,
+        );
+    });
+
+    group.bench_function("full_pipeline_1000_files_warm_cache", |bencher| {
+        bencher.iter_batched_ref(
+            || create_warm_config_input("1000-warm", 1000),
+            |input| fallow_core::analyze(&input.config),
+            BatchSize::LargeInput,
+        );
+    });
+
+    group.bench_function("full_pipeline_5000_files_warm_cache", |bencher| {
+        bencher.iter_batched_ref(
+            || create_warm_config_input("5000-warm", 5000),
+            |input| fallow_core::analyze(&input.config),
+            BatchSize::LargeInput,
+        );
+    });
+
+    group.bench_function("dupes_full_pipeline_1000_files", |bencher| {
+        bencher.iter_batched_ref(
+            || create_dupes_input("1000", 1000),
+            |input| {
+                fallow_core::duplicates::find_duplicates(&input.root, &input.files, &input.config);
+            },
+            BatchSize::LargeInput,
+        );
+    });
+
+    group.bench_function("dupes_full_pipeline_5000_files", |bencher| {
+        bencher.iter_batched_ref(
+            || create_dupes_input("5000", 5000),
+            |input| {
+                fallow_core::duplicates::find_duplicates(&input.root, &input.files, &input.config);
+            },
+            BatchSize::LargeInput,
+        );
+    });
+
+    group.finish();
 }
 
-#[divan::bench]
-fn full_pipeline_1000_files_warm_cache(bencher: Bencher) {
-    bencher
-        .with_inputs(|| create_warm_config_input("1000-warm", 1000))
-        .bench_refs(|input| fallow_core::analyze(&input.config));
-}
-
-#[divan::bench]
-fn full_pipeline_5000_files_warm_cache(bencher: Bencher) {
-    bencher
-        .with_inputs(|| create_warm_config_input("5000-warm", 5000))
-        .bench_refs(|input| fallow_core::analyze(&input.config));
-}
-
-#[divan::bench]
-fn dupes_full_pipeline_1000_files(bencher: Bencher) {
-    bencher
-        .with_inputs(|| create_dupes_input("1000", 1000))
-        .bench_refs(|input| {
-            fallow_core::duplicates::find_duplicates(&input.root, &input.files, &input.config);
-        });
-}
-
-#[divan::bench]
-fn dupes_full_pipeline_5000_files(bencher: Bencher) {
-    bencher
-        .with_inputs(|| create_dupes_input("5000", 5000))
-        .bench_refs(|input| {
-            fallow_core::duplicates::find_duplicates(&input.root, &input.files, &input.config);
-        });
-}
+criterion_group!(benches, bench_large_analysis);
+criterion_main!(benches);

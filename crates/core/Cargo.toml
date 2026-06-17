@@ -63,13 +63,14 @@ tracing = { workspace = true }
 schemars = { workspace = true, optional = true }
 
 [features]
+codspeed = ["criterion2/codspeed"]
 # Mirrors fallow-types' `schema` feature: enables `#[derive(schemars::JsonSchema)]`
 # on `DuplicationReport` and friends so the public JSON output contract can be
 # regenerated from the Rust source of truth.
 schema = ["dep:schemars", "fallow-types/schema"]
 
 [dev-dependencies]
-divan = { workspace = true }
+criterion2 = { workspace = true }
 proptest = { workspace = true }
 dhat = { workspace = true }
 tracing-subscriber = { workspace = true }

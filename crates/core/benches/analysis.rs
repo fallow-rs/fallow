@@ -10,14 +10,10 @@
 
 use std::path::PathBuf;
 
-use divan::Bencher;
+use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use rustc_hash::FxHashSet;
 
 mod helpers;
-
-fn main() {
-    divan::main();
-}
 
 struct ParseFileInput {
     temp_dir: PathBuf,
@@ -133,11 +129,14 @@ export default function App({ name, age }: Props) {
     ParseFileInput { temp_dir, file }
 }
 
-#[divan::bench]
-fn parse_single_file(bencher: Bencher) {
-    bencher
-        .with_inputs(create_parse_file_input)
-        .bench_refs(|input| fallow_core::extract::parse_single_file(&input.file));
+fn parse_single_file(c: &mut Criterion) {
+    c.bench_function("parse_single_file", |bencher| {
+        bencher.iter_batched_ref(
+            create_parse_file_input,
+            |input| fallow_core::extract::parse_single_file(&input.file),
+            BatchSize::LargeInput,
+        );
+    });
 }
 
 fn create_full_pipeline_input() -> ConfigInput {
@@ -177,11 +176,14 @@ export type Type{i} = {{ value: number }};
     ConfigInput { temp_dir, config }
 }
 
-#[divan::bench]
-fn full_pipeline_10_files(bencher: Bencher) {
-    bencher
-        .with_inputs(create_full_pipeline_input)
-        .bench_refs(|input| fallow_core::analyze(&input.config));
+fn full_pipeline_10_files(c: &mut Criterion) {
+    c.bench_function("full_pipeline_10_files", |bencher| {
+        bencher.iter_batched_ref(
+            create_full_pipeline_input,
+            |input| fallow_core::analyze(&input.config),
+            BatchSize::LargeInput,
+        );
+    });
 }
 
 fn create_synthetic_config_input(name: &str, file_count: usize) -> ConfigInput {
@@ -189,18 +191,24 @@ fn create_synthetic_config_input(name: &str, file_count: usize) -> ConfigInput {
     ConfigInput { temp_dir, config }
 }
 
-#[divan::bench]
-fn full_pipeline_100_files(bencher: Bencher) {
-    bencher
-        .with_inputs(|| create_synthetic_config_input("100", 100))
-        .bench_refs(|input| fallow_core::analyze(&input.config));
+fn full_pipeline_100_files(c: &mut Criterion) {
+    c.bench_function("full_pipeline_100_files", |bencher| {
+        bencher.iter_batched_ref(
+            || create_synthetic_config_input("100", 100),
+            |input| fallow_core::analyze(&input.config),
+            BatchSize::LargeInput,
+        );
+    });
 }
 
-#[divan::bench]
-fn full_pipeline_1000_files(bencher: Bencher) {
-    bencher
-        .with_inputs(|| create_synthetic_config_input("1000", 1000))
-        .bench_refs(|input| fallow_core::analyze(&input.config));
+fn full_pipeline_1000_files(c: &mut Criterion) {
+    c.bench_function("full_pipeline_1000_files", |bencher| {
+        bencher.iter_batched_ref(
+            || create_synthetic_config_input("1000", 1000),
+            |input| fallow_core::analyze(&input.config),
+            BatchSize::LargeInput,
+        );
+    });
 }
 
 struct ReExportInput {
@@ -417,17 +425,20 @@ fn create_re_export_input() -> ReExportInput {
     }
 }
 
-#[divan::bench]
-fn resolve_re_export_chains(bencher: Bencher) {
-    bencher
-        .with_inputs(create_re_export_input)
-        .bench_refs(|input| {
-            fallow_core::graph::ModuleGraph::build(
-                &input.resolved_modules,
-                &input.entry_points,
-                &input.files,
-            );
-        });
+fn resolve_re_export_chains(c: &mut Criterion) {
+    c.bench_function("resolve_re_export_chains", |bencher| {
+        bencher.iter_batched_ref(
+            create_re_export_input,
+            |input| {
+                fallow_core::graph::ModuleGraph::build(
+                    &input.resolved_modules,
+                    &input.entry_points,
+                    &input.files,
+                );
+            },
+            BatchSize::LargeInput,
+        );
+    });
 }
 
 #[expect(
@@ -716,17 +727,20 @@ fn create_cache_round_trip_input() -> fallow_core::extract::ModuleInfo {
     }
 }
 
-#[divan::bench]
-fn cache_round_trip(bencher: Bencher) {
+fn cache_round_trip(c: &mut Criterion) {
     use fallow_core::cache::{cached_to_module, module_to_cached};
     use fallow_core::discover::FileId;
 
-    bencher
-        .with_inputs(create_cache_round_trip_input)
-        .bench_refs(|module| {
-            let cached = module_to_cached(module, 0, 0);
-            let _ = cached_to_module(&cached, FileId(0));
-        });
+    c.bench_function("cache_round_trip", |bencher| {
+        bencher.iter_batched_ref(
+            create_cache_round_trip_input,
+            |module| {
+                let cached = module_to_cached(module, 0, 0);
+                let _ = cached_to_module(&cached, FileId(0));
+            },
+            BatchSize::LargeInput,
+        );
+    });
 }
 
 fn make_hashed_tokens(hashes: &[u64]) -> Vec<fallow_core::duplicates::normalize::HashedToken> {
@@ -808,44 +822,55 @@ fn make_diverse_files(n: usize, tokens_per_file: usize) -> DupeInput {
         .collect()
 }
 
-#[divan::bench]
-fn dupe_detect_2x500_identical(bencher: Bencher) {
+fn dupe_detect_2x500_identical(c: &mut Criterion) {
     use fallow_core::duplicates::detect::CloneDetector;
     let data = make_identical_files(2, 500);
-    bencher
-        .with_inputs(|| data.clone())
-        .bench_values(|d| CloneDetector::new(30, 5, false).detect(d));
+    c.bench_function("dupe_detect_2x500_identical", |bencher| {
+        bencher.iter_batched(
+            || data.clone(),
+            |d| CloneDetector::new(30, 5, false).detect(d),
+            BatchSize::LargeInput,
+        );
+    });
 }
 
-#[divan::bench]
-fn dupe_detect_2x2000_identical(bencher: Bencher) {
+fn dupe_detect_2x2000_identical(c: &mut Criterion) {
     use fallow_core::duplicates::detect::CloneDetector;
     let data = make_identical_files(2, 2000);
-    bencher
-        .with_inputs(|| data.clone())
-        .bench_values(|d| CloneDetector::new(30, 5, false).detect(d));
+    c.bench_function("dupe_detect_2x2000_identical", |bencher| {
+        bencher.iter_batched(
+            || data.clone(),
+            |d| CloneDetector::new(30, 5, false).detect(d),
+            BatchSize::LargeInput,
+        );
+    });
 }
 
-#[divan::bench]
-fn dupe_detect_10x500_identical(bencher: Bencher) {
+fn dupe_detect_10x500_identical(c: &mut Criterion) {
     use fallow_core::duplicates::detect::CloneDetector;
     let data = make_identical_files(10, 500);
-    bencher
-        .with_inputs(|| data.clone())
-        .bench_values(|d| CloneDetector::new(30, 5, false).detect(d));
+    c.bench_function("dupe_detect_10x500_identical", |bencher| {
+        bencher.iter_batched(
+            || data.clone(),
+            |d| CloneDetector::new(30, 5, false).detect(d),
+            BatchSize::LargeInput,
+        );
+    });
 }
 
-#[divan::bench]
-fn dupe_detect_50x200_diverse(bencher: Bencher) {
+fn dupe_detect_50x200_diverse(c: &mut Criterion) {
     use fallow_core::duplicates::detect::CloneDetector;
     let data = make_diverse_files(50, 200);
-    bencher
-        .with_inputs(|| data.clone())
-        .bench_values(|d| CloneDetector::new(30, 5, false).detect(d));
+    c.bench_function("dupe_detect_50x200_diverse", |bencher| {
+        bencher.iter_batched(
+            || data.clone(),
+            |d| CloneDetector::new(30, 5, false).detect(d),
+            BatchSize::LargeInput,
+        );
+    });
 }
 
-#[divan::bench]
-fn dupe_detect_100x200_mixed(bencher: Bencher) {
+fn dupe_detect_100x200_mixed(c: &mut Criterion) {
     use fallow_core::duplicates::detect::CloneDetector;
     let hashes: Vec<u64> = (1..=200).collect();
     let data: DupeInput = (0..100)
@@ -865,13 +890,16 @@ fn dupe_detect_100x200_mixed(bencher: Bencher) {
         })
         .collect();
 
-    bencher
-        .with_inputs(|| data.clone())
-        .bench_values(|d| CloneDetector::new(30, 5, false).detect(d));
+    c.bench_function("dupe_detect_100x200_mixed", |bencher| {
+        bencher.iter_batched(
+            || data.clone(),
+            |d| CloneDetector::new(30, 5, false).detect(d),
+            BatchSize::LargeInput,
+        );
+    });
 }
 
-#[divan::bench]
-fn dupe_detect_100x200_mixed_focused(bencher: Bencher) {
+fn dupe_detect_100x200_mixed_focused(c: &mut Criterion) {
     use fallow_core::duplicates::detect::CloneDetector;
     use rustc_hash::FxHashSet;
 
@@ -894,16 +922,41 @@ fn dupe_detect_100x200_mixed_focused(bencher: Bencher) {
         .collect();
     let focus: FxHashSet<PathBuf> = std::iter::once(PathBuf::from("dir0/file0.ts")).collect();
 
-    bencher
-        .with_inputs(|| data.clone())
-        .bench_values(|d| CloneDetector::new(30, 5, false).detect_touching_files(d, &focus));
+    c.bench_function("dupe_detect_100x200_mixed_focused", |bencher| {
+        bencher.iter_batched(
+            || data.clone(),
+            |d| CloneDetector::new(30, 5, false).detect_touching_files(d, &focus),
+            BatchSize::LargeInput,
+        );
+    });
 }
 
-#[divan::bench]
-fn dupe_detect_2x5000_identical(bencher: Bencher) {
+fn dupe_detect_2x5000_identical(c: &mut Criterion) {
     use fallow_core::duplicates::detect::CloneDetector;
     let data = make_identical_files(2, 5000);
-    bencher
-        .with_inputs(|| data.clone())
-        .bench_values(|d| CloneDetector::new(30, 5, false).detect(d));
+    c.bench_function("dupe_detect_2x5000_identical", |bencher| {
+        bencher.iter_batched(
+            || data.clone(),
+            |d| CloneDetector::new(30, 5, false).detect(d),
+            BatchSize::LargeInput,
+        );
+    });
 }
+
+criterion_group!(
+    benches,
+    parse_single_file,
+    full_pipeline_10_files,
+    full_pipeline_100_files,
+    full_pipeline_1000_files,
+    resolve_re_export_chains,
+    cache_round_trip,
+    dupe_detect_2x500_identical,
+    dupe_detect_2x2000_identical,
+    dupe_detect_10x500_identical,
+    dupe_detect_50x200_diverse,
+    dupe_detect_100x200_mixed,
+    dupe_detect_100x200_mixed_focused,
+    dupe_detect_2x5000_identical
+);
+criterion_main!(benches);

@@ -14,9 +14,12 @@ name = "programmatic_commands"
 harness = false
 
 [dev-dependencies]
-divan = { workspace = true }
+criterion2 = { workspace = true }
 fallow-cli = { workspace = true }
 tempfile = { workspace = true }
+
+[features]
+codspeed = ["criterion2/codspeed"]
 
 [lints]
 workspace = true
