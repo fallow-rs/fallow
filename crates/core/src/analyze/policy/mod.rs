@@ -132,15 +132,15 @@ pub fn find_policy_violations(
             continue;
         };
 
-        collect_banned_imports(
-            &in_scope,
+        collect_banned_imports(PolicyCollectionInput {
+            in_scope: &in_scope,
             module,
             node,
             master,
             suppressions,
             line_offsets_by_file,
-            &mut violations,
-        );
+            violations: &mut violations,
+        });
         collect_banned_calls(
             &in_scope,
             module,
@@ -203,23 +203,26 @@ fn compile_rules(config: &ResolvedConfig) -> Vec<CompiledRule<'_>> {
 
 /// Emit one finding per `banned-import` rule match over the module's imports
 /// and re-exports.
-fn collect_banned_imports(
-    in_scope: &[(usize, &CompiledRule<'_>)],
-    module: &ModuleInfo,
-    node: &crate::graph::ModuleNode,
+struct PolicyCollectionInput<'a> {
+    in_scope: &'a [(usize, &'a CompiledRule<'a>)],
+    module: &'a ModuleInfo,
+    node: &'a crate::graph::ModuleNode,
     master: Severity,
-    suppressions: &SuppressionContext<'_>,
-    line_offsets_by_file: &LineOffsetsMap<'_>,
-    violations: &mut Vec<PolicyViolation>,
-) {
-    for (_, rule) in in_scope {
+    suppressions: &'a SuppressionContext<'a>,
+    line_offsets_by_file: &'a LineOffsetsMap<'a>,
+    violations: &'a mut Vec<PolicyViolation>,
+}
+
+fn collect_banned_imports(input: PolicyCollectionInput<'_>) {
+    for (_, rule) in input.in_scope {
         if rule.rule.kind != RulePackRuleKind::BannedImport {
             continue;
         }
-        let Some(severity) = wire_severity(rule.effective_severity(master)) else {
+        let Some(severity) = wire_severity(rule.effective_severity(input.master)) else {
             continue;
         };
-        let sites = module
+        let sites = input
+            .module
             .imports
             .iter()
             .map(|import| {
@@ -229,7 +232,7 @@ fn collect_banned_imports(
                     import.span.start,
                 )
             })
-            .chain(module.re_exports.iter().map(|re_export| {
+            .chain(input.module.re_exports.iter().map(|re_export| {
                 (
                     re_export.source.as_str(),
                     re_export.is_type_only,
@@ -249,12 +252,17 @@ fn collect_banned_imports(
                 continue;
             }
             let (line, col) =
-                byte_offset_to_line_col(line_offsets_by_file, node.file_id, span_start);
-            if suppressions.is_policy_suppressed(node.file_id, line, rule.pack, &rule.rule.id) {
+                byte_offset_to_line_col(input.line_offsets_by_file, input.node.file_id, span_start);
+            if input.suppressions.is_policy_suppressed(
+                input.node.file_id,
+                line,
+                rule.pack,
+                &rule.rule.id,
+            ) {
                 continue;
             }
-            violations.push(PolicyViolation {
-                path: node.path.clone(),
+            input.violations.push(PolicyViolation {
+                path: input.node.path.clone(),
                 line,
                 col,
                 pack: rule.pack.to_owned(),
