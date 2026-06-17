@@ -262,9 +262,11 @@ pub fn sample_results(root: &Path) -> AnalysisResults {
         col: 0,
         origin: SuppressionOrigin::Comment {
             issue_kind: Some("unused-exports".to_string()),
+            reason: None,
             is_file_level: false,
             kind_known: false,
         },
+        missing_reason: false,
     });
 
     r

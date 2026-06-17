@@ -254,6 +254,10 @@ export type SuppressionOrigin = ({
  */
 issue_kind?: (string | null)
 /**
+ * Human-authored reason after `--`, when present.
+ */
+reason?: (string | null)
+/**
  * Whether this was a file-level suppression.
  */
 is_file_level: boolean
@@ -272,6 +276,10 @@ type: "comment"
  * The name of the export that was tagged.
  */
 export_name: string
+/**
+ * Human-authored reason after `--`, when present.
+ */
+reason?: (string | null)
 type: "jsdoc_tag"
 })
 /**
@@ -2428,6 +2436,11 @@ line: number
  */
 col: number
 origin: SuppressionOrigin
+/**
+ * True when `rules.require-suppression-reason` reported a suppression
+ * comment or tag that has no reason.
+ */
+missing_reason?: boolean
 }
 /**
  * Wire-shape envelope for an [`UnusedCatalogEntry`] finding. Per-instance

@@ -2800,6 +2800,9 @@ pub enum SuppressionOrigin {
         /// The issue kind token from the comment (e.g., "unused-exports"), or None for blanket.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         issue_kind: Option<String>,
+        /// Human-authored reason after `--`, when present.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
         /// Whether this was a file-level suppression.
         is_file_level: bool,
         /// Whether `issue_kind` parses to a known `IssueKind`. False when the
@@ -2815,6 +2818,9 @@ pub enum SuppressionOrigin {
     JsdocTag {
         /// The name of the export that was tagged.
         export_name: String,
+        /// Human-authored reason after `--`, when present.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
     },
 }
 
@@ -2864,6 +2870,10 @@ pub struct StaleSuppression {
     pub col: u32,
     /// The origin and details of the stale suppression.
     pub origin: SuppressionOrigin,
+    /// True when `rules.require-suppression-reason` reported a suppression
+    /// comment or tag that has no reason.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub missing_reason: bool,
 }
 
 impl StaleSuppression {
@@ -2873,6 +2883,7 @@ impl StaleSuppression {
         match &self.origin {
             SuppressionOrigin::Comment {
                 issue_kind,
+                reason,
                 is_file_level,
                 ..
             } => {
@@ -2882,13 +2893,23 @@ impl StaleSuppression {
                     "fallow-ignore-next-line"
                 };
                 match issue_kind {
-                    Some(kind) => format!("// {directive} {kind}"),
-                    None => format!("// {directive}"),
+                    Some(kind) => match reason {
+                        Some(reason) => format!("// {directive} {kind} -- {reason}"),
+                        None => format!("// {directive} {kind}"),
+                    },
+                    None => match reason {
+                        Some(reason) => format!("// {directive} -- {reason}"),
+                        None => format!("// {directive}"),
+                    },
                 }
             }
-            SuppressionOrigin::JsdocTag { export_name } => {
-                format!("@expected-unused on {export_name}")
-            }
+            SuppressionOrigin::JsdocTag {
+                export_name,
+                reason,
+            } => match reason {
+                Some(reason) => format!("@expected-unused on {export_name} -- {reason}"),
+                None => format!("@expected-unused on {export_name}"),
+            },
         }
     }
 
@@ -2905,7 +2926,11 @@ impl StaleSuppression {
                 issue_kind,
                 is_file_level,
                 kind_known,
+                ..
             } => {
+                if self.missing_reason {
+                    return "suppression is missing a reason".to_string();
+                }
                 let scope = if *is_file_level {
                     "in this file"
                 } else {
@@ -2924,7 +2949,10 @@ impl StaleSuppression {
                     None => format!("no issues found {scope}"),
                 }
             }
-            SuppressionOrigin::JsdocTag { export_name } => {
+            SuppressionOrigin::JsdocTag { export_name, .. } => {
+                if self.missing_reason {
+                    return "suppression is missing a reason".to_string();
+                }
                 format!("{export_name} is now used")
             }
         }
@@ -2958,6 +2986,11 @@ impl StaleSuppression {
             SuppressionOrigin::Comment {
                 kind_known: false, ..
             } => format!("{} ({})", self.description(), self.explanation()),
+            SuppressionOrigin::Comment { .. } | SuppressionOrigin::JsdocTag { .. }
+                if self.missing_reason =>
+            {
+                format!("{} ({})", self.description(), self.explanation())
+            }
             SuppressionOrigin::Comment { .. } | SuppressionOrigin::JsdocTag { .. } => {
                 self.description()
             }
@@ -2988,6 +3021,8 @@ pub struct ActiveSuppression {
     /// Whether this is a `fallow-ignore-file` (file-level) marker rather than a
     /// `fallow-ignore-next-line` marker.
     pub is_file_level: bool,
+    /// Human-authored reason after `--`, when present.
+    pub reason: Option<String>,
 }
 
 /// The detection method used to identify a feature flag.

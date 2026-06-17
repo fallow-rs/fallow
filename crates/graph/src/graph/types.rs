@@ -167,6 +167,8 @@ pub struct ExportSymbol {
     /// Visibility tag from JSDoc/TSDoc comment (`@public`, `@internal`, `@alpha`, `@beta`).
     /// Exports with any visibility tag are never reported as unused.
     pub visibility: VisibilityTag,
+    /// Human-authored reason on `@expected-unused -- <reason>`, when present.
+    pub expected_unused_reason: Option<String>,
     /// Source span of the export declaration.
     pub span: oxc_span::Span,
     /// Which files reference this export.
@@ -205,7 +207,7 @@ pub enum ReferenceKind {
 }
 
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ExportSymbol>() == 88);
+const _: () = assert!(std::mem::size_of::<ExportSymbol>() == 112);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SymbolReference>() == 16);
 #[cfg(target_pointer_width = "64")]
@@ -333,6 +335,7 @@ mod tests {
             is_type_only: false,
             is_side_effect_used: false,
             visibility: VisibilityTag::None,
+            expected_unused_reason: None,
             span: oxc_span::Span::new(0, 50),
             references: vec![],
             members: vec![],
@@ -349,6 +352,7 @@ mod tests {
             is_type_only: false,
             is_side_effect_used: false,
             visibility: VisibilityTag::None,
+            expected_unused_reason: None,
             span: oxc_span::Span::new(0, 20),
             references: vec![],
             members: vec![],
@@ -363,6 +367,7 @@ mod tests {
             is_type_only: false,
             is_side_effect_used: false,
             visibility: VisibilityTag::Public,
+            expected_unused_reason: None,
             span: oxc_span::Span::new(0, 10),
             references: vec![],
             members: vec![],
@@ -377,6 +382,7 @@ mod tests {
             is_type_only: true,
             is_side_effect_used: false,
             visibility: VisibilityTag::None,
+            expected_unused_reason: None,
             span: oxc_span::Span::new(0, 30),
             references: vec![],
             members: vec![],
@@ -391,6 +397,7 @@ mod tests {
             is_type_only: false,
             is_side_effect_used: false,
             visibility: VisibilityTag::None,
+            expected_unused_reason: None,
             span: oxc_span::Span::new(0, 20),
             references: vec![
                 SymbolReference {
@@ -475,6 +482,7 @@ mod tests {
                 is_type_only: false,
                 is_side_effect_used: false,
                 visibility: VisibilityTag::None,
+                expected_unused_reason: None,
                 span: oxc_span::Span::new(0, 20),
                 references: vec![],
                 members: vec![],

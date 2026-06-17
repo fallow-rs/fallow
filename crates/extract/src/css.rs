@@ -673,6 +673,7 @@ fn scan_css_module_exports(
                     local_name: None,
                     is_type_only: false,
                     visibility: VisibilityTag::None,
+                    expected_unused_reason: None,
                     span,
                     members: Vec::new(),
                     is_side_effect_used: false,

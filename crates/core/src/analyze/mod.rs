@@ -780,6 +780,11 @@ pub fn find_dead_code_full(
             .stale_suppressions
             .extend(suppressions.find_stale(graph, config));
     }
+    if config.rules.require_suppression_reason != Severity::Off {
+        results
+            .stale_suppressions
+            .extend(suppressions.find_missing_reasons(graph));
+    }
     results.suppression_count = suppressions.used_count();
     results.active_suppressions = suppressions.all_suppressions(graph);
 
@@ -2006,6 +2011,10 @@ fn run_export_detectors(
     }
     if config.rules.stale_suppressions != Severity::Off {
         results.stale_suppressions.extend(stale_expected);
+    } else if config.rules.require_suppression_reason != Severity::Off {
+        results
+            .stale_suppressions
+            .extend(stale_expected.into_iter().filter(|s| s.missing_reason));
     }
     results
 }
@@ -2387,6 +2396,7 @@ mod tests {
                 coverage_gaps: Severity::Off,
                 feature_flags: Severity::Off,
                 stale_suppressions: Severity::Off,
+                require_suppression_reason: Severity::Off,
                 unused_catalog_entries: Severity::Off,
                 empty_catalog_groups: Severity::Off,
                 unresolved_catalog_references: Severity::Off,
@@ -2460,6 +2470,7 @@ mod tests {
                 is_type_only: false,
                 is_side_effect_used: false,
                 visibility: VisibilityTag::None,
+                expected_unused_reason: None,
                 span: Span::new(10, 30),
                 references: vec![],
                 members: vec![],

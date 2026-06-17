@@ -64,6 +64,7 @@ fn cached_exports_to_module(exports: &[CachedExport]) -> Vec<crate::ExportInfo> 
                 5 => VisibilityTag::ExpectedUnused,
                 _ => VisibilityTag::None,
             },
+            expected_unused_reason: export.expected_unused_reason.clone(),
             span: Span::new(export.span_start, export.span_end),
             members: export
                 .members
@@ -184,6 +185,7 @@ fn cached_suppressions_to_module(
                 line: suppression.line,
                 comment_line: suppression.comment_line,
                 target,
+                reason: suppression.reason.clone(),
             }
         })
         .collect()
@@ -198,6 +200,7 @@ fn cached_unknown_suppressions_to_module(
             comment_line: unknown.comment_line,
             is_file_level: unknown.is_file_level,
             token: unknown.token.clone(),
+            reason: unknown.reason.clone(),
         })
         .collect()
 }
@@ -252,6 +255,7 @@ fn module_exports_to_cached(exports: &[crate::ExportInfo]) -> Vec<CachedExport> 
             is_type_only: export.is_type_only,
             is_side_effect_used: export.is_side_effect_used,
             visibility: export.visibility as u8,
+            expected_unused_reason: export.expected_unused_reason.clone(),
             local_name: export.local_name.clone(),
             span_start: export.span.start,
             span_end: export.span.end,
@@ -384,6 +388,7 @@ fn module_suppressions_to_cached(
                 kind,
                 policy_pack,
                 policy_rule_id,
+                reason: suppression.reason.clone(),
             }
         })
         .collect()
@@ -398,6 +403,7 @@ fn module_unknown_suppressions_to_cached(
             comment_line: unknown.comment_line,
             is_file_level: unknown.is_file_level,
             token: unknown.token.clone(),
+            reason: unknown.reason.clone(),
         })
         .collect()
 }

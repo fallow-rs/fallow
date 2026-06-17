@@ -178,6 +178,7 @@
         "coverage-gaps": "off",
         "feature-flags": "off",
         "stale-suppressions": "warn",
+        "require-suppression-reason": "off",
         "unused-catalog-entries": "warn",
         "empty-catalog-groups": "warn",
         "unresolved-catalog-references": "error",
@@ -1139,6 +1140,11 @@
           "$ref": "#/$defs/Severity",
           "default": "warn"
         },
+        "require-suppression-reason": {
+          "description": "Opt-in suppression hygiene rule: when enabled, every `fallow-ignore-*`\ncomment and `@expected-unused` tag must carry a `-- <reason>` suffix.",
+          "$ref": "#/$defs/Severity",
+          "default": "off"
+        },
         "unused-catalog-entries": {
           "$ref": "#/$defs/Severity",
           "default": "warn"
@@ -1930,6 +1936,16 @@
           ]
         },
         "stale-suppressions": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "require-suppression-reason": {
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"

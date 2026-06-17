@@ -337,6 +337,7 @@ mod tests {
             local_name: Some(name.to_string()),
             is_type_only: false,
             visibility: VisibilityTag::None,
+            expected_unused_reason: None,
             span: oxc_span::Span::new(0, 10),
             members: vec![],
             is_side_effect_used: false,

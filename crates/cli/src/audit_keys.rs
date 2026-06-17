@@ -2313,9 +2313,11 @@ mod tests {
             col: 0,
             origin: SuppressionOrigin::Comment {
                 issue_kind: Some("unused-export".to_string()),
+                reason: None,
                 is_file_level: false,
                 kind_known: true,
             },
+            missing_reason: false,
         });
         results.unresolved_catalog_references.push(
             UnresolvedCatalogReferenceFinding::with_actions(UnresolvedCatalogReference {

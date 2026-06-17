@@ -1194,6 +1194,9 @@ pub struct ExportInfo {
     /// Visibility tag from JSDoc/TSDoc comment.
     #[serde(default, skip_serializing_if = "VisibilityTag::is_none")]
     pub visibility: VisibilityTag,
+    /// Human-authored reason on `@expected-unused -- <reason>`, when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_unused_reason: Option<String>,
     /// Source span of the export declaration.
     #[serde(serialize_with = "serialize_span")]
     pub span: Span,
@@ -1749,7 +1752,7 @@ pub enum ImportedName {
 }
 
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ExportInfo>() == 112);
+const _: () = assert!(std::mem::size_of::<ExportInfo>() == 136);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<ImportInfo>() == 96);
 #[cfg(target_pointer_width = "64")]
@@ -1878,6 +1881,7 @@ mod tests {
                 is_type_only: false,
                 is_side_effect_used: false,
                 visibility: VisibilityTag::None,
+                expected_unused_reason: None,
                 span: span(),
                 members: Vec::new(),
                 super_class: None,

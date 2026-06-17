@@ -583,6 +583,31 @@ fn no_visibility_tag() {
 }
 
 #[test]
+fn expected_unused_tag_basic() {
+    let info = parse_source("/** @expected-unused */ export const foo = 1;");
+    assert_eq!(info.exports[0].visibility, VisibilityTag::ExpectedUnused);
+    assert_eq!(info.exports[0].expected_unused_reason, None);
+}
+
+#[test]
+fn expected_unused_tag_with_reason() {
+    let info =
+        parse_source("/** @expected-unused -- public package entry */ export const foo = 1;");
+    assert_eq!(info.exports[0].visibility, VisibilityTag::ExpectedUnused);
+    assert_eq!(
+        info.exports[0].expected_unused_reason.as_deref(),
+        Some("public package entry")
+    );
+}
+
+#[test]
+fn expected_unused_tag_empty_reason_is_missing() {
+    let info = parse_source("/** @expected-unused -- */ export const foo = 1;");
+    assert_eq!(info.exports[0].visibility, VisibilityTag::ExpectedUnused);
+    assert_eq!(info.exports[0].expected_unused_reason, None);
+}
+
+#[test]
 fn public_takes_priority_over_internal() {
     let info = parse_source("/** @public @internal */ export const foo = 1;");
     assert_eq!(info.exports[0].visibility, VisibilityTag::Public);

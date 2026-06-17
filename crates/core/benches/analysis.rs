@@ -367,6 +367,7 @@ fn create_re_export_input() -> ReExportInput {
                         local_name: Some(format!("value{e}")),
                         is_type_only: false,
                         visibility: VisibilityTag::None,
+                        expected_unused_reason: None,
                         span: oxc_span::Span::new(0, 20),
                         members: vec![],
                         is_side_effect_used: false,
@@ -377,6 +378,7 @@ fn create_re_export_input() -> ReExportInput {
                         local_name: Some(format!("fn{e}")),
                         is_type_only: false,
                         visibility: VisibilityTag::None,
+                        expected_unused_reason: None,
                         span: oxc_span::Span::new(25, 45),
                         members: vec![],
                         is_side_effect_used: false,
@@ -449,6 +451,7 @@ fn create_cache_round_trip_input() -> fallow_core::extract::ModuleInfo {
                 local_name: Some("UserService".to_string()),
                 is_type_only: false,
                 visibility: VisibilityTag::None,
+                expected_unused_reason: None,
                 span: oxc_span::Span::new(100, 500),
                 members: vec![
                     MemberInfo {
@@ -487,6 +490,7 @@ fn create_cache_round_trip_input() -> fallow_core::extract::ModuleInfo {
                 local_name: Some("Status".to_string()),
                 is_type_only: false,
                 visibility: VisibilityTag::None,
+                expected_unused_reason: None,
                 span: oxc_span::Span::new(550, 700),
                 members: vec![
                     MemberInfo {
@@ -525,6 +529,7 @@ fn create_cache_round_trip_input() -> fallow_core::extract::ModuleInfo {
                 local_name: None,
                 is_type_only: false,
                 visibility: VisibilityTag::None,
+                expected_unused_reason: None,
                 span: oxc_span::Span::new(800, 1200),
                 members: vec![],
                 is_side_effect_used: false,
@@ -535,6 +540,7 @@ fn create_cache_round_trip_input() -> fallow_core::extract::ModuleInfo {
                 local_name: Some("Props".to_string()),
                 is_type_only: true,
                 visibility: VisibilityTag::None,
+                expected_unused_reason: None,
                 span: oxc_span::Span::new(10, 80),
                 members: vec![],
                 is_side_effect_used: false,
@@ -545,6 +551,7 @@ fn create_cache_round_trip_input() -> fallow_core::extract::ModuleInfo {
                 local_name: Some("formatName".to_string()),
                 is_type_only: false,
                 visibility: VisibilityTag::None,
+                expected_unused_reason: None,
                 span: oxc_span::Span::new(720, 780),
                 members: vec![],
                 is_side_effect_used: false,

@@ -169,6 +169,11 @@ use crate::MemberKind;
 /// miss those synthetic `member_accesses` and surface false
 /// `unused-class-member` findings.
 ///
+/// Bumped to 116 for issue #1302: suppression comments and `@expected-unused`
+/// tags now carry optional human-authored reasons. Pre-116 entries lack those
+/// reasons, so `require-suppression-reason` would report false missing-reason
+/// findings until files are re-extracted.
+///
 /// Bumped to 117 for issue #955: Vue SFC script-side Nuxt UI icon strings now
 /// populate `iconify_icon_names`, allowing declared `@iconify-json/*`
 /// collections used through values like `icon: 'i-simple-icons-github'` to be
@@ -537,7 +542,7 @@ use crate::MemberKind;
 /// `toRefs(useStore())` destructures now record store member accesses. Warm
 /// caches from 180 can miss those synthetic `member_accesses` and surface false
 /// `unused-store-member` findings.
-pub(super) const CACHE_VERSION: u32 = 181;
+pub(super) const CACHE_VERSION: u32 = 182;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -587,9 +592,9 @@ assert_cached_type_size!(CachedModule, 1256);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 56);
-assert_cached_type_size!(CachedSuppression, 64);
-assert_cached_type_size!(CachedUnknownSuppressionKind, 32);
-assert_cached_type_size!(CachedExport, 112);
+assert_cached_type_size!(CachedSuppression, 88);
+assert_cached_type_size!(CachedUnknownSuppressionKind, 56);
+assert_cached_type_size!(CachedExport, 136);
 assert_cached_type_size!(CachedImport, 96);
 assert_cached_type_size!(CachedDynamicImport, 88);
 assert_cached_type_size!(CachedRequireCall, 88);
@@ -854,6 +859,8 @@ pub struct CachedSuppression {
     /// Rule id for scoped policy suppressions. Empty for all other suppression
     /// targets.
     pub policy_rule_id: String,
+    /// Human-authored reason after `--`, when present.
+    pub reason: Option<String>,
 }
 
 /// Cached unknown suppression kind token (see #449).
@@ -865,6 +872,8 @@ pub struct CachedUnknownSuppressionKind {
     pub is_file_level: bool,
     /// The verbatim token that did not parse.
     pub token: String,
+    /// Human-authored reason after `--`, when present.
+    pub reason: Option<String>,
 }
 
 /// Cached export data for a single export declaration.
@@ -883,6 +892,8 @@ pub struct CachedExport {
     pub is_side_effect_used: bool,
     /// Visibility tag discriminant (0=None, 1=Public, 2=Internal, 3=Beta, 4=Alpha).
     pub visibility: u8,
+    /// Human-authored reason on `@expected-unused -- <reason>`, when present.
+    pub expected_unused_reason: Option<String>,
     /// The local binding name, if different.
     pub local_name: Option<String>,
     /// Byte offset of the export span start.

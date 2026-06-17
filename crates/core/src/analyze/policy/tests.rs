@@ -663,6 +663,7 @@ fn stale_scoped_policy_suppression_preserves_full_token() {
             issue_kind: Some(token),
             is_file_level: true,
             kind_known: true,
+            ..
         } if token == "policy-violation:team-policy/removed-rule"
     ));
 }

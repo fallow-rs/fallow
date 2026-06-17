@@ -182,9 +182,14 @@ fn apply_catalog_override_rules(
     results: &mut fallow_core::results::AnalysisResults,
     config: &ResolvedConfig,
 ) {
-    results
-        .stale_suppressions
-        .retain(|s| config.resolve_rules_for_path(&s.path).stale_suppressions != Severity::Off);
+    results.stale_suppressions.retain(|s| {
+        let rules = config.resolve_rules_for_path(&s.path);
+        if s.missing_reason {
+            rules.require_suppression_reason != Severity::Off
+        } else {
+            rules.stale_suppressions != Severity::Off
+        }
+    });
     results.unresolved_catalog_references.retain(|r| {
         config
             .resolve_rules_for_path(&r.reference.path)
@@ -311,9 +316,13 @@ fn apply_base_file_rules(results: &mut fallow_core::results::AnalysisResults, ru
     if rules.unresolved_imports == Severity::Off {
         results.unresolved_imports.clear();
     }
-    if rules.stale_suppressions == Severity::Off {
-        results.stale_suppressions.clear();
-    }
+    results.stale_suppressions.retain(|s| {
+        if s.missing_reason {
+            rules.require_suppression_reason != Severity::Off
+        } else {
+            rules.stale_suppressions != Severity::Off
+        }
+    });
     if rules.invalid_client_export == Severity::Off {
         results.invalid_client_exports.clear();
     }
@@ -496,39 +505,38 @@ fn has_override_catalog_boundary_error(
     results: &fallow_core::results::AnalysisResults,
     config: &ResolvedConfig,
 ) -> bool {
-    results
-        .stale_suppressions
-        .iter()
-        .any(|s| config.resolve_rules_for_path(&s.path).stale_suppressions == Severity::Error)
-        || results.unresolved_catalog_references.iter().any(|r| {
-            config
-                .resolve_rules_for_path(&r.reference.path)
-                .unresolved_catalog_references
-                == Severity::Error
+    results.stale_suppressions.iter().any(|s| {
+        let rules = config.resolve_rules_for_path(&s.path);
+        if s.missing_reason {
+            rules.require_suppression_reason == Severity::Error
+        } else {
+            rules.stale_suppressions == Severity::Error
+        }
+    }) || results.unresolved_catalog_references.iter().any(|r| {
+        config
+            .resolve_rules_for_path(&r.reference.path)
+            .unresolved_catalog_references
+            == Severity::Error
+    }) || results.empty_catalog_groups.iter().any(|g| {
+        config
+            .resolve_rules_for_path(&g.group.path)
+            .empty_catalog_groups
+            == Severity::Error
+    }) || results.boundary_coverage_violations.iter().any(|v| {
+        config
+            .resolve_rules_for_path(&v.violation.path)
+            .boundary_violation
+            == Severity::Error
+    }) || results.boundary_call_violations.iter().any(|v| {
+        config
+            .resolve_rules_for_path(&v.violation.path)
+            .boundary_violation
+            == Severity::Error
+    }) || results.circular_dependencies.iter().any(|c| {
+        c.cycle.files.iter().any(|path| {
+            config.resolve_rules_for_path(path).circular_dependencies == Severity::Error
         })
-        || results.empty_catalog_groups.iter().any(|g| {
-            config
-                .resolve_rules_for_path(&g.group.path)
-                .empty_catalog_groups
-                == Severity::Error
-        })
-        || results.boundary_coverage_violations.iter().any(|v| {
-            config
-                .resolve_rules_for_path(&v.violation.path)
-                .boundary_violation
-                == Severity::Error
-        })
-        || results.boundary_call_violations.iter().any(|v| {
-            config
-                .resolve_rules_for_path(&v.violation.path)
-                .boundary_violation
-                == Severity::Error
-        })
-        || results.circular_dependencies.iter().any(|c| {
-            c.cycle.files.iter().any(|path| {
-                config.resolve_rules_for_path(path).circular_dependencies == Severity::Error
-            })
-        })
+    })
 }
 
 fn has_override_framework_error(
@@ -594,7 +602,13 @@ fn has_default_file_scoped_error(
         || (rules.unused_load_data_keys == Severity::Error
             && !results.unused_load_data_keys.is_empty())
         || (rules.unresolved_imports == Severity::Error && !results.unresolved_imports.is_empty())
-        || (rules.stale_suppressions == Severity::Error && !results.stale_suppressions.is_empty())
+        || results.stale_suppressions.iter().any(|s| {
+            if s.missing_reason {
+                rules.require_suppression_reason == Severity::Error
+            } else {
+                rules.stale_suppressions == Severity::Error
+            }
+        })
         || (rules.unresolved_catalog_references == Severity::Error
             && !results.unresolved_catalog_references.is_empty())
         || (rules.empty_catalog_groups == Severity::Error
@@ -690,6 +704,7 @@ pub fn promote_warns_to_errors(rules: &mut RulesConfig) {
         &mut rules.boundary_violation,
         &mut rules.coverage_gaps,
         &mut rules.stale_suppressions,
+        &mut rules.require_suppression_reason,
         &mut rules.unused_catalog_entries,
         &mut rules.empty_catalog_groups,
         &mut rules.unresolved_catalog_references,
@@ -963,6 +978,7 @@ mod tests {
             coverage_gaps: Severity::Off,
             feature_flags: Severity::Off,
             stale_suppressions: Severity::Off,
+            require_suppression_reason: Severity::Off,
             unused_catalog_entries: Severity::Off,
             empty_catalog_groups: Severity::Off,
             unresolved_catalog_references: Severity::Off,
@@ -1099,6 +1115,7 @@ mod tests {
             coverage_gaps: Severity::Warn,
             feature_flags: Severity::Warn,
             stale_suppressions: Severity::Warn,
+            require_suppression_reason: Severity::Warn,
             unused_catalog_entries: Severity::Warn,
             empty_catalog_groups: Severity::Warn,
             unresolved_catalog_references: Severity::Error,
@@ -1158,6 +1175,7 @@ mod tests {
             coverage_gaps: Severity::Warn,
             feature_flags: Severity::Warn,
             stale_suppressions: Severity::Warn,
+            require_suppression_reason: Severity::Warn,
             unused_catalog_entries: Severity::Warn,
             empty_catalog_groups: Severity::Warn,
             unresolved_catalog_references: Severity::Error,
@@ -1638,6 +1656,7 @@ mod tests {
             coverage_gaps: Severity::Warn,
             feature_flags: Severity::Warn,
             stale_suppressions: Severity::Warn,
+            require_suppression_reason: Severity::Warn,
             unused_catalog_entries: Severity::Warn,
             empty_catalog_groups: Severity::Warn,
             unresolved_catalog_references: Severity::Error,
@@ -1710,6 +1729,7 @@ mod tests {
             coverage_gaps: Severity::Off,
             feature_flags: Severity::Off,
             stale_suppressions: Severity::Off,
+            require_suppression_reason: Severity::Off,
             unused_catalog_entries: Severity::Off,
             empty_catalog_groups: Severity::Off,
             unresolved_catalog_references: Severity::Off,

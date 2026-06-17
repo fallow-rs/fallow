@@ -785,6 +785,7 @@ fn sarif_mixed_severity_snapshot() {
         coverage_gaps: fallow_config::Severity::Warn,
         feature_flags: fallow_config::Severity::Off,
         stale_suppressions: fallow_config::Severity::Warn,
+        require_suppression_reason: fallow_config::Severity::Warn,
         unused_catalog_entries: fallow_config::Severity::Warn,
         empty_catalog_groups: fallow_config::Severity::Warn,
         unresolved_catalog_references: fallow_config::Severity::Error,
@@ -1030,9 +1031,11 @@ fn json_stale_suppression_unknown_kind_snapshot() {
         col: 0,
         origin: SuppressionOrigin::Comment {
             issue_kind: Some("complexity-typo".to_string()),
+            reason: None,
             is_file_level: false,
             kind_known: false,
         },
+        missing_reason: false,
     });
     results.stale_suppressions.push(StaleSuppression {
         path: root.join("src/utils.ts"),
@@ -1040,9 +1043,11 @@ fn json_stale_suppression_unknown_kind_snapshot() {
         col: 0,
         origin: SuppressionOrigin::Comment {
             issue_kind: Some("unused-export".to_string()),
+            reason: None,
             is_file_level: false,
             kind_known: true,
         },
+        missing_reason: false,
     });
     let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
@@ -1665,6 +1670,7 @@ fn codeclimate_mixed_severity_snapshot() {
         coverage_gaps: fallow_config::Severity::Warn,
         feature_flags: fallow_config::Severity::Off,
         stale_suppressions: fallow_config::Severity::Warn,
+        require_suppression_reason: fallow_config::Severity::Warn,
         unused_catalog_entries: fallow_config::Severity::Warn,
         empty_catalog_groups: fallow_config::Severity::Warn,
         unresolved_catalog_references: fallow_config::Severity::Error,

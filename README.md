@@ -969,19 +969,19 @@ No TypeScript compiler, no Node.js runtime needed to analyze your code. [Fallow 
 ## Suppressing findings
 
 ```ts
-// fallow-ignore-next-line unused-export
+// fallow-ignore-next-line unused-export -- kept for plugin consumers
 export const keepThis = 1;
 
-// fallow-ignore-next-line unused-export, complexity
+// fallow-ignore-next-line unused-export, complexity -- public API shim
 export const publicComplexHelper = (value: number) => value;
 
-// fallow-ignore-file
+// fallow-ignore-file -- generated route map
 // Suppress all issues in this file
 ```
 
-Use a comma-separated issue-kind list when one line has multiple findings.
+Use a comma-separated issue-kind list when one line has multiple findings. The `-- <reason>` suffix is optional by default and is recorded in suppression hygiene output. Set `rules.require-suppression-reason` to `"warn"` or `"error"` to require a reason on every `fallow-ignore-*` comment and `@expected-unused` tag.
 
-Also supports JSDoc visibility tags (`/** @public */`, `/** @internal */`, `/** @beta */`, `/** @alpha */`) to suppress unused export reports for library APIs consumed externally.
+Also supports JSDoc visibility tags (`/** @public */`, `/** @internal */`, `/** @beta */`, `/** @alpha */`) to suppress unused export reports for library APIs consumed externally. Use `/** @expected-unused -- <reason> */` when an export is intentionally unused today but should be reported once it becomes used.
 
 Set `ignoreExportsUsedInFile: true` when exported helpers should stay quiet while another symbol in the same file still references them, but should be reported once they become completely unreferenced. The `{ "type": true, "interface": true }` object form is accepted for knip parity; fallow groups type aliases and interfaces under one issue, so both type-kind fields behave identically. References inside the export specifier itself (`export { foo }`, `export default foo`) do not count as same-file uses.
 

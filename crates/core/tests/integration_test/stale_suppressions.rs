@@ -100,7 +100,7 @@ fn expected_unused_tag_stale_when_used() {
         s.path.ends_with("expected-unused.ts")
             && matches!(
                 &s.origin,
-                SuppressionOrigin::JsdocTag { export_name } if export_name == "usedExport"
+                SuppressionOrigin::JsdocTag { export_name, .. } if export_name == "usedExport"
             )
     });
 
@@ -120,7 +120,7 @@ fn expected_unused_tag_not_stale_when_unused() {
         s.path.ends_with("expected-unused.ts")
             && matches!(
                 &s.origin,
-                SuppressionOrigin::JsdocTag { export_name } if export_name == "genuinelyUnused"
+                SuppressionOrigin::JsdocTag { export_name, .. } if export_name == "genuinelyUnused"
             )
     });
 
@@ -146,6 +146,94 @@ fn expected_unused_not_in_unused_exports() {
         expected_unused_in_results.is_empty(),
         "@expected-unused exports should never appear in unused_exports: {expected_unused_in_results:?}"
     );
+}
+
+#[test]
+fn suppression_reasons_default_to_optional() {
+    let root = fixture_path("suppression-reasons");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let missing_reason_findings: Vec<_> = results
+        .stale_suppressions
+        .iter()
+        .filter(|s| s.missing_reason)
+        .collect();
+
+    assert!(
+        missing_reason_findings.is_empty(),
+        "missing reasons should not report unless the rule is enabled: {missing_reason_findings:?}"
+    );
+}
+
+#[test]
+fn require_suppression_reason_reports_reasonless_directive() {
+    let root = fixture_path("suppression-reasons");
+    let config = create_config_with_rules(root, |rules| {
+        rules.require_suppression_reason = Severity::Error;
+    });
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let missing_reason_findings: Vec<_> = results
+        .stale_suppressions
+        .iter()
+        .filter(|s| s.missing_reason)
+        .collect();
+
+    assert_eq!(
+        missing_reason_findings.len(),
+        2,
+        "the reasonless fallow-ignore directive and @expected-unused tag should report: {missing_reason_findings:?}"
+    );
+    let finding = missing_reason_findings
+        .iter()
+        .find(|s| s.line == 4)
+        .expect("reasonless fallow-ignore directive should report");
+    assert!(finding.path.ends_with("reasoned.ts"));
+    assert_eq!(finding.explanation(), "suppression is missing a reason");
+    assert!(
+        matches!(
+            &finding.origin,
+            SuppressionOrigin::Comment {
+                issue_kind: Some(kind),
+                reason: None,
+                ..
+            } if kind == "unused-export"
+        ),
+        "missing-reason finding should preserve the suppression kind: {finding:?}"
+    );
+
+    let jsdoc = missing_reason_findings
+        .iter()
+        .find(|s| s.line == 11)
+        .expect("reasonless @expected-unused tag should report");
+    assert!(
+        matches!(
+            &jsdoc.origin,
+            SuppressionOrigin::JsdocTag {
+                export_name,
+                reason: None,
+            } if export_name == "expectedUnusedMissingReason"
+        ),
+        "missing-reason finding should preserve the JSDoc export name: {jsdoc:?}"
+    );
+}
+
+#[test]
+fn reasoned_suppressions_surface_reason_metadata() {
+    let root = fixture_path("suppression-reasons");
+    let config = create_config_with_rules(root, |rules| {
+        rules.require_suppression_reason = Severity::Warn;
+    });
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let active_reason = results
+        .active_suppressions
+        .iter()
+        .find(|s| s.kind.as_deref() == Some("unused-export") && s.reason.is_some())
+        .and_then(|s| s.reason.as_deref());
+
+    assert_eq!(active_reason, Some("public compatibility export"));
 }
 
 #[test]

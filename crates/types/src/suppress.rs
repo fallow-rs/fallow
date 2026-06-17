@@ -462,6 +462,8 @@ pub struct Suppression {
     pub comment_line: u32,
     /// None = suppress all issue kinds on this line or file.
     pub target: Option<SuppressionTarget>,
+    /// Human-authored reason after `--`, when present.
+    pub reason: Option<String>,
 }
 
 impl Suppression {
@@ -472,6 +474,7 @@ impl Suppression {
             line,
             comment_line,
             target: None,
+            reason: None,
         }
     }
 
@@ -482,6 +485,7 @@ impl Suppression {
             line,
             comment_line,
             target: Some(SuppressionTarget::Issue(kind)),
+            reason: None,
         }
     }
 
@@ -499,7 +503,15 @@ impl Suppression {
             target: Some(SuppressionTarget::PolicyRule(PolicyRuleSuppression::new(
                 pack, rule_id,
             ))),
+            reason: None,
         }
+    }
+
+    /// Return a copy with a parsed suppression reason attached.
+    #[must_use]
+    pub fn with_reason(mut self, reason: Option<String>) -> Self {
+        self.reason = reason;
+        self
     }
 
     /// The bare issue kind if this suppression targets one.
@@ -578,6 +590,8 @@ pub struct UnknownSuppressionKind {
     pub is_file_level: bool,
     /// The verbatim token from the marker that did not parse.
     pub token: String,
+    /// Human-authored reason after `--`, when present.
+    pub reason: Option<String>,
 }
 
 /// Levenshtein edit distance between two ASCII-leaning strings.

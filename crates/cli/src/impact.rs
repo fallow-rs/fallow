@@ -2612,6 +2612,7 @@ mod tests {
             path: path.to_path_buf(),
             kind: Some(kind.to_owned()),
             is_file_level: false,
+            reason: None,
         }
     }
 
@@ -3302,6 +3303,7 @@ mod tests {
             path: a.clone(),
             kind: None,
             is_file_level: true,
+            reason: None,
         };
         run(root, &[&a], vec![], vec![], &[blanket], "t1");
         let store = load(root);

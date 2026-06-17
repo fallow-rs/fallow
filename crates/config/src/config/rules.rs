@@ -213,6 +213,10 @@ pub struct RulesConfig {
     pub feature_flags: Severity,
     #[serde(default = "Severity::default_warn", alias = "stale-suppression")]
     pub stale_suppressions: Severity,
+    /// Opt-in suppression hygiene rule: when enabled, every `fallow-ignore-*`
+    /// comment and `@expected-unused` tag must carry a `-- <reason>` suffix.
+    #[serde(default = "Severity::default_off", alias = "suppression-reason")]
+    pub require_suppression_reason: Severity,
     #[serde(default = "Severity::default_warn", alias = "unused-catalog-entry")]
     pub unused_catalog_entries: Severity,
     #[serde(default = "Severity::default_warn", alias = "empty-catalog-group")]
@@ -323,6 +327,7 @@ impl Default for RulesConfig {
             coverage_gaps: Severity::Off,
             feature_flags: Severity::Off,
             stale_suppressions: Severity::Warn,
+            require_suppression_reason: Severity::Off,
             unused_catalog_entries: Severity::Warn,
             empty_catalog_groups: Severity::Warn,
             unresolved_catalog_references: Severity::Error,
@@ -408,6 +413,7 @@ impl RulesConfig {
                 coverage_gaps,
                 feature_flags,
                 stale_suppressions,
+                require_suppression_reason,
                 unused_catalog_entries,
                 empty_catalog_groups,
                 unresolved_catalog_references,
@@ -638,6 +644,12 @@ pub struct PartialRulesConfig {
     pub stale_suppressions: Option<Severity>,
     #[serde(
         default,
+        alias = "suppression-reason",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub require_suppression_reason: Option<Severity>,
+    #[serde(
+        default,
         alias = "unused-catalog-entry",
         skip_serializing_if = "Option::is_none"
     )]
@@ -752,6 +764,8 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "coverage-gaps",
     "feature-flags",
     "stale-suppressions",
+    "require-suppression-reason",
+    "suppression-reason",
     "unused-catalog-entries",
     "empty-catalog-groups",
     "unresolved-catalog-references",
@@ -972,6 +986,7 @@ mod tests {
             "coverage-gap": "warn",
             "feature-flag": "warn",
             "stale-suppression": "off",
+            "suppression-reason": "warn",
             "unused-catalog-entry": "error",
             "empty-catalog-group": "error",
             "unresolved-catalog-reference": "warn"
@@ -995,6 +1010,7 @@ mod tests {
         assert_eq!(rules.coverage_gaps, Severity::Warn);
         assert_eq!(rules.feature_flags, Severity::Warn);
         assert_eq!(rules.stale_suppressions, Severity::Off);
+        assert_eq!(rules.require_suppression_reason, Severity::Warn);
         assert_eq!(rules.unused_catalog_entries, Severity::Error);
         assert_eq!(rules.empty_catalog_groups, Severity::Error);
         assert_eq!(rules.unresolved_catalog_references, Severity::Warn);
@@ -1017,6 +1033,7 @@ mod tests {
         assert_eq!(partial.coverage_gaps, Some(Severity::Warn));
         assert_eq!(partial.feature_flags, Some(Severity::Warn));
         assert_eq!(partial.stale_suppressions, Some(Severity::Off));
+        assert_eq!(partial.require_suppression_reason, Some(Severity::Warn));
         assert_eq!(partial.unused_catalog_entries, Some(Severity::Error));
         assert_eq!(partial.empty_catalog_groups, Some(Severity::Error));
         assert_eq!(partial.unresolved_catalog_references, Some(Severity::Warn));
@@ -1045,6 +1062,26 @@ mod tests {
         assert_eq!(rules.unused_exports, Severity::Off);
         assert_eq!(rules.unused_types, Severity::Error);
         assert_eq!(rules.unresolved_imports, Severity::Error);
+        assert_eq!(rules.require_suppression_reason, Severity::Off);
+    }
+
+    #[test]
+    fn require_suppression_reason_deserializes_canonical_and_alias() {
+        let rules: RulesConfig = serde_json::from_str(
+            r#"{
+                "require-suppression-reason": "error"
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(rules.require_suppression_reason, Severity::Error);
+
+        let partial: PartialRulesConfig = serde_json::from_str(
+            r#"{
+                "suppression-reason": "warn"
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(partial.require_suppression_reason, Some(Severity::Warn));
     }
 
     #[test]
@@ -1105,6 +1142,7 @@ mod tests {
             coverage_gaps: Some(Severity::Off),
             feature_flags: Some(Severity::Off),
             stale_suppressions: Some(Severity::Off),
+            require_suppression_reason: Some(Severity::Off),
             unused_catalog_entries: Some(Severity::Off),
             empty_catalog_groups: Some(Severity::Off),
             unresolved_catalog_references: Some(Severity::Off),
@@ -1129,6 +1167,7 @@ mod tests {
         assert_eq!(rules.coverage_gaps, Severity::Off);
         assert_eq!(rules.feature_flags, Severity::Off);
         assert_eq!(rules.stale_suppressions, Severity::Off);
+        assert_eq!(rules.require_suppression_reason, Severity::Off);
         assert_eq!(rules.security_sink, Severity::Off);
         assert_eq!(rules.policy_violation, Severity::Off);
         assert_eq!(rules.invalid_client_export, Severity::Off);
@@ -1185,7 +1224,7 @@ mod tests {
 
     #[test]
     fn known_rule_names_count_matches_struct() {
-        assert_eq!(KNOWN_RULE_NAMES.len(), 89);
+        assert_eq!(KNOWN_RULE_NAMES.len(), 91);
     }
 
     #[test]
@@ -1226,8 +1265,8 @@ mod tests {
 
         assert_eq!(
             aliases_found.len(),
-            92,
-            "expected 92 source-level alias attrs (46 per struct); got {}: {:?}",
+            94,
+            "expected 94 source-level alias attrs (47 per struct); got {}: {:?}",
             aliases_found.len(),
             aliases_found
         );

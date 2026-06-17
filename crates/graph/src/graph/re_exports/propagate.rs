@@ -129,6 +129,7 @@ pub(in crate::graph) fn propagate_star_re_export(input: StarReExportPropagation<
                 is_type_only: triggering_is_type_only,
                 is_side_effect_used: false,
                 visibility: VisibilityTag::None,
+                expected_unused_reason: None,
                 span: oxc_span::Span::new(0, 0),
                 references: refs.clone(),
                 members: Vec::new(),

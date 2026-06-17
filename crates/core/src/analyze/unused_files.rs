@@ -174,6 +174,7 @@ mod tests {
             is_type_only: false,
             is_side_effect_used: false,
             visibility: VisibilityTag::None,
+            expected_unused_reason: None,
             span: Span::new(0, 10),
             references: vec![SymbolReference {
                 from_file: FileId(2),
@@ -198,6 +199,7 @@ mod tests {
             is_type_only: false,
             is_side_effect_used: false,
             visibility: VisibilityTag::None,
+            expected_unused_reason: None,
             span: Span::new(0, 10),
             references: vec![SymbolReference {
                 from_file: FileId(0),

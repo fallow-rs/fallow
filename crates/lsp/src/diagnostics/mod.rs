@@ -850,9 +850,11 @@ mod severity_gate {
                             col: 0,
                             origin: fallow_core::results::SuppressionOrigin::Comment {
                                 issue_kind: None,
+                                reason: None,
                                 is_file_level: false,
                                 kind_known: true,
                             },
+                            missing_reason: false,
                         });
                 }),
             ),

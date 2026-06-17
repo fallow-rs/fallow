@@ -4505,6 +4505,10 @@
         "origin": {
           "description": "The origin and details of the stale suppression.",
           "$ref": "#/definitions/SuppressionOrigin"
+        },
+        "missing_reason": {
+          "type": "boolean",
+          "description": "True when `rules.require-suppression-reason` reported a suppression\ncomment or tag that has no reason."
         }
       },
       "required": [
@@ -6040,6 +6044,13 @@
               ],
               "description": "The issue kind token from the comment (e.g., \"unused-exports\"), or None for blanket."
             },
+            "reason": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Human-authored reason after `--`, when present."
+            },
             "is_file_level": {
               "type": "boolean",
               "description": "Whether this was a file-level suppression."
@@ -6065,6 +6076,13 @@
             "export_name": {
               "type": "string",
               "description": "The name of the export that was tagged."
+            },
+            "reason": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Human-authored reason after `--`, when present."
             },
             "type": {
               "type": "string",

@@ -330,6 +330,7 @@ impl CachedTokenFile {
                     line: suppression.line,
                     comment_line: suppression.comment_line,
                     target,
+                    reason: None,
                 }
             })
             .collect();

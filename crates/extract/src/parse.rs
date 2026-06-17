@@ -414,7 +414,7 @@ fn apply_jsdoc_visibility_tags(exports: &mut [ExportInfo], comments: &[Comment],
         return;
     }
 
-    let mut tag_offsets: Vec<(u32, VisibilityTag)> = Vec::new();
+    let mut tag_offsets: Vec<(u32, VisibilityTag, Option<String>)> = Vec::new();
     for comment in comments {
         if comment.is_jsdoc() {
             let content_span = comment.content_span();
@@ -422,20 +422,23 @@ fn apply_jsdoc_visibility_tags(exports: &mut [ExportInfo], comments: &[Comment],
             let end = (content_span.end as usize).min(source.len());
             if start < end {
                 let text = &source[start..end];
-                let tag = if has_public_tag(text) {
-                    VisibilityTag::Public
+                let (tag, reason) = if has_public_tag(text) {
+                    (VisibilityTag::Public, None)
                 } else if has_internal_tag(text) {
-                    VisibilityTag::Internal
+                    (VisibilityTag::Internal, None)
                 } else if has_alpha_tag(text) {
-                    VisibilityTag::Alpha
+                    (VisibilityTag::Alpha, None)
                 } else if has_beta_tag(text) {
-                    VisibilityTag::Beta
-                } else if has_expected_unused_tag(text) {
-                    VisibilityTag::ExpectedUnused
+                    (VisibilityTag::Beta, None)
                 } else {
-                    continue;
+                    let (has_expected_unused, reason) = expected_unused_tag(text);
+                    if has_expected_unused {
+                        (VisibilityTag::ExpectedUnused, reason)
+                    } else {
+                        continue;
+                    }
                 };
-                tag_offsets.push((comment.attached_to, tag));
+                tag_offsets.push((comment.attached_to, tag, reason));
             }
         }
     }
@@ -444,21 +447,24 @@ fn apply_jsdoc_visibility_tags(exports: &mut [ExportInfo], comments: &[Comment],
         return;
     }
 
-    tag_offsets.sort_unstable_by_key(|&(offset, _)| offset);
+    tag_offsets.sort_unstable_by_key(|&(offset, _, _)| offset);
 
     for export in exports.iter_mut() {
         if export.span.start == 0 && export.span.end == 0 {
             continue;
         }
 
-        if let Ok(idx) = tag_offsets.binary_search_by_key(&export.span.start, |&(o, _)| o) {
+        if let Ok(idx) = tag_offsets.binary_search_by_key(&export.span.start, |&(o, _, _)| o) {
             export.visibility = tag_offsets[idx].1;
+            export
+                .expected_unused_reason
+                .clone_from(&tag_offsets[idx].2);
             continue;
         }
 
-        let idx = tag_offsets.partition_point(|&(o, _)| o <= export.span.start);
+        let idx = tag_offsets.partition_point(|&(o, _, _)| o <= export.span.start);
         if idx > 0 {
-            let (offset, tag) = tag_offsets[idx - 1];
+            let (offset, tag, ref reason) = tag_offsets[idx - 1];
             let offset = offset as usize;
             let export_start = export.span.start as usize;
             if offset < export_start && export_start <= source.len() {
@@ -466,6 +472,7 @@ fn apply_jsdoc_visibility_tags(exports: &mut [ExportInfo], comments: &[Comment],
                 if between.starts_with("export") && !between.contains(';') && !between.contains('}')
                 {
                     export.visibility = tag;
+                    export.expected_unused_reason.clone_from(reason);
                 }
             }
         }
@@ -505,15 +512,41 @@ fn has_alpha_tag(comment_text: &str) -> bool {
     false
 }
 
-/// Check if a JSDoc comment body contains an `@expected-unused` tag.
-fn has_expected_unused_tag(comment_text: &str) -> bool {
+fn split_jsdoc_reason(rest: &str) -> Option<String> {
+    for (idx, _) in rest.match_indices("--") {
+        let before_ok = idx == 0
+            || rest[..idx]
+                .chars()
+                .next_back()
+                .is_some_and(char::is_whitespace);
+        let after_idx = idx + 2;
+        let after_ok = after_idx == rest.len()
+            || rest[after_idx..]
+                .chars()
+                .next()
+                .is_some_and(char::is_whitespace);
+        if before_ok && after_ok {
+            let reason = rest[after_idx..].trim();
+            return if reason.is_empty() {
+                None
+            } else {
+                Some(reason.to_string())
+            };
+        }
+    }
+
+    None
+}
+
+/// Return whether an `@expected-unused` tag is present and its optional reason.
+fn expected_unused_tag(comment_text: &str) -> (bool, Option<String>) {
     for (i, _) in comment_text.match_indices("@expected-unused") {
         let after = i + "@expected-unused".len();
         if after >= comment_text.len() || !is_ident_char(comment_text.as_bytes()[after]) {
-            return true;
+            return (true, split_jsdoc_reason(&comment_text[after..]));
         }
     }
-    false
+    (false, None)
 }
 
 /// Check if a byte is an identifier-continuation character (alphanumeric or `_`).

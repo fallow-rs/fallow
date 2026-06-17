@@ -334,9 +334,11 @@ impl<'a> SuppressionContext<'a> {
                     col: 0,
                     origin: SuppressionOrigin::Comment {
                         issue_kind: issue_kind_str,
+                        reason: s.reason.clone(),
                         is_file_level,
                         kind_known: true,
                     },
+                    missing_reason: false,
                 });
             }
         }
@@ -350,14 +352,69 @@ impl<'a> SuppressionContext<'a> {
                     col: 0,
                     origin: SuppressionOrigin::Comment {
                         issue_kind: Some(u.token.clone()),
+                        reason: u.reason.clone(),
                         is_file_level: u.is_file_level,
                         kind_known: false,
                     },
+                    missing_reason: false,
                 });
             }
         }
 
         stale
+    }
+
+    /// Collect suppression comments that are missing `-- <reason>`.
+    #[must_use]
+    pub fn find_missing_reasons(&self, graph: &ModuleGraph) -> Vec<StaleSuppression> {
+        let mut findings = Vec::new();
+        let mut seen: FxHashSet<(FileId, u32)> = FxHashSet::default();
+
+        for (&file_id, supps) in &self.by_file {
+            let path = &graph.modules[file_id.0 as usize].path;
+            for s in *supps {
+                if s.reason.is_some() || !seen.insert((file_id, s.comment_line)) {
+                    continue;
+                }
+
+                findings.push(StaleSuppression {
+                    path: path.clone(),
+                    line: s.comment_line,
+                    col: 0,
+                    origin: SuppressionOrigin::Comment {
+                        issue_kind: s.target_token(),
+                        reason: None,
+                        is_file_level: s.line == 0,
+                        kind_known: true,
+                    },
+                    missing_reason: true,
+                });
+            }
+        }
+
+        for (&file_id, unknowns) in &self.unknown_kinds {
+            let path = &graph.modules[file_id.0 as usize].path;
+            for u in *unknowns {
+                if u.reason.is_some() || !seen.insert((file_id, u.comment_line)) {
+                    continue;
+                }
+
+                findings.push(StaleSuppression {
+                    path: path.clone(),
+                    line: u.comment_line,
+                    col: 0,
+                    origin: SuppressionOrigin::Comment {
+                        issue_kind: Some(u.token.clone()),
+                        reason: None,
+                        is_file_level: u.is_file_level,
+                        kind_known: false,
+                    },
+                    missing_reason: true,
+                });
+            }
+        }
+
+        findings
     }
 
     /// Collect every suppression comment present in the analyzed files this run,
@@ -389,6 +446,7 @@ impl<'a> SuppressionContext<'a> {
                     path: path.clone(),
                     kind: s.target_token(),
                     is_file_level: s.line == 0,
+                    reason: s.reason.clone(),
                 });
             }
         }

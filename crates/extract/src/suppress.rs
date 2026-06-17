@@ -63,11 +63,43 @@ fn parse_suppression_target_list(rest: &str) -> (Vec<SuppressionTarget>, Vec<Str
     (targets, unknown)
 }
 
+fn split_suppression_reason(rest: &str) -> (&str, Option<String>) {
+    for (idx, _) in rest.match_indices("--") {
+        let before_ok = idx == 0
+            || rest[..idx]
+                .chars()
+                .next_back()
+                .is_some_and(char::is_whitespace);
+        let after_idx = idx + 2;
+        let after_ok = after_idx == rest.len()
+            || rest[after_idx..]
+                .chars()
+                .next()
+                .is_some_and(char::is_whitespace);
+        if before_ok && after_ok {
+            let targets = rest[..idx].trim_end();
+            let reason = rest[after_idx..].trim();
+            return (
+                targets,
+                if reason.is_empty() {
+                    None
+                } else {
+                    Some(reason.to_string())
+                },
+            );
+        }
+    }
+
+    (rest, None)
+}
+
 fn push_suppressions(parsed: &mut ParsedSuppressions, line: u32, comment_line: u32, rest: &str) {
+    let (rest, reason) = split_suppression_reason(rest);
+
     if rest.is_empty() {
         parsed
             .suppressions
-            .push(Suppression::all(line, comment_line));
+            .push(Suppression::all(line, comment_line).with_reason(reason));
         return;
     }
 
@@ -80,6 +112,7 @@ fn push_suppressions(parsed: &mut ParsedSuppressions, line: u32, comment_line: u
             line,
             comment_line,
             target: Some(target),
+            reason: reason.clone(),
         }));
 
     parsed
@@ -88,6 +121,7 @@ fn push_suppressions(parsed: &mut ParsedSuppressions, line: u32, comment_line: u
             comment_line,
             is_file_level,
             token,
+            reason: reason.clone(),
         }));
 }
 
@@ -214,6 +248,31 @@ mod tests {
     }
 
     #[test]
+    fn parse_next_line_suppression_with_reason() {
+        let source = "// fallow-ignore-next-line unused-export -- legacy public API\nexport const foo = 1;\n";
+        let suppressions = parse_suppressions_from_source(source).suppressions;
+        assert_eq!(suppressions.len(), 1);
+        assert_eq!(suppressions[0].reason.as_deref(), Some("legacy public API"));
+        assert_eq!(
+            suppressions[0].issue_kind_target(),
+            Some(IssueKind::UnusedExport)
+        );
+    }
+
+    #[test]
+    fn parse_blanket_file_suppression_with_reason() {
+        let source = "// fallow-ignore-file -- generated route map\nexport const foo = 1;\n";
+        let suppressions = parse_suppressions_from_source(source).suppressions;
+        assert_eq!(suppressions.len(), 1);
+        assert_eq!(suppressions[0].line, 0);
+        assert!(suppressions[0].issue_kind_target().is_none());
+        assert_eq!(
+            suppressions[0].reason.as_deref(),
+            Some("generated route map")
+        );
+    }
+
+    #[test]
     fn parse_next_line_suppression_with_comma_kind_list() {
         let source =
             "// fallow-ignore-next-line unused-export, complexity\nexport const foo = 1;\n";
@@ -303,17 +362,24 @@ mod tests {
 
     #[test]
     fn parse_partial_accept_known_kinds_recorded() {
-        let source =
-            "// fallow-ignore-next-line unused-export, complexity-typo\nexport const foo = 1;\n";
+        let source = "// fallow-ignore-next-line unused-export, complexity-typo -- tracked migration\nexport const foo = 1;\n";
         let parsed = parse_suppressions_from_source(source);
         assert_eq!(parsed.suppressions.len(), 1);
         assert_eq!(parsed.suppressions[0].line, 2);
+        assert_eq!(
+            parsed.suppressions[0].reason.as_deref(),
+            Some("tracked migration")
+        );
         assert_eq!(
             parsed.suppressions[0].issue_kind_target(),
             Some(IssueKind::UnusedExport)
         );
         assert_eq!(parsed.unknown_kinds.len(), 1);
         assert_eq!(parsed.unknown_kinds[0].token, "complexity-typo");
+        assert_eq!(
+            parsed.unknown_kinds[0].reason.as_deref(),
+            Some("tracked migration")
+        );
         assert_eq!(parsed.unknown_kinds[0].comment_line, 1);
         assert!(!parsed.unknown_kinds[0].is_file_level);
     }

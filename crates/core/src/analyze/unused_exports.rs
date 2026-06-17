@@ -3,7 +3,7 @@ use std::sync::LazyLock;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_config::{CompiledIgnoreExportRule, ResolvedConfig};
+use fallow_config::{CompiledIgnoreExportRule, ResolvedConfig, Severity};
 use fallow_types::extract::{ExportInfo, ExportName, ModuleInfo};
 
 use crate::discover::FileId;
@@ -308,7 +308,9 @@ fn stale_expected_unused_suppression(
         col,
         origin: SuppressionOrigin::JsdocTag {
             export_name: export.name.to_string(),
+            reason: export.expected_unused_reason.clone(),
         },
+        missing_reason: false,
     }
 }
 
@@ -462,6 +464,25 @@ fn unused_export_for_module(
         export.visibility,
         fallow_types::extract::VisibilityTag::ExpectedUnused
     ) {
+        if ctx.config.rules.require_suppression_reason != Severity::Off
+            && export.expected_unused_reason.is_none()
+        {
+            let (line, col) = byte_offset_to_line_col(
+                ctx.line_offsets_by_file,
+                module.file_id,
+                export.span.start,
+            );
+            stale_expected_unused.push(StaleSuppression {
+                path: module.path.clone(),
+                line,
+                col,
+                origin: SuppressionOrigin::JsdocTag {
+                    export_name: export.name.to_string(),
+                    reason: None,
+                },
+                missing_reason: true,
+            });
+        }
         if is_referenced {
             stale_expected_unused.push(stale_expected_unused_suppression(
                 module,
@@ -1216,6 +1237,7 @@ mod tests {
             is_type_only: false,
             is_side_effect_used: false,
             visibility: VisibilityTag::None,
+            expected_unused_reason: None,
             span: Span::new(span_start, span_end),
             references: vec![],
             members: vec![],
@@ -1233,6 +1255,7 @@ mod tests {
             is_type_only: false,
             is_side_effect_used: false,
             visibility: VisibilityTag::None,
+            expected_unused_reason: None,
             span: Span::new(span_start, span_end),
             references: vec![SymbolReference {
                 from_file: FileId(from),
@@ -1300,6 +1323,7 @@ mod tests {
             is_type_only: false,
             is_side_effect_used: false,
             visibility: VisibilityTag::None,
+            expected_unused_reason: None,
             span: Span::new(10, 20),
             references: vec![],
             members: vec![],
@@ -1310,6 +1334,7 @@ mod tests {
             is_type_only: false,
             is_side_effect_used: false,
             visibility: VisibilityTag::None,
+            expected_unused_reason: None,
             span: Span::new(10, 20),
             references: vec![],
             members: vec![],
@@ -1762,6 +1787,7 @@ mod tests {
             is_type_only: false,
             is_side_effect_used: false,
             visibility: VisibilityTag::None,
+            expected_unused_reason: None,
             span: oxc_span::Span::new(0, 10),
             references: vec![],
             members: vec![],
@@ -2073,6 +2099,7 @@ mod tests {
             is_type_only: true,
             is_side_effect_used: false,
             visibility: VisibilityTag::None,
+            expected_unused_reason: None,
             span: Span::new(span_start, span_end),
             references: vec![],
             members: vec![],
@@ -2153,6 +2180,7 @@ mod tests {
             is_type_only: false,
             is_side_effect_used: false,
             visibility: VisibilityTag::Public,
+            expected_unused_reason: None,
             span: Span::new(10, 20),
             references: vec![],
             members: vec![],
@@ -2751,6 +2779,7 @@ mod tests {
                 is_type_only: false,
                 is_side_effect_used: false,
                 visibility: VisibilityTag::None,
+                expected_unused_reason: None,
                 span: Span::new(10, 30),
                 references: vec![SymbolReference {
                     from_file: FileId(2),
@@ -2797,6 +2826,7 @@ mod tests {
             is_type_only: false,
             is_side_effect_used: false,
             visibility: VisibilityTag::None,
+            expected_unused_reason: None,
             span: Span::new(10, 28),
             references: vec![SymbolReference {
                 from_file: FileId(0),
@@ -2835,6 +2865,7 @@ mod tests {
             is_type_only: false,
             is_side_effect_used: false,
             visibility: VisibilityTag::Internal,
+            expected_unused_reason: None,
             span: Span::new(10, 30),
             references: vec![],
             members: vec![],
@@ -2868,6 +2899,7 @@ mod tests {
             is_type_only: false,
             is_side_effect_used: false,
             visibility: VisibilityTag::Beta,
+            expected_unused_reason: None,
             span: Span::new(10, 30),
             references: vec![],
             members: vec![],
@@ -2901,6 +2933,7 @@ mod tests {
             is_type_only: false,
             is_side_effect_used: false,
             visibility: VisibilityTag::Alpha,
+            expected_unused_reason: None,
             span: Span::new(10, 30),
             references: vec![],
             members: vec![],
