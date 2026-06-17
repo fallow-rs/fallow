@@ -812,15 +812,7 @@ fn populate_framework_specific_findings(input: &mut FrameworkSpecificFindingsInp
     populate_misplaced_directive_findings(input);
     populate_unprovided_inject_findings(input);
     populate_unrendered_component_findings(input);
-    populate_unused_component_prop_findings(
-        input.graph,
-        input.modules,
-        input.config,
-        input.declared_deps,
-        input.line_offsets_by_file,
-        input.suppressions,
-        input.results,
-    );
+    populate_unused_component_prop_findings(input);
     populate_unused_component_emit_findings(
         input.graph,
         input.modules,
@@ -1049,28 +1041,29 @@ fn populate_unrendered_component_findings(input: &mut FrameworkSpecificFindingsI
 /// Populate `unused_component_props` when the rule is enabled. Gated on the
 /// project declaring `vue` / `@vue/runtime-core` / `nuxt` inside the detector
 /// (see [`find_unused_component_props`]).
-fn populate_unused_component_prop_findings(
-    graph: &ModuleGraph,
-    modules: &[ModuleInfo],
-    config: &ResolvedConfig,
-    declared_deps: &FxHashSet<String>,
-    line_offsets_by_file: &LineOffsetsMap<'_>,
-    suppressions: &SuppressionContext<'_>,
-    results: &mut AnalysisResults,
-) {
-    if config.rules.unused_component_props == Severity::Off {
+fn populate_unused_component_prop_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
+    if input.config.rules.unused_component_props == Severity::Off {
         return;
     }
     // Vue arm: one component per `.vue` SFC, flagged from `component_props`.
-    results.unused_component_props =
-        find_unused_component_props(graph, modules, declared_deps, line_offsets_by_file)
-            .into_iter()
-            .map(UnusedComponentPropFinding::with_actions)
-            .collect();
+    input.results.unused_component_props = find_unused_component_props(
+        input.graph,
+        input.modules,
+        input.declared_deps,
+        input.line_offsets_by_file,
+    )
+    .into_iter()
+    .map(UnusedComponentPropFinding::with_actions)
+    .collect();
     // React/Preact arm: another producer of the SAME finding kind, emitting into
     // the same vector. Gated on `react` / `react-dom` / `next` / `preact` inside
     // the producer.
-    let react = find_unused_react_props(graph, modules, declared_deps, line_offsets_by_file);
+    let react = find_unused_react_props(
+        input.graph,
+        input.modules,
+        input.declared_deps,
+        input.line_offsets_by_file,
+    );
     if react.components_scanned > 0 {
         // Observability: make a silent dep-gate or silent abstain visible (a
         // scanned-but-zero-finding run is a clean bill, not a no-op). Surfaced at
@@ -1082,7 +1075,7 @@ fn populate_unused_component_prop_findings(
             react.components_scanned
         );
     }
-    results.unused_component_props.extend(
+    input.results.unused_component_props.extend(
         react
             .findings
             .into_iter()
@@ -1094,18 +1087,23 @@ fn populate_unused_component_prop_findings(
     // `// fallow-ignore-file unused-component-prop`) drops the finding. The
     // finding's `path` is the absolute graph node path, so it maps directly to a
     // FileId for the line-anchored suppression check.
-    let path_to_id: FxHashMap<&std::path::Path, FileId> = graph
+    let path_to_id: FxHashMap<&std::path::Path, FileId> = input
+        .graph
         .modules
         .iter()
         .map(|node| (node.path.as_path(), node.file_id))
         .collect();
-    results.unused_component_props.retain(|finding| {
+    input.results.unused_component_props.retain(|finding| {
         let Some(&file_id) = path_to_id.get(finding.prop.path.as_path()) else {
             return true;
         };
-        let suppressed =
-            suppressions.is_suppressed(file_id, finding.prop.line, IssueKind::UnusedComponentProp)
-                || suppressions.is_file_suppressed(file_id, IssueKind::UnusedComponentProp);
+        let suppressed = input.suppressions.is_suppressed(
+            file_id,
+            finding.prop.line,
+            IssueKind::UnusedComponentProp,
+        ) || input
+            .suppressions
+            .is_file_suppressed(file_id, IssueKind::UnusedComponentProp);
         !suppressed
     });
 }
