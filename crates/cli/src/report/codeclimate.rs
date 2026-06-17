@@ -402,8 +402,8 @@ fn push_unused_export_issues<'a, I>(input: UnusedExportIssuesInput<'a, I>)
 where
     I: IntoIterator<Item = &'a fallow_core::results::UnusedExport>,
 {
-    let level = severity_to_codeclimate(input.severity);
     for export in input.exports {
+        let level = severity_to_codeclimate(input.severity);
         let path = cc_path(&export.path, input.root);
         let kind = if export.is_re_export {
             input.re_export_label
