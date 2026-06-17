@@ -146,15 +146,15 @@ fn extract_eslint_config(
         visited,
         depth,
     });
-    add_eslint_override_config(
+    add_eslint_override_config(EslintConfigInput {
         result,
-        &parse_source,
+        parse_source: &parse_source,
         parse_path,
         config_path,
         root,
         visited,
         depth,
-    );
+    });
     add_eslint_resolver_dependencies(result, &parse_source, parse_path);
 }
 
@@ -248,45 +248,46 @@ fn add_eslint_top_level_config(input: EslintConfigInput<'_>) {
     }
 }
 
-fn add_eslint_override_config(
-    result: &mut PluginResult,
-    parse_source: &str,
-    parse_path: &Path,
-    config_path: &Path,
-    root: &Path,
-    visited: &mut FxHashSet<PathBuf>,
-    depth: usize,
-) {
+fn add_eslint_override_config(input: EslintConfigInput<'_>) {
     let override_parsers = config_parser::extract_config_array_nested_string_or_array(
-        parse_source,
-        parse_path,
+        input.parse_source,
+        input.parse_path,
         &["overrides"],
         &["parser"],
     );
     for parser in &override_parsers {
-        result
+        input
+            .result
             .referenced_dependencies
             .push(crate::resolve::extract_package_name(parser));
     }
     let override_plugins = config_parser::extract_config_array_nested_string_or_array(
-        parse_source,
-        parse_path,
+        input.parse_source,
+        input.parse_path,
         &["overrides"],
         &["plugins"],
     );
     for plugin in &override_plugins {
-        result
+        input
+            .result
             .referenced_dependencies
             .push(resolve_eslint_plugin_name(plugin));
     }
     let override_extends = config_parser::extract_config_array_nested_string_or_array(
-        parse_source,
-        parse_path,
+        input.parse_source,
+        input.parse_path,
         &["overrides"],
         &["extends"],
     );
     for ext in &override_extends {
-        process_extends_entry(ext, config_path, root, result, visited, depth);
+        process_extends_entry(
+            ext,
+            input.config_path,
+            input.root,
+            input.result,
+            input.visited,
+            input.depth,
+        );
     }
 }
 
