@@ -235,7 +235,7 @@ fn resolve_module_imports(
             .unwrap_or(file_path)
     };
 
-    Some(build_resolved_module(
+    Some(build_resolved_module(ResolvedModuleBuildInput {
         module,
         ctx,
         file_path,
@@ -243,39 +243,50 @@ fn resolve_module_imports(
         canonical_paths,
         files,
         all_imports,
-    ))
+    }))
 }
 
-fn build_resolved_module(
-    module: &ModuleInfo,
-    ctx: &ResolveContext<'_>,
-    file_path: &Path,
-    from_dir: &Path,
-    canonical_paths: &[PathBuf],
-    files: &[DiscoveredFile],
+struct ResolvedModuleBuildInput<'a> {
+    module: &'a ModuleInfo,
+    ctx: &'a ResolveContext<'a>,
+    file_path: &'a Path,
+    from_dir: &'a Path,
+    canonical_paths: &'a [PathBuf],
+    files: &'a [DiscoveredFile],
     all_imports: Vec<types::ResolvedImport>,
-) -> ResolvedModule {
+}
+
+fn build_resolved_module(input: ResolvedModuleBuildInput<'_>) -> ResolvedModule {
     ResolvedModule {
-        file_id: module.file_id,
-        path: file_path.to_path_buf(),
-        exports: module.exports.clone(),
-        re_exports: resolve_re_exports(ctx, file_path, &module.re_exports),
-        resolved_imports: all_imports,
-        resolved_dynamic_imports: resolve_dynamic_imports(ctx, file_path, &module.dynamic_imports),
-        resolved_dynamic_patterns: resolve_dynamic_patterns(
-            from_dir,
-            &module.dynamic_import_patterns,
-            canonical_paths,
-            files,
+        file_id: input.module.file_id,
+        path: input.file_path.to_path_buf(),
+        exports: input.module.exports.clone(),
+        re_exports: resolve_re_exports(input.ctx, input.file_path, &input.module.re_exports),
+        resolved_imports: input.all_imports,
+        resolved_dynamic_imports: resolve_dynamic_imports(
+            input.ctx,
+            input.file_path,
+            &input.module.dynamic_imports,
         ),
-        member_accesses: module.member_accesses.clone(),
-        whole_object_uses: module.whole_object_uses.clone(),
-        has_cjs_exports: module.has_cjs_exports,
-        has_angular_component_template_url: module.has_angular_component_template_url,
-        unused_import_bindings: module.unused_import_bindings.iter().cloned().collect(),
-        type_referenced_import_bindings: module.type_referenced_import_bindings.clone(),
-        value_referenced_import_bindings: module.value_referenced_import_bindings.clone(),
-        namespace_object_aliases: module.namespace_object_aliases.clone(),
+        resolved_dynamic_patterns: resolve_dynamic_patterns(
+            input.from_dir,
+            &input.module.dynamic_import_patterns,
+            input.canonical_paths,
+            input.files,
+        ),
+        member_accesses: input.module.member_accesses.clone(),
+        whole_object_uses: input.module.whole_object_uses.clone(),
+        has_cjs_exports: input.module.has_cjs_exports,
+        has_angular_component_template_url: input.module.has_angular_component_template_url,
+        unused_import_bindings: input
+            .module
+            .unused_import_bindings
+            .iter()
+            .cloned()
+            .collect(),
+        type_referenced_import_bindings: input.module.type_referenced_import_bindings.clone(),
+        value_referenced_import_bindings: input.module.value_referenced_import_bindings.clone(),
+        namespace_object_aliases: input.module.namespace_object_aliases.clone(),
     }
 }
 
