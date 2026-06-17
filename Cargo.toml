@@ -95,7 +95,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "io-st
 notify = "8"
 
 # Testing
-criterion = { version = "0.8", features = ["html_reports"] }
+divan = { package = "codspeed-divan-compat", version = "4.7" }
 dhat = "0.3"
 insta = { version = "1", features = ["yaml"] }
 proptest = "1"

@@ -7,8 +7,8 @@
 //! Allocation tracking benchmark using dhat.
 //!
 //! This benchmark measures heap allocation statistics for the fallow analysis
-//! pipeline. It cannot be a Criterion benchmark because dhat requires being
-//! the global allocator.
+//! pipeline. It uses a dedicated harness because dhat requires being the global
+//! allocator.
 //!
 //! Run with: `cargo bench --bench allocations`
 //!

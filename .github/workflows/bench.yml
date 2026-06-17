@@ -30,12 +30,9 @@ env:
 
 jobs:
   benchmark:
-    name: Performance regression check
+    name: CodSpeed performance check
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    permissions:
-      contents: write
-      pull-requests: write
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
@@ -43,44 +40,18 @@ jobs:
         with:
           cache-key: bench
 
-      - name: Run benchmarks
-        # Only run the `analysis` bench target (not `large_analysis` which
-        # contains 5000+ file benchmarks that take 5+ minutes each).
-        run: cargo bench --bench analysis -- --output-format bencher | tee bench-output.txt
-
-      - name: Store benchmark result
-        uses: ./.github/actions/store-benchmark
+      - name: Install cargo-codspeed
+        uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # v2.81.11
         with:
-          name: Fallow Benchmarks
-          tool: cargo
-          output-file-path: bench-output.txt
-          data-dir: bench
-          alert-threshold: '150%'
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          continue-on-error: ${{ github.event_name == 'pull_request' }}
+          tool: cargo-codspeed
 
-      - name: Deploy dashboard
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          # Save the dashboard page before switching branches
-          cp .github/pages/index.html /tmp/dashboard-index.html
+      - name: Build benchmark
+        # Only run the analysis bench target. large_analysis contains larger
+        # synthetic project benchmarks that exceed the fast PR feedback budget.
+        run: cargo codspeed build -p fallow-core --bench analysis
 
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          # Fetch latest gh-pages (benchmark-action may have just pushed)
-          git fetch origin gh-pages
-
-          # Use worktree to avoid losing the main checkout
-          git worktree add /tmp/gh-pages origin/gh-pages
-          cd /tmp/gh-pages
-
-          cp /tmp/dashboard-index.html index.html
-          git add index.html
-          if ! git diff --cached --quiet; then
-            git commit -m "chore: update dashboard index.html"
-            git push origin HEAD:gh-pages
-          fi
-
-          cd "$GITHUB_WORKSPACE"
-          git worktree remove /tmp/gh-pages
+      - name: Run benchmark
+        uses: CodSpeedHQ/action@c145068895e045cc725ee76fcd2307624b65c3af # v4.17.5
+        with:
+          mode: simulation
+          run: cargo codspeed run -p fallow-core --bench analysis
