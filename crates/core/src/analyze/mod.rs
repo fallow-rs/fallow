@@ -807,15 +807,7 @@ struct FrameworkSpecificFindingsInput<'a> {
 }
 
 fn populate_framework_specific_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
-    populate_invalid_client_export_findings(
-        input.graph,
-        input.modules,
-        input.config,
-        input.declared_deps,
-        input.suppressions,
-        input.line_offsets_by_file,
-        input.results,
-    );
+    populate_invalid_client_export_findings(input);
     populate_mixed_client_server_barrel_findings(input);
     populate_misplaced_directive_findings(
         input.graph,
@@ -950,24 +942,16 @@ fn populate_unused_load_data_key_findings(
 /// Populate `invalid_client_exports` when the rule is enabled. Gated on the
 /// project declaring `next` inside the detector (see
 /// [`find_invalid_client_exports`]).
-fn populate_invalid_client_export_findings(
-    graph: &ModuleGraph,
-    modules: &[ModuleInfo],
-    config: &ResolvedConfig,
-    declared_deps: &FxHashSet<String>,
-    suppressions: &SuppressionContext<'_>,
-    line_offsets_by_file: &LineOffsetsMap<'_>,
-    results: &mut AnalysisResults,
-) {
-    if config.rules.invalid_client_export == Severity::Off {
+fn populate_invalid_client_export_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
+    if input.config.rules.invalid_client_export == Severity::Off {
         return;
     }
-    results.invalid_client_exports = find_invalid_client_exports(
-        graph,
-        modules,
-        declared_deps,
-        suppressions,
-        line_offsets_by_file,
+    input.results.invalid_client_exports = find_invalid_client_exports(
+        input.graph,
+        input.modules,
+        input.declared_deps,
+        input.suppressions,
+        input.line_offsets_by_file,
     )
     .into_iter()
     .map(InvalidClientExportFinding::with_actions)
