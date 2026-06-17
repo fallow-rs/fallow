@@ -1,0 +1,12 @@
+{
+  "name": "app",
+  "private": true,
+  "main": "src/index.ts",
+  "dependencies": {
+    "bun-types": "catalog:",
+    "missing": "catalog:doesnotexist"
+  },
+  "devDependencies": {
+    "vitest": "catalog:testing"
+  }
+}

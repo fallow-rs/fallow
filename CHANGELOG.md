@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Nested same-file schema values no longer report as unused when a reachable exported value depends on them.** Effect Schema projects commonly pair `export const Foo = Schema...` with `export type Foo = Schema.Schema.Type<typeof Foo>`, then compose that value into another exported schema through `Schema.Array(Foo)`. Fallow now walks reachable same-file exported value initializers so the child schema value is credited through the parent schema, while unrelated unused sibling schemas still report. Thanks [@danielo515](https://github.com/danielo515) for the report. (Closes [#1304](https://github.com/fallow-rs/fallow/issues/1304).)
 
+- **Catalog rules now read Bun catalogs from root `package.json`.** Bun workspaces that declare catalog entries under `workspaces.catalog` / `workspaces.catalogs` (or Bun's accepted top-level `catalog` / `catalogs` form) now get the same `unresolved-catalog-references`, `unused-catalog-entries`, and `empty-catalog-groups` coverage as pnpm workspaces with `pnpm-workspace.yaml`. Fallow still prefers `pnpm-workspace.yaml` when it exists, preserving existing pnpm behavior. Thanks [@codingthat](https://github.com/codingthat) for the report. (Closes [#1301](https://github.com/fallow-rs/fallow/issues/1301).)
+
 ## [2.98.0] - 2026-06-17
 
 ### Added

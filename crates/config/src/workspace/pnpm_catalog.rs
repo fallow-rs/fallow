@@ -1,8 +1,12 @@
-//! Parser for the `catalog:` and `catalogs:` sections of `pnpm-workspace.yaml`.
+//! Parser for package manager catalog declarations.
 //!
 //! pnpm supports two catalog forms:
 //! - the top-level `catalog:` map (the "default" catalog)
 //! - the top-level `catalogs:` map of named catalogs
+//!
+//! Bun supports the same shapes in root `package.json`, usually under
+//! `workspaces.catalog` / `workspaces.catalogs`, with top-level `catalog` /
+//! `catalogs` accepted as an alternative.
 //!
 //! ```yaml
 //! catalog:
@@ -28,12 +32,12 @@
 //! parse; a second targeted scan over the raw source recovers the line
 //! numbers.
 
-/// Structured catalog data extracted from a `pnpm-workspace.yaml` file.
+/// Structured catalog data extracted from a package manager catalog source.
 #[derive(Debug, Clone, Default)]
 pub struct PnpmCatalogData {
     /// Catalogs found in the file. The default catalog (top-level `catalog:`)
     /// always appears first with `name = "default"` when present; named
-    /// catalogs follow in YAML source order.
+    /// catalogs follow in source order.
     pub catalogs: Vec<PnpmCatalog>,
     /// Named catalogs under `catalogs:` that declare no package entries.
     ///
@@ -141,6 +145,76 @@ pub fn parse_pnpm_catalog_data(source: &str) -> PnpmCatalogData {
     }
 }
 
+/// Parse Bun catalog sections from a root `package.json` file.
+///
+/// Bun accepts `workspaces.catalog` / `workspaces.catalogs` and the same
+/// `catalog` / `catalogs` keys at package.json top level. The nested
+/// `workspaces` form is preferred when both forms exist for the same section.
+#[must_use]
+pub fn parse_package_json_catalog_data(source: &str) -> PnpmCatalogData {
+    let value: serde_json::Value = match serde_json::from_str(source.trim_start_matches('\u{FEFF}'))
+    {
+        Ok(value) => value,
+        Err(_) => return PnpmCatalogData::default(),
+    };
+    let Some(root) = value.as_object() else {
+        return PnpmCatalogData::default();
+    };
+
+    let workspaces = root
+        .get("workspaces")
+        .and_then(serde_json::Value::as_object);
+    let default_value = workspaces
+        .and_then(|workspace| workspace.get("catalog"))
+        .or_else(|| root.get("catalog"));
+    let named_value = workspaces
+        .and_then(|workspace| workspace.get("catalogs"))
+        .or_else(|| root.get("catalogs"));
+    let line_index = build_package_json_line_index(source);
+
+    let mut catalogs = Vec::new();
+    let mut empty_named_catalog_groups = Vec::new();
+
+    if let Some(default_map) = default_value.and_then(serde_json::Value::as_object) {
+        let entries = collect_json_entries(default_map, &line_index, "default");
+        if !entries.is_empty() {
+            catalogs.push(PnpmCatalog {
+                name: "default".to_string(),
+                entries,
+            });
+        }
+    }
+
+    if let Some(named_map) = named_value.and_then(serde_json::Value::as_object) {
+        for (name, catalog_value) in named_map {
+            if let Some(catalog_map) = catalog_value.as_object() {
+                let entries = collect_json_entries(catalog_map, &line_index, name);
+                if entries.is_empty() {
+                    empty_named_catalog_groups.push(PnpmCatalogGroup {
+                        name: name.clone(),
+                        line: line_index.group_line_for(name).unwrap_or(1),
+                    });
+                } else {
+                    catalogs.push(PnpmCatalog {
+                        name: name.clone(),
+                        entries,
+                    });
+                }
+            } else if catalog_value.is_null() {
+                empty_named_catalog_groups.push(PnpmCatalogGroup {
+                    name: name.clone(),
+                    line: line_index.group_line_for(name).unwrap_or(1),
+                });
+            }
+        }
+    }
+
+    PnpmCatalogData {
+        catalogs,
+        empty_named_catalog_groups,
+    }
+}
+
 fn collect_entries(
     mapping: &serde_yaml_ng::Mapping,
     line_index: &CatalogLineIndex,
@@ -155,6 +229,20 @@ fn collect_entries(
                 package_name: pkg.to_string(),
                 line,
             })
+        })
+        .collect()
+}
+
+fn collect_json_entries(
+    mapping: &serde_json::Map<String, serde_json::Value>,
+    line_index: &CatalogLineIndex,
+    catalog_name: &str,
+) -> Vec<PnpmCatalogEntry> {
+    mapping
+        .keys()
+        .map(|pkg| PnpmCatalogEntry {
+            package_name: pkg.clone(),
+            line: line_index.line_for(catalog_name, pkg).unwrap_or(1),
         })
         .collect()
 }
@@ -249,6 +337,120 @@ fn build_line_index(source: &str) -> CatalogLineIndex {
     }
 
     CatalogLineIndex { entries, groups }
+}
+
+fn build_package_json_line_index(source: &str) -> CatalogLineIndex {
+    let mut entries = Vec::new();
+    let mut groups = Vec::new();
+    let mut current_depth: u32 = 0;
+    let mut workspaces_depth: Option<u32> = None;
+    let mut section: Section = Section::None;
+    let mut section_depth: u32 = 0;
+    let mut named_catalog: Option<(String, u32)> = None;
+
+    for (idx, raw_line) in source.lines().enumerate() {
+        let line_no = u32::try_from(idx).unwrap_or(u32::MAX).saturating_add(1);
+        let trimmed = raw_line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let key = parse_json_key(trimmed);
+        let parent_depth = current_depth;
+        let in_supported_parent =
+            parent_depth == 1 || workspaces_depth.is_some_and(|depth| parent_depth == depth);
+
+        if let Some(name) = key {
+            match section {
+                Section::DefaultCatalog if parent_depth == section_depth => {
+                    entries.push((("default".to_string(), name.to_string()), line_no));
+                }
+                Section::NamedCatalogs if parent_depth == section_depth => {
+                    groups.push((name.to_string(), line_no));
+                    named_catalog = Some((name.to_string(), parent_depth));
+                }
+                Section::NamedCatalogs => {
+                    if let Some((catalog_name, group_depth)) = &named_catalog
+                        && parent_depth == group_depth.saturating_add(1)
+                    {
+                        entries.push(((catalog_name.clone(), name.to_string()), line_no));
+                    }
+                }
+                Section::DefaultCatalog | Section::None => {}
+            }
+        }
+
+        let (opens, closes) = count_json_braces(raw_line);
+        let depth_after_opens = current_depth.saturating_add(opens);
+
+        if let Some(name) = key {
+            if parent_depth == 1 && name == "workspaces" && opens > 0 {
+                workspaces_depth = Some(parent_depth.saturating_add(1));
+            }
+            if in_supported_parent && name == "catalog" && opens > 0 {
+                section = Section::DefaultCatalog;
+                section_depth = parent_depth.saturating_add(1);
+                named_catalog = None;
+            } else if in_supported_parent && name == "catalogs" && opens > 0 {
+                section = Section::NamedCatalogs;
+                section_depth = parent_depth.saturating_add(1);
+                named_catalog = None;
+            }
+        }
+
+        current_depth = depth_after_opens.saturating_sub(closes);
+
+        if matches!(section, Section::DefaultCatalog | Section::NamedCatalogs)
+            && current_depth < section_depth
+        {
+            section = Section::None;
+            named_catalog = None;
+        }
+        if let Some(depth) = workspaces_depth
+            && current_depth < depth
+        {
+            workspaces_depth = None;
+        }
+    }
+
+    CatalogLineIndex { entries, groups }
+}
+
+fn parse_json_key(trimmed: &str) -> Option<&str> {
+    let rest = trimmed.strip_prefix('"')?;
+    let end = rest.find('"')?;
+    let after = rest[end.saturating_add(1)..].trim_start();
+    after.starts_with(':').then_some(&rest[..end])
+}
+
+fn count_json_braces(line: &str) -> (u32, u32) {
+    let mut opens: u32 = 0;
+    let mut closes: u32 = 0;
+    let mut in_string = false;
+    let mut escaped = false;
+    for ch in line.chars() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        if ch == '"' {
+            in_string = !in_string;
+            continue;
+        }
+        if in_string {
+            continue;
+        }
+        match ch {
+            '{' => opens = opens.saturating_add(1),
+            '}' => closes = closes.saturating_add(1),
+            _ => {}
+        }
+    }
+    (opens, closes)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -366,6 +568,91 @@ mod tests {
         assert_eq!(default.entries[0].line, 5);
         assert_eq!(default.entries[1].package_name, "is-even");
         assert_eq!(default.entries[1].line, 6);
+    }
+
+    #[test]
+    fn parses_bun_workspaces_catalog() {
+        let json = r#"{
+  "name": "demo",
+  "workspaces": {
+    "packages": ["packages/*"],
+    "catalog": {
+      "react": "^19.0.0",
+      "react-dom": "^19.0.0"
+    },
+    "catalogs": {
+      "testing": {
+        "vitest": "^3.0.0"
+      },
+      "empty": {}
+    }
+  }
+}
+"#;
+        let data = parse_package_json_catalog_data(json);
+        assert_eq!(data.catalogs.len(), 2);
+        assert_eq!(data.catalogs[0].name, "default");
+        assert_eq!(data.catalogs[0].entries[0].package_name, "react");
+        assert_eq!(data.catalogs[0].entries[0].line, 6);
+        assert_eq!(data.catalogs[1].name, "testing");
+        assert_eq!(data.catalogs[1].entries[0].package_name, "vitest");
+        assert_eq!(data.catalogs[1].entries[0].line, 11);
+        let empty: Vec<_> = data
+            .empty_named_catalog_groups
+            .iter()
+            .map(|group| (group.name.as_str(), group.line))
+            .collect();
+        assert_eq!(empty, vec![("empty", 13)]);
+    }
+
+    #[test]
+    fn parses_bun_top_level_catalog_fallback() {
+        let json = r#"{
+  "name": "demo",
+  "workspaces": ["packages/*"],
+  "catalog": {
+    "bun-types": "^1.3.0"
+  },
+  "catalogs": {
+    "testing": {
+      "vitest": "^3.0.0"
+    }
+  }
+}
+"#;
+        let data = parse_package_json_catalog_data(json);
+        assert_eq!(data.catalogs.len(), 2);
+        assert_eq!(data.catalogs[0].name, "default");
+        assert_eq!(data.catalogs[0].entries[0].package_name, "bun-types");
+        assert_eq!(data.catalogs[0].entries[0].line, 5);
+        assert_eq!(data.catalogs[1].name, "testing");
+        assert_eq!(data.catalogs[1].entries[0].line, 9);
+    }
+
+    #[test]
+    fn workspaces_catalog_takes_precedence_over_top_level_catalog() {
+        let json = r#"{
+  "workspaces": {
+    "packages": ["packages/*"],
+    "catalog": {
+      "react": "^19.0.0"
+    }
+  },
+  "catalog": {
+    "react": "^18.0.0",
+    "vue": "^3.0.0"
+  }
+}
+"#;
+        let data = parse_package_json_catalog_data(json);
+        assert_eq!(data.catalogs.len(), 1);
+        let entries: Vec<_> = data.catalogs[0]
+            .entries
+            .iter()
+            .map(|entry| entry.package_name.as_str())
+            .collect();
+        assert_eq!(entries, vec!["react"]);
+        assert_eq!(data.catalogs[0].entries[0].line, 5);
     }
 
     #[test]

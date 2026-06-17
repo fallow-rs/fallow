@@ -236,22 +236,23 @@ pub struct AnalysisResults {
     /// Suppression comments or JSDoc tags that no longer match any issue.
     #[serde(default)]
     pub stale_suppressions: Vec<StaleSuppression>,
-    /// Entries in pnpm-workspace.yaml's catalog: or catalogs: sections not
-    /// referenced by any workspace package via the catalog: protocol. Wrapped
-    /// in [`UnusedCatalogEntryFinding`] so each entry carries a typed
+    /// Entries in package manager catalog sections not referenced by any
+    /// workspace package via the catalog: protocol. Supports
+    /// `pnpm-workspace.yaml` catalogs and Bun root `package.json` catalogs.
+    /// Wrapped in [`UnusedCatalogEntryFinding`] so each entry carries a typed
     /// `actions` array natively, with per-instance `auto_fixable` derived
-    /// from `hardcoded_consumers`.
+    /// from `hardcoded_consumers` and the catalog source file.
     #[serde(default)]
     pub unused_catalog_entries: Vec<UnusedCatalogEntryFinding>,
-    /// Named groups under pnpm-workspace.yaml's catalogs: section that declare
-    /// no package entries. The top-level catalog: map is not reported. Wrapped
-    /// in [`EmptyCatalogGroupFinding`].
+    /// Named groups under package manager catalogs sections that declare no
+    /// package entries. The top-level catalog: map is not reported. Wrapped in
+    /// [`EmptyCatalogGroupFinding`].
     #[serde(default)]
     pub empty_catalog_groups: Vec<EmptyCatalogGroupFinding>,
     /// Workspace package.json references to catalogs (`catalog:` or
-    /// `catalog:<name>`) that do not declare the consumed package. pnpm install
-    /// will error until the named catalog grows to include the package or the
-    /// reference is switched / removed. Wrapped in
+    /// `catalog:<name>`) that do not declare the consumed package. The package
+    /// manager install will error until the named catalog grows to include the
+    /// package or the reference is switched / removed. Wrapped in
     /// [`UnresolvedCatalogReferenceFinding`] with the discriminated
     /// `add-catalog-entry` / `update-catalog-reference` primary at position 0.
     #[serde(default)]
@@ -2342,23 +2343,25 @@ pub struct SecurityFinding {
     pub attack_surface: Option<SecurityAttackSurfaceEntry>,
 }
 
-/// A pnpm catalog entry declared in pnpm-workspace.yaml that no workspace package
-/// references via the `catalog:` protocol.
+/// A package manager catalog entry that no workspace package references via
+/// the `catalog:` protocol.
 ///
-/// The default catalog (top-level `catalog:` key) uses `catalog_name: "default"`.
-/// Named catalogs (under `catalogs.<name>:`) use their declared name.
+/// The default catalog uses `catalog_name: "default"`. Named catalogs
+/// (`catalogs.<name>`) use their declared name. The source file is
+/// `pnpm-workspace.yaml` for pnpm catalogs or root `package.json` for Bun
+/// catalogs.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedCatalogEntry {
     /// Package name declared in the catalog (e.g. `"react"`, `"@scope/lib"`).
     pub entry_name: String,
-    /// Catalog group: `"default"` for the top-level `catalog:` map, or the
-    /// named catalog key for entries declared under `catalogs.<name>:`.
+    /// Catalog group: `"default"` for the default catalog map, or the named
+    /// catalog key for entries declared under `catalogs.<name>`.
     pub catalog_name: String,
-    /// Path to `pnpm-workspace.yaml`, relative to the analyzed root.
+    /// Path to the catalog source file, relative to the analyzed root.
     #[serde(serialize_with = "serde_path::serialize")]
     pub path: PathBuf,
-    /// 1-based line number of the catalog entry within `pnpm-workspace.yaml`.
+    /// 1-based line number of the catalog entry within the source file.
     pub line: u32,
     /// Workspace `package.json` files that declare the same package with a
     /// hardcoded version range instead of `catalog:`. Empty when no consumer
@@ -2372,29 +2375,28 @@ pub struct UnusedCatalogEntry {
     pub hardcoded_consumers: Vec<PathBuf>,
 }
 
-/// A named `catalogs.<name>:` group in `pnpm-workspace.yaml` with no package entries.
+/// A named `catalogs.<name>` group with no package entries.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct EmptyCatalogGroup {
-    /// Catalog group name declared under the top-level `catalogs:` map.
+    /// Catalog group name declared under the `catalogs` map.
     pub catalog_name: String,
-    /// Path to `pnpm-workspace.yaml`, relative to the analyzed root.
+    /// Path to the catalog source file, relative to the analyzed root.
     #[serde(serialize_with = "serde_path::serialize")]
     pub path: PathBuf,
-    /// 1-based line number of the empty group header within `pnpm-workspace.yaml`.
+    /// 1-based line number of the empty group header within the source file.
     pub line: u32,
 }
 
 /// A workspace package.json reference (`catalog:` or `catalog:<name>`) that points
 /// at a catalog which does not declare the consumed package.
 ///
-/// `pnpm install` errors at install time with `ERR_PNPM_CATALOG_ENTRY_NOT_FOUND_FOR_CATALOG_PROTOCOL`
-/// when this happens. fallow surfaces it statically so the failure is caught at
-/// `fallow dead-code` time, before any install.
+/// Package manager installs error when this happens. fallow surfaces it
+/// statically so the failure is caught at `fallow dead-code` time, before any
+/// install.
 ///
-/// The default catalog (bare `catalog:` references the top-level `catalog:` map)
-/// uses `catalog_name: "default"`. Named catalogs (`catalog:react17`) use the
-/// declared catalog name.
+/// The default catalog (bare `catalog:`) uses `catalog_name: "default"`.
+/// Named catalogs (`catalog:react17`) use the declared catalog name.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnresolvedCatalogReference {
@@ -2413,10 +2415,10 @@ pub struct UnresolvedCatalogReference {
     pub path: PathBuf,
     /// 1-based line number of the dependency entry in the consumer `package.json`.
     pub line: u32,
-    /// Other catalogs (in the same `pnpm-workspace.yaml`) that DO declare this
-    /// package. Empty when no catalog has the package. Sorted lexicographically.
-    /// Lets agents and humans decide whether to switch the reference to a
-    /// different catalog or to add the entry to the named catalog.
+    /// Other catalogs in the same catalog source that DO declare this package.
+    /// Empty when no catalog has the package. Sorted lexicographically. Lets
+    /// agents and humans decide whether to switch the reference to a different
+    /// catalog or to add the entry to the named catalog.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub available_in_catalogs: Vec<String>,
 }

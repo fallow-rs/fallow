@@ -238,25 +238,25 @@ pub const CHECK_RULES: &[RuleDef] = &[
     RuleDef {
         id: "fallow/unused-catalog-entry",
         category: "Dependencies",
-        name: "Unused pnpm catalog entry",
-        short: "Catalog entry in pnpm-workspace.yaml not referenced by any workspace package",
-        full: "An entry in the `catalog:` or `catalogs:` section of pnpm-workspace.yaml that no workspace package.json references via the `catalog:` protocol. Catalog entries are leftover dependency metadata once a package is removed from every consumer; delete the entry to keep the catalog truthful. See also: fallow/unresolved-catalog-reference (the inverse: consumer references a catalog that does not declare the package).",
+        name: "Unused catalog entry",
+        short: "Catalog entry not referenced by any workspace package",
+        full: "An entry in a package manager catalog (`pnpm-workspace.yaml` `catalog:` / `catalogs:` or Bun root `package.json` `workspaces.catalog` / `workspaces.catalogs`) that no workspace package.json references via the `catalog:` protocol. Catalog entries are leftover dependency metadata once a package is removed from every consumer; delete the entry to keep the catalog truthful. See also: fallow/unresolved-catalog-reference (the inverse: consumer references a catalog that does not declare the package).",
         docs_path: "explanations/dead-code#unused-catalog-entries",
     },
     RuleDef {
         id: "fallow/empty-catalog-group",
         category: "Dependencies",
-        name: "Empty pnpm catalog group",
-        short: "Named catalog group in pnpm-workspace.yaml has no entries",
-        full: "A named group under `catalogs:` in pnpm-workspace.yaml has no package entries. Empty named groups are leftover catalog structure after the last entry is removed. The top-level `catalog:` map is intentionally ignored because some projects keep it as a stable hook.",
+        name: "Empty catalog group",
+        short: "Named catalog group has no entries",
+        full: "A named group under `catalogs:` in `pnpm-workspace.yaml` or Bun root `package.json` has no package entries. Empty named groups are leftover catalog structure after the last entry is removed. The default `catalog` map is intentionally ignored because some projects keep it as a stable hook.",
         docs_path: "explanations/dead-code#empty-catalog-groups",
     },
     RuleDef {
         id: "fallow/unresolved-catalog-reference",
         category: "Dependencies",
-        name: "Unresolved pnpm catalog reference",
+        name: "Unresolved catalog reference",
         short: "package.json references a catalog that does not declare the package",
-        full: "A workspace package.json declares a dependency with the `catalog:` or `catalog:<name>` protocol, but the catalog has no entry for that package. `pnpm install` will fail with ERR_PNPM_CATALOG_ENTRY_NOT_FOUND_FOR_CATALOG_PROTOCOL. To fix: add the package to the named catalog, switch the reference to a different catalog that does declare it, or remove the reference and pin a hardcoded version. Scope: the detector scans `dependencies`, `devDependencies`, `peerDependencies`, and `optionalDependencies` in every workspace `package.json`. See also: fallow/unused-catalog-entry (the inverse: catalog entries no consumer references).",
+        full: "A workspace package.json declares a dependency with the `catalog:` or `catalog:<name>` protocol, but the catalog has no entry for that package. The package manager install will fail until the catalog is fixed. To fix: add the package to the named catalog, switch the reference to a different catalog that does declare it, or remove the reference and pin a hardcoded version. Scope: the detector scans `dependencies`, `devDependencies`, `peerDependencies`, and `optionalDependencies` in every workspace `package.json`, using `pnpm-workspace.yaml` catalogs when present and Bun root `package.json` catalogs otherwise. See also: fallow/unused-catalog-entry (the inverse: catalog entries no consumer references).",
         docs_path: "explanations/dead-code#unresolved-catalog-references",
     },
     RuleDef {
@@ -764,16 +764,16 @@ fn architecture_rule_guide(id: &str) -> Option<RuleGuide> {
 fn catalog_rule_guide(id: &str) -> Option<RuleGuide> {
     Some(match id {
         "fallow/unused-catalog-entry" => RuleGuide {
-            example: "pnpm-workspace.yaml declares `catalog: { is-even: ^1.0.0 }`, but no workspace package.json declares `\"is-even\": \"catalog:\"`.",
-            how_to_fix: "Delete the entry from pnpm-workspace.yaml. If any consumer uses a hardcoded version (surfaced in `hardcoded_consumers`), switch that consumer to `catalog:` first to keep versions aligned.",
+            example: "The catalog source declares `catalog: { is-even: ^1.0.0 }`, but no workspace package.json declares `\"is-even\": \"catalog:\"`.",
+            how_to_fix: "Delete the entry from the catalog source file. If any consumer uses a hardcoded version (surfaced in `hardcoded_consumers`), switch that consumer to `catalog:` first to keep versions aligned.",
         },
         "fallow/empty-catalog-group" => RuleGuide {
-            example: "pnpm-workspace.yaml declares `catalogs: { react17: {} }` after the last react17 entry was removed.",
-            how_to_fix: "Delete the empty named group header from pnpm-workspace.yaml. Comments between the deleted header and the next sibling can stay in place for manual review.",
+            example: "The catalog source declares `catalogs: { react17: {} }` after the last react17 entry was removed.",
+            how_to_fix: "Delete the empty named group from the catalog source file. Comments between the deleted header and the next sibling can stay in place for manual review.",
         },
         "fallow/unresolved-catalog-reference" => RuleGuide {
-            example: "packages/app/package.json declares `\"old-react\": \"catalog:react17\"`, but `catalogs.react17` in pnpm-workspace.yaml does not declare `old-react`. `pnpm install` will fail.",
-            how_to_fix: "If `available_in_catalogs` is non-empty, change the reference to one of those catalogs (e.g. `catalog:react18`). Otherwise add the package to the named catalog in pnpm-workspace.yaml, or remove the catalog reference and pin a hardcoded version. For staged migrations where the catalog edit lands separately, add the (package, catalog, consumer) triple to `ignoreCatalogReferences` in your fallow config.",
+            example: "packages/app/package.json declares `\"old-react\": \"catalog:react17\"`, but `catalogs.react17` in the catalog source does not declare `old-react`. The package manager install will fail.",
+            how_to_fix: "If `available_in_catalogs` is non-empty, change the reference to one of those catalogs (e.g. `catalog:react18`). Otherwise add the package to the named catalog in the catalog source, or remove the catalog reference and pin a hardcoded version. For staged migrations where the catalog edit lands separately, add the (package, catalog, consumer) triple to `ignoreCatalogReferences` in your fallow config.",
         },
         "fallow/unused-dependency-override" => RuleGuide {
             example: "pnpm-workspace.yaml declares `overrides: { axios: ^1.6.0 }`, but no workspace package.json declares `axios` and `pnpm-lock.yaml` does not resolve it.",

@@ -1,9 +1,13 @@
-//! Detection of unused pnpm catalog entries and unresolved catalog references
+//! Detection of unused package manager catalog entries and unresolved references
 //! in workspace `package.json` files.
 //!
-//! pnpm 9+ supports two catalog forms:
+//! pnpm 9+ supports two catalog forms in `pnpm-workspace.yaml`:
 //! - the top-level `catalog:` map ("default" catalog)
 //! - the top-level `catalogs:` map of named catalogs
+//!
+//! Bun supports matching catalog forms in root `package.json`, either under
+//! `workspaces.catalog` / `workspaces.catalogs` or top-level `catalog` /
+//! `catalogs`.
 //!
 //! Workspace packages reference catalog versions from their `dependencies` /
 //! `devDependencies` / `peerDependencies` / `optionalDependencies` via the
@@ -20,8 +24,8 @@
 //! 2. **`unresolved-catalog-references`**: the inverse. A `package.json`
 //!    references a `catalog:` or `catalog:<name>` that does not declare the
 //!    consumed package. `pnpm install` errors with
-//!    `ERR_PNPM_CATALOG_ENTRY_NOT_FOUND_FOR_CATALOG_PROTOCOL`; fallow surfaces
-//!    this statically before any install runs. Each finding carries
+//!    the package manager install; fallow surfaces this statically before any
+//!    install runs. Each finding carries
 //!    `available_in_catalogs`: other catalogs in the same workspace that DO
 //!    declare the package, so consumers can flip the reference instead of
 //!    adding a new catalog entry. Suppression: `ignoreCatalogReferences`
@@ -35,35 +39,53 @@ use std::path::{Path, PathBuf};
 
 use fallow_config::{
     CompiledIgnoreCatalogReferenceRule, PackageJson, PnpmCatalogData, ResolvedConfig,
-    WorkspaceInfo, parse_pnpm_catalog_data,
+    WorkspaceInfo, parse_package_json_catalog_data, parse_pnpm_catalog_data,
 };
 use fallow_types::results::{EmptyCatalogGroup, UnresolvedCatalogReference, UnusedCatalogEntry};
 use rustc_hash::FxHashSet;
 
 const PNPM_WORKSPACE_FILE: &str = "pnpm-workspace.yaml";
+const PACKAGE_JSON_FILE: &str = "package.json";
 
-/// Catalog analysis state: parsed YAML data and walked consumer references.
+/// Catalog analysis state: parsed catalog data and walked consumer references.
 /// Built once per analysis run so both detectors share parsing cost.
 pub struct PnpmCatalogState {
     data: PnpmCatalogData,
     consumers: CatalogConsumers,
+    source_path: PathBuf,
 }
 
-/// Read `pnpm-workspace.yaml` and walk workspace `package.json` files to build
-/// shared catalog analysis state. Returns `None` when the YAML file is missing
-/// or unreadable; callers should skip both catalog detectors in that case.
+/// Read catalog declarations and walk workspace `package.json` files to build
+/// shared catalog analysis state. `pnpm-workspace.yaml` stays the preferred
+/// source when present; otherwise Bun-style root `package.json` catalogs are
+/// read from `workspaces.catalog` / `workspaces.catalogs`.
 pub fn gather_pnpm_catalog_state(
     config: &ResolvedConfig,
     workspaces: &[WorkspaceInfo],
 ) -> Option<PnpmCatalogState> {
     let yaml_path = config.root.join(PNPM_WORKSPACE_FILE);
-    let yaml_source = std::fs::read_to_string(&yaml_path).ok()?;
-
-    let data = parse_pnpm_catalog_data(&yaml_source);
+    let (data, source_path) = if let Ok(yaml_source) = std::fs::read_to_string(&yaml_path) {
+        (
+            parse_pnpm_catalog_data(&yaml_source),
+            PathBuf::from(PNPM_WORKSPACE_FILE),
+        )
+    } else {
+        let package_json_path = config.root.join(PACKAGE_JSON_FILE);
+        let package_json_source = std::fs::read_to_string(&package_json_path).ok()?;
+        let data = parse_package_json_catalog_data(&package_json_source);
+        if data.catalogs.is_empty() && data.empty_named_catalog_groups.is_empty() {
+            return None;
+        }
+        (data, PathBuf::from(PACKAGE_JSON_FILE))
+    };
     let consumer_pkg_paths = collect_consumer_pkg_paths(config, workspaces);
     let consumers = collect_catalog_consumers(&consumer_pkg_paths, &config.root);
 
-    Some(PnpmCatalogState { data, consumers })
+    Some(PnpmCatalogState {
+        data,
+        consumers,
+        source_path,
+    })
 }
 
 /// Emit one `UnusedCatalogEntry` for every catalog entry not referenced by any
@@ -99,7 +121,7 @@ pub fn find_unused_catalog_entries(state: &PnpmCatalogState) -> Vec<UnusedCatalo
             findings.push(UnusedCatalogEntry {
                 entry_name: entry.package_name.clone(),
                 catalog_name: catalog.name.clone(),
-                path: PathBuf::from(PNPM_WORKSPACE_FILE),
+                path: state.source_path.clone(),
                 line: entry.line,
                 hardcoded_consumers,
             });
@@ -123,7 +145,7 @@ pub fn find_empty_catalog_groups(state: &PnpmCatalogState) -> Vec<EmptyCatalogGr
         .iter()
         .map(|group| EmptyCatalogGroup {
             catalog_name: group.name.clone(),
-            path: PathBuf::from(PNPM_WORKSPACE_FILE),
+            path: state.source_path.clone(),
             line: group.line,
         })
         .collect()

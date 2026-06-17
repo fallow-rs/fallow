@@ -29,6 +29,8 @@ use fallow_core::results::{
 
 use super::plan::{CapturedHashes, FixPlan, read_source_with_hash_check};
 
+const PNPM_WORKSPACE_FILE: &str = "pnpm-workspace.yaml";
+
 /// Apply unused-catalog-entry fixes to `pnpm-workspace.yaml`.
 ///
 /// Returns `(had_write_error, applied_count, skipped_count)` so the
@@ -68,6 +70,17 @@ pub(super) fn apply_catalog_entry_fixes(
     let by_path = group_unused_catalog_entries_by_path(entries);
 
     for (relative_path, file_entries) in by_path {
+        if !is_pnpm_catalog_source(relative_path) {
+            skip_unsupported_catalog_source_entries(
+                &file_entries,
+                &mut summary,
+                fixes,
+                output,
+                relative_path,
+            );
+            continue;
+        }
+
         let absolute = root.join(relative_path);
         let Some((content, meta)) = read_source_with_hash_check(root, &absolute, hashes, plan)
         else {
@@ -250,6 +263,29 @@ fn group_unused_catalog_entries_by_path(
     by_path
 }
 
+fn is_pnpm_catalog_source(path: &Path) -> bool {
+    path == Path::new(PNPM_WORKSPACE_FILE)
+}
+
+fn skip_unsupported_catalog_source_entries(
+    entries: &[&UnusedCatalogEntry],
+    summary: &mut CatalogFixSummary,
+    fixes: &mut Vec<serde_json::Value>,
+    output: OutputFormat,
+    relative_path: &Path,
+) {
+    for entry in entries {
+        summary.skipped += 1;
+        fixes.push(skip_record(
+            entry,
+            "unsupported_catalog_source",
+            "Skipped: fallow fix only edits pnpm-workspace.yaml catalog entries; edit Bun package.json catalogs manually",
+            output,
+            relative_path,
+        ));
+    }
+}
+
 fn skip_out_of_range_catalog_entry(
     entry: &UnusedCatalogEntry,
     summary: &mut CatalogFixSummary,
@@ -337,6 +373,20 @@ pub(super) fn apply_empty_catalog_group_fixes(
     let by_path = group_empty_catalog_groups_by_path(groups);
 
     for (relative_path, file_groups) in by_path {
+        if !is_pnpm_catalog_source(relative_path) {
+            for group in &file_groups {
+                summary.skipped += 1;
+                fixes.push(skip_group_record(
+                    group,
+                    "unsupported_catalog_source",
+                    "Skipped: fallow fix only edits pnpm-workspace.yaml catalog entries; edit Bun package.json catalogs manually",
+                    output,
+                    relative_path,
+                ));
+            }
+            continue;
+        }
+
         let absolute = root.join(relative_path);
         let Some((content, meta)) = read_source_with_hash_check(root, &absolute, hashes, plan)
         else {
@@ -861,6 +911,16 @@ mod tests {
         })
     }
 
+    fn make_package_json_entry(name: &str, catalog: &str, line: u32) -> UnusedCatalogEntryFinding {
+        UnusedCatalogEntryFinding::with_actions(UnusedCatalogEntry {
+            entry_name: name.to_string(),
+            catalog_name: catalog.to_string(),
+            path: PathBuf::from("package.json"),
+            line,
+            hardcoded_consumers: vec![],
+        })
+    }
+
     fn make_group(name: &str, line: u32) -> EmptyCatalogGroupFinding {
         EmptyCatalogGroupFinding::with_actions(EmptyCatalogGroup {
             catalog_name: name.to_string(),
@@ -869,8 +929,21 @@ mod tests {
         })
     }
 
+    fn make_package_json_group(name: &str, line: u32) -> EmptyCatalogGroupFinding {
+        EmptyCatalogGroupFinding::with_actions(EmptyCatalogGroup {
+            catalog_name: name.to_string(),
+            path: PathBuf::from("package.json"),
+            line,
+        })
+    }
+
     fn seed_workspace_file(root: &Path, content: &str) {
         let path = root.join("pnpm-workspace.yaml");
+        std::fs::write(&path, content).unwrap();
+    }
+
+    fn seed_package_json(root: &Path, content: &str) {
+        let path = root.join("package.json");
         std::fs::write(&path, content).unwrap();
     }
 
@@ -972,6 +1045,57 @@ mod tests {
         assert_eq!(fixes.len(), 1);
         assert_eq!(fixes[0]["applied"], serde_json::json!(true));
         assert_eq!(fixes[0]["removed_lines"], serde_json::json!(1));
+    }
+
+    #[test]
+    fn skips_bun_package_json_catalog_entries_without_mutating_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let content = "{\n  \"workspaces\": {\n    \"catalog\": {\n      \"unused\": \"^1.0.0\"\n    }\n  }\n}\n";
+        seed_package_json(dir.path(), content);
+
+        let entries = vec![make_package_json_entry("unused", "default", 4)];
+        let mut fixes = Vec::new();
+        let summary = run_catalog_entry_fix(
+            dir.path(),
+            &entries,
+            CatalogPrecedingCommentPolicy::Auto,
+            OutputFormat::Json,
+            false,
+            &mut fixes,
+        );
+
+        assert_eq!(summary.applied, 0);
+        assert_eq!(summary.skipped, 1);
+        assert!(!summary.write_error);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("package.json")).unwrap(),
+            content
+        );
+        assert_eq!(fixes[0]["skip_reason"], "unsupported_catalog_source");
+        assert_eq!(fixes[0]["file"], "package.json");
+    }
+
+    #[test]
+    fn skips_bun_package_json_empty_catalog_groups_without_mutating_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let content =
+            "{\n  \"workspaces\": {\n    \"catalogs\": {\n      \"empty\": {}\n    }\n  }\n}\n";
+        seed_package_json(dir.path(), content);
+
+        let groups = vec![make_package_json_group("empty", 4)];
+        let mut fixes = Vec::new();
+        let summary =
+            run_empty_catalog_group_fix(dir.path(), &groups, OutputFormat::Json, false, &mut fixes);
+
+        assert_eq!(summary.applied, 0);
+        assert_eq!(summary.skipped, 1);
+        assert!(!summary.write_error);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("package.json")).unwrap(),
+            content
+        );
+        assert_eq!(fixes[0]["skip_reason"], "unsupported_catalog_source");
+        assert_eq!(fixes[0]["file"], "package.json");
     }
 
     #[test]

@@ -237,6 +237,8 @@ mod arrow_wrapped_imports;
 mod bin_script_deps;
 #[path = "integration_test/entry_export_validation.rs"]
 mod entry_export_validation;
+#[path = "integration_test/issue_1301_bun_catalog.rs"]
+mod issue_1301_bun_catalog;
 #[path = "integration_test/issue_195_non_source_entry_points.rs"]
 mod issue_195_non_source_entry_points;
 #[path = "integration_test/issue_317_namespace_barrel_ignore_exports.rs"]

@@ -34,10 +34,12 @@ use serde::Serialize;
 /// Current per-instance flips:
 ///
 /// - `remove-catalog-entry` (`unused-catalog-entries`): `true` only when the
-///   finding's `hardcoded_consumers` array is empty. When a workspace
-///   package still pins a hardcoded version of the same package, `fallow fix`
-///   skips the entry to avoid breaking `pnpm install`, and the action is
-///   emitted with `auto_fixable: false`.
+///   finding's `hardcoded_consumers` array is empty and the source is
+///   `pnpm-workspace.yaml`. When a workspace package still pins a hardcoded
+///   version of the same package, `fallow fix` skips the entry to avoid
+///   breaking `pnpm install`. Bun `package.json` catalog entries are also
+///   emitted with `auto_fixable: false` because the current fixer is
+///   YAML-only.
 /// - `remove-dependency` vs `move-dependency` (dependency findings): when the
 ///   finding's `used_in_workspaces` array is non-empty, the primary action
 ///   flips to `move-dependency` with `auto_fixable: false` (`fallow fix` will
@@ -95,11 +97,12 @@ pub struct FixAction {
     /// FINDING, not per action type: the same `type` may carry
     /// `auto_fixable: true` on one finding and `auto_fixable: false` on
     /// another when per-instance guards in the applier discriminate (e.g.
-    /// `remove-catalog-entry` flips on `hardcoded_consumers`, the primary
-    /// dependency action flips between `remove-dependency` /
-    /// `move-dependency` on `used_in_workspaces`). Filter on this bool of
-    /// each individual action, not on `type`. See the [`IssueAction`]
-    /// enum-level docs for the full list of per-instance flips.
+    /// `remove-catalog-entry` flips on `hardcoded_consumers` and catalog
+    /// source file, the primary dependency action flips between
+    /// `remove-dependency` / `move-dependency` on `used_in_workspaces`).
+    /// Filter on this bool of each individual action, not on `type`. See the
+    /// [`IssueAction`] enum-level docs for the full list of per-instance
+    /// flips.
     pub auto_fixable: bool,
     /// Human-readable description of the fix.
     pub description: String,
@@ -163,9 +166,11 @@ pub enum FixActionType {
     /// Convert an import statement to a type-only import (used by
     /// private-type-leak findings).
     ExportType,
-    /// Remove an unused catalog entry from `pnpm-workspace.yaml`.
+    /// Remove an unused catalog entry. Auto-fix only supports `pnpm-workspace.yaml`;
+    /// Bun `package.json` catalogs are manual.
     RemoveCatalogEntry,
-    /// Remove an empty named catalog group from `pnpm-workspace.yaml`.
+    /// Remove an empty named catalog group. Auto-fix only supports
+    /// `pnpm-workspace.yaml`; Bun `package.json` catalogs are manual.
     RemoveEmptyCatalogGroup,
     /// Update an existing `catalog:` reference in a workspace `package.json`
     /// to point at a different (declared) catalog.

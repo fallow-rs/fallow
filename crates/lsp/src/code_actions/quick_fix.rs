@@ -12,6 +12,8 @@ use fallow_core::results::AnalysisResults;
 
 use crate::diagnostics::FIRST_LINE_RANGE;
 
+const PNPM_WORKSPACE_FILE: &str = "pnpm-workspace.yaml";
+
 /// Return true if `c` is a JS / TS identifier character.
 ///
 /// Covers the ASCII identifier set (`[A-Za-z0-9_$]`) plus the non-ASCII
@@ -325,6 +327,9 @@ fn catalog_entry_delete_span(
     if !entry.hardcoded_consumers.is_empty() {
         return None;
     }
+    if !is_pnpm_catalog_source(&entry.path) {
+        return None;
+    }
 
     let entry_uri = Uri::from_file_path(root.join(&entry.path))?;
     if entry_uri != *uri {
@@ -481,6 +486,9 @@ pub fn build_remove_empty_catalog_group_actions(
 
     for group in &results.empty_catalog_groups {
         let group = &group.group;
+        if !is_pnpm_catalog_source(&group.path) {
+            continue;
+        }
         let Some(group_uri) = Uri::from_file_path(root.join(&group.path)) else {
             continue;
         };
@@ -562,6 +570,10 @@ pub fn build_remove_empty_catalog_group_actions(
     }
 
     actions
+}
+
+fn is_pnpm_catalog_source(path: &Path) -> bool {
+    path == Path::new(PNPM_WORKSPACE_FILE)
 }
 
 /// Anchored match for a catalog key on its declared line. Handles
@@ -1392,10 +1404,26 @@ mod tests {
         line: u32,
         consumers: Vec<PathBuf>,
     ) -> UnusedCatalogEntryFinding {
+        make_catalog_entry_in_file(
+            name,
+            catalog,
+            PathBuf::from("pnpm-workspace.yaml"),
+            line,
+            consumers,
+        )
+    }
+
+    fn make_catalog_entry_in_file(
+        name: &str,
+        catalog: &str,
+        path: PathBuf,
+        line: u32,
+        consumers: Vec<PathBuf>,
+    ) -> UnusedCatalogEntryFinding {
         UnusedCatalogEntryFinding::with_actions(UnusedCatalogEntry {
             entry_name: name.to_string(),
             catalog_name: catalog.to_string(),
-            path: PathBuf::from("pnpm-workspace.yaml"),
+            path,
             line,
             hardcoded_consumers: consumers,
         })
@@ -1466,6 +1494,41 @@ mod tests {
             dir.path(),
             &uri,
             &make_range(1, 1),
+            &lines,
+        );
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn catalog_action_skips_bun_package_json_catalog_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let uri = Uri::from_file_path(dir.path().join("package.json")).unwrap();
+
+        let mut results = AnalysisResults::default();
+        results
+            .unused_catalog_entries
+            .push(make_catalog_entry_in_file(
+                "unused",
+                "default",
+                PathBuf::from("package.json"),
+                4,
+                vec![],
+            ));
+
+        let lines = vec![
+            "{",
+            "  \"workspaces\": {",
+            "    \"catalog\": {",
+            "      \"unused\": \"^1.0.0\"",
+            "    }",
+            "  }",
+            "}",
+        ];
+        let actions = build_remove_catalog_entry_actions(
+            &results,
+            dir.path(),
+            &uri,
+            &make_range(3, 3),
             &lines,
         );
         assert!(actions.is_empty());
@@ -1763,9 +1826,13 @@ mod tests {
     use fallow_core::results::{EmptyCatalogGroup, EmptyCatalogGroupFinding};
 
     fn make_empty_group(name: &str, line: u32) -> EmptyCatalogGroupFinding {
+        make_empty_group_in_file(name, PathBuf::from("pnpm-workspace.yaml"), line)
+    }
+
+    fn make_empty_group_in_file(name: &str, path: PathBuf, line: u32) -> EmptyCatalogGroupFinding {
         EmptyCatalogGroupFinding::with_actions(EmptyCatalogGroup {
             catalog_name: name.to_string(),
-            path: PathBuf::from("pnpm-workspace.yaml"),
+            path,
             line,
         })
     }
@@ -1813,6 +1880,37 @@ mod tests {
         );
         assert_eq!(diag.message, "Empty catalog group: 'legacy' has no entries");
         assert_eq!(diag.tags, Some(vec![DiagnosticTag::UNNECESSARY]));
+    }
+
+    #[test]
+    fn empty_catalog_group_action_skips_bun_package_json_groups() {
+        let dir = tempfile::tempdir().unwrap();
+        let uri = Uri::from_file_path(dir.path().join("package.json")).unwrap();
+
+        let mut results = AnalysisResults::default();
+        results.empty_catalog_groups.push(make_empty_group_in_file(
+            "empty",
+            PathBuf::from("package.json"),
+            4,
+        ));
+
+        let lines = vec![
+            "{",
+            "  \"workspaces\": {",
+            "    \"catalogs\": {",
+            "      \"empty\": {}",
+            "    }",
+            "  }",
+            "}",
+        ];
+        let actions = build_remove_empty_catalog_group_actions(
+            &results,
+            dir.path(),
+            &uri,
+            &make_range(3, 3),
+            &lines,
+        );
+        assert!(actions.is_empty());
     }
 
     #[test]

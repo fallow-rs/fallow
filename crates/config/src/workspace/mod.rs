@@ -23,7 +23,8 @@ use parsers::{
     parse_tsconfig_references_with_diagnostics,
 };
 pub use pnpm_catalog::{
-    PnpmCatalog, PnpmCatalogData, PnpmCatalogEntry, PnpmCatalogGroup, parse_pnpm_catalog_data,
+    PnpmCatalog, PnpmCatalogData, PnpmCatalogEntry, PnpmCatalogGroup,
+    parse_package_json_catalog_data, parse_pnpm_catalog_data,
 };
 pub use pnpm_overrides::{
     MisconfigReason, OverrideSource, ParsedOverrideKey, PnpmOverrideData, PnpmOverrideEntry,

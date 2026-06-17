@@ -138,10 +138,12 @@ export type AuditGate = ("new-only" | "all")
  * Current per-instance flips:
  *
  * - `remove-catalog-entry` (`unused-catalog-entries`): `true` only when the
- *   finding's `hardcoded_consumers` array is empty. When a workspace
- *   package still pins a hardcoded version of the same package, `fallow fix`
- *   skips the entry to avoid breaking `pnpm install`, and the action is
- *   emitted with `auto_fixable: false`.
+ *   finding's `hardcoded_consumers` array is empty and the source is
+ *   `pnpm-workspace.yaml`. When a workspace package still pins a hardcoded
+ *   version of the same package, `fallow fix` skips the entry to avoid
+ *   breaking `pnpm install`. Bun `package.json` catalog entries are also
+ *   emitted with `auto_fixable: false` because the current fixer is
+ *   YAML-only.
  * - `remove-dependency` vs `move-dependency` (dependency findings): when the
  *   finding's `used_in_workspaces` array is non-empty, the primary action
  *   flips to `move-dependency` with `auto_fixable: false` (`fallow fix` will
@@ -1040,24 +1042,25 @@ policy_violations?: PolicyViolationFinding[]
  */
 stale_suppressions?: StaleSuppression[]
 /**
- * Entries in pnpm-workspace.yaml's catalog: or catalogs: sections not
- * referenced by any workspace package via the catalog: protocol. Wrapped
- * in [`UnusedCatalogEntryFinding`] so each entry carries a typed
+ * Entries in package manager catalog sections not referenced by any
+ * workspace package via the catalog: protocol. Supports
+ * `pnpm-workspace.yaml` catalogs and Bun root `package.json` catalogs.
+ * Wrapped in [`UnusedCatalogEntryFinding`] so each entry carries a typed
  * `actions` array natively, with per-instance `auto_fixable` derived
- * from `hardcoded_consumers`.
+ * from `hardcoded_consumers` and the catalog source file.
  */
 unused_catalog_entries?: UnusedCatalogEntryFinding[]
 /**
- * Named groups under pnpm-workspace.yaml's catalogs: section that declare
- * no package entries. The top-level catalog: map is not reported. Wrapped
- * in [`EmptyCatalogGroupFinding`].
+ * Named groups under package manager catalogs sections that declare no
+ * package entries. The top-level catalog: map is not reported. Wrapped in
+ * [`EmptyCatalogGroupFinding`].
  */
 empty_catalog_groups?: EmptyCatalogGroupFinding[]
 /**
  * Workspace package.json references to catalogs (`catalog:` or
- * `catalog:<name>`) that do not declare the consumed package. pnpm install
- * will error until the named catalog grows to include the package or the
- * reference is switched / removed. Wrapped in
+ * `catalog:<name>`) that do not declare the consumed package. The package
+ * manager install will error until the named catalog grows to include the
+ * package or the reference is switched / removed. Wrapped in
  * [`UnresolvedCatalogReferenceFinding`] with the discriminated
  * `add-catalog-entry` / `update-catalog-reference` primary at position 0.
  */
@@ -1460,11 +1463,12 @@ type: FixActionType
  * FINDING, not per action type: the same `type` may carry
  * `auto_fixable: true` on one finding and `auto_fixable: false` on
  * another when per-instance guards in the applier discriminate (e.g.
- * `remove-catalog-entry` flips on `hardcoded_consumers`, the primary
- * dependency action flips between `remove-dependency` /
- * `move-dependency` on `used_in_workspaces`). Filter on this bool of
- * each individual action, not on `type`. See the [`IssueAction`]
- * enum-level docs for the full list of per-instance flips.
+ * `remove-catalog-entry` flips on `hardcoded_consumers` and catalog
+ * source file, the primary dependency action flips between
+ * `remove-dependency` / `move-dependency` on `used_in_workspaces`).
+ * Filter on this bool of each individual action, not on `type`. See the
+ * [`IssueAction`] enum-level docs for the full list of per-instance
+ * flips.
  */
 auto_fixable: boolean
 /**
@@ -2444,9 +2448,8 @@ missing_reason?: boolean
 }
 /**
  * Wire-shape envelope for an [`UnusedCatalogEntry`] finding. Per-instance
- * `auto_fixable` flips to `false` when `hardcoded_consumers` is non-empty:
- * the entry cannot be removed safely while a workspace package still pins
- * the same package via a hardcoded version range.
+ * `auto_fixable` flips to `false` when `hardcoded_consumers` is non-empty or
+ * the source is not `pnpm-workspace.yaml`.
  */
 export interface UnusedCatalogEntryFinding {
 /**
@@ -2454,16 +2457,16 @@ export interface UnusedCatalogEntryFinding {
  */
 entry_name: string
 /**
- * Catalog group: `"default"` for the top-level `catalog:` map, or the
- * named catalog key for entries declared under `catalogs.<name>:`.
+ * Catalog group: `"default"` for the default catalog map, or the named
+ * catalog key for entries declared under `catalogs.<name>`.
  */
 catalog_name: string
 /**
- * Path to `pnpm-workspace.yaml`, relative to the analyzed root.
+ * Path to the catalog source file, relative to the analyzed root.
  */
 path: string
 /**
- * 1-based line number of the catalog entry within `pnpm-workspace.yaml`.
+ * 1-based line number of the catalog entry within the source file.
  */
 line: number
 /**
@@ -2485,20 +2488,20 @@ introduced?: (AuditIntroduced | null)
 }
 /**
  * Wire-shape envelope for an [`EmptyCatalogGroup`] finding. Carries a
- * straightforward `remove-empty-catalog-group` primary plus a YAML-comment
- * suppress.
+ * `remove-empty-catalog-group` primary. YAML-sourced findings also include a
+ * YAML-comment suppress action.
  */
 export interface EmptyCatalogGroupFinding {
 /**
- * Catalog group name declared under the top-level `catalogs:` map.
+ * Catalog group name declared under the `catalogs` map.
  */
 catalog_name: string
 /**
- * Path to `pnpm-workspace.yaml`, relative to the analyzed root.
+ * Path to the catalog source file, relative to the analyzed root.
  */
 path: string
 /**
- * 1-based line number of the empty group header within `pnpm-workspace.yaml`.
+ * 1-based line number of the empty group header within the source file.
  */
 line: number
 /**
@@ -2544,10 +2547,10 @@ path: string
  */
 line: number
 /**
- * Other catalogs (in the same `pnpm-workspace.yaml`) that DO declare this
- * package. Empty when no catalog has the package. Sorted lexicographically.
- * Lets agents and humans decide whether to switch the reference to a
- * different catalog or to add the entry to the named catalog.
+ * Other catalogs in the same catalog source that DO declare this package.
+ * Empty when no catalog has the package. Sorted lexicographically. Lets
+ * agents and humans decide whether to switch the reference to a different
+ * catalog or to add the entry to the named catalog.
  */
 available_in_catalogs?: string[]
 /**
@@ -7130,24 +7133,25 @@ policy_violations?: PolicyViolationFinding[]
  */
 stale_suppressions?: StaleSuppression[]
 /**
- * Entries in pnpm-workspace.yaml's catalog: or catalogs: sections not
- * referenced by any workspace package via the catalog: protocol. Wrapped
- * in [`UnusedCatalogEntryFinding`] so each entry carries a typed
+ * Entries in package manager catalog sections not referenced by any
+ * workspace package via the catalog: protocol. Supports
+ * `pnpm-workspace.yaml` catalogs and Bun root `package.json` catalogs.
+ * Wrapped in [`UnusedCatalogEntryFinding`] so each entry carries a typed
  * `actions` array natively, with per-instance `auto_fixable` derived
- * from `hardcoded_consumers`.
+ * from `hardcoded_consumers` and the catalog source file.
  */
 unused_catalog_entries?: UnusedCatalogEntryFinding[]
 /**
- * Named groups under pnpm-workspace.yaml's catalogs: section that declare
- * no package entries. The top-level catalog: map is not reported. Wrapped
- * in [`EmptyCatalogGroupFinding`].
+ * Named groups under package manager catalogs sections that declare no
+ * package entries. The top-level catalog: map is not reported. Wrapped in
+ * [`EmptyCatalogGroupFinding`].
  */
 empty_catalog_groups?: EmptyCatalogGroupFinding[]
 /**
  * Workspace package.json references to catalogs (`catalog:` or
- * `catalog:<name>`) that do not declare the consumed package. pnpm install
- * will error until the named catalog grows to include the package or the
- * reference is switched / removed. Wrapped in
+ * `catalog:<name>`) that do not declare the consumed package. The package
+ * manager install will error until the named catalog grows to include the
+ * package or the reference is switched / removed. Wrapped in
  * [`UnresolvedCatalogReferenceFinding`] with the discriminated
  * `add-catalog-entry` / `update-catalog-reference` primary at position 0.
  */

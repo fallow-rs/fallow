@@ -28,6 +28,7 @@
 //! `None` (`skip_serializing_if`).
 
 use serde::Serialize;
+use std::path::Path;
 
 use crate::envelope::AuditIntroduced;
 use crate::output::{
@@ -67,6 +68,8 @@ const IGNORE_CATALOG_REFERENCES_VALUE_SCHEMA: &str = "https://raw.githubusercont
 /// referenced by `add-to-config` actions on both the unused- and
 /// misconfigured-override findings.
 const IGNORE_DEPENDENCY_OVERRIDES_VALUE_SCHEMA: &str = "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencyOverrides/items";
+
+const PNPM_WORKSPACE_FILE: &str = "pnpm-workspace.yaml";
 
 fn manual_framework_fix(kind: FixActionType, description: &str, note: &str) -> IssueAction {
     IssueAction::Fix(FixAction {
@@ -2118,9 +2121,8 @@ fn build_duplicate_exports_ignore_rules(
 }
 
 /// Wire-shape envelope for an [`UnusedCatalogEntry`] finding. Per-instance
-/// `auto_fixable` flips to `false` when `hardcoded_consumers` is non-empty:
-/// the entry cannot be removed safely while a workspace package still pins
-/// the same package via a hardcoded version range.
+/// `auto_fixable` flips to `false` when `hardcoded_consumers` is non-empty or
+/// the source is not `pnpm-workspace.yaml`.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedCatalogEntryFinding {
@@ -2137,31 +2139,45 @@ pub struct UnusedCatalogEntryFinding {
 
 impl UnusedCatalogEntryFinding {
     /// Build the wrapper. Per-instance `auto_fixable` is `true` only when
-    /// `hardcoded_consumers` is empty; otherwise `fallow fix` skips the
-    /// entry to avoid breaking `pnpm install` on the holdout consumer.
+    /// `hardcoded_consumers` is empty and the source is `pnpm-workspace.yaml`;
+    /// otherwise `fallow fix` skips the entry to avoid breaking installs or
+    /// applying YAML edits to Bun `package.json` catalogs.
     #[must_use]
     pub fn with_actions(entry: UnusedCatalogEntry) -> Self {
-        let auto_fixable = entry.hardcoded_consumers.is_empty();
-        let actions = vec![
-            IssueAction::Fix(FixAction {
-                kind: FixActionType::RemoveCatalogEntry,
-                auto_fixable,
-                description: "Remove the entry from pnpm-workspace.yaml".to_string(),
-                note: Some(
-                    "If any consumer declares the same package with a hardcoded version, switch the consumer to `catalog:` before removing"
-                        .to_string(),
-                ),
-                available_in_catalogs: None,
-                suggested_target: None,
-            }),
-            IssueAction::SuppressLine(SuppressLineAction {
+        let is_pnpm_source = is_pnpm_catalog_source(&entry.path);
+        let auto_fixable = entry.hardcoded_consumers.is_empty() && is_pnpm_source;
+        let note = if is_pnpm_source {
+            Some(
+                "If any consumer declares the same package with a hardcoded version, switch the consumer to `catalog:` before removing"
+                    .to_string(),
+            )
+        } else {
+            Some(
+                "fallow fix only edits pnpm-workspace.yaml catalog entries. Edit Bun package.json catalogs manually."
+                    .to_string(),
+            )
+        };
+        let mut actions = vec![IssueAction::Fix(FixAction {
+            kind: FixActionType::RemoveCatalogEntry,
+            auto_fixable,
+            description: if is_pnpm_source {
+                "Remove the entry from pnpm-workspace.yaml".to_string()
+            } else {
+                "Remove the entry from the catalog source file manually".to_string()
+            },
+            note,
+            available_in_catalogs: None,
+            suggested_target: None,
+        })];
+        if is_pnpm_source {
+            actions.push(IssueAction::SuppressLine(SuppressLineAction {
                 kind: SuppressLineKind::SuppressLine,
                 auto_fixable: false,
                 description: "Suppress with a YAML comment above the line".to_string(),
                 comment: "# fallow-ignore-next-line unused-catalog-entry".to_string(),
                 scope: None,
-            }),
-        ];
+            }));
+        }
         Self {
             entry,
             actions,
@@ -2171,8 +2187,8 @@ impl UnusedCatalogEntryFinding {
 }
 
 /// Wire-shape envelope for an [`EmptyCatalogGroup`] finding. Carries a
-/// straightforward `remove-empty-catalog-group` primary plus a YAML-comment
-/// suppress.
+/// `remove-empty-catalog-group` primary. YAML-sourced findings also include a
+/// YAML-comment suppress action.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct EmptyCatalogGroupFinding {
@@ -2191,33 +2207,45 @@ impl EmptyCatalogGroupFinding {
     /// Build the wrapper.
     #[must_use]
     pub fn with_actions(group: EmptyCatalogGroup) -> Self {
-        let actions = vec![
-            IssueAction::Fix(FixAction {
-                kind: FixActionType::RemoveEmptyCatalogGroup,
-                auto_fixable: true,
-                description: "Remove the empty named catalog group from pnpm-workspace.yaml"
-                    .to_string(),
-                note: Some(
-                    "Only named groups under `catalogs:` are flagged; the top-level `catalog:` hook is intentionally ignored"
-                        .to_string(),
-                ),
-                available_in_catalogs: None,
-                suggested_target: None,
+        let auto_fixable = is_pnpm_catalog_source(&group.path);
+        let mut actions = vec![IssueAction::Fix(FixAction {
+            kind: FixActionType::RemoveEmptyCatalogGroup,
+            auto_fixable,
+            description: if auto_fixable {
+                "Remove the empty named catalog group from pnpm-workspace.yaml".to_string()
+            } else {
+                "Remove the empty named catalog group from the catalog source file manually"
+                    .to_string()
+            },
+            note: Some(if auto_fixable {
+                "Only named groups under `catalogs:` are flagged; the top-level `catalog:` hook is intentionally ignored"
+                    .to_string()
+            } else {
+                "fallow fix only edits pnpm-workspace.yaml catalog groups. Edit Bun package.json catalogs manually."
+                    .to_string()
             }),
-            IssueAction::SuppressLine(SuppressLineAction {
+            available_in_catalogs: None,
+            suggested_target: None,
+        })];
+        if auto_fixable {
+            actions.push(IssueAction::SuppressLine(SuppressLineAction {
                 kind: SuppressLineKind::SuppressLine,
                 auto_fixable: false,
                 description: "Suppress with a YAML comment above the line".to_string(),
                 comment: "# fallow-ignore-next-line empty-catalog-group".to_string(),
                 scope: None,
-            }),
-        ];
+            }));
+        }
         Self {
             group,
             actions,
             introduced: None,
         }
     }
+}
+
+fn is_pnpm_catalog_source(path: &Path) -> bool {
+    path == Path::new(PNPM_WORKSPACE_FILE)
 }
 
 /// Wire-shape envelope for an [`UnresolvedCatalogReference`] finding. The
@@ -2549,6 +2577,58 @@ mod position_0_invariants {
             panic!("position-1 should be a suppress-line action");
         };
         assert_eq!(suppress.comment, suppress_comment);
+    }
+
+    #[test]
+    fn pnpm_catalog_entry_action_is_auto_fixable() {
+        let finding = UnusedCatalogEntryFinding::with_actions(UnusedCatalogEntry {
+            entry_name: "unused".to_string(),
+            catalog_name: "default".to_string(),
+            path: PathBuf::from("pnpm-workspace.yaml"),
+            line: 3,
+            hardcoded_consumers: vec![],
+        });
+
+        let IssueAction::Fix(fix) = &finding.actions[0] else {
+            panic!("position-0 should be a fix action");
+        };
+        assert!(fix.auto_fixable);
+        assert_eq!(finding.actions.len(), 2);
+        assert_eq!(action_type(&finding.actions[1]), "suppress-line");
+    }
+
+    #[test]
+    fn bun_package_json_catalog_entry_action_is_manual_only() {
+        let finding = UnusedCatalogEntryFinding::with_actions(UnusedCatalogEntry {
+            entry_name: "unused".to_string(),
+            catalog_name: "default".to_string(),
+            path: PathBuf::from("package.json"),
+            line: 4,
+            hardcoded_consumers: vec![],
+        });
+
+        let IssueAction::Fix(fix) = &finding.actions[0] else {
+            panic!("position-0 should be a fix action");
+        };
+        assert!(!fix.auto_fixable);
+        assert!(fix.description.contains("manually"));
+        assert_eq!(finding.actions.len(), 1);
+    }
+
+    #[test]
+    fn bun_package_json_empty_catalog_group_action_is_manual_only() {
+        let finding = EmptyCatalogGroupFinding::with_actions(EmptyCatalogGroup {
+            catalog_name: "empty".to_string(),
+            path: PathBuf::from("package.json"),
+            line: 4,
+        });
+
+        let IssueAction::Fix(fix) = &finding.actions[0] else {
+            panic!("position-0 should be a fix action");
+        };
+        assert!(!fix.auto_fixable);
+        assert!(fix.description.contains("manually"));
+        assert_eq!(finding.actions.len(), 1);
     }
 
     #[test]
