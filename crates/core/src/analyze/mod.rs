@@ -1547,15 +1547,15 @@ fn run_member_and_dependency_detectors(
             })
         },
         || {
-            run_dependency_detectors(
-                input.graph,
-                input.pkg,
-                input.config,
-                input.plugin_result,
-                input.workspaces,
-                input.resolved_modules,
-                input.line_offsets_by_file,
-            )
+            run_dependency_detectors(DependencyDetectorInput {
+                graph: input.graph,
+                pkg: input.pkg,
+                config: input.config,
+                plugin_result: input.plugin_result,
+                workspaces: input.workspaces,
+                resolved_modules: input.resolved_modules,
+                line_offsets_by_file: input.line_offsets_by_file,
+            })
         },
     )
 }
@@ -2072,43 +2072,50 @@ fn run_member_detectors(input: MemberDetectorInput<'_>) -> AnalysisResults {
     results
 }
 
+struct DependencyDetectorInput<'a> {
+    graph: &'a ModuleGraph,
+    pkg: Option<&'a PackageJson>,
+    config: &'a ResolvedConfig,
+    plugin_result: Option<&'a crate::plugins::AggregatedPluginResult>,
+    workspaces: &'a [fallow_config::WorkspaceInfo],
+    resolved_modules: &'a [ResolvedModule],
+    line_offsets_by_file: &'a LineOffsetsMap<'a>,
+}
+
 #[expect(
     deprecated,
     reason = "ADR-008 deprecates detector helpers for external callers; core orchestration still calls them internally"
 )]
-fn run_dependency_detectors(
-    graph: &ModuleGraph,
-    pkg: Option<&PackageJson>,
-    config: &ResolvedConfig,
-    plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
-    workspaces: &[fallow_config::WorkspaceInfo],
-    resolved_modules: &[ResolvedModule],
-    line_offsets_by_file: &LineOffsetsMap<'_>,
-) -> AnalysisResults {
+fn run_dependency_detectors(input: DependencyDetectorInput<'_>) -> AnalysisResults {
     let mut results = AnalysisResults::default();
-    let Some(pkg) = pkg else {
+    let Some(pkg) = input.pkg else {
         return results;
     };
 
-    if config.rules.unused_dependencies != Severity::Off
-        || config.rules.unused_dev_dependencies != Severity::Off
-        || config.rules.unused_optional_dependencies != Severity::Off
+    if input.config.rules.unused_dependencies != Severity::Off
+        || input.config.rules.unused_dev_dependencies != Severity::Off
+        || input.config.rules.unused_optional_dependencies != Severity::Off
     {
-        let (deps, dev_deps, optional_deps) =
-            find_unused_dependencies(graph, pkg, config, plugin_result, workspaces);
-        if config.rules.unused_dependencies != Severity::Off {
+        let (deps, dev_deps, optional_deps) = find_unused_dependencies(
+            input.graph,
+            pkg,
+            input.config,
+            input.plugin_result,
+            input.workspaces,
+        );
+        if input.config.rules.unused_dependencies != Severity::Off {
             results.unused_dependencies = deps
                 .into_iter()
                 .map(UnusedDependencyFinding::with_actions)
                 .collect();
         }
-        if config.rules.unused_dev_dependencies != Severity::Off {
+        if input.config.rules.unused_dev_dependencies != Severity::Off {
             results.unused_dev_dependencies = dev_deps
                 .into_iter()
                 .map(UnusedDevDependencyFinding::with_actions)
                 .collect();
         }
-        if config.rules.unused_optional_dependencies != Severity::Off {
+        if input.config.rules.unused_optional_dependencies != Severity::Off {
             results.unused_optional_dependencies = optional_deps
                 .into_iter()
                 .map(UnusedOptionalDependencyFinding::with_actions)
@@ -2116,32 +2123,32 @@ fn run_dependency_detectors(
         }
     }
 
-    if config.rules.unlisted_dependencies != Severity::Off {
+    if input.config.rules.unlisted_dependencies != Severity::Off {
         results.unlisted_dependencies = find_unlisted_dependencies(
-            graph,
+            input.graph,
             pkg,
-            config,
-            workspaces,
-            plugin_result,
-            resolved_modules,
-            line_offsets_by_file,
+            input.config,
+            input.workspaces,
+            input.plugin_result,
+            input.resolved_modules,
+            input.line_offsets_by_file,
         )
         .into_iter()
         .map(UnlistedDependencyFinding::with_actions)
         .collect();
     }
 
-    if config.production {
+    if input.config.production {
         results.type_only_dependencies =
-            find_type_only_dependencies(graph, pkg, config, workspaces)
+            find_type_only_dependencies(input.graph, pkg, input.config, input.workspaces)
                 .into_iter()
                 .map(TypeOnlyDependencyFinding::with_actions)
                 .collect();
     }
 
-    if !config.production && config.rules.test_only_dependencies != Severity::Off {
+    if !input.config.production && input.config.rules.test_only_dependencies != Severity::Off {
         results.test_only_dependencies =
-            find_test_only_dependencies(graph, pkg, config, workspaces)
+            find_test_only_dependencies(input.graph, pkg, input.config, input.workspaces)
                 .into_iter()
                 .map(TestOnlyDependencyFinding::with_actions)
                 .collect();
