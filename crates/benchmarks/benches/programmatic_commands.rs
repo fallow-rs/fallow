@@ -31,20 +31,41 @@ fn write_file(root: &Path, path: &str, source: impl AsRef<str>) {
     std::fs::write(path, source.as_ref()).unwrap();
 }
 
-fn package_json(name: &str, extra: &str) -> String {
+fn dependency_block(dependencies: &[(&str, &str)]) -> String {
+    if dependencies.is_empty() {
+        return "{}".to_string();
+    }
+
+    let mut source = String::from("{\n");
+    for (index, (name, version)) in dependencies.iter().enumerate() {
+        let comma = if index + 1 == dependencies.len() {
+            ""
+        } else {
+            ","
+        };
+        writeln!(&mut source, r#"    "{name}": "{version}"{comma}"#).unwrap();
+    }
+    source.push_str("  }");
+    source
+}
+
+fn package_json(name: &str, dependencies: &[(&str, &str)], extra_fields: &str) -> String {
+    let dependencies = dependency_block(dependencies);
+    let extra_fields = if extra_fields.is_empty() {
+        String::new()
+    } else {
+        format!(",\n{extra_fields}")
+    };
+
     format!(
         r#"{{
   "name": "{name}",
   "private": true,
   "type": "module",
-  "dependencies": {{
-    "react": "19.0.0",
-    "next": "15.0.0",
-    "tailwindcss": "4.0.0"{extra}
-  }},
+  "dependencies": {dependencies},
   "devDependencies": {{
     "typescript": "5.8.0"
-  }}
+  }}{extra_fields}
 }}"#
     )
 }
@@ -62,12 +83,25 @@ fn create_library_project() -> CommandInput {
     let temp_dir = TempDir::new().unwrap();
     let root = temp_dir.path().to_path_buf();
 
-    write_file(&root, "package.json", package_json("bench-library", ""));
+    write_file(
+        &root,
+        "package.json",
+        package_json(
+            "bench-package-library",
+            &[],
+            r#"  "exports": {
+    ".": "./src/index.ts",
+    "./server": "./src/server.ts"
+  },
+  "files": ["src"]"#,
+        ),
+    );
     write_file(
         &root,
         "src/index.ts",
         r#"
 export { usedFeature } from "./feature";
+export { createHandler } from "./server";
 export type { PublicOptions } from "./types";
 "#,
     );
@@ -82,6 +116,22 @@ export type PublicOptions = { label: string };
 export const usedFeature = (value: string): string => formatLabel(value);
 export const unusedFeature = (value: string): string => value.toUpperCase();
 export const unusedConstant = 42;
+"#,
+    );
+    write_file(
+        &root,
+        "src/server.ts",
+        r#"
+import type { PublicOptions } from "./types";
+
+export const createHandler = (options: PublicOptions) => {
+  return (request: Request): Response => {
+    const label = request.headers.get("x-label") ?? options.label;
+    return Response.json({ label });
+  };
+};
+
+export const createDebugHandler = () => Response.json({ debug: true });
 "#,
     );
     write_file(
@@ -102,7 +152,7 @@ export type InternalOptions = { retries: number };
     );
     write_file(
         &root,
-        "src/unused-file.ts",
+        "src/internal/legacy.ts",
         r"
 export const onlyInUnusedFile = true;
 ",
@@ -114,11 +164,44 @@ export const onlyInUnusedFile = true;
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "the Next app router fixture keeps related generated files together"
+)]
 fn create_next_app_project() -> CommandInput {
     let temp_dir = TempDir::new().unwrap();
     let root = temp_dir.path().to_path_buf();
 
-    write_file(&root, "package.json", package_json("bench-next-app", ""));
+    write_file(
+        &root,
+        "package.json",
+        package_json(
+            "bench-next-app-router",
+            &[
+                ("next", "15.0.0"),
+                ("react", "19.0.0"),
+                ("react-dom", "19.0.0"),
+            ],
+            r#"  "scripts": {
+    "build": "next build"
+  }"#,
+        ),
+    );
+    write_file(
+        &root,
+        "next.config.ts",
+        r#"
+import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {
+  experimental: {
+    typedRoutes: true,
+  },
+};
+
+export default nextConfig;
+"#,
+    );
     write_file(
         &root,
         "app/layout.tsx",
@@ -135,11 +218,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         "app/page.tsx",
         r#"
 import { Button } from "../components/button";
+import { createPost } from "./actions";
 import { getPosts } from "../lib/posts";
 
 export default async function Page() {
   const posts = await getPosts();
-  return <main>{posts.map((post) => <Button key={post.id} label={post.title} />)}</main>;
+  return <main>{posts.map((post) => <Button key={post.id} label={post.title} action={createPost} />)}</main>;
 }
 "#,
     );
@@ -157,12 +241,60 @@ export default async function BlogPost({ params }: { params: { slug: string } })
     );
     write_file(
         &root,
+        "app/(marketing)/pricing/page.tsx",
+        r#"
+import { getPlans } from "../../../lib/plans";
+
+export default async function PricingPage() {
+  const plans = await getPlans();
+  return <section>{plans.map((plan) => <p key={plan.id}>{plan.name}</p>)}</section>;
+}
+"#,
+    );
+    write_file(
+        &root,
+        "app/dashboard/@analytics/page.tsx",
+        r#"
+import { getDashboardStats } from "../../../lib/dashboard";
+
+export default async function AnalyticsSlot() {
+  const stats = await getDashboardStats();
+  return <aside>{stats.visits}</aside>;
+}
+"#,
+    );
+    write_file(
+        &root,
+        "app/api/posts/route.ts",
+        r#"
+import { getPosts } from "../../../lib/posts";
+
+export async function GET() {
+  return Response.json(await getPosts());
+}
+"#,
+    );
+    write_file(
+        &root,
+        "app/actions.ts",
+        r#"
+"use server";
+
+export const createPost = async (formData: FormData): Promise<string> => {
+  return String(formData.get("title") ?? "untitled");
+};
+
+export const unusedServerAction = async (): Promise<void> => {};
+"#,
+    );
+    write_file(
+        &root,
         "components/button.tsx",
         r#"
 "use client";
 
-export const Button = ({ label }: { label: string }) => {
-  return <button className="button primary">{label}</button>;
+export const Button = ({ action, label }: { action: (formData: FormData) => Promise<string>; label: string }) => {
+  return <form action={action}><button className="button primary">{label}</button></form>;
 };
 
 export const DebugButton = () => <button>debug</button>;
@@ -176,6 +308,22 @@ export const getPosts = async () => [{ id: "1", title: "Intro" }];
 export const getPost = async (slug: string) => ({ slug, title: "Intro" });
 export const unusedPostHelper = () => "unused";
 "#,
+    );
+    write_file(
+        &root,
+        "lib/plans.ts",
+        r#"
+export const getPlans = async () => [{ id: "starter", name: "Starter" }];
+export const unusedPlanMapper = (name: string) => name.toLowerCase();
+"#,
+    );
+    write_file(
+        &root,
+        "lib/dashboard.ts",
+        r"
+export const getDashboardStats = async () => ({ visits: 42 });
+export const unusedDashboardExport = () => ({ visits: 0 });
+",
     );
     write_file(
         &root,
@@ -203,14 +351,29 @@ fn create_workspace_project() -> CommandInput {
         r#"{
   "name": "bench-workspace",
   "private": true,
-  "workspaces": ["packages/*"],
-  "dependencies": {"react": "19.0.0"}
+  "packageManager": "pnpm@10.0.0",
+  "workspaces": ["apps/*", "packages/*"],
+  "dependencies": {}
 }"#,
     );
     write_file(
         &root,
-        "packages/app/package.json",
-        r#"{"name":"@bench/app","main":"src/index.ts","dependencies":{"@bench/shared":"workspace:*","@bench/ui":"workspace:*"}}"#,
+        "pnpm-workspace.yaml",
+        r#"
+packages:
+  - "apps/*"
+  - "packages/*"
+"#,
+    );
+    write_file(
+        &root,
+        "apps/web/package.json",
+        r#"{"name":"@bench/web","main":"src/index.ts","dependencies":{"@bench/config":"workspace:*","@bench/shared":"workspace:*","@bench/ui":"workspace:*"}}"#,
+    );
+    write_file(
+        &root,
+        "apps/admin/package.json",
+        r#"{"name":"@bench/admin","main":"src/index.ts","dependencies":{"@bench/shared":"workspace:*","@bench/ui":"workspace:*"}}"#,
     );
     write_file(
         &root,
@@ -224,12 +387,28 @@ fn create_workspace_project() -> CommandInput {
     );
     write_file(
         &root,
-        "packages/app/src/index.ts",
+        "packages/config/package.json",
+        r#"{"name":"@bench/config","main":"src/index.ts"}"#,
+    );
+    write_file(
+        &root,
+        "apps/web/src/index.ts",
+        r#"
+import { featureFlags } from "@bench/config";
+import { formatUser } from "@bench/shared";
+import { Card } from "@bench/ui";
+
+export const render = (name: string) => Card({ title: `${formatUser(name)}:${featureFlags.checkout}` });
+"#,
+    );
+    write_file(
+        &root,
+        "apps/admin/src/index.ts",
         r#"
 import { formatUser } from "@bench/shared";
 import { Card } from "@bench/ui";
 
-export const render = (name: string) => Card({ title: formatUser(name) });
+export const renderAdmin = (name: string) => Card({ title: `admin:${formatUser(name)}` });
 "#,
     );
     write_file(
@@ -248,6 +427,14 @@ export const Card = ({ title }: { title: string }) => `<section>${title}</sectio
 export const UnusedCard = () => "<section>unused</section>";
 "#,
     );
+    write_file(
+        &root,
+        "packages/config/src/index.ts",
+        r#"
+export const featureFlags = { checkout: "new" } as const;
+export const unusedExperiment = { search: "legacy" } as const;
+"#,
+    );
 
     CommandInput {
         _temp_dir: temp_dir,
@@ -262,7 +449,7 @@ fn create_duplication_project() -> CommandInput {
     write_file(
         &root,
         "package.json",
-        package_json("bench-dupes-routes", ""),
+        package_json("bench-next-route-callback-dupes", &[("next", "15.0.0")], ""),
     );
     let route_body = r#"
 const validateRequest = (request: Request): string => {
@@ -285,7 +472,7 @@ const buildResponse = (value: string) => {
 };
 "#;
 
-    for i in 0..12 {
+    for i in 0..14 {
         write_file(
             &root,
             &format!("app/api/resource{i}/route.ts"),
@@ -299,6 +486,16 @@ export async function GET(request: Request) {{
             ),
         );
     }
+    write_file(
+        &root,
+        "middleware.ts",
+        r#"
+export const middleware = (request: Request): Response => {
+  const tenant = request.headers.get("x-tenant") ?? "default";
+  return Response.json({ tenant });
+};
+"#,
+    );
 
     CommandInput {
         _temp_dir: temp_dir,
@@ -310,28 +507,43 @@ fn create_circular_project() -> CommandInput {
     let temp_dir = TempDir::new().unwrap();
     let root = temp_dir.path().to_path_buf();
 
-    write_file(&root, "package.json", package_json("bench-circulars", ""));
-    for i in 0..24 {
-        let next = (i + 1) % 24;
-        write_file(
-            &root,
-            &format!("src/cycle{i}.ts"),
-            format!(
-                r#"
-import {{ value{next} }} from "./cycle{next}";
+    write_file(
+        &root,
+        "package.json",
+        package_json("bench-circulars", &[], ""),
+    );
+    for domain in ["orders", "billing", "users"] {
+        for i in 0..10 {
+            let next = (i + 1) % 10;
+            write_file(
+                &root,
+                &format!("src/domains/{domain}/node{i}.ts"),
+                format!(
+                    r#"
+import {{ value{next} }} from "./node{next}";
 
 export const value{i} = value{next} + {i};
 "#
-            ),
+                ),
+            );
+        }
+        write_file(
+            &root,
+            &format!("src/domains/{domain}/index.ts"),
+            r#"
+export { value0 } from "./node0";
+"#,
         );
     }
     write_file(
         &root,
         "src/index.ts",
         r#"
-import { value0 } from "./cycle0";
+import { value0 as orderValue } from "./domains/orders";
+import { value0 as billingValue } from "./domains/billing";
+import { value0 as userValue } from "./domains/users";
 
-console.log(value0);
+console.log(orderValue, billingValue, userValue);
 "#,
     );
 
@@ -345,7 +557,11 @@ fn create_health_project() -> CommandInput {
     let temp_dir = TempDir::new().unwrap();
     let root = temp_dir.path().to_path_buf();
 
-    write_file(&root, "package.json", package_json("bench-health", ""));
+    write_file(
+        &root,
+        "package.json",
+        package_json("bench-health-service", &[], ""),
+    );
     let mut source = String::from(
         r"
 export function scoreOrder(input: { status: string; amount: number; flags: string[] }): number {
@@ -391,7 +607,31 @@ fn create_css_project() -> CommandInput {
     let temp_dir = TempDir::new().unwrap();
     let root = temp_dir.path().to_path_buf();
 
-    write_file(&root, "package.json", package_json("bench-css-health", ""));
+    write_file(
+        &root,
+        "package.json",
+        package_json(
+            "bench-css-tailwind-design-system",
+            &[("react", "19.0.0"), ("tailwindcss", "4.0.0")],
+            "",
+        ),
+    );
+    write_file(
+        &root,
+        "tailwind.config.ts",
+        r##"
+export default {
+  content: ["./src/**/*.{ts,tsx}"],
+  theme: {
+    extend: {
+      colors: {
+        brand: "#0055cc",
+      },
+    },
+  },
+};
+"##,
+    );
     write_file(
         &root,
         "src/app.tsx",
@@ -401,6 +641,7 @@ import "./styles.css";
 export const App = () => (
   <main className="layout card text-brand shadow-panel animate-fade">
     <button className="button button-primary">Save</button>
+    <span className="sr-only">Draft saved</span>
   </main>
 );
 "#,
@@ -424,6 +665,7 @@ export const App = () => (
 .card { color: var(--color-brand); box-shadow: var(--shadow-panel); }
 .button { border: 0; padding: .5rem 1rem; }
 .button-primary { background: var(--color-brand); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; }
 ",
     );
     for i in 0..80 {
@@ -456,7 +698,7 @@ fn create_warm_workspace_project() -> CommandInput {
 }
 
 #[divan::bench]
-fn dead_code_library_package(bencher: Bencher) {
+fn dead_code_package_library_exports(bencher: Bencher) {
     bencher
         .with_inputs(create_library_project)
         .bench_refs(|input| {
@@ -469,7 +711,7 @@ fn dead_code_library_package(bencher: Bencher) {
 }
 
 #[divan::bench]
-fn dead_code_next_app_router(bencher: Bencher) {
+fn dead_code_next_app_router_segments(bencher: Bencher) {
     bencher
         .with_inputs(create_next_app_project)
         .bench_refs(|input| {
@@ -482,7 +724,7 @@ fn dead_code_next_app_router(bencher: Bencher) {
 }
 
 #[divan::bench]
-fn dead_code_workspace_monorepo(bencher: Bencher) {
+fn dead_code_workspace_monorepo_cross_package(bencher: Bencher) {
     bencher
         .with_inputs(create_workspace_project)
         .bench_refs(|input| {
@@ -495,7 +737,7 @@ fn dead_code_workspace_monorepo(bencher: Bencher) {
 }
 
 #[divan::bench]
-fn dead_code_workspace_monorepo_warm_cache(bencher: Bencher) {
+fn dead_code_workspace_monorepo_cross_package_warm_cache(bencher: Bencher) {
     bencher
         .with_inputs(create_warm_workspace_project)
         .bench_refs(|input| {
@@ -508,7 +750,7 @@ fn dead_code_workspace_monorepo_warm_cache(bencher: Bencher) {
 }
 
 #[divan::bench]
-fn duplicates_route_callbacks(bencher: Bencher) {
+fn duplication_next_route_callbacks_repeated_auth(bencher: Bencher) {
     bencher
         .with_inputs(create_duplication_project)
         .bench_refs(|input| {
@@ -525,7 +767,7 @@ fn duplicates_route_callbacks(bencher: Bencher) {
 }
 
 #[divan::bench]
-fn circular_dense_cycles(bencher: Bencher) {
+fn circular_dependencies_domain_graph_cycles(bencher: Bencher) {
     bencher
         .with_inputs(create_circular_project)
         .bench_refs(|input| {
@@ -538,7 +780,7 @@ fn circular_dense_cycles(bencher: Bencher) {
 }
 
 #[divan::bench]
-fn health_complex_app(bencher: Bencher) {
+fn health_complex_service_scoring(bencher: Bencher) {
     bencher
         .with_inputs(create_health_project)
         .bench_refs(|input| {
@@ -555,7 +797,7 @@ fn health_complex_app(bencher: Bencher) {
 }
 
 #[divan::bench]
-fn health_css_tailwind_app(bencher: Bencher) {
+fn health_css_tailwind_design_system(bencher: Bencher) {
     bencher.with_inputs(create_css_project).bench_refs(|input| {
         let options = ComplexityOptions {
             analysis: analysis_options(&input.root, true),

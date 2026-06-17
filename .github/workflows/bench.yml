@@ -30,33 +30,40 @@ env:
 
 jobs:
   benchmark:
-    name: CodSpeed performance check
+    name: CodSpeed simulation (${{ matrix.label }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: core analysis
+            cache_key: core-analysis
+            package: fallow-core
+            bench: analysis
+          - label: programmatic commands
+            cache_key: programmatic-commands
+            package: fallow-benchmarks
+            bench: programmatic_commands
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       - uses: ./.github/actions/setup-rust
         with:
-          cache-key: bench
+          cache-key: bench-${{ matrix.cache_key }}
 
       - name: Install cargo-codspeed
         uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # v2.81.11
         with:
           tool: cargo-codspeed@4.7.0
 
-      - name: Build benchmark
-        # Keep PR feedback focused: core analysis plus programmatic command profiles.
+      - name: Build benchmark shard
+        # Keep PR feedback focused: split simulation shards without adding a noisy suite.
         # large_analysis stays out because it exceeds the fast benchmark budget.
-        run: |
-          cargo codspeed build -p fallow-core --bench analysis
-          cargo codspeed build -p fallow-benchmarks --bench programmatic_commands
+        run: cargo codspeed build -p ${{ matrix.package }} --bench ${{ matrix.bench }}
 
-      - name: Run benchmark
+      - name: Run benchmark shard
         uses: CodSpeedHQ/action@c145068895e045cc725ee76fcd2307624b65c3af # v4.17.5
         with:
           mode: simulation
-          run: |
-            set -euo pipefail
-            cargo codspeed run -p fallow-core --bench analysis
-            cargo codspeed run -p fallow-benchmarks --bench programmatic_commands
+          run: cargo codspeed run -p ${{ matrix.package }} --bench ${{ matrix.bench }}
