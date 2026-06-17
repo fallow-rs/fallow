@@ -137,15 +137,15 @@ fn extract_eslint_config(
     let parse_path: &Path = &parse_path_buf;
 
     add_eslint_import_dependencies(root, result, &parse_source, parse_path);
-    add_eslint_top_level_config(
+    add_eslint_top_level_config(EslintConfigInput {
         result,
-        &parse_source,
+        parse_source: &parse_source,
         parse_path,
         config_path,
         root,
         visited,
         depth,
-    );
+    });
     add_eslint_override_config(
         result,
         &parse_source,
@@ -189,40 +189,60 @@ fn add_eslint_import_dependencies(
     }
 }
 
-fn add_eslint_top_level_config(
-    result: &mut PluginResult,
-    parse_source: &str,
-    parse_path: &Path,
-    config_path: &Path,
-    root: &Path,
-    visited: &mut FxHashSet<PathBuf>,
+struct EslintConfigInput<'a> {
+    result: &'a mut PluginResult,
+    parse_source: &'a str,
+    parse_path: &'a Path,
+    config_path: &'a Path,
+    root: &'a Path,
+    visited: &'a mut FxHashSet<PathBuf>,
     depth: usize,
-) {
-    let plugins =
-        config_parser::extract_config_shallow_strings(parse_source, parse_path, "plugins");
+}
+
+fn add_eslint_top_level_config(input: EslintConfigInput<'_>) {
+    let plugins = config_parser::extract_config_shallow_strings(
+        input.parse_source,
+        input.parse_path,
+        "plugins",
+    );
     for plugin in &plugins {
-        result
+        input
+            .result
             .referenced_dependencies
             .push(resolve_eslint_plugin_name(plugin));
     }
 
-    let extends =
-        config_parser::extract_config_shallow_strings(parse_source, parse_path, "extends");
+    let extends = config_parser::extract_config_shallow_strings(
+        input.parse_source,
+        input.parse_path,
+        "extends",
+    );
     for ext in &extends {
-        process_extends_entry(ext, config_path, root, result, visited, depth);
+        process_extends_entry(
+            ext,
+            input.config_path,
+            input.root,
+            input.result,
+            input.visited,
+            input.depth,
+        );
     }
 
     if let Some(parser) =
-        config_parser::extract_config_string(parse_source, parse_path, &["parser"])
+        config_parser::extract_config_string(input.parse_source, input.parse_path, &["parser"])
     {
         let dep = crate::resolve::extract_package_name(&parser);
-        result.referenced_dependencies.push(dep);
+        input.result.referenced_dependencies.push(dep);
     }
 
-    let plugin_keys =
-        config_parser::extract_config_object_keys(parse_source, parse_path, &["plugins"]);
+    let plugin_keys = config_parser::extract_config_object_keys(
+        input.parse_source,
+        input.parse_path,
+        &["plugins"],
+    );
     for key in &plugin_keys {
-        result
+        input
+            .result
             .referenced_dependencies
             .push(resolve_eslint_plugin_name(key));
     }
