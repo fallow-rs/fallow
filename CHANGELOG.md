@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Nested same-file schema values no longer report as unused when a reachable exported value depends on them.** Effect Schema projects commonly pair `export const Foo = Schema...` with `export type Foo = Schema.Schema.Type<typeof Foo>`, then compose that value into another exported schema through `Schema.Array(Foo)`. Fallow now walks reachable same-file exported value initializers so the child schema value is credited through the parent schema, while unrelated unused sibling schemas still report. Thanks [@danielo515](https://github.com/danielo515) for the report. (Closes [#1304](https://github.com/fallow-rs/fallow/issues/1304).)
+
 ## [2.98.0] - 2026-06-17
 
 ### Added

@@ -1,0 +1,11 @@
+{
+  "name": "issue-1304-effect-schema-same-name",
+  "type": "module",
+  "main": "src/route.ts",
+  "dependencies": {
+    "effect": "^3.21.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

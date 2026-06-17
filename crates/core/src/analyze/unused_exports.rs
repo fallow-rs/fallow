@@ -1,5 +1,7 @@
 use std::sync::LazyLock;
 
+use oxc_ast::ast::{Declaration, Expression};
+use oxc_ast_visit::Visit;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -240,6 +242,124 @@ fn collect_exports_used_in_file(module: &ModuleInfo, path: &std::path::Path) -> 
     used
 }
 
+struct ValueExportDependencyCollector {
+    deps_by_export: FxHashMap<String, FxHashSet<String>>,
+    current_export: Option<String>,
+}
+
+impl ValueExportDependencyCollector {
+    fn new() -> Self {
+        Self {
+            deps_by_export: FxHashMap::default(),
+            current_export: None,
+        }
+    }
+
+    fn collect_for_export(&mut self, export_name: &str, expression: &Expression<'_>) {
+        self.current_export = Some(export_name.to_string());
+        self.visit_expression(expression);
+        self.current_export = None;
+    }
+}
+
+impl<'a> Visit<'a> for ValueExportDependencyCollector {
+    fn visit_export_named_declaration(
+        &mut self,
+        declaration: &oxc_ast::ast::ExportNamedDeclaration<'a>,
+    ) {
+        if declaration.export_kind.is_type() {
+            return;
+        }
+        let Some(declaration) = declaration.declaration.as_ref() else {
+            return;
+        };
+        let Declaration::VariableDeclaration(variable) = declaration else {
+            return;
+        };
+        for declarator in &variable.declarations {
+            let Some(init) = declarator.init.as_ref() else {
+                continue;
+            };
+            for binding in declarator.id.get_binding_identifiers() {
+                self.collect_for_export(binding.name.as_str(), init);
+            }
+        }
+    }
+
+    fn visit_identifier_reference(&mut self, ident: &oxc_ast::ast::IdentifierReference<'a>) {
+        let Some(current_export) = self.current_export.as_ref() else {
+            return;
+        };
+        self.deps_by_export
+            .entry(current_export.clone())
+            .or_default()
+            .insert(ident.name.to_string());
+    }
+}
+
+fn collect_reachable_same_file_value_dependencies(
+    module: &ModuleNode,
+    graph: &ModuleGraph,
+    path: &std::path::Path,
+) -> FxHashSet<String> {
+    if module.exports.is_empty() || !is_js_like_source(path) {
+        return FxHashSet::default();
+    }
+
+    let value_export_names: FxHashSet<String> = module
+        .exports
+        .iter()
+        .filter(|export| !export.is_type_only)
+        .map(|export| export.name.to_string())
+        .collect();
+    if value_export_names.is_empty() {
+        return FxHashSet::default();
+    }
+
+    let mut reachable: FxHashSet<String> = module
+        .exports
+        .iter()
+        .filter(|export| !export.is_type_only)
+        .filter(|export| {
+            export_has_reachable_reference(graph, module, export)
+                || (module.is_reachable() && export.is_side_effect_used)
+        })
+        .map(|export| export.name.to_string())
+        .collect();
+    if reachable.is_empty() {
+        return FxHashSet::default();
+    }
+
+    let source = read_source(path);
+    if source.is_empty() {
+        return FxHashSet::default();
+    }
+
+    let source_type = oxc_span::SourceType::from_path(path).unwrap_or_default();
+    let allocator = oxc_allocator::Allocator::default();
+    let parser_return = oxc_parser::Parser::new(&allocator, &source, source_type).parse();
+    let mut collector = ValueExportDependencyCollector::new();
+    collector.visit_program(&parser_return.program);
+
+    let mut dependencies = FxHashSet::default();
+    let mut stack: Vec<String> = reachable.iter().cloned().collect();
+    while let Some(export_name) = stack.pop() {
+        let Some(local_deps) = collector.deps_by_export.get(&export_name) else {
+            continue;
+        };
+        for dep in local_deps {
+            if !value_export_names.contains(dep) || !dependencies.insert(dep.clone()) {
+                continue;
+            }
+            if reachable.insert(dep.clone()) {
+                stack.push(dep.clone());
+            }
+        }
+    }
+
+    dependencies
+}
+
 /// Walk ancestors of `node_id` and return `true` if the reference originates
 /// from inside an `export { foo }` / `export { foo as bar }` specifier or an
 /// `export default foo` declaration. Those identifiers are the export site
@@ -392,6 +512,8 @@ fn find_unused_exports_for_module(
     }
 
     let same_file_used_exports = same_file_used_exports(module, ctx);
+    let reachable_same_file_value_deps =
+        collect_reachable_same_file_value_dependencies(module, ctx.graph, &module.path);
     let re_export_names: FxHashSet<&str> = module
         .re_exports
         .iter()
@@ -405,6 +527,7 @@ fn find_unused_exports_for_module(
             ctx,
             UnusedExportMatchContext {
                 same_file_used_exports: &same_file_used_exports,
+                reachable_same_file_value_deps: &reachable_same_file_value_deps,
                 re_export_names: &re_export_names,
                 matching_ignore: &matching_ignore,
                 matching_plugin: &matching_plugin,
@@ -438,6 +561,7 @@ fn same_file_used_exports(
 
 struct UnusedExportMatchContext<'a> {
     same_file_used_exports: &'a FxHashSet<String>,
+    reachable_same_file_value_deps: &'a FxHashSet<String>,
     re_export_names: &'a FxHashSet<&'a str>,
     matching_ignore: &'a [&'a [String]],
     matching_plugin: &'a [&'a [&'a str]],
@@ -452,6 +576,7 @@ fn unused_export_for_module(
 ) -> Option<UnusedExport> {
     let UnusedExportMatchContext {
         same_file_used_exports,
+        reachable_same_file_value_deps,
         re_export_names,
         matching_ignore,
         matching_plugin,
@@ -498,6 +623,9 @@ fn unused_export_for_module(
     }
 
     let export_str = export.name.to_string();
+    if !export.is_type_only && reachable_same_file_value_deps.contains(export_str.as_str()) {
+        return None;
+    }
     if ctx
         .config
         .ignore_exports_used_in_file

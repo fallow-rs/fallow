@@ -65,6 +65,8 @@ mod hono_html_tagged_template;
 mod html_entry;
 #[path = "integration_test/issue_1032_tsconfig_sibling_src_paths.rs"]
 mod issue_1032_tsconfig_sibling_src_paths;
+#[path = "integration_test/issue_1304_effect_schema_same_name.rs"]
+mod issue_1304_effect_schema_same_name;
 #[path = "integration_test/issue_546_storybook_runtime_resources.rs"]
 mod issue_546_storybook_runtime_resources;
 #[path = "integration_test/issue_914_pnpm_bare_binary.rs"]
