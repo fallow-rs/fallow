@@ -809,15 +809,7 @@ struct FrameworkSpecificFindingsInput<'a> {
 fn populate_framework_specific_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
     populate_invalid_client_export_findings(input);
     populate_mixed_client_server_barrel_findings(input);
-    populate_misplaced_directive_findings(
-        input.graph,
-        input.modules,
-        input.config,
-        input.declared_deps,
-        input.suppressions,
-        input.line_offsets_by_file,
-        input.results,
-    );
+    populate_misplaced_directive_findings(input);
     populate_unprovided_inject_findings(input);
     populate_unrendered_component_findings(input);
     populate_unused_component_prop_findings(
@@ -981,24 +973,16 @@ fn populate_mixed_client_server_barrel_findings(input: &mut FrameworkSpecificFin
 /// Populate `misplaced_directives` when the rule is enabled. Gated on the
 /// project declaring `next` inside the detector (see
 /// [`find_misplaced_directives`]).
-fn populate_misplaced_directive_findings(
-    graph: &ModuleGraph,
-    modules: &[ModuleInfo],
-    config: &ResolvedConfig,
-    declared_deps: &FxHashSet<String>,
-    suppressions: &SuppressionContext<'_>,
-    line_offsets_by_file: &LineOffsetsMap<'_>,
-    results: &mut AnalysisResults,
-) {
-    if config.rules.misplaced_directive == Severity::Off {
+fn populate_misplaced_directive_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
+    if input.config.rules.misplaced_directive == Severity::Off {
         return;
     }
-    results.misplaced_directives = find_misplaced_directives(
-        graph,
-        modules,
-        declared_deps,
-        suppressions,
-        line_offsets_by_file,
+    input.results.misplaced_directives = find_misplaced_directives(
+        input.graph,
+        input.modules,
+        input.declared_deps,
+        input.suppressions,
+        input.line_offsets_by_file,
     )
     .into_iter()
     .map(MisplacedDirectiveFinding::with_actions)
