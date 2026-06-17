@@ -581,11 +581,47 @@ fn build_audit_codeclimate(result: &AuditResult) -> serde_json::Value {
 
 #[cfg(test)]
 mod tests {
-    use crate::audit::AuditSummary;
+    use std::process::ExitCode;
+    use std::time::Duration;
+
+    use fallow_config::{AuditGate, OutputFormat};
+
+    use crate::audit::{AuditAttribution, AuditResult, AuditSummary, AuditVerdict};
 
     use super::{
-        build_status_parts, build_vital_sign_parts, format_scope_line_parts, short_base_ref,
+        build_audit_codeclimate, build_status_parts, build_vital_sign_parts,
+        format_scope_line_parts, print_audit_result, short_base_ref,
     };
+
+    fn audit_result(verdict: AuditVerdict, output: OutputFormat) -> AuditResult {
+        AuditResult {
+            verdict,
+            summary: AuditSummary {
+                dead_code_issues: 0,
+                dead_code_has_errors: false,
+                complexity_findings: 0,
+                max_cyclomatic: None,
+                duplication_clone_groups: 0,
+            },
+            attribution: AuditAttribution {
+                gate: AuditGate::NewOnly,
+                ..AuditAttribution::default()
+            },
+            base_snapshot: None,
+            base_snapshot_skipped: false,
+            changed_files_count: 0,
+            changed_files: Vec::new(),
+            base_ref: "origin/main".to_string(),
+            base_description: None,
+            head_sha: None,
+            output,
+            performance: false,
+            check: None,
+            dupes: None,
+            health: None,
+            elapsed: Duration::ZERO,
+        }
+    }
 
     #[test]
     fn short_base_ref_abbreviates_full_sha() {
@@ -693,5 +729,26 @@ mod tests {
                 "duplication 0".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn build_audit_codeclimate_returns_empty_issue_list_without_findings() {
+        let result = audit_result(AuditVerdict::Pass, OutputFormat::CodeClimate);
+
+        assert_eq!(build_audit_codeclimate(&result), serde_json::json!([]));
+    }
+
+    #[test]
+    fn print_audit_result_rejects_badge_format() {
+        let result = audit_result(AuditVerdict::Pass, OutputFormat::Badge);
+
+        assert_eq!(print_audit_result(&result, true, false), ExitCode::from(2));
+    }
+
+    #[test]
+    fn print_audit_result_maps_fail_verdict_to_error_exit() {
+        let result = audit_result(AuditVerdict::Fail, OutputFormat::Human);
+
+        assert_eq!(print_audit_result(&result, true, false), ExitCode::from(1));
     }
 }
