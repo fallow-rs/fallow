@@ -45,10 +45,10 @@ jobs:
             cache_key: programmatic-commands
             package: fallow-benchmarks
             bench: programmatic_commands
-          - label: real sources
-            cache_key: real-sources
+          - label: representative sources
+            cache_key: representative-sources
             package: fallow-benchmarks
-            bench: real_sources
+            bench: representative_sources
           - label: scaling analysis
             cache_key: scaling-analysis
             package: fallow-core

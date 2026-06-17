@@ -15,8 +15,7 @@ use fallow_core::{
 use tempfile::TempDir;
 
 const BENCH_THREADS: usize = 4;
-const ZOD_TYPES_SOURCE: &str =
-    include_str!("../../../benchmarks/fixtures/real-world/zod/src/types.ts");
+const REPRESENTATIVE_TYPES_SOURCE: &str = include_str!("../fixtures/representative-types.ts");
 
 struct RealSourceInput {
     _temp_dir: TempDir,
@@ -30,16 +29,16 @@ fn write_file(root: &Path, path: &str, source: &str) {
     std::fs::write(path, source).unwrap();
 }
 
-fn create_zod_types_project() -> RealSourceInput {
+fn create_representative_types_project() -> RealSourceInput {
     let temp_dir = TempDir::new().unwrap();
     let root = temp_dir.path().to_path_buf();
 
     write_file(
         &root,
         "package.json",
-        r#"{"name":"bench-zod-types","private":true,"type":"module","main":"src/types.ts","dependencies":{}}"#,
+        r#"{"name":"bench-representative-types","private":true,"type":"module","main":"src/types.ts","dependencies":{}}"#,
     );
-    write_file(&root, "src/types.ts", ZOD_TYPES_SOURCE);
+    write_file(&root, "src/types.ts", REPRESENTATIVE_TYPES_SOURCE);
     write_file(
         &root,
         "src/errors.ts",
@@ -128,20 +127,20 @@ export type ZodParsedType = string;
     }
 }
 
-fn zod_types_parse(c: &mut Criterion) {
-    c.bench_function("zod_types_parse", |bencher| {
+fn representative_types_parse(c: &mut Criterion) {
+    c.bench_function("representative_types_parse", |bencher| {
         bencher.iter_batched_ref(
-            create_zod_types_project,
+            create_representative_types_project,
             |input| parse_single_file(&input.file),
             BatchSize::LargeInput,
         );
     });
 }
 
-fn zod_types_dead_code(c: &mut Criterion) {
-    c.bench_function("zod_types_dead_code", |bencher| {
+fn representative_types_dead_code(c: &mut Criterion) {
+    c.bench_function("representative_types_dead_code", |bencher| {
         bencher.iter_batched_ref(
-            create_zod_types_project,
+            create_representative_types_project,
             |input| {
                 let options = DeadCodeOptions {
                     analysis: AnalysisOptions {
@@ -160,5 +159,9 @@ fn zod_types_dead_code(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, zod_types_parse, zod_types_dead_code);
+criterion_group!(
+    benches,
+    representative_types_parse,
+    representative_types_dead_code
+);
 criterion_main!(benches);

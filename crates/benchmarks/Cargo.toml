@@ -14,7 +14,7 @@ name = "programmatic_commands"
 harness = false
 
 [[bench]]
-name = "real_sources"
+name = "representative_sources"
 harness = false
 
 [dev-dependencies]
