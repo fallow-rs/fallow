@@ -2548,15 +2548,16 @@ fn build_health_output_parts(
         build.max_crap,
     );
 
-    let HealthOutputSupportingParts { grouping, timings } = build_health_supporting_parts(
-        opts,
-        build,
-        &analysis_data,
-        &derived_sections,
-        &vital_data,
-        &findings,
-        &action_ctx,
-    );
+    let HealthOutputSupportingParts { grouping, timings } =
+        build_health_supporting_parts(HealthSupportingPartsInput {
+            opts,
+            build,
+            analysis_data: &analysis_data,
+            derived_sections: &derived_sections,
+            vital_data: &vital_data,
+            findings: &findings,
+            action_ctx: &action_ctx,
+        });
 
     let report = build_health_report_from_pipeline(
         opts,
@@ -2592,30 +2593,34 @@ fn build_health_output_parts(
     }
 }
 
+struct HealthSupportingPartsInput<'a> {
+    opts: &'a HealthOptions<'a>,
+    build: &'a HealthOutputBuildInput<'a>,
+    analysis_data: &'a HealthAnalysisData,
+    derived_sections: &'a HealthDerivedSections,
+    vital_data: &'a HealthVitalData,
+    findings: &'a [ComplexityViolation],
+    action_ctx: &'a crate::health_types::HealthActionContext,
+}
+
 fn build_health_supporting_parts(
-    opts: &HealthOptions<'_>,
-    build: &HealthOutputBuildInput<'_>,
-    analysis_data: &HealthAnalysisData,
-    derived_sections: &HealthDerivedSections,
-    vital_data: &HealthVitalData,
-    findings: &[ComplexityViolation],
-    action_ctx: &crate::health_types::HealthActionContext,
+    input: HealthSupportingPartsInput<'_>,
 ) -> HealthOutputSupportingParts {
     let grouping = build_health_output_grouping(
-        opts,
-        build,
-        analysis_data,
-        derived_sections,
-        vital_data,
-        findings,
-        action_ctx,
+        input.opts,
+        input.build,
+        input.analysis_data,
+        input.derived_sections,
+        input.vital_data,
+        input.findings,
+        input.action_ctx,
     );
     let timings = build_health_timings_from_pipeline(
-        opts,
-        build.start,
-        analysis_data,
-        derived_sections,
-        &build.timing_base,
+        input.opts,
+        input.build.start,
+        input.analysis_data,
+        input.derived_sections,
+        &input.build.timing_base,
     );
 
     HealthOutputSupportingParts { grouping, timings }
