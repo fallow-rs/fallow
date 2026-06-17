@@ -845,15 +845,7 @@ fn populate_framework_specific_findings(input: &mut FrameworkSpecificFindingsInp
         input.line_offsets_by_file,
         input.results,
     );
-    populate_unused_load_data_key_findings(
-        input.graph,
-        input.modules,
-        input.config,
-        input.declared_deps,
-        input.suppressions,
-        input.line_offsets_by_file,
-        input.results,
-    );
+    populate_unused_load_data_key_findings(input);
     populate_prop_drilling_findings(input);
     populate_thin_wrapper_findings(input);
     populate_render_fan_in(input);
@@ -889,34 +881,26 @@ fn populate_render_fan_in(input: &mut FrameworkSpecificFindingsInput<'_>) {
 /// project declaring `@sveltejs/kit` inside the detector (see
 /// [`find_unused_load_data_keys`]). Runs as a sequential populate because it
 /// needs the run's `declared_deps` for the dep gate.
-fn populate_unused_load_data_key_findings(
-    graph: &ModuleGraph,
-    modules: &[ModuleInfo],
-    config: &ResolvedConfig,
-    declared_deps: &FxHashSet<String>,
-    suppressions: &SuppressionContext<'_>,
-    line_offsets_by_file: &LineOffsetsMap<'_>,
-    results: &mut AnalysisResults,
-) {
-    if config.rules.unused_load_data_keys == Severity::Off {
+fn populate_unused_load_data_key_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
+    if input.config.rules.unused_load_data_keys == Severity::Off {
         return;
     }
     let result = find_unused_load_data_keys(
-        graph,
-        modules,
-        declared_deps,
-        suppressions,
-        line_offsets_by_file,
-        &config.root,
+        input.graph,
+        input.modules,
+        input.declared_deps,
+        input.suppressions,
+        input.line_offsets_by_file,
+        &input.config.root,
     );
     if result.global_abstain {
-        results.unused_load_data_keys_global_abstain = true;
+        input.results.unused_load_data_keys_global_abstain = true;
         tracing::debug!(
             "unused-load-data-key: abstained project-wide (a whole-object use of \
              page.data / $page.data was seen; any key could be read reflectively)"
         );
     }
-    results.unused_load_data_keys = result
+    input.results.unused_load_data_keys = result
         .findings
         .into_iter()
         .map(UnusedLoadDataKeyFinding::with_actions)
