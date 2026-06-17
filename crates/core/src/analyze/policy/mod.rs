@@ -141,15 +141,15 @@ pub fn find_policy_violations(
             line_offsets_by_file,
             violations: &mut violations,
         });
-        collect_banned_calls(
-            &in_scope,
+        collect_banned_calls(PolicyCollectionInput {
+            in_scope: &in_scope,
             module,
             node,
             master,
             suppressions,
             line_offsets_by_file,
-            &mut violations,
-        );
+            violations: &mut violations,
+        });
     }
 
     for (index, rule) in rules.iter().enumerate() {
@@ -279,34 +279,34 @@ fn collect_banned_imports(input: PolicyCollectionInput<'_>) {
 /// Emit one finding per unique callee path matched by the first applicable
 /// `banned-call` rule (config order), mirroring the boundary forbidden-call
 /// first-pattern-wins behavior.
-fn collect_banned_calls(
-    in_scope: &[(usize, &CompiledRule<'_>)],
-    module: &ModuleInfo,
-    node: &crate::graph::ModuleNode,
-    master: Severity,
-    suppressions: &SuppressionContext<'_>,
-    line_offsets_by_file: &LineOffsetsMap<'_>,
-    violations: &mut Vec<PolicyViolation>,
-) {
-    for callee_use in &module.callee_uses {
-        let matched = in_scope.iter().find_map(|(_, rule)| {
+fn collect_banned_calls(input: PolicyCollectionInput<'_>) {
+    for callee_use in &input.module.callee_uses {
+        let matched = input.in_scope.iter().find_map(|(_, rule)| {
             if rule.rule.kind != RulePackRuleKind::BannedCall {
                 return None;
             }
-            let severity = wire_severity(rule.effective_severity(master))?;
-            rule.matches_callee(module, &callee_use.callee_path)
+            let severity = wire_severity(rule.effective_severity(input.master))?;
+            rule.matches_callee(input.module, &callee_use.callee_path)
                 .then_some((rule, severity))
         });
         let Some((rule, severity)) = matched else {
             continue;
         };
-        let (line, col) =
-            byte_offset_to_line_col(line_offsets_by_file, node.file_id, callee_use.span_start);
-        if suppressions.is_policy_suppressed(node.file_id, line, rule.pack, &rule.rule.id) {
+        let (line, col) = byte_offset_to_line_col(
+            input.line_offsets_by_file,
+            input.node.file_id,
+            callee_use.span_start,
+        );
+        if input.suppressions.is_policy_suppressed(
+            input.node.file_id,
+            line,
+            rule.pack,
+            &rule.rule.id,
+        ) {
             continue;
         }
-        violations.push(PolicyViolation {
-            path: node.path.clone(),
+        input.violations.push(PolicyViolation {
+            path: input.node.path.clone(),
             line,
             col,
             pack: rule.pack.to_owned(),
