@@ -3704,46 +3704,46 @@ fn prepare_shared_analysis_output(
         .map_err(|e| emit_error(&format!("analysis failed: {e}"), 2, opts.output))
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "runtime coverage analysis needs the same filtered health context as scoring"
-)]
+struct RuntimeCoverageAnalysisScope<'a> {
+    opts: &'a HealthOptions<'a>,
+    config: &'a ResolvedConfig,
+    modules: &'a [fallow_core::extract::ModuleInfo],
+    shared_analysis_output: Option<&'a fallow_core::AnalysisOutput>,
+    istanbul_coverage: Option<&'a scoring::IstanbulCoverage>,
+    file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
+    ignore_set: &'a globset::GlobSet,
+    changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
+    ws_roots: Option<&'a [std::path::PathBuf]>,
+}
+
 fn analyze_runtime_coverage(
-    opts: &HealthOptions<'_>,
-    config: &ResolvedConfig,
-    modules: &[fallow_core::extract::ModuleInfo],
-    shared_analysis_output: Option<&fallow_core::AnalysisOutput>,
-    istanbul_coverage: Option<&scoring::IstanbulCoverage>,
-    file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
-    ignore_set: &globset::GlobSet,
-    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
-    ws_roots: Option<&[std::path::PathBuf]>,
+    input: RuntimeCoverageAnalysisScope<'_>,
 ) -> Result<Option<crate::health_types::RuntimeCoverageReport>, ExitCode> {
-    let Some(ref production_options) = opts.runtime_coverage else {
+    let Some(ref production_options) = input.opts.runtime_coverage else {
         return Ok(None);
     };
-    let Some(analysis_output) = shared_analysis_output else {
+    let Some(analysis_output) = input.shared_analysis_output else {
         return Err(emit_error(
             "runtime coverage requires analysis output",
             2,
-            opts.output,
+            input.opts.output,
         ));
     };
     coverage::analyze(
         production_options,
         &coverage::RuntimeCoverageAnalysisInput {
-            root: &config.root,
-            modules,
+            root: &input.config.root,
+            modules: input.modules,
             analysis_output,
-            istanbul_coverage,
-            file_paths,
-            ignore_set,
-            changed_files,
-            ws_roots,
-            top: opts.top,
-            codeowners_path: config.codeowners.as_deref(),
-            quiet: opts.quiet,
-            output: opts.output,
+            istanbul_coverage: input.istanbul_coverage,
+            file_paths: input.file_paths,
+            ignore_set: input.ignore_set,
+            changed_files: input.changed_files,
+            ws_roots: input.ws_roots,
+            top: input.opts.top,
+            codeowners_path: input.config.codeowners.as_deref(),
+            quiet: input.opts.quiet,
+            output: input.opts.output,
         },
     )
     .map(Some)
@@ -3888,17 +3888,17 @@ fn prepare_health_analysis_data(
         crate::telemetry::note_graph_structure(graph);
     }
 
-    let runtime_coverage = analyze_runtime_coverage(
-        input.opts,
-        input.config,
-        input.modules,
-        shared_analysis_output.as_ref(),
-        input.istanbul_coverage,
-        input.file_paths,
-        input.ignore_set,
-        input.changed_files,
-        input.ws_roots,
-    )?;
+    let runtime_coverage = analyze_runtime_coverage(RuntimeCoverageAnalysisScope {
+        opts: input.opts,
+        config: input.config,
+        modules: input.modules,
+        shared_analysis_output: shared_analysis_output.as_ref(),
+        istanbul_coverage: input.istanbul_coverage,
+        file_paths: input.file_paths,
+        ignore_set: input.ignore_set,
+        changed_files: input.changed_files,
+        ws_roots: input.ws_roots,
+    })?;
 
     let precomputed_for_scores = if input.needs_file_scores {
         shared_analysis_output.take()
