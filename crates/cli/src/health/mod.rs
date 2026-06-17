@@ -4376,16 +4376,16 @@ fn prepare_health_vital_data(
         &mut counts,
         total_files_scoped,
     );
-    let large_functions = collect_filtered_large_functions(
-        &vital_signs,
-        input.modules,
-        input.file_paths,
-        input.config,
-        input.ignore_set,
-        input.changed_files,
-        input.ws_roots,
-        input.diff_index,
-    );
+    let large_functions = collect_filtered_large_functions(FilteredLargeFunctionInput {
+        vital_signs: &vital_signs,
+        modules: input.modules,
+        file_paths: input.file_paths,
+        config: input.config,
+        ignore_set: input.ignore_set,
+        changed_files: input.changed_files,
+        ws_roots: input.ws_roots,
+        diff_index: input.diff_index,
+    });
     if let Some(ref snapshot_path) = input.opts.save_snapshot {
         save_snapshot(SnapshotInput {
             opts: input.opts,
@@ -4424,32 +4424,32 @@ fn compute_health_score_metrics(
         .then(|| vital_signs::compute_health_score(vital_signs, total_files_scoped))
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "large-function filtering needs vital signs plus the active health scope"
-)]
+struct FilteredLargeFunctionInput<'a> {
+    vital_signs: &'a crate::health_types::VitalSigns,
+    modules: &'a [fallow_core::extract::ModuleInfo],
+    file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
+    config: &'a ResolvedConfig,
+    ignore_set: &'a globset::GlobSet,
+    changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
+    ws_roots: Option<&'a [std::path::PathBuf]>,
+    diff_index: Option<&'a crate::report::ci::diff_filter::DiffIndex>,
+}
+
 fn collect_filtered_large_functions(
-    vital_signs: &crate::health_types::VitalSigns,
-    modules: &[fallow_core::extract::ModuleInfo],
-    file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
-    config: &ResolvedConfig,
-    ignore_set: &globset::GlobSet,
-    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
-    ws_roots: Option<&[std::path::PathBuf]>,
-    diff_index: Option<&crate::report::ci::diff_filter::DiffIndex>,
+    input: FilteredLargeFunctionInput<'_>,
 ) -> Vec<crate::health_types::LargeFunctionEntry> {
-    let input = LargeFunctionInput {
-        vital_signs,
-        modules,
-        file_paths,
-        config_root: &config.root,
-        ignore_set,
-        changed_files,
-        ws_roots,
+    let large_input = LargeFunctionInput {
+        vital_signs: input.vital_signs,
+        modules: input.modules,
+        file_paths: input.file_paths,
+        config_root: &input.config.root,
+        ignore_set: input.ignore_set,
+        changed_files: input.changed_files,
+        ws_roots: input.ws_roots,
     };
-    let mut large_functions = collect_large_functions(&input);
-    if let Some(diff_index) = diff_index {
-        filter_large_functions_by_diff(&mut large_functions, diff_index, &config.root);
+    let mut large_functions = collect_large_functions(&large_input);
+    if let Some(diff_index) = input.diff_index {
+        filter_large_functions_by_diff(&mut large_functions, diff_index, &input.config.root);
     }
     large_functions
 }
