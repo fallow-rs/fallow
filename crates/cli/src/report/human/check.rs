@@ -285,15 +285,15 @@ fn build_human_lines_with_explain(
     let total_issues = results.total_issues();
     let mut lines = Vec::new();
 
-    build_unused_code_section(
-        &mut lines,
+    build_unused_code_section(UnusedCodeSectionInput {
+        lines: &mut lines,
         results,
         root,
         rules,
         max_items,
         max_grouped_files,
         total_issues,
-    );
+    });
     build_dependencies_section(DependencySectionInput {
         lines: &mut lines,
         results,
@@ -608,102 +608,121 @@ fn push_human_pkg_dep_section<T: NamedPkgDep>(
     );
 }
 
-fn build_unused_code_section(
-    lines: &mut Vec<String>,
-    results: &AnalysisResults,
-    root: &Path,
-    rules: &RulesConfig,
+struct UnusedCodeSectionInput<'a> {
+    lines: &'a mut Vec<String>,
+    results: &'a AnalysisResults,
+    root: &'a Path,
+    rules: &'a RulesConfig,
     max_items: usize,
     max_grouped_files: usize,
     total_issues: usize,
-) {
-    let unused_file_set: FxHashSet<&Path> = results
+}
+
+fn build_unused_code_section(input: UnusedCodeSectionInput<'_>) {
+    let unused_file_set: FxHashSet<&Path> = input
+        .results
         .unused_files
         .iter()
         .map(|f| f.file.path.as_path())
         .collect();
-    let filtered_exports: Vec<UnusedExportFinding> = results
+    let filtered_exports: Vec<UnusedExportFinding> = input
+        .results
         .unused_exports
         .iter()
         .filter(|e| !unused_file_set.contains(e.export.path.as_path()))
         .cloned()
         .collect();
-    let filtered_types: Vec<UnusedTypeFinding> = results
+    let filtered_types: Vec<UnusedTypeFinding> = input
+        .results
         .unused_types
         .iter()
         .filter(|e| !unused_file_set.contains(e.export.path.as_path()))
         .cloned()
         .collect();
-    let suppressed_exports = results.unused_exports.len() - filtered_exports.len();
-    let suppressed_types = results.unused_types.len() - filtered_types.len();
+    let suppressed_exports = input.results.unused_exports.len() - filtered_exports.len();
+    let suppressed_types = input.results.unused_types.len() - filtered_types.len();
 
-    let has_unused_code = !results.unused_files.is_empty()
+    let has_unused_code = !input.results.unused_files.is_empty()
         || !filtered_exports.is_empty()
         || !filtered_types.is_empty()
-        || !results.private_type_leaks.is_empty()
-        || !results.unused_enum_members.is_empty()
-        || !results.unused_class_members.is_empty()
-        || !results.unused_store_members.is_empty();
+        || !input.results.private_type_leaks.is_empty()
+        || !input.results.unused_enum_members.is_empty()
+        || !input.results.unused_class_members.is_empty()
+        || !input.results.unused_store_members.is_empty();
     if !has_unused_code {
         return;
     }
-    push_category_header(lines, "Unused Code");
+    push_category_header(input.lines, "Unused Code");
 
-    if results.unused_files.len() > DIR_ROLLUP_THRESHOLD {
-        build_dir_rollup_section(lines, &results.unused_files, root, rules, total_issues);
+    if input.results.unused_files.len() > DIR_ROLLUP_THRESHOLD {
+        build_dir_rollup_section(
+            input.lines,
+            &input.results.unused_files,
+            input.root,
+            input.rules,
+            input.total_issues,
+        );
     } else {
         build_human_section_ex(
-            lines,
-            &results.unused_files,
+            input.lines,
+            &input.results.unused_files,
             "Unused files",
-            severity_to_level(rules.unused_files),
-            max_items,
-            total_issues,
+            severity_to_level(input.rules.unused_files),
+            input.max_items,
+            input.total_issues,
             |file| {
-                let path_str = relative_path(&file.file.path, root).display().to_string();
+                let path_str = relative_path(&file.file.path, input.root)
+                    .display()
+                    .to_string();
                 vec![format!("  {}", format_path(&path_str))]
             },
         );
     }
-    insert_test_src_split(lines, &results.unused_files, |f| &f.file.path);
+    insert_test_src_split(input.lines, &input.results.unused_files, |f| &f.file.path);
 
     build_human_grouped_section(GroupedSectionInput {
-        lines,
+        lines: input.lines,
         items: &filtered_exports,
         title: "Unused exports",
-        level: severity_to_level(rules.unused_exports),
-        root,
-        max_files: max_grouped_files,
+        level: severity_to_level(input.rules.unused_exports),
+        root: input.root,
+        max_files: input.max_grouped_files,
         get_path: |e| e.export.path.as_path(),
         format_detail: &|e: &UnusedExportFinding| format_unused_export(&e.export),
     });
-    push_suppressed_count_note(lines, suppressed_exports);
-    insert_test_src_split(lines, &filtered_exports, |e| &e.export.path);
+    push_suppressed_count_note(input.lines, suppressed_exports);
+    insert_test_src_split(input.lines, &filtered_exports, |e| &e.export.path);
 
     build_human_grouped_section(GroupedSectionInput {
-        lines,
+        lines: input.lines,
         items: &filtered_types,
         title: "Unused type exports",
-        level: severity_to_level(rules.unused_types),
-        root,
-        max_files: max_grouped_files,
+        level: severity_to_level(input.rules.unused_types),
+        root: input.root,
+        max_files: input.max_grouped_files,
         get_path: |e| e.export.path.as_path(),
         format_detail: &|e: &UnusedTypeFinding| format_unused_export(&e.export),
     });
-    push_suppressed_count_note(lines, suppressed_types);
+    push_suppressed_count_note(input.lines, suppressed_types);
 
     build_human_grouped_section(GroupedSectionInput {
-        lines,
-        items: &results.private_type_leaks,
+        lines: input.lines,
+        items: &input.results.private_type_leaks,
         title: "Private type leaks",
-        level: severity_to_level(rules.private_type_leaks),
-        root,
-        max_files: max_grouped_files,
+        level: severity_to_level(input.rules.private_type_leaks),
+        root: input.root,
+        max_files: input.max_grouped_files,
         get_path: |e| e.leak.path.as_path(),
         format_detail: &format_private_type_leak,
     });
 
-    build_unused_member_sections(lines, results, root, rules, max_grouped_files);
+    build_unused_member_sections(
+        input.lines,
+        input.results,
+        input.root,
+        input.rules,
+        input.max_grouped_files,
+    );
 }
 
 fn build_unused_member_sections(
