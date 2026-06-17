@@ -2625,23 +2625,23 @@ fn build_health_output_grouping(
     action_ctx: &crate::health_types::HealthActionContext,
 ) -> Option<crate::health_types::HealthGrouping> {
     let file_scores = health_file_scores_slice(analysis_data.score_output.as_ref());
-    build_health_grouping_from_context(
+    build_health_grouping_from_context(HealthGroupingContextInput {
         opts,
-        build.config,
-        build.group_resolver,
-        &derived_sections.candidate_paths,
-        build.files,
-        build.modules,
-        build.file_paths,
-        analysis_data.score_output.as_ref(),
+        config: build.config,
+        group_resolver: build.group_resolver,
+        candidate_paths: &derived_sections.candidate_paths,
+        files: build.files,
+        modules: build.modules,
+        file_paths: build.file_paths,
+        score_output: analysis_data.score_output.as_ref(),
         file_scores,
         findings,
-        &derived_sections.hotspots,
+        hotspots: &derived_sections.hotspots,
         vital_data,
-        &derived_sections.targets,
-        build.needs_file_scores,
+        targets: &derived_sections.targets,
+        needs_file_scores: build.needs_file_scores,
         action_ctx,
-    )
+    })
 }
 
 struct HealthDerivedSectionInput<'a> {
@@ -3050,47 +3050,47 @@ struct ThresholdOverrideStateInput {
     dimension: ThresholdOverrideDimension,
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "grouping bridges the assembled health pipeline context into the grouping module"
-)]
-fn build_health_grouping_from_context(
-    opts: &HealthOptions<'_>,
-    config: &ResolvedConfig,
-    group_resolver: Option<&crate::report::OwnershipResolver>,
-    candidate_paths: &rustc_hash::FxHashSet<std::path::PathBuf>,
-    files: &[fallow_types::discover::DiscoveredFile],
-    modules: &[fallow_core::extract::ModuleInfo],
-    file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
-    score_output: Option<&scoring::FileScoreOutput>,
-    file_scores: &[FileHealthScore],
-    findings: &[ComplexityViolation],
-    hotspots: &[HotspotEntry],
-    vital_data: &HealthVitalData,
-    targets: &[RefactoringTarget],
+struct HealthGroupingContextInput<'a> {
+    opts: &'a HealthOptions<'a>,
+    config: &'a ResolvedConfig,
+    group_resolver: Option<&'a crate::report::OwnershipResolver>,
+    candidate_paths: &'a rustc_hash::FxHashSet<std::path::PathBuf>,
+    files: &'a [fallow_types::discover::DiscoveredFile],
+    modules: &'a [fallow_core::extract::ModuleInfo],
+    file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
+    score_output: Option<&'a scoring::FileScoreOutput>,
+    file_scores: &'a [FileHealthScore],
+    findings: &'a [ComplexityViolation],
+    hotspots: &'a [HotspotEntry],
+    vital_data: &'a HealthVitalData,
+    targets: &'a [RefactoringTarget],
     needs_file_scores: bool,
-    action_ctx: &crate::health_types::HealthActionContext,
+    action_ctx: &'a crate::health_types::HealthActionContext,
+}
+
+fn build_health_grouping_from_context(
+    input: HealthGroupingContextInput<'_>,
 ) -> Option<crate::health_types::HealthGrouping> {
     build_optional_health_grouping_opt(
-        group_resolver,
-        &config.root,
-        candidate_paths,
+        input.group_resolver,
+        &input.config.root,
+        input.candidate_paths,
         &grouping::HealthGroupingInput {
-            files,
-            modules,
-            file_paths,
-            score_output,
-            file_scores,
-            findings,
-            hotspots,
-            large_functions: &vital_data.large_functions,
-            targets,
-            score_requested: opts.score,
-            duplicates_config: opts.score.then_some(&config.duplicates),
-            needs_file_scores,
-            needs_hotspots: opts.hotspots || opts.targets,
-            show_vital_signs: !opts.score_only_output,
-            action_ctx,
+            files: input.files,
+            modules: input.modules,
+            file_paths: input.file_paths,
+            score_output: input.score_output,
+            file_scores: input.file_scores,
+            findings: input.findings,
+            hotspots: input.hotspots,
+            large_functions: &input.vital_data.large_functions,
+            targets: input.targets,
+            score_requested: input.opts.score,
+            duplicates_config: input.opts.score.then_some(&input.config.duplicates),
+            needs_file_scores: input.needs_file_scores,
+            needs_hotspots: input.opts.hotspots || input.opts.targets,
+            show_vital_signs: !input.opts.score_only_output,
+            action_ctx: input.action_ctx,
         },
     )
 }
