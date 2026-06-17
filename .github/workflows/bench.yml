@@ -30,7 +30,7 @@ env:
 
 jobs:
   benchmark:
-    name: CodSpeed simulation (${{ matrix.label }})
+    name: CodSpeed fast simulation (${{ matrix.label }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -58,8 +58,7 @@ jobs:
           tool: cargo-codspeed@4.7.0
 
       - name: Build benchmark shard
-        # Keep PR feedback focused: split simulation shards without adding a noisy suite.
-        # large_analysis stays out because it exceeds the fast benchmark budget.
+        # Keep PR feedback focused: the full main/manual job uploads the slower suite.
         run: cargo codspeed build -p ${{ matrix.package }} --bench ${{ matrix.bench }} --features codspeed
 
       - name: Run benchmark shard
@@ -67,3 +66,29 @@ jobs:
         with:
           mode: simulation
           run: cargo codspeed run -p ${{ matrix.package }} --bench ${{ matrix.bench }}
+
+  benchmark-full:
+    name: CodSpeed full simulation (large analysis)
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: bench-large-analysis
+
+      - name: Install cargo-codspeed
+        uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # v2.81.11
+        with:
+          tool: cargo-codspeed@4.7.0
+
+      - name: Build large benchmark shard
+        run: cargo codspeed build -p fallow-core --bench large_analysis --features codspeed
+
+      - name: Run large benchmark shard
+        uses: CodSpeedHQ/action@c145068895e045cc725ee76fcd2307624b65c3af # v4.17.5
+        with:
+          mode: simulation
+          run: cargo codspeed run -p fallow-core --bench large_analysis
