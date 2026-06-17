@@ -81,25 +81,27 @@ pub struct PluginRegexValidationError {
 }
 
 impl PluginRegexValidationError {
-    pub(crate) fn new(
-        plugin_name: &str,
-        config_path: Option<&Path>,
-        rule_kind: &'static str,
-        field: &'static str,
-        rule_pattern: &str,
-        regex_pattern: &str,
-        source: &regex::Error,
-    ) -> Self {
+    pub(crate) fn new(input: PluginRegexValidationErrorInput<'_>) -> Self {
         Self {
-            plugin_name: plugin_name.to_owned(),
-            config_path: config_path.map(Path::to_path_buf),
-            rule_kind,
-            field,
-            rule_pattern: rule_pattern.to_owned(),
-            regex_pattern: regex_pattern.to_owned(),
-            source: source.to_string(),
+            plugin_name: input.plugin_name.to_owned(),
+            config_path: input.config_path.map(Path::to_path_buf),
+            rule_kind: input.rule_kind,
+            field: input.field,
+            rule_pattern: input.rule_pattern.to_owned(),
+            regex_pattern: input.regex_pattern.to_owned(),
+            source: input.source.to_string(),
         }
     }
+}
+
+pub(crate) struct PluginRegexValidationErrorInput<'a> {
+    pub(crate) plugin_name: &'a str,
+    pub(crate) config_path: Option<&'a Path>,
+    pub(crate) rule_kind: &'static str,
+    pub(crate) field: &'static str,
+    pub(crate) rule_pattern: &'a str,
+    pub(crate) regex_pattern: &'a str,
+    pub(crate) source: &'a regex::Error,
 }
 
 impl fmt::Display for PluginRegexValidationError {

@@ -13,7 +13,7 @@ use fallow_config::{ExternalPluginDef, PackageJson, PluginDetection, UsedClassMe
 use crate::discover::SOURCE_EXTENSIONS;
 
 use super::super::{PathRule, Plugin, PluginResult, PluginUsedExportRule, UsedExportRule};
-use super::{AggregatedPluginResult, PluginRegexValidationError};
+use super::{AggregatedPluginResult, PluginRegexValidationError, PluginRegexValidationErrorInput};
 
 /// True when a config pattern names a source-extension config file living
 /// directly in some directory (no path separator, no leading dot, all expanded
@@ -364,26 +364,30 @@ fn collect_path_rule_regex_errors(
     for pattern in &rule.exclude_regexes {
         if let Err(source) = regex::Regex::new(pattern) {
             errors.push(PluginRegexValidationError::new(
-                plugin_name,
-                config_path,
-                rule_kind,
-                "exclude_regexes",
-                &rule.pattern,
-                pattern,
-                &source,
+                PluginRegexValidationErrorInput {
+                    plugin_name,
+                    config_path,
+                    rule_kind,
+                    field: "exclude_regexes",
+                    rule_pattern: &rule.pattern,
+                    regex_pattern: pattern,
+                    source: &source,
+                },
             ));
         }
     }
     for pattern in &rule.exclude_segment_regexes {
         if let Err(source) = regex::Regex::new(pattern) {
             errors.push(PluginRegexValidationError::new(
-                plugin_name,
-                config_path,
-                rule_kind,
-                "exclude_segment_regexes",
-                &rule.pattern,
-                pattern,
-                &source,
+                PluginRegexValidationErrorInput {
+                    plugin_name,
+                    config_path,
+                    rule_kind,
+                    field: "exclude_segment_regexes",
+                    rule_pattern: &rule.pattern,
+                    regex_pattern: pattern,
+                    source: &source,
+                },
             ));
         }
     }
