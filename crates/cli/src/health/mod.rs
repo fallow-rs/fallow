@@ -357,21 +357,21 @@ fn execute_health_inner(
         needs_file_scores,
     )?;
 
-    let findings_data = prepare_health_findings(
+    let findings_data = prepare_health_findings(HealthFindingsInput {
         opts,
-        &config,
-        &modules,
-        &scope.file_paths,
-        &scope.ignore_set,
-        scope.changed_files.as_ref(),
-        scope.ws_roots.as_deref(),
-        scope.diff_index,
-        scope.max_cyclomatic,
-        scope.max_cognitive,
-        scope.max_crap,
-        scope.enforce_crap,
-        analysis_data.score_output.as_ref(),
-    )?;
+        config: &config,
+        modules: &modules,
+        file_paths: &scope.file_paths,
+        ignore_set: &scope.ignore_set,
+        changed_files: scope.changed_files.as_ref(),
+        ws_roots: scope.ws_roots.as_deref(),
+        diff_index: scope.diff_index,
+        max_cyclomatic: scope.max_cyclomatic,
+        max_cognitive: scope.max_cognitive,
+        max_crap: scope.max_crap,
+        enforce_crap: scope.enforce_crap,
+        score_output: analysis_data.score_output.as_ref(),
+    })?;
 
     let HealthRuntimeSections {
         analysis_data,
@@ -3288,69 +3288,72 @@ fn build_health_result(input: HealthResultInput) -> HealthResult {
     }
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "finding preparation applies the active health scope and optional scoring data"
-)]
-fn prepare_health_findings(
-    opts: &HealthOptions<'_>,
-    config: &ResolvedConfig,
-    modules: &[fallow_core::extract::ModuleInfo],
-    file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
-    ignore_set: &globset::GlobSet,
-    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
-    ws_roots: Option<&[std::path::PathBuf]>,
-    diff_index: Option<&crate::report::ci::diff_filter::DiffIndex>,
+struct HealthFindingsInput<'a> {
+    opts: &'a HealthOptions<'a>,
+    config: &'a ResolvedConfig,
+    modules: &'a [fallow_core::extract::ModuleInfo],
+    file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
+    ignore_set: &'a globset::GlobSet,
+    changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
+    ws_roots: Option<&'a [std::path::PathBuf]>,
+    diff_index: Option<&'a crate::report::ci::diff_filter::DiffIndex>,
     max_cyclomatic: u16,
     max_cognitive: u16,
     max_crap: f64,
     enforce_crap: bool,
-    score_output: Option<&scoring::FileScoreOutput>,
-) -> Result<HealthFindingsData, ExitCode> {
+    score_output: Option<&'a scoring::FileScoreOutput>,
+}
+
+fn prepare_health_findings(input: HealthFindingsInput<'_>) -> Result<HealthFindingsData, ExitCode> {
     let t = Instant::now();
     let global_thresholds = GlobalHealthThresholds {
-        cyclomatic: max_cyclomatic,
-        cognitive: max_cognitive,
-        crap: max_crap,
+        cyclomatic: input.max_cyclomatic,
+        cognitive: input.max_cognitive,
+        crap: input.max_crap,
     };
     let threshold_resolver =
-        ThresholdOverrideResolver::new(&config.health.threshold_overrides, global_thresholds);
+        ThresholdOverrideResolver::new(&input.config.health.threshold_overrides, global_thresholds);
     let mut threshold_state_tracker = ThresholdOverrideStateTracker::default();
     let mut collect_input = CollectFindingsInput {
-        modules,
-        file_paths,
-        config_root: &config.root,
-        ignore_set,
-        changed_files,
-        ws_roots,
+        modules: input.modules,
+        file_paths: input.file_paths,
+        config_root: &input.config.root,
+        ignore_set: input.ignore_set,
+        changed_files: input.changed_files,
+        ws_roots: input.ws_roots,
         threshold_resolver: &threshold_resolver,
         threshold_state_tracker: &mut threshold_state_tracker,
-        complexity_breakdown: opts.complexity_breakdown,
+        complexity_breakdown: input.opts.complexity_breakdown,
     };
     let (mut findings, files_analyzed, total_functions) =
         collect_findings_with_resolver(&mut collect_input);
     let complexity_ms = t.elapsed().as_secs_f64() * 1000.0;
 
     let mut crap_ctx = HealthCrapMergeContext {
-        modules,
-        file_paths,
-        ignore_set,
-        changed_files,
-        ws_roots,
-        max_cyclomatic,
-        max_cognitive,
-        enforce_crap,
-        score_output,
-        config_root: &config.root,
+        modules: input.modules,
+        file_paths: input.file_paths,
+        ignore_set: input.ignore_set,
+        changed_files: input.changed_files,
+        ws_roots: input.ws_roots,
+        max_cyclomatic: input.max_cyclomatic,
+        max_cognitive: input.max_cognitive,
+        enforce_crap: input.enforce_crap,
+        score_output: input.score_output,
+        config_root: &input.config.root,
         threshold_resolver: &threshold_resolver,
         threshold_state_tracker: &mut threshold_state_tracker,
     };
-    apply_optional_crap_findings(opts, &mut findings, &mut crap_ctx);
+    apply_optional_crap_findings(input.opts, &mut findings, &mut crap_ctx);
     let (total_above_threshold, sev_critical, sev_high, sev_moderate, loaded_baseline) =
-        finalize_health_findings(opts, config, &mut findings, diff_index)?;
+        finalize_health_findings(input.opts, input.config, &mut findings, input.diff_index)?;
     threshold_state_tracker.record_no_match_entries(
         &threshold_resolver,
-        should_emit_no_match_threshold_overrides(opts, changed_files, ws_roots, diff_index),
+        should_emit_no_match_threshold_overrides(
+            input.opts,
+            input.changed_files,
+            input.ws_roots,
+            input.diff_index,
+        ),
     );
 
     Ok(HealthFindingsData {
