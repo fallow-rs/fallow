@@ -249,37 +249,39 @@ pub fn find_unused_dependency_overrides(
     let mut findings = Vec::new();
     let yaml_path = config.root.join(PNPM_WORKSPACE_FILE);
     let json_path = config.root.join(ROOT_PACKAGE_JSON);
-    collect_unused_from_source(
-        &state.workspace_yaml_data,
-        DependencyOverrideSource::PnpmWorkspaceYaml,
-        &yaml_path,
-        &state.declared_packages,
-        &state.lockfile_packages,
-        &config.compiled_ignore_dependency_overrides,
-        &mut findings,
-    );
-    collect_unused_from_source(
-        &state.package_json_data,
-        DependencyOverrideSource::PnpmPackageJson,
-        &json_path,
-        &state.declared_packages,
-        &state.lockfile_packages,
-        &config.compiled_ignore_dependency_overrides,
-        &mut findings,
-    );
+    collect_unused_from_source(UnusedOverrideSourceInput {
+        data: &state.workspace_yaml_data,
+        source: DependencyOverrideSource::PnpmWorkspaceYaml,
+        source_path: &yaml_path,
+        declared: &state.declared_packages,
+        resolved: &state.lockfile_packages,
+        ignore_rules: &config.compiled_ignore_dependency_overrides,
+        findings: &mut findings,
+    });
+    collect_unused_from_source(UnusedOverrideSourceInput {
+        data: &state.package_json_data,
+        source: DependencyOverrideSource::PnpmPackageJson,
+        source_path: &json_path,
+        declared: &state.declared_packages,
+        resolved: &state.lockfile_packages,
+        ignore_rules: &config.compiled_ignore_dependency_overrides,
+        findings: &mut findings,
+    });
     findings
 }
 
-fn collect_unused_from_source(
-    data: &PnpmOverrideData,
+struct UnusedOverrideSourceInput<'a> {
+    data: &'a PnpmOverrideData,
     source: DependencyOverrideSource,
-    source_path: &std::path::Path,
-    declared: &FxHashSet<String>,
-    resolved: &FxHashSet<String>,
-    ignore_rules: &[CompiledIgnoreDependencyOverrideRule],
-    findings: &mut Vec<UnusedDependencyOverride>,
-) {
-    for entry in &data.entries {
+    source_path: &'a std::path::Path,
+    declared: &'a FxHashSet<String>,
+    resolved: &'a FxHashSet<String>,
+    ignore_rules: &'a [CompiledIgnoreDependencyOverrideRule],
+    findings: &'a mut Vec<UnusedDependencyOverride>,
+}
+
+fn collect_unused_from_source(input: UnusedOverrideSourceInput<'_>) {
+    for entry in &input.data.entries {
         let Some(parsed) = entry.parsed_key.as_ref() else {
             continue;
         };
@@ -290,22 +292,23 @@ fn collect_unused_from_source(
             continue;
         }
 
-        let target_declared = declared.contains(&parsed.target_package);
-        let target_resolved = resolved.contains(&parsed.target_package);
+        let target_declared = input.declared.contains(&parsed.target_package);
+        let target_resolved = input.resolved.contains(&parsed.target_package);
         let parent_declared = parsed
             .parent_package
             .as_ref()
-            .is_some_and(|p| declared.contains(p));
+            .is_some_and(|p| input.declared.contains(p));
         let parent_resolved = parsed
             .parent_package
             .as_ref()
-            .is_some_and(|p| resolved.contains(p));
+            .is_some_and(|p| input.resolved.contains(p));
         if target_declared || target_resolved || parent_declared || parent_resolved {
             continue;
         }
 
-        let source_label = source_label_for(source);
-        if ignore_rules
+        let source_label = source_label_for(input.source);
+        if input
+            .ignore_rules
             .iter()
             .any(|rule| rule.matches(&parsed.target_package, source_label))
         {
@@ -314,14 +317,14 @@ fn collect_unused_from_source(
 
         let hint = Some(HINT_MAY_BE_TRANSITIVE.to_string());
 
-        findings.push(UnusedDependencyOverride {
+        input.findings.push(UnusedDependencyOverride {
             raw_key: entry.raw_key.clone(),
             target_package: parsed.target_package.clone(),
             parent_package: parsed.parent_package.clone(),
             version_constraint: parsed.target_version_selector.clone(),
             version_range: value.clone(),
-            source,
-            path: source_path.to_path_buf(),
+            source: input.source,
+            path: input.source_path.to_path_buf(),
             line: entry.line,
             hint,
         });
