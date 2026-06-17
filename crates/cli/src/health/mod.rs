@@ -3189,15 +3189,15 @@ fn prepare_health_section_hotspots(
     opts: &HealthOptions<'_>,
     input: HealthHotspotSectionInput<'_>,
 ) -> (Vec<HotspotEntry>, Option<HotspotSummary>, f64) {
-    compute_filtered_hotspots(
+    compute_filtered_hotspots(FilteredHotspotInput {
         opts,
-        input.config,
-        input.file_scores,
-        input.ignore_set,
-        input.ws_roots,
-        input.churn_fetch,
-        input.diff_index,
-    )
+        config: input.config,
+        file_scores_slice: input.file_scores,
+        ignore_set: input.ignore_set,
+        ws_roots: input.ws_roots,
+        churn_fetch: input.churn_fetch,
+        diff_index: input.diff_index,
+    })
 }
 
 struct HealthTargetSectionInput<'a> {
@@ -4059,30 +4059,34 @@ fn apply_health_baseline_and_top(
     Ok(loaded_baseline)
 }
 
-fn compute_filtered_hotspots(
-    opts: &HealthOptions<'_>,
-    config: &ResolvedConfig,
-    file_scores_slice: &[FileHealthScore],
-    ignore_set: &globset::GlobSet,
-    ws_roots: Option<&[std::path::PathBuf]>,
+struct FilteredHotspotInput<'a> {
+    opts: &'a HealthOptions<'a>,
+    config: &'a ResolvedConfig,
+    file_scores_slice: &'a [FileHealthScore],
+    ignore_set: &'a globset::GlobSet,
+    ws_roots: Option<&'a [std::path::PathBuf]>,
     churn_fetch: Option<hotspots::ChurnFetchResult>,
-    diff_index: Option<&crate::report::ci::diff_filter::DiffIndex>,
+    diff_index: Option<&'a crate::report::ci::diff_filter::DiffIndex>,
+}
+
+fn compute_filtered_hotspots(
+    input: FilteredHotspotInput<'_>,
 ) -> (Vec<HotspotEntry>, Option<HotspotSummary>, f64) {
     let t = Instant::now();
-    let (mut hotspots, hotspot_summary) = if let Some(churn_data) = churn_fetch {
+    let (mut hotspots, hotspot_summary) = if let Some(churn_data) = input.churn_fetch {
         compute_hotspots(
-            opts,
-            config,
-            file_scores_slice,
-            ignore_set,
-            ws_roots,
+            input.opts,
+            input.config,
+            input.file_scores_slice,
+            input.ignore_set,
+            input.ws_roots,
             churn_data,
         )
     } else {
         (Vec::new(), None)
     };
-    if let Some(diff_index) = diff_index {
-        filter_hotspots_by_diff(&mut hotspots, diff_index, &config.root);
+    if let Some(diff_index) = input.diff_index {
+        filter_hotspots_by_diff(&mut hotspots, diff_index, &input.config.root);
     }
     (
         hotspots,
