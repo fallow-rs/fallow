@@ -3302,6 +3302,62 @@ mod tests {
     }
 
     #[test]
+    fn truncation_hint_suggests_scoping_for_large_sections_or_totals() {
+        assert!(truncation_hint(10, 10).contains("--format json"));
+        assert!(truncation_hint(SCOPING_HINT_THRESHOLD + 1, 10).contains("--workspace"));
+        assert!(truncation_hint(10, SCOPING_HINT_THRESHOLD + 1).contains("--changed-since"));
+    }
+
+    #[test]
+    fn insert_test_src_split_only_reports_meaningful_mixed_sections() {
+        let src_a = PathBuf::from("src/a.ts");
+        let src_b = PathBuf::from("src/b.ts");
+        let src_c = PathBuf::from("src/c.ts");
+        let src_d = PathBuf::from("src/d.ts");
+        let test_a = PathBuf::from("tests/a.test.ts");
+        let test_b = PathBuf::from("tests/b.test.ts");
+        let fixture = PathBuf::from("__fixtures__/sample.ts");
+
+        let mut small = vec!["section".to_string(), String::new()];
+        insert_test_src_split(
+            &mut small,
+            &[src_a.clone(), test_a.clone()],
+            PathBuf::as_path,
+        );
+        assert_eq!(small, vec!["section".to_string(), String::new()]);
+
+        let mut mostly_src = vec!["section".to_string(), String::new()];
+        insert_test_src_split(
+            &mut mostly_src,
+            &[src_a.clone(), src_b.clone(), src_c, src_d, test_a.clone()],
+            PathBuf::as_path,
+        );
+        assert_eq!(mostly_src, vec!["section".to_string(), String::new()]);
+
+        let mut all_tests = vec!["section".to_string(), String::new()];
+        insert_test_src_split(
+            &mut all_tests,
+            &[
+                test_a.clone(),
+                test_b.clone(),
+                fixture.clone(),
+                test_a.clone(),
+                test_b.clone(),
+            ],
+            PathBuf::as_path,
+        );
+        assert_eq!(all_tests, vec!["section".to_string(), String::new()]);
+
+        let mut mixed = vec!["section".to_string()];
+        insert_test_src_split(
+            &mut mixed,
+            &[src_a, src_b, test_a, test_b, fixture],
+            PathBuf::as_path,
+        );
+        assert!(plain(&mixed).contains("2 in src, 3 in test directories"));
+    }
+
+    #[test]
     fn collect_matching_rules_routes_mixed_client_server_barrels() {
         // A file whose ONLY finding is a mixed-client-server-barrel must still
         // surface its CODEOWNERS rule in the `--group-by owner` "matched by"
