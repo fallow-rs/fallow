@@ -344,18 +344,18 @@ fn execute_health_inner(
         enforce_coverage_gaps,
         scope.enforce_crap,
     );
-    let analysis_data = prepare_health_analysis_data(
+    let analysis_data = prepare_health_analysis_data(HealthAnalysisDataInput {
         opts,
-        &config,
-        &modules,
-        &scope.file_paths,
-        &scope.ignore_set,
-        scope.changed_files.as_ref(),
-        scope.ws_roots.as_deref(),
-        istanbul_coverage.as_ref(),
+        config: &config,
+        modules: &modules,
+        file_paths: &scope.file_paths,
+        ignore_set: &scope.ignore_set,
+        changed_files: scope.changed_files.as_ref(),
+        ws_roots: scope.ws_roots.as_deref(),
+        istanbul_coverage: istanbul_coverage.as_ref(),
         pre_computed_analysis,
         needs_file_scores,
-    )?;
+    })?;
 
     let findings_data = prepare_health_findings(HealthFindingsInput {
         opts,
@@ -3857,28 +3857,28 @@ fn prepare_health_vital_data_from_sections(
     })
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "health analysis preparation shares the active scope across runtime coverage and file scores"
-)]
-fn prepare_health_analysis_data(
-    opts: &HealthOptions<'_>,
-    config: &ResolvedConfig,
-    modules: &[fallow_core::extract::ModuleInfo],
-    file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
-    ignore_set: &globset::GlobSet,
-    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
-    ws_roots: Option<&[std::path::PathBuf]>,
-    istanbul_coverage: Option<&scoring::IstanbulCoverage>,
+struct HealthAnalysisDataInput<'a> {
+    opts: &'a HealthOptions<'a>,
+    config: &'a ResolvedConfig,
+    modules: &'a [fallow_core::extract::ModuleInfo],
+    file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
+    ignore_set: &'a globset::GlobSet,
+    changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
+    ws_roots: Option<&'a [std::path::PathBuf]>,
+    istanbul_coverage: Option<&'a scoring::IstanbulCoverage>,
     pre_computed_analysis: Option<fallow_core::AnalysisOutput>,
     needs_file_scores: bool,
+}
+
+fn prepare_health_analysis_data(
+    input: HealthAnalysisDataInput<'_>,
 ) -> Result<HealthAnalysisData, ExitCode> {
-    let needs_analysis_output = needs_file_scores || opts.runtime_coverage.is_some();
+    let needs_analysis_output = input.needs_file_scores || input.opts.runtime_coverage.is_some();
     let mut shared_analysis_output = prepare_shared_analysis_output(
-        opts,
-        config,
-        modules,
-        pre_computed_analysis,
+        input.opts,
+        input.config,
+        input.modules,
+        input.pre_computed_analysis,
         needs_analysis_output,
     )?;
     if let Some(graph) = shared_analysis_output
@@ -3889,33 +3889,33 @@ fn prepare_health_analysis_data(
     }
 
     let runtime_coverage = analyze_runtime_coverage(
-        opts,
-        config,
-        modules,
+        input.opts,
+        input.config,
+        input.modules,
         shared_analysis_output.as_ref(),
-        istanbul_coverage,
-        file_paths,
-        ignore_set,
-        changed_files,
-        ws_roots,
+        input.istanbul_coverage,
+        input.file_paths,
+        input.ignore_set,
+        input.changed_files,
+        input.ws_roots,
     )?;
 
-    let precomputed_for_scores = if needs_file_scores {
+    let precomputed_for_scores = if input.needs_file_scores {
         shared_analysis_output.take()
     } else {
         None
     };
 
     let (file_score_result, file_scores_ms, churn_fetch) = compute_file_scores_and_churn(
-        opts,
-        config,
-        modules,
-        file_paths,
-        changed_files,
-        ws_roots,
-        ignore_set,
-        istanbul_coverage,
-        needs_file_scores,
+        input.opts,
+        input.config,
+        input.modules,
+        input.file_paths,
+        input.changed_files,
+        input.ws_roots,
+        input.ignore_set,
+        input.istanbul_coverage,
+        input.needs_file_scores,
         precomputed_for_scores,
     )?;
     let (git_churn_ms, git_churn_cache_hit) = churn_fetch
@@ -3923,7 +3923,7 @@ fn prepare_health_analysis_data(
         .map_or((0.0, false), |cf| (cf.git_log_ms, cf.cache_hit));
     let (score_output, files_scored, average_maintainability) = file_score_result;
 
-    print_slow_churn_note(opts, churn_fetch.as_ref());
+    print_slow_churn_note(input.opts, churn_fetch.as_ref());
 
     Ok(HealthAnalysisData {
         runtime_coverage,
