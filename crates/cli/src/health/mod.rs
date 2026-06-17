@@ -3907,15 +3907,17 @@ fn prepare_health_analysis_data(
     };
 
     let (file_score_result, file_scores_ms, churn_fetch) = compute_file_scores_and_churn(
-        input.opts,
-        input.config,
-        input.modules,
-        input.file_paths,
-        input.changed_files,
-        input.ws_roots,
-        input.ignore_set,
-        input.istanbul_coverage,
-        input.needs_file_scores,
+        FileScoresAndChurnInput {
+            opts: input.opts,
+            config: input.config,
+            modules: input.modules,
+            file_paths: input.file_paths,
+            changed_files: input.changed_files,
+            ws_roots: input.ws_roots,
+            ignore_set: input.ignore_set,
+            istanbul_coverage: input.istanbul_coverage,
+            needs_file_scores: input.needs_file_scores,
+        },
         precomputed_for_scores,
     )?;
     let (git_churn_ms, git_churn_cache_hit) = churn_fetch
@@ -3939,57 +3941,58 @@ fn prepare_health_analysis_data(
 
 type FileScoresAndChurn = (FileScoreResult, f64, Option<hotspots::ChurnFetchResult>);
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "file-score filtering needs the active health scope and optional precomputed analysis"
-)]
-fn compute_file_scores_and_churn(
-    opts: &HealthOptions<'_>,
-    config: &ResolvedConfig,
-    modules: &[fallow_core::extract::ModuleInfo],
-    file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
-    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
-    ws_roots: Option<&[std::path::PathBuf]>,
-    ignore_set: &globset::GlobSet,
-    istanbul_coverage: Option<&scoring::IstanbulCoverage>,
+struct FileScoresAndChurnInput<'a> {
+    opts: &'a HealthOptions<'a>,
+    config: &'a ResolvedConfig,
+    modules: &'a [fallow_core::extract::ModuleInfo],
+    file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
+    changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
+    ws_roots: Option<&'a [std::path::PathBuf]>,
+    ignore_set: &'a globset::GlobSet,
+    istanbul_coverage: Option<&'a scoring::IstanbulCoverage>,
     needs_file_scores: bool,
+}
+
+fn compute_file_scores_and_churn(
+    input: FileScoresAndChurnInput<'_>,
     precomputed_for_scores: Option<fallow_core::AnalysisOutput>,
 ) -> Result<FileScoresAndChurn, ExitCode> {
-    let needs_churn = opts.hotspots || opts.targets;
-    if needs_file_scores && needs_churn {
+    let needs_churn = input.opts.hotspots || input.opts.targets;
+    if input.needs_file_scores && needs_churn {
         return std::thread::scope(|s| {
-            let churn_handle = s.spawn(|| hotspots::fetch_churn_data(opts, &config.cache_dir));
+            let churn_handle =
+                s.spawn(|| hotspots::fetch_churn_data(input.opts, &input.config.cache_dir));
             let t = Instant::now();
             let score_result = compute_filtered_file_scores(FileScoreInput {
-                config,
-                modules,
-                file_paths,
-                changed_files,
-                ws_roots,
-                ignore_set,
-                output: opts.output,
-                istanbul_coverage,
+                config: input.config,
+                modules: input.modules,
+                file_paths: input.file_paths,
+                changed_files: input.changed_files,
+                ws_roots: input.ws_roots,
+                ignore_set: input.ignore_set,
+                output: input.opts.output,
+                istanbul_coverage: input.istanbul_coverage,
                 pre_computed: precomputed_for_scores,
             })?;
             let fs_ms = t.elapsed().as_secs_f64() * 1000.0;
             let churn = churn_handle
                 .join()
-                .map_err(|_| emit_error("churn thread panicked", 2, opts.output))?;
+                .map_err(|_| emit_error("churn thread panicked", 2, input.opts.output))?;
             Ok((score_result, fs_ms, churn))
         });
     }
 
     let t = Instant::now();
-    let score_result = if needs_file_scores {
+    let score_result = if input.needs_file_scores {
         compute_filtered_file_scores(FileScoreInput {
-            config,
-            modules,
-            file_paths,
-            changed_files,
-            ws_roots,
-            ignore_set,
-            output: opts.output,
-            istanbul_coverage,
+            config: input.config,
+            modules: input.modules,
+            file_paths: input.file_paths,
+            changed_files: input.changed_files,
+            ws_roots: input.ws_roots,
+            ignore_set: input.ignore_set,
+            output: input.opts.output,
+            istanbul_coverage: input.istanbul_coverage,
             pre_computed: precomputed_for_scores,
         })?
     } else {
@@ -3997,7 +4000,7 @@ fn compute_file_scores_and_churn(
     };
     let fs_ms = t.elapsed().as_secs_f64() * 1000.0;
     let churn = if needs_churn {
-        hotspots::fetch_churn_data(opts, &config.cache_dir)
+        hotspots::fetch_churn_data(input.opts, &input.config.cache_dir)
     } else {
         None
     };
