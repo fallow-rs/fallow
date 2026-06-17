@@ -13,6 +13,10 @@ description = "CodSpeed benchmark suites for fallow"
 name = "programmatic_commands"
 harness = false
 
+[[bench]]
+name = "real_sources"
+harness = false
+
 [dev-dependencies]
 criterion2 = { workspace = true }
 fallow-cli = { workspace = true }

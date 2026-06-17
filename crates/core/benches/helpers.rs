@@ -8,6 +8,7 @@ use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use fallow_config::{BoundaryConfig, FallowConfig, OutputFormat};
+use tempfile::TempDir;
 
 #[must_use]
 pub fn create_test_config(root: PathBuf) -> fallow_config::ResolvedConfig {
@@ -66,7 +67,7 @@ pub fn make_config(root: PathBuf, no_cache: bool) -> fallow_config::ResolvedConf
 pub fn create_synthetic_project(
     name: &str,
     file_count: usize,
-) -> (PathBuf, fallow_config::ResolvedConfig) {
+) -> (TempDir, fallow_config::ResolvedConfig) {
     create_synthetic_project_with_cache(name, file_count, true)
 }
 
@@ -78,13 +79,16 @@ pub fn create_synthetic_project_with_cache(
     name: &str,
     file_count: usize,
     no_cache: bool,
-) -> (PathBuf, fallow_config::ResolvedConfig) {
-    let temp_dir = std::env::temp_dir().join(format!("fallow-bench-{name}"));
-    let _ = std::fs::remove_dir_all(&temp_dir);
-    std::fs::create_dir_all(temp_dir.join("src")).unwrap();
+) -> (TempDir, fallow_config::ResolvedConfig) {
+    let temp_dir = tempfile::Builder::new()
+        .prefix(&format!("fallow-bench-{name}-"))
+        .tempdir()
+        .unwrap();
+    let root = temp_dir.path().to_path_buf();
+    std::fs::create_dir_all(root.join("src")).unwrap();
 
     std::fs::write(
-        temp_dir.join("package.json"),
+        root.join("package.json"),
         r#"{"name": "bench-project", "main": "src/index.ts", "dependencies": {"react": "^18"}}"#,
     )
     .unwrap();
@@ -98,7 +102,7 @@ export type Type{i} = {{ value: number }};
 export const helper{i} = () => value{i} + 1;
 "
         );
-        std::fs::write(temp_dir.join(format!("src/module{i}.ts")), content).unwrap();
+        std::fs::write(root.join(format!("src/module{i}.ts")), content).unwrap();
     }
 
     let used_count = file_count / 2;
@@ -109,12 +113,12 @@ export const helper{i} = () => value{i} + 1;
         .map(|i| format!("console.log(value{i});"))
         .collect();
     std::fs::write(
-        temp_dir.join("src/index.ts"),
+        root.join("src/index.ts"),
         format!("{}\n{}\n", imports.join("\n"), uses.join("\n")),
     )
     .unwrap();
 
-    let config = make_config(temp_dir.clone(), no_cache);
+    let config = make_config(root, no_cache);
     (temp_dir, config)
 }
 
@@ -128,13 +132,16 @@ export const helper{i} = () => value{i} + 1;
 pub fn create_dupe_project(
     name: &str,
     file_count: usize,
-) -> (PathBuf, fallow_config::ResolvedConfig) {
-    let temp_dir = std::env::temp_dir().join(format!("fallow-bench-dupes-{name}"));
-    let _ = std::fs::remove_dir_all(&temp_dir);
-    std::fs::create_dir_all(temp_dir.join("src")).unwrap();
+) -> (TempDir, fallow_config::ResolvedConfig) {
+    let temp_dir = tempfile::Builder::new()
+        .prefix(&format!("fallow-bench-dupes-{name}-"))
+        .tempdir()
+        .unwrap();
+    let root = temp_dir.path().to_path_buf();
+    std::fs::create_dir_all(root.join("src")).unwrap();
 
     std::fs::write(
-        temp_dir.join("package.json"),
+        root.join("package.json"),
         r#"{"name": "bench-dupes", "main": "src/index.ts"}"#,
     )
     .unwrap();
@@ -189,11 +196,11 @@ pub fn create_dupe_project(
             content.push('\n');
         }
         writeln!(&mut content, "export const helper_{i} = {i};").unwrap();
-        std::fs::write(temp_dir.join(format!("src/module{i}.ts")), content).unwrap();
+        std::fs::write(root.join(format!("src/module{i}.ts")), content).unwrap();
     }
 
-    std::fs::write(temp_dir.join("src/index.ts"), "export const main = true;\n").unwrap();
+    std::fs::write(root.join("src/index.ts"), "export const main = true;\n").unwrap();
 
-    let config = create_test_config(temp_dir.clone());
+    let config = create_test_config(root);
     (temp_dir, config)
 }

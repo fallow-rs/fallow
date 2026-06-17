@@ -9,37 +9,29 @@
 )]
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
+use tempfile::TempDir;
 
 mod helpers;
 
 struct ConfigInput {
-    temp_dir: std::path::PathBuf,
+    _temp_dir: TempDir,
     config: fallow_config::ResolvedConfig,
 }
 
-impl Drop for ConfigInput {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.temp_dir);
-    }
-}
-
 struct DupesInput {
-    temp_dir: std::path::PathBuf,
+    _temp_dir: TempDir,
     root: std::path::PathBuf,
     files: Vec<fallow_core::discover::DiscoveredFile>,
     config: fallow_config::DuplicatesConfig,
 }
 
-impl Drop for DupesInput {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.temp_dir);
-    }
-}
-
 fn create_config_input(name: &str, file_count: usize, no_cache: bool) -> ConfigInput {
     let (temp_dir, config) =
         helpers::create_synthetic_project_with_cache(name, file_count, no_cache);
-    ConfigInput { temp_dir, config }
+    ConfigInput {
+        _temp_dir: temp_dir,
+        config,
+    }
 }
 
 fn create_warm_config_input(name: &str, file_count: usize) -> ConfigInput {
@@ -52,7 +44,7 @@ fn create_dupes_input(name: &str, file_count: usize) -> DupesInput {
     let (temp_dir, resolved_config) = helpers::create_dupe_project(name, file_count);
     let files = fallow_core::discover::discover_files(&resolved_config);
     DupesInput {
-        temp_dir,
+        _temp_dir: temp_dir,
         root: resolved_config.root,
         files,
         config: fallow_config::DuplicatesConfig::default(),

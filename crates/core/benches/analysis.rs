@@ -12,37 +12,27 @@ use std::path::PathBuf;
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use rustc_hash::FxHashSet;
+use tempfile::TempDir;
 
 mod helpers;
 
 struct ParseFileInput {
-    temp_dir: PathBuf,
+    _temp_dir: TempDir,
     file: fallow_core::discover::DiscoveredFile,
 }
 
-impl Drop for ParseFileInput {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.temp_dir);
-    }
-}
-
 struct ConfigInput {
-    temp_dir: PathBuf,
+    _temp_dir: TempDir,
     config: fallow_config::ResolvedConfig,
 }
 
-impl Drop for ConfigInput {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.temp_dir);
-    }
-}
-
 fn create_parse_file_input() -> ParseFileInput {
-    let temp_dir = std::env::temp_dir().join("fallow-bench");
-    let _ = std::fs::remove_dir_all(&temp_dir);
-    std::fs::create_dir_all(&temp_dir).unwrap();
+    let temp_dir = tempfile::Builder::new()
+        .prefix("fallow-bench-parse-")
+        .tempdir()
+        .unwrap();
 
-    let test_file = temp_dir.join("bench.ts");
+    let test_file = temp_dir.path().join("bench.ts");
     std::fs::write(
         &test_file,
         r"
@@ -126,7 +116,10 @@ export default function App({ name, age }: Props) {
         size_bytes: std::fs::metadata(&test_file).unwrap().len(),
     };
 
-    ParseFileInput { temp_dir, file }
+    ParseFileInput {
+        _temp_dir: temp_dir,
+        file,
+    }
 }
 
 fn parse_single_file(c: &mut Criterion) {
@@ -140,12 +133,15 @@ fn parse_single_file(c: &mut Criterion) {
 }
 
 fn create_full_pipeline_input() -> ConfigInput {
-    let temp_dir = std::env::temp_dir().join("fallow-bench-project");
-    let _ = std::fs::remove_dir_all(&temp_dir);
-    std::fs::create_dir_all(temp_dir.join("src")).unwrap();
+    let temp_dir = tempfile::Builder::new()
+        .prefix("fallow-bench-project-")
+        .tempdir()
+        .unwrap();
+    let root = temp_dir.path().to_path_buf();
+    std::fs::create_dir_all(root.join("src")).unwrap();
 
     std::fs::write(
-        temp_dir.join("package.json"),
+        root.join("package.json"),
         r#"{"name": "bench-project", "main": "src/index.ts", "dependencies": {"react": "^18"}}"#,
     )
     .unwrap();
@@ -158,7 +154,7 @@ export function fn{i}() {{ return {i}; }}
 export type Type{i} = {{ value: number }};
 "
         );
-        std::fs::write(temp_dir.join(format!("src/module{i}.ts")), content).unwrap();
+        std::fs::write(root.join(format!("src/module{i}.ts")), content).unwrap();
     }
 
     let imports: Vec<String> = (0..5)
@@ -166,14 +162,17 @@ export type Type{i} = {{ value: number }};
         .collect();
     let uses: Vec<String> = (0..5).map(|i| format!("console.log(value{i});")).collect();
     std::fs::write(
-        temp_dir.join("src/index.ts"),
+        root.join("src/index.ts"),
         format!("{}\n{}\n", imports.join("\n"), uses.join("\n")),
     )
     .unwrap();
 
-    let config = helpers::create_test_config(temp_dir.clone());
+    let config = helpers::create_test_config(root);
 
-    ConfigInput { temp_dir, config }
+    ConfigInput {
+        _temp_dir: temp_dir,
+        config,
+    }
 }
 
 fn full_pipeline_10_files(c: &mut Criterion) {
@@ -188,7 +187,10 @@ fn full_pipeline_10_files(c: &mut Criterion) {
 
 fn create_synthetic_config_input(name: &str, file_count: usize) -> ConfigInput {
     let (temp_dir, config) = helpers::create_synthetic_project(name, file_count);
-    ConfigInput { temp_dir, config }
+    ConfigInput {
+        _temp_dir: temp_dir,
+        config,
+    }
 }
 
 fn full_pipeline_100_files(c: &mut Criterion) {

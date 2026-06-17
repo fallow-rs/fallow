@@ -26,7 +26,7 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 mod helpers;
 
 fn main() {
-    let (temp_dir, config) = helpers::create_synthetic_project("alloc-bench", 100);
+    let (_temp_dir, config) = helpers::create_synthetic_project("alloc-bench", 100);
 
     let profiler = dhat::Profiler::builder().testing().build();
 
@@ -34,8 +34,6 @@ fn main() {
 
     let stats = dhat::HeapStats::get();
     drop(profiler);
-
-    let _ = std::fs::remove_dir_all(&temp_dir);
 
     #[expect(
         clippy::print_stdout,

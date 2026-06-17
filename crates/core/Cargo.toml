@@ -87,5 +87,9 @@ name = "large_analysis"
 harness = false
 
 [[bench]]
+name = "scaling_analysis"
+harness = false
+
+[[bench]]
 name = "allocations"
 harness = false
