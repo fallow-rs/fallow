@@ -2202,53 +2202,55 @@ struct MarkupCssCandidates {
 /// likely class typos, unreferenced global classes, unused `@theme` tokens),
 /// each honoring the same ignore / changed / workspace filters and setting its
 /// own summary counts.
-fn scan_markup_css_candidates(
-    tokens: &CssTokenSets,
-    files: &[fallow_types::discover::DiscoveredFile],
-    config: &ResolvedConfig,
-    ignore_set: &globset::GlobSet,
-    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
-    ws_roots: Option<&[std::path::PathBuf]>,
-    summary: &mut crate::health_types::CssAnalyticsSummary,
-) -> MarkupCssCandidates {
+struct MarkupCssCandidateInput<'a> {
+    tokens: &'a CssTokenSets,
+    files: &'a [fallow_types::discover::DiscoveredFile],
+    config: &'a ResolvedConfig,
+    ignore_set: &'a globset::GlobSet,
+    changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
+    ws_roots: Option<&'a [std::path::PathBuf]>,
+    summary: &'a mut crate::health_types::CssAnalyticsSummary,
+}
+
+fn scan_markup_css_candidates(input: MarkupCssCandidateInput<'_>) -> MarkupCssCandidates {
     MarkupCssCandidates {
         // Markup arbitrary-value scan (gated on the project using Tailwind).
         tailwind_arbitrary_values: scan_markup_tailwind_arbitrary_values(
-            files,
-            config,
-            ignore_set,
-            changed_files,
-            ws_roots,
-            summary,
+            input.files,
+            input.config,
+            input.ignore_set,
+            input.changed_files,
+            input.ws_roots,
+            input.summary,
         ),
         // Static markup class tokens one edit from a defined class (likely typos).
         unresolved_class_references: scan_unresolved_class_references(
-            files,
-            config,
-            ignore_set,
-            changed_files,
-            ws_roots,
-            summary,
+            input.files,
+            input.config,
+            input.ignore_set,
+            input.changed_files,
+            input.ws_roots,
+            input.summary,
         ),
         // Global classes referenced by no in-project markup (heavily gated).
         unreferenced_css_classes: scan_unreferenced_css_classes(
-            files,
-            config,
-            ignore_set,
-            changed_files,
-            ws_roots,
-            summary,
+            input.files,
+            input.config,
+            input.ignore_set,
+            input.changed_files,
+            input.ws_roots,
+            input.summary,
         ),
         // Tailwind v4 @theme design tokens used by no utility / var() / @apply
         // anywhere (heavily gated: v4 + non-plugin + non-published + whole-scope).
         unused_theme_tokens: scan_unused_theme_tokens(
-            tokens,
-            files,
-            config,
-            ignore_set,
-            changed_files,
-            ws_roots,
-            summary,
+            input.tokens,
+            input.files,
+            input.config,
+            input.ignore_set,
+            input.changed_files,
+            input.ws_roots,
+            input.summary,
         ),
     }
 }
@@ -2422,15 +2424,15 @@ fn compute_css_analytics_report(
         unresolved_class_references,
         unreferenced_css_classes,
         unused_theme_tokens,
-    } = scan_markup_css_candidates(
-        &tokens,
+    } = scan_markup_css_candidates(MarkupCssCandidateInput {
+        tokens: &tokens,
         files,
         config,
         ignore_set,
         changed_files,
         ws_roots,
-        &mut summary,
-    );
+        summary: &mut summary,
+    });
 
     if summary.files_analyzed == 0
         && scoped_unused.is_empty()
