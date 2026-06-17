@@ -131,6 +131,12 @@ fn env_truthy(name: &str) -> bool {
 mod tests {
     use super::*;
 
+    static TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+    fn clear_candidate() {
+        *CACHE_NOTICE.lock().expect("cache notice lock") = None;
+    }
+
     #[test]
     fn notice_requires_human_non_quiet_tty_and_enabled_env() {
         let active = CacheNoticeContext {
@@ -175,5 +181,66 @@ mod tests {
             display_cache_dir(root, Path::new("/tmp/fallow-cache")),
             "/tmp/fallow-cache/"
         );
+    }
+
+    #[test]
+    fn maybe_print_created_notice_returns_false_without_candidate() {
+        let _guard = TEST_LOCK.lock().expect("test lock");
+        clear_candidate();
+
+        assert!(!maybe_print_created_notice());
+    }
+
+    #[test]
+    fn maybe_print_created_notice_returns_false_for_existing_cache() {
+        let _guard = TEST_LOCK.lock().expect("test lock");
+        clear_candidate();
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cache_dir = dir.path().join(".fallow");
+        std::fs::create_dir_all(&cache_dir).expect("create cache dir");
+        *CACHE_NOTICE.lock().expect("cache notice lock") = Some(CacheNoticeCandidate {
+            root: dir.path().to_path_buf(),
+            cache_dir,
+            existed_before: true,
+        });
+
+        assert!(!maybe_print_created_notice());
+        clear_candidate();
+    }
+
+    #[test]
+    fn maybe_print_created_notice_returns_false_when_cache_was_not_created() {
+        let _guard = TEST_LOCK.lock().expect("test lock");
+        clear_candidate();
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        *CACHE_NOTICE.lock().expect("cache notice lock") = Some(CacheNoticeCandidate {
+            root: dir.path().to_path_buf(),
+            cache_dir: dir.path().join(".fallow"),
+            existed_before: false,
+        });
+
+        assert!(!maybe_print_created_notice());
+        clear_candidate();
+    }
+
+    #[test]
+    fn maybe_print_created_notice_reports_new_cache_once() {
+        let _guard = TEST_LOCK.lock().expect("test lock");
+        clear_candidate();
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cache_dir = dir.path().join(".fallow");
+        std::fs::create_dir_all(&cache_dir).expect("create cache dir");
+        *CACHE_NOTICE.lock().expect("cache notice lock") = Some(CacheNoticeCandidate {
+            root: dir.path().to_path_buf(),
+            cache_dir,
+            existed_before: false,
+        });
+
+        assert!(maybe_print_created_notice());
+        assert!(!maybe_print_created_notice());
+        clear_candidate();
     }
 }
