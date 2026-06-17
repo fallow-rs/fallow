@@ -24,6 +24,9 @@ pub mod discover;
 pub mod envelope;
 /// Module extraction types: exports, imports, re-exports, and member info.
 pub mod extract;
+/// Shared issue-type contract metadata used by CLI, LSP, MCP, and suppression
+/// helpers.
+pub mod issue_meta;
 /// Machine-readable manifest of the fallow MCP server's tools, shared by
 /// `fallow schema` and the telemetry tool-name allowlist; kept in sync with
 /// the live tool router by a drift test in `crates/mcp`.

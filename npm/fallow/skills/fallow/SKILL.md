@@ -172,8 +172,8 @@ Run `fallow <command> --help` for the full flag list per command (see also refer
 | `prop-drilling` | - | - | `// fallow-ignore-next-line prop-drilling` | A React/Preact prop is forwarded unchanged through 3+ pass-through components to a distant consumer; Opt-in: set rules.prop-drilling to warn or error to enable. Defaults to off. |
 | `thin-wrapper` | - | - | `// fallow-ignore-next-line thin-wrapper` | A React/Preact component whose whole body is a single spread-forwarded child render (a candidate for inlining); Opt-in: set rules.thin-wrapper to warn or error to enable. Defaults to off. |
 | `duplicate-prop-shape` | - | - | `// fallow-ignore-next-line duplicate-prop-shape` | Three or more React/Preact components across two or more files declare an identical prop-name set (a missing shared Props type); Opt-in: set rules.duplicate-prop-shape to warn or error to enable. Defaults to off. |
-| `route-collision` | - | - | - | Two or more Next.js App Router route files resolve to the same URL |
-| `dynamic-segment-name-conflict` | - | - | - | Sibling Next.js dynamic route segments use different slug names at the same position |
+| `route-collision` | - | - | `// fallow-ignore-file route-collision` | Two or more Next.js App Router route files resolve to the same URL |
+| `dynamic-segment-name-conflict` | - | - | `// fallow-ignore-file dynamic-segment-name-conflict` | Sibling Next.js dynamic route segments use different slug names at the same position |
 | `high-cyclomatic-complexity` | `--complexity` | - | `// fallow-ignore-next-line complexity` | Function has high cyclomatic complexity |
 | `high-cognitive-complexity` | `--complexity` | - | `// fallow-ignore-next-line complexity` | Function has high cognitive complexity |
 | `high-complexity` | `--complexity` | - | `// fallow-ignore-next-line complexity` | Function exceeds both complexity thresholds |

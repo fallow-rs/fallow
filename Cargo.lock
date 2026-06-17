@@ -1161,6 +1161,7 @@ version = "2.98.0"
 dependencies = [
  "fallow-config",
  "fallow-core",
+ "fallow-types",
  "futures",
  "globset",
  "ls-types",

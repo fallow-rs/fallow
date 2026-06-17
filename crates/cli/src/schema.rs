@@ -1,6 +1,7 @@
 use std::process::ExitCode;
 
 use clap::CommandFactory;
+use fallow_types::issue_meta::issue_meta_by_code;
 use fallow_types::mcp_manifest::{MCP_TOOLS, RUNTIME_COVERAGE_LICENSE_NOTE};
 
 use crate::Cli;
@@ -118,6 +119,19 @@ struct IssueTypeMeta {
     freemium: bool,
 }
 
+impl IssueTypeMeta {
+    fn from_shared(bare_id: &str) -> Self {
+        let mut meta = Self::default();
+        if let Some(shared) = issue_meta_by_code(bare_id) {
+            meta.filter_flag = shared.filter_flag;
+            if let Some(token) = shared.suppress_token {
+                meta.suppress = Some((token, shared.suppress_file_level));
+            }
+        }
+        meta
+    }
+}
+
 fn issue_types_schema() -> serde_json::Value {
     let mut rows = Vec::new();
     for rule in CHECK_RULES {
@@ -166,24 +180,21 @@ fn issue_type_row(rule: &RuleDef, command: &str) -> serde_json::Value {
 }
 
 fn issue_type_meta(bare_id: &str, command: &str) -> IssueTypeMeta {
+    let mut meta = IssueTypeMeta::from_shared(bare_id);
     match command {
-        "dead-code" => dead_code_issue_meta(bare_id),
-        "health" => health_issue_meta(bare_id),
-        "security" => security_issue_meta(bare_id),
-        _ => standalone_issue_meta(bare_id),
+        "dead-code" => apply_dead_code_issue_meta(bare_id, &mut meta),
+        "health" => apply_health_issue_meta(bare_id, &mut meta),
+        "security" => apply_security_issue_meta(bare_id, &mut meta),
+        _ => apply_standalone_issue_meta(bare_id, &mut meta),
     }
+    meta
 }
 
-fn dead_code_issue_meta(bare_id: &str) -> IssueTypeMeta {
-    let mut m = IssueTypeMeta::default();
-    if apply_source_issue_meta(bare_id, &mut m)
-        || apply_dependency_issue_meta(bare_id, &mut m)
-        || apply_architecture_issue_meta(bare_id, &mut m)
-        || apply_catalog_issue_meta(bare_id, &mut m)
-    {
-        return m;
-    }
-    m
+fn apply_dead_code_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) {
+    apply_source_issue_meta(bare_id, m);
+    apply_dependency_issue_meta(bare_id, m);
+    apply_architecture_issue_meta(bare_id, m);
+    apply_catalog_issue_meta(bare_id, m);
 }
 
 fn apply_source_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
@@ -399,8 +410,7 @@ fn apply_catalog_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
     true
 }
 
-fn health_issue_meta(bare_id: &str) -> IssueTypeMeta {
-    let mut m = IssueTypeMeta::default();
+fn apply_health_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) {
     match bare_id {
         "high-cyclomatic-complexity"
         | "high-cognitive-complexity"
@@ -434,11 +444,9 @@ fn health_issue_meta(bare_id: &str) -> IssueTypeMeta {
         }
         _ => {}
     }
-    m
 }
 
-fn standalone_issue_meta(bare_id: &str) -> IssueTypeMeta {
-    let mut m = IssueTypeMeta::default();
+fn apply_standalone_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) {
     match bare_id {
         "code-duplication" => {
             m.suppress = Some(("code-duplication", false));
@@ -450,11 +458,9 @@ fn standalone_issue_meta(bare_id: &str) -> IssueTypeMeta {
         }
         _ => {}
     }
-    m
 }
 
-fn security_issue_meta(bare_id: &str) -> IssueTypeMeta {
-    let mut m = IssueTypeMeta::default();
+fn apply_security_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) {
     match bare_id {
         "client-server-leak" => {
             m.suppress = Some(("security-client-server-leak", true));
@@ -475,7 +481,6 @@ fn security_issue_meta(bare_id: &str) -> IssueTypeMeta {
             );
         }
     }
-    m
 }
 
 fn mcp_tools_schema() -> serde_json::Value {

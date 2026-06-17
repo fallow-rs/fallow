@@ -34,6 +34,7 @@ use fallow_core::changed_files::{
 };
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::AnalysisResults;
+use fallow_types::issue_meta::{IssueKindMeta, diagnostic_issue_metas};
 
 use crate::code_lens::{InlineComplexityExceeded, InlineComplexityFinding};
 
@@ -132,16 +133,6 @@ fn analysis_complete_params(
     }
 }
 
-/// Diagnostic codes that the LSP client can disable via initializationOptions.
-/// The same table also backs the `fallow/issueTypes` custom request used by
-/// editor clients that need user-facing labels for all emitted diagnostic codes.
-#[derive(Debug, Clone, Copy)]
-struct DiagnosticIssueType {
-    config_key: Option<&'static str>,
-    code: &'static str,
-    label: &'static str,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct IssueTypeInfo {
@@ -149,227 +140,17 @@ struct IssueTypeInfo {
     label: String,
 }
 
-const DIAGNOSTIC_ISSUE_TYPES: &[DiagnosticIssueType] = &[
-    DiagnosticIssueType {
-        config_key: None,
-        code: "code-duplication",
-        label: "Code Duplication",
-    },
-    DiagnosticIssueType {
-        config_key: Some("unused-files"),
-        code: "unused-file",
-        label: "Unused Files",
-    },
-    DiagnosticIssueType {
-        config_key: Some("unused-exports"),
-        code: "unused-export",
-        label: "Unused Exports",
-    },
-    DiagnosticIssueType {
-        config_key: Some("unused-types"),
-        code: "unused-type",
-        label: "Unused Types",
-    },
-    DiagnosticIssueType {
-        config_key: Some("private-type-leaks"),
-        code: "private-type-leak",
-        label: "Private Type Leaks",
-    },
-    DiagnosticIssueType {
-        config_key: Some("unused-dependencies"),
-        code: "unused-dependency",
-        label: "Unused Dependencies",
-    },
-    DiagnosticIssueType {
-        config_key: Some("unused-dev-dependencies"),
-        code: "unused-dev-dependency",
-        label: "Unused Dev Dependencies",
-    },
-    DiagnosticIssueType {
-        config_key: Some("unused-optional-dependencies"),
-        code: "unused-optional-dependency",
-        label: "Unused Optional Dependencies",
-    },
-    DiagnosticIssueType {
-        config_key: Some("unused-enum-members"),
-        code: "unused-enum-member",
-        label: "Unused Enum Members",
-    },
-    DiagnosticIssueType {
-        config_key: Some("unused-class-members"),
-        code: "unused-class-member",
-        label: "Unused Class Members",
-    },
-    DiagnosticIssueType {
-        config_key: Some("unused-store-members"),
-        code: "unused-store-member",
-        label: "Unused Store Members",
-    },
-    DiagnosticIssueType {
-        config_key: Some("unresolved-imports"),
-        code: "unresolved-import",
-        label: "Unresolved Imports",
-    },
-    DiagnosticIssueType {
-        config_key: Some("unlisted-dependencies"),
-        code: "unlisted-dependency",
-        label: "Unlisted Dependencies",
-    },
-    DiagnosticIssueType {
-        config_key: Some("duplicate-exports"),
-        code: "duplicate-export",
-        label: "Duplicate Exports",
-    },
-    DiagnosticIssueType {
-        config_key: Some("type-only-dependencies"),
-        code: "type-only-dependency",
-        label: "Type-Only Dependencies",
-    },
-    DiagnosticIssueType {
-        config_key: Some("test-only-dependencies"),
-        code: "test-only-dependency",
-        label: "Test-Only Dependencies",
-    },
-    DiagnosticIssueType {
-        config_key: Some("circular-dependencies"),
-        code: "circular-dependency",
-        label: "Circular Dependencies",
-    },
-    DiagnosticIssueType {
-        config_key: Some("re-export-cycles"),
-        code: "re-export-cycle",
-        label: "Re-Export Cycles",
-    },
-    DiagnosticIssueType {
-        config_key: Some("boundary-violation"),
-        code: "boundary-violation",
-        label: "Boundary Violations",
-    },
-    DiagnosticIssueType {
-        config_key: Some("policy-violation"),
-        code: "policy-violation",
-        label: "Policy Violations",
-    },
-    DiagnosticIssueType {
-        config_key: Some("invalid-client-export"),
-        code: "invalid-client-export",
-        label: "Invalid Client Exports",
-    },
-    DiagnosticIssueType {
-        config_key: Some("mixed-client-server-barrel"),
-        code: "mixed-client-server-barrel",
-        label: "Mixed Client/Server Barrels",
-    },
-    DiagnosticIssueType {
-        config_key: Some("misplaced-directive"),
-        code: "misplaced-directive",
-        label: "Misplaced Directives",
-    },
-    DiagnosticIssueType {
-        config_key: Some("unprovided-injects"),
-        code: "unprovided-inject",
-        label: "Unprovided Injects",
-    },
-    DiagnosticIssueType {
-        config_key: Some("unrendered-components"),
-        code: "unrendered-component",
-        label: "Unrendered Components",
-    },
-    DiagnosticIssueType {
-        config_key: Some("unused-component-props"),
-        code: "unused-component-prop",
-        label: "Unused Component Props",
-    },
-    DiagnosticIssueType {
-        config_key: Some("unused-component-emits"),
-        code: "unused-component-emit",
-        label: "Unused Component Emits",
-    },
-    DiagnosticIssueType {
-        config_key: Some("unused-component-inputs"),
-        code: "unused-component-input",
-        label: "Unused Component Inputs",
-    },
-    DiagnosticIssueType {
-        config_key: Some("unused-component-outputs"),
-        code: "unused-component-output",
-        label: "Unused Component Outputs",
-    },
-    DiagnosticIssueType {
-        config_key: Some("unused-svelte-events"),
-        code: "unused-svelte-event",
-        label: "Unused Svelte Events",
-    },
-    DiagnosticIssueType {
-        config_key: Some("unused-server-actions"),
-        code: "unused-server-action",
-        label: "Unused Server Actions",
-    },
-    DiagnosticIssueType {
-        config_key: Some("unused-load-data-keys"),
-        code: "unused-load-data-key",
-        label: "Unused Load Data Keys",
-    },
-    DiagnosticIssueType {
-        config_key: Some("route-collision"),
-        code: "route-collision",
-        label: "Route Collisions",
-    },
-    DiagnosticIssueType {
-        config_key: Some("dynamic-segment-name-conflict"),
-        code: "dynamic-segment-name-conflict",
-        label: "Dynamic Segment Conflicts",
-    },
-    DiagnosticIssueType {
-        config_key: Some("stale-suppressions"),
-        code: "stale-suppression",
-        label: "Stale Suppressions",
-    },
-    DiagnosticIssueType {
-        config_key: Some("unused-catalog-entries"),
-        code: "unused-catalog-entry",
-        label: "Unused Catalog Entries",
-    },
-    DiagnosticIssueType {
-        config_key: Some("empty-catalog-groups"),
-        code: "empty-catalog-group",
-        label: "Empty Catalog Groups",
-    },
-    DiagnosticIssueType {
-        config_key: Some("unresolved-catalog-references"),
-        code: "unresolved-catalog-reference",
-        label: "Unresolved Catalog References",
-    },
-    DiagnosticIssueType {
-        config_key: Some("unused-dependency-overrides"),
-        code: "unused-dependency-override",
-        label: "Unused Dependency Overrides",
-    },
-    DiagnosticIssueType {
-        config_key: Some("misconfigured-dependency-overrides"),
-        code: "misconfigured-dependency-override",
-        label: "Misconfigured Dependency Overrides",
-    },
-    DiagnosticIssueType {
-        config_key: Some("security-sink"),
-        code: "security-sink",
-        label: "Security Sink Candidates",
-    },
-    DiagnosticIssueType {
-        config_key: Some("security-client-server-leak"),
-        code: "security-client-server-leak",
-        label: "Security Client-Server Leaks",
-    },
-];
-
 fn diagnostic_issue_types() -> Vec<IssueTypeInfo> {
-    DIAGNOSTIC_ISSUE_TYPES
-        .iter()
-        .map(|issue_type| IssueTypeInfo {
-            code: issue_type.code.to_string(),
-            label: issue_type.label.to_string(),
+    diagnostic_issue_metas()
+        .map(|meta| IssueTypeInfo {
+            code: meta.code.to_string(),
+            label: meta.label.to_string(),
         })
         .collect()
+}
+
+fn diagnostic_issue_type_metas() -> impl Iterator<Item = &'static IssueKindMeta> {
+    diagnostic_issue_metas()
 }
 
 fn config_load_error_detail(
@@ -888,7 +669,7 @@ impl LanguageServer for FallowLspServer {
         if let Some(opts) = &params.initialization_options {
             if let Some(issue_types) = opts.get("issueTypes").and_then(|v| v.as_object()) {
                 let mut disabled = FxHashSet::default();
-                for issue_type in DIAGNOSTIC_ISSUE_TYPES {
+                for issue_type in diagnostic_issue_type_metas() {
                     let Some(config_key) = issue_type.config_key else {
                         continue;
                     };
@@ -3228,8 +3009,7 @@ export function choose(value: number): string {
 
     #[test]
     fn issue_type_mapping_has_expected_entries() {
-        let keys: Vec<&str> = DIAGNOSTIC_ISSUE_TYPES
-            .iter()
+        let keys: Vec<&str> = diagnostic_issue_type_metas()
             .filter_map(|issue_type| issue_type.config_key)
             .collect();
 
@@ -3257,7 +3037,7 @@ export function choose(value: number): string {
 
     #[test]
     fn issue_type_mapping_codes_are_singular() {
-        for issue_type in DIAGNOSTIC_ISSUE_TYPES {
+        for issue_type in diagnostic_issue_type_metas() {
             let Some(config_key) = issue_type.config_key else {
                 continue;
             };

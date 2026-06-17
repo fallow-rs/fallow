@@ -96,6 +96,13 @@ A minimal plugin needs:
 
 See the [Plugin Authoring Guide](docs/plugin-authoring.md) for the full trait API and external plugin format.
 
+## Adding an analyzer or finding
+
+New built-in findings need more than detector code: rule metadata, output
+formats, suppressions, LSP/MCP surfaces, fixtures, and generated contract files
+must move together. Use the [Analyzer Authoring Guide](docs/analyzer-authoring.md)
+before adding a new issue kind or framework-specific analyzer.
+
 ## Adding a known tooling dependency
 
 Some dev tools are used through the CLI or config rather than imported in source (`typescript`, `prettier`, `husky`, `@types/*`), so they should never be reported as unused devDependencies. These live in a data-driven catalogue at `crates/core/data/tooling.toml`. Adding one is a single-file, one-entry change with no regeneration step:

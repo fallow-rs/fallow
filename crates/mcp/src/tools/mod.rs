@@ -41,6 +41,7 @@ pub use trace::{
 use std::process::Stdio;
 use std::time::Duration;
 
+use fallow_types::issue_meta::MCP_ISSUE_TYPE_FLAGS;
 use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, Content, RawContent};
 use tokio::process::Command;
@@ -107,47 +108,7 @@ fn push_regression(
 }
 
 /// Issue type flag names mapped to their CLI flags.
-pub const ISSUE_TYPE_FLAGS: &[(&str, &str)] = &[
-    ("unused-files", "--unused-files"),
-    ("unused-exports", "--unused-exports"),
-    ("unused-types", "--unused-types"),
-    ("private-type-leaks", "--private-type-leaks"),
-    ("unused-deps", "--unused-deps"),
-    ("unused-enum-members", "--unused-enum-members"),
-    ("unused-class-members", "--unused-class-members"),
-    ("unused-store-members", "--unused-store-members"),
-    ("unprovided-injects", "--unprovided-injects"),
-    ("unrendered-components", "--unrendered-components"),
-    ("unused-component-props", "--unused-component-props"),
-    ("unused-component-emits", "--unused-component-emits"),
-    ("unused-component-inputs", "--unused-component-inputs"),
-    ("unused-component-outputs", "--unused-component-outputs"),
-    ("unused-svelte-events", "--unused-svelte-events"),
-    ("unused-server-actions", "--unused-server-actions"),
-    ("unused-load-data-keys", "--unused-load-data-keys"),
-    ("unresolved-imports", "--unresolved-imports"),
-    ("unlisted-deps", "--unlisted-deps"),
-    ("duplicate-exports", "--duplicate-exports"),
-    ("circular-deps", "--circular-deps"),
-    ("re-export-cycles", "--re-export-cycles"),
-    ("boundary-violations", "--boundary-violations"),
-    ("policy-violations", "--policy-violations"),
-    ("stale-suppressions", "--stale-suppressions"),
-    ("unused-catalog-entries", "--unused-catalog-entries"),
-    ("empty-catalog-groups", "--empty-catalog-groups"),
-    (
-        "unresolved-catalog-references",
-        "--unresolved-catalog-references",
-    ),
-    (
-        "unused-dependency-overrides",
-        "--unused-dependency-overrides",
-    ),
-    (
-        "misconfigured-dependency-overrides",
-        "--misconfigured-dependency-overrides",
-    ),
-];
+pub const ISSUE_TYPE_FLAGS: &[(&str, &str)] = MCP_ISSUE_TYPE_FLAGS;
 
 /// Valid detection modes for the `find_dupes` tool.
 pub const VALID_DUPES_MODES: &[&str] = &["strict", "mild", "weak", "semantic"];

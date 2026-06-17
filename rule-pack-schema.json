@@ -11,7 +11,7 @@
       "minimum": 0
     },
     "name": {
-      "description": "Pack name, unique across all loaded packs. Part of each finding's\n`\"<pack>/<id>\"` policy identity.",
+      "description": "Pack name, unique across all loaded packs. Must use only ASCII\nletters, digits, `.`, `_`, and `-` so `\"<pack>/<id>\"` is unambiguous in\noutput, baselines, and scoped suppression comments.",
       "type": "string"
     },
     "description": {
@@ -41,7 +41,7 @@
       "type": "object",
       "properties": {
         "id": {
-          "description": "Rule id, unique within the pack. `\"<pack>/<id>\"` is the finding's\npolicy identity across output formats and baselines.",
+          "description": "Rule id, unique within the pack. Must use only ASCII letters, digits,\n`.`, `_`, and `-` so `\"<pack>/<id>\"` is unambiguous in output,\nbaselines, and scoped suppression comments.",
           "type": "string"
         },
         "kind": {

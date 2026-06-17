@@ -1,5 +1,7 @@
 //! Inline suppression comment types and issue kind definitions.
 
+pub use crate::issue_meta::{DEAD_CODE_FILTER_FLAGS, KNOWN_ISSUE_KIND_NAMES};
+
 /// Issue kind for suppression matching.
 ///
 /// # Examples
@@ -173,74 +175,7 @@ impl IssueKind {
     /// Parse an issue kind from the string tokens used in CLI output and suppression comments.
     #[must_use]
     pub fn parse(s: &str) -> Option<Self> {
-        match s {
-            "unused-file" => Some(Self::UnusedFile),
-            "unused-export" => Some(Self::UnusedExport),
-            "unused-type" => Some(Self::UnusedType),
-            "private-type-leak" => Some(Self::PrivateTypeLeak),
-            "unused-dependency" => Some(Self::UnusedDependency),
-            "unused-dev-dependency" => Some(Self::UnusedDevDependency),
-            "unused-enum-member" => Some(Self::UnusedEnumMember),
-            "unused-class-member" => Some(Self::UnusedClassMember),
-            "unresolved-import" => Some(Self::UnresolvedImport),
-            "unlisted-dependency" => Some(Self::UnlistedDependency),
-            "duplicate-export" => Some(Self::DuplicateExport),
-            "code-duplication" => Some(Self::CodeDuplication),
-            "circular-dependency" | "circular-dependencies" => Some(Self::CircularDependency),
-            "re-export-cycle" | "re-export-cycles" | "reexport-cycle" | "reexport-cycles" => {
-                Some(Self::ReExportCycle)
-            }
-            "type-only-dependency" => Some(Self::TypeOnlyDependency),
-            "test-only-dependency" => Some(Self::TestOnlyDependency),
-            "boundary-violation" | "boundary-call-violation" | "boundary-call-violations" => {
-                Some(Self::BoundaryViolation)
-            }
-            "coverage-gaps" => Some(Self::CoverageGaps),
-            "feature-flag" => Some(Self::FeatureFlag),
-            "complexity" => Some(Self::Complexity),
-            "stale-suppression" => Some(Self::StaleSuppression),
-            "unused-catalog-entry" | "unused-catalog-entries" => Some(Self::PnpmCatalogEntry),
-            "empty-catalog-group" | "empty-catalog-groups" => Some(Self::EmptyCatalogGroup),
-            "unresolved-catalog-reference" | "unresolved-catalog-references" => {
-                Some(Self::UnresolvedCatalogReference)
-            }
-            "unused-dependency-override" | "unused-dependency-overrides" => {
-                Some(Self::UnusedDependencyOverride)
-            }
-            "misconfigured-dependency-override" | "misconfigured-dependency-overrides" => {
-                Some(Self::MisconfiguredDependencyOverride)
-            }
-            "security-client-server-leak" => Some(Self::SecurityClientServerLeak),
-            "security-sink" => Some(Self::SecuritySink),
-            "policy-violation" | "policy-violations" => Some(Self::PolicyViolation),
-            "invalid-client-export" | "invalid-client-exports" => Some(Self::InvalidClientExport),
-            "mixed-client-server-barrel" | "mixed-client-server-barrels" => {
-                Some(Self::MixedClientServerBarrel)
-            }
-            "misplaced-directive" | "misplaced-directives" => Some(Self::MisplacedDirective),
-            "unused-store-member" | "unused-store-members" => Some(Self::UnusedStoreMember),
-            "unprovided-inject" | "unprovided-injects" => Some(Self::UnprovidedInject),
-            "route-collision" | "route-collisions" => Some(Self::RouteCollision),
-            "dynamic-segment-name-conflict" | "dynamic-segment-name-conflicts" => {
-                Some(Self::DynamicSegmentNameConflict)
-            }
-            "unrendered-component" | "unrendered-components" => Some(Self::UnrenderedComponent),
-            "unused-component-prop" | "unused-component-props" => Some(Self::UnusedComponentProp),
-            "unused-component-emit" | "unused-component-emits" => Some(Self::UnusedComponentEmit),
-            "unused-component-input" | "unused-component-inputs" => {
-                Some(Self::UnusedComponentInput)
-            }
-            "unused-component-output" | "unused-component-outputs" => {
-                Some(Self::UnusedComponentOutput)
-            }
-            "unused-server-action" | "unused-server-actions" => Some(Self::UnusedServerAction),
-            "unused-load-data-key" | "unused-load-data-keys" => Some(Self::UnusedLoadDataKey),
-            "prop-drilling" => Some(Self::PropDrilling),
-            "thin-wrapper" | "thin-wrappers" => Some(Self::ThinWrapper),
-            "duplicate-prop-shape" | "duplicate-prop-shapes" => Some(Self::DuplicatePropShape),
-            "unused-svelte-event" | "unused-svelte-events" => Some(Self::UnusedSvelteEvent),
-            _ => None,
-        }
+        crate::issue_meta::issue_meta_for_token(s).and_then(|meta| meta.kind)
     }
 
     /// Convert to a u8 discriminant for compact cache storage.
@@ -644,133 +579,6 @@ pub struct UnknownSuppressionKind {
     /// The verbatim token from the marker that did not parse.
     pub token: String,
 }
-
-/// Canonical kebab-case names accepted by `IssueKind::parse`, including
-/// documented plural aliases.
-///
-/// Used by `closest_known_kind_name` for Levenshtein "did you mean?" hints
-/// when a suppression marker carries an unknown token. Keep in sync with the
-/// `IssueKind::parse` match table above; the
-/// `issue_kind_parse_covers_known_names` test asserts every entry round-trips.
-pub const KNOWN_ISSUE_KIND_NAMES: &[&str] = &[
-    "unused-file",
-    "unused-export",
-    "unused-type",
-    "private-type-leak",
-    "unused-dependency",
-    "unused-dev-dependency",
-    "unused-enum-member",
-    "unused-class-member",
-    "unresolved-import",
-    "unlisted-dependency",
-    "duplicate-export",
-    "code-duplication",
-    "circular-dependency",
-    "circular-dependencies",
-    "re-export-cycle",
-    "re-export-cycles",
-    "reexport-cycle",
-    "reexport-cycles",
-    "type-only-dependency",
-    "test-only-dependency",
-    "boundary-violation",
-    "boundary-call-violation",
-    "boundary-call-violations",
-    "coverage-gaps",
-    "feature-flag",
-    "complexity",
-    "stale-suppression",
-    "unused-catalog-entry",
-    "unused-catalog-entries",
-    "empty-catalog-group",
-    "empty-catalog-groups",
-    "unresolved-catalog-reference",
-    "unresolved-catalog-references",
-    "unused-dependency-override",
-    "unused-dependency-overrides",
-    "misconfigured-dependency-override",
-    "misconfigured-dependency-overrides",
-    "security-client-server-leak",
-    "security-sink",
-    "policy-violation",
-    "policy-violations",
-    "invalid-client-export",
-    "invalid-client-exports",
-    "mixed-client-server-barrel",
-    "mixed-client-server-barrels",
-    "misplaced-directive",
-    "misplaced-directives",
-    "unused-store-member",
-    "unused-store-members",
-    "unprovided-inject",
-    "unprovided-injects",
-    "route-collision",
-    "route-collisions",
-    "dynamic-segment-name-conflict",
-    "dynamic-segment-name-conflicts",
-    "unrendered-component",
-    "unrendered-components",
-    "unused-component-prop",
-    "unused-component-props",
-    "unused-component-emit",
-    "unused-component-emits",
-    "unused-component-input",
-    "unused-component-inputs",
-    "unused-component-output",
-    "unused-component-outputs",
-    "unused-server-action",
-    "unused-server-actions",
-    "unused-load-data-key",
-    "unused-load-data-keys",
-    "prop-drilling",
-    "thin-wrapper",
-    "thin-wrappers",
-    "duplicate-prop-shape",
-    "duplicate-prop-shapes",
-    "unused-svelte-event",
-    "unused-svelte-events",
-];
-
-/// CLI filter flags on `fallow dead-code` that scope output to a single
-/// issue type.
-///
-/// Shared home so the agent capability manifest (`fallow schema` in
-/// `crates/cli`), the MCP server's `issue_types` allowlist
-/// (`ISSUE_TYPE_FLAGS` in `crates/mcp`), and the clap flag definitions stay
-/// in sync: each crate carries a drift test asserting its own list against
-/// this one.
-pub const DEAD_CODE_FILTER_FLAGS: &[&str] = &[
-    "--unused-files",
-    "--unused-exports",
-    "--unused-types",
-    "--private-type-leaks",
-    "--unused-deps",
-    "--unused-enum-members",
-    "--unused-class-members",
-    "--unused-store-members",
-    "--unprovided-injects",
-    "--unrendered-components",
-    "--unused-component-props",
-    "--unused-component-emits",
-    "--unused-component-inputs",
-    "--unused-component-outputs",
-    "--unused-svelte-events",
-    "--unused-server-actions",
-    "--unused-load-data-keys",
-    "--unresolved-imports",
-    "--unlisted-deps",
-    "--duplicate-exports",
-    "--circular-deps",
-    "--re-export-cycles",
-    "--boundary-violations",
-    "--policy-violations",
-    "--stale-suppressions",
-    "--unused-catalog-entries",
-    "--empty-catalog-groups",
-    "--unresolved-catalog-references",
-    "--unused-dependency-overrides",
-    "--misconfigured-dependency-overrides",
-];
 
 /// Levenshtein edit distance between two ASCII-leaning strings.
 ///
