@@ -87,7 +87,7 @@ pub(super) fn merge_expression_usage_with_bound_targets(
     bound_targets: &FxHashMap<String, String>,
     locals: &[String],
 ) {
-    merge_snippet_usage_with_bound_targets(BoundSnippetUsageInput {
+    merge_snippet_usage_with_bound_targets(&mut BoundSnippetUsageInput {
         usage,
         snippet,
         kind: TemplateSnippetKind::Expression,
@@ -105,7 +105,7 @@ pub(super) fn merge_statement_usage_with_bound_targets(
     bound_targets: &FxHashMap<String, String>,
     locals: &[String],
 ) {
-    merge_snippet_usage_with_bound_targets(BoundSnippetUsageInput {
+    merge_snippet_usage_with_bound_targets(&mut BoundSnippetUsageInput {
         usage,
         snippet,
         kind: TemplateSnippetKind::Statement,
@@ -123,7 +123,7 @@ pub(super) fn merge_expression_usage_allow_dollar_refs_with_bound_targets(
     bound_targets: &FxHashMap<String, String>,
     locals: &[String],
 ) {
-    merge_snippet_usage_with_bound_targets(BoundSnippetUsageInput {
+    merge_snippet_usage_with_bound_targets(&mut BoundSnippetUsageInput {
         usage,
         snippet,
         kind: TemplateSnippetKind::Expression,
@@ -141,7 +141,7 @@ pub(super) fn merge_statement_usage_allow_dollar_refs_with_bound_targets(
     bound_targets: &FxHashMap<String, String>,
     locals: &[String],
 ) {
-    merge_snippet_usage_with_bound_targets(BoundSnippetUsageInput {
+    merge_snippet_usage_with_bound_targets(&mut BoundSnippetUsageInput {
         usage,
         snippet,
         kind: TemplateSnippetKind::Statement,
@@ -179,7 +179,7 @@ struct BoundSnippetUsageInput<'a> {
     allow_dollar_prefixed_refs: bool,
 }
 
-fn merge_snippet_usage_with_bound_targets(input: BoundSnippetUsageInput<'_>) {
+fn merge_snippet_usage_with_bound_targets(input: &mut BoundSnippetUsageInput<'_>) {
     input
         .usage
         .merge(analyze_template_snippet_with_bound_targets(

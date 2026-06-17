@@ -470,7 +470,7 @@ fn resolve_extends_file(
     let mut merged = serde_json::Value::Object(serde_json::Map::new());
 
     for extend_path_str in &extends {
-        let base = resolve_extends_file_entry(ExtendsFileEntryInput {
+        let base = resolve_extends_file_entry(&mut ExtendsFileEntryInput {
             path,
             config_dir,
             entry: extend_path_str,
@@ -531,7 +531,7 @@ struct ExtendsFileEntryInput<'a> {
 }
 
 fn resolve_extends_file_entry(
-    input: ExtendsFileEntryInput<'_>,
+    input: &mut ExtendsFileEntryInput<'_>,
 ) -> Result<serde_json::Value, miette::Report> {
     if input.entry.starts_with(HTTPS_PREFIX) {
         reject_sealed_remote_extends(input.path, input.entry, input.sealed, "URL")?;

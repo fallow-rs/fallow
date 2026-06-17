@@ -92,7 +92,7 @@ pub(super) fn collect_template_usage_with_bound_targets(
                 let Some((tag, next_index)) = scan_curly_section(&markup, index, 1, 1) else {
                     break;
                 };
-                apply_tag(SvelteTagInput {
+                apply_tag(&mut SvelteTagInput {
                     tag: tag.trim(),
                     tag_start: index,
                     tag_end: next_index,
@@ -246,7 +246,7 @@ struct SvelteTagInput<'a> {
     usage: &'a mut TemplateUsage,
 }
 
-fn apply_tag(input: SvelteTagInput<'_>) {
+fn apply_tag(input: &mut SvelteTagInput<'_>) {
     if input.tag.is_empty() {
         return;
     }
@@ -261,7 +261,7 @@ fn apply_tag(input: SvelteTagInput<'_>) {
         return;
     }
 
-    if apply_svelte_expression_directive(SvelteExpressionDirectiveInput {
+    if apply_svelte_expression_directive(&mut SvelteExpressionDirectiveInput {
         tag: input.tag,
         tag_start: input.tag_start,
         tag_end: input.tag_end,
@@ -366,7 +366,7 @@ struct SvelteExpressionDirectiveInput<'a> {
     usage: &'a mut TemplateUsage,
 }
 
-fn apply_svelte_expression_directive(input: SvelteExpressionDirectiveInput<'_>) -> bool {
+fn apply_svelte_expression_directive(input: &mut SvelteExpressionDirectiveInput<'_>) -> bool {
     if let Some(expr) = input.tag.strip_prefix("@attach") {
         apply_expression_tag(
             expr,
