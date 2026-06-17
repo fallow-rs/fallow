@@ -261,15 +261,15 @@ fn apply_tag(input: SvelteTagInput<'_>) {
         return;
     }
 
-    if apply_svelte_expression_directive(
-        input.tag,
-        input.tag_start,
-        input.tag_end,
-        input.imported_bindings,
-        input.bound_targets,
-        input.scopes,
-        input.usage,
-    ) {
+    if apply_svelte_expression_directive(SvelteExpressionDirectiveInput {
+        tag: input.tag,
+        tag_start: input.tag_start,
+        tag_end: input.tag_end,
+        imported_bindings: input.imported_bindings,
+        bound_targets: input.bound_targets,
+        scopes: input.scopes,
+        usage: input.usage,
+    }) {
         return;
     }
 
@@ -356,55 +356,89 @@ fn apply_svelte_block_tag(
     false
 }
 
-fn apply_svelte_expression_directive(
-    tag: &str,
+struct SvelteExpressionDirectiveInput<'a> {
+    tag: &'a str,
     tag_start: usize,
     tag_end: usize,
-    imported_bindings: &FxHashSet<String>,
-    bound_targets: &FxHashMap<String, String>,
-    scopes: &mut [SvelteScopeFrame],
-    usage: &mut TemplateUsage,
-) -> bool {
-    if let Some(expr) = tag.strip_prefix("@attach") {
-        apply_expression_tag(expr, imported_bindings, bound_targets, scopes, usage);
-        return true;
-    }
+    imported_bindings: &'a FxHashSet<String>,
+    bound_targets: &'a FxHashMap<String, String>,
+    scopes: &'a mut [SvelteScopeFrame],
+    usage: &'a mut TemplateUsage,
+}
 
-    if let Some(expr) = tag.strip_prefix("@html") {
-        if let Some(sink) = crate::template_usage::template_html_sink(expr, tag_start, tag_end) {
-            usage.security_sinks.push(sink);
-        }
-        merge_expression_usage_allow_dollar_refs_with_bound_targets(
-            usage,
-            expr.trim(),
-            imported_bindings,
-            bound_targets,
-            &current_locals(scopes),
+fn apply_svelte_expression_directive(input: SvelteExpressionDirectiveInput<'_>) -> bool {
+    if let Some(expr) = input.tag.strip_prefix("@attach") {
+        apply_expression_tag(
+            expr,
+            input.imported_bindings,
+            input.bound_targets,
+            input.scopes,
+            input.usage,
         );
         return true;
     }
 
-    if let Some(expr) = tag.strip_prefix("@render") {
-        apply_expression_tag(expr, imported_bindings, bound_targets, scopes, usage);
+    if let Some(expr) = input.tag.strip_prefix("@html") {
+        if let Some(sink) =
+            crate::template_usage::template_html_sink(expr, input.tag_start, input.tag_end)
+        {
+            input.usage.security_sinks.push(sink);
+        }
+        merge_expression_usage_allow_dollar_refs_with_bound_targets(
+            input.usage,
+            expr.trim(),
+            input.imported_bindings,
+            input.bound_targets,
+            &current_locals(input.scopes),
+        );
         return true;
     }
 
-    if let Some(stmt) = tag.strip_prefix("@const") {
-        apply_const_tag(stmt, imported_bindings, bound_targets, scopes, usage);
+    if let Some(expr) = input.tag.strip_prefix("@render") {
+        apply_expression_tag(
+            expr,
+            input.imported_bindings,
+            input.bound_targets,
+            input.scopes,
+            input.usage,
+        );
         return true;
     }
 
-    if let Some(expr) = tag.strip_prefix("@debug") {
-        apply_expression_tag(expr, imported_bindings, bound_targets, scopes, usage);
+    if let Some(stmt) = input.tag.strip_prefix("@const") {
+        apply_const_tag(
+            stmt,
+            input.imported_bindings,
+            input.bound_targets,
+            input.scopes,
+            input.usage,
+        );
         return true;
     }
 
-    if let Some(expr) = tag.strip_prefix(":else if") {
-        apply_expression_tag(expr, imported_bindings, bound_targets, scopes, usage);
+    if let Some(expr) = input.tag.strip_prefix("@debug") {
+        apply_expression_tag(
+            expr,
+            input.imported_bindings,
+            input.bound_targets,
+            input.scopes,
+            input.usage,
+        );
         return true;
     }
 
-    if tag.starts_with(":else") {
+    if let Some(expr) = input.tag.strip_prefix(":else if") {
+        apply_expression_tag(
+            expr,
+            input.imported_bindings,
+            input.bound_targets,
+            input.scopes,
+            input.usage,
+        );
+        return true;
+    }
+
+    if input.tag.starts_with(":else") {
         return true;
     }
 
