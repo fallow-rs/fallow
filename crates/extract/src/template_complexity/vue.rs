@@ -6,9 +6,13 @@
 //! SFC `<script>` / `<style>` blocks and `<!-- -->` comments are masked out
 //! (replaced with equal-length spaces so byte offsets stay accurate) before
 //! scanning, so script control flow is NOT double-counted here (it is scored
-//! separately by `translate_script_complexity`). Nesting depth tracks the HTML
-//! tag stack: a control-flow directive on a child element scores deeper than
-//! one on its ancestor, matching Angular's per-block nesting model.
+//! separately by `translate_script_complexity`). Cognitive nesting tracks
+//! CONTROL-FLOW depth, not raw markup depth: only an element bearing a
+//! control-flow directive (`v-if` / `v-else-if` / `v-else` / `v-for` / `v-show`)
+//! opens a nesting level for its subtree, so a `v-if` buried under plain
+//! `<div>` wrappers is not over-weighted. This matches the Svelte and Angular
+//! scanners and the cognitive-complexity standard (only nesting control
+//! structures increase the nesting penalty).
 
 use std::sync::LazyLock;
 
@@ -51,6 +55,14 @@ struct VueScanner<'a> {
     source: &'a str,
     complexity: TemplateComplexity,
     nesting: u16,
+    /// One entry per open (non-void, non-self-closing) element, recording
+    /// whether that element carried a control-flow directive and therefore
+    /// opened a cognitive nesting level for its subtree. Popped on the matching
+    /// close so only control-flow elements decrement `nesting`. This makes
+    /// cognitive nesting track CONTROL-FLOW depth, NOT raw markup depth, so a
+    /// `v-if` buried under plain `<div>` wrappers is not over-weighted, matching
+    /// the Svelte and Angular scanners and the cognitive-complexity standard.
+    tag_stack: Vec<bool>,
 }
 
 impl<'a> VueScanner<'a> {
@@ -59,6 +71,7 @@ impl<'a> VueScanner<'a> {
             source,
             complexity: TemplateComplexity::default(),
             nesting: 0,
+            tag_stack: Vec::new(),
         }
     }
 
@@ -99,8 +112,12 @@ impl<'a> VueScanner<'a> {
         let tag_end = find_tag_end(self.source, offset)?;
         let after = tag_end + 1;
         if self.source[offset..].starts_with("</") {
-            // Closing tag: pop one level of nesting if any is open.
-            self.nesting = self.nesting.saturating_sub(1);
+            // Closing tag: pop the matching open element. Decrement nesting only
+            // when that element was control-flow-bearing, so plain markup never
+            // shifts cognitive depth. A stray close (empty stack) is a no-op.
+            if self.tag_stack.pop() == Some(true) {
+                self.nesting = self.nesting.saturating_sub(1);
+            }
             return Ok(after);
         }
         if self.source[offset..].starts_with("<!") || self.source[offset..].starts_with("<?") {
@@ -109,16 +126,28 @@ impl<'a> VueScanner<'a> {
 
         let self_closing = self.source[..tag_end].trim_end().ends_with('/');
         let tag_name = read_tag_name(self.source, offset);
-        self.scan_attributes(offset, tag_end)?;
+        // Score the element's directives at the CURRENT nesting (before its own
+        // subtree deepens), and learn whether it carries control flow.
+        let has_control_flow = self.scan_attributes(offset, tag_end)?;
 
         if !self_closing && !is_void_tag(tag_name) {
-            self.nesting = self.nesting.saturating_add(1);
+            // Every open element is pushed so the stack stays paired with close
+            // tags, but only a control-flow-bearing one opens a nesting level.
+            self.tag_stack.push(has_control_flow);
+            if has_control_flow {
+                self.nesting = self.nesting.saturating_add(1);
+            }
         }
         Ok(after)
     }
 
-    fn scan_attributes(&mut self, tag_start: usize, tag_end: usize) -> Result<(), ScanError> {
+    /// Scan an element's attributes, scoring directive expressions and control
+    /// flow. Returns whether the element carried a control-flow directive
+    /// (`v-if` / `v-else-if` / `v-else` / `v-for` / `v-show`), so the caller can
+    /// open a cognitive nesting level for its subtree.
+    fn scan_attributes(&mut self, tag_start: usize, tag_end: usize) -> Result<bool, ScanError> {
         let mut offset = tag_start + 1;
+        let mut has_control_flow = false;
         // Skip the tag name.
         while offset < tag_end {
             let byte = self.source.as_bytes()[offset];
@@ -146,43 +175,51 @@ impl<'a> VueScanner<'a> {
             offset = skip_whitespace(self.source, offset);
             if offset >= tag_end || self.source.as_bytes()[offset] != b'=' {
                 // Valueless attribute (`disabled`, bare `v-else`).
-                self.scan_valueless_attr(name);
+                has_control_flow |= self.scan_valueless_attr(name);
                 continue;
             }
             offset = skip_whitespace(self.source, offset + 1);
             let (value_start, value_end, next_offset) = read_attribute_value(self.source, offset)?;
-            self.scan_attribute_value(name, value_start, value_end)?;
+            has_control_flow |= self.scan_attribute_value(name, value_start, value_end)?;
             offset = next_offset;
         }
-        Ok(())
+        Ok(has_control_flow)
     }
 
     /// A directive written without a value: only bare `v-else` matters (a
     /// control-flow continuation). Mirrors Angular's bare `@else`: cognitive
     /// +1, no cyclomatic increment (the new branch path is owned by the paired
-    /// `v-if`).
-    fn scan_valueless_attr(&mut self, name: &str) {
+    /// `v-if`). Returns `true` for `v-else` so its element opens a nesting level.
+    fn scan_valueless_attr(&mut self, name: &str) -> bool {
         if name == "v-else" {
             self.complexity.cognitive = self.complexity.cognitive.saturating_add(1);
+            return true;
         }
+        false
     }
 
+    /// Score a valued directive. Returns `true` when it is a control-flow
+    /// directive (so the element opens a cognitive nesting level for its
+    /// subtree). The control-flow construct is scored at the CURRENT nesting,
+    /// before the subtree deepens.
     fn scan_attribute_value(
         &mut self,
         name: &str,
         value_start: usize,
         value_end: usize,
-    ) -> Result<(), ScanError> {
+    ) -> Result<bool, ScanError> {
         let value = &self.source[value_start..value_end];
         if is_control_flow_directive(name) {
             self.complexity.add_control_flow(self.nesting);
             self.complexity
                 .add_expression(value, value_start, self.nesting)?;
-        } else if is_bound_directive(name) {
+            return Ok(true);
+        }
+        if is_bound_directive(name) {
             self.complexity
                 .add_expression(value, value_start, self.nesting)?;
         }
-        Ok(())
+        Ok(false)
     }
 }
 
@@ -380,6 +417,49 @@ for (const i of items) { use(i); }
                 r#"<template><!-- v-if="a && b && c" --><p>plain</p></template>"#
             )
             .is_none()
+        );
+    }
+
+    #[test]
+    fn markup_depth_does_not_inflate_cognitive() {
+        // The SAME single `v-if` must score identically whether it sits at the
+        // top of the template or buried under plain `<div>` wrappers: cognitive
+        // nesting tracks CONTROL-FLOW depth, not raw markup depth (issue #1281's
+        // failure mode applied to Vue). Regression for the tag-stack fix.
+        let shallow =
+            compute_vue_template_complexity(r#"<template><div v-if="ok">x</div></template>"#)
+                .expect("a v-if has complexity");
+        let deep = compute_vue_template_complexity(
+            r#"<template><div><div><div><div><div><div><div v-if="ok">x</div></div></div></div></div></div></div></template>"#,
+        )
+        .expect("a v-if has complexity");
+        assert_eq!(
+            (shallow.cyclomatic, shallow.cognitive),
+            (deep.cyclomatic, deep.cognitive),
+            "markup nesting must not change the cognitive weight of a control-flow construct: shallow={shallow:?} deep={deep:?}"
+        );
+    }
+
+    #[test]
+    fn nested_control_flow_still_increments_cognitive() {
+        // A v-if nested inside ANOTHER v-if's element subtree IS deeper and must
+        // weigh more than two sibling v-ifs, so the fix did not flatten genuine
+        // control-flow nesting (only markup nesting was removed).
+        let nested = compute_vue_template_complexity(
+            r#"<template><div v-if="a"><span v-if="b">x</span></div></template>"#,
+        )
+        .expect("nested control flow has complexity");
+        let siblings = compute_vue_template_complexity(
+            r#"<template><div v-if="a">x</div><div v-if="b">y</div></template>"#,
+        )
+        .expect("sibling control flow has complexity");
+        assert_eq!(
+            nested.cyclomatic, siblings.cyclomatic,
+            "both have two v-if branches: same cyclomatic"
+        );
+        assert!(
+            nested.cognitive > siblings.cognitive,
+            "nested control flow must weigh more than sibling control flow: nested={nested:?} siblings={siblings:?}"
         );
     }
 }
