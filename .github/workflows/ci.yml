@@ -645,10 +645,8 @@ jobs:
       - name: fallow-graph
         run: cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-graph --lib --tests -- --skip proptests
 
-      # Only suppress, css, and visitor/helpers run under Miri (pure data logic).
-      # Parser-heavy modules (visitor::tests, sfc_template, html, template_usage,
-      # sfc_css, template_complexity) have no unsafe code and are too slow under
-      # Miri interpretation.
+      # Only suppress, CSS helpers, and visitor helpers run under Miri (pure data logic).
+      # Parser-heavy modules have no unsafe code and are too slow under Miri interpretation.
       #
       # Tree Borrows for this crate only: the css analytics path parses via
       # lightningcss (alpha), whose @layer string handling reconstructs a &str
@@ -659,13 +657,12 @@ jobs:
       - name: fallow-extract
         env:
           MIRIFLAGS: -Zmiri-tree-borrows
-        # `react` skips the React JSX extraction tests (react_structural + the
-        # complexity React-fold tests): pure-safe AST/parse tests with no unsafe
-        # for Miri to check, so a low-value speed-skip, same rationale as the
-        # visitor::tests / sfc_template / html entries above. `sfc_css` and
-        # `template_complexity` are also parser-heavy and exceeded the
-        # 60-minute CI budget under Miri.
-        run: cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-extract --lib --tests -- --skip cache --skip visitor::tests --skip sfc_template --skip html --skip template_usage --skip react --skip sfc_css --skip template_complexity
+        run: |
+          cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-extract --lib --tests css:: -- --skip sfc_css::
+          cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-extract --lib --tests css_classes::
+          cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-extract --lib --tests css_metrics::
+          cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-extract --lib --tests suppress::
+          cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-extract --lib --tests visitor::helpers::
 
   ci-ok:
     name: CI
