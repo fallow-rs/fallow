@@ -388,29 +388,32 @@ fn push_unused_file_issues(
 /// `direct_label` / `re_export_label` let the same helper produce the right
 /// prose for both `unused-export` (Export / Re-export) and `unused-type`
 /// (Type export / Type re-export) rule ids.
-fn push_unused_export_issues<'a, I>(
-    issues: &mut Vec<CodeClimateIssue>,
+struct UnusedExportIssuesInput<'a, I> {
+    issues: &'a mut Vec<CodeClimateIssue>,
     exports: I,
-    root: &Path,
-    rule_id: &str,
-    direct_label: &str,
-    re_export_label: &str,
+    root: &'a Path,
+    rule_id: &'a str,
+    direct_label: &'a str,
+    re_export_label: &'a str,
     severity: Severity,
-) where
+}
+
+fn push_unused_export_issues<'a, I>(input: UnusedExportIssuesInput<'a, I>)
+where
     I: IntoIterator<Item = &'a fallow_core::results::UnusedExport>,
 {
-    for export in exports {
-        let level = severity_to_codeclimate(severity);
-        let path = cc_path(&export.path, root);
+    let level = severity_to_codeclimate(input.severity);
+    for export in input.exports {
+        let path = cc_path(&export.path, input.root);
         let kind = if export.is_re_export {
-            re_export_label
+            input.re_export_label
         } else {
-            direct_label
+            input.direct_label
         };
         let line_str = export.line.to_string();
-        let fp = fingerprint_hash(&[rule_id, &path, &line_str, &export.export_name]);
-        issues.push(cc_issue(
-            rule_id,
+        let fp = fingerprint_hash(&[input.rule_id, &path, &line_str, &export.export_name]);
+        input.issues.push(cc_issue(
+            input.rule_id,
             &format!(
                 "{kind} '{}' is never imported by other modules",
                 export.export_name
@@ -1669,24 +1672,24 @@ impl CodeClimateBuilder<'_> {
             self.root,
             self.rules.unused_files,
         );
-        push_unused_export_issues(
-            &mut self.issues,
-            self.results.unused_exports.iter().map(|e| &e.export),
-            self.root,
-            "fallow/unused-export",
-            "Export",
-            "Re-export",
-            self.rules.unused_exports,
-        );
-        push_unused_export_issues(
-            &mut self.issues,
-            self.results.unused_types.iter().map(|e| &e.export),
-            self.root,
-            "fallow/unused-type",
-            "Type export",
-            "Type re-export",
-            self.rules.unused_types,
-        );
+        push_unused_export_issues(UnusedExportIssuesInput {
+            issues: &mut self.issues,
+            exports: self.results.unused_exports.iter().map(|e| &e.export),
+            root: self.root,
+            rule_id: "fallow/unused-export",
+            direct_label: "Export",
+            re_export_label: "Re-export",
+            severity: self.rules.unused_exports,
+        });
+        push_unused_export_issues(UnusedExportIssuesInput {
+            issues: &mut self.issues,
+            exports: self.results.unused_types.iter().map(|e| &e.export),
+            root: self.root,
+            rule_id: "fallow/unused-type",
+            direct_label: "Type export",
+            re_export_label: "Type re-export",
+            severity: self.rules.unused_types,
+        });
     }
 
     fn push_private_type_leak_issues(&mut self) {
