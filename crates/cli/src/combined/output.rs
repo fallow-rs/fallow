@@ -60,16 +60,16 @@ fn print_machine_combined_report(
 ) -> Result<Option<u8>, ExitCode> {
     match opts.output {
         OutputFormat::Json => {
-            let code = print_combined_json(
+            let code = print_combined_json(CombinedJsonPrintInput {
                 check_result,
                 dupes_result,
                 health_result,
-                opts.root,
-                total_elapsed,
-                opts.explain,
-                opts.config_path.is_some()
+                root: opts.root,
+                elapsed: total_elapsed,
+                explain: opts.explain,
+                config_fixable: opts.config_path.is_some()
                     || fallow_config::FallowConfig::find_config_path(opts.root).is_some(),
-            );
+            });
             combined_machine_success(code)
         }
         OutputFormat::Sarif => {
@@ -408,42 +408,57 @@ fn print_failure_summary(
 }
 
 /// Print combined JSON output wrapping check, dupes, and health results.
-fn print_combined_json(
-    check: Option<&CheckResult>,
-    dupes: Option<&DupesResult>,
-    health: Option<&HealthResult>,
-    root: &std::path::Path,
+struct CombinedJsonPrintInput<'a> {
+    check_result: Option<&'a CheckResult>,
+    dupes_result: Option<&'a DupesResult>,
+    health_result: Option<&'a HealthResult>,
+    root: &'a std::path::Path,
     elapsed: std::time::Duration,
     explain: bool,
     config_fixable: bool,
-) -> ExitCode {
-    let mut combined = match combined_json_root(elapsed) {
+}
+
+fn print_combined_json(input: CombinedJsonPrintInput<'_>) -> ExitCode {
+    let mut combined = match combined_json_root(input.elapsed) {
         Ok(combined) => combined,
         Err(code) => return code,
     };
-    let root_prefix = format!("{}/", root.display());
+    let root_prefix = format!("{}/", input.root.display());
 
-    if let Some(result) = check
-        && let Err(code) = insert_combined_check_json(&mut combined, result, config_fixable)
+    if let Some(result) = input.check_result
+        && let Err(code) = insert_combined_check_json(&mut combined, result, input.config_fixable)
     {
         return code;
     }
 
-    let dupes_payload =
-        dupes.map(|result| crate::output_dupes::DupesReportPayload::from_report(&result.report));
-    if let Err(code) = insert_combined_dupes_json(&mut combined, dupes_payload.as_ref(), root) {
-        return code;
-    }
-    if let Err(code) = insert_combined_health_json(&mut combined, health, &root_prefix) {
-        return code;
-    }
-    if let Err(code) =
-        insert_combined_next_steps(&mut combined, check, dupes_payload.as_ref(), health, root)
+    let dupes_payload = input
+        .dupes_result
+        .map(|result| crate::output_dupes::DupesReportPayload::from_report(&result.report));
+    if let Err(code) = insert_combined_dupes_json(&mut combined, dupes_payload.as_ref(), input.root)
     {
         return code;
     }
+    if let Err(code) = insert_combined_health_json(&mut combined, input.health_result, &root_prefix)
+    {
+        return code;
+    }
+    if let Err(code) = insert_combined_next_steps(
+        &mut combined,
+        input.check_result,
+        dupes_payload.as_ref(),
+        input.health_result,
+        input.root,
+    ) {
+        return code;
+    }
 
-    emit_combined_json_output(combined, check, dupes, health, explain)
+    emit_combined_json_output(
+        combined,
+        input.check_result,
+        input.dupes_result,
+        input.health_result,
+        input.explain,
+    )
 }
 
 #[expect(
