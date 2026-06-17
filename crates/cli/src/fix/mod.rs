@@ -90,15 +90,15 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
         fixes: &mut fixes,
     });
 
-    deps::apply_dependency_fixes(
-        opts.root,
-        &results,
-        &file_hashes,
-        &mut plan,
-        opts.output,
-        opts.dry_run,
-        &mut fixes,
-    );
+    deps::apply_dependency_fixes(deps::DependencyFixInput {
+        root: opts.root,
+        results: &results,
+        hashes: &file_hashes,
+        plan: &mut plan,
+        output: opts.output,
+        dry_run: opts.dry_run,
+        fixes: &mut fixes,
+    });
 
     let mut had_write_error = config::apply_config_fixes(
         opts.root,

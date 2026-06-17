@@ -10,36 +10,38 @@ use super::plan::{CapturedHashes, FixPlan};
 ///
 /// `hashes` is accepted for signature uniformity; `package.json` files are
 /// re-read and reparsed here, so the hash check is a no-op.
-pub(super) fn apply_dependency_fixes(
-    root: &Path,
-    results: &fallow_core::results::AnalysisResults,
-    hashes: &CapturedHashes,
-    plan: &mut FixPlan,
-    output: OutputFormat,
-    dry_run: bool,
-    fixes: &mut Vec<serde_json::Value>,
-) {
-    let _ = hashes; // see doc above
+pub(super) struct DependencyFixInput<'a> {
+    pub(super) root: &'a Path,
+    pub(super) results: &'a fallow_core::results::AnalysisResults,
+    pub(super) hashes: &'a CapturedHashes,
+    pub(super) plan: &'a mut FixPlan,
+    pub(super) output: OutputFormat,
+    pub(super) dry_run: bool,
+    pub(super) fixes: &'a mut Vec<serde_json::Value>,
+}
 
-    if results.unused_dependencies.is_empty()
-        && results.unused_dev_dependencies.is_empty()
-        && results.unused_optional_dependencies.is_empty()
+pub(super) fn apply_dependency_fixes(input: DependencyFixInput<'_>) {
+    let _ = input.hashes; // see doc above
+
+    if input.results.unused_dependencies.is_empty()
+        && input.results.unused_dev_dependencies.is_empty()
+        && input.results.unused_optional_dependencies.is_empty()
     {
         return;
     }
 
     let mut deps_by_pkg: FxHashMap<&Path, Vec<(&str, &str)>> = FxHashMap::default();
-    for dep in &results.unused_dependencies {
+    for dep in &input.results.unused_dependencies {
         queue_dependency_removal(&mut deps_by_pkg, &dep.dep, "dependencies");
     }
-    for dep in &results.unused_dev_dependencies {
+    for dep in &input.results.unused_dev_dependencies {
         queue_dependency_removal(&mut deps_by_pkg, &dep.dep, "devDependencies");
     }
-    for dep in &results.unused_optional_dependencies {
+    for dep in &input.results.unused_optional_dependencies {
         queue_dependency_removal(&mut deps_by_pkg, &dep.dep, "optionalDependencies");
     }
 
-    let _ = root; // root was previously used to construct the path; now deps carry their own path
+    let _ = input.root; // root was previously used to construct the path; now deps carry their own path
 
     for (pkg_path, removals) in &deps_by_pkg {
         if let Ok(content) = std::fs::read_to_string(pkg_path)
@@ -52,14 +54,14 @@ pub(super) fn apply_dependency_fixes(
                     && let Some(obj) = deps.as_object_mut()
                     && obj.remove(package_name).is_some()
                 {
-                    if dry_run {
-                        if !matches!(output, OutputFormat::Json) {
+                    if input.dry_run {
+                        if !matches!(input.output, OutputFormat::Json) {
                             eprintln!(
                                 "Would remove `{package_name}` from {location} in {}",
                                 pkg_path.display()
                             );
                         }
-                        fixes.push(serde_json::json!({
+                        input.fixes.push(serde_json::json!({
                             "type": "remove_dependency",
                             "package": package_name,
                             "location": location,
@@ -67,7 +69,7 @@ pub(super) fn apply_dependency_fixes(
                         }));
                     } else {
                         changed = true;
-                        fixes.push(serde_json::json!({
+                        input.fixes.push(serde_json::json!({
                             "type": "remove_dependency",
                             "package": package_name,
                             "location": location,
@@ -79,15 +81,17 @@ pub(super) fn apply_dependency_fixes(
                 }
             }
 
-            if changed && !dry_run {
+            if changed && !input.dry_run {
                 match serde_json::to_string_pretty(&pkg_value) {
                     Ok(new_json) => {
                         let pkg_content = new_json + "\n";
-                        plan.stage(pkg_path.to_path_buf(), pkg_content.into_bytes());
+                        input
+                            .plan
+                            .stage(pkg_path.to_path_buf(), pkg_content.into_bytes());
                     }
                     Err(e) => {
                         eprintln!("Error: failed to serialize {}: {e}", pkg_path.display());
-                        for entry in fixes.iter_mut() {
+                        for entry in input.fixes.iter_mut() {
                             let matches = entry
                                 .get("__target")
                                 .and_then(|v| v.as_str())
@@ -129,7 +133,15 @@ mod tests {
     ) -> bool {
         let mut plan = FixPlan::new();
         let hashes = CapturedHashes::default();
-        apply_dependency_fixes(root, results, &hashes, &mut plan, output, dry_run, fixes);
+        apply_dependency_fixes(DependencyFixInput {
+            root,
+            results,
+            hashes: &hashes,
+            plan: &mut plan,
+            output,
+            dry_run,
+            fixes,
+        });
         if dry_run {
             return false;
         }
