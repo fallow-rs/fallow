@@ -87,15 +87,15 @@ pub(super) fn apply_catalog_entry_fixes(
 
         let lines: Vec<&str> = content.split(meta.line_ending).collect();
 
-        let to_remove = collect_catalog_entry_removals(
-            &file_entries,
-            &lines,
+        let to_remove = collect_catalog_entry_removals(CatalogEntryRemovalInput {
+            file_entries: &file_entries,
+            lines: &lines,
             preceding_comment_policy,
-            &mut summary,
+            summary: &mut summary,
             fixes,
             output,
             relative_path,
-        );
+        });
 
         if to_remove.is_empty() {
             continue;
@@ -151,29 +151,46 @@ pub(super) fn apply_catalog_entry_fixes(
     summary
 }
 
-fn collect_catalog_entry_removals<'a>(
-    file_entries: &[&'a UnusedCatalogEntry],
-    lines: &[&str],
+struct CatalogEntryRemovalInput<'a, 'b> {
+    file_entries: &'b [&'a UnusedCatalogEntry],
+    lines: &'b [&'b str],
     preceding_comment_policy: CatalogPrecedingCommentPolicy,
-    summary: &mut CatalogFixSummary,
-    fixes: &mut Vec<serde_json::Value>,
+    summary: &'b mut CatalogFixSummary,
+    fixes: &'b mut Vec<serde_json::Value>,
     output: OutputFormat,
-    relative_path: &Path,
+    relative_path: &'b Path,
+}
+
+fn collect_catalog_entry_removals<'a>(
+    input: CatalogEntryRemovalInput<'a, '_>,
 ) -> Vec<CatalogRemoval<'a>> {
     let mut to_remove = Vec::new();
-    for entry in file_entries {
+    for entry in input.file_entries {
         if !entry.hardcoded_consumers.is_empty() {
-            skip_hardcoded_catalog_consumers(entry, summary, fixes, output, relative_path);
+            skip_hardcoded_catalog_consumers(
+                entry,
+                input.summary,
+                input.fixes,
+                input.output,
+                input.relative_path,
+            );
             continue;
         }
 
         let line_idx = entry.line.saturating_sub(1) as usize;
-        if line_idx >= lines.len() {
-            skip_out_of_range_catalog_entry(entry, summary, fixes, output, relative_path);
+        if line_idx >= input.lines.len() {
+            skip_out_of_range_catalog_entry(
+                entry,
+                input.summary,
+                input.fixes,
+                input.output,
+                input.relative_path,
+            );
             continue;
         }
 
-        let range = compute_deletion_range(lines, line_idx, entry, preceding_comment_policy);
+        let range =
+            compute_deletion_range(input.lines, line_idx, entry, input.preceding_comment_policy);
         to_remove.push((range, *entry));
     }
     to_remove
