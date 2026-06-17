@@ -201,13 +201,14 @@ jobs:
 
       - name: Run tests
         if: matrix.os != 'windows-latest'
-        run: cargo test --workspace --all-targets
+        # Benchmark targets exceed this job's timeout and are covered by the
+        # dedicated benchmark workflows.
+        run: cargo test --workspace --lib --bins --tests
 
       - name: Run tests (Windows)
         if: matrix.os == 'windows-latest'
-        # Windows push checks catch path and filesystem regressions, but bench
-        # target execution can exceed this job's timeout. Dedicated benchmark
-        # workflows cover benchmark execution separately.
+        # Windows push checks catch path and filesystem regressions.
+        # Benchmark targets are covered by dedicated benchmark workflows.
         run: cargo test --workspace --lib --bins --tests
 
       - name: Run runtime-coverage integration tests (feature-gated stub sidecar)
