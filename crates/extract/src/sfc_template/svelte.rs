@@ -92,15 +92,15 @@ pub(super) fn collect_template_usage_with_bound_targets(
                 let Some((tag, next_index)) = scan_curly_section(&markup, index, 1, 1) else {
                     break;
                 };
-                apply_tag(
-                    tag.trim(),
-                    index,
-                    next_index,
+                apply_tag(SvelteTagInput {
+                    tag: tag.trim(),
+                    tag_start: index,
+                    tag_end: next_index,
                     imported_bindings,
                     bound_targets,
-                    &mut scopes,
-                    &mut usage,
-                );
+                    scopes: &mut scopes,
+                    usage: &mut usage,
+                });
                 index = next_index;
             }
             b'<' => {
@@ -236,41 +236,49 @@ fn strip_non_template_content(source: &str) -> String {
     visible
 }
 
-fn apply_tag(
-    tag: &str,
+struct SvelteTagInput<'a> {
+    tag: &'a str,
     tag_start: usize,
     tag_end: usize,
-    imported_bindings: &FxHashSet<String>,
-    bound_targets: &FxHashMap<String, String>,
-    scopes: &mut Vec<SvelteScopeFrame>,
-    usage: &mut TemplateUsage,
-) {
-    if tag.is_empty() {
+    imported_bindings: &'a FxHashSet<String>,
+    bound_targets: &'a FxHashMap<String, String>,
+    scopes: &'a mut Vec<SvelteScopeFrame>,
+    usage: &'a mut TemplateUsage,
+}
+
+fn apply_tag(input: SvelteTagInput<'_>) {
+    if input.tag.is_empty() {
         return;
     }
 
-    if apply_svelte_block_tag(tag, imported_bindings, bound_targets, scopes, usage) {
+    if apply_svelte_block_tag(
+        input.tag,
+        input.imported_bindings,
+        input.bound_targets,
+        input.scopes,
+        input.usage,
+    ) {
         return;
     }
 
     if apply_svelte_expression_directive(
-        tag,
-        tag_start,
-        tag_end,
-        imported_bindings,
-        bound_targets,
-        scopes,
-        usage,
+        input.tag,
+        input.tag_start,
+        input.tag_end,
+        input.imported_bindings,
+        input.bound_targets,
+        input.scopes,
+        input.usage,
     ) {
         return;
     }
 
     merge_expression_usage_allow_dollar_refs_with_bound_targets(
-        usage,
-        tag,
-        imported_bindings,
-        bound_targets,
-        &current_locals(scopes),
+        input.usage,
+        input.tag,
+        input.imported_bindings,
+        input.bound_targets,
+        &current_locals(input.scopes),
     );
 }
 
