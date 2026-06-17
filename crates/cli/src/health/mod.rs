@@ -2606,15 +2606,7 @@ struct HealthSupportingPartsInput<'a> {
 fn build_health_supporting_parts(
     input: HealthSupportingPartsInput<'_>,
 ) -> HealthOutputSupportingParts {
-    let grouping = build_health_output_grouping(
-        input.opts,
-        input.build,
-        input.analysis_data,
-        input.derived_sections,
-        input.vital_data,
-        input.findings,
-        input.action_ctx,
-    );
+    let grouping = build_health_output_grouping(&input);
     let timings = build_health_timings_from_pipeline(
         input.opts,
         input.build.start,
@@ -2627,31 +2619,25 @@ fn build_health_supporting_parts(
 }
 
 fn build_health_output_grouping(
-    opts: &HealthOptions<'_>,
-    build: &HealthOutputBuildInput<'_>,
-    analysis_data: &HealthAnalysisData,
-    derived_sections: &HealthDerivedSections,
-    vital_data: &HealthVitalData,
-    findings: &[ComplexityViolation],
-    action_ctx: &crate::health_types::HealthActionContext,
+    input: &HealthSupportingPartsInput<'_>,
 ) -> Option<crate::health_types::HealthGrouping> {
-    let file_scores = health_file_scores_slice(analysis_data.score_output.as_ref());
+    let file_scores = health_file_scores_slice(input.analysis_data.score_output.as_ref());
     build_health_grouping_from_context(HealthGroupingContextInput {
-        opts,
-        config: build.config,
-        group_resolver: build.group_resolver,
-        candidate_paths: &derived_sections.candidate_paths,
-        files: build.files,
-        modules: build.modules,
-        file_paths: build.file_paths,
-        score_output: analysis_data.score_output.as_ref(),
+        opts: input.opts,
+        config: input.build.config,
+        group_resolver: input.build.group_resolver,
+        candidate_paths: &input.derived_sections.candidate_paths,
+        files: input.build.files,
+        modules: input.build.modules,
+        file_paths: input.build.file_paths,
+        score_output: input.analysis_data.score_output.as_ref(),
         file_scores,
-        findings,
-        hotspots: &derived_sections.hotspots,
-        vital_data,
-        targets: &derived_sections.targets,
-        needs_file_scores: build.needs_file_scores,
-        action_ctx,
+        findings: input.findings,
+        hotspots: &input.derived_sections.hotspots,
+        vital_data: input.vital_data,
+        targets: &input.derived_sections.targets,
+        needs_file_scores: input.build.needs_file_scores,
+        action_ctx: input.action_ctx,
     })
 }
 
