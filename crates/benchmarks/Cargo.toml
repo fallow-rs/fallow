@@ -16,6 +16,7 @@ harness = false
 [dev-dependencies]
 criterion2 = { workspace = true }
 fallow-cli = { workspace = true }
+fallow-core = { workspace = true }
 tempfile = { workspace = true }
 
 [features]

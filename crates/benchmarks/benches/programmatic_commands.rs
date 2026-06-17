@@ -5,12 +5,18 @@
 )]
 
 use std::fmt::Write as _;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use fallow_cli::programmatic::{
     AnalysisOptions, ComplexityOptions, DeadCodeOptions, DuplicationMode, DuplicationOptions,
     compute_health, detect_circular_dependencies, detect_dead_code, detect_duplication,
+};
+use fallow_core::{
+    cache::{CacheStore, module_to_cached},
+    discover::{DiscoveredFile, FileId},
+    extract::{parse_all_files, parse_single_file},
 };
 use tempfile::TempDir;
 
@@ -19,6 +25,12 @@ const BENCH_THREADS: usize = 4;
 struct CommandInput {
     _temp_dir: TempDir,
     root: PathBuf,
+}
+
+struct ExtractCacheInput {
+    _temp_dir: TempDir,
+    files: Vec<DiscoveredFile>,
+    cache: CacheStore,
 }
 
 fn write_file(root: &Path, path: &str, source: impl AsRef<str>) {
@@ -73,6 +85,44 @@ fn analysis_options(root: &Path, no_cache: bool) -> AnalysisOptions {
         threads: Some(BENCH_THREADS),
         ..AnalysisOptions::default()
     }
+}
+
+fn is_source_path(path: &Path) -> bool {
+    let Some(extension) = path.extension().and_then(|extension| extension.to_str()) else {
+        return false;
+    };
+
+    matches!(extension, "css" | "js" | "jsx" | "ts" | "tsx")
+}
+
+fn collect_source_paths(dir: &Path, paths: &mut Vec<PathBuf>) {
+    for entry in fs::read_dir(dir).expect("benchmark fixture directory is readable") {
+        let entry = entry.expect("benchmark fixture entry is readable");
+        let path = entry.path();
+        if path.is_dir() {
+            collect_source_paths(&path, paths);
+        } else if is_source_path(&path) {
+            paths.push(path);
+        }
+    }
+}
+
+fn discovered_source_files(root: &Path) -> Vec<DiscoveredFile> {
+    let mut paths = Vec::new();
+    collect_source_paths(root, &mut paths);
+    paths.sort();
+
+    paths
+        .into_iter()
+        .enumerate()
+        .map(|(index, path)| DiscoveredFile {
+            id: FileId(u32::try_from(index).expect("benchmark fixture file count fits in u32")),
+            size_bytes: fs::metadata(&path)
+                .expect("benchmark fixture metadata is readable")
+                .len(),
+            path,
+        })
+        .collect()
 }
 
 fn create_library_project() -> CommandInput {
@@ -683,13 +733,48 @@ export const App = () => (
     }
 }
 
-fn create_warm_workspace_project() -> CommandInput {
+fn create_warm_metadata_workspace_project() -> CommandInput {
     let input = create_workspace_project();
     let options = DeadCodeOptions {
         analysis: analysis_options(&input.root, false),
         ..DeadCodeOptions::default()
     };
     let _ = detect_dead_code(&options).expect("warm cache priming succeeds");
+    input
+}
+
+fn create_warm_hash_workspace_project() -> ExtractCacheInput {
+    let CommandInput {
+        _temp_dir: temp_dir,
+        root,
+    } = create_workspace_project();
+    let files = discovered_source_files(&root);
+    let mut cache = CacheStore::new();
+
+    for file in &files {
+        let module = parse_single_file(file).expect("benchmark fixture parses");
+        let cached = module_to_cached(&module, 1, 1);
+        cache.insert(&file.path, cached);
+    }
+
+    ExtractCacheInput {
+        _temp_dir: temp_dir,
+        files,
+        cache,
+    }
+}
+
+fn create_warm_complexity_health_project() -> CommandInput {
+    let input = create_health_project();
+    let options = ComplexityOptions {
+        analysis: analysis_options(&input.root, false),
+        complexity: true,
+        file_scores: true,
+        hotspots: true,
+        targets: true,
+        ..ComplexityOptions::default()
+    };
+    let _ = compute_health(&options).expect("warm complexity cache priming succeeds");
     input
 }
 
@@ -741,12 +826,12 @@ fn dead_code_workspace_monorepo_cross_package(c: &mut Criterion) {
     });
 }
 
-fn dead_code_workspace_monorepo_cross_package_warm_cache(c: &mut Criterion) {
+fn dead_code_workspace_monorepo_cross_package_warm_metadata_hit(c: &mut Criterion) {
     c.bench_function(
-        "dead_code_workspace_monorepo_cross_package_warm_cache",
+        "dead_code_workspace_monorepo_cross_package_warm_metadata_hit",
         |bencher| {
             bencher.iter_batched_ref(
-                create_warm_workspace_project,
+                create_warm_metadata_workspace_project,
                 |input| {
                     let options = DeadCodeOptions {
                         analysis: analysis_options(&input.root, false),
@@ -758,6 +843,21 @@ fn dead_code_workspace_monorepo_cross_package_warm_cache(c: &mut Criterion) {
             );
         },
     );
+}
+
+fn extract_workspace_monorepo_warm_hash_hit(c: &mut Criterion) {
+    c.bench_function("extract_workspace_monorepo_warm_hash_hit", |bencher| {
+        bencher.iter_batched_ref(
+            create_warm_hash_workspace_project,
+            |input| {
+                let result = parse_all_files(&input.files, Some(&input.cache), false);
+                assert_eq!(result.cache_hits, input.files.len());
+                assert_eq!(result.cache_misses, 0);
+                result
+            },
+            BatchSize::LargeInput,
+        );
+    });
 }
 
 fn duplication_next_route_callbacks_repeated_auth(c: &mut Criterion) {
@@ -819,6 +919,26 @@ fn health_complex_service_scoring(c: &mut Criterion) {
     });
 }
 
+fn health_complex_service_warm_complexity_hit(c: &mut Criterion) {
+    c.bench_function("health_complex_service_warm_complexity_hit", |bencher| {
+        bencher.iter_batched_ref(
+            create_warm_complexity_health_project,
+            |input| {
+                let options = ComplexityOptions {
+                    analysis: analysis_options(&input.root, false),
+                    complexity: true,
+                    file_scores: true,
+                    hotspots: true,
+                    targets: true,
+                    ..ComplexityOptions::default()
+                };
+                compute_health(&options)
+            },
+            BatchSize::LargeInput,
+        );
+    });
+}
+
 fn health_css_tailwind_design_system(c: &mut Criterion) {
     c.bench_function("health_css_tailwind_design_system", |bencher| {
         bencher.iter_batched_ref(
@@ -842,10 +962,12 @@ criterion_group!(
     dead_code_package_library_exports,
     dead_code_next_app_router_segments,
     dead_code_workspace_monorepo_cross_package,
-    dead_code_workspace_monorepo_cross_package_warm_cache,
+    dead_code_workspace_monorepo_cross_package_warm_metadata_hit,
+    extract_workspace_monorepo_warm_hash_hit,
     duplication_next_route_callbacks_repeated_auth,
     circular_dependencies_domain_graph_cycles,
     health_complex_service_scoring,
+    health_complex_service_warm_complexity_hit,
     health_css_tailwind_design_system
 );
 criterion_main!(benches);

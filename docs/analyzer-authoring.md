@@ -19,6 +19,17 @@ there first when the finding has a stable issue code, LSP diagnostic code,
 filter flag, or suppression token. Keep prose and caveats in the surface that
 owns them.
 
+## Optional Scaffold
+
+To start from a checklist-only plan:
+
+```bash
+npm run scaffold:analyzer -- unused-example
+```
+
+The command writes `.plans/analyzers/unused-example.md` and does not edit Rust
+source.
+
 ## Implementation Checklist
 
 Use this as the default map for a new finding:
