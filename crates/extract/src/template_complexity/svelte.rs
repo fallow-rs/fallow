@@ -1,8 +1,11 @@
 //! Synthetic `<template>` complexity for Svelte single-file components.
 //!
 //! Scores Svelte logic blocks (`{#if}` / `{:else if}` / `{#each}` / `{#await}` /
-//! `{:then}` / `{:catch}` / `{#key}`) plus `{ }` text interpolations and bound
-//! block expressions, reusing the framework-agnostic JS-expression engine.
+//! `{:then}` / `{:catch}` / `{#key}`) plus `{ }` text interpolations, bound block
+//! expressions, AND attribute-binding expressions inside a tag (`class={cond ? a
+//! : b}`, `onclick={x && y}`, `class:active={...}`), which carry the same
+//! expression complexity Vue's `:class` and Angular's `[class]` score. All reuse
+//! the framework-agnostic JS-expression engine.
 //! `<script>` / `<style>` blocks and `<!-- -->` comments are masked out
 //! (replaced with equal-length spaces so byte offsets stay accurate) so script
 //! control flow is NOT double-counted here (it is scored separately by
@@ -72,16 +75,38 @@ impl<'a> SvelteScanner<'a> {
         Ok(self.complexity)
     }
 
-    /// Skip an HTML tag (markup elements carry no logic-block nesting; their
-    /// brace-bound directive values are scored when their `{ ... }` sections are
-    /// hit by the top-level walk). Quote-aware so a `>` inside an attribute value
-    /// does not end the tag early.
-    fn scan_element(&self, offset: usize) -> Result<usize, ScanError> {
+    /// Scan an HTML tag's attribute bindings for expression complexity. Markup
+    /// elements carry no logic-block nesting (Svelte nesting is logic-block only),
+    /// but a `{ ... }` binding inside the tag (`class={cond ? a : b}`,
+    /// `onclick={x && y}`, `class:active={loading || !valid}`, a `{shorthand}` or
+    /// `{...spread}`) carries the same kind of expression complexity that Vue's
+    /// `:class` and Angular's `[class]` bound attributes score, so it must be
+    /// counted here for cross-framework parity (it is NOT reached by the
+    /// top-level text-interpolation walk, which never sees inside a `<tag ...>`).
+    /// Quote-tracking keeps a `>` inside an attribute value from ending the tag
+    /// early; a `{ ... }` is scored whether bare (`class={x}`) or embedded in a
+    /// quoted value (`class="a {x}"`), and `find_matching_curly` skips any nested
+    /// strings / braces inside the expression.
+    fn scan_element(&mut self, offset: usize) -> Result<usize, ScanError> {
         let mut index = offset + 1;
+        let mut quote: Option<u8> = None;
         while index < self.source.len() {
-            match self.source.as_bytes()[index] {
-                b'\'' | b'"' => index = skip_quoted(self.source, index)?,
-                b'>' => return Ok(index + 1),
+            let byte = self.source.as_bytes()[index];
+            match byte {
+                b'{' => {
+                    let close = find_matching_curly(self.source, index)?;
+                    self.add_expr_slice(self.source[index + 1..close].trim(), index + 1)?;
+                    index = close + 1;
+                }
+                b'\'' | b'"' => {
+                    match quote {
+                        Some(open) if open == byte => quote = None,
+                        None => quote = Some(byte),
+                        Some(_) => {}
+                    }
+                    index += 1;
+                }
+                b'>' if quote.is_none() => return Ok(index + 1),
                 _ => {
                     index += self.source[index..]
                         .chars()
@@ -426,5 +451,36 @@ for (const i of items) { use(i); }
         .expect("template should have complexity");
         // #each control flow + @const optional chains.
         assert!(complexity.cyclomatic >= 3, "{complexity:?}");
+    }
+
+    #[test]
+    fn attribute_binding_expressions_are_scored() {
+        // A `{ ... }` binding inside a tag carries the same expression complexity
+        // as Vue's `:class` and Angular's `[class]`, so it must be scored (it is
+        // NOT reached by the top-level text-interpolation walk). Parity
+        // regression: this whole class was previously dropped because the tag
+        // interior was skipped wholesale.
+        let class_bind = compute_svelte_template_complexity(
+            r#"<div class={a && b ? "x" : (c || d ? "y" : "z")}>t</div>"#,
+        )
+        .expect("an attribute binding with logic has complexity");
+        assert!(
+            class_bind.cyclomatic >= 4,
+            "class={{ternary+logical}} should score: {class_bind:?}"
+        );
+        // Event handler and class: directive bindings are also scored.
+        let event =
+            compute_svelte_template_complexity("<button onclick={() => a && b && go()}>x</button>")
+                .expect("event handler with logic has complexity");
+        assert!(
+            event.cyclomatic >= 2,
+            "onclick logic should score: {event:?}"
+        );
+        // A `>` inside a quoted attribute value must not end the tag early; a
+        // plain shorthand carries no complexity and stays dropped.
+        assert!(
+            compute_svelte_template_complexity(r#"<a title="a > b" href={url}>x</a>"#).is_none(),
+            "a quote-enclosed > plus a plain binding has no logic and is dropped"
+        );
     }
 }
