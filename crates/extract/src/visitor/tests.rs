@@ -36,6 +36,16 @@ fn store_member_names(info: &crate::ModuleInfo, export: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn store_member_accesses(info: &crate::ModuleInfo) -> Vec<(String, String)> {
+    let mut accesses: Vec<(String, String)> = info
+        .member_accesses
+        .iter()
+        .map(|access| (access.object.clone(), access.member.clone()))
+        .collect();
+    accesses.sort();
+    accesses
+}
+
 #[test]
 fn pinia_option_store_harvests_state_getters_actions_keys() {
     let info = parse(
@@ -85,6 +95,64 @@ fn pinia_setup_store_spread_return_abstains() {
     assert!(
         store_member_names(&info, "useS").is_empty(),
         "a spread return must abstain (no members harvested)"
+    );
+}
+
+#[test]
+fn pinia_credits_inline_store_to_refs_store_members() {
+    let info = parse(
+        "import { storeToRefs } from 'pinia'\nimport { useCounterStore } from './counter'\nconst { count, double } = storeToRefs(useCounterStore())",
+    );
+    let accesses = store_member_accesses(&info);
+    assert!(
+        accesses.contains(&("useCounterStore".to_string(), "count".to_string())),
+        "inline storeToRefs should credit count on the store factory: {accesses:?}"
+    );
+    assert!(
+        accesses.contains(&("useCounterStore".to_string(), "double".to_string())),
+        "inline storeToRefs should credit double on the store factory: {accesses:?}"
+    );
+}
+
+#[test]
+fn pinia_credits_inline_to_refs_store_members() {
+    let info = parse(
+        "import { toRefs } from 'vue'\nimport { useCounterStore } from './counter'\nconst { count } = toRefs(useCounterStore())",
+    );
+    let accesses = store_member_accesses(&info);
+    assert!(
+        accesses.contains(&("useCounterStore".to_string(), "count".to_string())),
+        "inline toRefs should credit count on the store factory: {accesses:?}"
+    );
+}
+
+#[test]
+fn pinia_credits_original_key_for_aliased_inline_store_to_refs_member() {
+    let info = parse(
+        "import { storeToRefs } from 'pinia'\nimport { useCounterStore } from './counter'\nconst { count: localCount } = storeToRefs(useCounterStore())\nvoid localCount",
+    );
+    let accesses = store_member_accesses(&info);
+    assert!(
+        accesses.contains(&("useCounterStore".to_string(), "count".to_string())),
+        "aliased destructure should credit the store key, not the local alias: {accesses:?}"
+    );
+    assert!(
+        !accesses.iter().any(|(_, member)| member == "localCount"),
+        "aliased destructure must not credit the local alias: {accesses:?}"
+    );
+}
+
+#[test]
+fn pinia_does_not_credit_non_store_inline_refs_arg() {
+    let info = parse(
+        "import { storeToRefs } from 'pinia'\nfunction makeThing() { return { count: 1 } }\nconst { count } = storeToRefs(makeThing())",
+    );
+    let accesses = store_member_accesses(&info);
+    assert!(
+        !accesses
+            .iter()
+            .any(|(object, member)| object == "makeThing" && member == "count"),
+        "non-store inline refs args must not create store member credits: {accesses:?}"
     );
 }
 

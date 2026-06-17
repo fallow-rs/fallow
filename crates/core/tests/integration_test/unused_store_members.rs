@@ -59,6 +59,10 @@ fn flags_unused_option_and_setup_store_members() {
         names.contains(&"deadFn"),
         "deadFn should be flagged: {members:?}"
     );
+    assert!(
+        names.contains(&"deadInlinePermission"),
+        "deadInlinePermission should be flagged: {members:?}"
+    );
 }
 
 #[test]
@@ -72,9 +76,18 @@ fn credits_consumed_store_members() {
         .collect();
 
     // `count` (store.count), `increment` (store.increment()), `double`
-    // (storeToRefs destructure + return), `name` (u.name), `login` (u.login())
-    // are all consumed and must NOT be flagged.
-    for credited in ["count", "increment", "double", "name", "login"] {
+    // (storeToRefs destructure + return), `name` (u.name), `login` (u.login()),
+    // and inline refs-helper members are all consumed and must NOT be flagged.
+    for credited in [
+        "count",
+        "increment",
+        "double",
+        "name",
+        "login",
+        "canCreateEvents",
+        "canEditFloorPlans",
+        "canSeeAnalytics",
+    ] {
         assert!(
             !names.contains(&credited.to_string()),
             "{credited} is consumed and should be credited, not flagged: {names:?}"

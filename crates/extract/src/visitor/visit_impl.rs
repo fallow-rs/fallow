@@ -6693,8 +6693,9 @@ impl ModuleInfoExtractor {
     /// `MemberKind::StoreMember`, keyed by the binding's local name for
     /// `enrich_store_exports`. Consumption: mark `const s = useFooStore()`
     /// instances and credit destructure reads (`const { count } = s` /
-    /// `storeToRefs(s)` / `const { count } = useFooStore()`) so a member
-    /// consumed only that way is not falsely flagged.
+    /// `storeToRefs(s)` / `storeToRefs(useFooStore())` /
+    /// `const { count } = useFooStore()`) so a member consumed only that way is
+    /// not falsely flagged.
     fn record_pinia_store(&mut self, declarator: &VariableDeclarator<'_>, init: &Expression<'_>) {
         // Declaration: const <name> = defineStore('id', <options|setup>)
         if let BindingPattern::BindingIdentifier(id) = &declarator.id
@@ -6736,13 +6737,14 @@ impl ModuleInfoExtractor {
                     return;
                 };
                 if matches!(callee.name.as_str(), "storeToRefs" | "toRefs") {
-                    // const { count } = storeToRefs(s) / toRefs(s): credit on the
-                    // store-instance argument (which resolves to its factory
-                    // export via `binding_target_names`).
-                    if let Some(Argument::Identifier(arg)) = call.arguments.first()
-                        && self.store_instance_locals.contains(arg.name.as_str())
+                    // const { count } = storeToRefs(s) / toRefs(useFooStore()):
+                    // credit on the store-instance local or factory import.
+                    if let Some(object_name) = call
+                        .arguments
+                        .first()
+                        .and_then(|arg| self.store_name_from_refs_arg(arg))
                     {
-                        self.credit_store_pattern_members(obj_pat, arg.name.as_str());
+                        self.credit_store_pattern_members(obj_pat, object_name);
                     }
                 } else if self.is_store_factory_call(callee.name.as_str()) {
                     // const { count, inc } = useFooStore(): credit on the factory
@@ -7151,6 +7153,48 @@ impl ModuleInfoExtractor {
     fn is_store_factory_call(&self, name: &str) -> bool {
         self.imports.iter().any(|i| i.local_name == name)
             || (name.starts_with("use") && name.ends_with("Store"))
+    }
+
+    fn store_name_from_refs_arg<'a>(&self, arg: &'a Argument<'_>) -> Option<&'a str> {
+        match arg {
+            Argument::Identifier(ident)
+                if self.store_instance_locals.contains(ident.name.as_str()) =>
+            {
+                Some(ident.name.as_str())
+            }
+            Argument::CallExpression(call) => {
+                let Expression::Identifier(callee) = &call.callee else {
+                    return None;
+                };
+                self.is_store_factory_call(callee.name.as_str())
+                    .then_some(callee.name.as_str())
+            }
+            Argument::ParenthesizedExpression(paren) => {
+                self.store_name_from_refs_expression(&paren.expression)
+            }
+            _ => None,
+        }
+    }
+
+    fn store_name_from_refs_expression<'a>(&self, expr: &'a Expression<'_>) -> Option<&'a str> {
+        match expr {
+            Expression::Identifier(ident)
+                if self.store_instance_locals.contains(ident.name.as_str()) =>
+            {
+                Some(ident.name.as_str())
+            }
+            Expression::CallExpression(call) => {
+                let Expression::Identifier(callee) = &call.callee else {
+                    return None;
+                };
+                self.is_store_factory_call(callee.name.as_str())
+                    .then_some(callee.name.as_str())
+            }
+            Expression::ParenthesizedExpression(paren) => {
+                self.store_name_from_refs_expression(&paren.expression)
+            }
+            _ => None,
+        }
     }
 
     /// Emit a `MemberAccess` for each statically-named destructured key against

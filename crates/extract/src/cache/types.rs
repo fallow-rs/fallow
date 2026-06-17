@@ -532,7 +532,12 @@ use crate::MemberKind;
 /// Bumped to 180 for issue #1281: JSX nesting depth is now descriptive
 /// `react_jsx_max_depth` context only, so warm caches from 179 may carry stale
 /// cognitive scores and `JsxDepth` contribution entries for React components.
-pub(super) const CACHE_VERSION: u32 = 180;
+///
+/// Bumped to 181 for issue #1282: Pinia `storeToRefs(useStore())` and
+/// `toRefs(useStore())` destructures now record store member accesses. Warm
+/// caches from 180 can miss those synthetic `member_accesses` and surface false
+/// `unused-store-member` findings.
+pub(super) const CACHE_VERSION: u32 = 181;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
