@@ -6,6 +6,7 @@ import {
   countCheckIssues,
   countDuplicationGroups,
 } from "./analysis-utils.js";
+import { shouldAcceptLspAnalysisComplete } from "./analysisNotification.js";
 import { startClient, stopClient, restartClient } from "./client.js";
 import { createSingleFlight } from "./analysis-single-flight.js";
 import {
@@ -252,6 +253,9 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   // (a restart builds a fresh client; a handler bound only to the first client
   // would stop firing and freeze the status bar after the first restart).
   const onAnalysisComplete = (params: AnalysisCompleteParams): void => {
+    if (!shouldAcceptLspAnalysisComplete(vscode.workspace.textDocuments)) {
+      return;
+    }
     updateStatusBarFromLsp(params);
     void vscode.commands.executeCommand("setContext", "fallow.hasAnalyzed", true);
   };

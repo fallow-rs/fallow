@@ -532,6 +532,7 @@ fn filter_inline_complexity_by_changed_files(
     findings.retain(|finding| changed_files.contains(&finding.path));
 }
 
+#[derive(Clone)]
 struct FallowLspServer {
     client: Client,
     root: Arc<RwLock<Option<PathBuf>>>,
@@ -547,6 +548,11 @@ struct FallowLspServer {
     /// by `publish_collected_diagnostics` to skip stale publishes; see
     /// `.claude/rules/lsp-server.md` for the staleness invariant.
     documents: Arc<RwLock<FxHashMap<Uri, DocumentState>>>,
+    /// Guards the first automatic analysis. Startup `initialized` is too early
+    /// for VS Code and VS Codium, which can show provisional counts before open
+    /// documents and project state are ready. The first open or save runs the
+    /// initial analysis instead.
+    startup_analysis_started: Arc<AtomicBool>,
     /// Diagnostic codes to suppress (parsed from initializationOptions.issueTypes)
     disabled_diagnostic_codes: Arc<RwLock<FxHashSet<String>>>,
     /// Optional git ref from `initializationOptions.changedSince`. When set,
@@ -714,8 +720,6 @@ impl LanguageServer for FallowLspServer {
         self.client
             .log_message(MessageType::INFO, "fallow LSP server initialized")
             .await;
-
-        self.run_analysis().await;
     }
 
     /// Cooperative shutdown.
@@ -784,6 +788,7 @@ impl LanguageServer for FallowLspServer {
             *last = now;
         }
 
+        self.startup_analysis_started.store(true, Ordering::SeqCst);
         self.run_analysis().await;
     }
 
@@ -801,6 +806,10 @@ impl LanguageServer for FallowLspServer {
                 .publish_diagnostics(uri, vec![], Some(version))
                 .await;
             self.spawn_diagnostic_refresh();
+        }
+
+        if !self.startup_analysis_started.swap(true, Ordering::SeqCst) {
+            self.spawn_startup_analysis();
         }
     }
 
@@ -971,6 +980,7 @@ impl FallowLspServer {
             )),
             analysis_guard: Arc::new(tokio::sync::Mutex::new(())),
             documents: Arc::new(RwLock::new(FxHashMap::default())),
+            startup_analysis_started: Arc::new(AtomicBool::new(false)),
             disabled_diagnostic_codes: Arc::new(RwLock::new(FxHashSet::default())),
             changed_since: Arc::new(RwLock::new(None)),
             config_path: Arc::new(RwLock::new(None)),
@@ -1015,6 +1025,16 @@ impl FallowLspServer {
             self.spawn_diagnostic_refresh();
         }
         Ok(())
+    }
+
+    /// Run the first open-triggered analysis without blocking the `didOpen`
+    /// response. The existing `analysis_guard` still prevents overlap with a
+    /// concurrent save or restart-triggered analysis.
+    fn spawn_startup_analysis(&self) {
+        let server = self.clone();
+        tokio::spawn(async move {
+            server.run_analysis().await;
+        });
     }
 
     /// Resolve the canonical git toplevel for `root`, populating the cache
@@ -1590,6 +1610,81 @@ mod tests {
         assert!(
             backend.results.read().await.is_none(),
             "results must stay None when run_analysis short-circuits on cancellation",
+        );
+    }
+
+    fn write_startup_analysis_fixture(root: &Path) -> PathBuf {
+        let source = root.join("src/index.ts");
+        std::fs::create_dir_all(source.parent().expect("source has parent"))
+            .expect("create src dir");
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"lsp-startup","private":true,"main":"src/index.ts"}"#,
+        )
+        .expect("write package");
+        std::fs::write(&source, "export const ready = 1;\n").expect("write source");
+        source
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn initialized_does_not_run_startup_analysis_before_file_open() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().canonicalize().expect("canonical root");
+        write_startup_analysis_fixture(&root);
+
+        let (service, _) = LspService::build(FallowLspServer::new).finish();
+        let backend = service.inner();
+        *backend.root.write().await = Some(root);
+
+        backend.initialized(InitializedParams {}).await;
+
+        assert!(
+            backend.results.read().await.is_none(),
+            "initialized must not publish provisional startup results before any file is open",
+        );
+        assert!(
+            !backend.startup_analysis_started.load(Ordering::SeqCst),
+            "the first-open analysis gate must remain armed after initialized",
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn first_did_open_runs_startup_analysis_once() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().canonicalize().expect("canonical root");
+        let source = write_startup_analysis_fixture(&root);
+        let uri = Uri::from_file_path(&source).expect("source file URI");
+
+        let (service, _) = LspService::build(FallowLspServer::new).finish();
+        let backend = service.inner();
+        *backend.root.write().await = Some(root);
+
+        backend
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem::new(
+                    uri.clone(),
+                    "typescript".to_string(),
+                    1,
+                    "export const ready = 1;\n".to_string(),
+                ),
+            })
+            .await;
+
+        assert!(
+            backend.startup_analysis_started.load(Ordering::SeqCst),
+            "the first file open must consume the startup analysis gate",
+        );
+
+        for _ in 0..50 {
+            if backend.results.read().await.is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+
+        assert!(
+            backend.results.read().await.is_some(),
+            "the first opened file must trigger the initial LSP analysis",
         );
     }
 
@@ -3863,7 +3958,7 @@ export function choose(value: number): string {
                     "id": 2,
                     "method": "textDocument/diagnostic",
                     "params": {
-                        "textDocument": { "uri": file_uri },
+                        "textDocument": { "uri": file_uri.clone() },
                         "identifier": "fallow"
                     }
                 }),
@@ -3874,11 +3969,28 @@ export function choose(value: number): string {
                 json!("full"),
             );
 
-            // `initialized` triggers analysis; with the client already pulling, the
-            // server must emit `workspace/diagnostic/refresh` over the real wire.
+            // `initialized` alone must stay quiet; first `didOpen` triggers the
+            // initial analysis. With the client already pulling, that analysis
+            // must emit `workspace/diagnostic/refresh` over the real wire.
             write_lsp_message(
                 &mut client_tx,
                 &json!({ "jsonrpc": "2.0", "method": "initialized", "params": {} }),
+            )
+            .await;
+            write_lsp_message(
+                &mut client_tx,
+                &json!({
+                    "jsonrpc": "2.0",
+                    "method": "textDocument/didOpen",
+                    "params": {
+                        "textDocument": {
+                            "uri": file_uri,
+                            "languageId": "typescript",
+                            "version": 1,
+                            "text": "export function choose(value: number): string { return value > 0 ? \"yes\" : \"no\"; }\n"
+                        }
+                    }
+                }),
             )
             .await;
             let refresh_id =
