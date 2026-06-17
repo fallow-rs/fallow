@@ -1084,9 +1084,10 @@ impl FallowLspServer {
         let root = self.root.read().await.clone();
         let Some(root) = root else { return };
 
-        let Ok(_guard) = self.analysis_guard.try_lock() else {
-            return; // analysis already running
-        };
+        let _guard = self.analysis_guard.lock().await;
+        if self.cancellation.load(Ordering::SeqCst) {
+            return;
+        }
 
         let version_snapshot: VersionSnapshot = self
             .documents
@@ -1685,6 +1686,47 @@ mod tests {
         assert!(
             backend.results.read().await.is_some(),
             "the first opened file must trigger the initial LSP analysis",
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn did_save_waits_for_in_flight_startup_analysis() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().canonicalize().expect("canonical root");
+        let source = write_startup_analysis_fixture(&root);
+        let uri = Uri::from_file_path(&source).expect("source file URI");
+
+        let (service, _) = LspService::build(FallowLspServer::new).finish();
+        let backend = service.inner();
+        *backend.root.write().await = Some(root);
+
+        let guard = backend.analysis_guard.lock().await;
+        let save_backend = backend.clone();
+        let save_task = tokio::spawn(async move {
+            save_backend
+                .did_save(DidSaveTextDocumentParams {
+                    text_document: TextDocumentIdentifier::new(uri),
+                    text: None,
+                })
+                .await;
+        });
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(
+            !save_task.is_finished(),
+            "didSave-triggered analysis must wait behind an in-flight startup analysis",
+        );
+        assert!(
+            backend.results.read().await.is_none(),
+            "analysis cannot publish while the guard is held",
+        );
+
+        drop(guard);
+        save_task.await.expect("didSave analysis task completes");
+
+        assert!(
+            backend.results.read().await.is_some(),
+            "didSave must rerun analysis after the in-flight startup analysis completes",
         );
     }
 
