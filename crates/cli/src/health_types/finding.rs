@@ -149,7 +149,7 @@ pub fn build_health_finding_actions(
 
     let is_template = name == "<template>";
     let is_component = name == "<component>";
-    if should_add_refactor_action(
+    if should_add_refactor_action(RefactorActionDecision {
         crap_only,
         full_coverage_can_clear_crap,
         cyclomatic,
@@ -157,7 +157,7 @@ pub fn build_health_finding_actions(
         max_cyclomatic_threshold,
         max_cognitive_threshold,
         ctx,
-    ) {
+    }) {
         actions.push(build_refactor_action(
             violation,
             name,
@@ -173,22 +173,28 @@ pub fn build_health_finding_actions(
     actions
 }
 
-fn should_add_refactor_action(
+struct RefactorActionDecision<'a> {
     crap_only: bool,
     full_coverage_can_clear_crap: bool,
     cyclomatic: u16,
     cognitive: u16,
     max_cyclomatic_threshold: u16,
     max_cognitive_threshold: u16,
-    ctx: &HealthActionContext,
-) -> bool {
-    let crap_only_needs_complexity_reduction = crap_only && !full_coverage_can_clear_crap;
-    let cognitive_floor = max_cognitive_threshold / 2;
-    let near_cyclomatic_threshold = crap_only
-        && cyclomatic > 0
-        && cyclomatic >= max_cyclomatic_threshold.saturating_sub(ctx.crap_refactor_band)
-        && cognitive >= cognitive_floor;
-    !crap_only || crap_only_needs_complexity_reduction || near_cyclomatic_threshold
+    ctx: &'a HealthActionContext,
+}
+
+fn should_add_refactor_action(input: RefactorActionDecision<'_>) -> bool {
+    let crap_only_needs_complexity_reduction =
+        input.crap_only && !input.full_coverage_can_clear_crap;
+    let cognitive_floor = input.max_cognitive_threshold / 2;
+    let near_cyclomatic_threshold = input.crap_only
+        && input.cyclomatic > 0
+        && input.cyclomatic
+            >= input
+                .max_cyclomatic_threshold
+                .saturating_sub(input.ctx.crap_refactor_band)
+        && input.cognitive >= cognitive_floor;
+    !input.crap_only || crap_only_needs_complexity_reduction || near_cyclomatic_threshold
 }
 
 fn build_refactor_action(
