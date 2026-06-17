@@ -3217,16 +3217,16 @@ fn prepare_health_section_targets(
     opts: &HealthOptions<'_>,
     input: &HealthTargetSectionInput<'_>,
 ) -> (Vec<RefactoringTarget>, Option<TargetThresholds>, f64) {
-    compute_filtered_targets(
+    compute_filtered_targets(FilteredTargetInput {
         opts,
-        input.score_output,
-        input.file_scores,
-        input.hotspots,
-        input.loaded_baseline,
-        input.config,
-        input.diff_index,
-        input.dupes_report,
-    )
+        score_output: input.score_output,
+        file_scores_slice: input.file_scores,
+        hotspots: input.hotspots,
+        loaded_baseline: input.loaded_baseline,
+        config: input.config,
+        diff_index: input.diff_index,
+        dupes_report: input.dupes_report,
+    })
 }
 
 struct HealthTimingInput {
@@ -4094,32 +4094,32 @@ fn compute_filtered_hotspots(
     )
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "target filtering coordinates independent health scope inputs"
-)]
+struct FilteredTargetInput<'a> {
+    opts: &'a HealthOptions<'a>,
+    score_output: Option<&'a scoring::FileScoreOutput>,
+    file_scores_slice: &'a [FileHealthScore],
+    hotspots: &'a [HotspotEntry],
+    loaded_baseline: Option<&'a HealthBaselineData>,
+    config: &'a ResolvedConfig,
+    diff_index: Option<&'a crate::report::ci::diff_filter::DiffIndex>,
+    dupes_report: Option<&'a fallow_core::duplicates::DuplicationReport>,
+}
+
 fn compute_filtered_targets(
-    opts: &HealthOptions<'_>,
-    score_output: Option<&scoring::FileScoreOutput>,
-    file_scores_slice: &[FileHealthScore],
-    hotspots: &[HotspotEntry],
-    loaded_baseline: Option<&HealthBaselineData>,
-    config: &ResolvedConfig,
-    diff_index: Option<&crate::report::ci::diff_filter::DiffIndex>,
-    dupes_report: Option<&fallow_core::duplicates::DuplicationReport>,
+    input: FilteredTargetInput<'_>,
 ) -> (Vec<RefactoringTarget>, Option<TargetThresholds>, f64) {
     let t = Instant::now();
     let (mut targets, target_thresholds) = compute_targets(
-        opts,
-        score_output,
-        file_scores_slice,
-        hotspots,
-        loaded_baseline,
-        &config.root,
-        dupes_report,
+        input.opts,
+        input.score_output,
+        input.file_scores_slice,
+        input.hotspots,
+        input.loaded_baseline,
+        &input.config.root,
+        input.dupes_report,
     );
-    if let Some(diff_index) = diff_index {
-        filter_refactoring_targets_by_diff(&mut targets, diff_index, &config.root);
+    if let Some(diff_index) = input.diff_index {
+        filter_refactoring_targets_by_diff(&mut targets, diff_index, &input.config.root);
     }
     (
         targets,
