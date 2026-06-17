@@ -1,4 +1,5 @@
 use super::helpers::*;
+use crate::analyze::unused_deps::UnusedCategoryInput;
 
 #[test]
 fn collect_unused_empty_deps_returns_empty() {
@@ -16,15 +17,15 @@ fn collect_unused_empty_deps_returns_empty() {
         check_known_tooling: false,
         check_plugin_tooling: true,
     };
-    let result = collect_unused_for_category(
-        vec![],
-        &category,
-        &shared,
-        |_| false,
-        |_| Vec::new(),
-        Path::new("/pkg.json"),
-        None,
-    );
+    let result = collect_unused_for_category(UnusedCategoryInput {
+        dep_names: vec![],
+        category: &category,
+        shared: &shared,
+        is_used: &|_| false,
+        used_in_workspaces: &|_| Vec::new(),
+        pkg_path: Path::new("/pkg.json"),
+        pkg_content: None,
+    });
     assert!(result.is_empty());
 }
 
@@ -45,15 +46,15 @@ fn collect_unused_all_used_returns_empty() {
         check_plugin_tooling: false,
     };
     let deps = vec!["react".to_string(), "lodash".to_string()];
-    let result = collect_unused_for_category(
-        deps,
-        &category,
-        &shared,
-        |_| true,
-        |_| Vec::new(),
-        Path::new("/pkg.json"),
-        None,
-    );
+    let result = collect_unused_for_category(UnusedCategoryInput {
+        dep_names: deps,
+        category: &category,
+        shared: &shared,
+        is_used: &|_| true,
+        used_in_workspaces: &|_| Vec::new(),
+        pkg_path: Path::new("/pkg.json"),
+        pkg_content: None,
+    });
     assert!(result.is_empty());
 }
 
@@ -78,15 +79,15 @@ fn collect_unused_some_unused_are_flagged() {
         "lodash".to_string(),
         "axios".to_string(),
     ];
-    let result = collect_unused_for_category(
-        deps,
-        &category,
-        &shared,
-        |dep| dep == "react",
-        |_| Vec::new(),
-        Path::new("/project/package.json"),
-        None,
-    );
+    let result = collect_unused_for_category(UnusedCategoryInput {
+        dep_names: deps,
+        category: &category,
+        shared: &shared,
+        is_used: &|dep| dep == "react",
+        used_in_workspaces: &|_| Vec::new(),
+        pkg_path: Path::new("/project/package.json"),
+        pkg_content: None,
+    });
     assert_eq!(result.len(), 2);
     assert!(result.iter().any(|d| d.package_name == "lodash"));
     assert!(result.iter().any(|d| d.package_name == "axios"));
@@ -114,15 +115,15 @@ fn collect_unused_implicit_filter_skips_react_dom() {
         check_plugin_tooling: false,
     };
     let deps = vec!["react-dom".to_string(), "lodash".to_string()];
-    let result = collect_unused_for_category(
-        deps,
-        &category,
-        &shared,
-        |_| false,
-        |_| Vec::new(),
-        Path::new("/pkg.json"),
-        None,
-    );
+    let result = collect_unused_for_category(UnusedCategoryInput {
+        dep_names: deps,
+        category: &category,
+        shared: &shared,
+        is_used: &|_| false,
+        used_in_workspaces: &|_| Vec::new(),
+        pkg_path: Path::new("/pkg.json"),
+        pkg_content: None,
+    });
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].package_name, "lodash");
 }
@@ -144,15 +145,15 @@ fn collect_unused_implicit_filter_disabled_keeps_react_dom() {
         check_plugin_tooling: false,
     };
     let deps = vec!["react-dom".to_string()];
-    let result = collect_unused_for_category(
-        deps,
-        &category,
-        &shared,
-        |_| false,
-        |_| Vec::new(),
-        Path::new("/pkg.json"),
-        None,
-    );
+    let result = collect_unused_for_category(UnusedCategoryInput {
+        dep_names: deps,
+        category: &category,
+        shared: &shared,
+        is_used: &|_| false,
+        used_in_workspaces: &|_| Vec::new(),
+        pkg_path: Path::new("/pkg.json"),
+        pkg_content: None,
+    });
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].package_name, "react-dom");
 }
@@ -174,15 +175,15 @@ fn collect_unused_known_tooling_filter_skips_jest() {
         check_plugin_tooling: false,
     };
     let deps = vec!["jest".to_string(), "my-lib".to_string()];
-    let result = collect_unused_for_category(
-        deps,
-        &category,
-        &shared,
-        |_| false,
-        |_| Vec::new(),
-        Path::new("/pkg.json"),
-        None,
-    );
+    let result = collect_unused_for_category(UnusedCategoryInput {
+        dep_names: deps,
+        category: &category,
+        shared: &shared,
+        is_used: &|_| false,
+        used_in_workspaces: &|_| Vec::new(),
+        pkg_path: Path::new("/pkg.json"),
+        pkg_content: None,
+    });
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].package_name, "my-lib");
 }
@@ -210,15 +211,15 @@ fn collect_unused_plugin_tooling_filter() {
         check_plugin_tooling: true,
     };
     let deps = vec!["my-runtime".to_string(), "other".to_string()];
-    let result = collect_unused_for_category(
-        deps,
-        &category,
-        &shared,
-        |_| false,
-        |_| Vec::new(),
-        Path::new("/pkg.json"),
-        None,
-    );
+    let result = collect_unused_for_category(UnusedCategoryInput {
+        dep_names: deps,
+        category: &category,
+        shared: &shared,
+        is_used: &|_| false,
+        used_in_workspaces: &|_| Vec::new(),
+        pkg_path: Path::new("/pkg.json"),
+        pkg_content: None,
+    });
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].package_name, "other");
 }
@@ -246,15 +247,15 @@ fn collect_unused_plugin_tooling_disabled_keeps_dep() {
         check_plugin_tooling: false,
     };
     let deps = vec!["my-runtime".to_string()];
-    let result = collect_unused_for_category(
-        deps,
-        &category,
-        &shared,
-        |_| false,
-        |_| Vec::new(),
-        Path::new("/pkg.json"),
-        None,
-    );
+    let result = collect_unused_for_category(UnusedCategoryInput {
+        dep_names: deps,
+        category: &category,
+        shared: &shared,
+        is_used: &|_| false,
+        used_in_workspaces: &|_| Vec::new(),
+        pkg_path: Path::new("/pkg.json"),
+        pkg_content: None,
+    });
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].package_name, "my-runtime");
 }

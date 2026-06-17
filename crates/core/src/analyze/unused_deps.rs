@@ -211,36 +211,47 @@ fn shared_dep_sets<'a>(
 ///
 /// Filters `dep_names` against usage data and category-specific rules, returning
 /// `UnusedDependency` entries for deps that are unused.
-pub fn collect_unused_for_category(
-    dep_names: Vec<String>,
-    category: &DepCategoryConfig,
-    shared: &SharedDepSets<'_>,
-    is_used: impl Fn(&str) -> bool,
-    used_in_workspaces: impl Fn(&str) -> Vec<PathBuf>,
-    pkg_path: &Path,
-    pkg_content: Option<&str>,
-) -> Vec<UnusedDependency> {
-    dep_names
+pub struct UnusedCategoryInput<'a> {
+    pub dep_names: Vec<String>,
+    pub category: &'a DepCategoryConfig,
+    pub shared: &'a SharedDepSets<'a>,
+    pub is_used: &'a dyn Fn(&str) -> bool,
+    pub used_in_workspaces: &'a dyn Fn(&str) -> Vec<PathBuf>,
+    pub pkg_path: &'a Path,
+    pub pkg_content: Option<&'a str>,
+}
+
+pub fn collect_unused_for_category(input: UnusedCategoryInput<'_>) -> Vec<UnusedDependency> {
+    input
+        .dep_names
         .into_iter()
-        .filter(|dep| !is_used(dep))
-        .filter(|dep| !shared.script_used.contains(dep.as_str()))
-        .filter(|dep| !category.check_implicit || !is_implicit_dependency(dep))
+        .filter(|dep| !(input.is_used)(dep))
+        .filter(|dep| !input.shared.script_used.contains(dep.as_str()))
+        .filter(|dep| !input.category.check_implicit || !is_implicit_dependency(dep))
         .filter(|dep| {
-            !category.check_known_tooling || !crate::plugins::is_known_tooling_dependency(dep)
+            !input.category.check_known_tooling || !crate::plugins::is_known_tooling_dependency(dep)
         })
         .filter(|dep| {
-            !category.check_plugin_tooling || !shared.plugin_tooling.contains(dep.as_str())
+            !input.category.check_plugin_tooling
+                || !input.shared.plugin_tooling.contains(dep.as_str())
         })
-        .filter(|dep| !shared.plugin_referenced.contains(dep.as_str()))
-        .filter(|dep| !shared.package_plugin_referenced.contains(dep.as_str()))
-        .filter(|dep| !shared.ignore_deps.contains(dep.as_str()))
+        .filter(|dep| !input.shared.plugin_referenced.contains(dep.as_str()))
+        .filter(|dep| {
+            !input
+                .shared
+                .package_plugin_referenced
+                .contains(dep.as_str())
+        })
+        .filter(|dep| !input.shared.ignore_deps.contains(dep.as_str()))
         .map(|dep| {
-            let line = pkg_content.map_or(1, |c| find_dep_line_in_json(c, &dep));
-            let used_in_workspaces = used_in_workspaces(&dep);
+            let line = input
+                .pkg_content
+                .map_or(1, |c| find_dep_line_in_json(c, &dep));
+            let used_in_workspaces = (input.used_in_workspaces)(&dep);
             UnusedDependency {
                 package_name: dep,
-                location: category.location.clone(),
-                path: pkg_path.to_path_buf(),
+                location: input.category.location.clone(),
+                path: input.pkg_path.to_path_buf(),
                 line,
                 used_in_workspaces,
             }
@@ -425,35 +436,35 @@ pub fn find_unused_dependencies(
     let is_used_globally = |dep: &str| used_packages.contains(dep) || root_peer_used.contains(dep);
     let no_workspace_context = |_dep: &str| Vec::new();
 
-    let mut unused_deps = collect_unused_for_category(
-        pkg.production_dependency_names(),
-        &prod_category(),
-        &shared,
-        is_used_globally,
-        no_workspace_context,
-        &root_pkg_path,
-        root_pkg_content.as_deref(),
-    );
+    let mut unused_deps = collect_unused_for_category(UnusedCategoryInput {
+        dep_names: pkg.production_dependency_names(),
+        category: &prod_category(),
+        shared: &shared,
+        is_used: &is_used_globally,
+        used_in_workspaces: &no_workspace_context,
+        pkg_path: &root_pkg_path,
+        pkg_content: root_pkg_content.as_deref(),
+    });
 
-    let mut unused_dev_deps = collect_unused_for_category(
-        pkg.dev_dependency_names(),
-        &dev_category(),
-        &shared,
-        is_used_globally,
-        no_workspace_context,
-        &root_pkg_path,
-        root_pkg_content.as_deref(),
-    );
+    let mut unused_dev_deps = collect_unused_for_category(UnusedCategoryInput {
+        dep_names: pkg.dev_dependency_names(),
+        category: &dev_category(),
+        shared: &shared,
+        is_used: &is_used_globally,
+        used_in_workspaces: &no_workspace_context,
+        pkg_path: &root_pkg_path,
+        pkg_content: root_pkg_content.as_deref(),
+    });
 
-    let mut unused_optional_deps = collect_unused_for_category(
-        pkg.optional_dependency_names(),
-        &optional_category(),
-        &shared,
-        is_used_globally,
-        no_workspace_context,
-        &root_pkg_path,
-        root_pkg_content.as_deref(),
-    );
+    let mut unused_optional_deps = collect_unused_for_category(UnusedCategoryInput {
+        dep_names: pkg.optional_dependency_names(),
+        category: &optional_category(),
+        shared: &shared,
+        is_used: &is_used_globally,
+        used_in_workspaces: &no_workspace_context,
+        pkg_path: &root_pkg_path,
+        pkg_content: root_pkg_content.as_deref(),
+    });
 
     let root_flagged: FxHashSet<String> = unused_deps
         .iter()
@@ -613,33 +624,33 @@ fn collect_workspace_unused_categories(
     let is_used_in_workspace = |dep: &str| usage.is_used_in_workspace(dep);
     let used_in_workspaces = |dep: &str| usage.used_in_other_workspaces(dep);
 
-    let prod = collect_unused_for_category(
-        ws_pkg.production_dependency_names(),
-        &prod_category(),
-        ws_shared,
-        is_used_in_workspace,
-        used_in_workspaces,
-        ws_pkg_path,
-        Some(ws_pkg_content),
-    );
-    let dev = collect_unused_for_category(
-        ws_pkg.dev_dependency_names(),
-        &dev_category(),
-        ws_shared,
-        is_used_in_workspace,
-        used_in_workspaces,
-        ws_pkg_path,
-        Some(ws_pkg_content),
-    );
-    let optional = collect_unused_for_category(
-        ws_pkg.optional_dependency_names(),
-        &optional_category(),
-        ws_shared,
-        is_used_in_workspace,
-        used_in_workspaces,
-        ws_pkg_path,
-        Some(ws_pkg_content),
-    );
+    let prod = collect_unused_for_category(UnusedCategoryInput {
+        dep_names: ws_pkg.production_dependency_names(),
+        category: &prod_category(),
+        shared: ws_shared,
+        is_used: &is_used_in_workspace,
+        used_in_workspaces: &used_in_workspaces,
+        pkg_path: ws_pkg_path,
+        pkg_content: Some(ws_pkg_content),
+    });
+    let dev = collect_unused_for_category(UnusedCategoryInput {
+        dep_names: ws_pkg.dev_dependency_names(),
+        category: &dev_category(),
+        shared: ws_shared,
+        is_used: &is_used_in_workspace,
+        used_in_workspaces: &used_in_workspaces,
+        pkg_path: ws_pkg_path,
+        pkg_content: Some(ws_pkg_content),
+    });
+    let optional = collect_unused_for_category(UnusedCategoryInput {
+        dep_names: ws_pkg.optional_dependency_names(),
+        category: &optional_category(),
+        shared: ws_shared,
+        is_used: &is_used_in_workspace,
+        used_in_workspaces: &used_in_workspaces,
+        pkg_path: ws_pkg_path,
+        pkg_content: Some(ws_pkg_content),
+    });
 
     (prod, dev, optional)
 }
