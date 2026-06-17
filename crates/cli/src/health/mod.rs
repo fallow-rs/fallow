@@ -4110,15 +4110,7 @@ fn compute_filtered_targets(
     input: FilteredTargetInput<'_>,
 ) -> (Vec<RefactoringTarget>, Option<TargetThresholds>, f64) {
     let t = Instant::now();
-    let (mut targets, target_thresholds) = compute_targets(
-        input.opts,
-        input.score_output,
-        input.file_scores_slice,
-        input.hotspots,
-        input.loaded_baseline,
-        &input.config.root,
-        input.dupes_report,
-    );
+    let (mut targets, target_thresholds) = compute_targets(&input);
     if let Some(diff_index) = input.diff_index {
         filter_refactoring_targets_by_diff(&mut targets, diff_index, &input.config.root);
     }
@@ -4689,33 +4681,29 @@ fn compute_filtered_file_scores(input: FileScoreInput<'_>) -> Result<FileScoreRe
 
 /// Compute refactoring targets when requested, applying baseline and top filters.
 fn compute_targets(
-    opts: &HealthOptions<'_>,
-    score_output: Option<&scoring::FileScoreOutput>,
-    file_scores_slice: &[FileHealthScore],
-    hotspots: &[HotspotEntry],
-    loaded_baseline: Option<&HealthBaselineData>,
-    config_root: &std::path::Path,
-    dupes_report: Option<&fallow_core::duplicates::DuplicationReport>,
+    input: &FilteredTargetInput<'_>,
 ) -> (Vec<RefactoringTarget>, Option<TargetThresholds>) {
-    if !opts.targets {
+    if !input.opts.targets {
         return (Vec::new(), None);
     }
-    let Some(output) = score_output else {
+    let Some(output) = input.score_output else {
         return (Vec::new(), None);
     };
-    let clone_siblings = dupes_report.map_or_else(rustc_hash::FxHashMap::default, |report| {
-        targets::build_clone_sibling_evidence(report)
-    });
+    let clone_siblings = input
+        .dupes_report
+        .map_or_else(rustc_hash::FxHashMap::default, |report| {
+            targets::build_clone_sibling_evidence(report)
+        });
     let target_aux = TargetAuxData::from_output(output, &clone_siblings);
     let (mut tgts, thresholds) =
-        compute_refactoring_targets(file_scores_slice, &target_aux, hotspots);
-    if let Some(baseline) = loaded_baseline {
-        tgts = filter_new_health_targets(tgts, baseline, config_root);
+        compute_refactoring_targets(input.file_scores_slice, &target_aux, input.hotspots);
+    if let Some(baseline) = input.loaded_baseline {
+        tgts = filter_new_health_targets(tgts, baseline, &input.config.root);
     }
-    if let Some(ref effort) = opts.effort {
+    if let Some(ref effort) = input.opts.effort {
         tgts.retain(|t| t.effort == *effort);
     }
-    if let Some(top) = opts.top {
+    if let Some(top) = input.opts.top {
         tgts.truncate(top);
     }
     (tgts, Some(thresholds))
