@@ -68,6 +68,27 @@ const IGNORE_CATALOG_REFERENCES_VALUE_SCHEMA: &str = "https://raw.githubusercont
 /// misconfigured-override findings.
 const IGNORE_DEPENDENCY_OVERRIDES_VALUE_SCHEMA: &str = "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencyOverrides/items";
 
+fn manual_framework_fix(kind: FixActionType, description: &str, note: &str) -> IssueAction {
+    IssueAction::Fix(FixAction {
+        kind,
+        auto_fixable: false,
+        description: description.to_string(),
+        note: Some(note.to_string()),
+        available_in_catalogs: None,
+        suggested_target: None,
+    })
+}
+
+fn suppress_line(comment: &str) -> IssueAction {
+    IssueAction::SuppressLine(SuppressLineAction {
+        kind: SuppressLineKind::SuppressLine,
+        auto_fixable: false,
+        description: "Suppress with an inline comment above the line".to_string(),
+        comment: comment.to_string(),
+        scope: None,
+    })
+}
+
 /// Wire-shape envelope for an [`UnusedFile`] finding. The bare finding
 /// flattens in via `#[serde(flatten)]`, with a typed `actions` array
 /// populated at construction time and the audit-pass `introduced` flag
@@ -895,7 +916,8 @@ impl MisplacedDirectiveFinding {
 
 /// Wire-shape envelope for an [`UnprovidedInject`] finding. There is no safe
 /// auto-fix: the fix is binary but judgement-bearing (add a `provide` for the
-/// key, or delete the dead inject). The only action is a line-level suppress.
+/// key, or delete the dead inject). Actions are manual remediation guidance
+/// plus a line-level suppress.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnprovidedInjectFinding {
@@ -912,18 +934,18 @@ pub struct UnprovidedInjectFinding {
 }
 
 impl UnprovidedInjectFinding {
-    /// Build the wrapper from a raw [`UnprovidedInject`]. Emits only a
-    /// line-level suppress action: there is no safe auto-fix because the fix
-    /// (provide the key or remove the inject) is a human decision.
+    /// Build the wrapper from a raw [`UnprovidedInject`]. Emits a manual fix
+    /// action plus a line-level suppress.
     #[must_use]
     pub fn with_actions(inject: UnprovidedInject) -> Self {
-        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
-            kind: SuppressLineKind::SuppressLine,
-            auto_fixable: false,
-            description: "Suppress with an inline comment above the line".to_string(),
-            comment: "// fallow-ignore-next-line unprovided-inject".to_string(),
-            scope: None,
-        })];
+        let actions = vec![
+            manual_framework_fix(
+                FixActionType::ProvideInject,
+                "Provide this injected key, or remove the inject / getContext call",
+                "Manual review required: dependency-injection keys can be provided by framework wiring, tests, or package consumers outside this project.",
+            ),
+            suppress_line("// fallow-ignore-next-line unprovided-inject"),
+        ];
         Self {
             inject,
             actions,
@@ -934,7 +956,8 @@ impl UnprovidedInjectFinding {
 
 /// Wire-shape envelope for an [`UnusedServerAction`] finding. There is no safe
 /// auto-fix: the fix is binary but judgement-bearing (wire the action up to a
-/// consumer, or delete it). The only action is a line-level suppress.
+/// consumer, or delete it). Actions are manual remediation guidance plus a
+/// line-level suppress.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedServerActionFinding {
@@ -951,18 +974,18 @@ pub struct UnusedServerActionFinding {
 }
 
 impl UnusedServerActionFinding {
-    /// Build the wrapper from a raw [`UnusedServerAction`]. Emits only a
-    /// line-level suppress action: there is no safe auto-fix because the fix
-    /// (wire the action to a consumer or remove it) is a human decision.
+    /// Build the wrapper from a raw [`UnusedServerAction`]. Emits a manual fix
+    /// action plus a line-level suppress.
     #[must_use]
     pub fn with_actions(action: UnusedServerAction) -> Self {
-        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
-            kind: SuppressLineKind::SuppressLine,
-            auto_fixable: false,
-            description: "Suppress with an inline comment above the line".to_string(),
-            comment: "// fallow-ignore-next-line unused-server-action".to_string(),
-            scope: None,
-        })];
+        let actions = vec![
+            manual_framework_fix(
+                FixActionType::WireServerAction,
+                "Wire the server action to a caller or form action, or remove it",
+                "Manual review required: server actions may still be POST-able by action id or invoked reflectively outside the static project graph.",
+            ),
+            suppress_line("// fallow-ignore-next-line unused-server-action"),
+        ];
         Self {
             action,
             actions,
@@ -973,7 +996,8 @@ impl UnusedServerActionFinding {
 
 /// Wire-shape envelope for an [`UnusedLoadDataKey`] finding. There is no safe
 /// auto-fix: a `load()` fetch can have side effects, so deleting the key is a
-/// human call. The only action is a line-level suppress.
+/// human call. Actions are manual remediation guidance plus a line-level
+/// suppress.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedLoadDataKeyFinding {
@@ -990,18 +1014,18 @@ pub struct UnusedLoadDataKeyFinding {
 }
 
 impl UnusedLoadDataKeyFinding {
-    /// Build the wrapper from a raw [`UnusedLoadDataKey`]. Emits only a
-    /// line-level suppress action: there is no safe auto-fix because a load
-    /// fetch can have side effects, so deleting the key is a human decision.
+    /// Build the wrapper from a raw [`UnusedLoadDataKey`]. Emits a manual fix
+    /// action plus a line-level suppress.
     #[must_use]
     pub fn with_actions(key: UnusedLoadDataKey) -> Self {
-        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
-            kind: SuppressLineKind::SuppressLine,
-            auto_fixable: false,
-            description: "Suppress with an inline comment above the line".to_string(),
-            comment: "// fallow-ignore-next-line unused-load-data-key".to_string(),
-            scope: None,
-        })];
+        let actions = vec![
+            manual_framework_fix(
+                FixActionType::UseLoadData,
+                "Read this load data key from the route UI, or remove it from the load return",
+                "Manual review required: load functions can perform real server or database work, so verify side effects before deleting the producer.",
+            ),
+            suppress_line("// fallow-ignore-next-line unused-load-data-key"),
+        ];
         Self {
             key,
             actions,
@@ -1012,8 +1036,8 @@ impl UnusedLoadDataKeyFinding {
 
 /// Wire-shape envelope for an [`UnrenderedComponent`] finding. There is no safe
 /// auto-fix: the fix is binary but judgement-bearing (render the component
-/// somewhere, or delete the dead component). The only action is a line-level
-/// suppress.
+/// somewhere, or delete the dead component). Actions are manual remediation
+/// guidance plus a line-level suppress.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnrenderedComponentFinding {
@@ -1030,18 +1054,18 @@ pub struct UnrenderedComponentFinding {
 }
 
 impl UnrenderedComponentFinding {
-    /// Build the wrapper from a raw [`UnrenderedComponent`]. Emits only a
-    /// line-level suppress action: there is no safe auto-fix because the fix
-    /// (render the component or remove it) is a human decision.
+    /// Build the wrapper from a raw [`UnrenderedComponent`]. Emits a manual
+    /// fix action plus a line-level suppress.
     #[must_use]
     pub fn with_actions(component: UnrenderedComponent) -> Self {
-        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
-            kind: SuppressLineKind::SuppressLine,
-            auto_fixable: false,
-            description: "Suppress with an inline comment above the line".to_string(),
-            comment: "// fallow-ignore-next-line unrendered-component".to_string(),
-            scope: None,
-        })];
+        let actions = vec![
+            manual_framework_fix(
+                FixActionType::RenderComponent,
+                "Render the reachable component from project code, or remove it",
+                "Manual review required: exported library components and dynamic render registries can be intentionally reachable without static template usage.",
+            ),
+            suppress_line("// fallow-ignore-next-line unrendered-component"),
+        ];
         Self {
             component,
             actions,
@@ -1052,8 +1076,8 @@ impl UnrenderedComponentFinding {
 
 /// Wire-shape envelope for an [`UnusedComponentProp`] finding. There is no safe
 /// auto-fix: removing a declared prop is judgement-bearing (the prop may be part
-/// of a deliberately-stable public component API). The only action is a
-/// line-level suppress at the prop declaration.
+/// of a deliberately-stable public component API). Actions are manual
+/// remediation guidance plus a line-level suppress at the prop declaration.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedComponentPropFinding {
@@ -1070,18 +1094,18 @@ pub struct UnusedComponentPropFinding {
 }
 
 impl UnusedComponentPropFinding {
-    /// Build the wrapper from a raw [`UnusedComponentProp`]. Emits only a
-    /// line-level suppress action: there is no safe auto-fix because removing a
-    /// prop is a human decision (it may be part of a stable component API).
+    /// Build the wrapper from a raw [`UnusedComponentProp`]. Emits a manual
+    /// fix action plus a line-level suppress.
     #[must_use]
     pub fn with_actions(prop: UnusedComponentProp) -> Self {
-        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
-            kind: SuppressLineKind::SuppressLine,
-            auto_fixable: false,
-            description: "Suppress with an inline comment above the line".to_string(),
-            comment: "// fallow-ignore-next-line unused-component-prop".to_string(),
-            scope: None,
-        })];
+        let actions = vec![
+            manual_framework_fix(
+                FixActionType::UseComponentProp,
+                "Use the declared prop in the component, or remove it from the component API",
+                "Manual review required: public component APIs can intentionally keep stable props for external consumers.",
+            ),
+            suppress_line("// fallow-ignore-next-line unused-component-prop"),
+        ];
         Self {
             prop,
             actions,
@@ -1092,8 +1116,8 @@ impl UnusedComponentPropFinding {
 
 /// Wire-shape envelope for an [`UnusedComponentEmit`] finding. There is no safe
 /// auto-fix: removing a declared emit is judgement-bearing (the event may be
-/// part of a deliberately-stable public component API). The only action is a
-/// line-level suppress at the emit declaration.
+/// part of a deliberately-stable public component API). Actions are manual
+/// remediation guidance plus a line-level suppress at the emit declaration.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedComponentEmitFinding {
@@ -1110,18 +1134,18 @@ pub struct UnusedComponentEmitFinding {
 }
 
 impl UnusedComponentEmitFinding {
-    /// Build the wrapper from a raw [`UnusedComponentEmit`]. Emits only a
-    /// line-level suppress action: there is no safe auto-fix because removing an
-    /// emit is a human decision (it may be part of a stable component API).
+    /// Build the wrapper from a raw [`UnusedComponentEmit`]. Emits a manual
+    /// fix action plus a line-level suppress.
     #[must_use]
     pub fn with_actions(emit: UnusedComponentEmit) -> Self {
-        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
-            kind: SuppressLineKind::SuppressLine,
-            auto_fixable: false,
-            description: "Suppress with an inline comment above the line".to_string(),
-            comment: "// fallow-ignore-next-line unused-component-emit".to_string(),
-            scope: None,
-        })];
+        let actions = vec![
+            manual_framework_fix(
+                FixActionType::EmitComponentEvent,
+                "Emit the declared event from the component, or remove it from the component API",
+                "Manual review required: public component APIs can intentionally keep stable events for external listeners.",
+            ),
+            suppress_line("// fallow-ignore-next-line unused-component-emit"),
+        ];
         Self {
             emit,
             actions,
@@ -1133,8 +1157,8 @@ impl UnusedComponentEmitFinding {
 /// Wire-shape envelope for an [`UnusedSvelteEvent`] finding. There is no safe
 /// auto-fix: removing a dispatched event is judgement-bearing (the event may be
 /// part of a deliberately-stable public component API, or a listener may be
-/// added later). The only action is a line-level suppress at the `dispatch`
-/// call.
+/// added later). Actions are manual remediation guidance plus a line-level
+/// suppress at the `dispatch` call.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedSvelteEventFinding {
@@ -1151,19 +1175,18 @@ pub struct UnusedSvelteEventFinding {
 }
 
 impl UnusedSvelteEventFinding {
-    /// Build the wrapper from a raw [`UnusedSvelteEvent`]. Emits only a
-    /// line-level suppress action: there is no safe auto-fix because removing a
-    /// dispatched event is a human decision (it may be part of a stable
-    /// component API, or a listener may be wired up later).
+    /// Build the wrapper from a raw [`UnusedSvelteEvent`]. Emits a manual fix
+    /// action plus a line-level suppress.
     #[must_use]
     pub fn with_actions(event: UnusedSvelteEvent) -> Self {
-        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
-            kind: SuppressLineKind::SuppressLine,
-            auto_fixable: false,
-            description: "Suppress with an inline comment above the line".to_string(),
-            comment: "// fallow-ignore-next-line unused-svelte-event".to_string(),
-            scope: None,
-        })];
+        let actions = vec![
+            manual_framework_fix(
+                FixActionType::WireSvelteEvent,
+                "Add or forward a listener for this custom event, or remove the dispatch",
+                "Manual review required: public Svelte component APIs can intentionally dispatch events for package consumers outside this project.",
+            ),
+            suppress_line("// fallow-ignore-next-line unused-svelte-event"),
+        ];
         Self {
             event,
             actions,
@@ -2491,6 +2514,13 @@ mod position_0_invariants {
                 FixActionType::MoveToServerModule => "move-to-server-module",
                 FixActionType::SplitMixedBarrel => "split-mixed-barrel",
                 FixActionType::HoistDirective => "hoist-directive",
+                FixActionType::WireServerAction => "wire-server-action",
+                FixActionType::ProvideInject => "provide-inject",
+                FixActionType::UseLoadData => "use-load-data",
+                FixActionType::RenderComponent => "render-component",
+                FixActionType::UseComponentProp => "use-component-prop",
+                FixActionType::EmitComponentEvent => "emit-component-event",
+                FixActionType::WireSvelteEvent => "wire-svelte-event",
                 FixActionType::ResolveRouteCollision => "resolve-route-collision",
                 FixActionType::ResolveDynamicSegmentNameConflict => {
                     "resolve-dynamic-segment-name-conflict"
@@ -2500,6 +2530,144 @@ mod position_0_invariants {
             IssueAction::SuppressFile(_) => "suppress-file",
             IssueAction::AddToConfig(_) => "add-to-config",
         }
+    }
+
+    fn assert_manual_fix_then_suppress(
+        actions: &[IssueAction],
+        primary_type: &str,
+        suppress_comment: &str,
+    ) {
+        assert_eq!(actions.len(), 2);
+        assert_eq!(action_type(&actions[0]), primary_type);
+        let IssueAction::Fix(primary) = &actions[0] else {
+            panic!("position-0 should be a manual fix action");
+        };
+        assert!(!primary.auto_fixable);
+        assert!(primary.note.is_some());
+        assert_eq!(action_type(&actions[1]), "suppress-line");
+        let IssueAction::SuppressLine(suppress) = &actions[1] else {
+            panic!("position-1 should be a suppress-line action");
+        };
+        assert_eq!(suppress.comment, suppress_comment);
+    }
+
+    #[test]
+    fn unprovided_inject_primary_action_is_provide_inject() {
+        let finding = UnprovidedInjectFinding::with_actions(UnprovidedInject {
+            path: PathBuf::from("src/context.ts"),
+            key_name: "userKey".to_string(),
+            framework: "svelte".to_string(),
+            line: 7,
+            col: 12,
+        });
+
+        assert_manual_fix_then_suppress(
+            &finding.actions,
+            "provide-inject",
+            "// fallow-ignore-next-line unprovided-inject",
+        );
+    }
+
+    #[test]
+    fn unused_server_action_primary_action_is_wire_server_action() {
+        let finding = UnusedServerActionFinding::with_actions(UnusedServerAction {
+            path: PathBuf::from("app/actions.ts"),
+            action_name: "saveDraft".to_string(),
+            line: 3,
+            col: 13,
+        });
+
+        assert_manual_fix_then_suppress(
+            &finding.actions,
+            "wire-server-action",
+            "// fallow-ignore-next-line unused-server-action",
+        );
+    }
+
+    #[test]
+    fn unused_load_data_key_primary_action_is_use_load_data() {
+        let finding = UnusedLoadDataKeyFinding::with_actions(UnusedLoadDataKey {
+            path: PathBuf::from("src/routes/+page.server.ts"),
+            key_name: "profile".to_string(),
+            line: 12,
+            col: 6,
+            route_dir: Some("src/routes".to_string()),
+        });
+
+        assert_manual_fix_then_suppress(
+            &finding.actions,
+            "use-load-data",
+            "// fallow-ignore-next-line unused-load-data-key",
+        );
+    }
+
+    #[test]
+    fn unrendered_component_primary_action_is_render_component() {
+        let finding = UnrenderedComponentFinding::with_actions(UnrenderedComponent {
+            path: PathBuf::from("src/components/EmptyState.vue"),
+            component_name: "EmptyState".to_string(),
+            framework: "vue".to_string(),
+            reachable_via: None,
+            line: 1,
+            col: 0,
+        });
+
+        assert_manual_fix_then_suppress(
+            &finding.actions,
+            "render-component",
+            "// fallow-ignore-next-line unrendered-component",
+        );
+    }
+
+    #[test]
+    fn unused_component_prop_primary_action_is_use_component_prop() {
+        let finding = UnusedComponentPropFinding::with_actions(UnusedComponentProp {
+            path: PathBuf::from("src/components/Card.vue"),
+            component_name: "Card".to_string(),
+            prop_name: "variant".to_string(),
+            line: 5,
+            col: 10,
+        });
+
+        assert_manual_fix_then_suppress(
+            &finding.actions,
+            "use-component-prop",
+            "// fallow-ignore-next-line unused-component-prop",
+        );
+    }
+
+    #[test]
+    fn unused_component_emit_primary_action_is_emit_component_event() {
+        let finding = UnusedComponentEmitFinding::with_actions(UnusedComponentEmit {
+            path: PathBuf::from("src/components/Picker.vue"),
+            component_name: "Picker".to_string(),
+            emit_name: "focus".to_string(),
+            line: 6,
+            col: 14,
+        });
+
+        assert_manual_fix_then_suppress(
+            &finding.actions,
+            "emit-component-event",
+            "// fallow-ignore-next-line unused-component-emit",
+        );
+    }
+
+    #[test]
+    fn unused_svelte_event_primary_action_is_wire_svelte_event() {
+        let finding = UnusedSvelteEventFinding::with_actions(UnusedSvelteEvent {
+            path: PathBuf::from("src/Dialog.svelte"),
+            component_name: "Dialog".to_string(),
+            event_name: "closed".to_string(),
+            line: 19,
+            col: 8,
+        });
+
+        assert_manual_fix_then_suppress(
+            &finding.actions,
+            "wire-svelte-event",
+            "// fallow-ignore-next-line unused-svelte-event",
+        );
     }
 
     #[test]

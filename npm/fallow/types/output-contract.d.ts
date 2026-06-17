@@ -172,7 +172,7 @@ export type IssueAction = (FixAction | SuppressLineAction | SuppressFileAction |
  * Discriminant string for [`FixAction`]. Kebab-case per the JSON output
  * contract.
  */
-export type FixActionType = ("remove-export" | "delete-file" | "remove-dependency" | "move-dependency" | "remove-enum-member" | "remove-class-member" | "resolve-import" | "install-dependency" | "remove-duplicate" | "move-to-dev" | "refactor-cycle" | "refactor-re-export-cycle" | "refactor-boundary" | "export-type" | "remove-catalog-entry" | "remove-empty-catalog-group" | "update-catalog-reference" | "add-catalog-entry" | "remove-catalog-reference" | "remove-dependency-override" | "fix-dependency-override" | "resolve-policy-violation" | "move-to-server-module" | "split-mixed-barrel" | "hoist-directive" | "resolve-route-collision" | "resolve-dynamic-segment-name-conflict")
+export type FixActionType = ("remove-export" | "delete-file" | "remove-dependency" | "move-dependency" | "remove-enum-member" | "remove-class-member" | "resolve-import" | "install-dependency" | "remove-duplicate" | "move-to-dev" | "refactor-cycle" | "refactor-re-export-cycle" | "refactor-boundary" | "export-type" | "remove-catalog-entry" | "remove-empty-catalog-group" | "update-catalog-reference" | "add-catalog-entry" | "remove-catalog-reference" | "remove-dependency-override" | "fix-dependency-override" | "resolve-policy-violation" | "move-to-server-module" | "split-mixed-barrel" | "hoist-directive" | "wire-server-action" | "provide-inject" | "use-load-data" | "render-component" | "use-component-prop" | "emit-component-event" | "wire-svelte-event" | "resolve-route-collision" | "resolve-dynamic-segment-name-conflict")
 /**
  * Singleton discriminant for [`SuppressLineAction`].
  */
@@ -2780,7 +2780,8 @@ introduced?: (AuditIntroduced | null)
 /**
  * Wire-shape envelope for an [`UnprovidedInject`] finding. There is no safe
  * auto-fix: the fix is binary but judgement-bearing (add a `provide` for the
- * key, or delete the dead inject). The only action is a line-level suppress.
+ * key, or delete the dead inject). Actions are manual remediation guidance
+ * plus a line-level suppress.
  */
 export interface UnprovidedInjectFinding {
 /**
@@ -2817,8 +2818,8 @@ introduced?: (AuditIntroduced | null)
 /**
  * Wire-shape envelope for an [`UnrenderedComponent`] finding. There is no safe
  * auto-fix: the fix is binary but judgement-bearing (render the component
- * somewhere, or delete the dead component). The only action is a line-level
- * suppress.
+ * somewhere, or delete the dead component). Actions are manual remediation
+ * guidance plus a line-level suppress.
  */
 export interface UnrenderedComponentFinding {
 /**
@@ -2950,8 +2951,8 @@ introduced?: (AuditIntroduced | null)
 /**
  * Wire-shape envelope for an [`UnusedComponentProp`] finding. There is no safe
  * auto-fix: removing a declared prop is judgement-bearing (the prop may be part
- * of a deliberately-stable public component API). The only action is a
- * line-level suppress at the prop declaration.
+ * of a deliberately-stable public component API). Actions are manual
+ * remediation guidance plus a line-level suppress at the prop declaration.
  */
 export interface UnusedComponentPropFinding {
 /**
@@ -2988,8 +2989,8 @@ introduced?: (AuditIntroduced | null)
 /**
  * Wire-shape envelope for an [`UnusedComponentEmit`] finding. There is no safe
  * auto-fix: removing a declared emit is judgement-bearing (the event may be
- * part of a deliberately-stable public component API). The only action is a
- * line-level suppress at the emit declaration.
+ * part of a deliberately-stable public component API). Actions are manual
+ * remediation guidance plus a line-level suppress at the emit declaration.
  */
 export interface UnusedComponentEmitFinding {
 /**
@@ -3103,8 +3104,8 @@ introduced?: (AuditIntroduced | null)
  * Wire-shape envelope for an [`UnusedSvelteEvent`] finding. There is no safe
  * auto-fix: removing a dispatched event is judgement-bearing (the event may be
  * part of a deliberately-stable public component API, or a listener may be
- * added later). The only action is a line-level suppress at the `dispatch`
- * call.
+ * added later). Actions are manual remediation guidance plus a line-level
+ * suppress at the `dispatch` call.
  */
 export interface UnusedSvelteEventFinding {
 /**
@@ -3141,7 +3142,8 @@ introduced?: (AuditIntroduced | null)
 /**
  * Wire-shape envelope for an [`UnusedServerAction`] finding. There is no safe
  * auto-fix: the fix is binary but judgement-bearing (wire the action up to a
- * consumer, or delete it). The only action is a line-level suppress.
+ * consumer, or delete it). Actions are manual remediation guidance plus a
+ * line-level suppress.
  */
 export interface UnusedServerActionFinding {
 /**
@@ -3174,7 +3176,8 @@ introduced?: (AuditIntroduced | null)
 /**
  * Wire-shape envelope for an [`UnusedLoadDataKey`] finding. There is no safe
  * auto-fix: a `load()` fetch can have side effects, so deleting the key is a
- * human call. The only action is a line-level suppress.
+ * human call. Actions are manual remediation guidance plus a line-level
+ * suppress.
  */
 export interface UnusedLoadDataKeyFinding {
 /**

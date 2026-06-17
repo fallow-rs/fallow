@@ -685,6 +685,12 @@ expression: redact_version(&json_str)
       "col": 2,
       "actions": [
         {
+          "type": "provide-inject",
+          "auto_fixable": false,
+          "description": "Provide this injected key, or remove the inject / getContext call",
+          "note": "Manual review required: dependency-injection keys can be provided by framework wiring, tests, or package consumers outside this project."
+        },
+        {
           "type": "suppress-line",
           "auto_fixable": false,
           "description": "Suppress with an inline comment above the line",
@@ -737,6 +743,12 @@ expression: redact_version(&json_str)
       "line": 6,
       "col": 2,
       "actions": [
+        {
+          "type": "wire-svelte-event",
+          "auto_fixable": false,
+          "description": "Add or forward a listener for this custom event, or remove the dispatch",
+          "note": "Manual review required: public Svelte component APIs can intentionally dispatch events for package consumers outside this project."
+        },
         {
           "type": "suppress-line",
           "auto_fixable": false,

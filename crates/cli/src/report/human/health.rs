@@ -1,4 +1,5 @@
 use crate::report::sink::outln;
+use std::borrow::Cow;
 use std::fmt::Write as _;
 use std::path::Path;
 use std::time::Duration;
@@ -1423,12 +1424,15 @@ fn render_findings(
         push_finding_file_header(lines, finding, root, &mut last_file);
         push_finding_metric_rows(lines, finding, report, root);
     }
+    let scope = if has_synthetic_complexity_entries(report) {
+        "Functions and synthetic template or component entries"
+    } else {
+        "Functions"
+    };
     lines.push(format!(
         "  {}",
-        format!(
-            "Functions exceeding cyclomatic, cognitive, or CRAP thresholds ({DOCS_HEALTH}#complexity-metrics)"
-        )
-        .dimmed()
+        format!("{scope} exceeding cyclomatic, cognitive, or CRAP thresholds ({DOCS_HEALTH}#complexity-metrics)")
+            .dimmed()
     ));
     append_suppression_hints(lines, report);
     if report.findings.len() < report.summary.functions_above_threshold {
@@ -1442,19 +1446,36 @@ fn render_findings(
 }
 
 fn push_findings_header(lines: &mut Vec<String>, report: &crate::health_types::HealthReport) {
+    let subject = if has_synthetic_complexity_entries(report) {
+        "High complexity findings"
+    } else {
+        "High complexity functions"
+    };
     let title = if report.findings.len() < report.summary.functions_above_threshold {
         format!(
-            "High complexity functions ({} shown, {} total)",
+            "{subject} ({} shown, {} total)",
             report.findings.len(),
             report.summary.functions_above_threshold
         )
     } else {
-        format!(
-            "High complexity functions ({})",
-            report.summary.functions_above_threshold
-        )
+        format!("{subject} ({})", report.summary.functions_above_threshold)
     };
     lines.push(format!("{} {}", "\u{25cf}".red(), title.red().bold()));
+}
+
+fn has_synthetic_complexity_entries(report: &crate::health_types::HealthReport) -> bool {
+    report
+        .findings
+        .iter()
+        .any(|finding| matches!(finding.name.as_str(), "<template>" | "<component>"))
+}
+
+fn display_complexity_entry_name(name: &str) -> Cow<'_, str> {
+    match name {
+        "<template>" => Cow::Borrowed("<template> (template complexity)"),
+        "<component>" => Cow::Borrowed("<component> (component rollup)"),
+        _ => Cow::Borrowed(name),
+    }
 }
 
 fn push_finding_file_header(
@@ -1480,7 +1501,7 @@ fn push_finding_metric_rows(
     lines.push(format!(
         "    {} {}{}{}",
         format!(":{}", finding.line).dimmed(),
-        finding.name.bold(),
+        display_complexity_entry_name(&finding.name).as_ref().bold(),
         finding_severity_tag(finding),
         finding_generated_tag(finding),
     ));
@@ -2361,6 +2382,53 @@ mod tests {
         assert!(text.contains("25 cyclomatic"));
         assert!(text.contains("30 cognitive"));
         assert!(text.contains("80 lines"));
+    }
+
+    #[test]
+    fn health_findings_label_template_complexity_entries() {
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            findings: vec![
+                crate::health_types::ComplexityViolation {
+                    path: root.join("src/Card.vue"),
+                    name: "<template>".to_string(),
+                    line: 1,
+                    col: 0,
+                    cyclomatic: 8,
+                    cognitive: 12,
+                    line_count: 40,
+                    param_count: 0,
+                    react_hook_count: 0,
+                    react_jsx_max_depth: 0,
+                    react_prop_count: 0,
+                    react_hook_profile: None,
+                    exceeded: crate::health_types::ExceededThreshold::Cognitive,
+                    severity: crate::health_types::FindingSeverity::Moderate,
+                    crap: None,
+                    coverage_pct: None,
+                    coverage_tier: None,
+                    coverage_source: None,
+                    inherited_from: None,
+                    component_rollup: None,
+                    contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
+                }
+                .into(),
+            ],
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 1,
+                functions_analyzed: 1,
+                functions_above_threshold: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let lines = build_health_human_lines(&report, &root);
+        let text = plain(&lines);
+        assert!(text.contains("High complexity findings (1)"));
+        assert!(text.contains("<template> (template complexity)"));
+        assert!(text.contains("Functions and synthetic template or component entries"));
     }
 
     #[test]

@@ -6441,6 +6441,41 @@
         },
         {
           "type": "string",
+          "const": "wire-server-action",
+          "description": "Wire a server action to a project consumer or remove the unused action\nexport (manual; used by unused-server-action findings)."
+        },
+        {
+          "type": "string",
+          "const": "provide-inject",
+          "description": "Add a provider for an injected key or remove the dead inject call\n(manual; used by unprovided-inject findings)."
+        },
+        {
+          "type": "string",
+          "const": "use-load-data",
+          "description": "Use a SvelteKit load-data key from the route UI or remove the unused\nreturned key (manual; used by unused-load-data-key findings)."
+        },
+        {
+          "type": "string",
+          "const": "render-component",
+          "description": "Render a reachable component from project code or remove the component\n(manual; used by unrendered-component findings)."
+        },
+        {
+          "type": "string",
+          "const": "use-component-prop",
+          "description": "Use a declared component prop or remove it from the component API\n(manual; used by unused-component-prop findings)."
+        },
+        {
+          "type": "string",
+          "const": "emit-component-event",
+          "description": "Emit a declared component event or remove it from the component API\n(manual; used by unused-component-emit findings)."
+        },
+        {
+          "type": "string",
+          "const": "wire-svelte-event",
+          "description": "Add or forward a Svelte custom-event listener, or remove the dispatch\n(manual; used by unused-svelte-event findings)."
+        },
+        {
+          "type": "string",
           "const": "resolve-route-collision",
           "description": "Resolve a Next.js App Router route collision by moving or merging one of\nthe files that own the same URL (manual; suppressing a guaranteed build\nerror is never the right fix, so this is the primary action)."
         },
@@ -13210,7 +13245,7 @@
         "col",
         "actions"
       ],
-      "description": "Wire-shape envelope for an [`UnprovidedInject`] finding. There is no safe\nauto-fix: the fix is binary but judgement-bearing (add a `provide` for the\nkey, or delete the dead inject). The only action is a line-level suppress."
+      "description": "Wire-shape envelope for an [`UnprovidedInject`] finding. There is no safe\nauto-fix: the fix is binary but judgement-bearing (add a `provide` for the\nkey, or delete the dead inject). Actions are manual remediation guidance\nplus a line-level suppress."
     },
     "RouteCollisionFinding": {
       "type": "object",
@@ -13387,7 +13422,7 @@
         "col",
         "actions"
       ],
-      "description": "Wire-shape envelope for an [`UnrenderedComponent`] finding. There is no safe\nauto-fix: the fix is binary but judgement-bearing (render the component\nsomewhere, or delete the dead component). The only action is a line-level\nsuppress."
+      "description": "Wire-shape envelope for an [`UnrenderedComponent`] finding. There is no safe\nauto-fix: the fix is binary but judgement-bearing (render the component\nsomewhere, or delete the dead component). Actions are manual remediation\nguidance plus a line-level suppress."
     },
     "UnusedComponentPropFinding": {
       "type": "object",
@@ -13439,7 +13474,7 @@
         "col",
         "actions"
       ],
-      "description": "Wire-shape envelope for an [`UnusedComponentProp`] finding. There is no safe\nauto-fix: removing a declared prop is judgement-bearing (the prop may be part\nof a deliberately-stable public component API). The only action is a\nline-level suppress at the prop declaration."
+      "description": "Wire-shape envelope for an [`UnusedComponentProp`] finding. There is no safe\nauto-fix: removing a declared prop is judgement-bearing (the prop may be part\nof a deliberately-stable public component API). Actions are manual\nremediation guidance plus a line-level suppress at the prop declaration."
     },
     "UnusedComponentEmitFinding": {
       "type": "object",
@@ -13491,7 +13526,7 @@
         "col",
         "actions"
       ],
-      "description": "Wire-shape envelope for an [`UnusedComponentEmit`] finding. There is no safe\nauto-fix: removing a declared emit is judgement-bearing (the event may be\npart of a deliberately-stable public component API). The only action is a\nline-level suppress at the emit declaration."
+      "description": "Wire-shape envelope for an [`UnusedComponentEmit`] finding. There is no safe\nauto-fix: removing a declared emit is judgement-bearing (the event may be\npart of a deliberately-stable public component API). Actions are manual\nremediation guidance plus a line-level suppress at the emit declaration."
     },
     "UnusedServerActionFinding": {
       "type": "object",
@@ -13538,7 +13573,7 @@
         "col",
         "actions"
       ],
-      "description": "Wire-shape envelope for an [`UnusedServerAction`] finding. There is no safe\nauto-fix: the fix is binary but judgement-bearing (wire the action up to a\nconsumer, or delete it). The only action is a line-level suppress."
+      "description": "Wire-shape envelope for an [`UnusedServerAction`] finding. There is no safe\nauto-fix: the fix is binary but judgement-bearing (wire the action up to a\nconsumer, or delete it). Actions are manual remediation guidance plus a\nline-level suppress."
     },
     "UnusedLoadDataKeyFinding": {
       "type": "object",
@@ -13592,7 +13627,7 @@
         "col",
         "actions"
       ],
-      "description": "Wire-shape envelope for an [`UnusedLoadDataKey`] finding. There is no safe\nauto-fix: a `load()` fetch can have side effects, so deleting the key is a\nhuman call. The only action is a line-level suppress."
+      "description": "Wire-shape envelope for an [`UnusedLoadDataKey`] finding. There is no safe\nauto-fix: a `load()` fetch can have side effects, so deleting the key is a\nhuman call. Actions are manual remediation guidance plus a line-level\nsuppress."
     },
     "CssAnalyticsReport": {
       "type": "object",
@@ -14706,7 +14741,7 @@
         "col",
         "actions"
       ],
-      "description": "Wire-shape envelope for an [`UnusedSvelteEvent`] finding. There is no safe\nauto-fix: removing a dispatched event is judgement-bearing (the event may be\npart of a deliberately-stable public component API, or a listener may be\nadded later). The only action is a line-level suppress at the `dispatch`\ncall."
+      "description": "Wire-shape envelope for an [`UnusedSvelteEvent`] finding. There is no safe\nauto-fix: removing a dispatched event is judgement-bearing (the event may be\npart of a deliberately-stable public component API, or a listener may be\nadded later). Actions are manual remediation guidance plus a line-level\nsuppress at the `dispatch` call."
     },
     "PropDrillingChainFinding": {
       "type": "object",

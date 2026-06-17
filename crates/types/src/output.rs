@@ -194,6 +194,27 @@ pub enum FixActionType {
     /// leading prologue of the file (manual; used by misplaced-directive
     /// findings).
     HoistDirective,
+    /// Wire a server action to a project consumer or remove the unused action
+    /// export (manual; used by unused-server-action findings).
+    WireServerAction,
+    /// Add a provider for an injected key or remove the dead inject call
+    /// (manual; used by unprovided-inject findings).
+    ProvideInject,
+    /// Use a SvelteKit load-data key from the route UI or remove the unused
+    /// returned key (manual; used by unused-load-data-key findings).
+    UseLoadData,
+    /// Render a reachable component from project code or remove the component
+    /// (manual; used by unrendered-component findings).
+    RenderComponent,
+    /// Use a declared component prop or remove it from the component API
+    /// (manual; used by unused-component-prop findings).
+    UseComponentProp,
+    /// Emit a declared component event or remove it from the component API
+    /// (manual; used by unused-component-emit findings).
+    EmitComponentEvent,
+    /// Add or forward a Svelte custom-event listener, or remove the dispatch
+    /// (manual; used by unused-svelte-event findings).
+    WireSvelteEvent,
     /// Resolve a Next.js App Router route collision by moving or merging one of
     /// the files that own the same URL (manual; suppressing a guaranteed build
     /// error is never the right fix, so this is the primary action).

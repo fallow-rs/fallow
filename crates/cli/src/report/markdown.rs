@@ -1,4 +1,5 @@
 use crate::report::sink::{out, outln};
+use std::borrow::Cow;
 use std::fmt::Write;
 use std::path::Path;
 
@@ -15,6 +16,14 @@ use super::{normalize_uri, plural, relative_path};
 /// Escape backticks in user-controlled strings to prevent breaking markdown code spans.
 fn escape_backticks(s: &str) -> String {
     s.replace('`', "\\`")
+}
+
+fn display_complexity_entry_name(name: &str) -> Cow<'_, str> {
+    match name {
+        "<template>" => Cow::Borrowed("<template> (template complexity)"),
+        "<component>" => Cow::Borrowed("<component> (component rollup)"),
+        _ => Cow::Borrowed(name),
+    }
 }
 
 pub(super) fn print_markdown(results: &AnalysisResults, root: &Path) {
@@ -1528,21 +1537,30 @@ fn write_findings_section(
 
     let count = report.summary.functions_above_threshold;
     let shown = report.findings.len();
+    let has_synthetic = report
+        .findings
+        .iter()
+        .any(|finding| matches!(finding.name.as_str(), "<template>" | "<component>"));
+    let subject = if has_synthetic {
+        "high complexity finding"
+    } else {
+        "high complexity function"
+    };
     if shown < count {
         let _ = write!(
             out,
-            "## Fallow: {count} high complexity function{} ({shown} shown)\n\n",
+            "## Fallow: {count} {subject}{} ({shown} shown)\n\n",
             plural(count),
         );
     } else {
-        let _ = write!(
-            out,
-            "## Fallow: {count} high complexity function{}\n\n",
-            plural(count),
-        );
+        let _ = write!(out, "## Fallow: {count} {subject}{}\n\n", plural(count));
     }
 
-    out.push_str("| File | Function | Severity | Cyclomatic | Cognitive | CRAP | Lines |\n");
+    let name_header = if has_synthetic { "Entry" } else { "Function" };
+    let _ = writeln!(
+        out,
+        "| File | {name_header} | Severity | Cyclomatic | Cognitive | CRAP | Lines |"
+    );
     out.push_str("|:-----|:---------|:---------|:-----------|:----------|:-----|:------|\n");
 
     for finding in &report.findings {
@@ -1584,7 +1602,7 @@ fn write_findings_section(
             out,
             "| `{file_str}:{line}` | `{name}` | {severity_label} | {cyc}{cyc_marker} | {cog}{cog_marker} | {crap_cell} | {lines} |",
             line = finding.line,
-            name = escape_backticks(&finding.name),
+            name = escape_backticks(display_complexity_entry_name(&finding.name).as_ref()),
             cyc = finding.cyclomatic,
             cog = finding.cognitive,
             lines = finding.line_count,
@@ -2340,6 +2358,52 @@ mod tests {
         assert!(md.contains("30 **!**"));
         assert!(md.contains("| 80 |"));
         assert!(md.contains("| - |"));
+    }
+
+    #[test]
+    fn health_markdown_labels_template_complexity_entries() {
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            findings: vec![
+                crate::health_types::ComplexityViolation {
+                    path: root.join("src/Card.vue"),
+                    name: "<template>".to_string(),
+                    line: 1,
+                    col: 0,
+                    cyclomatic: 8,
+                    cognitive: 12,
+                    line_count: 40,
+                    param_count: 0,
+                    react_hook_count: 0,
+                    react_jsx_max_depth: 0,
+                    react_prop_count: 0,
+                    react_hook_profile: None,
+                    exceeded: crate::health_types::ExceededThreshold::Cognitive,
+                    severity: crate::health_types::FindingSeverity::Moderate,
+                    crap: None,
+                    coverage_pct: None,
+                    coverage_tier: None,
+                    coverage_source: None,
+                    inherited_from: None,
+                    component_rollup: None,
+                    contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
+                }
+                .into(),
+            ],
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 1,
+                functions_analyzed: 1,
+                functions_above_threshold: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let md = build_health_markdown(&report, &root);
+        assert!(md.contains("## Fallow: 1 high complexity finding\n"));
+        assert!(md.contains("| File | Entry |"));
+        assert!(md.contains("`<template> (template complexity)`"));
     }
 
     #[test]
