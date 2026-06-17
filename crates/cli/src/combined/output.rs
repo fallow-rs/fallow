@@ -772,3 +772,88 @@ fn build_combined_codeclimate_issues(
 pub(super) fn exit_code_to_u8(code: ExitCode) -> u8 {
     u8::from(code != ExitCode::SUCCESS)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::process::ExitCode;
+    use std::time::Duration;
+
+    use super::{
+        build_combined_codeclimate, combined_json_root, combined_machine_success,
+        emit_combined_json_output, exit_code_to_u8, insert_combined_dupes_json,
+        insert_combined_health_json, print_combined_codeclimate, print_combined_sarif,
+    };
+
+    #[test]
+    fn combined_machine_success_maps_success_to_zero_exit() {
+        assert_eq!(combined_machine_success(ExitCode::SUCCESS), Ok(Some(0)));
+    }
+
+    #[test]
+    fn combined_machine_success_preserves_output_error() {
+        let code = ExitCode::from(2);
+
+        assert_eq!(combined_machine_success(code), Err(code));
+    }
+
+    #[test]
+    fn exit_code_to_u8_collapses_non_success_codes() {
+        assert_eq!(exit_code_to_u8(ExitCode::SUCCESS), 0);
+        assert_eq!(exit_code_to_u8(ExitCode::from(1)), 1);
+        assert_eq!(exit_code_to_u8(ExitCode::from(2)), 1);
+    }
+
+    #[test]
+    fn combined_json_root_contains_stable_envelope_fields() {
+        let root = combined_json_root(Duration::from_millis(42)).expect("combined JSON root");
+
+        assert_eq!(
+            root.get("kind").and_then(serde_json::Value::as_str),
+            Some("combined")
+        );
+        assert_eq!(
+            root.get("elapsed_ms").and_then(serde_json::Value::as_u64),
+            Some(42)
+        );
+        assert!(root.get("schema_version").is_some());
+        assert!(root.get("version").is_some());
+    }
+
+    #[test]
+    fn empty_combined_codeclimate_output_is_an_empty_issue_list() {
+        assert_eq!(
+            build_combined_codeclimate(None, None, None),
+            serde_json::json!([])
+        );
+    }
+
+    #[test]
+    fn empty_combined_machine_printers_succeed() {
+        assert_eq!(print_combined_sarif(None, None, None), ExitCode::SUCCESS);
+        assert_eq!(
+            print_combined_codeclimate(None, None, None),
+            ExitCode::SUCCESS
+        );
+    }
+
+    #[test]
+    fn insert_empty_optional_sections_leaves_combined_map_unchanged() {
+        let mut combined = serde_json::Map::new();
+        insert_combined_dupes_json(&mut combined, None, std::path::Path::new("."))
+            .expect("empty dupes section should serialize");
+        insert_combined_health_json(&mut combined, None, ".")
+            .expect("empty health section should serialize");
+
+        assert!(combined.is_empty());
+    }
+
+    #[test]
+    fn emit_combined_json_output_can_attach_empty_meta() {
+        let combined = combined_json_root(Duration::ZERO).expect("combined JSON root");
+
+        assert_eq!(
+            emit_combined_json_output(combined, None, None, None, true),
+            ExitCode::SUCCESS
+        );
+    }
+}
