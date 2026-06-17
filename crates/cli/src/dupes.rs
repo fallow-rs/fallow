@@ -643,15 +643,15 @@ pub fn run_dupes(opts: &DupesOptions<'_>) -> ExitCode {
         Ok(r) => r,
         Err(code) => return code,
     };
-    print_dupes_result_with_grouping(
-        &result,
-        opts.quiet,
-        opts.explain,
-        resolver,
-        opts.summary,
-        true,
-        true,
-    )
+    print_dupes_result_with_grouping(DupesResultGroupingInput {
+        result: &result,
+        quiet: opts.quiet,
+        explain: opts.explain,
+        group_by: resolver,
+        summary: opts.summary,
+        summary_heading: true,
+        show_explain_tip: true,
+    })
 }
 
 /// Emit a stderr timing panel for `fallow dupes --performance`. Stays out of
@@ -710,33 +710,36 @@ fn print_dupes_performance(result: &DupesResult, output: OutputFormat) {
     }
 }
 
-fn print_dupes_result_with_grouping(
-    result: &DupesResult,
+struct DupesResultGroupingInput<'a> {
+    result: &'a DupesResult,
     quiet: bool,
     explain: bool,
     group_by: Option<report::OwnershipResolver>,
     summary: bool,
     summary_heading: bool,
     show_explain_tip: bool,
-) -> ExitCode {
+}
+
+fn print_dupes_result_with_grouping(input: DupesResultGroupingInput<'_>) -> ExitCode {
+    let result = input.result;
     let ctx = report::ReportContext {
         root: &result.config.root,
         rules: &result.config.rules,
         elapsed: result.elapsed,
-        quiet,
-        explain,
-        group_by,
+        quiet: input.quiet,
+        explain: input.explain,
+        group_by: input.group_by,
         top: None,
-        summary,
-        summary_heading,
-        show_explain_tip,
+        summary: input.summary,
+        summary_heading: input.summary_heading,
+        show_explain_tip: input.show_explain_tip,
         baseline_matched: None,
         config_fixable: false,
         skip_score_and_trend: false,
     };
-    print_default_ignore_note(result, quiet);
-    print_min_occurrences_note(result, quiet);
-    print_ignore_imports_note(result, quiet);
+    print_default_ignore_note(result, input.quiet);
+    print_min_occurrences_note(result, input.quiet);
+    print_ignore_imports_note(result, input.quiet);
     report::print_duplication_report(&result.report, &ctx, result.config.output)
 }
 
