@@ -60,6 +60,7 @@ export interface ComplexityOptions extends AnalysisOptions {
   ownership?: boolean;
   ownershipEmails?: OwnershipEmailMode;
   targets?: boolean;
+  css?: boolean;
   effort?: TargetEffort;
   score?: boolean;
   since?: string;

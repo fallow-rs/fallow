@@ -281,6 +281,7 @@ pub struct ComplexityOptions {
     pub ownership: bool,
     pub ownership_emails: Option<OwnershipEmailMode>,
     pub targets: bool,
+    pub css: bool,
     pub effort: Option<TargetEffort>,
     pub score: bool,
     pub since: Option<String>,
@@ -868,7 +869,7 @@ fn build_complexity_options<'a>(
         ownership: state.ownership,
         ownership_emails: options.ownership_emails.map(OwnershipEmailMode::to_config),
         targets: state.targets,
-        css: false,
+        css: options.css,
         force_full: state.force_full,
         score_only_output: state.score_only_output,
         enforce_coverage_gap_gate: true,
@@ -1565,6 +1566,44 @@ mod tests {
         // HealthOutput.report is `#[serde(flatten)]`, so its fields are top-level.
         assert!(json["summary"].is_object());
         assert!(json["findings"].is_array());
+    }
+
+    #[test]
+    fn compute_health_css_option_returns_css_analytics() {
+        let project = tempfile::tempdir().expect("temp dir");
+        let root = project.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"prog-css","main":"src/index.ts","dependencies":{"tailwindcss":"4.0.0"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("src/index.ts"),
+            "import './style.css';\nexport const ok = true;\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("src/style.css"),
+            r"
+@theme {
+  --color-brand: #0055cc;
+}
+
+.used { color: var(--color-brand); }
+",
+        )
+        .unwrap();
+
+        let json = compute_health(&ComplexityOptions {
+            analysis: analysis_at(root),
+            css: true,
+            ..ComplexityOptions::default()
+        })
+        .expect("CSS health analysis should succeed");
+
+        assert_eq!(json["kind"], "health");
+        assert!(json["css_analytics"].is_object());
     }
 
     #[test]

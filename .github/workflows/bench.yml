@@ -43,15 +43,20 @@ jobs:
       - name: Install cargo-codspeed
         uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # v2.81.11
         with:
-          tool: cargo-codspeed
+          tool: cargo-codspeed@4.7.0
 
       - name: Build benchmark
-        # Only run the analysis bench target. large_analysis contains larger
-        # synthetic project benchmarks that exceed the fast PR feedback budget.
-        run: cargo codspeed build -p fallow-core --bench analysis
+        # Keep PR feedback focused: core analysis plus programmatic command profiles.
+        # large_analysis stays out because it exceeds the fast benchmark budget.
+        run: |
+          cargo codspeed build -p fallow-core --bench analysis
+          cargo codspeed build -p fallow-benchmarks --bench programmatic_commands
 
       - name: Run benchmark
         uses: CodSpeedHQ/action@c145068895e045cc725ee76fcd2307624b65c3af # v4.17.5
         with:
           mode: simulation
-          run: cargo codspeed run -p fallow-core --bench analysis
+          run: |
+            set -euo pipefail
+            cargo codspeed run -p fallow-core --bench analysis
+            cargo codspeed run -p fallow-benchmarks --bench programmatic_commands

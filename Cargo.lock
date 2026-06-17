@@ -969,6 +969,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fallow-benchmarks"
+version = "2.98.0"
+dependencies = [
+ "codspeed-divan-compat",
+ "fallow-cli",
+ "tempfile",
+]
+
+[[package]]
 name = "fallow-cli"
 version = "2.98.0"
 dependencies = [

@@ -1,0 +1,22 @@
+[package]
+name = "fallow-benchmarks"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+publish = false
+description = "CodSpeed benchmark suites for fallow"
+
+[[bench]]
+name = "programmatic_commands"
+harness = false
+
+[dependencies]
+divan = { workspace = true }
+fallow-cli = { workspace = true }
+tempfile = { workspace = true }
+
+[lints]
+workspace = true
