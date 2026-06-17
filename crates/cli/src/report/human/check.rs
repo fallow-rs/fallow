@@ -294,15 +294,15 @@ fn build_human_lines_with_explain(
         max_grouped_files,
         total_issues,
     );
-    build_dependencies_section(
-        &mut lines,
+    build_dependencies_section(DependencySectionInput {
+        lines: &mut lines,
         results,
         root,
         rules,
         max_items,
         max_grouped_files,
         total_issues,
-    );
+    });
     build_structure_section(&mut lines, results, root, rules, total_issues);
     build_policy_section(&mut lines, results, root, rules, total_issues);
     build_maintenance_section(&mut lines, results, root, rules, total_issues);
@@ -747,32 +747,55 @@ fn build_unused_member_sections(
     });
 }
 
-fn build_dependencies_section(
-    lines: &mut Vec<String>,
-    results: &AnalysisResults,
-    root: &Path,
-    rules: &RulesConfig,
+struct DependencySectionInput<'a> {
+    lines: &'a mut Vec<String>,
+    results: &'a AnalysisResults,
+    root: &'a Path,
+    rules: &'a RulesConfig,
     max_items: usize,
     max_grouped_files: usize,
     total_issues: usize,
-) {
-    if !has_dependency_findings(results) {
+}
+
+fn build_dependencies_section(input: DependencySectionInput<'_>) {
+    if !has_dependency_findings(input.results) {
         return;
     }
-    push_category_header(lines, "Dependencies");
+    push_category_header(input.lines, "Dependencies");
 
-    push_package_dependency_sections(lines, results, root, rules, max_items, total_issues);
+    push_package_dependency_sections(
+        input.lines,
+        input.results,
+        input.root,
+        input.rules,
+        input.max_items,
+        input.total_issues,
+    );
     push_import_dependency_sections(ImportDependencySectionInput {
-        lines,
-        results,
-        root,
-        rules,
-        max_items,
-        max_grouped_files,
-        total_issues,
+        lines: input.lines,
+        results: input.results,
+        root: input.root,
+        rules: input.rules,
+        max_items: input.max_items,
+        max_grouped_files: input.max_grouped_files,
+        total_issues: input.total_issues,
     });
-    push_catalog_dependency_sections(lines, results, root, rules, max_items, total_issues);
-    push_dependency_override_sections(lines, results, root, rules, max_items, total_issues);
+    push_catalog_dependency_sections(
+        input.lines,
+        input.results,
+        input.root,
+        input.rules,
+        input.max_items,
+        input.total_issues,
+    );
+    push_dependency_override_sections(
+        input.lines,
+        input.results,
+        input.root,
+        input.rules,
+        input.max_items,
+        input.total_issues,
+    );
 }
 
 fn has_dependency_findings(results: &AnalysisResults) -> bool {
