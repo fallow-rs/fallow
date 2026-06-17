@@ -173,6 +173,7 @@ pub fn build_health_finding_actions(
     actions
 }
 
+#[derive(Clone, Copy)]
 struct RefactorActionDecision<'a> {
     crap_only: bool,
     full_coverage_can_clear_crap: bool,

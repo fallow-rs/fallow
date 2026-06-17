@@ -2081,7 +2081,7 @@ struct UnusedThemeTokenScanInput<'a> {
 }
 
 fn scan_unused_theme_tokens(
-    input: UnusedThemeTokenScanInput<'_>,
+    input: &mut UnusedThemeTokenScanInput<'_>,
 ) -> Vec<crate::health_types::UnusedThemeToken> {
     use crate::health_types::{CssCandidateAction, UnusedThemeToken};
 
@@ -2216,7 +2216,7 @@ struct MarkupCssCandidateInput<'a> {
     summary: &'a mut crate::health_types::CssAnalyticsSummary,
 }
 
-fn scan_markup_css_candidates(input: MarkupCssCandidateInput<'_>) -> MarkupCssCandidates {
+fn scan_markup_css_candidates(input: &mut MarkupCssCandidateInput<'_>) -> MarkupCssCandidates {
     MarkupCssCandidates {
         // Markup arbitrary-value scan (gated on the project using Tailwind).
         tailwind_arbitrary_values: scan_markup_tailwind_arbitrary_values(
@@ -2247,7 +2247,7 @@ fn scan_markup_css_candidates(input: MarkupCssCandidateInput<'_>) -> MarkupCssCa
         ),
         // Tailwind v4 @theme design tokens used by no utility / var() / @apply
         // anywhere (heavily gated: v4 + non-plugin + non-published + whole-scope).
-        unused_theme_tokens: scan_unused_theme_tokens(UnusedThemeTokenScanInput {
+        unused_theme_tokens: scan_unused_theme_tokens(&mut UnusedThemeTokenScanInput {
             tokens: input.tokens,
             files: input.files,
             config: input.config,
@@ -2428,7 +2428,7 @@ fn compute_css_analytics_report(
         unresolved_class_references,
         unreferenced_css_classes,
         unused_theme_tokens,
-    } = scan_markup_css_candidates(MarkupCssCandidateInput {
+    } = scan_markup_css_candidates(&mut MarkupCssCandidateInput {
         tokens: &tokens,
         files,
         config,
@@ -2593,6 +2593,7 @@ fn build_health_output_parts(
     }
 }
 
+#[derive(Clone, Copy)]
 struct HealthSupportingPartsInput<'a> {
     opts: &'a HealthOptions<'a>,
     build: &'a HealthOutputBuildInput<'a>,
@@ -3047,6 +3048,7 @@ struct ThresholdOverrideStateInput {
     dimension: ThresholdOverrideDimension,
 }
 
+#[derive(Clone, Copy)]
 struct HealthGroupingContextInput<'a> {
     opts: &'a HealthOptions<'a>,
     config: &'a ResolvedConfig,
@@ -3285,6 +3287,7 @@ fn build_health_result(input: HealthResultInput) -> HealthResult {
     }
 }
 
+#[derive(Clone, Copy)]
 struct HealthFindingsInput<'a> {
     opts: &'a HealthOptions<'a>,
     config: &'a ResolvedConfig,
@@ -3701,6 +3704,7 @@ fn prepare_shared_analysis_output(
         .map_err(|e| emit_error(&format!("analysis failed: {e}"), 2, opts.output))
 }
 
+#[derive(Clone, Copy)]
 struct RuntimeCoverageAnalysisScope<'a> {
     opts: &'a HealthOptions<'a>,
     config: &'a ResolvedConfig,
@@ -3938,6 +3942,7 @@ fn prepare_health_analysis_data(
 
 type FileScoresAndChurn = (FileScoreResult, f64, Option<hotspots::ChurnFetchResult>);
 
+#[derive(Clone, Copy)]
 struct FileScoresAndChurnInput<'a> {
     opts: &'a HealthOptions<'a>,
     config: &'a ResolvedConfig,
@@ -4095,6 +4100,7 @@ fn compute_filtered_hotspots(
     )
 }
 
+#[derive(Clone, Copy)]
 struct FilteredTargetInput<'a> {
     opts: &'a HealthOptions<'a>,
     score_output: Option<&'a scoring::FileScoreOutput>,
@@ -4417,6 +4423,7 @@ fn compute_health_score_metrics(
         .then(|| vital_signs::compute_health_score(vital_signs, total_files_scoped))
 }
 
+#[derive(Clone, Copy)]
 struct FilteredLargeFunctionInput<'a> {
     vital_signs: &'a crate::health_types::VitalSigns,
     modules: &'a [fallow_core::extract::ModuleInfo],

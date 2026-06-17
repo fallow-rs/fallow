@@ -132,7 +132,7 @@ pub fn find_policy_violations(
             continue;
         };
 
-        collect_banned_imports(PolicyCollectionInput {
+        collect_banned_imports(&mut PolicyCollectionInput {
             in_scope: &in_scope,
             module,
             node,
@@ -141,7 +141,7 @@ pub fn find_policy_violations(
             line_offsets_by_file,
             violations: &mut violations,
         });
-        collect_banned_calls(PolicyCollectionInput {
+        collect_banned_calls(&mut PolicyCollectionInput {
             in_scope: &in_scope,
             module,
             node,
@@ -213,7 +213,7 @@ struct PolicyCollectionInput<'a> {
     violations: &'a mut Vec<PolicyViolation>,
 }
 
-fn collect_banned_imports(input: PolicyCollectionInput<'_>) {
+fn collect_banned_imports(input: &mut PolicyCollectionInput<'_>) {
     for (_, rule) in input.in_scope {
         if rule.rule.kind != RulePackRuleKind::BannedImport {
             continue;
@@ -279,7 +279,7 @@ fn collect_banned_imports(input: PolicyCollectionInput<'_>) {
 /// Emit one finding per unique callee path matched by the first applicable
 /// `banned-call` rule (config order), mirroring the boundary forbidden-call
 /// first-pattern-wins behavior.
-fn collect_banned_calls(input: PolicyCollectionInput<'_>) {
+fn collect_banned_calls(input: &mut PolicyCollectionInput<'_>) {
     for callee_use in &input.module.callee_uses {
         let matched = input.in_scope.iter().find_map(|(_, rule)| {
             if rule.rule.kind != RulePackRuleKind::BannedCall {

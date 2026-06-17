@@ -249,7 +249,7 @@ pub fn find_unused_dependency_overrides(
     let mut findings = Vec::new();
     let yaml_path = config.root.join(PNPM_WORKSPACE_FILE);
     let json_path = config.root.join(ROOT_PACKAGE_JSON);
-    collect_unused_from_source(UnusedOverrideSourceInput {
+    collect_unused_from_source(&mut UnusedOverrideSourceInput {
         data: &state.workspace_yaml_data,
         source: DependencyOverrideSource::PnpmWorkspaceYaml,
         source_path: &yaml_path,
@@ -258,7 +258,7 @@ pub fn find_unused_dependency_overrides(
         ignore_rules: &config.compiled_ignore_dependency_overrides,
         findings: &mut findings,
     });
-    collect_unused_from_source(UnusedOverrideSourceInput {
+    collect_unused_from_source(&mut UnusedOverrideSourceInput {
         data: &state.package_json_data,
         source: DependencyOverrideSource::PnpmPackageJson,
         source_path: &json_path,
@@ -280,7 +280,7 @@ struct UnusedOverrideSourceInput<'a> {
     findings: &'a mut Vec<UnusedDependencyOverride>,
 }
 
-fn collect_unused_from_source(input: UnusedOverrideSourceInput<'_>) {
+fn collect_unused_from_source(input: &mut UnusedOverrideSourceInput<'_>) {
     for entry in &input.data.entries {
         let Some(parsed) = entry.parsed_key.as_ref() else {
             continue;

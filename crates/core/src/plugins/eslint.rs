@@ -137,7 +137,7 @@ fn extract_eslint_config(
     let parse_path: &Path = &parse_path_buf;
 
     add_eslint_import_dependencies(root, result, &parse_source, parse_path);
-    add_eslint_top_level_config(EslintConfigInput {
+    add_eslint_top_level_config(&mut EslintConfigInput {
         result,
         parse_source: &parse_source,
         parse_path,
@@ -146,7 +146,7 @@ fn extract_eslint_config(
         visited,
         depth,
     });
-    add_eslint_override_config(EslintConfigInput {
+    add_eslint_override_config(&mut EslintConfigInput {
         result,
         parse_source: &parse_source,
         parse_path,
@@ -199,7 +199,7 @@ struct EslintConfigInput<'a> {
     depth: usize,
 }
 
-fn add_eslint_top_level_config(input: EslintConfigInput<'_>) {
+fn add_eslint_top_level_config(input: &mut EslintConfigInput<'_>) {
     let plugins = config_parser::extract_config_shallow_strings(
         input.parse_source,
         input.parse_path,
@@ -248,7 +248,7 @@ fn add_eslint_top_level_config(input: EslintConfigInput<'_>) {
     }
 }
 
-fn add_eslint_override_config(input: EslintConfigInput<'_>) {
+fn add_eslint_override_config(input: &mut EslintConfigInput<'_>) {
     let override_parsers = config_parser::extract_config_array_nested_string_or_array(
         input.parse_source,
         input.parse_path,

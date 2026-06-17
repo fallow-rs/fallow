@@ -87,7 +87,7 @@ pub(super) fn apply_catalog_entry_fixes(
 
         let lines: Vec<&str> = content.split(meta.line_ending).collect();
 
-        let to_remove = collect_catalog_entry_removals(CatalogEntryRemovalInput {
+        let to_remove = collect_catalog_entry_removals(&mut CatalogEntryRemovalInput {
             file_entries: &file_entries,
             lines: &lines,
             preceding_comment_policy,
@@ -162,7 +162,7 @@ struct CatalogEntryRemovalInput<'a, 'b> {
 }
 
 fn collect_catalog_entry_removals<'a>(
-    input: CatalogEntryRemovalInput<'a, '_>,
+    input: &mut CatalogEntryRemovalInput<'a, '_>,
 ) -> Vec<CatalogRemoval<'a>> {
     let mut to_remove = Vec::new();
     for entry in input.file_entries {

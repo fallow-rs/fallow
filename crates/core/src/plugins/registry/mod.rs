@@ -94,6 +94,7 @@ impl PluginRegexValidationError {
     }
 }
 
+#[derive(Clone, Copy)]
 pub(crate) struct PluginRegexValidationErrorInput<'a> {
     pub(crate) plugin_name: &'a str,
     pub(crate) config_path: Option<&'a Path>,
@@ -469,7 +470,7 @@ impl PluginRegistry {
             Vec::new()
         };
 
-        resolve_plugin_config_files(PluginConfigResolutionInput {
+        resolve_plugin_config_files(&mut PluginConfigResolutionInput {
             config_matchers: &config_matchers,
             relative_files: &relative_files,
             config_search_roots,
@@ -611,7 +612,7 @@ impl PluginRegistry {
 
         let mut resolved_ws_plugins: FxHashSet<&str> = FxHashSet::default();
         for (plugin, matchers) in &workspace_matchers {
-            resolve_plugin_matching_files(PluginMatchingFilesInput {
+            resolve_plugin_matching_files(&mut PluginMatchingFilesInput {
                 plugin: *plugin,
                 matchers,
                 relative_files,
@@ -750,14 +751,14 @@ struct PluginConfigResolutionInput<'a> {
     regex_errors: &'a mut Vec<PluginRegexValidationError>,
 }
 
-fn resolve_plugin_config_files(input: PluginConfigResolutionInput<'_>) {
+fn resolve_plugin_config_files(input: &mut PluginConfigResolutionInput<'_>) {
     if input.config_matchers.is_empty() {
         return;
     }
 
     let mut resolved_plugins: FxHashSet<&str> = FxHashSet::default();
     for (plugin, matchers) in input.config_matchers {
-        resolve_plugin_matching_files(PluginMatchingFilesInput {
+        resolve_plugin_matching_files(&mut PluginMatchingFilesInput {
             plugin: *plugin,
             matchers,
             relative_files: input.relative_files,
@@ -795,7 +796,7 @@ struct PluginMatchingFilesInput<'plugins, 'data, 'state> {
     resolved_plugins: &'state mut FxHashSet<&'plugins str>,
 }
 
-fn resolve_plugin_matching_files(input: PluginMatchingFilesInput<'_, '_, '_>) {
+fn resolve_plugin_matching_files(input: &mut PluginMatchingFilesInput<'_, '_, '_>) {
     use rayon::prelude::*;
 
     let plugin_hits: Vec<&PathBuf> = input

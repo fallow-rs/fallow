@@ -2072,6 +2072,7 @@ fn run_member_detectors(input: MemberDetectorInput<'_>) -> AnalysisResults {
     results
 }
 
+#[derive(Clone, Copy)]
 struct DependencyDetectorInput<'a> {
     graph: &'a ModuleGraph,
     pkg: Option<&'a PackageJson>,
@@ -2156,6 +2157,7 @@ fn run_dependency_detectors(input: DependencyDetectorInput<'_>) -> AnalysisResul
     results
 }
 
+#[derive(Clone, Copy)]
 struct UnresolvedImportDetectorInput<'a> {
     resolved_modules: &'a [ResolvedModule],
     config: &'a ResolvedConfig,

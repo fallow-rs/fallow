@@ -271,7 +271,7 @@ fn apply_enum_member_file_fixes(
         new_lines.remove(idx);
     }
 
-    record_applied_enum_member_fixes(AppliedEnumMemberRecordInput {
+    record_applied_enum_member_fixes(&mut AppliedEnumMemberRecordInput {
         member_fixes,
         folded,
         folded_parents,
@@ -313,7 +313,7 @@ struct AppliedEnumMemberRecordInput<'a> {
     fixes: &'a mut Vec<serde_json::Value>,
 }
 
-fn record_applied_enum_member_fixes(input: AppliedEnumMemberRecordInput<'_>) {
+fn record_applied_enum_member_fixes(input: &mut AppliedEnumMemberRecordInput<'_>) {
     let target = input.path.display().to_string();
     for fix in input.member_fixes {
         if input.folded_parents.contains(fix.parent_name.as_str()) {

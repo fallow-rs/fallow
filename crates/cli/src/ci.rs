@@ -498,7 +498,7 @@ fn apply_github_reconcile(
     }
 
     for (index, operation) in operations.iter().enumerate() {
-        if let Err(failure) = apply_github_operation(GithubOperationInput {
+        if let Err(failure) = apply_github_operation(&mut GithubOperationInput {
             operation,
             agent: &agent,
             repo: &repo,
@@ -661,7 +661,7 @@ struct GithubOperationInput<'a> {
     result: &'a mut ApplyResult,
 }
 
-fn apply_github_operation(input: GithubOperationInput<'_>) -> Result<(), ApplyFailure> {
+fn apply_github_operation(input: &mut GithubOperationInput<'_>) -> Result<(), ApplyFailure> {
     match input.operation {
         GithubApplyOperation::Reply {
             fingerprint,
@@ -827,7 +827,7 @@ fn apply_gitlab_reconcile(
     }
 
     for (index, operation) in operations.iter().enumerate() {
-        if let Err(failure) = apply_gitlab_operation(GitlabOperationInput {
+        if let Err(failure) = apply_gitlab_operation(&mut GitlabOperationInput {
             operation,
             agent: &agent,
             encoded_project: &encoded_project,
@@ -958,7 +958,7 @@ struct GitlabOperationInput<'a> {
     result: &'a mut ApplyResult,
 }
 
-fn apply_gitlab_operation(input: GitlabOperationInput<'_>) -> Result<(), ApplyFailure> {
+fn apply_gitlab_operation(input: &mut GitlabOperationInput<'_>) -> Result<(), ApplyFailure> {
     match input.operation {
         GitlabApplyOperation::Note {
             fingerprint,

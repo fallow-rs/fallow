@@ -537,7 +537,7 @@ struct AngularTokenChainCreditInput<'a, 'b> {
     accessed_members: &'a mut FxHashMap<ExportKey, FxHashSet<String>>,
 }
 
-fn credit_angular_token_chain_member(input: AngularTokenChainCreditInput<'_, '_>) {
+fn credit_angular_token_chain_member(input: &mut AngularTokenChainCreditInput<'_, '_>) {
     let mut interface_names: Vec<&str> = vec![input.type_name];
     if let Some(export_keys) = input.local_to_export_keys.get(input.type_name) {
         for export_key in export_keys {
@@ -808,7 +808,7 @@ impl<'a> AngularTemplateChainContext<'a, '_> {
             let Some(type_name) = component.component_bindings.get(object) else {
                 continue;
             };
-            credit_angular_token_chain_member(AngularTokenChainCreditInput {
+            credit_angular_token_chain_member(&mut AngularTokenChainCreditInput {
                 graph: self.graph,
                 type_name,
                 member,

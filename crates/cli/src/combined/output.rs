@@ -408,6 +408,7 @@ fn print_failure_summary(
 }
 
 /// Print combined JSON output wrapping check, dupes, and health results.
+#[derive(Clone, Copy)]
 struct CombinedJsonPrintInput<'a> {
     check_result: Option<&'a CheckResult>,
     dupes_result: Option<&'a DupesResult>,

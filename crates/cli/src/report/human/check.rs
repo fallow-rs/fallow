@@ -285,7 +285,7 @@ fn build_human_lines_with_explain(
     let total_issues = results.total_issues();
     let mut lines = Vec::new();
 
-    build_unused_code_section(UnusedCodeSectionInput {
+    build_unused_code_section(&mut UnusedCodeSectionInput {
         lines: &mut lines,
         results,
         root,
@@ -294,7 +294,7 @@ fn build_human_lines_with_explain(
         max_grouped_files,
         total_issues,
     });
-    build_dependencies_section(DependencySectionInput {
+    build_dependencies_section(&mut DependencySectionInput {
         lines: &mut lines,
         results,
         root,
@@ -588,7 +588,7 @@ struct HumanPkgDepSectionInput<'a, T> {
     root: &'a Path,
 }
 
-fn push_human_pkg_dep_section<T: NamedPkgDep>(input: HumanPkgDepSectionInput<'_, T>) {
+fn push_human_pkg_dep_section<T: NamedPkgDep>(input: &mut HumanPkgDepSectionInput<'_, T>) {
     build_human_section_ex(
         input.lines,
         input.items,
@@ -620,7 +620,7 @@ struct UnusedCodeSectionInput<'a> {
     total_issues: usize,
 }
 
-fn build_unused_code_section(input: UnusedCodeSectionInput<'_>) {
+fn build_unused_code_section(input: &mut UnusedCodeSectionInput<'_>) {
     let unused_file_set: FxHashSet<&Path> = input
         .results
         .unused_files
@@ -778,7 +778,7 @@ struct DependencySectionInput<'a> {
     total_issues: usize,
 }
 
-fn build_dependencies_section(input: DependencySectionInput<'_>) {
+fn build_dependencies_section(input: &mut DependencySectionInput<'_>) {
     if !has_dependency_findings(input.results) {
         return;
     }
@@ -842,7 +842,7 @@ fn push_package_dependency_sections(
     max_items: usize,
     total_issues: usize,
 ) {
-    push_human_pkg_dep_section(HumanPkgDepSectionInput {
+    push_human_pkg_dep_section(&mut HumanPkgDepSectionInput {
         lines,
         items: &results.unused_dependencies,
         title: "Unused dependencies",
@@ -851,7 +851,7 @@ fn push_package_dependency_sections(
         total_issues,
         root,
     });
-    push_human_pkg_dep_section(HumanPkgDepSectionInput {
+    push_human_pkg_dep_section(&mut HumanPkgDepSectionInput {
         lines,
         items: &results.unused_dev_dependencies,
         title: "Unused devDependencies",
@@ -860,7 +860,7 @@ fn push_package_dependency_sections(
         total_issues,
         root,
     });
-    push_human_pkg_dep_section(HumanPkgDepSectionInput {
+    push_human_pkg_dep_section(&mut HumanPkgDepSectionInput {
         lines,
         items: &results.unused_optional_dependencies,
         title: "Unused optionalDependencies",
@@ -917,7 +917,7 @@ fn push_import_dependency_sections(input: ImportDependencySectionInput<'_>) {
         total_issues,
         |dep| vec![format!("  {}", dep.dep.package_name.bold())],
     );
-    push_human_pkg_dep_section(HumanPkgDepSectionInput {
+    push_human_pkg_dep_section(&mut HumanPkgDepSectionInput {
         lines,
         items: &results.type_only_dependencies,
         title: "Type-only dependencies (consider moving to devDependencies)",
@@ -926,7 +926,7 @@ fn push_import_dependency_sections(input: ImportDependencySectionInput<'_>) {
         total_issues,
         root,
     });
-    push_human_pkg_dep_section(HumanPkgDepSectionInput {
+    push_human_pkg_dep_section(&mut HumanPkgDepSectionInput {
         lines,
         items: &results.test_only_dependencies,
         title: "Test-only production dependencies (consider moving to devDependencies)",

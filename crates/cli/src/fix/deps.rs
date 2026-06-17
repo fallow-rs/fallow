@@ -20,7 +20,7 @@ pub(super) struct DependencyFixInput<'a> {
     pub(super) fixes: &'a mut Vec<serde_json::Value>,
 }
 
-pub(super) fn apply_dependency_fixes(input: DependencyFixInput<'_>) {
+pub(super) fn apply_dependency_fixes(input: &mut DependencyFixInput<'_>) {
     let _ = input.hashes; // see doc above
 
     if input.results.unused_dependencies.is_empty()
@@ -133,7 +133,7 @@ mod tests {
     ) -> bool {
         let mut plan = FixPlan::new();
         let hashes = CapturedHashes::default();
-        apply_dependency_fixes(DependencyFixInput {
+        apply_dependency_fixes(&mut DependencyFixInput {
             root,
             results,
             hashes: &hashes,

@@ -80,7 +80,7 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
     let mut fixes: Vec<serde_json::Value> = Vec::new();
     let mut plan = FixPlan::new();
 
-    apply_unused_export_fixes(FixApplicationInput {
+    apply_unused_export_fixes(&mut FixApplicationInput {
         root: opts.root,
         results: &results,
         file_hashes: &file_hashes,
@@ -90,7 +90,7 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
         fixes: &mut fixes,
     });
 
-    deps::apply_dependency_fixes(deps::DependencyFixInput {
+    deps::apply_dependency_fixes(&mut deps::DependencyFixInput {
         root: opts.root,
         results: &results,
         hashes: &file_hashes,
@@ -110,7 +110,7 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
         &mut fixes,
     );
 
-    apply_unused_enum_member_fixes(FixApplicationInput {
+    apply_unused_enum_member_fixes(&mut FixApplicationInput {
         root: opts.root,
         results: &results,
         file_hashes: &file_hashes,
@@ -208,7 +208,7 @@ struct FixApplicationInput<'a> {
     fixes: &'a mut Vec<serde_json::Value>,
 }
 
-fn apply_unused_export_fixes(input: FixApplicationInput<'_>) {
+fn apply_unused_export_fixes(input: &mut FixApplicationInput<'_>) {
     let mut exports_by_file: FxHashMap<PathBuf, Vec<&fallow_core::results::UnusedExport>> =
         FxHashMap::default();
     for finding in &input.results.unused_exports {
@@ -235,7 +235,7 @@ fn apply_unused_export_fixes(input: FixApplicationInput<'_>) {
     );
 }
 
-fn apply_unused_enum_member_fixes(input: FixApplicationInput<'_>) {
+fn apply_unused_enum_member_fixes(input: &mut FixApplicationInput<'_>) {
     if input.results.unused_enum_members.is_empty() {
         return;
     }
