@@ -816,15 +816,15 @@ fn resolve_plugin_matching_files(input: PluginMatchingFilesInput<'_, '_, '_>) {
             continue;
         }
         input.resolved_plugins.insert(input.plugin.name());
-        process_resolved_plugin_config(
-            input.plugin,
+        process_resolved_plugin_config(ResolvedPluginConfigInput {
+            plugin: input.plugin,
             abs_path,
             plugin_result,
-            input.result,
-            input.regex_errors,
-            "resolved config",
-            abs_path.display(),
-        );
+            result: input.result,
+            regex_errors: input.regex_errors,
+            message: "resolved config",
+            config_display: abs_path.display(),
+        });
     }
 }
 
@@ -846,37 +846,42 @@ fn resolve_plugin_filesystem_config(
         .strip_prefix(root)
         .map(|p| p.to_string_lossy())
         .unwrap_or_default();
-    process_resolved_plugin_config(
+    process_resolved_plugin_config(ResolvedPluginConfigInput {
         plugin,
         abs_path,
         plugin_result,
         result,
         regex_errors,
-        "resolved config (filesystem fallback)",
-        rel,
-    );
+        message: "resolved config (filesystem fallback)",
+        config_display: rel,
+    });
 }
 
-fn process_resolved_plugin_config(
-    plugin: &dyn Plugin,
-    abs_path: &Path,
+struct ResolvedPluginConfigInput<'a, D> {
+    plugin: &'a dyn Plugin,
+    abs_path: &'a Path,
     plugin_result: PluginResult,
-    result: &mut AggregatedPluginResult,
-    regex_errors: &mut Vec<PluginRegexValidationError>,
+    result: &'a mut AggregatedPluginResult,
+    regex_errors: &'a mut Vec<PluginRegexValidationError>,
     message: &'static str,
-    config_display: impl std::fmt::Display,
-) {
+    config_display: D,
+}
+
+fn process_resolved_plugin_config(input: ResolvedPluginConfigInput<'_, impl std::fmt::Display>) {
     tracing::debug!(
-        plugin = plugin.name(),
-        config = %config_display,
-        entries = plugin_result.entry_patterns.len(),
-        deps = plugin_result.referenced_dependencies.len(),
-        message
+        plugin = input.plugin.name(),
+        config = %input.config_display,
+        entries = input.plugin_result.entry_patterns.len(),
+        deps = input.plugin_result.referenced_dependencies.len(),
+        input.message
     );
-    if let Err(mut errors) =
-        process_config_result(plugin.name(), plugin_result, result, Some(abs_path))
-    {
-        regex_errors.append(&mut errors);
+    if let Err(mut errors) = process_config_result(
+        input.plugin.name(),
+        input.plugin_result,
+        input.result,
+        Some(input.abs_path),
+    ) {
+        input.regex_errors.append(&mut errors);
     }
 }
 
