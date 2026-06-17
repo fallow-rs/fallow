@@ -467,15 +467,15 @@ impl PluginRegistry {
             Vec::new()
         };
 
-        resolve_plugin_config_files(
-            &config_matchers,
-            &relative_files,
+        resolve_plugin_config_files(PluginConfigResolutionInput {
+            config_matchers: &config_matchers,
+            relative_files: &relative_files,
             config_search_roots,
             production_mode,
             root,
-            &mut result,
-            &mut regex_errors,
-        );
+            result: &mut result,
+            regex_errors: &mut regex_errors,
+        });
 
         process_package_json_inline_configs(
             &active,
@@ -738,40 +738,48 @@ fn plugin_warn_dedupe() -> &'static std::sync::Mutex<FxHashSet<String>> {
     WARNED.get_or_init(|| std::sync::Mutex::new(FxHashSet::default()))
 }
 
-fn resolve_plugin_config_files(
-    config_matchers: &[(&dyn Plugin, Vec<globset::GlobMatcher>)],
-    relative_files: &[(PathBuf, String)],
-    config_search_roots: &[&Path],
+struct PluginConfigResolutionInput<'a> {
+    config_matchers: &'a [(&'a dyn Plugin, Vec<globset::GlobMatcher>)],
+    relative_files: &'a [(PathBuf, String)],
+    config_search_roots: &'a [&'a Path],
     production_mode: bool,
-    root: &Path,
-    result: &mut AggregatedPluginResult,
-    regex_errors: &mut Vec<PluginRegexValidationError>,
-) {
-    if config_matchers.is_empty() {
+    root: &'a Path,
+    result: &'a mut AggregatedPluginResult,
+    regex_errors: &'a mut Vec<PluginRegexValidationError>,
+}
+
+fn resolve_plugin_config_files(input: PluginConfigResolutionInput<'_>) {
+    if input.config_matchers.is_empty() {
         return;
     }
 
     let mut resolved_plugins: FxHashSet<&str> = FxHashSet::default();
-    for (plugin, matchers) in config_matchers {
+    for (plugin, matchers) in input.config_matchers {
         resolve_plugin_matching_files(
             *plugin,
             matchers,
-            relative_files,
-            root,
-            result,
-            regex_errors,
+            input.relative_files,
+            input.root,
+            input.result,
+            input.regex_errors,
             &mut resolved_plugins,
         );
     }
 
     let json_configs = discover_config_files(
-        config_matchers,
+        input.config_matchers,
         &resolved_plugins,
-        config_search_roots,
-        production_mode,
+        input.config_search_roots,
+        input.production_mode,
     );
     for (abs_path, plugin) in &json_configs {
-        resolve_plugin_filesystem_config(*plugin, abs_path, root, result, regex_errors);
+        resolve_plugin_filesystem_config(
+            *plugin,
+            abs_path,
+            input.root,
+            input.result,
+            input.regex_errors,
+        );
     }
 }
 
