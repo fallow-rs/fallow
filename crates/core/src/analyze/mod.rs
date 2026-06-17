@@ -1565,15 +1565,15 @@ fn run_import_and_duplicate_detectors(
 ) -> (Vec<UnresolvedImportFinding>, Vec<DuplicateExportFinding>) {
     rayon::join(
         || {
-            run_unresolved_import_detector(
-                input.resolved_modules,
-                input.config,
-                input.suppressions,
-                input.virtual_prefixes,
-                input.generated_patterns,
-                input.generated_type_prefixes,
-                input.line_offsets_by_file,
-            )
+            run_unresolved_import_detector(UnresolvedImportDetectorInput {
+                resolved_modules: input.resolved_modules,
+                config: input.config,
+                suppressions: input.suppressions,
+                virtual_prefixes: input.virtual_prefixes,
+                generated_patterns: input.generated_patterns,
+                generated_type_prefixes: input.generated_type_prefixes,
+                line_offsets_by_file: input.line_offsets_by_file,
+            })
         },
         || {
             run_duplicate_export_detector(
@@ -2156,26 +2156,30 @@ fn run_dependency_detectors(input: DependencyDetectorInput<'_>) -> AnalysisResul
     results
 }
 
+struct UnresolvedImportDetectorInput<'a> {
+    resolved_modules: &'a [ResolvedModule],
+    config: &'a ResolvedConfig,
+    suppressions: &'a crate::suppress::SuppressionContext<'a>,
+    virtual_prefixes: &'a [&'a str],
+    generated_patterns: &'a [&'a str],
+    generated_type_prefixes: &'a [&'a str],
+    line_offsets_by_file: &'a LineOffsetsMap<'a>,
+}
+
 fn run_unresolved_import_detector(
-    resolved_modules: &[ResolvedModule],
-    config: &ResolvedConfig,
-    suppressions: &crate::suppress::SuppressionContext<'_>,
-    virtual_prefixes: &[&str],
-    generated_patterns: &[&str],
-    generated_type_prefixes: &[&str],
-    line_offsets_by_file: &LineOffsetsMap<'_>,
+    input: UnresolvedImportDetectorInput<'_>,
 ) -> Vec<UnresolvedImportFinding> {
-    if config.rules.unresolved_imports == Severity::Off || resolved_modules.is_empty() {
+    if input.config.rules.unresolved_imports == Severity::Off || input.resolved_modules.is_empty() {
         return Vec::new();
     }
     find_unresolved_imports(
-        resolved_modules,
-        config,
-        suppressions,
-        virtual_prefixes,
-        generated_patterns,
-        generated_type_prefixes,
-        line_offsets_by_file,
+        input.resolved_modules,
+        input.config,
+        input.suppressions,
+        input.virtual_prefixes,
+        input.generated_patterns,
+        input.generated_type_prefixes,
+        input.line_offsets_by_file,
     )
     .into_iter()
     .map(UnresolvedImportFinding::with_actions)
