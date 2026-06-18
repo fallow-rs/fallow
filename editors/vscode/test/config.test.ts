@@ -12,15 +12,22 @@ type InspectValue<T> = {
 
 let inspected: Record<string, InspectValue<unknown> | undefined> = {};
 let configured: Record<string, unknown> = {};
+let scopedConfigured: Record<string, Record<string, unknown>> = {};
 
 vi.mock("vscode", () => ({
   workspace: {
     workspaceFolders: undefined,
-    getConfiguration: () => ({
-      get: <T>(key: string, fallback: T): T => (configured[key] as T | undefined) ?? fallback,
+    getConfiguration: (_section: string, resource?: { readonly fsPath: string }) => ({
+      get: <T>(key: string, fallback: T): T =>
+        ((resource ? scopedConfigured[resource.fsPath]?.[key] : undefined) as T | undefined) ??
+        (configured[key] as T | undefined) ??
+        fallback,
       inspect: <T>(key: string): InspectValue<T> | undefined =>
         inspected[key] as InspectValue<T> | undefined,
     }),
+  },
+  Uri: {
+    file: (fsPath: string) => ({ fsPath }),
   },
 }));
 
@@ -35,6 +42,7 @@ import {
   getDuplicationThresholdOverride,
   getDiagnosticSeverity,
   getMutedDiagnosticCategories,
+  getResolvedConfigPath,
   getHealthInlineComplexity,
   getProductionOverride,
 } from "../src/config.js";
@@ -43,6 +51,7 @@ describe("duplication setting overrides", () => {
   beforeEach(() => {
     inspected = {};
     configured = {};
+    scopedConfigured = {};
   });
 
   it("ignores package defaults so project config can win", () => {
@@ -110,6 +119,7 @@ describe("production override setting (#1055)", () => {
   beforeEach(() => {
     inspected = {};
     configured = {};
+    scopedConfigured = {};
   });
 
   it("defers to the project config when unset or auto", () => {
@@ -142,6 +152,7 @@ describe("production override setting (#1055)", () => {
 describe("diagnostics severity setting", () => {
   beforeEach(() => {
     configured = {};
+    scopedConfigured = {};
   });
 
   it("defaults to warning", () => {
@@ -158,6 +169,26 @@ describe("diagnostics severity setting", () => {
   it("falls back to warning for unknown values", () => {
     configured = { "diagnostics.severity": "quiet" };
     expect(getDiagnosticSeverity()).toBe("warning");
+  });
+});
+
+describe("resolved config path", () => {
+  beforeEach(() => {
+    configured = {};
+    scopedConfigured = {};
+  });
+
+  it("reads folder-scoped config when a workspace root override is supplied", () => {
+    configured = { configPath: ".fallow-root.json" };
+    scopedConfigured = {
+      "/repo/packages/app": {
+        configPath: ".fallow-app.json",
+      },
+    };
+
+    expect(getResolvedConfigPath("/repo/packages/app")).toBe(
+      "/repo/packages/app/.fallow-app.json",
+    );
   });
 });
 

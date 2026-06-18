@@ -155,4 +155,13 @@ describe("parseUnknownSubcommand", () => {
     expect(parseUnknownSubcommand("fallow exited with code 2")).toBe(false);
     expect(parseUnknownSubcommand("unrecognized subcommand 'health'")).toBe(false);
   });
+
+  it("supports explicit subcommand names without prefix matches", () => {
+    expect(parseUnknownSubcommand('error: unrecognized subcommand "inspect"', "inspect")).toBe(
+      true,
+    );
+    expect(parseUnknownSubcommand("error: unrecognized subcommand inspection", "inspect")).toBe(
+      false,
+    );
+  });
 });

@@ -63,6 +63,30 @@ fn inspect_file_outputs_typed_evidence_bundle() {
 }
 
 #[test]
+fn inspect_file_accepts_absolute_path_inside_root() {
+    let dir = tempdir().unwrap();
+    write_project(dir.path());
+
+    let file = dir.path().join("src/api.ts");
+    let output = run_fallow_in_root(
+        "inspect",
+        dir.path(),
+        &[
+            "--file",
+            file.to_str().unwrap(),
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(output.code, 0, "inspect should exit 0: {}", output.stderr);
+
+    let json = parse_json(&output);
+    assert_eq!(json["target"]["file"].as_str(), Some("src/api.ts"));
+    assert_eq!(json["identity"]["file"].as_str(), Some("src/api.ts"));
+}
+
+#[test]
 fn inspect_symbol_outputs_trace_export_section() {
     let dir = tempdir().unwrap();
     write_project(dir.path());
@@ -93,5 +117,22 @@ fn inspect_symbol_outputs_trace_export_section() {
         json["warnings"]
             .as_array()
             .is_some_and(|items| !items.is_empty())
+    );
+}
+
+#[test]
+fn inspect_human_output_includes_evidence_summary() {
+    let dir = tempdir().unwrap();
+    write_project(dir.path());
+
+    let output = run_fallow_in_root("inspect", dir.path(), &["--file", "src/api.ts"]);
+    assert_eq!(output.code, 0, "inspect should exit 0: {}", output.stderr);
+
+    assert!(output.stdout.contains("Evidence"));
+    assert!(output.stdout.contains("trace_file: ok [file]"));
+    assert!(
+        output
+            .stdout
+            .contains("duplication: ok [project filtered to file]")
     );
 }

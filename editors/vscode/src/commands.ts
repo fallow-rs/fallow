@@ -371,6 +371,38 @@ const execAnalysisTolerant = async (
   }
 };
 
+const execInspectWithManagedFallback = async (
+  context: vscode.ExtensionContext,
+  initialBinary: string | null,
+  args: ReadonlyArray<string>,
+  cwd: string,
+  outputChannel?: vscode.OutputChannel,
+): Promise<string> => {
+  try {
+    return await execFallow(initialBinary, args, cwd);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (!parseUnknownSubcommand(message, "inspect")) {
+      throw err;
+    }
+
+    if (getAutoDownload()) {
+      const managed =
+        (await getInstalledCliPath(context, outputChannel)) ?? (await downloadCliBinary(context));
+      if (managed && managed !== initialBinary) {
+        outputChannel?.appendLine(
+          "Fallow: resolved CLI does not support inspect; switched to the managed CLI.",
+        );
+        return execFallow(managed, args, cwd);
+      }
+    }
+
+    throw new Error(
+      "The resolved fallow CLI does not support `fallow inspect`. Update the fallow binary, or enable fallow.autoDownload so the extension can use the managed CLI.",
+    );
+  }
+};
+
 export interface RunAnalysisOptions {
   readonly force?: boolean;
   readonly backoff?: AnalysisFailureBackoff;
@@ -870,10 +902,16 @@ export const runInspectActiveFile = async (
       filePath: target.filePath,
       production: getProductionOverride(),
       workspace: resolveActiveWorkspaceScope(context),
-      configPath: getResolvedConfigPath(),
+      configPath: getResolvedConfigPath(target.root),
     });
 
-    const output = await execFallow(binary, args, target.root);
+    const output = await execInspectWithManagedFallback(
+      context,
+      binary,
+      args,
+      target.root,
+      outputChannel,
+    );
     if (output.trim().length === 0) {
       void vscode.window.showWarningMessage("Fallow inspect returned no output.");
       return null;

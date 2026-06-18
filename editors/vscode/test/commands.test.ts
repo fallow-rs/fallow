@@ -13,6 +13,8 @@ let mockInstalledCli: string | null = null;
 let mockDownloadedCli: string | null = null;
 let mockExtensionVersion: string | null = null;
 let mockBinaryVersions: Readonly<Record<string, string | null>> = {};
+let mockConfigPathSetting = "";
+let mockResolvedConfigRoots: string[] = [];
 let mockActiveTextEditor:
   | {
       readonly document: {
@@ -93,7 +95,12 @@ vi.mock("../src/config.js", () => ({
   getComplexityDecorationCap: () => 200,
   getIssueTypes: () => ({}),
   getChangedSince: () => "",
-  getResolvedConfigPath: () => "",
+  getResolvedConfigPath: (workspaceRoot?: string) => {
+    mockResolvedConfigRoots.push(workspaceRoot ?? "");
+    return mockConfigPathSetting && workspaceRoot
+      ? join(workspaceRoot, mockConfigPathSetting)
+      : mockConfigPathSetting;
+  },
   getWorkspaceScope: () => "",
 }));
 
@@ -131,6 +138,11 @@ const workspaceContext = {
     get: () => "",
   },
 } as unknown as vscode.ExtensionContext;
+
+beforeEach(() => {
+  mockConfigPathSetting = "";
+  mockResolvedConfigRoots = [];
+});
 
 const emptyCheck = {
   schema_version: 7,
@@ -730,6 +742,104 @@ describe("runInspectActiveFile", () => {
       ]);
       expect(outputChannel.appendLine).toHaveBeenCalledWith("Fallow inspect: src/extension.ts");
       expect(outputChannel.show).toHaveBeenCalled();
+    } finally {
+      setWorkspaceRoot(null);
+      setActiveEditor(null);
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves relative inspect config paths from the active editor workspace root", async () => {
+    const firstRoot = await mkdtemp(join(tmpdir(), "fallow-vscode-root-a-"));
+    const secondRoot = await mkdtemp(join(tmpdir(), "fallow-vscode-root-b-"));
+    const script = join(secondRoot, "fallow-cli.js");
+    const filePath = join(secondRoot, "src", "extension.ts");
+    const logPath = join(secondRoot, "spawn.log");
+
+    try {
+      await writeFile(
+        script,
+        [
+          "#!/usr/bin/env node",
+          'const fs = require("node:fs");',
+          `fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args: process.argv.slice(2) }) + "\\n");`,
+          'process.stdout.write(\'{"kind":"inspect_target","warnings":[]}\');',
+        ].join("\n"),
+        "utf8",
+      );
+      await chmod(script, 0o755);
+
+      mockPathBinary = script;
+      mockConfigPathSetting = ".config/fallow.json";
+      const workspace = mockWorkspace as {
+        workspaceFolders: ReadonlyArray<{ readonly uri: { readonly fsPath: string } }>;
+      };
+      workspace.workspaceFolders = [
+        { uri: { fsPath: firstRoot } },
+        { uri: { fsPath: secondRoot } },
+      ];
+      setActiveEditor(filePath);
+
+      await expect(runInspectActiveFile(workspaceContext)).resolves.not.toBeNull();
+      const calls = await readSpawnLog(logPath);
+
+      expect(mockResolvedConfigRoots).toContain(secondRoot);
+      expect(calls[0]?.args).toContain(join(secondRoot, ".config/fallow.json"));
+    } finally {
+      setWorkspaceRoot(null);
+      setActiveEditor(null);
+      await rm(firstRoot, { recursive: true, force: true });
+      await rm(secondRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("retries inspect with the managed CLI when the resolved CLI rejects the subcommand", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "fallow-vscode-inspect-managed-"));
+    const staleScript = join(dir, "stale-fallow.js");
+    const managedScript = join(dir, "managed-fallow.js");
+    const filePath = join(dir, "src", "extension.ts");
+    const logPath = join(dir, "spawn.log");
+    const outputChannel = {
+      appendLine: vi.fn(),
+      show: vi.fn(),
+    } as unknown as vscode.OutputChannel;
+
+    try {
+      await writeFile(
+        staleScript,
+        [
+          "#!/usr/bin/env node",
+          'process.stderr.write("error: unrecognized subcommand \\"inspect\\"\\n");',
+          "process.exit(2);",
+        ].join("\n"),
+        "utf8",
+      );
+      await writeFile(
+        managedScript,
+        [
+          "#!/usr/bin/env node",
+          'const fs = require("node:fs");',
+          `fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args: process.argv.slice(2) }) + "\\n");`,
+          'process.stdout.write(\'{"kind":"inspect_target","warnings":[]}\');',
+        ].join("\n"),
+        "utf8",
+      );
+      await chmod(staleScript, 0o755);
+      await chmod(managedScript, 0o755);
+
+      mockPathBinary = staleScript;
+      mockInstalledCli = managedScript;
+      setWorkspaceRoot(dir);
+      setActiveEditor(filePath);
+
+      const result = await runInspectActiveFile(workspaceContext, outputChannel);
+      const calls = await readSpawnLog(logPath);
+
+      expect(result?.kind).toBe("inspect_target");
+      expect(calls).toHaveLength(1);
+      expect(outputChannel.appendLine).toHaveBeenCalledWith(
+        "Fallow: resolved CLI does not support inspect; switched to the managed CLI.",
+      );
     } finally {
       setWorkspaceRoot(null);
       setActiveEditor(null);

@@ -34,7 +34,12 @@ fn build_inspect_args(params: &InspectTargetParams) -> Result<Vec<String>, Strin
         params.no_cache,
         params.threads,
     );
-    push_scope(&mut args, params.production, params.workspace.as_deref());
+    if params.production == Some(false) {
+        args.push("--no-production".to_string());
+        push_scope(&mut args, None, params.workspace.as_deref());
+    } else {
+        push_scope(&mut args, params.production, params.workspace.as_deref());
+    }
 
     match &params.target {
         InspectTarget::File { file } => {
@@ -56,4 +61,30 @@ fn require_non_empty(field: &str, value: &str) -> Result<(), String> {
         return Err(format!("{field} must not be empty"));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn production_false_forces_inspect_out_of_production_mode() {
+        let params = InspectTargetParams {
+            root: None,
+            config: None,
+            no_cache: None,
+            threads: None,
+            production: Some(false),
+            workspace: Some("pkg-a".to_string()),
+            target: InspectTarget::File {
+                file: "src/api.ts".to_string(),
+            },
+        };
+
+        let args = build_inspect_args(&params).unwrap();
+
+        assert!(args.contains(&"--no-production".to_string()));
+        assert!(args.windows(2).any(|pair| pair == ["--workspace", "pkg-a"]));
+        assert!(!args.contains(&"--production".to_string()));
+    }
 }

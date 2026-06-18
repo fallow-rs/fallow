@@ -14,7 +14,8 @@ import { getDiagnosticCategories } from "./diagnosticFilter.js";
 
 const SECTION = "fallow";
 
-const getConfig = (): vscode.WorkspaceConfiguration => vscode.workspace.getConfiguration(SECTION);
+const getConfig = (resource?: vscode.Uri): vscode.WorkspaceConfiguration =>
+  vscode.workspace.getConfiguration(SECTION, resource);
 
 const getConfiguredValue = <T>(key: string): T | undefined => {
   const inspected = getConfig().inspect<T>(key);
@@ -30,15 +31,17 @@ const getConfiguredValue = <T>(key: string): T | undefined => {
 
 export const getLspPath = (): string => getConfig().get<string>("lspPath", "");
 
-const getConfigPath = (): string => getConfig().get<string>("configPath", "").trim();
+const getConfigPath = (resource?: vscode.Uri): string =>
+  getConfig(resource).get<string>("configPath", "").trim();
 
-export const getResolvedConfigPath = (): string => {
-  const configPath = getConfigPath();
+export const getResolvedConfigPath = (workspaceRootOverride?: string): string => {
+  const resource = workspaceRootOverride ? vscode.Uri.file(workspaceRootOverride) : undefined;
+  const configPath = getConfigPath(resource);
   if (!configPath || path.isAbsolute(configPath)) {
     return configPath;
   }
 
-  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const workspaceRoot = workspaceRootOverride ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   return workspaceRoot ? path.resolve(workspaceRoot, configPath) : configPath;
 };
 

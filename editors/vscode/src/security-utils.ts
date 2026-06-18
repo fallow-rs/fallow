@@ -102,11 +102,19 @@ export const hopRoleLabel = (role: TraceHopRole): string => {
  * phrasing (`The subcommand 'security' wasn't recognized`). Unrelated errors
  * return false so genuine failures stay loud.
  */
-export const parseUnknownSubcommand = (message: string): boolean => {
-  if (/unrecognized subcommand '?security'?/i.test(message)) {
+export const parseUnknownSubcommand = (message: string, subcommand = "security"): boolean => {
+  const escaped = subcommand.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  if (
+    new RegExp(`unrecognized subcommand (?:['"]${escaped}['"]|${escaped}\\b)`, "i").test(message)
+  ) {
     return true;
   }
-  if (/subcommand '?security'? (?:wasn't|was not) recognized/i.test(message)) {
+  if (
+    new RegExp(
+      `subcommand (?:['"]${escaped}['"]|${escaped}\\b) (?:wasn't|was not) recognized`,
+      "i",
+    ).test(message)
+  ) {
     return true;
   }
   return false;

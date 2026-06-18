@@ -140,18 +140,30 @@ run_fallow() {
     local elapsed_ticks=0
     local pid
     local run_status
+    local kill_target
     local timeout_ticks=$((PROJECT_TIMEOUT_SECONDS * 10))
     local heartbeat_ticks=$((HEARTBEAT_SECONDS * 10))
 
-    "${FALLOW_BIN}" --quiet --format json "$@" --root "${dir}" >/dev/null 2>/dev/null &
-    pid=$!
+    if command -v setsid >/dev/null 2>&1; then
+        setsid "${FALLOW_BIN}" --quiet --format json "$@" --root "${dir}" >/dev/null 2>/dev/null &
+        pid=$!
+        kill_target="-${pid}"
+    elif command -v python3 >/dev/null 2>&1; then
+        python3 -c 'import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' \
+            "${FALLOW_BIN}" --quiet --format json "$@" --root "${dir}" >/dev/null 2>/dev/null &
+        pid=$!
+        kill_target="-${pid}"
+    else
+        echo "python3 or setsid is required for benchmark timeout cleanup" >&2
+        return 127
+    fi
 
     while kill -0 "${pid}" 2>/dev/null; do
         if (( elapsed_ticks >= timeout_ticks )); then
-            kill -TERM "${pid}" 2>/dev/null || true
+            kill -TERM -- "${kill_target}" 2>/dev/null || true
             sleep 2
             if kill -0 "${pid}" 2>/dev/null; then
-                kill -KILL "${pid}" 2>/dev/null || true
+                kill -KILL -- "${kill_target}" 2>/dev/null || true
             fi
             wait "${pid}" 2>/dev/null || true
             return 124
@@ -183,6 +195,16 @@ time_fallow() {
 
     ELAPSED_MS=$(( (end - start) / 1000000 ))
     return "${run_status}"
+}
+
+fallow_failure_message() {
+    local phase="$1"
+    local run_status="$2"
+    if [[ "${run_status}" -eq 124 ]]; then
+        echo "    FAIL: fallow timed out during ${phase} after ${PROJECT_TIMEOUT_SECONDS}s"
+    else
+        echo "    FAIL: fallow exited with status ${run_status} during ${phase}"
+    fi
 }
 
 median() {
@@ -242,8 +264,11 @@ for entry in "${PROJECTS[@]}"; do
     cold_times=()
     for (( i=0; i<RUNS; i++ )); do
         clear_cache "${dest}"
-        if ! time_fallow "${dest}" --no-cache; then
-            echo "    FAIL: fallow timed out or errored during cold run after ${PROJECT_TIMEOUT_SECONDS}s" >&2
+        if time_fallow "${dest}" --no-cache; then
+            :
+        else
+            run_status=$?
+            fallow_failure_message "cold run" "${run_status}" >&2
             exit 1
         fi
         cold_times+=("${ELAPSED_MS}")
@@ -253,15 +278,21 @@ for entry in "${PROJECTS[@]}"; do
     # --- Warm runs (with cache) ---
     clear_cache "${dest}"
     # Populate cache
-    if ! run_fallow "${dest}"; then
-        echo "    FAIL: fallow timed out or errored while warming cache after ${PROJECT_TIMEOUT_SECONDS}s" >&2
+    if run_fallow "${dest}"; then
+        :
+    else
+        run_status=$?
+        fallow_failure_message "cache warmup" "${run_status}" >&2
         exit 1
     fi
     # Measure
     warm_times=()
     for (( i=0; i<RUNS; i++ )); do
-        if ! time_fallow "${dest}"; then
-            echo "    FAIL: fallow timed out or errored during warm run after ${PROJECT_TIMEOUT_SECONDS}s" >&2
+        if time_fallow "${dest}"; then
+            :
+        else
+            run_status=$?
+            fallow_failure_message "warm run" "${run_status}" >&2
             exit 1
         fi
         warm_times+=("${ELAPSED_MS}")

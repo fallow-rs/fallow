@@ -3531,6 +3531,8 @@ fn dispatch_inspect_command(
         config_path: &dispatch.cli.config,
         output: dispatch.output,
         no_cache: dispatch.cli.no_cache,
+        no_production: dispatch.cli.no_production,
+        max_file_size: dispatch.cli.max_file_size,
         threads: dispatch.threads,
         quiet: dispatch.quiet,
         production: dispatch.cli.production,
