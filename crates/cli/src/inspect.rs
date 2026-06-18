@@ -21,7 +21,7 @@ pub enum InspectTarget {
 
 pub struct InspectOptions<'a> {
     pub root: &'a Path,
-    pub config_path: &'a Option<PathBuf>,
+    pub config_path: Option<&'a PathBuf>,
     pub output: OutputFormat,
     pub no_cache: bool,
     pub no_production: bool,
@@ -317,7 +317,7 @@ fn build_child_args(opts: &InspectOptions<'_>, command_args: Vec<String>) -> Vec
         "json".to_string(),
         "--quiet".to_string(),
     ];
-    if let Some(config) = opts.config_path.as_ref() {
+    if let Some(config) = opts.config_path {
         args.extend(["--config".to_string(), config.to_string_lossy().to_string()]);
     }
     if opts.no_cache {
@@ -523,7 +523,7 @@ mod tests {
 
     fn inspect_options<'a>(
         root: &'a Path,
-        config_path: &'a Option<PathBuf>,
+        config_path: Option<&'a PathBuf>,
         target: InspectTarget,
     ) -> InspectOptions<'a> {
         InspectOptions {
@@ -543,8 +543,12 @@ mod tests {
 
     #[test]
     fn normalized_target_uses_root_relative_posix_path() {
-        let root = PathBuf::from("/repo");
-        let file = "/repo/./src/api.ts".to_string();
+        let root = std::env::current_dir().unwrap();
+        let file = root
+            .join("src")
+            .join("api.ts")
+            .to_string_lossy()
+            .to_string();
 
         let target = NormalizedTarget::new(&root, &InspectTarget::File { file }).unwrap();
 
@@ -567,7 +571,7 @@ mod tests {
         let config_path = Some(PathBuf::from("/repo/.fallowrc.json"));
         let opts = inspect_options(
             &root,
-            &config_path,
+            config_path.as_ref(),
             InspectTarget::File {
                 file: "src/api.ts".to_string(),
             },
@@ -591,7 +595,7 @@ mod tests {
         let config_path = None;
         let opts = inspect_options(
             &root,
-            &config_path,
+            config_path.as_ref(),
             InspectTarget::File {
                 file: "src/api.ts".to_string(),
             },

@@ -399,6 +399,7 @@ const execInspectWithManagedFallback = async (
 
     throw new Error(
       "The resolved fallow CLI does not support `fallow inspect`. Update the fallow binary, or enable fallow.autoDownload so the extension can use the managed CLI.",
+      { cause: err },
     );
   }
 };

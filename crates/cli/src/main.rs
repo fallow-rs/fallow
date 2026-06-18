@@ -3528,7 +3528,7 @@ fn dispatch_inspect_command(
 
     inspect::run_inspect(&inspect::InspectOptions {
         root: dispatch.root,
-        config_path: &dispatch.cli.config,
+        config_path: dispatch.cli.config.as_ref(),
         output: dispatch.output,
         no_cache: dispatch.cli.no_cache,
         no_production: dispatch.cli.no_production,
