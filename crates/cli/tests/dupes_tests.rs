@@ -490,6 +490,52 @@ const value = 42;
 }
 
 #[test]
+fn dupes_does_not_report_cross_format_clone_groups() {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"name":"dupes-format-namespace","type":"module","main":"src/main.ts"}"#,
+    )
+    .unwrap();
+
+    let js = "export function alpha() { color: red; margin: 0; padding: 1; }";
+    let css = ".alpha { color: red; margin: 0; padding: 1; }";
+    std::fs::write(dir.path().join("src/alpha.ts"), js).unwrap();
+    std::fs::write(dir.path().join("src/beta.ts"), js).unwrap();
+    std::fs::write(dir.path().join("src/alpha.css"), css).unwrap();
+    init_git_index(dir.path());
+
+    let output = run_fallow_in_root(
+        "dupes",
+        dir.path(),
+        &[
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+            "--min-tokens",
+            "5",
+            "--min-lines",
+            "1",
+        ],
+    );
+    let json = parse_json(&output);
+    assert!(
+        has_clone_group_with_files(&json, &["src/alpha.ts", "src/beta.ts"]),
+        "same-format JS clone should still be reported. stdout: {} stderr: {}",
+        output.stdout,
+        output.stderr
+    );
+    assert!(
+        !has_clone_group_with_files(&json, &["src/alpha.ts", "src/alpha.css"]),
+        "JS and CSS should not form cross-format clone groups. stdout: {} stderr: {}",
+        output.stdout,
+        output.stderr
+    );
+}
+
+#[test]
 fn dupes_does_not_report_clone_groups_spanning_sfc_sections() {
     let dir = tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join("src")).unwrap();

@@ -1,4 +1,4 @@
-//! Focused duplicate-analysis prefilter based on k-token shingles.
+//! Duplicate-analysis prefilters based on k-token shingles.
 
 use rustc_hash::{FxHashSet, FxHasher};
 use std::hash::Hasher;
@@ -7,6 +7,27 @@ use std::path::PathBuf;
 use super::{TokenizedFile, normalize::HashedToken};
 
 const DEFAULT_SHINGLE_TOKENS: usize = 7;
+const GLOBAL_SHINGLE_BASE: u64 = 1_000_003;
+
+pub(super) fn filter_to_duplicate_candidates(files: &mut Vec<TokenizedFile>, min_tokens: usize) {
+    let window = min_tokens.max(1);
+    let duplicate_shingles = find_duplicate_shingles(files, window);
+    if duplicate_shingles.is_empty() {
+        files.clear();
+        return;
+    }
+
+    let before = files.len();
+    files.retain(|file| {
+        has_matching_rolling_shingle(&file.hashed_tokens, window, &duplicate_shingles)
+    });
+    tracing::debug!(
+        candidates_kept = files.len(),
+        candidates_skipped = before.saturating_sub(files.len()),
+        shingle_window = window,
+        "duplication shingle prefilter"
+    );
+}
 
 pub(super) fn filter_to_focus_candidates(
     files: &mut Vec<TokenizedFile>,
@@ -58,6 +79,57 @@ fn insert_shingles(tokens: &[HashedToken], window: usize, out: &mut FxHashSet<u6
     }
 }
 
+fn find_duplicate_shingles(files: &[TokenizedFile], window: usize) -> FxHashSet<u64> {
+    let mut seen = FxHashSet::default();
+    let mut duplicates = FxHashSet::default();
+
+    for file in files {
+        if file.hashed_tokens.len() < window {
+            continue;
+        }
+
+        for_each_rolling_shingle_hash(&file.hashed_tokens, window, |hash| {
+            if !seen.insert(hash) {
+                duplicates.insert(hash);
+            }
+        });
+    }
+
+    duplicates
+}
+
+fn for_each_rolling_shingle_hash(
+    tokens: &[HashedToken],
+    window: usize,
+    mut visit: impl FnMut(u64),
+) {
+    if tokens.len() < window {
+        return;
+    }
+
+    let mut base_power = 1_u64;
+    for _ in 1..window {
+        base_power = base_power.wrapping_mul(GLOBAL_SHINGLE_BASE);
+    }
+
+    let mut hash = 0_u64;
+    for token in &tokens[..window] {
+        hash = hash
+            .wrapping_mul(GLOBAL_SHINGLE_BASE)
+            .wrapping_add(token.hash);
+    }
+    visit(hash);
+
+    for i in window..tokens.len() {
+        let outgoing = tokens[i - window].hash.wrapping_mul(base_power);
+        hash = hash
+            .wrapping_sub(outgoing)
+            .wrapping_mul(GLOBAL_SHINGLE_BASE)
+            .wrapping_add(tokens[i].hash);
+        visit(hash);
+    }
+}
+
 fn has_matching_shingle(
     tokens: &[HashedToken],
     window: usize,
@@ -67,6 +139,18 @@ fn has_matching_shingle(
         && tokens
             .windows(window)
             .any(|shingle| focus_shingles.contains(&hash_shingle(shingle)))
+}
+
+fn has_matching_rolling_shingle(
+    tokens: &[HashedToken],
+    window: usize,
+    duplicate_shingles: &FxHashSet<u64>,
+) -> bool {
+    let mut matches = false;
+    for_each_rolling_shingle_hash(tokens, window, |hash| {
+        matches |= duplicate_shingles.contains(&hash);
+    });
+    matches
 }
 
 fn hash_shingle(tokens: &[HashedToken]) -> u64 {
@@ -124,6 +208,42 @@ mod tests {
         assert!(paths.contains(&PathBuf::from("focus.ts")));
         assert!(paths.contains(&PathBuf::from("candidate.ts")));
         assert!(!paths.contains(&PathBuf::from("unrelated.ts")));
+    }
+
+    #[test]
+    fn keeps_only_files_with_duplicate_shingles() {
+        let mut files = vec![
+            file("a.ts", &[1, 2, 3, 4, 9]),
+            file("b.ts", &[8, 1, 2, 3, 7]),
+            file("unique.ts", &[10, 11, 12, 13, 14]),
+        ];
+
+        filter_to_duplicate_candidates(&mut files, 3);
+
+        let paths = files
+            .into_iter()
+            .map(|file| file.path)
+            .collect::<FxHashSet<_>>();
+        assert!(paths.contains(&PathBuf::from("a.ts")));
+        assert!(paths.contains(&PathBuf::from("b.ts")));
+        assert!(!paths.contains(&PathBuf::from("unique.ts")));
+    }
+
+    #[test]
+    fn keeps_file_with_internal_duplicate_shingles() {
+        let mut files = vec![
+            file("self.ts", &[1, 2, 3, 8, 1, 2, 3]),
+            file("unique.ts", &[10, 11, 12, 13, 14]),
+        ];
+
+        filter_to_duplicate_candidates(&mut files, 3);
+
+        let paths = files
+            .into_iter()
+            .map(|file| file.path)
+            .collect::<FxHashSet<_>>();
+        assert!(paths.contains(&PathBuf::from("self.ts")));
+        assert!(!paths.contains(&PathBuf::from("unique.ts")));
     }
 
     proptest! {

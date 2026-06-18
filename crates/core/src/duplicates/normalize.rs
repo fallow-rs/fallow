@@ -31,9 +31,13 @@ pub fn normalize_and_hash_resolved(
     normalization: ResolvedNormalization,
 ) -> Vec<HashedToken> {
     let mut result = Vec::with_capacity(tokens.len());
+    let mut namespace = "js";
 
     for (i, token) in tokens.iter().enumerate() {
-        let hash = hash_token_resolved(&token.kind, normalization);
+        if let TokenKind::Boundary(name) = &token.kind {
+            namespace = name;
+        }
+        let hash = hash_token_resolved(&token.kind, normalization, namespace);
         result.push(HashedToken {
             hash,
             original_index: i,
@@ -44,48 +48,56 @@ pub fn normalize_and_hash_resolved(
 }
 
 /// Hash a single token using resolved normalization flags.
-fn hash_token_resolved(kind: &TokenKind, norm: ResolvedNormalization) -> u64 {
+fn hash_token_resolved(kind: &TokenKind, norm: ResolvedNormalization, namespace: &str) -> u64 {
     match kind {
-        TokenKind::Keyword(kw) => hash_bytes(&[0, *kw as u8]),
+        TokenKind::Keyword(kw) => hash_namespaced(namespace, &[0, *kw as u8]),
         TokenKind::Identifier(name) => {
             if norm.ignore_identifiers {
-                hash_bytes(&[1, 0])
+                hash_namespaced(namespace, &[1, 0])
             } else {
                 let mut buf = vec![1];
                 buf.extend_from_slice(name.as_bytes());
-                hash_bytes(&buf)
+                hash_namespaced(namespace, &buf)
             }
         }
         TokenKind::StringLiteral(val) => {
             if norm.ignore_string_values {
-                hash_bytes(&[2, 0])
+                hash_namespaced(namespace, &[2, 0])
             } else {
                 let mut buf = vec![2];
                 buf.extend_from_slice(val.as_bytes());
-                hash_bytes(&buf)
+                hash_namespaced(namespace, &buf)
             }
         }
         TokenKind::NumericLiteral(val) => {
             if norm.ignore_numeric_values {
-                hash_bytes(&[3, 0])
+                hash_namespaced(namespace, &[3, 0])
             } else {
                 let mut buf = vec![3];
                 buf.extend_from_slice(val.as_bytes());
-                hash_bytes(&buf)
+                hash_namespaced(namespace, &buf)
             }
         }
-        TokenKind::BooleanLiteral(val) => hash_bytes(&[4, u8::from(*val)]),
-        TokenKind::NullLiteral => hash_bytes(&[5]),
-        TokenKind::TemplateLiteral => hash_bytes(&[6]),
-        TokenKind::RegExpLiteral => hash_bytes(&[7]),
-        TokenKind::Operator(op) => hash_bytes(&[8, *op as u8]),
-        TokenKind::Punctuation(p) => hash_bytes(&[9, *p as u8]),
+        TokenKind::BooleanLiteral(val) => hash_namespaced(namespace, &[4, u8::from(*val)]),
+        TokenKind::NullLiteral => hash_namespaced(namespace, &[5]),
+        TokenKind::TemplateLiteral => hash_namespaced(namespace, &[6]),
+        TokenKind::RegExpLiteral => hash_namespaced(namespace, &[7]),
+        TokenKind::Operator(op) => hash_namespaced(namespace, &[8, *op as u8]),
+        TokenKind::Punctuation(p) => hash_namespaced(namespace, &[9, *p as u8]),
         TokenKind::Boundary(name) => {
             let mut buf = vec![10];
             buf.extend_from_slice(name.as_bytes());
             hash_bytes(&buf)
         }
     }
+}
+
+fn hash_namespaced(namespace: &str, data: &[u8]) -> u64 {
+    let mut buf = Vec::with_capacity(namespace.len() + 1 + data.len());
+    buf.extend_from_slice(namespace.as_bytes());
+    buf.push(0);
+    buf.extend_from_slice(data);
+    hash_bytes(&buf)
 }
 
 /// Hash a byte slice using xxh3.

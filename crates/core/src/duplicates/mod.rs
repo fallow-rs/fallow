@@ -275,10 +275,25 @@ fn find_duplicates_inner(
         "tokenized files for duplication analysis"
     );
 
-    if let Some(focus_files) = focus_files
-        && file_data.len() >= config.min_corpus_size_for_shingle_filter
-    {
-        shingle_filter::filter_to_focus_candidates(&mut file_data, focus_files, config.min_tokens);
+    let corpus_totals = detect::CorpusTotals {
+        files: file_data.len(),
+        lines: file_data
+            .iter()
+            .map(|file| file.file_tokens.line_count)
+            .sum(),
+        tokens: file_data.iter().map(|file| file.hashed_tokens.len()).sum(),
+    };
+
+    if file_data.len() >= config.min_corpus_size_for_shingle_filter {
+        if let Some(focus_files) = focus_files {
+            shingle_filter::filter_to_focus_candidates(
+                &mut file_data,
+                focus_files,
+                config.min_tokens,
+            );
+        } else {
+            shingle_filter::filter_to_duplicate_candidates(&mut file_data, config.min_tokens);
+        }
     }
 
     let suppressions_by_file: FxHashMap<PathBuf, Vec<Suppression>> = file_data
@@ -297,7 +312,7 @@ fn find_duplicates_inner(
     let mut report = if let Some(focus_files) = focus_files {
         detector.detect_touching_files(detector_data, focus_files)
     } else {
-        detector.detect(detector_data)
+        detector.detect_with_totals(detector_data, corpus_totals)
     };
 
     if !suppressions_by_file.is_empty() {
@@ -694,6 +709,66 @@ export function validateInput(data: string): boolean {
             !report.clone_families.is_empty(),
             "Should group clones into families"
         );
+    }
+
+    #[test]
+    fn global_shingle_prefilter_preserves_corpus_totals() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let src_dir = dir.path().join("src");
+        std::fs::create_dir_all(&src_dir).expect("create src dir");
+
+        let duplicated = r#"
+export function normalizeUser(input: string): string {
+    const trimmed = input.trim();
+    const lowered = trimmed.toLowerCase();
+    const compact = lowered.replaceAll(" ", "-");
+    return compact;
+}
+"#;
+        let unique = r#"
+export function renderInvoice(id: string): string {
+    const prefix = "invoice";
+    const suffix = id.padStart(6, "0");
+    return `${prefix}:${suffix}`;
+}
+"#;
+
+        let original_path = src_dir.join("original.ts");
+        let copy_path = src_dir.join("copy.ts");
+        let unique_path = src_dir.join("unique.ts");
+        std::fs::write(&original_path, duplicated).expect("write original");
+        std::fs::write(&copy_path, duplicated).expect("write copy");
+        std::fs::write(&unique_path, unique).expect("write unique");
+
+        let files = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: original_path,
+                size_bytes: duplicated.len() as u64,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: copy_path,
+                size_bytes: duplicated.len() as u64,
+            },
+            DiscoveredFile {
+                id: FileId(2),
+                path: unique_path,
+                size_bytes: unique.len() as u64,
+            },
+        ];
+        let config = DuplicatesConfig {
+            min_tokens: 5,
+            min_lines: 2,
+            min_corpus_size_for_shingle_filter: 1,
+            ..DuplicatesConfig::default()
+        };
+
+        let report = find_duplicates(dir.path(), &files, &config);
+
+        assert!(!report.clone_groups.is_empty());
+        assert_eq!(report.stats.total_files, 3);
+        assert!(report.stats.total_tokens > report.stats.duplicated_tokens);
     }
 
     #[test]

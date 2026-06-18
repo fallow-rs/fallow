@@ -80,7 +80,7 @@ fn tokenize_sfc(source: &str, strip_types: bool, skip_imports: bool) -> FileToke
             (false, false) => SourceType::mjs(),
         };
         sections.push(tokenize_js_section(
-            "sfc-script",
+            "js",
             &script.body,
             script.byte_offset,
             source_type,
@@ -91,7 +91,7 @@ fn tokenize_sfc(source: &str, strip_types: bool, skip_imports: bool) -> FileToke
 
     for region in crate::extract::extract_sfc_template_regions(source) {
         sections.push(tokenize_lexical_section(
-            "sfc-template",
+            "markup",
             &region.body,
             region.byte_offset,
         ));
@@ -100,7 +100,7 @@ fn tokenize_sfc(source: &str, strip_types: bool, skip_imports: bool) -> FileToke
     for style in crate::extract::extract_sfc_styles(source) {
         if style.src.is_none() {
             sections.push(tokenize_lexical_section(
-                "sfc-style",
+                "style",
                 &style.body,
                 style.byte_offset,
             ));
@@ -126,7 +126,7 @@ fn tokenize_astro(
 ) -> FileTokens {
     if let Some(script) = extract_fn(source) {
         let mut sections = vec![tokenize_js_section(
-            "astro-frontmatter",
+            "js",
             &script.body,
             script.byte_offset,
             SourceType::ts(),
@@ -135,14 +135,14 @@ fn tokenize_astro(
         )];
         for region in crate::extract::extract_astro_template_regions(source) {
             sections.push(tokenize_lexical_section(
-                "astro-template",
+                "markup",
                 &region.body,
                 region.byte_offset,
             ));
         }
         for region in crate::extract::extract_astro_style_regions(source) {
             sections.push(tokenize_lexical_section(
-                "astro-style",
+                "style",
                 &region.body,
                 region.byte_offset,
             ));
@@ -158,14 +158,14 @@ fn tokenize_astro(
     let mut sections = Vec::new();
     for region in crate::extract::extract_astro_template_regions(source) {
         sections.push(tokenize_lexical_section(
-            "astro-template",
+            "markup",
             &region.body,
             region.byte_offset,
         ));
     }
     for region in crate::extract::extract_astro_style_regions(source) {
         sections.push(tokenize_lexical_section(
-            "astro-style",
+            "style",
             &region.body,
             region.byte_offset,
         ));
@@ -215,8 +215,11 @@ fn empty_tokens(source: &str) -> FileTokens {
 }
 
 fn tokenize_style_source(source: &str) -> FileTokens {
+    let mut tokens = Vec::with_capacity(source.len().min(64));
+    tokens.push(lexical::boundary_token("style", 0));
+    tokens.extend(lexical::tokenize_lexical_region(source, 0));
     FileTokens {
-        tokens: lexical::tokenize_lexical_region(source, 0),
+        tokens,
         atomic_invocation_spans: Vec::new(),
         source: source.to_string(),
         line_count: source.lines().count().max(1),
@@ -226,7 +229,6 @@ fn tokenize_style_source(source: &str) -> FileTokens {
 struct TokenSection {
     name: &'static str,
     start: usize,
-    end: usize,
     tokens: Vec<SourceToken>,
     atomic_invocation_spans: Vec<Span>,
 }
@@ -256,7 +258,6 @@ fn tokenize_js_section(
     TokenSection {
         name,
         start: byte_offset,
-        end: byte_offset + source.len(),
         tokens: extractor.tokens,
         atomic_invocation_spans: extractor.atomic_invocation_spans,
     }
@@ -266,7 +267,6 @@ fn tokenize_lexical_section(name: &'static str, source: &str, byte_offset: usize
     TokenSection {
         name,
         start: byte_offset,
-        end: byte_offset + source.len(),
         tokens: lexical::tokenize_lexical_region(source, byte_offset),
         atomic_invocation_spans: Vec::new(),
     }
@@ -278,14 +278,11 @@ fn merge_sections(mut sections: Vec<TokenSection>) -> (Vec<SourceToken>, Vec<Spa
 
     let mut tokens = Vec::new();
     let mut atomic_invocation_spans = Vec::new();
-    let total_sections = sections.len();
 
-    for (index, section) in sections.into_iter().enumerate() {
+    for section in sections {
+        tokens.push(lexical::boundary_token(section.name, section.start));
         tokens.extend(section.tokens);
         atomic_invocation_spans.extend(section.atomic_invocation_spans);
-        if index + 1 < total_sections {
-            tokens.push(lexical::boundary_token(section.name, section.end));
-        }
     }
 
     (tokens, atomic_invocation_spans)

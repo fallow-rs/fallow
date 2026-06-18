@@ -33,6 +33,13 @@ struct FileData {
     atomic_invocation_spans: Vec<Span>,
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct CorpusTotals {
+    pub(super) files: usize,
+    pub(super) lines: usize,
+    pub(super) tokens: usize,
+}
+
 /// Suffix Array + LCP based clone detection engine.
 ///
 /// Concatenates all files' token sequences (separated by unique sentinels),
@@ -66,7 +73,15 @@ impl CloneDetector {
         &self,
         file_data: Vec<(PathBuf, Vec<HashedToken>, FileTokens)>,
     ) -> DuplicationReport {
-        self.detect_inner(file_data, None)
+        self.detect_inner(file_data, None, None)
+    }
+
+    pub(super) fn detect_with_totals(
+        &self,
+        file_data: Vec<(PathBuf, Vec<HashedToken>, FileTokens)>,
+        totals: CorpusTotals,
+    ) -> DuplicationReport {
+        self.detect_inner(file_data, None, Some(totals))
     }
 
     /// Run clone detection while only materializing groups that touch one of the
@@ -80,18 +95,23 @@ impl CloneDetector {
         file_data: Vec<(PathBuf, Vec<HashedToken>, FileTokens)>,
         focus_files: &FxHashSet<PathBuf>,
     ) -> DuplicationReport {
-        self.detect_inner(file_data, Some(focus_files))
+        self.detect_inner(file_data, Some(focus_files), None)
     }
 
     fn detect_inner(
         &self,
         file_data: Vec<(PathBuf, Vec<HashedToken>, FileTokens)>,
         focus_files: Option<&FxHashSet<PathBuf>>,
+        corpus_totals: Option<CorpusTotals>,
     ) -> DuplicationReport {
         let _span = tracing::info_span!("clone_detect").entered();
 
         if file_data.is_empty() || self.min_tokens == 0 {
-            return empty_report(0);
+            return empty_report(corpus_totals.unwrap_or(CorpusTotals {
+                files: 0,
+                lines: 0,
+                tokens: 0,
+            }));
         }
 
         let files: Vec<FileData> = file_data
@@ -104,14 +124,16 @@ impl CloneDetector {
             })
             .collect();
 
-        let total_files = files.len();
-        let total_lines: usize = files.iter().map(|f| f.file_tokens.line_count).sum();
-        let total_tokens: usize = files.iter().map(|f| f.hashed_tokens.len()).sum();
+        let totals = corpus_totals.unwrap_or_else(|| CorpusTotals {
+            files: files.len(),
+            lines: files.iter().map(|f| f.file_tokens.line_count).sum(),
+            tokens: files.iter().map(|f| f.hashed_tokens.len()).sum(),
+        });
         let focus_file_ids = focus_files.map(|focus| build_focus_file_ids(&files, focus));
         trace_clone_detection_input(
-            total_files,
-            total_tokens,
-            total_lines,
+            totals.files,
+            totals.tokens,
+            totals.lines,
             focus_file_ids.as_deref(),
         );
 
@@ -141,7 +163,7 @@ impl CloneDetector {
         );
 
         if text.is_empty() {
-            return empty_report(total_files);
+            return empty_report(totals);
         }
 
         let t0 = std::time::Instant::now();
@@ -187,7 +209,7 @@ impl CloneDetector {
 
         let t0 = std::time::Instant::now();
         let stats =
-            statistics::compute_stats(&clone_groups, total_files, total_lines, total_tokens);
+            statistics::compute_stats(&clone_groups, totals.files, totals.lines, totals.tokens);
         let stats_time = t0.elapsed();
         tracing::debug!(elapsed_us = stats_time.as_micros(), "step7_compute_stats");
 
@@ -201,7 +223,7 @@ impl CloneDetector {
                 build: build_time,
                 stats: stats_time,
             },
-            total_tokens,
+            totals.tokens,
             clone_groups.len(),
         );
 
@@ -278,17 +300,17 @@ fn trace_clone_detection_complete(
 }
 
 /// Create an empty report when there are no files to analyze.
-const fn empty_report(total_files: usize) -> DuplicationReport {
+const fn empty_report(totals: CorpusTotals) -> DuplicationReport {
     DuplicationReport {
         clone_groups: Vec::new(),
         clone_families: Vec::new(),
         mirrored_directories: Vec::new(),
         stats: DuplicationStats {
-            total_files,
+            total_files: totals.files,
             files_with_clones: 0,
-            total_lines: 0,
+            total_lines: totals.lines,
             duplicated_lines: 0,
-            total_tokens: 0,
+            total_tokens: totals.tokens,
             duplicated_tokens: 0,
             clone_groups: 0,
             clone_instances: 0,

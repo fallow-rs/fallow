@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`unused-component-prop` now covers Svelte 5 `$props()` destructures.** Svelte components that declare a prop through `$props()` and never read it in their script or markup now report through the existing `unused-component-prop` rule. The finding keeps the same output shape, severity, manual action, and suppression token as Vue and React component-prop findings. It stays conservative by requiring a declared `svelte` or `@sveltejs/kit` dependency and abstaining when a `$props()` destructure contains rest, computed, nested, or whole-object shapes that could hide a use.
 
+### Fixed
+
+- **`fallow dupes` avoids cross-format clone groups for web-format tokens.** Duplicate token hashes now include the active source namespace, so JS, style, and markup regions do not form clone groups with each other just because their punctuation or identifier shapes match. Large-corpus duplicate detection also prefilters files with no repeated `minTokens` shingle before suffix-array analysis, and the real-world benchmark watchdog now allows the expanded Next.js combined-analysis surface to complete.
+
 ## [2.99.0] - 2026-06-18
 
 ### Added
