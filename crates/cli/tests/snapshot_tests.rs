@@ -2494,6 +2494,7 @@ fn sample_health_report(root: &Path) -> HealthReport {
         runtime_coverage: None,
         coverage_intelligence: None,
         actions_meta: None,
+        framework_health: None,
         css_analytics: None,
         render_fan_in_top: rustc_hash::FxHashMap::default(),
     }
@@ -2758,6 +2759,7 @@ fn empty_health_report() -> HealthReport {
         runtime_coverage: None,
         coverage_intelligence: None,
         actions_meta: None,
+        framework_health: None,
         css_analytics: None,
         render_fan_in_top: rustc_hash::FxHashMap::default(),
     }

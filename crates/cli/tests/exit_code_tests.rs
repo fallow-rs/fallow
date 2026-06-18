@@ -119,6 +119,123 @@ fn human_explain_adds_inline_descriptions_for_analysis_commands() {
 }
 
 #[test]
+fn health_json_reports_framework_abstains() {
+    let output = run_fallow(
+        "health",
+        "sveltekit-load-data-global-abstain",
+        &["--format", "json", "--quiet", "--score"],
+    );
+    assert_eq!(output.code, 0, "health should pass: {}", output.stderr);
+    let json = parse_json(&output);
+    assert!(
+        json.pointer("/framework_health/detected_frameworks")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|frameworks| frameworks.iter().any(|framework| framework == "sveltekit")),
+        "SvelteKit should be detected: {}",
+        output.stdout
+    );
+    let detectors = json
+        .pointer("/framework_health/detectors")
+        .and_then(serde_json::Value::as_array)
+        .expect("framework detectors should be present");
+    let abstain = detectors
+        .iter()
+        .find(|detector| {
+            detector.get("id").and_then(serde_json::Value::as_str) == Some("unused-load-data-key")
+                && detector
+                    .get("framework")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("sveltekit")
+        })
+        .expect("unused-load-data-key detector should be reported");
+    assert_eq!(
+        abstain.get("status").and_then(serde_json::Value::as_str),
+        Some("abstained")
+    );
+    assert_eq!(
+        abstain.get("reason").and_then(serde_json::Value::as_str),
+        Some("unused_load_data_keys_global_abstain")
+    );
+}
+
+#[test]
+fn health_json_reports_disabled_framework_detectors() {
+    let output = run_fallow(
+        "health",
+        "unused-react-prop",
+        &["--format", "json", "--quiet", "--score"],
+    );
+    assert_eq!(output.code, 0, "health should pass: {}", output.stderr);
+    let json = parse_json(&output);
+    let detectors = json
+        .pointer("/framework_health/detectors")
+        .and_then(serde_json::Value::as_array)
+        .expect("framework detectors should be present");
+    for id in ["prop-drilling", "thin-wrapper", "duplicate-prop-shape"] {
+        let detector = detectors
+            .iter()
+            .find(|detector| {
+                detector.get("id").and_then(serde_json::Value::as_str) == Some(id)
+                    && detector
+                        .get("framework")
+                        .and_then(serde_json::Value::as_str)
+                        == Some("react")
+            })
+            .unwrap_or_else(|| panic!("{id} should be reported"));
+        assert_eq!(
+            detector.get("status").and_then(serde_json::Value::as_str),
+            Some("disabled_by_config")
+        );
+        assert_eq!(
+            detector.get("reason").and_then(serde_json::Value::as_str),
+            Some("disabled_by_config")
+        );
+    }
+}
+
+#[test]
+fn health_json_reports_not_checked_framework_detectors() {
+    let output = run_fallow(
+        "health",
+        "nuxt-auto-import-components",
+        &["--format", "json", "--quiet", "--score"],
+    );
+    assert_eq!(output.code, 0, "health should pass: {}", output.stderr);
+    let json = parse_json(&output);
+    let detectors = json
+        .pointer("/framework_health/detectors")
+        .and_then(serde_json::Value::as_array)
+        .expect("framework detectors should be present");
+    assert!(
+        !detectors.iter().any(|detector| {
+            detector
+                .get("framework")
+                .and_then(serde_json::Value::as_str)
+                == Some("vue")
+        }),
+        "Nuxt-only projects should not synthesize a Vue detector row"
+    );
+    let detector = detectors
+        .iter()
+        .find(|detector| {
+            detector.get("id").and_then(serde_json::Value::as_str) == Some("unprovided-inject")
+                && detector
+                    .get("framework")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("nuxt")
+        })
+        .expect("Nuxt unprovided-inject detector should be reported");
+    assert_eq!(
+        detector.get("status").and_then(serde_json::Value::as_str),
+        Some("not_checked")
+    );
+    assert_eq!(
+        detector.get("reason").and_then(serde_json::Value::as_str),
+        Some("requires_vue_runtime_dependency")
+    );
+}
+
+#[test]
 fn combined_human_explain_renders_inline_descriptions() {
     let combined = run_fallow_combined("basic-project", &["--quiet", "--explain"]);
     assert!(

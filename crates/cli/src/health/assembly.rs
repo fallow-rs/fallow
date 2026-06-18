@@ -48,6 +48,7 @@ pub(super) fn assemble_health_report(
         health_trend,
         has_istanbul_coverage,
         runtime_coverage,
+        framework_health,
         large_functions,
         sev_critical,
         sev_high,
@@ -139,6 +140,7 @@ pub(super) fn assemble_health_report(
         },
         health_trend,
         actions_meta: build_health_actions_meta(action_ctx),
+        framework_health,
         css_analytics: None,
         render_fan_in_top,
     };

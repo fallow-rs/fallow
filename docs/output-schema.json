@@ -1398,6 +1398,17 @@
           ],
           "description": "Audit breadcrumb explaining systemic action-array adjustments. Present\nonly when at least one adjustment was made (e.g., health finding\nsuppression hints omitted because a baseline is active). When --group-by\nis active, each entry of `groups` may carry its own `actions_meta`\ndescribing the same omission so per-group consumers do not need to walk\nback to the report root."
         },
+        "framework_health": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FrameworkHealthDiagnostics"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional framework-specific detector coverage. Present only when the\nhealth run already needed the dead-code analysis output."
+        },
         "css_analytics": {
           "anyOf": [
             {
@@ -2352,6 +2363,17 @@
             }
           ],
           "description": "Audit breadcrumb explaining systemic action-array adjustments. Present\nonly when at least one adjustment was made (e.g., health finding\nsuppression hints omitted because a baseline is active). When --group-by\nis active, each entry of `groups` may carry its own `actions_meta`\ndescribing the same omission so per-group consumers do not need to walk\nback to the report root."
+        },
+        "framework_health": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FrameworkHealthDiagnostics"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional framework-specific detector coverage. Present only when the\nhealth run already needed the dead-code analysis output."
         },
         "css_analytics": {
           "anyOf": [
@@ -4384,7 +4406,7 @@
       "properties": {
         "package_name": {
           "type": "string",
-          "description": "Production dependency that is only imported by test files , consider\nmoving to devDependencies."
+          "description": "Production dependency that is only imported by test files, consider\nmoving to devDependencies."
         },
         "path": {
           "type": "string",
@@ -9002,7 +9024,7 @@
       "properties": {
         "package_name": {
           "type": "string",
-          "description": "Production dependency that is only imported by test files , consider\nmoving to devDependencies."
+          "description": "Production dependency that is only imported by test files, consider\nmoving to devDependencies."
         },
         "path": {
           "type": "string",
@@ -15425,6 +15447,70 @@
         "sampled_count"
       ],
       "description": "One file inside a blind-spot group."
+    },
+    "FrameworkHealthDiagnostics": {
+      "type": "object",
+      "properties": {
+        "detected_frameworks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Detected framework IDs, sorted and deduplicated."
+        },
+        "detectors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/FrameworkHealthDetector"
+          },
+          "description": "Detector coverage for the detected frameworks."
+        }
+      },
+      "required": [
+        "detected_frameworks",
+        "detectors"
+      ],
+      "description": "Framework-specific health detector coverage surfaced for agent consumers."
+    },
+    "FrameworkHealthDetector": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Rule or detector ID, matching fallow's stable rule names where possible."
+        },
+        "framework": {
+          "type": "string",
+          "description": "Framework ID that made this detector relevant."
+        },
+        "status": {
+          "description": "Whether the detector ran, was disabled, abstained, or could not be checked.",
+          "$ref": "#/definitions/FrameworkHealthDetectorStatus"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable reason code for non-active statuses."
+        }
+      },
+      "required": [
+        "id",
+        "framework",
+        "status"
+      ],
+      "description": "Status for one framework-specific health detector."
+    },
+    "FrameworkHealthDetectorStatus": {
+      "type": "string",
+      "enum": [
+        "active",
+        "disabled_by_config",
+        "abstained",
+        "not_checked"
+      ],
+      "description": "Detector status codes for framework health observability."
     }
   }
 }

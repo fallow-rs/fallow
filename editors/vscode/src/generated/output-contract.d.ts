@@ -578,6 +578,10 @@ export type RefactoringTargetActionType = ("apply-refactoring" | "suppress-line"
  */
 export type TrendDirection = ("improving" | "declining" | "stable")
 /**
+ * Detector status codes for framework health observability.
+ */
+export type FrameworkHealthDetectorStatus = ("active" | "disabled_by_config" | "abstained" | "not_checked")
+/**
  * Discriminant for [`CssCandidateAction::kind`].
  */
 export type CssCandidateActionType = ("verify-unused" | "verify-undefined" | "consolidate" | "replace-with-token" | "standardize")
@@ -2150,7 +2154,7 @@ introduced?: (AuditIntroduced | null)
  */
 export interface TestOnlyDependencyFinding {
 /**
- * Production dependency that is only imported by test files , consider
+ * Production dependency that is only imported by test files, consider
  * moving to devDependencies.
  */
 package_name: string
@@ -3937,6 +3941,11 @@ health_trend?: (HealthTrend | null)
  */
 actions_meta?: (HealthActionsMeta | null)
 /**
+ * Optional framework-specific detector coverage. Present only when the
+ * health run already needed the dead-code analysis output.
+ */
+framework_health?: (FrameworkHealthDiagnostics | null)
+/**
  * Structural CSS analytics (specificity hotspots, `!important` density,
  * over-complex selectors, deep nesting). Present only with `--css`.
  */
@@ -5574,6 +5583,37 @@ reason: string
 scope: string
 }
 /**
+ * Framework-specific health detector coverage surfaced for agent consumers.
+ */
+export interface FrameworkHealthDiagnostics {
+/**
+ * Detected framework IDs, sorted and deduplicated.
+ */
+detected_frameworks: string[]
+/**
+ * Detector coverage for the detected frameworks.
+ */
+detectors: FrameworkHealthDetector[]
+}
+/**
+ * Status for one framework-specific health detector.
+ */
+export interface FrameworkHealthDetector {
+/**
+ * Rule or detector ID, matching fallow's stable rule names where possible.
+ */
+id: string
+/**
+ * Framework ID that made this detector relevant.
+ */
+framework: string
+status: FrameworkHealthDetectorStatus
+/**
+ * Stable reason code for non-active statuses.
+ */
+reason?: (string | null)
+}
+/**
  * Structural CSS analytics surfaced by `fallow health --css`.
  */
 export interface CssAnalyticsReport {
@@ -6720,6 +6760,11 @@ health_trend?: (HealthTrend | null)
  * back to the report root.
  */
 actions_meta?: (HealthActionsMeta | null)
+/**
+ * Optional framework-specific detector coverage. Present only when the
+ * health run already needed the dead-code analysis output.
+ */
+framework_health?: (FrameworkHealthDiagnostics | null)
 /**
  * Structural CSS analytics (specificity hotspots, `!important` density,
  * over-complex selectors, deep nesting). Present only with `--css`.

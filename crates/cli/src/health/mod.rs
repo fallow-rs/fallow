@@ -15,7 +15,7 @@ use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
 use colored::Colorize;
-use fallow_config::{OutputFormat, ResolvedConfig};
+use fallow_config::{OutputFormat, PackageJson, ResolvedConfig, Severity};
 
 use crate::baseline::{HealthBaselineData, filter_new_health_findings, filter_new_health_targets};
 use crate::check::{get_changed_files, resolve_workspace_scope};
@@ -2559,6 +2559,9 @@ fn build_health_output_parts(
             action_ctx: &action_ctx,
         });
 
+    let framework_health =
+        build_framework_health_diagnostics(build.config, analysis_data.framework_health_facts);
+
     let report = build_health_report_from_pipeline(
         opts,
         &action_ctx,
@@ -2579,6 +2582,7 @@ fn build_health_output_parts(
             targets: derived_sections.targets,
             target_thresholds: derived_sections.target_thresholds,
             has_istanbul_coverage: build.has_istanbul_coverage,
+            framework_health,
             sev_critical: build.sev_critical,
             sev_high: build.sev_high,
             sev_moderate: build.sev_moderate,
@@ -2684,6 +2688,7 @@ struct HealthReportPipelineInput {
     targets: Vec<RefactoringTarget>,
     target_thresholds: Option<crate::health_types::TargetThresholds>,
     has_istanbul_coverage: bool,
+    framework_health: Option<crate::health_types::FrameworkHealthDiagnostics>,
     sev_critical: usize,
     sev_high: usize,
     sev_moderate: usize,
@@ -2719,6 +2724,7 @@ fn build_health_report_from_pipeline(
             health_trend: input.vital_data.health_trend,
             has_istanbul_coverage: input.has_istanbul_coverage,
             runtime_coverage: input.analysis_data.runtime_coverage,
+            framework_health: input.framework_health,
             large_functions: input.vital_data.large_functions,
             sev_critical: input.sev_critical,
             sev_high: input.sev_high,
@@ -3755,10 +3761,347 @@ struct HealthAnalysisData {
     score_output: Option<scoring::FileScoreOutput>,
     files_scored: Option<usize>,
     average_maintainability: Option<f64>,
+    framework_health_facts: Option<FrameworkHealthFacts>,
     file_scores_ms: f64,
     git_churn_ms: f64,
     git_churn_cache_hit: bool,
     churn_fetch: Option<hotspots::ChurnFetchResult>,
+}
+
+#[derive(Clone, Copy, Default)]
+struct FrameworkHealthFacts {
+    unused_load_data_keys_global_abstain: bool,
+}
+
+fn build_framework_health_diagnostics(
+    config: &ResolvedConfig,
+    facts: Option<FrameworkHealthFacts>,
+) -> Option<crate::health_types::FrameworkHealthDiagnostics> {
+    let facts = facts?;
+    let detected_frameworks = detect_frameworks(config);
+    if detected_frameworks.is_empty() {
+        return None;
+    }
+
+    let mut detectors = Vec::new();
+    for framework in &detected_frameworks {
+        add_framework_detectors(&mut detectors, framework, &config.rules, facts);
+    }
+
+    if detectors.is_empty() {
+        return None;
+    }
+
+    Some(crate::health_types::FrameworkHealthDiagnostics {
+        detected_frameworks,
+        detectors,
+    })
+}
+
+fn detect_frameworks(config: &ResolvedConfig) -> Vec<String> {
+    let mut deps = rustc_hash::FxHashSet::default();
+    if let Ok(pkg) = PackageJson::load(&config.root.join("package.json")) {
+        deps.extend(pkg.all_dependency_names());
+    }
+    for workspace in fallow_config::discover_workspaces(&config.root) {
+        if let Ok(pkg) = PackageJson::load(&workspace.root.join("package.json")) {
+            deps.extend(pkg.all_dependency_names());
+        }
+    }
+
+    let mut frameworks = Vec::new();
+    if deps.contains("react") || deps.contains("preact") || deps.contains("next") {
+        frameworks.push("react".to_string());
+    }
+    if deps.contains("next") {
+        frameworks.push("next".to_string());
+    }
+    if deps.contains("vue") || deps.contains("@vue/runtime-core") {
+        frameworks.push("vue".to_string());
+    }
+    if deps.contains("nuxt") {
+        frameworks.push("nuxt".to_string());
+    }
+    if deps.contains("svelte") || deps.contains("@sveltejs/kit") {
+        frameworks.push("svelte".to_string());
+    }
+    if deps.contains("@sveltejs/kit") {
+        frameworks.push("sveltekit".to_string());
+    }
+    if deps.contains("@angular/core") {
+        frameworks.push("angular".to_string());
+    }
+    frameworks.sort_unstable();
+    frameworks.dedup();
+    frameworks
+}
+
+fn add_framework_detectors(
+    detectors: &mut Vec<crate::health_types::FrameworkHealthDetector>,
+    framework: &str,
+    rules: &fallow_config::RulesConfig,
+    facts: FrameworkHealthFacts,
+) {
+    match framework {
+        "angular" => add_angular_detectors(detectors, framework, rules),
+        "next" => add_next_detectors(detectors, framework, rules),
+        "nuxt" => add_nuxt_detectors(detectors, framework, rules),
+        "vue" => add_vue_detectors(detectors, framework, rules),
+        "react" => add_react_detectors(detectors, framework, rules),
+        "svelte" => add_svelte_detectors(detectors, framework, rules),
+        "sveltekit" => add_sveltekit_detectors(detectors, framework, rules, facts),
+        _ => {}
+    }
+}
+
+fn add_angular_detectors(
+    detectors: &mut Vec<crate::health_types::FrameworkHealthDetector>,
+    framework: &str,
+    rules: &fallow_config::RulesConfig,
+) {
+    add_detector(
+        detectors,
+        framework,
+        "unrendered-component",
+        rules.unrendered_components,
+    );
+    add_detector(
+        detectors,
+        framework,
+        "unused-component-input",
+        rules.unused_component_inputs,
+    );
+    add_detector(
+        detectors,
+        framework,
+        "unused-component-output",
+        rules.unused_component_outputs,
+    );
+    add_detector(
+        detectors,
+        framework,
+        "unprovided-inject",
+        rules.unprovided_injects,
+    );
+}
+
+fn add_next_detectors(
+    detectors: &mut Vec<crate::health_types::FrameworkHealthDetector>,
+    framework: &str,
+    rules: &fallow_config::RulesConfig,
+) {
+    add_detector(
+        detectors,
+        framework,
+        "invalid-client-export",
+        rules.invalid_client_export,
+    );
+    add_detector(
+        detectors,
+        framework,
+        "mixed-client-server-barrel",
+        rules.mixed_client_server_barrel,
+    );
+    add_detector(
+        detectors,
+        framework,
+        "misplaced-directive",
+        rules.misplaced_directive,
+    );
+    add_detector(
+        detectors,
+        framework,
+        "route-collision",
+        rules.route_collision,
+    );
+    add_detector(
+        detectors,
+        framework,
+        "dynamic-segment-name-conflict",
+        rules.dynamic_segment_name_conflict,
+    );
+    add_detector(
+        detectors,
+        framework,
+        "unused-server-action",
+        rules.unused_server_actions,
+    );
+}
+
+fn add_nuxt_detectors(
+    detectors: &mut Vec<crate::health_types::FrameworkHealthDetector>,
+    framework: &str,
+    rules: &fallow_config::RulesConfig,
+) {
+    add_detector(
+        detectors,
+        framework,
+        "unrendered-component",
+        rules.unrendered_components,
+    );
+    add_detector(
+        detectors,
+        framework,
+        "unused-component-prop",
+        rules.unused_component_props,
+    );
+    add_detector(
+        detectors,
+        framework,
+        "unused-component-emit",
+        rules.unused_component_emits,
+    );
+    add_not_checked_detector(
+        detectors,
+        framework,
+        "unprovided-inject",
+        "requires_vue_runtime_dependency",
+    );
+}
+
+fn add_vue_detectors(
+    detectors: &mut Vec<crate::health_types::FrameworkHealthDetector>,
+    framework: &str,
+    rules: &fallow_config::RulesConfig,
+) {
+    add_detector(
+        detectors,
+        framework,
+        "unrendered-component",
+        rules.unrendered_components,
+    );
+    add_detector(
+        detectors,
+        framework,
+        "unused-component-prop",
+        rules.unused_component_props,
+    );
+    add_detector(
+        detectors,
+        framework,
+        "unused-component-emit",
+        rules.unused_component_emits,
+    );
+    add_detector(
+        detectors,
+        framework,
+        "unprovided-inject",
+        rules.unprovided_injects,
+    );
+}
+
+fn add_react_detectors(
+    detectors: &mut Vec<crate::health_types::FrameworkHealthDetector>,
+    framework: &str,
+    rules: &fallow_config::RulesConfig,
+) {
+    add_detector(
+        detectors,
+        framework,
+        "unused-component-prop",
+        rules.unused_component_props,
+    );
+    add_detector(detectors, framework, "prop-drilling", rules.prop_drilling);
+    add_detector(detectors, framework, "thin-wrapper", rules.thin_wrapper);
+    add_detector(
+        detectors,
+        framework,
+        "duplicate-prop-shape",
+        rules.duplicate_prop_shape,
+    );
+}
+
+fn add_svelte_detectors(
+    detectors: &mut Vec<crate::health_types::FrameworkHealthDetector>,
+    framework: &str,
+    rules: &fallow_config::RulesConfig,
+) {
+    add_detector(
+        detectors,
+        framework,
+        "unrendered-component",
+        rules.unrendered_components,
+    );
+    add_detector(
+        detectors,
+        framework,
+        "unused-component-prop",
+        rules.unused_component_props,
+    );
+    add_detector(
+        detectors,
+        framework,
+        "unused-svelte-event",
+        rules.unused_svelte_events,
+    );
+    add_detector(
+        detectors,
+        framework,
+        "unprovided-inject",
+        rules.unprovided_injects,
+    );
+}
+
+fn add_sveltekit_detectors(
+    detectors: &mut Vec<crate::health_types::FrameworkHealthDetector>,
+    framework: &str,
+    rules: &fallow_config::RulesConfig,
+    facts: FrameworkHealthFacts,
+) {
+    if facts.unused_load_data_keys_global_abstain && rules.unused_load_data_keys != Severity::Off {
+        detectors.push(crate::health_types::FrameworkHealthDetector {
+            id: "unused-load-data-key".to_string(),
+            framework: framework.to_string(),
+            status: crate::health_types::FrameworkHealthDetectorStatus::Abstained,
+            reason: Some("unused_load_data_keys_global_abstain".to_string()),
+        });
+    } else {
+        add_detector(
+            detectors,
+            framework,
+            "unused-load-data-key",
+            rules.unused_load_data_keys,
+        );
+    }
+}
+
+fn add_detector(
+    detectors: &mut Vec<crate::health_types::FrameworkHealthDetector>,
+    framework: &str,
+    id: &str,
+    severity: Severity,
+) {
+    let (status, reason) = if severity == Severity::Off {
+        (
+            crate::health_types::FrameworkHealthDetectorStatus::DisabledByConfig,
+            Some("disabled_by_config".to_string()),
+        )
+    } else {
+        (
+            crate::health_types::FrameworkHealthDetectorStatus::Active,
+            None,
+        )
+    };
+    detectors.push(crate::health_types::FrameworkHealthDetector {
+        id: id.to_string(),
+        framework: framework.to_string(),
+        status,
+        reason,
+    });
+}
+
+fn add_not_checked_detector(
+    detectors: &mut Vec<crate::health_types::FrameworkHealthDetector>,
+    framework: &str,
+    id: &str,
+    reason: &str,
+) {
+    detectors.push(crate::health_types::FrameworkHealthDetector {
+        id: id.to_string(),
+        framework: framework.to_string(),
+        status: crate::health_types::FrameworkHealthDetectorStatus::NotChecked,
+        reason: Some(reason.to_string()),
+    });
 }
 
 struct HealthRuntimeSectionsInput<'a> {
@@ -3882,6 +4225,14 @@ fn prepare_health_analysis_data(
         input.pre_computed_analysis,
         needs_analysis_output,
     )?;
+    let framework_health_facts =
+        shared_analysis_output
+            .as_ref()
+            .map(|output| FrameworkHealthFacts {
+                unused_load_data_keys_global_abstain: output
+                    .results
+                    .unused_load_data_keys_global_abstain,
+            });
     if let Some(graph) = shared_analysis_output
         .as_ref()
         .and_then(|output| output.graph.as_ref())
@@ -3933,6 +4284,7 @@ fn prepare_health_analysis_data(
         score_output,
         files_scored,
         average_maintainability,
+        framework_health_facts,
         file_scores_ms,
         git_churn_ms,
         git_churn_cache_hit,
@@ -4963,6 +5315,7 @@ struct HealthReportAssembly {
     health_trend: Option<crate::health_types::HealthTrend>,
     has_istanbul_coverage: bool,
     runtime_coverage: Option<crate::health_types::RuntimeCoverageReport>,
+    framework_health: Option<crate::health_types::FrameworkHealthDiagnostics>,
     large_functions: Vec<LargeFunctionEntry>,
     sev_critical: usize,
     sev_high: usize,

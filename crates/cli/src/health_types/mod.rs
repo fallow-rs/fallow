@@ -807,6 +807,43 @@ pub struct CssAnalyticsSummary {
     pub notable_truncated_files: u32,
 }
 
+/// Framework-specific health detector coverage surfaced for agent consumers.
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct FrameworkHealthDiagnostics {
+    /// Detected framework IDs, sorted and deduplicated.
+    pub detected_frameworks: Vec<String>,
+    /// Detector coverage for the detected frameworks.
+    pub detectors: Vec<FrameworkHealthDetector>,
+}
+
+/// Status for one framework-specific health detector.
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct FrameworkHealthDetector {
+    /// Rule or detector ID, matching fallow's stable rule names where possible.
+    pub id: String,
+    /// Framework ID that made this detector relevant.
+    pub framework: String,
+    /// Whether the detector ran, was disabled, abstained, or could not be checked.
+    pub status: FrameworkHealthDetectorStatus,
+    /// Stable reason code for non-active statuses.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// Detector status codes for framework health observability.
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum FrameworkHealthDetectorStatus {
+    Active,
+    DisabledByConfig,
+    Abstained,
+    #[allow(dead_code, reason = "reserved for analysis paths that skip a detector")]
+    NotChecked,
+}
+
 /// Result of complexity analysis for reporting.
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -889,6 +926,10 @@ pub struct HealthReport {
     /// back to the report root.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub actions_meta: Option<HealthActionsMeta>,
+    /// Optional framework-specific detector coverage. Present only when the
+    /// health run already needed the dead-code analysis output.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub framework_health: Option<FrameworkHealthDiagnostics>,
     /// Structural CSS analytics (specificity hotspots, `!important` density,
     /// over-complex selectors, deep nesting). Present only with `--css`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -928,6 +969,7 @@ impl Default for HealthReport {
             target_thresholds: None,
             health_trend: None,
             actions_meta: None,
+            framework_health: None,
             css_analytics: None,
             render_fan_in_top: rustc_hash::FxHashMap::default(),
         }
@@ -952,6 +994,7 @@ mod tests {
         assert!(!json.contains("threshold_overrides"));
         assert!(!json.contains("vital_signs"));
         assert!(!json.contains("health_score"));
+        assert!(!json.contains("framework_health"));
     }
 
     #[test]

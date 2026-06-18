@@ -538,6 +538,11 @@ pub fn analyze_with_parse_result(
     let graph = build_analysis_graph(&resolved, &entry_points, files, modules, workspaces);
     let graph_ms = t.elapsed().as_secs_f64() * 1000.0;
 
+    let mut analysis_modules = modules.to_vec();
+    for module in &mut analysis_modules {
+        module.release_resolution_payload();
+    }
+
     let t = Instant::now();
     progress.set_stage("analyzing...");
     #[expect(
@@ -550,7 +555,7 @@ pub fn analyze_with_parse_result(
         &resolved,
         Some(&plugin_result),
         workspaces,
-        modules,
+        &analysis_modules,
         false,
     );
     let analyze_ms = t.elapsed().as_secs_f64() * 1000.0;
