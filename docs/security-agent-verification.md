@@ -1,12 +1,12 @@
 # Security Agent Verification
 
-`fallow security` is a deterministic candidate producer. It does not call a model, decide exploitability, or emit verified vulnerabilities. Use this recipe when an agent or out-of-core harness should turn raw candidates into verifier-filtered survivors.
+`fallow security` is a deterministic candidate producer. It does not call a model, decide exploitability, or emit verified vulnerabilities. Use this recipe when an agent or out-of-core harness should turn raw candidates into verifier-retained survivors.
 
 The workflow uses three fallow surfaces:
 
 - `fallow security --format json --surface` for the candidate list and attack-surface inventory.
 - The candidate contract: fallow fills `source_kind`, `sink`, `boundary`, `severity`, and reachability context; the verifier owns `impact`.
-- `fallow security survivors --candidates fallow-security.json --verdicts verdicts.json --format json` to render verifier-filtered survivors without rewriting the raw candidate output.
+- `fallow security survivors --candidates fallow-security.json --verdicts verdicts.json --format json` to render verifier-retained survivors without rewriting the raw candidate output.
 - `fallow security blind-spots --format json` to group unresolved callee diagnostics into action-oriented blind-spot output.
 - The MCP `security_candidates` tool for agent edit loops that need the same JSON shape without shelling out directly.
 
@@ -171,7 +171,7 @@ The survivor renderer accepts either an array of verdict objects or this wrapper
 }
 ```
 
-The renderer rejects unknown verdict values, duplicate `finding_id` values, unsupported schema versions, and verdicts that do not match any candidate in the `--candidates` file.
+The renderer rejects unknown verdict values, duplicate `finding_id` values, unsupported schema versions, a wrapper `verdicts` field that is not an array, and verdicts that do not match any candidate in the `--candidates` file.
 
 Allowed `verdict` values:
 
@@ -203,7 +203,7 @@ fallow security survivors \
   --format json
 ```
 
-The renderer emits `kind: "security-survivors"` with `survivors` and `needs_human_review` objects keyed by `finding_id`. Human output says "externally verified candidate" and keeps the boundary clear: fallow did not prove a vulnerability.
+The renderer emits `kind: "security-survivors"` with `survivors` and `needs_human_review` objects keyed by `finding_id`, plus `summary.unverdicted` for candidates with no matching verdict. Human output says "verifier-retained candidate" and keeps the boundary clear: fallow did not prove a vulnerability. In CI, add `--require-verdict-for-each-candidate` so an incomplete verdict file exits 2 instead of silently rendering a partial review.
 
 Carry through:
 
@@ -224,7 +224,7 @@ Use blind-spot output when a verifier queue needs to understand where fallow may
 fallow security blind-spots --format json
 ```
 
-The renderer emits `kind: "security-blind-spots"` with aggregate counts and grouped samples by unresolved reason, expression kind, file, and suggested next action. It is derived from existing bounded diagnostics. A non-zero result is not a finding by itself, but it is not a clean bill either.
+The renderer emits `kind: "security-blind-spots"` with aggregate counts and grouped samples by unresolved reason, expression kind, file, and suggested next action. It accepts `--file <PATH>` either before or after `blind-spots`, matching the parent `fallow security --file <PATH>` scope. It is derived from existing bounded diagnostics. A non-zero result is not a finding by itself, but it is not a clean bill either.
 
 ## Quality Caveats
 

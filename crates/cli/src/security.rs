@@ -356,9 +356,9 @@ pub struct SecurityRuntimeStateCounts {
 #[derive(Debug, Clone, Copy, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum SecuritySurvivorsSchemaVersion {
-    /// Initial survivor-renderer output contract.
-    #[serde(rename = "1")]
-    V1,
+    /// Adds `summary.unverdicted` for incomplete verdict files.
+    #[serde(rename = "2")]
+    V2,
 }
 
 /// Verifier verdict status accepted by `fallow security survivors`.
@@ -413,7 +413,7 @@ pub struct SecuritySurvivorsOutput {
     pub elapsed_ms: ElapsedMs,
     /// Survivor render summary.
     pub summary: SecuritySurvivorsSummary,
-    /// Externally verified survivor candidates keyed by finding id.
+    /// Verifier-retained candidates keyed by finding id.
     pub survivors: BTreeMap<String, SecuritySurvivor>,
     /// Ambiguous candidates keyed by finding id. These are not dismissed and are
     /// kept explicit so queues can decide whether to include them.
@@ -429,9 +429,10 @@ pub struct SecuritySurvivorsSummary {
     pub survivors: usize,
     pub dismissed: usize,
     pub needs_human_review: usize,
+    pub unverdicted: usize,
 }
 
-/// One externally verified candidate row.
+/// One verifier-retained candidate row.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecuritySurvivor {
@@ -571,6 +572,8 @@ pub struct SecuritySurvivorsOptions<'a> {
     pub candidates: &'a Path,
     /// Verifier verdict JSON file.
     pub verdicts: &'a Path,
+    /// Exit with code 2 when any candidate lacks a matching verdict.
+    pub require_verdict_for_each_candidate: bool,
 }
 
 /// Run `fallow security survivors`.
@@ -583,6 +586,17 @@ pub fn run_survivors(opts: &SecuritySurvivorsOptions<'_>) -> ExitCode {
         Ok(output) => output,
         Err(message) => return emit_error(&message, 2, opts.output),
     };
+    if opts.require_verdict_for_each_candidate && output.summary.unverdicted > 0 {
+        return emit_error(
+            &format!(
+                "Verifier verdict file is missing verdicts for {} candidate{}.",
+                output.summary.unverdicted,
+                crate::report::plural(output.summary.unverdicted)
+            ),
+            2,
+            opts.output,
+        );
+    }
     outln!("{}", render_survivors_output(opts.output, &output));
     ExitCode::SUCCESS
 }
@@ -776,8 +790,10 @@ fn build_survivors_output(
         }
     }
 
+    let unverdicted = candidates.len().saturating_sub(seen.len());
+
     Ok(SecuritySurvivorsOutput {
-        schema_version: SecuritySurvivorsSchemaVersion::V1,
+        schema_version: SecuritySurvivorsSchemaVersion::V2,
         version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
         elapsed_ms: ElapsedMs(started.elapsed().as_millis() as u64),
         summary: SecuritySurvivorsSummary {
@@ -786,6 +802,7 @@ fn build_survivors_output(
             survivors: survivors.len(),
             dismissed,
             needs_human_review: needs_human_review.len(),
+            unverdicted,
         },
         survivors,
         needs_human_review,
@@ -841,6 +858,12 @@ fn load_verdicts(path: &Path) -> Result<Vec<SecurityVerifierVerdict>, String> {
         {
             return Err(format!(
                 "Verifier verdict file {} must use schema_version `fallow-security-verdicts/v1`.",
+                path.display()
+            ));
+        }
+        if !items.is_array() {
+            return Err(format!(
+                "Verifier verdict file {} must contain a verdicts array.",
                 path.display()
             ));
         }
@@ -2065,7 +2088,7 @@ fn render_survivors_human(output: &SecuritySurvivorsOutput) -> String {
     let mut out = String::new();
     let _ = writeln!(
         out,
-        "Security survivors: {} externally verified candidate{}.",
+        "Security survivors: {} verifier-retained candidate{}.",
         output.summary.survivors,
         plural(output.summary.survivors)
     );
@@ -2077,12 +2100,27 @@ fn render_survivors_human(output: &SecuritySurvivorsOutput) -> String {
             plural(output.summary.needs_human_review)
         );
     }
+    if output.summary.unverdicted > 0 {
+        let _ = writeln!(
+            out,
+            "Unreviewed candidates: {} candidate{}.",
+            output.summary.unverdicted,
+            plural(output.summary.unverdicted)
+        );
+    }
     out.push_str(
-        "These are verifier-filtered fallow candidates, not vulnerabilities proven by fallow.\n",
+        "Retained and human-review rows are verifier dispositions, not vulnerabilities proven by fallow.\n",
     );
+    if output.summary.unverdicted > 0 {
+        out.push_str("Unreviewed candidates have no verifier disposition yet.\n");
+    }
 
     if output.survivors.is_empty() && output.needs_human_review.is_empty() {
-        out.push_str("\nNo survivor details to show.\n");
+        if output.summary.unverdicted > 0 {
+            out.push_str("\nNo retained or human-review details to show yet.\n");
+        } else {
+            out.push_str("\nNo retained candidate details to show.\n");
+        }
         return out;
     }
 
@@ -3401,6 +3439,7 @@ mod tests {
                 output: OutputFormat::Json,
                 candidates: &candidates,
                 verdicts: &verdicts,
+                require_verdict_for_each_candidate: false,
             },
             Instant::now(),
         )
@@ -3443,6 +3482,7 @@ mod tests {
                 output: OutputFormat::Json,
                 candidates: &candidates,
                 verdicts: &verdicts,
+                require_verdict_for_each_candidate: false,
             },
             Instant::now(),
         )
@@ -3459,6 +3499,7 @@ mod tests {
                 output: OutputFormat::Json,
                 candidates: &candidates,
                 verdicts: &verdicts,
+                require_verdict_for_each_candidate: false,
             },
             Instant::now(),
         )
@@ -3491,6 +3532,7 @@ mod tests {
                 output: OutputFormat::Json,
                 candidates: &candidates,
                 verdicts: &verdicts,
+                require_verdict_for_each_candidate: false,
             },
             Instant::now(),
         )
@@ -3507,6 +3549,7 @@ mod tests {
                 output: OutputFormat::Json,
                 candidates: &candidates,
                 verdicts: &verdicts,
+                require_verdict_for_each_candidate: false,
             },
             Instant::now(),
         )

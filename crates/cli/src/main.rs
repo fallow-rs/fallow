@@ -1328,7 +1328,7 @@ enum Command {
 
 #[derive(Subcommand)]
 enum SecuritySubcommand {
-    /// Render externally verified survivor candidates from fallow output plus verifier verdicts.
+    /// Render verifier-retained survivor candidates from fallow output plus verifier verdicts.
     Survivors {
         /// Raw `fallow security --format json` candidate output.
         #[arg(long, value_name = "PATH")]
@@ -1336,10 +1336,17 @@ enum SecuritySubcommand {
         /// Verifier verdict JSON file.
         #[arg(long, value_name = "PATH")]
         verdicts: PathBuf,
+        /// Fail when any candidate has no matching verdict.
+        #[arg(long)]
+        require_verdict_for_each_candidate: bool,
     },
     /// Group unresolved security callees into actionable blind-spot output.
     #[command(name = "blind-spots")]
-    BlindSpots,
+    BlindSpots {
+        /// Scope diagnostics to selected files.
+        #[arg(long, value_name = "PATH")]
+        file: Vec<PathBuf>,
+    },
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
@@ -3111,16 +3118,22 @@ fn render_security_parent_help() -> String {
 
 fn render_security_survivors_help() -> String {
     "\
-Render externally verified survivor candidates from fallow output plus verifier verdicts.
+Render verifier-retained survivor candidates from fallow output plus verifier verdicts.
 
 Usage: fallow security survivors --candidates <PATH> --verdicts <PATH> [OPTIONS]
 
 Options:
-      --candidates <PATH>  Raw `fallow security --format json` candidate output
-      --verdicts <PATH>    Verifier verdict JSON file
-  -f, --format <FORMAT>    Output format: human or json [default: human]
-  -o, --output-file <PATH> Write the report to a file instead of stdout
-  -h, --help               Print help
+      --candidates <PATH>                      Raw `fallow security --format json` candidate output
+      --verdicts <PATH>                        Verifier verdict JSON file
+      --require-verdict-for-each-candidate     Fail when any candidate has no matching verdict
+  -f, --format <FORMAT>                        Output format: human or json [default: human]
+  -o, --output-file <PATH>                     Write the report to a file instead of stdout
+  -h, --help                                   Print help
+
+Verdict JSON:
+  [{\"schema_version\":\"fallow-security-verdict/v1\",\"finding_id\":\"sec-a\",\"verdict\":\"survivor\"}]
+
+Docs: docs/security-agent-verification.md
 "
     .to_owned()
 }
@@ -3141,7 +3154,7 @@ Options:
       --changed-since <REF>          Scope analysis to files changed since this git ref
       --diff-file <PATH>             Unified diff for line-level scoping
       --diff-stdin                   Read the unified diff from stdin
-      --file <PATH>                  Scope diagnostics to selected files: use `fallow security --file <PATH> blind-spots`
+      --file <PATH>                  Scope diagnostics to selected files
   -w, --workspace <WORKSPACE>        Scope output to selected workspaces
       --changed-workspaces <REF>     Scope output to workspaces touched since this git ref
   -o, --output-file <PATH>           Write the report to a file instead of stdout
@@ -3574,6 +3587,7 @@ fn dispatch_security_command(command: Command, dispatch: &DispatchContext<'_>) -
     if let Some(SecuritySubcommand::Survivors {
         candidates,
         verdicts,
+        require_verdict_for_each_candidate,
     }) = &subcommand
     {
         if let Some(code) = validate_security_survivors_flags(&derived_flags) {
@@ -3583,7 +3597,16 @@ fn dispatch_security_command(command: Command, dispatch: &DispatchContext<'_>) -
             output,
             candidates,
             verdicts,
+            require_verdict_for_each_candidate: *require_verdict_for_each_candidate,
         });
+    }
+
+    let mut scoped_files = file.clone();
+    if let Some(SecuritySubcommand::BlindSpots {
+        file: blind_spot_files,
+    }) = &subcommand
+    {
+        scoped_files.extend(blind_spot_files.iter().cloned());
     }
 
     let opts = security::SecurityOptions {
@@ -3600,14 +3623,14 @@ fn dispatch_security_command(command: Command, dispatch: &DispatchContext<'_>) -
         use_shared_diff_index: true,
         workspace: cli.workspace.as_deref(),
         changed_workspaces: cli.changed_workspaces.as_deref(),
-        file: file.as_slice(),
+        file: scoped_files.as_slice(),
         surface,
         gate,
         runtime_coverage: runtime_coverage.as_deref(),
         min_invocations_hot,
         explain: cli.explain,
     };
-    if matches!(subcommand, Some(SecuritySubcommand::BlindSpots)) {
+    if matches!(subcommand, Some(SecuritySubcommand::BlindSpots { .. })) {
         if let Some(code) = validate_security_blind_spots_flags(&derived_flags) {
             return code;
         }

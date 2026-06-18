@@ -754,7 +754,7 @@ export type SkippedSecurityCalleeExpressionKind = ("static-member-expression" | 
 /**
  * The `fallow security survivors --format json` schema version.
  */
-export type SecuritySurvivorsSchemaVersion = "1"
+export type SecuritySurvivorsSchemaVersion = "2"
 /**
  * Verifier verdict status accepted by `fallow security survivors`.
  */
@@ -8308,7 +8308,7 @@ version: ToolVersion
 elapsed_ms: ElapsedMs
 summary: SecuritySurvivorsSummary
 /**
- * Externally verified survivor candidates keyed by finding id.
+ * Verifier-retained candidates keyed by finding id.
  */
 survivors: {
 [k: string]: SecuritySurvivor
@@ -8330,9 +8330,10 @@ verdicts: number
 survivors: number
 dismissed: number
 needs_human_review: number
+unverdicted: number
 }
 /**
- * One externally verified candidate row.
+ * One verifier-retained candidate row.
  */
 export interface SecuritySurvivor {
 /**

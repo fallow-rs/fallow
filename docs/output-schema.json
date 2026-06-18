@@ -15159,7 +15159,7 @@
           "additionalProperties": {
             "$ref": "#/definitions/SecuritySurvivor"
           },
-          "description": "Externally verified survivor candidates keyed by finding id."
+          "description": "Verifier-retained candidates keyed by finding id."
         },
         "needs_human_review": {
           "type": "object",
@@ -15183,8 +15183,8 @@
       "oneOf": [
         {
           "type": "string",
-          "const": "1",
-          "description": "Initial survivor-renderer output contract."
+          "const": "2",
+          "description": "Adds `summary.unverdicted` for incomplete verdict files."
         }
       ],
       "description": "The `fallow security survivors --format json` schema version."
@@ -15206,6 +15206,9 @@
         },
         "needs_human_review": {
           "type": "integer"
+        },
+        "unverdicted": {
+          "type": "integer"
         }
       },
       "required": [
@@ -15213,7 +15216,8 @@
         "verdicts",
         "survivors",
         "dismissed",
-        "needs_human_review"
+        "needs_human_review",
+        "unverdicted"
       ],
       "description": "Aggregate counts for survivor rendering."
     },
@@ -15273,7 +15277,7 @@
         "verdict",
         "candidate"
       ],
-      "description": "One externally verified candidate row."
+      "description": "One verifier-retained candidate row."
     },
     "SecurityVerifierVerdict": {
       "type": "object",
