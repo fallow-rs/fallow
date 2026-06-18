@@ -20,14 +20,18 @@ FALLOW_BIN=""
 CLONE_DIR="/tmp/fallow-bench-ci"
 RUNS=3
 export FALLOW_QUIET="${FALLOW_QUIET:-1}"
-PROJECT_TIMEOUT_SECONDS="${PROJECT_TIMEOUT_SECONDS:-60}"
+PROJECT_TIMEOUT_SECONDS="${PROJECT_TIMEOUT_SECONDS:-120}"
 QUERY_MAX_COLD_MS="${QUERY_MAX_COLD_MS:-5000}"
 TIMEOUT_BIN=""
+TIMEOUT_ARGS=()
 
 if command -v timeout >/dev/null 2>&1; then
     TIMEOUT_BIN="timeout"
 elif command -v gtimeout >/dev/null 2>&1; then
     TIMEOUT_BIN="gtimeout"
+fi
+if [[ -n "${TIMEOUT_BIN}" ]] && "${TIMEOUT_BIN}" --help 2>&1 | rg -q -- "--foreground"; then
+    TIMEOUT_ARGS=(--foreground)
 fi
 
 # Parse arguments
@@ -129,7 +133,7 @@ run_fallow() {
     local dir="$1"; shift
 
     if [[ -n "${TIMEOUT_BIN}" ]]; then
-        "${TIMEOUT_BIN}" "${PROJECT_TIMEOUT_SECONDS}" \
+        "${TIMEOUT_BIN}" "${TIMEOUT_ARGS[@]}" "${PROJECT_TIMEOUT_SECONDS}" \
             "${FALLOW_BIN}" --quiet --format json "$@" --root "${dir}" \
             >/dev/null 2>/dev/null
     else

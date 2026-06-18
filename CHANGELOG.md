@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **`fallow dupes` avoids cross-format clone groups for web-format tokens.** Duplicate token hashes now include the active source namespace, so JS, style, and markup regions do not form clone groups with each other just because their punctuation or identifier shapes match. Large-corpus duplicate detection also prefilters files with no repeated `minTokens` shingle before suffix-array analysis, and the real-world benchmark watchdog now allows the expanded Next.js combined-analysis surface to complete.
+- **`fallow dupes` avoids cross-format clone groups for web-format tokens.** Duplicate token hashes now include the active source namespace, so JS, style, and markup regions do not form clone groups with each other just because their punctuation or identifier shapes match. Large-corpus duplicate detection also prefilters files with no repeated `minTokens` shingle before suffix-array analysis, and the real-world benchmark watchdog now allows the expanded Next.js combined-analysis surface to complete on CI while preserving benchmark diagnostics on timeout.
 
 ## [2.99.0] - 2026-06-18
 
