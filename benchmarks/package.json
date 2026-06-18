@@ -19,7 +19,7 @@
   },
   "dependencies": {
     "dpdm": "^4.0.0",
-    "jscpd": "^4.0.0",
+    "jscpd": "^5.0.10",
     "knip": "^5.0.0",
     "madge": "^8.0.0",
     "tinybench": "^3.0.0"

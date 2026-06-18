@@ -176,6 +176,18 @@ function fmtMem(bytes) {
   return mb < 1024 ? `${mb.toFixed(1)} MB` : `${(mb / 1024).toFixed(2)} GB`;
 }
 
+function relativeSpeed(fallowMedian, jscpdMedian) {
+  if (fallowMedian <= jscpdMedian) {
+    return `fallow ${formatMultiplier(jscpdMedian / fallowMedian)}`;
+  }
+
+  return `jscpd ${formatMultiplier(fallowMedian / jscpdMedian)}`;
+}
+
+function formatMultiplier(value) {
+  return `${value.toFixed(1)}x`;
+}
+
 function benchmarkProject(name, dir) {
   const files = countSourceFiles(dir);
   console.log(`### ${name} (${files} source files)\n`);
@@ -238,7 +250,7 @@ function benchmarkProject(name, dir) {
 
   const fsCold = stats(fTimesCold),
     js = stats(jTimes);
-  const speedup = js.median / fsCold.median;
+  const relative = relativeSpeed(fsCold.median, js.median);
 
   console.table([
     {
@@ -247,7 +259,7 @@ function benchmarkProject(name, dir) {
       Mean: fmt(fsCold.mean),
       Median: fmt(fsCold.median),
       Max: fmt(fsCold.max),
-      Speedup: `${speedup.toFixed(1)}x`,
+      Relative: relative,
       Memory: fmtMem(fPeakRss),
       "Clone Groups": fClones.groups,
       "Dup %": `${fClones.pct}%`,
@@ -258,7 +270,7 @@ function benchmarkProject(name, dir) {
       Mean: fmt(js.mean),
       Median: fmt(js.median),
       Max: fmt(js.max),
-      Speedup: "1.0x",
+      Relative: relative,
       Memory: fmtMem(jPeakRss),
       "Clone Groups": jClones.groups,
       "Dup %": `${jClones.pct}%`,
@@ -267,7 +279,7 @@ function benchmarkProject(name, dir) {
   console.log(`  fallow: [${fTimesCold.map((t) => t.toFixed(0)).join(", ")}]`);
   console.log(`  jscpd:  [${jTimes.map((t) => t.toFixed(0)).join(", ")}]\n`);
 
-  return { name, files, fallow: fsCold, jscpd: js, speedup, fClones, jClones, fPeakRss, jPeakRss };
+  return { name, files, fallow: fsCold, jscpd: js, relative, fClones, jClones, fPeakRss, jPeakRss };
 }
 
 const results = [];
@@ -307,14 +319,11 @@ if (results.length > 0) {
       Files: r.files,
       "Fallow (median)": fmt(r.fallow.median),
       "jscpd (median)": fmt(r.jscpd.median),
-      Speedup: `${r.speedup.toFixed(1)}x`,
+      "Faster tool": r.relative,
       "Fallow RSS": fmtMem(r.fPeakRss),
       "jscpd RSS": fmtMem(r.jPeakRss),
       "Fallow clones": r.fClones.groups,
       "jscpd clones": r.jClones.groups,
     })),
-  );
-  console.log(
-    `Average speedup: ${(results.reduce((s, r) => s + r.speedup, 0) / results.length).toFixed(1)}x faster\n`,
   );
 }

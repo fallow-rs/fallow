@@ -932,7 +932,7 @@ Fallow is not an AI assistant. It is the deterministic codebase intelligence lay
 
 ## Performance
 
-Benchmarked on real open-source projects, cold runs (no cache) so both tools work from scratch, median of 5 runs with 2 warmups. fallow 2.91.0, knip 5.87.0 and 6.6.1, Apple M5, Node 22. Fastest tool per row in bold.
+Benchmarked on real open-source projects, cold runs (no cache) so both tools work from scratch, median of 5 runs with 2 warmups. The dead-code table uses fallow 2.91.0, knip 5.87.0 and 6.6.1, Apple M5, Node 22. The duplication table uses fallow 2.99.0, jscpd 5.0.10, Apple M5, Node 24. Fastest tool per row in bold.
 
 ### Dead code: fallow vs knip
 
@@ -953,16 +953,18 @@ fallow is fastest on small-to-medium projects (roughly 5-18x faster than knip v5
 
 ¹ knip loads and executes a project's config and JSON files to read plugin settings, which is its design and works well on apps. A few framework monorepos trip that up where fallow (purely syntactic, no config execution) completes with no setup: **vite**, a workspace `package.json` carries a UTF-8 BOM that knip's `JSON.parse` rejects (a robustness gap, reportable upstream); **vue/core**, a private `sfc-playground/vite.config.ts` fails to load; **next.js**, the framework's own monorepo needs a build for its jest config and per-workspace entry config for its `dist`-published packages (this is the framework source, not a Next.js app, which is what knip's Next.js plugin targets). All are fixable with knip config; the point is fallow needs none.
 
-### Duplication: fallow vs jscpd
+### Duplication: fallow vs jscpd v5
 
-| Project | Files | fallow | jscpd | Speedup |
-|:--------|------:|-------:|------:|--------:|
-| [preact](https://github.com/preactjs/preact) | 244 | **90ms** | 1.83s | 20x |
-| [fastify](https://github.com/fastify/fastify) | 286 | **100ms** | 1.57s | 16x |
-| [vue/core](https://github.com/vuejs/core) | 522 | **204ms** | 3.22s | 16x |
-| [TanStack/query](https://github.com/TanStack/query) | 901 | **173ms** | 1.28s | 7x |
-| [svelte](https://github.com/sveltejs/svelte) | 3,337 | **366ms** | 3.52s | 10x |
-| [next.js](https://github.com/vercel/next.js) | 20,552 | **3.87s** | 25.50s | 7x |
+| Project | Files | fallow | jscpd v5 | Faster |
+|:--------|------:|-------:|---------:|-------:|
+| [preact](https://github.com/preactjs/preact) | 244 | 83ms | **51ms** | jscpd 1.6x |
+| [fastify](https://github.com/fastify/fastify) | 286 | 135ms | **66ms** | jscpd 2.0x |
+| [vue/core](https://github.com/vuejs/core) | 522 | 168ms | **78ms** | jscpd 2.2x |
+| [TanStack/query](https://github.com/TanStack/query) | 901 | 178ms | **57ms** | jscpd 3.1x |
+| [svelte](https://github.com/sveltejs/svelte) | 3,337 | 383ms | **170ms** | jscpd 2.3x |
+| [next.js](https://github.com/vercel/next.js) | 20,552 | 2.62s | **775ms** | jscpd 3.4x |
+
+jscpd v5's Rust rewrite is now faster for raw duplication scanning on these projects. fallow's duplication checker remains part of the broader audit flow, alongside dead code, dependency, complexity, CSS, framework, and security checks.
 
 No TypeScript compiler, no Node.js runtime needed to analyze your code. [Fallow vs linters](https://docs.fallow.tools/explanations/fallow-vs-linters) | [Reproduce benchmarks](https://github.com/fallow-rs/fallow/tree/main/benchmarks)
 
