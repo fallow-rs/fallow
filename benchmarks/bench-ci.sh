@@ -145,12 +145,12 @@ run_fallow() {
     local heartbeat_ticks=$((HEARTBEAT_SECONDS * 10))
 
     if command -v setsid >/dev/null 2>&1; then
-        setsid "${FALLOW_BIN}" --quiet --format json "$@" --root "${dir}" >/dev/null 2>/dev/null &
+        setsid "${FALLOW_BIN}" --quiet --format json --summary "$@" --root "${dir}" >/dev/null 2>/dev/null &
         pid=$!
         kill_target="-${pid}"
     elif command -v python3 >/dev/null 2>&1; then
         python3 -c 'import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' \
-            "${FALLOW_BIN}" --quiet --format json "$@" --root "${dir}" >/dev/null 2>/dev/null &
+            "${FALLOW_BIN}" --quiet --format json --summary "$@" --root "${dir}" >/dev/null 2>/dev/null &
         pid=$!
         kill_target="-${pid}"
     else
