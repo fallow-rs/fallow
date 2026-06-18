@@ -41,6 +41,17 @@ fn security_finding_json(
     })
 }
 
+fn write_empty_survivor_inputs(dir: &tempfile::TempDir) -> (String, String) {
+    let candidates = dir.path().join("candidates.json");
+    let verdicts = dir.path().join("verdicts.json");
+    std::fs::write(&candidates, r#"{"security_findings":[]}"#).expect("write candidates");
+    std::fs::write(&verdicts, "[]").expect("write verdicts");
+    (
+        candidates.to_string_lossy().to_string(),
+        verdicts.to_string_lossy().to_string(),
+    )
+}
+
 #[test]
 fn security_survivors_renders_verifier_filtered_candidates() {
     let dir = tempfile::tempdir().expect("temp dir");
@@ -167,18 +178,17 @@ fn security_subcommand_help_reaches_subcommands() {
     assert!(!blind_spots.stdout.contains("markdown"));
     assert!(!blind_spots.stdout.contains("--baseline"));
     assert!(!blind_spots.stdout.contains("--gate"));
+    assert!(
+        blind_spots
+            .stdout
+            .contains("fallow security --file <PATH> blind-spots")
+    );
 }
 
 #[test]
 fn security_survivors_rejects_candidate_generation_flags() {
     let dir = tempfile::tempdir().expect("temp dir");
-    let candidates = dir.path().join("candidates.json");
-    let verdicts = dir.path().join("verdicts.json");
-    std::fs::write(&candidates, r#"{"security_findings":[]}"#).expect("write candidates");
-    std::fs::write(&verdicts, "[]").expect("write verdicts");
-
-    let candidates = candidates.to_string_lossy().to_string();
-    let verdicts = verdicts.to_string_lossy().to_string();
+    let (candidates, verdicts) = write_empty_survivor_inputs(&dir);
     let output = run_fallow_raw(&[
         "security",
         "--surface",
@@ -194,6 +204,72 @@ fn security_survivors_rejects_candidate_generation_flags() {
 }
 
 #[test]
+fn security_survivors_rejects_hidden_parent_flags() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let (candidates, verdicts) = write_empty_survivor_inputs(&dir);
+    let sarif = dir.path().join("out.sarif").to_string_lossy().to_string();
+    let output = run_fallow_raw(&[
+        "security",
+        "survivors",
+        "--candidates",
+        &candidates,
+        "--verdicts",
+        &verdicts,
+        "--sarif-file",
+        &sarif,
+        "--format",
+        "json",
+    ]);
+
+    assert_eq!(output.code, 2);
+    let json = parse_json(&output);
+    assert_eq!(
+        json["message"],
+        "--sarif-file is not valid with `fallow security survivors`."
+    );
+
+    let output = run_fallow_raw(&[
+        "security",
+        "survivors",
+        "--candidates",
+        &candidates,
+        "--verdicts",
+        &verdicts,
+        "--fail-on-issues",
+    ]);
+
+    assert_eq!(output.code, 2);
+    assert!(
+        output
+            .stderr
+            .contains("--fail-on-issues is not valid with `fallow security survivors`.")
+    );
+}
+
+#[test]
+fn security_survivors_parse_errors_honor_json_format() {
+    let output = run_fallow_raw(&[
+        "security",
+        "survivors",
+        "--candidates",
+        "/tmp/fallow-missing-candidates.json",
+        "--format",
+        "json",
+    ]);
+
+    assert_eq!(output.code, 2);
+    assert!(output.stderr.is_empty());
+    let json = parse_json(&output);
+    assert_eq!(json["error"], true);
+    assert_eq!(json["exit_code"], 2);
+    assert!(
+        json["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("--verdicts <PATH>"))
+    );
+}
+
+#[test]
 fn security_blind_spots_rejects_gate_flags() {
     let output = run_fallow(
         "security",
@@ -206,5 +282,46 @@ fn security_blind_spots_rejects_gate_flags() {
     assert_eq!(
         json["message"],
         "--gate is not valid with `fallow security blind-spots`."
+    );
+}
+
+#[test]
+fn security_blind_spots_rejects_hidden_parent_flags() {
+    let output = run_fallow(
+        "security",
+        "security-tls-validation-disabled-895",
+        &[
+            "--runtime-coverage",
+            "/tmp/fallow-missing-runtime.json",
+            "blind-spots",
+            "--format",
+            "json",
+        ],
+    );
+
+    assert_eq!(output.code, 2);
+    let json = parse_json(&output);
+    assert_eq!(
+        json["message"],
+        "--runtime-coverage is not valid with `fallow security blind-spots`."
+    );
+
+    let output = run_fallow(
+        "security",
+        "security-tls-validation-disabled-895",
+        &[
+            "--sarif-file",
+            "/tmp/fallow-blind-spots.sarif",
+            "blind-spots",
+            "--format",
+            "json",
+        ],
+    );
+
+    assert_eq!(output.code, 2);
+    let json = parse_json(&output);
+    assert_eq!(
+        json["message"],
+        "--sarif-file is not valid with `fallow security blind-spots`."
     );
 }

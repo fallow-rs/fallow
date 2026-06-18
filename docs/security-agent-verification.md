@@ -152,7 +152,7 @@ The verifier should return a compact verdict object:
 }
 ```
 
-`fallow-security-verdict/v1` is a supported input contract for `fallow security survivors`. Reject extra prose around the JSON object so the survivor renderer can parse the verdict without model-specific cleanup.
+`fallow-security-verdict/v1` is a supported input contract for `fallow security survivors`. Reject extra prose around the JSON object so the survivor renderer can parse the verdict without model-specific cleanup. Fallow persists `reason`, `rationale`, `confidence`, `impact`, and `fix_direction` in survivor output. `evidence_checked` and `dismissal_reason` are harness-owned audit fields today; fallow accepts verdict objects that include them, but does not render those fields.
 
 The survivor renderer accepts either an array of verdict objects or this wrapper shape:
 

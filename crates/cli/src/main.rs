@@ -2002,7 +2002,11 @@ fn parse_min_occurrences(s: &str) -> Result<usize, String> {
 /// Read `FALLOW_FORMAT` env var and parse it into a Format value.
 fn format_from_env() -> Option<Format> {
     let val = std::env::var("FALLOW_FORMAT").ok()?;
-    match val.to_lowercase().as_str() {
+    parse_format_arg(&val)
+}
+
+fn parse_format_arg(value: &str) -> Option<Format> {
+    match value.to_lowercase().as_str() {
         "json" => Some(Format::Json),
         "human" => Some(Format::Human),
         "sarif" => Some(Format::Sarif),
@@ -2968,6 +2972,7 @@ fn telemetry_analysis_mode_for_command(command: Option<&Command>) -> telemetry::
 }
 
 fn handle_cli_parse_error(err: &clap::Error) -> ExitCode {
+    let exit_code = u8::try_from(err.exit_code()).unwrap_or(2);
     if err.kind() == clap::error::ErrorKind::DisplayHelp
         && let Some(target) = security_help_target(std::env::args_os().skip(1))
     {
@@ -2975,9 +2980,54 @@ fn handle_cli_parse_error(err: &clap::Error) -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
-    let exit_code = err.exit_code();
+    if matches!(
+        parse_error_output_format(std::env::args_os().skip(1)),
+        fallow_config::OutputFormat::Json
+    ) {
+        return emit_error(
+            err.to_string().trim(),
+            exit_code,
+            fallow_config::OutputFormat::Json,
+        );
+    }
+
     let _ = err.print();
-    ExitCode::from(u8::try_from(exit_code).unwrap_or(2))
+    ExitCode::from(exit_code)
+}
+
+fn parse_error_output_format<I, S>(args: I) -> fallow_config::OutputFormat
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let args: Vec<String> = args
+        .into_iter()
+        .map(|arg| arg.as_ref().to_string_lossy().into_owned())
+        .collect();
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        if matches!(arg.as_str(), "--format" | "--output" | "-f") {
+            return iter
+                .next()
+                .and_then(|value| parse_format_arg(value))
+                .unwrap_or(Format::Human)
+                .into();
+        }
+        let short_format_value = if arg.starts_with("--") {
+            None
+        } else {
+            arg.strip_prefix("-f")
+        };
+        if let Some(value) = arg
+            .strip_prefix("--format=")
+            .or_else(|| arg.strip_prefix("--output="))
+            .or(short_format_value)
+            .filter(|value| !value.is_empty())
+        {
+            return parse_format_arg(value).unwrap_or(Format::Human).into();
+        }
+    }
+    format_from_env().unwrap_or(Format::Human).into()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3091,7 +3141,7 @@ Options:
       --changed-since <REF>          Scope analysis to files changed since this git ref
       --diff-file <PATH>             Unified diff for line-level scoping
       --diff-stdin                   Read the unified diff from stdin
-      --file <PATH>                  Scope diagnostics to selected files
+      --file <PATH>                  Scope diagnostics to selected files: use `fallow security --file <PATH> blind-spots`
   -w, --workspace <WORKSPACE>        Scope output to selected workspaces
       --changed-workspaces <REF>     Scope output to workspaces touched since this git ref
   -o, --output-file <PATH>           Write the report to a file instead of stdout
@@ -3506,19 +3556,25 @@ fn dispatch_security_command(command: Command, dispatch: &DispatchContext<'_>) -
     let root = dispatch.root;
     let threads = dispatch.threads;
     let (output, quiet, fail_on_issues) = dispatch.ci_defaults();
+    let derived_flags = SecurityDerivedFlagState {
+        output,
+        ci: cli.ci,
+        fail_on_issues,
+        sarif_file: cli.sarif_file.as_deref(),
+        summary: cli.summary,
+        explain: cli.explain,
+        runtime_coverage: runtime_coverage.as_deref(),
+        min_invocations_hot,
+        file: file.as_slice(),
+        gate,
+        surface,
+    };
     if let Some(SecuritySubcommand::Survivors {
         candidates,
         verdicts,
     }) = &subcommand
     {
-        if let Some(code) = validate_security_survivors_flags(
-            output,
-            runtime_coverage.as_deref(),
-            min_invocations_hot,
-            file.as_slice(),
-            gate,
-            surface,
-        ) {
+        if let Some(code) = validate_security_survivors_flags(&derived_flags) {
             return code;
         }
         return security::run_survivors(&security::SecuritySurvivorsOptions {
@@ -3550,9 +3606,7 @@ fn dispatch_security_command(command: Command, dispatch: &DispatchContext<'_>) -
         explain: cli.explain,
     };
     if matches!(subcommand, Some(SecuritySubcommand::BlindSpots)) {
-        if let Some(code) =
-            validate_security_blind_spots_flags(output, fail_on_issues, cli.summary, gate, surface)
-        {
+        if let Some(code) = validate_security_blind_spots_flags(&derived_flags) {
             return code;
         }
         security::run_blind_spots(&opts)
@@ -3561,23 +3615,40 @@ fn dispatch_security_command(command: Command, dispatch: &DispatchContext<'_>) -
     }
 }
 
-fn validate_security_survivors_flags(
+struct SecurityDerivedFlagState<'a> {
     output: fallow_config::OutputFormat,
-    runtime_coverage: Option<&Path>,
+    ci: bool,
+    fail_on_issues: bool,
+    sarif_file: Option<&'a Path>,
+    summary: bool,
+    explain: bool,
+    runtime_coverage: Option<&'a Path>,
     min_invocations_hot: u64,
-    file: &[PathBuf],
+    file: &'a [PathBuf],
     gate: Option<security::SecurityGateMode>,
     surface: bool,
-) -> Option<ExitCode> {
-    let flag = if runtime_coverage.is_some() {
+}
+
+fn validate_security_survivors_flags(flags: &SecurityDerivedFlagState<'_>) -> Option<ExitCode> {
+    let flag = if flags.ci {
+        Some("--ci")
+    } else if flags.fail_on_issues {
+        Some("--fail-on-issues")
+    } else if flags.sarif_file.is_some() {
+        Some("--sarif-file")
+    } else if flags.summary {
+        Some("--summary")
+    } else if flags.explain {
+        Some("--explain")
+    } else if flags.runtime_coverage.is_some() {
         Some("--runtime-coverage")
-    } else if min_invocations_hot != DEFAULT_MIN_INVOCATIONS_HOT {
+    } else if flags.min_invocations_hot != DEFAULT_MIN_INVOCATIONS_HOT {
         Some("--min-invocations-hot")
-    } else if !file.is_empty() {
+    } else if !flags.file.is_empty() {
         Some("--file")
-    } else if gate.is_some() {
+    } else if flags.gate.is_some() {
         Some("--gate")
-    } else if surface {
+    } else if flags.surface {
         Some("--surface")
     } else {
         None
@@ -3585,24 +3656,28 @@ fn validate_security_survivors_flags(
     Some(emit_error(
         &format!("{flag} is not valid with `fallow security survivors`."),
         2,
-        output,
+        flags.output,
     ))
 }
 
-fn validate_security_blind_spots_flags(
-    output: fallow_config::OutputFormat,
-    fail_on_issues: bool,
-    summary: bool,
-    gate: Option<security::SecurityGateMode>,
-    surface: bool,
-) -> Option<ExitCode> {
-    let flag = if fail_on_issues {
+fn validate_security_blind_spots_flags(flags: &SecurityDerivedFlagState<'_>) -> Option<ExitCode> {
+    let flag = if flags.ci {
+        Some("--ci")
+    } else if flags.fail_on_issues {
         Some("--fail-on-issues")
-    } else if summary {
+    } else if flags.sarif_file.is_some() {
+        Some("--sarif-file")
+    } else if flags.summary {
         Some("--summary")
-    } else if gate.is_some() {
+    } else if flags.explain {
+        Some("--explain")
+    } else if flags.runtime_coverage.is_some() {
+        Some("--runtime-coverage")
+    } else if flags.min_invocations_hot != DEFAULT_MIN_INVOCATIONS_HOT {
+        Some("--min-invocations-hot")
+    } else if flags.gate.is_some() {
         Some("--gate")
-    } else if surface {
+    } else if flags.surface {
         Some("--surface")
     } else {
         None
@@ -3610,7 +3685,7 @@ fn validate_security_blind_spots_flags(
     Some(emit_error(
         &format!("{flag} is not valid with `fallow security blind-spots`."),
         2,
-        output,
+        flags.output,
     ))
 }
 
