@@ -48,7 +48,7 @@ const dpdmVersion = hasDpdm
   : "n/a";
 const rustVersion = spawnSync("rustc", ["--version"], { stdio: "pipe" }).stdout?.toString().trim();
 
-console.log(`\n=== Fallow vs madge/dpdm — Circular Dependency Detection ===\n`);
+console.log(`\n=== Fallow vs madge/dpdm: Circular Dependency Detection ===\n`);
 printEnvironment();
 console.log(`Tools:`);
 console.log(`  fallow dead-code --circular-deps  ${fallowVersion}`);
@@ -257,7 +257,7 @@ function benchmarkProject(name, dir) {
       Mean: fmt(fs.mean),
       Median: fmt(fs.median),
       Max: fmt(fs.max),
-      Speedup: "—",
+      Speedup: "--",
       Memory: fmtMem(fallowRss),
       Cycles: fallowCycles,
     },

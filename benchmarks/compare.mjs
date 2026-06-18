@@ -224,12 +224,11 @@ for (const [project, summary] of Object.entries(allSummaries)) {
   console.log(`${project}:`);
   for (const [cat, counts] of Object.entries(summary)) {
     if (counts.both === 0 && counts.onlyFallow === 0 && counts.onlyKnip === 0) continue;
+    const knipComparable = counts.both + counts.onlyKnip;
     const pct =
-      counts.both + counts.onlyFallow + counts.onlyKnip > 0
-        ? ((counts.both / (counts.both + counts.onlyKnip)) * 100).toFixed(0)
-        : "100";
+      knipComparable > 0 ? `${((counts.both / knipComparable) * 100).toFixed(0)}%` : "n/a";
     console.log(
-      `  ${cat}: agree=${counts.both} fallow-only=${counts.onlyFallow} knip-only=${counts.onlyKnip} (${pct}% knip coverage)`,
+      `  ${cat}: agree=${counts.both} fallow-only=${counts.onlyFallow} knip-only=${counts.onlyKnip} (${pct} knip coverage)`,
     );
   }
 }

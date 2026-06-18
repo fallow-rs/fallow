@@ -13,6 +13,15 @@ const runSynthetic = args.includes("--synthetic") || !hasFilter;
 const runRealWorld = args.includes("--real-world") || !hasFilter;
 const RUNS = parseInt(args.find((a) => a.startsWith("--runs="))?.split("=")[1] ?? "5");
 const WARMUP = parseInt(args.find((a) => a.startsWith("--warmup="))?.split("=")[1] ?? "2");
+const projectsArg = args.find((a) => a.startsWith("--projects="))?.split("=")[1];
+const projectFilter = projectsArg
+  ? new Set(
+      projectsArg
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
+    )
+  : null;
 
 console.log("Building fallow (release)...");
 const buildResult = spawnSync("cargo", ["build", "--release"], {
@@ -293,8 +302,10 @@ if (runSynthetic) {
     const order = ["tiny", "small", "medium", "large", "xlarge"];
     for (const p of readdirSync(d)
       .filter((x) => existsSync(join(d, x, "package.json")))
-      .toSorted((a, b) => order.indexOf(a) - order.indexOf(b)))
+      .toSorted((a, b) => order.indexOf(a) - order.indexOf(b))) {
+      if (projectFilter && !projectFilter.has(p)) continue;
       results.push(benchmarkProject(p, join(d, p)));
+    }
   }
 }
 
@@ -306,8 +317,10 @@ if (runRealWorld) {
     console.log("--- Real-World Projects (Duplication) ---\n");
     for (const p of readdirSync(d)
       .filter((x) => existsSync(join(d, x, "package.json")))
-      .toSorted())
+      .toSorted()) {
+      if (projectFilter && !projectFilter.has(p)) continue;
       results.push(benchmarkProject(p, join(d, p)));
+    }
   }
 }
 
@@ -317,7 +330,7 @@ if (results.length > 0) {
     results.map((r) => ({
       Project: r.name,
       Files: r.files,
-      "Fallow (median)": fmt(r.fallow.median),
+      "Fallow cold (median)": fmt(r.fallow.median),
       "jscpd (median)": fmt(r.jscpd.median),
       "Faster tool": r.relative,
       "Fallow RSS": fmtMem(r.fPeakRss),

@@ -44,7 +44,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ---------------------------------------------------------------------------
-# Project list — same as download-fixtures.mjs and conformance/run-all.sh
+# Project list, same as download-fixtures.mjs and conformance/run-all.sh
 # ---------------------------------------------------------------------------
 
 PROJECTS=(

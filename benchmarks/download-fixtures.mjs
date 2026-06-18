@@ -85,7 +85,7 @@ for (const fixture of FIXTURES) {
     }
     console.log(`  ${fixture.name}: ready (${countSourceFiles(dest)} source files)`);
   } catch (err) {
-    console.error(`  ${fixture.name}: FAILED — ${err.message}`);
+    console.error(`  ${fixture.name}: FAILED - ${err.message}`);
     allOk = false;
   }
 }
