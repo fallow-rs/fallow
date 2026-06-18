@@ -61,6 +61,7 @@ export type {
   EntryPoints,
   FindingSeverity,
   FixAction as SuggestionFixAction,
+  FallowOutput,
   HealthFinding,
   HealthOutput,
   HealthReport,
@@ -114,7 +115,10 @@ export type {
   WorkspacesOutput,
 } from "./generated/output-contract.js";
 
+import type { FallowOutput } from "./generated/output-contract.js";
+
 export type { CheckOutput as FallowCheckResult } from "./generated/output-contract.js";
+export type FallowInspectResult = Extract<FallowOutput, { kind: "inspect_target" }>;
 // The VS Code extension reads dupes only via the combined invocation
 // (`fallow --format json`), where `combined.dupes` is the typed
 // `DupesReportPayload` body (introduced in #409), NOT the full

@@ -52,10 +52,12 @@ use fallow_cli::output_envelope::{
     CoverageSetupPackageManager, CoverageSetupRuntimeTarget, CoverageSetupSchemaVersion,
     CoverageSetupSnippet, DupesOutput, ExplainOutput, FallowOutput, GitHubReviewComment,
     GitHubReviewSide, GitLabReviewComment, GitLabReviewPosition, GitLabReviewPositionType,
-    GroupByMode, HealthOutput, ListBoundariesOutput, ReviewCheckConclusion, ReviewComment,
-    ReviewEnvelopeEvent, ReviewEnvelopeMeta, ReviewEnvelopeOutput, ReviewEnvelopeSchema,
-    ReviewEnvelopeSummary, ReviewProvider, ReviewReconcileOutput, ReviewReconcileSchema,
-    WorkspaceInfo, WorkspacesOutput,
+    GroupByMode, HealthOutput, InspectEvidence, InspectEvidenceScope, InspectEvidenceSection,
+    InspectFileIdentity, InspectIdentity, InspectOutput, InspectSectionStatus,
+    InspectSymbolIdentity, InspectTargetDescriptor, ListBoundariesOutput, ReviewCheckConclusion,
+    ReviewComment, ReviewEnvelopeEvent, ReviewEnvelopeMeta, ReviewEnvelopeOutput,
+    ReviewEnvelopeSchema, ReviewEnvelopeSummary, ReviewProvider, ReviewReconcileOutput,
+    ReviewReconcileSchema, WorkspaceInfo, WorkspacesOutput,
 };
 use fallow_cli::report::dupes_grouping::{
     AttributedCloneGroup, AttributedInstance, DuplicationGroup,
@@ -303,6 +305,13 @@ const DERIVED_DEFINITION_NAMES: &[&str] = &[
     "CoverageSetupSnippet",
     "DupesOutput",
     "ExplainOutput",
+    "InspectEvidence",
+    "InspectEvidenceSection",
+    "InspectFileIdentity",
+    "InspectIdentity",
+    "InspectOutput",
+    "InspectSymbolIdentity",
+    "InspectTargetDescriptor",
     "GitHubReviewComment",
     "GitLabReviewComment",
     "GitLabReviewPosition",
@@ -311,6 +320,8 @@ const DERIVED_DEFINITION_NAMES: &[&str] = &[
     "ReviewEnvelopeOutput",
     "ReviewEnvelopeSummary",
     "ReviewReconcileOutput",
+    "InspectEvidenceScope",
+    "InspectSectionStatus",
     "FallowOutput",
     "BoundariesListLogicalGroup",
     "BoundariesListRule",
@@ -705,6 +716,15 @@ fn register_per_command_envelope_definitions(generator: &mut schemars::SchemaGen
     let _ = generator.subschema_for::<fallow_cli::health_types::HealthReport>();
     let _ = generator.subschema_for::<GroupByMode>();
     let _ = generator.subschema_for::<ExplainOutput>();
+    let _ = generator.subschema_for::<InspectOutput>();
+    let _ = generator.subschema_for::<InspectTargetDescriptor>();
+    let _ = generator.subschema_for::<InspectIdentity>();
+    let _ = generator.subschema_for::<InspectFileIdentity>();
+    let _ = generator.subschema_for::<InspectSymbolIdentity>();
+    let _ = generator.subschema_for::<InspectEvidence>();
+    let _ = generator.subschema_for::<InspectEvidenceSection>();
+    let _ = generator.subschema_for::<InspectSectionStatus>();
+    let _ = generator.subschema_for::<InspectEvidenceScope>();
     let _ = generator.subschema_for::<CodeClimateOutput>();
     let _ = generator.subschema_for::<CodeClimateIssue>();
     let _ = generator.subschema_for::<CodeClimateIssueKind>();
@@ -801,6 +821,11 @@ const FALLOW_OUTPUT_VARIANTS: &[(&str, &[&str], &str)] = &[
         "explain",
         &["ExplainOutput"],
         "`fallow explain <issue-type> --format json`. Required `id`, `name`,\n`rationale`, `example`, `how_to_fix`, `docs`; no `schema_version`.",
+    ),
+    (
+        "inspect_target",
+        &["InspectOutput"],
+        "`fallow inspect --format json`. Required `target`, `identity`,\n`evidence`, and `warnings`; no `schema_version`.",
     ),
     (
         "review-envelope",
@@ -954,8 +979,8 @@ fn rewrite_document_root_one_of(document: &mut Value) -> Result<(), String> {
             "Schemas for the JSON output of fallow commands. Object-shaped \
              envelopes covered by the `FallowOutput` contract carry a top-level \
              `kind` discriminator (for example `dead-code`, `dead-code-grouped`, \
-             `health`, `dupes`, `combined`, `audit`, `explain`, `impact`, \
-             `security`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, \
+             `health`, `dupes`, `combined`, `audit`, `explain`, `inspect_target`, \
+             `impact`, `security`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, \
              `review-envelope`, and `review-reconcile`). Consumers should branch on `kind` instead of \
              probing for unique field presence. `--legacy-envelope` removes \
              only the document-root `kind` for one compatibility cycle. \
@@ -1221,6 +1246,7 @@ mod drift_tests {
             match value {
                 FallowOutput::Audit(_) => "Audit",
                 FallowOutput::Explain(_) => "Explain",
+                FallowOutput::Inspect(_) => "Inspect",
                 FallowOutput::ReviewEnvelope(_) => "ReviewEnvelope",
                 FallowOutput::ReviewReconcile(_) => "ReviewReconcile",
                 FallowOutput::CoverageSetup(_) => "CoverageSetup",

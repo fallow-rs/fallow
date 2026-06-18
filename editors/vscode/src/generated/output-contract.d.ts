@@ -25,7 +25,7 @@
 
 
 /**
- * Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator (for example `dead-code`, `dead-code-grouped`, `health`, `dupes`, `combined`, `audit`, `explain`, `impact`, `security`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `review-envelope`, and `review-reconcile`). Consumers should branch on `kind` instead of probing for unique field presence. `--legacy-envelope` removes only the document-root `kind` for one compatibility cycle. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array.
+ * Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator (for example `dead-code`, `dead-code-grouped`, `health`, `dupes`, `combined`, `audit`, `explain`, `inspect_target`, `impact`, `security`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `review-envelope`, and `review-reconcile`). Consumers should branch on `kind` instead of probing for unique field presence. `--legacy-envelope` removes only the document-root `kind` for one compatibility cycle. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array.
  */
 export type FallowJsonOutput = (FallowOutput | CodeClimateOutput)
 /**
@@ -51,6 +51,8 @@ export type FallowOutput = ((AuditOutput & {
 kind: "audit"
 }) | (ExplainOutput & {
 kind: "explain"
+}) | (InspectOutput & {
+kind: "inspect_target"
 }) | (ReviewEnvelopeOutput & {
 kind: "review-envelope"
 }) | (ReviewReconcileOutput & {
@@ -589,6 +591,17 @@ export type CssCandidateActionType = ("verify-unused" | "verify-undefined" | "co
  * Discriminant for [`UnusedAtRule::kind`].
  */
 export type UnusedAtRuleKind = ("property-registration" | "layer")
+export type InspectTargetDescriptor = ({
+file: string
+type: "file"
+} | {
+file: string
+export_name: string
+type: "symbol"
+})
+export type InspectIdentity = (InspectFileIdentity | InspectSymbolIdentity)
+export type InspectSectionStatus = ("ok" | "error")
+export type InspectEvidenceScope = ("symbol" | "file" | "project_filtered_to_file")
 /**
  * Singleton GitHub review-event marker.
  */
@@ -6405,6 +6418,45 @@ rationale: string
 example: string
 how_to_fix: string
 docs: string
+}
+/**
+ * Envelope emitted by `fallow inspect --format json`.
+ */
+export interface InspectOutput {
+target: InspectTargetDescriptor
+identity: InspectIdentity
+evidence: InspectEvidence
+warnings: string[]
+}
+export interface InspectFileIdentity {
+file: string
+is_reachable?: unknown
+is_entry_point?: unknown
+export_count?: (number | null)
+import_count?: (number | null)
+imported_by_count?: (number | null)
+}
+export interface InspectSymbolIdentity {
+file: string
+export_name: string
+file_reachable?: unknown
+is_entry_point?: unknown
+is_used?: unknown
+reason?: unknown
+}
+export interface InspectEvidence {
+trace_file: InspectEvidenceSection
+trace_export?: (InspectEvidenceSection | null)
+dead_code: InspectEvidenceSection
+duplication: InspectEvidenceSection
+complexity: InspectEvidenceSection
+security: InspectEvidenceSection
+}
+export interface InspectEvidenceSection {
+status: InspectSectionStatus
+scope: InspectEvidenceScope
+message?: (string | null)
+data?: unknown
 }
 /**
  * Envelope emitted by `fallow --format review-github` / `review-gitlab`.

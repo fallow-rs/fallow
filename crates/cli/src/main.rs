@@ -39,6 +39,7 @@ mod health;
 mod health_types;
 mod impact;
 mod init;
+mod inspect;
 mod license;
 mod list;
 mod migrate;
@@ -112,6 +113,7 @@ Workflow:
 
 Project inspection:
   list           List discovered files, entry points, plugins, boundaries, and workspaces
+  inspect        Inspect one file or exported symbol as a bundled evidence query
   workspaces     Show monorepo workspace discovery diagnostics
   explain        Explain one issue type without running analysis
   impact         Show what fallow has done for you (opt-in, local-only)
@@ -152,6 +154,7 @@ When the agent is about to...
   consolidate duplication                  fallow dupes --trace dup:<fingerprint>
   find feature flags                       fallow flags
   surface security candidates              fallow security
+  inspect a target before editing          fallow inspect --file <path>
   understand a finding                     fallow explain <issue-type>
   scope a monorepo                         --workspace <glob> / --changed-workspaces <ref>";
 
@@ -594,6 +597,22 @@ enum Command {
         /// Don't clear the screen between re-analyses
         #[arg(long)]
         no_clear: bool,
+    },
+
+    /// Inspect one file or exported symbol as a bundled evidence query
+    Inspect {
+        /// File to inspect.
+        #[arg(
+            long,
+            value_name = "PATH",
+            conflicts_with = "symbol",
+            required_unless_present = "symbol"
+        )]
+        file: Option<String>,
+
+        /// Exported symbol to inspect, formatted as FILE:EXPORT.
+        #[arg(long, value_name = "FILE:EXPORT", conflicts_with = "file")]
+        symbol: Option<String>,
     },
 
     /// Auto-fix issues: remove unused exports, dependencies, and enum
@@ -3129,6 +3148,7 @@ fn command_rejects_output_gate(command: Option<&Command>) -> bool {
                 | Command::Config { .. }
                 | Command::Ci { .. }
                 | Command::List { .. }
+                | Command::Inspect { .. }
                 | Command::Flags { .. }
                 | Command::Migrate { .. }
                 | Command::License { .. }
@@ -3387,6 +3407,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             },
         ),
         Command::Watch { no_clear } => dispatch_watch(dispatch, no_clear),
+        Command::Inspect { file, symbol } => dispatch_inspect_command(dispatch, file, symbol),
         fix @ Command::Fix { .. } => dispatch_fix_command(&fix, dispatch),
         init @ Command::Init { .. } => dispatch_init_command(init, root, quiet),
         Command::Hooks { subcommand } => run_hooks_command(root, subcommand, output),
@@ -3420,6 +3441,52 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             dispatch_setup_hooks_command(&setup_hooks, dispatch)
         }
     }
+}
+
+fn dispatch_inspect_command(
+    dispatch: &DispatchContext<'_>,
+    file: Option<String>,
+    symbol: Option<String>,
+) -> ExitCode {
+    let target = match (file, symbol) {
+        (Some(file), None) => inspect::InspectTarget::File { file },
+        (None, Some(symbol)) => match symbol.rsplit_once(':') {
+            Some((file, export_name))
+                if !file.trim().is_empty() && !export_name.trim().is_empty() =>
+            {
+                inspect::InspectTarget::Symbol {
+                    file: file.to_string(),
+                    export_name: export_name.to_string(),
+                }
+            }
+            _ => {
+                return emit_error(
+                    "--symbol must be formatted as FILE:EXPORT",
+                    2,
+                    dispatch.output,
+                );
+            }
+        },
+        _ => {
+            return emit_error(
+                "inspect requires exactly one of --file or --symbol",
+                2,
+                dispatch.output,
+            );
+        }
+    };
+
+    inspect::run_inspect(&inspect::InspectOptions {
+        root: dispatch.root,
+        config_path: &dispatch.cli.config,
+        output: dispatch.output,
+        no_cache: dispatch.cli.no_cache,
+        threads: dispatch.threads,
+        quiet: dispatch.quiet,
+        production: dispatch.cli.production,
+        workspace: dispatch.cli.workspace.as_ref(),
+        target,
+    })
 }
 
 fn dispatch_security_command(command: Command, dispatch: &DispatchContext<'_>) -> ExitCode {
@@ -4064,6 +4131,7 @@ fn telemetry_workflow_for_command(
         Some(Command::Dupes { .. }) => telemetry::Workflow::Dupes,
         Some(Command::Health { .. }) => telemetry::Workflow::Health,
         Some(Command::Audit { .. }) => telemetry::Workflow::Audit,
+        Some(Command::Inspect { .. }) => telemetry::Workflow::ProjectInventory,
         Some(Command::Ci { .. }) => match output {
             fallow_config::OutputFormat::ReviewGitlab
             | fallow_config::OutputFormat::PrCommentGitlab

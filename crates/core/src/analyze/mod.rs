@@ -216,7 +216,7 @@ fn read_source(path: &std::path::Path) -> String {
 
 /// Check whether any two files in a cycle belong to different workspace packages.
 /// Uses longest-prefix-match to assign each file to a workspace root.
-/// Files outside all workspace roots (e.g., root-level shared code) are ignored —
+/// Files outside all workspace roots (e.g., root-level shared code) are ignored,
 /// only cycles between two distinct named workspaces are flagged.
 fn is_cross_package_cycle(
     files: &[std::path::PathBuf],
@@ -1454,7 +1454,60 @@ struct DeadCodeDetectorInput<'a> {
     collect_usages: bool,
 }
 
+struct ParallelDeadCodeDetectorResults {
+    unused_files: Vec<UnusedFileFinding>,
+    export_results: AnalysisResults,
+    member_results: AnalysisResults,
+    dependency_results: AnalysisResults,
+    unresolved_imports: Vec<UnresolvedImportFinding>,
+    duplicate_exports: Vec<DuplicateExportFinding>,
+    boundary_violations: Vec<BoundaryViolationFinding>,
+    boundary_coverage_violations: Vec<BoundaryCoverageViolationFinding>,
+    boundary_call_violations: Vec<BoundaryCallViolationFinding>,
+    policy_violations: Vec<PolicyViolationFinding>,
+    circular_dependencies: Vec<CircularDependencyFinding>,
+    re_export_cycles: Vec<ReExportCycleFinding>,
+    export_usages: Vec<crate::results::ExportUsage>,
+}
+
+impl ParallelDeadCodeDetectorResults {
+    fn into_analysis_results(self) -> AnalysisResults {
+        AnalysisResults {
+            unused_files: self.unused_files,
+            unused_exports: self.export_results.unused_exports,
+            unused_types: self.export_results.unused_types,
+            private_type_leaks: self.export_results.private_type_leaks,
+            stale_suppressions: self.export_results.stale_suppressions,
+            unused_enum_members: self.member_results.unused_enum_members,
+            unused_class_members: self.member_results.unused_class_members,
+            unused_store_members: self.member_results.unused_store_members,
+            unused_dependencies: self.dependency_results.unused_dependencies,
+            unused_dev_dependencies: self.dependency_results.unused_dev_dependencies,
+            unused_optional_dependencies: self.dependency_results.unused_optional_dependencies,
+            unlisted_dependencies: self.dependency_results.unlisted_dependencies,
+            type_only_dependencies: self.dependency_results.type_only_dependencies,
+            test_only_dependencies: self.dependency_results.test_only_dependencies,
+            unresolved_imports: self.unresolved_imports,
+            duplicate_exports: self.duplicate_exports,
+            boundary_violations: self.boundary_violations,
+            boundary_coverage_violations: self.boundary_coverage_violations,
+            boundary_call_violations: self.boundary_call_violations,
+            policy_violations: self.policy_violations,
+            circular_dependencies: self.circular_dependencies,
+            re_export_cycles: self.re_export_cycles,
+            export_usages: self.export_usages,
+            ..AnalysisResults::default()
+        }
+    }
+}
+
 fn run_parallel_dead_code_detectors(input: DeadCodeDetectorInput<'_>) -> AnalysisResults {
+    collect_parallel_dead_code_detector_results(input).into_analysis_results()
+}
+
+fn collect_parallel_dead_code_detector_results(
+    input: DeadCodeDetectorInput<'_>,
+) -> ParallelDeadCodeDetectorResults {
     let (
         (unused_files, export_results),
         (
@@ -1488,21 +1541,11 @@ fn run_parallel_dead_code_detectors(input: DeadCodeDetectorInput<'_>) -> Analysi
         },
     );
 
-    AnalysisResults {
+    ParallelDeadCodeDetectorResults {
         unused_files,
-        unused_exports: export_results.unused_exports,
-        unused_types: export_results.unused_types,
-        private_type_leaks: export_results.private_type_leaks,
-        stale_suppressions: export_results.stale_suppressions,
-        unused_enum_members: member_results.unused_enum_members,
-        unused_class_members: member_results.unused_class_members,
-        unused_store_members: member_results.unused_store_members,
-        unused_dependencies: dependency_results.unused_dependencies,
-        unused_dev_dependencies: dependency_results.unused_dev_dependencies,
-        unused_optional_dependencies: dependency_results.unused_optional_dependencies,
-        unlisted_dependencies: dependency_results.unlisted_dependencies,
-        type_only_dependencies: dependency_results.type_only_dependencies,
-        test_only_dependencies: dependency_results.test_only_dependencies,
+        export_results,
+        member_results,
+        dependency_results,
         unresolved_imports,
         duplicate_exports,
         boundary_violations,
@@ -1512,7 +1555,6 @@ fn run_parallel_dead_code_detectors(input: DeadCodeDetectorInput<'_>) -> Analysi
         circular_dependencies,
         re_export_cycles,
         export_usages,
-        ..AnalysisResults::default()
     }
 }
 

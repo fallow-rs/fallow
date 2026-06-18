@@ -231,6 +231,7 @@ Common agent workflow:
 ```bash
 npx fallow audit --format json
 npx fallow --format json
+npx fallow inspect --file src/api.ts --format json
 npx fallow --coverage coverage/coverage-final.json --format json
 npx fallow fix --dry-run --format json
 ```
@@ -239,7 +240,7 @@ For full adoption instead of one-off review, see the [Fallow compliance happy pa
 
 See [Agent integration](https://docs.fallow.tools/integrations/mcp) for MCP setup and the full list of structured tools.
 
-The MCP server includes `inspect_target` for agents that need one evidence bundle for a file or exported symbol, combining trace, dead-code, duplication, complexity, and security signals without inventing a new analysis pass.
+Use `fallow inspect --file <path>` or `fallow inspect --symbol <file>:<export>` when an agent needs one evidence bundle before editing. The MCP server exposes the same flow as `inspect_target`, combining trace, dead-code, duplication, complexity, and security signals without inventing a new analysis pass.
 
 The MCP server also exposes `code_execute`, a bounded read-only Code Mode tool for composing multiple fallow analysis calls in one JavaScript snippet. It can call analysis helpers such as `fallow.projectInfo`, `fallow.audit`, and `fallow.checkHealth`, but it does not expose mutating fix tools.
 

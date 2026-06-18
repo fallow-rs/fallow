@@ -89,6 +89,11 @@
         "icon": "$(shield)"
       },
       {
+        "command": "fallow.inspectActiveFile",
+        "title": "Fallow: Inspect Active File",
+        "icon": "$(inspect)"
+      },
+      {
         "command": "fallow.selectWorkspace",
         "title": "Fallow: Select Workspace Scope...",
         "icon": "$(layers)"

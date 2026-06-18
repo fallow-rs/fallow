@@ -34,6 +34,7 @@ import {
   runAudit,
   runFix,
   runHealthAnalysis,
+  runInspectActiveFile,
   runSecurityAnalysis,
   runWorkspaces,
 } from "./commands.js";
@@ -749,6 +750,11 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   );
   context.subscriptions.push(
     vscode.commands.registerCommand("fallow.analyzeSecurity", runSecurityAnalysisCommand),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand("fallow.inspectActiveFile", () =>
+      runInspectActiveFile(context, outputChannel),
+    ),
   );
 
   // Re-run the sidebar after a scope change so the tree views and status bar

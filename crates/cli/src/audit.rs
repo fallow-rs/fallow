@@ -2776,7 +2776,7 @@ mod tests {
             .expect("node_modules tsconfig should be written");
 
         let base_sha = git_rev_parse(root, "HEAD").expect("HEAD should resolve");
-        let first = BaseWorktree::create(root, "HEAD", Some(&base_sha))
+        let first = BaseWorktree::reuse_or_create(root, &base_sha)
             .expect("persistent base worktree should be created");
         let worktree_path = first.path().to_path_buf();
         assert!(
@@ -2790,7 +2790,7 @@ mod tests {
         );
         drop(first);
 
-        let reused = BaseWorktree::create(root, "HEAD", Some(&base_sha))
+        let reused = BaseWorktree::reuse_or_create(root, &base_sha)
             .expect("ready persistent base worktree should be reused");
         assert_eq!(reused.path(), worktree_path.as_path());
         assert!(
@@ -2798,8 +2798,7 @@ mod tests {
             "ready persistent worktree should refresh missing node_modules context"
         );
 
-        remove_audit_worktree(root, reused.path());
-        let _ = fs::remove_dir_all(reused.path());
+        cleanup_reusable_worktree(root, reused.path());
     }
 
     fn remove_node_modules_context(worktree_path: &Path) {

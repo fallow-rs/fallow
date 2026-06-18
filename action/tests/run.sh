@@ -14,7 +14,7 @@ ERRORS=()
 # --- Helpers ---
 
 pass() { PASSED=$((PASSED + 1)); echo "  ✓ $1"; }
-fail() { FAILED=$((FAILED + 1)); ERRORS+=("$1: $2"); echo "  ✗ $1 — $2"; }
+fail() { FAILED=$((FAILED + 1)); ERRORS+=("$1: $2"); echo "  ✗ $1 - $2"; }
 
 assert_contains() {
   local output="$1" expected="$2" name="$3"
@@ -73,6 +73,130 @@ assert_json_value() {
     fail "$name" "expected $expected, got $actual"
   fi
 }
+
+# --- Repository config hygiene ---
+
+echo ""
+echo "=== Repository config hygiene ==="
+
+DUPLICATE_CONFIG_KEYS=$(cd "$DIR/../.." && node <<'NODE'
+const { readdirSync, readFileSync, statSync } = require("node:fs");
+const { join } = require("node:path");
+
+const ignored = new Set([".git", "target", "node_modules"]);
+const configNames = new Set([".fallowrc.json", ".fallowrc.jsonc"]);
+const issues = [];
+
+const stripJsonc = (input) => {
+  let output = "";
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < input.length; i += 1) {
+    const char = input[i];
+    const next = input[i + 1];
+    if (inString) {
+      output += char;
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === "\"") {
+      inString = true;
+      output += char;
+      continue;
+    }
+    if (char === "/" && next === "/") {
+      while (i < input.length && input[i] !== "\n") i += 1;
+      output += "\n";
+      continue;
+    }
+    if (char === "/" && next === "*") {
+      i += 2;
+      while (i < input.length && !(input[i] === "*" && input[i + 1] === "/")) i += 1;
+      i += 1;
+      output += " ";
+      continue;
+    }
+    output += char;
+  }
+  return output;
+};
+
+const findDuplicateKeys = (source, path) => {
+  const stripped = stripJsonc(source);
+  const duplicatePattern = /"([^"\\]*(?:\\.[^"\\]*)*)"\s*:/g;
+  const stack = [];
+  const objectKeys = [new Set()];
+  let match;
+  let i = 0;
+  let inString = false;
+  let escaped = false;
+  while (i < stripped.length) {
+    const char = stripped[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      i += 1;
+      continue;
+    }
+    if (char === "\"") {
+      duplicatePattern.lastIndex = i;
+      match = duplicatePattern.exec(stripped);
+      if (match && match.index === i) {
+        const key = JSON.parse(`"${match[1]}"`);
+        const current = objectKeys[objectKeys.length - 1];
+        if (current.has(key)) {
+          issues.push(`${path}: duplicate key ${[...stack, key].join(".")}`);
+        }
+        current.add(key);
+        i = duplicatePattern.lastIndex;
+        continue;
+      }
+      inString = true;
+    } else if (char === "{") {
+      objectKeys.push(new Set());
+      stack.push("<object>");
+    } else if (char === "}") {
+      objectKeys.pop();
+      stack.pop();
+    }
+    i += 1;
+  }
+};
+
+const walk = (dir) => {
+  for (const entry of readdirSync(dir)) {
+    if (ignored.has(entry)) continue;
+    const path = join(dir, entry);
+    const stat = statSync(path);
+    if (stat.isDirectory()) {
+      walk(path);
+    } else if (configNames.has(entry)) {
+      findDuplicateKeys(readFileSync(path, "utf8"), path);
+    }
+  }
+};
+
+walk(".");
+for (const issue of issues) console.log(issue);
+process.exit(issues.length === 0 ? 0 : 1);
+NODE
+)
+if [ -z "$DUPLICATE_CONFIG_KEYS" ]; then
+  pass "repo fallow configs have no duplicate JSON keys"
+else
+  fail "repo fallow configs have no duplicate JSON keys" "$DUPLICATE_CONFIG_KEYS"
+fi
 
 # --- Install script tests ---
 

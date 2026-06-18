@@ -813,6 +813,118 @@ assert_contains "$OUT_COMBINED_PROD" "Runtime coverage" "combined prod: has runt
 assert_contains "$OUT_COMBINED_PROD" "hotPath" "combined prod: shows hot path"
 assert_contains "$OUT_COMBINED_PROD" "hot path touched" "combined prod (GitLab, verdict hot-path-touched): header uses 'touched' framing"
 
+echo "  renderer semantic parity (GitHub vs GitLab):"
+PARITY_OUT=$(node - "$SHARED_JQ_DIR" "$CI_JQ_DIR" "$DIR/../../action/tests/fixtures" <<'NODE'
+const { execFileSync } = require("node:child_process");
+const { readFileSync } = require("node:fs");
+const [actionJqDir, gitlabJqDir, fixturesDir] = process.argv.slice(2);
+
+const readFixture = (fixture) => JSON.parse(readFileSync(`${fixturesDir}/${fixture}`, "utf8"));
+const checkFixture = readFixture("check.json");
+const healthFixture = readFixture("health.json");
+const dupesFixture = readFixture("dupes.json");
+const auditFixture = {
+  schema_version: 3,
+  command: "audit",
+  verdict: "fail",
+  changed_files_count: 2,
+  elapsed_ms: 42,
+  summary: { dead_code_issues: 1, complexity_findings: 3, duplication_clone_groups: 1 },
+  attribution: {
+    gate: "new-only",
+    dead_code_introduced: 1,
+    dead_code_inherited: 0,
+    complexity_introduced: 2,
+    complexity_inherited: 1,
+    duplication_introduced: 0,
+    duplication_inherited: 1,
+  },
+  dead_code: {
+    ...checkFixture,
+    unused_exports: checkFixture.unused_exports.map((item) => ({ ...item, introduced: true })),
+    unused_dependencies: checkFixture.unused_dependencies.map((item) => ({
+      ...item,
+      introduced: false,
+    })),
+  },
+  complexity: {
+    ...healthFixture,
+    findings: [
+      { ...healthFixture.findings[0], coverage_tier: "partial" },
+      { ...healthFixture.findings[1], coverage_tier: "high" },
+      healthFixture.findings[2],
+    ],
+    summary: {
+      ...healthFixture.summary,
+      coverage_model: "istanbul",
+      istanbul_matched: 8,
+      istanbul_total: 10,
+    },
+  },
+  duplication: {
+    ...dupesFixture,
+    clone_groups: dupesFixture.clone_groups.map((item) => ({ ...item, introduced: false })),
+  },
+};
+
+const cases = [
+  { name: "summary-check", fixture: "check.json" },
+  { name: "summary-health", fixture: "health.json" },
+  { name: "summary-audit", input: auditFixture },
+  { name: "summary-combined", fixture: "combined.json" },
+];
+
+const render = (dir, testCase) => {
+  const args = ["-r", "-f", `${dir}/${testCase.name}.jq`];
+  const options = { encoding: "utf8" };
+  if (testCase.fixture) {
+    args.push(`${fixturesDir}/${testCase.fixture}`);
+  } else {
+    options.input = JSON.stringify(testCase.input);
+  }
+  return execFileSync("jq", args, options);
+};
+
+const normalize = (text) =>
+  text
+    .split(/\r?\n/)
+    .map((line) =>
+      line
+        .replace(/^> \[![A-Z]+\]$/, "")
+        .replace(/^> :warning: /, "> ")
+        .replace(/^> :bulb: /, "> ")
+        .replace(/^> :chart_with_upwards_trend: /, "> ")
+        .replace(/^# :seedling: Fallow$/, "# Fallow")
+        .replace(/^# .* Fallow$/, "# Fallow"),
+    )
+    .filter((line) => line.trim() !== "")
+    .filter((line) => !line.startsWith("> Run `fallow fix --dry-run`"))
+    .filter((line) => !line.startsWith("> Intentionally public?"))
+    .filter((line) => !line.startsWith("> Add [`/** @public */`"))
+    .filter((line) => !line.startsWith("> Add [`// fallow-ignore-next-line`"))
+    .join("\n");
+
+const failures = [];
+for (const testCase of cases) {
+  const github = normalize(render(actionJqDir, testCase));
+  const gitlab = normalize(render(gitlabJqDir, testCase));
+  if (github !== gitlab) {
+    failures.push(`${testCase.name}: normalized output drifted`);
+  }
+}
+
+if (failures.length > 0) {
+  console.log(failures.join("\n"));
+  process.exit(1);
+}
+NODE
+)
+if [ -z "$PARITY_OUT" ]; then
+  pass "renderer parity: normalized GitHub and GitLab summaries match"
+else
+  fail "renderer parity: normalized GitHub and GitLab summaries match" "$PARITY_OUT"
+fi
+
 # =========================================================================
 # Shared summary scripts (reused from action/jq/, should still work)
 # =========================================================================

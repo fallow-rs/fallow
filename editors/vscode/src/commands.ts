@@ -61,6 +61,7 @@ import type {
   FallowCheckResult,
   FallowCombinedResult,
   FallowDupesResult,
+  FallowInspectResult,
   FallowFixResult,
   FixAction,
   HealthOutput,
@@ -374,6 +375,31 @@ export interface RunAnalysisOptions {
   readonly force?: boolean;
   readonly backoff?: AnalysisFailureBackoff;
 }
+
+export interface InspectArgsOptions {
+  readonly filePath: string;
+  readonly production: boolean | undefined;
+  readonly workspace: string;
+  readonly configPath: string;
+}
+
+export const buildInspectArgs = (options: InspectArgsOptions): string[] => {
+  const args = ["inspect", "--file", options.filePath, "--format", "json", "--quiet"];
+
+  if (options.workspace) {
+    args.push("--workspace", options.workspace);
+  }
+
+  if (options.production) {
+    args.push("--production");
+  }
+
+  if (options.configPath) {
+    args.push("--config", options.configPath);
+  }
+
+  return args;
+};
 
 const analysisBackoff = new AnalysisFailureBackoff();
 
@@ -780,6 +806,89 @@ export const runAudit = async (
     throw err;
   } finally {
     auditInFlight = false;
+  }
+};
+
+const activeEditorInspectTarget = (): {
+  readonly document: vscode.TextDocument;
+  readonly root: string;
+  readonly filePath: string;
+} | null => {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) {
+    void vscode.window.showWarningMessage("Fallow: no active editor to inspect.");
+    return null;
+  }
+
+  if (editor.document.uri.scheme !== "file") {
+    void vscode.window.showWarningMessage("Fallow: active editor is not a file on disk.");
+    return null;
+  }
+
+  const folder = vscode.workspace.getWorkspaceFolder(editor.document.uri);
+  const root = folder?.uri.fsPath ?? getWorkspaceRoot();
+  if (!root) {
+    void vscode.window.showWarningMessage("Fallow: no workspace folder open.");
+    return null;
+  }
+
+  const relative = path.relative(root, editor.document.uri.fsPath);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    void vscode.window.showWarningMessage("Fallow: active editor is outside the workspace.");
+    return null;
+  }
+
+  return {
+    document: editor.document,
+    root,
+    filePath: relative.split(path.sep).join(path.posix.sep),
+  };
+};
+
+export const runInspectActiveFile = async (
+  context: vscode.ExtensionContext,
+  outputChannel?: vscode.OutputChannel,
+): Promise<FallowInspectResult | null> => {
+  const target = activeEditorInspectTarget();
+  if (!target) {
+    return null;
+  }
+
+  try {
+    if (target.document.isDirty) {
+      const saved = await target.document.save();
+      if (!saved) {
+        void vscode.window.showWarningMessage(
+          `Fallow inspect cancelled because ${target.filePath} could not be saved.`,
+        );
+        return null;
+      }
+    }
+
+    const { binary } = await resolveCliForRun(context, outputChannel);
+    const args = buildInspectArgs({
+      filePath: target.filePath,
+      production: getProductionOverride(),
+      workspace: resolveActiveWorkspaceScope(context),
+      configPath: getResolvedConfigPath(),
+    });
+
+    const output = await execFallow(binary, args, target.root);
+    if (output.trim().length === 0) {
+      void vscode.window.showWarningMessage("Fallow inspect returned no output.");
+      return null;
+    }
+
+    const result = JSON.parse(output) as FallowInspectResult;
+    outputChannel?.appendLine(`Fallow inspect: ${target.filePath}`);
+    outputChannel?.appendLine(JSON.stringify(result, null, 2));
+    outputChannel?.show();
+    void vscode.window.showInformationMessage(`Fallow inspect complete: ${target.filePath}`);
+    return result;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    void vscode.window.showErrorMessage(`Fallow inspect failed: ${message}`);
+    return null;
   }
 };
 

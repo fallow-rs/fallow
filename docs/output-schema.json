@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Fallow JSON Output Schemas",
-  "description": "Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator (for example `dead-code`, `dead-code-grouped`, `health`, `dupes`, `combined`, `audit`, `explain`, `impact`, `security`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `review-envelope`, and `review-reconcile`). Consumers should branch on `kind` instead of probing for unique field presence. `--legacy-envelope` removes only the document-root `kind` for one compatibility cycle. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array.",
+  "description": "Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator (for example `dead-code`, `dead-code-grouped`, `health`, `dupes`, `combined`, `audit`, `explain`, `inspect_target`, `impact`, `security`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `review-envelope`, and `review-reconcile`). Consumers should branch on `kind` instead of probing for unique field presence. `--legacy-envelope` removes only the document-root `kind` for one compatibility cycle. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array.",
   "oneOf": [
     {
       "$ref": "#/definitions/FallowOutput"
@@ -7961,6 +7961,26 @@
           ]
         },
         {
+          "description": "`fallow inspect --format json`. Required `target`, `identity`,\n`evidence`, and `warnings`; no `schema_version`.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/InspectOutput"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "inspect_target"
+                }
+              },
+              "required": [
+                "kind"
+              ]
+            }
+          ]
+        },
+        {
           "description": "`fallow --format review-github` / `--format review-gitlab`. Required\n`body`, `comments`, `meta`; no `schema_version`.",
           "allOf": [
             {
@@ -15511,6 +15531,208 @@
         "not_checked"
       ],
       "description": "Detector status codes for framework health observability."
+    },
+    "InspectEvidence": {
+      "type": "object",
+      "properties": {
+        "trace_file": {
+          "$ref": "#/definitions/InspectEvidenceSection"
+        },
+        "trace_export": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/InspectEvidenceSection"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dead_code": {
+          "$ref": "#/definitions/InspectEvidenceSection"
+        },
+        "duplication": {
+          "$ref": "#/definitions/InspectEvidenceSection"
+        },
+        "complexity": {
+          "$ref": "#/definitions/InspectEvidenceSection"
+        },
+        "security": {
+          "$ref": "#/definitions/InspectEvidenceSection"
+        }
+      },
+      "required": [
+        "trace_file",
+        "dead_code",
+        "duplication",
+        "complexity",
+        "security"
+      ]
+    },
+    "InspectEvidenceSection": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "$ref": "#/definitions/InspectSectionStatus"
+        },
+        "scope": {
+          "$ref": "#/definitions/InspectEvidenceScope"
+        },
+        "message": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "data": true
+      },
+      "required": [
+        "status",
+        "scope"
+      ]
+    },
+    "InspectFileIdentity": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string"
+        },
+        "is_reachable": true,
+        "is_entry_point": true,
+        "export_count": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "import_count": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "imported_by_count": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "file"
+      ]
+    },
+    "InspectIdentity": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/InspectFileIdentity"
+        },
+        {
+          "$ref": "#/definitions/InspectSymbolIdentity"
+        }
+      ]
+    },
+    "InspectOutput": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "$ref": "#/definitions/InspectTargetDescriptor"
+        },
+        "identity": {
+          "$ref": "#/definitions/InspectIdentity"
+        },
+        "evidence": {
+          "$ref": "#/definitions/InspectEvidence"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "target",
+        "identity",
+        "evidence",
+        "warnings"
+      ],
+      "title": "fallow inspect --format json",
+      "description": "Envelope emitted by `fallow inspect --format json`."
+    },
+    "InspectSymbolIdentity": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string"
+        },
+        "export_name": {
+          "type": "string"
+        },
+        "file_reachable": true,
+        "is_entry_point": true,
+        "is_used": true,
+        "reason": true
+      },
+      "required": [
+        "file",
+        "export_name"
+      ]
+    },
+    "InspectTargetDescriptor": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "file"
+            }
+          },
+          "required": [
+            "type",
+            "file"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string"
+            },
+            "export_name": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "symbol"
+            }
+          },
+          "required": [
+            "type",
+            "file",
+            "export_name"
+          ]
+        }
+      ]
+    },
+    "InspectEvidenceScope": {
+      "type": "string",
+      "enum": [
+        "symbol",
+        "file",
+        "project_filtered_to_file"
+      ]
+    },
+    "InspectSectionStatus": {
+      "type": "string",
+      "enum": [
+        "ok",
+        "error"
+      ]
     }
   }
 }

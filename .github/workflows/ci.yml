@@ -397,13 +397,37 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 2
       - uses: ./.github/actions/setup-rust
       - name: Build fallow binary
         run: cargo build --bin fallow
-      - name: Analyze VS Code extension
+      - name: Dead-code dogfood VS Code extension
         run: ./target/debug/fallow dead-code --root editors/vscode --format json --quiet
-      - name: Analyze npm wrapper package
+      - name: Health dogfood VS Code extension
+        run: ./target/debug/fallow health --root editors/vscode --format json --quiet --score --targets --top 10 --report-only
+      - name: Duplication dogfood VS Code extension
+        run: ./target/debug/fallow dupes --root editors/vscode --format json --quiet --top 10
+      - name: Dead-code dogfood npm wrapper package
         run: ./target/debug/fallow dead-code --root npm/fallow --format json --quiet
+      - name: Health dogfood npm wrapper package
+        run: ./target/debug/fallow health --root npm/fallow --format json --quiet --score --targets --top 10 --report-only
+      - name: Duplication dogfood npm wrapper package
+        run: ./target/debug/fallow dupes --root npm/fallow --format json --quiet --top 10
+      - name: Audit dogfood smoke
+        run: |
+          base=HEAD
+          if git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+            base=HEAD~1
+          fi
+          set +e
+          ./target/debug/fallow audit --base "$base" --format json --quiet > /tmp/fallow-self-audit.json
+          code=$?
+          set -e
+          test -s /tmp/fallow-self-audit.json
+          if [ "$code" -gt 1 ]; then
+            exit "$code"
+          fi
 
   vscode:
     name: VS Code Extension

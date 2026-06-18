@@ -53,6 +53,7 @@ fn schema_has_commands_array() {
     );
     assert!(names.contains(&"health"), "should list health command");
     assert!(names.contains(&"dupes"), "should list dupes command");
+    assert!(names.contains(&"inspect"), "should list inspect command");
     assert!(names.contains(&"explain"), "should list explain command");
 }
 

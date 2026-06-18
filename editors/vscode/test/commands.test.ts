@@ -13,6 +13,18 @@ let mockInstalledCli: string | null = null;
 let mockDownloadedCli: string | null = null;
 let mockExtensionVersion: string | null = null;
 let mockBinaryVersions: Readonly<Record<string, string | null>> = {};
+let mockActiveTextEditor:
+  | {
+      readonly document: {
+        readonly uri: {
+          readonly scheme: string;
+          readonly fsPath: string;
+        };
+        readonly isDirty: boolean;
+        readonly save: () => Promise<boolean>;
+      };
+    }
+  | undefined;
 
 vi.mock("node:fs", () => ({
   existsSync: (p: string) => mockFiles.has(p),
@@ -23,6 +35,9 @@ vi.mock("vscode", () => ({
     Separator: -1,
   },
   window: {
+    get activeTextEditor() {
+      return mockActiveTextEditor;
+    },
     showWarningMessage: vi.fn(),
     showInformationMessage: vi.fn(),
     showErrorMessage: vi.fn(async () => undefined),
@@ -31,6 +46,17 @@ vi.mock("vscode", () => ({
   },
   workspace: {
     workspaceFolders: undefined,
+    getWorkspaceFolder: vi.fn((uri: { readonly fsPath: string }) => {
+      const workspace = mockWorkspace as {
+        readonly workspaceFolders:
+          | ReadonlyArray<{ readonly uri: { readonly fsPath: string } }>
+          | undefined;
+      };
+      return (
+        workspace.workspaceFolders?.find((folder) => uri.fsPath.startsWith(folder.uri.fsPath)) ??
+        undefined
+      );
+    }),
   },
   commands: {
     executeCommand: vi.fn(),
@@ -90,6 +116,7 @@ import {
   execFallow,
   FallowExecError,
   findCliBinary,
+  runInspectActiveFile,
   resolveCliBinary,
   resolveCliForRun,
   runAnalysis,
@@ -181,6 +208,24 @@ const setWorkspaceRoot = (root: string | null): void => {
     workspaceFolders: ReadonlyArray<{ readonly uri: { readonly fsPath: string } }> | undefined;
   };
   workspace.workspaceFolders = root === null ? undefined : [{ uri: { fsPath: root } }];
+};
+
+interface ActiveEditorOptions {
+  readonly isDirty?: boolean;
+  readonly save?: () => Promise<boolean>;
+}
+
+const setActiveEditor = (fsPath: string | null, options: ActiveEditorOptions = {}): void => {
+  mockActiveTextEditor =
+    fsPath === null
+      ? undefined
+      : {
+          document: {
+            uri: { scheme: "file", fsPath },
+            isDirty: options.isDirty ?? false,
+            save: options.save ?? (() => Promise.resolve(true)),
+          },
+        };
 };
 
 const restoreMaxFileSizeEnv = (value: string | undefined): void => {
@@ -620,6 +665,143 @@ describe("runHealthAnalysis no-workspace gate (#902)", () => {
     resetHealthNoWorkspaceWarning();
     await runHealthAnalysis(context);
     expect(mockWindow.showWarningMessage).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("runInspectActiveFile", () => {
+  beforeEach(() => {
+    mockLspPath = "";
+    mockLocalBinary = null;
+    mockPathBinary = null;
+    mockInstalledCli = null;
+    mockDownloadedCli = null;
+    mockExtensionVersion = null;
+    mockBinaryVersions = {};
+    setWorkspaceRoot(null);
+    setActiveEditor(null);
+    vi.clearAllMocks();
+  });
+
+  it("runs inspect for the active file and writes the JSON bundle to the output channel", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "fallow-vscode-inspect-"));
+    const script = join(dir, "fallow-cli.js");
+    const filePath = join(dir, "src", "extension.ts");
+    const logPath = join(dir, "spawn.log");
+    const output = JSON.stringify({
+      kind: "inspect_target",
+      target: { type: "file", file: "src/extension.ts" },
+      identity: { file: "src/extension.ts" },
+      evidence: {},
+      warnings: [],
+    });
+    const outputChannel = {
+      appendLine: vi.fn(),
+      show: vi.fn(),
+    } as unknown as vscode.OutputChannel;
+
+    try {
+      await writeFile(
+        script,
+        [
+          "#!/usr/bin/env node",
+          'const fs = require("node:fs");',
+          `fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args: process.argv.slice(2) }) + "\\n");`,
+          `process.stdout.write(${JSON.stringify(output)});`,
+        ].join("\n"),
+        "utf8",
+      );
+      await chmod(script, 0o755);
+
+      mockPathBinary = script;
+      setWorkspaceRoot(dir);
+      setActiveEditor(filePath);
+
+      const result = await runInspectActiveFile(workspaceContext, outputChannel);
+      const calls = await readSpawnLog(logPath);
+
+      expect(result?.kind).toBe("inspect_target");
+      expect(calls[0]?.args).toEqual([
+        "inspect",
+        "--file",
+        "src/extension.ts",
+        "--format",
+        "json",
+        "--quiet",
+      ]);
+      expect(outputChannel.appendLine).toHaveBeenCalledWith("Fallow inspect: src/extension.ts");
+      expect(outputChannel.show).toHaveBeenCalled();
+    } finally {
+      setWorkspaceRoot(null);
+      setActiveEditor(null);
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("saves a dirty active file before running inspect", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "fallow-vscode-inspect-save-"));
+    const script = join(dir, "fallow-cli.js");
+    const filePath = join(dir, "src", "extension.ts");
+    const logPath = join(dir, "spawn.log");
+    const save = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
+
+    try {
+      await writeFile(
+        script,
+        [
+          "#!/usr/bin/env node",
+          'const fs = require("node:fs");',
+          `fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args: process.argv.slice(2) }) + "\\n");`,
+          'process.stdout.write(\'{"kind":"inspect_target","warnings":[]}\');',
+        ].join("\n"),
+        "utf8",
+      );
+      await chmod(script, 0o755);
+
+      mockPathBinary = script;
+      setWorkspaceRoot(dir);
+      setActiveEditor(filePath, { isDirty: true, save });
+
+      const result = await runInspectActiveFile(workspaceContext);
+      const calls = await readSpawnLog(logPath);
+
+      expect(save).toHaveBeenCalledOnce();
+      expect(result?.kind).toBe("inspect_target");
+      expect(calls[0]?.args).toContain("src/extension.ts");
+    } finally {
+      setWorkspaceRoot(null);
+      setActiveEditor(null);
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not run inspect when saving a dirty active file fails", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "fallow-vscode-inspect-save-fail-"));
+    const script = join(dir, "fallow-cli.js");
+    const filePath = join(dir, "src", "extension.ts");
+    const logPath = join(dir, "spawn.log");
+    const save = vi.fn<() => Promise<boolean>>().mockResolvedValue(false);
+
+    try {
+      await writeFile(script, "#!/usr/bin/env node\n", "utf8");
+      await chmod(script, 0o755);
+
+      mockPathBinary = script;
+      setWorkspaceRoot(dir);
+      setActiveEditor(filePath, { isDirty: true, save });
+
+      const result = await runInspectActiveFile(workspaceContext);
+
+      expect(result).toBeNull();
+      expect(save).toHaveBeenCalledOnce();
+      expect(mockWindow.showWarningMessage).toHaveBeenCalledWith(
+        "Fallow inspect cancelled because src/extension.ts could not be saved.",
+      );
+      await expect(readSpawnLog(logPath)).rejects.toThrow();
+    } finally {
+      setWorkspaceRoot(null);
+      setActiveEditor(null);
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 

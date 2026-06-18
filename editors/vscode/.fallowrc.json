@@ -13,10 +13,6 @@
     "../src/generated/output-contract.js"
   ],
   "ignoreDependencies": ["@vscode/vsce"],
-  "ignoreUnresolvedImports": [
-    "./generated/output-contract.js",
-    "../src/generated/output-contract.js"
-  ],
   "ignoreExports": [
     {
       "file": "src/types.ts",
