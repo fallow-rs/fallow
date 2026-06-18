@@ -5,6 +5,8 @@ use oxc_ast_visit::Visit;
 use oxc_parser::Parser;
 use oxc_span::{SourceType, Span};
 
+mod lexical;
+
 pub use super::token_types::{
     FileTokens, KeywordType, OperatorType, PunctuationType, SourceToken, TokenKind,
 };
@@ -59,21 +61,16 @@ fn tokenize_file_inner(
         return tokenize_mdx(source, strip_types, skip_imports, extract_mdx_statements);
     }
     if matches!(ext, "css" | "scss" | "sass" | "less") {
-        return empty_tokens(source);
+        return tokenize_style_source(source);
     }
 
     tokenize_js_ts(path, source, strip_types, skip_imports)
 }
 
 /// Tokenize Vue/Svelte SFC `<script>` blocks.
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "byte offsets are bounded by source size"
-)]
 fn tokenize_sfc(source: &str, strip_types: bool, skip_imports: bool) -> FileTokens {
     let scripts = crate::extract::extract_sfc_scripts(source);
-    let mut all_tokens = Vec::new();
-    let mut atomic_invocation_spans = Vec::new();
+    let mut sections = Vec::new();
 
     for script in &scripts {
         let source_type = match (script.is_typescript, script.is_jsx) {
@@ -82,22 +79,35 @@ fn tokenize_sfc(source: &str, strip_types: bool, skip_imports: bool) -> FileToke
             (false, true) => SourceType::jsx(),
             (false, false) => SourceType::mjs(),
         };
-        let allocator = Allocator::default();
-        let parser_return = Parser::new(&allocator, &script.body, source_type).parse();
-
-        let mut extractor = TokenExtractor::new(strip_types, skip_imports);
-        extractor.visit_program(&parser_return.program);
-
-        let offset = script.byte_offset as u32;
-        for token in &mut extractor.tokens {
-            token.span = Span::new(token.span.start + offset, token.span.end + offset);
-        }
-        for span in &mut extractor.atomic_invocation_spans {
-            *span = Span::new(span.start + offset, span.end + offset);
-        }
-        all_tokens.extend(extractor.tokens);
-        atomic_invocation_spans.extend(extractor.atomic_invocation_spans);
+        sections.push(tokenize_js_section(
+            "sfc-script",
+            &script.body,
+            script.byte_offset,
+            source_type,
+            strip_types,
+            skip_imports,
+        ));
     }
+
+    for region in crate::extract::extract_sfc_template_regions(source) {
+        sections.push(tokenize_lexical_section(
+            "sfc-template",
+            &region.body,
+            region.byte_offset,
+        ));
+    }
+
+    for style in crate::extract::extract_sfc_styles(source) {
+        if style.src.is_none() {
+            sections.push(tokenize_lexical_section(
+                "sfc-style",
+                &style.body,
+                style.byte_offset,
+            ));
+        }
+    }
+
+    let (all_tokens, atomic_invocation_spans) = merge_sections(sections);
 
     FileTokens {
         tokens: all_tokens,
@@ -108,10 +118,6 @@ fn tokenize_sfc(source: &str, strip_types: bool, skip_imports: bool) -> FileToke
 }
 
 /// Tokenize Astro frontmatter between `---` delimiters.
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "byte offsets are bounded by source size"
-)]
 fn tokenize_astro(
     source: &str,
     strip_types: bool,
@@ -119,28 +125,58 @@ fn tokenize_astro(
     extract_fn: fn(&str) -> Option<fallow_extract::sfc::SfcScript>,
 ) -> FileTokens {
     if let Some(script) = extract_fn(source) {
-        let allocator = Allocator::default();
-        let parser_return = Parser::new(&allocator, &script.body, SourceType::ts()).parse();
-
-        let mut extractor = TokenExtractor::new(strip_types, skip_imports);
-        extractor.visit_program(&parser_return.program);
-
-        let offset = script.byte_offset as u32;
-        for token in &mut extractor.tokens {
-            token.span = Span::new(token.span.start + offset, token.span.end + offset);
+        let mut sections = vec![tokenize_js_section(
+            "astro-frontmatter",
+            &script.body,
+            script.byte_offset,
+            SourceType::ts(),
+            strip_types,
+            skip_imports,
+        )];
+        for region in crate::extract::extract_astro_template_regions(source) {
+            sections.push(tokenize_lexical_section(
+                "astro-template",
+                &region.body,
+                region.byte_offset,
+            ));
         }
-        for span in &mut extractor.atomic_invocation_spans {
-            *span = Span::new(span.start + offset, span.end + offset);
+        for region in crate::extract::extract_astro_style_regions(source) {
+            sections.push(tokenize_lexical_section(
+                "astro-style",
+                &region.body,
+                region.byte_offset,
+            ));
         }
-
+        let (tokens, atomic_invocation_spans) = merge_sections(sections);
         return FileTokens {
-            tokens: extractor.tokens,
-            atomic_invocation_spans: extractor.atomic_invocation_spans,
+            tokens,
+            atomic_invocation_spans,
             source: source.to_string(),
             line_count: source.lines().count().max(1),
         };
     }
-    empty_tokens(source)
+    let mut sections = Vec::new();
+    for region in crate::extract::extract_astro_template_regions(source) {
+        sections.push(tokenize_lexical_section(
+            "astro-template",
+            &region.body,
+            region.byte_offset,
+        ));
+    }
+    for region in crate::extract::extract_astro_style_regions(source) {
+        sections.push(tokenize_lexical_section(
+            "astro-style",
+            &region.body,
+            region.byte_offset,
+        ));
+    }
+    let (tokens, atomic_invocation_spans) = merge_sections(sections);
+    FileTokens {
+        tokens,
+        atomic_invocation_spans,
+        source: source.to_string(),
+        line_count: source.lines().count().max(1),
+    }
 }
 
 /// Tokenize MDX import/export statements.
@@ -168,7 +204,7 @@ fn tokenize_mdx(
     empty_tokens(source)
 }
 
-/// Return empty tokens for a source file (CSS, no-frontmatter Astro, empty MDX).
+/// Return empty tokens for a source file that has no tokenized regions.
 fn empty_tokens(source: &str) -> FileTokens {
     FileTokens {
         tokens: Vec::new(),
@@ -176,6 +212,83 @@ fn empty_tokens(source: &str) -> FileTokens {
         source: source.to_string(),
         line_count: source.lines().count().max(1),
     }
+}
+
+fn tokenize_style_source(source: &str) -> FileTokens {
+    FileTokens {
+        tokens: lexical::tokenize_lexical_region(source, 0),
+        atomic_invocation_spans: Vec::new(),
+        source: source.to_string(),
+        line_count: source.lines().count().max(1),
+    }
+}
+
+struct TokenSection {
+    name: &'static str,
+    start: usize,
+    end: usize,
+    tokens: Vec<SourceToken>,
+    atomic_invocation_spans: Vec<Span>,
+}
+
+fn tokenize_js_section(
+    name: &'static str,
+    source: &str,
+    byte_offset: usize,
+    source_type: SourceType,
+    strip_types: bool,
+    skip_imports: bool,
+) -> TokenSection {
+    let allocator = Allocator::default();
+    let parser_return = Parser::new(&allocator, source, source_type).parse();
+
+    let mut extractor = TokenExtractor::new(strip_types, skip_imports);
+    extractor.visit_program(&parser_return.program);
+
+    let offset = byte_offset as u32;
+    for token in &mut extractor.tokens {
+        token.span = Span::new(token.span.start + offset, token.span.end + offset);
+    }
+    for span in &mut extractor.atomic_invocation_spans {
+        *span = Span::new(span.start + offset, span.end + offset);
+    }
+
+    TokenSection {
+        name,
+        start: byte_offset,
+        end: byte_offset + source.len(),
+        tokens: extractor.tokens,
+        atomic_invocation_spans: extractor.atomic_invocation_spans,
+    }
+}
+
+fn tokenize_lexical_section(name: &'static str, source: &str, byte_offset: usize) -> TokenSection {
+    TokenSection {
+        name,
+        start: byte_offset,
+        end: byte_offset + source.len(),
+        tokens: lexical::tokenize_lexical_region(source, byte_offset),
+        atomic_invocation_spans: Vec::new(),
+    }
+}
+
+fn merge_sections(mut sections: Vec<TokenSection>) -> (Vec<SourceToken>, Vec<Span>) {
+    sections.retain(|section| !section.tokens.is_empty());
+    sections.sort_by_key(|section| section.start);
+
+    let mut tokens = Vec::new();
+    let mut atomic_invocation_spans = Vec::new();
+    let total_sections = sections.len();
+
+    for (index, section) in sections.into_iter().enumerate() {
+        tokens.extend(section.tokens);
+        atomic_invocation_spans.extend(section.atomic_invocation_spans);
+        if index + 1 < total_sections {
+            tokens.push(lexical::boundary_token(section.name, section.end));
+        }
+    }
+
+    (tokens, atomic_invocation_spans)
 }
 
 /// Tokenize a standard JS/TS file, with JSX fallback for parse errors.

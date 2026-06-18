@@ -277,6 +277,32 @@ pub struct SfcStyle {
     pub byte_offset: usize,
 }
 
+/// A source region extracted from a larger file while preserving the byte
+/// offset of the region body in the original source.
+pub struct SourceRegion {
+    /// Region body text.
+    pub body: String,
+    /// Byte offset of `body` within the original source.
+    pub byte_offset: usize,
+}
+
+/// Extract template markup regions from a Vue/Svelte SFC.
+///
+/// The returned regions exclude `<script>` blocks, `<style>` blocks, and HTML
+/// comments, so callers can tokenize authored markup without reading code or
+/// comments as template text. Offsets always point into the original SFC source.
+#[must_use]
+pub fn extract_sfc_template_regions(source: &str) -> Vec<SourceRegion> {
+    let mut ranges: Vec<(usize, usize)> = SCRIPT_BLOCK_RE
+        .find_iter(source)
+        .chain(STYLE_BLOCK_RE.find_iter(source))
+        .chain(HTML_COMMENT_RE.find_iter(source))
+        .map(|m| (m.start(), m.end()))
+        .collect();
+    ranges.sort_unstable_by_key(|(start, _)| *start);
+    ranges_to_gaps(source, &ranges)
+}
+
 /// Extract all `<style>` blocks from a Vue/Svelte SFC source string.
 ///
 /// Mirrors [`extract_sfc_scripts`]: filters blocks inside HTML comments and
@@ -325,6 +351,34 @@ pub fn extract_sfc_styles(source: &str) -> Vec<SfcStyle> {
             }
         })
         .collect()
+}
+
+fn ranges_to_gaps(source: &str, ranges: &[(usize, usize)]) -> Vec<SourceRegion> {
+    let mut regions = Vec::new();
+    let mut cursor = 0;
+    for &(start, end) in ranges {
+        if start > cursor {
+            push_region(source, cursor, start, &mut regions);
+        }
+        cursor = cursor.max(end);
+    }
+    if cursor < source.len() {
+        push_region(source, cursor, source.len(), &mut regions);
+    }
+    regions
+}
+
+fn push_region(source: &str, start: usize, end: usize, regions: &mut Vec<SourceRegion>) {
+    let Some(body) = source.get(start..end) else {
+        return;
+    };
+    if body.trim().is_empty() {
+        return;
+    }
+    regions.push(SourceRegion {
+        body: body.to_string(),
+        byte_offset: start,
+    });
 }
 
 /// Check if a file path is a Vue or Svelte SFC (`.vue` or `.svelte`).

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`fallow dupes` now scans authored web-format code outside JS and TS.** Duplicate detection now tokenizes `.css`, `.scss`, `.sass`, and `.less` files, plus Vue and Svelte template and style regions and Astro template and style regions. SFC and Astro regions keep section boundaries, so a clone candidate cannot be formed by stitching script, markup, and style tokens together. Warm duplicate-token caches refresh on upgrade because older caches stored these files as empty or script-only streams.
+
 ## [2.99.0] - 2026-06-18
 
 ### Added

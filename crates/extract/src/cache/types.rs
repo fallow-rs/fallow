@@ -549,7 +549,11 @@ pub(super) const CACHE_VERSION: u32 = 182;
 ///
 /// Bumped to 6 for issue #1225: `ignoreImports` now excludes re-export barrels
 /// and top-level static CommonJS require binding declarations.
-pub const DUPES_CACHE_VERSION: u32 = 6;
+///
+/// Bumped to 7: duplicate tokenization now includes CSS-family files plus
+/// Vue, Svelte, and Astro template/style regions. Warm caches from 6 can carry
+/// empty CSS streams or script-only SFC/Astro streams.
+pub const DUPES_CACHE_VERSION: u32 = 7;
 
 /// Default maximum cache size (256 MB). Overridable per-project via
 /// `cache.maxSizeMb` in the config file or `FALLOW_CACHE_MAX_SIZE` env var.

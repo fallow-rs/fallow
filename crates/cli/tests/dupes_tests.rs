@@ -27,6 +27,23 @@ fn init_git_index(root: &std::path::Path) {
     assert!(status.success(), "git add should succeed");
 }
 
+fn has_clone_group_with_files(json: &serde_json::Value, expected: &[&str]) -> bool {
+    json["clone_groups"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|group| {
+            let Some(instances) = group["instances"].as_array() else {
+                return false;
+            };
+            expected.iter().all(|file| {
+                instances
+                    .iter()
+                    .any(|instance| instance["file"].as_str() == Some(*file))
+            })
+        })
+}
+
 /// `fallow dupes --performance` was previously a no-op: the global flag was
 /// parsed but never wired through to `DupesOptions`, so users got nothing.
 /// This pins the behaviour: human format renders a stderr "Duplication
@@ -343,6 +360,178 @@ fn dupes_still_reports_repeated_callback_bodies_inside_calls() {
     assert!(
         !groups.is_empty(),
         "callback bodies inside calls should still be reported. stdout: {} stderr: {}",
+        output.stdout,
+        output.stderr
+    );
+}
+
+#[test]
+fn dupes_reports_web_format_clone_groups() {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"name":"dupes-web-formats","type":"module","main":"src/main.ts","dependencies":{"astro":"latest","svelte":"latest","vue":"latest"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("src/main.ts"),
+        "export const entry = true;\n",
+    )
+    .unwrap();
+
+    let css = r".metric-card {
+  display: grid;
+  gap: var(--space-3);
+  padding: clamp(12px, 2vw, 24px);
+  border: 1px solid var(--border-muted);
+}
+.metric-card__title {
+  font-weight: 700;
+  color: var(--text-strong);
+}
+";
+    std::fs::write(dir.path().join("src/alpha.css"), css).unwrap();
+    std::fs::write(dir.path().join("src/beta.css"), css).unwrap();
+
+    let vue = r#"<template>
+  <section class="metric-card">
+    <header class="metric-card__title">Revenue</header>
+    <p class="metric-card__value">{{ value }}</p>
+  </section>
+</template>
+<style>
+.metric-card {
+  display: grid;
+  gap: var(--space-3);
+  padding: 16px;
+}
+</style>
+"#;
+    std::fs::write(dir.path().join("src/AlphaCard.vue"), vue).unwrap();
+    std::fs::write(dir.path().join("src/BetaCard.vue"), vue).unwrap();
+
+    let svelte = r#"<script>
+  export let value = 0;
+</script>
+<section class="metric-card">
+  <header class="metric-card__title">Revenue</header>
+  <p class="metric-card__value">{value}</p>
+</section>
+<style>
+.metric-card {
+  display: grid;
+  gap: var(--space-3);
+  padding: 16px;
+}
+</style>
+"#;
+    std::fs::write(dir.path().join("src/AlphaPanel.svelte"), svelte).unwrap();
+    std::fs::write(dir.path().join("src/BetaPanel.svelte"), svelte).unwrap();
+
+    let astro = r#"---
+const value = 42;
+---
+<section class="metric-card">
+  <header class="metric-card__title">Revenue</header>
+  <p class="metric-card__value">{value}</p>
+</section>
+<style>
+.metric-card {
+  display: grid;
+  gap: var(--space-3);
+  padding: 16px;
+}
+</style>
+"#;
+    std::fs::write(dir.path().join("src/AlphaPage.astro"), astro).unwrap();
+    std::fs::write(dir.path().join("src/BetaPage.astro"), astro).unwrap();
+    init_git_index(dir.path());
+
+    let output = run_fallow_in_root(
+        "dupes",
+        dir.path(),
+        &[
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+            "--min-tokens",
+            "10",
+            "--min-lines",
+            "2",
+        ],
+    );
+    let json = parse_json(&output);
+    assert!(
+        has_clone_group_with_files(&json, &["src/alpha.css", "src/beta.css"]),
+        "CSS clone group should be reported. stdout: {} stderr: {}",
+        output.stdout,
+        output.stderr
+    );
+    assert!(
+        has_clone_group_with_files(&json, &["src/AlphaCard.vue", "src/BetaCard.vue"]),
+        "Vue clone group should be reported. stdout: {} stderr: {}",
+        output.stdout,
+        output.stderr
+    );
+    assert!(
+        has_clone_group_with_files(&json, &["src/AlphaPanel.svelte", "src/BetaPanel.svelte"]),
+        "Svelte clone group should be reported. stdout: {} stderr: {}",
+        output.stdout,
+        output.stderr
+    );
+    assert!(
+        has_clone_group_with_files(&json, &["src/AlphaPage.astro", "src/BetaPage.astro"]),
+        "Astro clone group should be reported. stdout: {} stderr: {}",
+        output.stdout,
+        output.stderr
+    );
+}
+
+#[test]
+fn dupes_does_not_report_clone_groups_spanning_sfc_sections() {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"name":"dupes-sfc-boundary","type":"module","main":"src/main.ts","dependencies":{"vue":"latest"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("src/main.ts"),
+        "export const entry = true;\n",
+    )
+    .unwrap();
+    let component = concat!(
+        "<script>let n = 1;</script><style>.a",
+        "{",
+        "b:c",
+        "}</style>"
+    );
+    std::fs::write(dir.path().join("src/Alpha.vue"), component).unwrap();
+    std::fs::write(dir.path().join("src/Beta.vue"), component).unwrap();
+    init_git_index(dir.path());
+
+    let output = run_fallow_in_root(
+        "dupes",
+        dir.path(),
+        &[
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+            "--min-tokens",
+            "9",
+            "--min-lines",
+            "1",
+        ],
+    );
+    let json = parse_json(&output);
+    let groups = json["clone_groups"].as_array().unwrap();
+    assert!(
+        groups.is_empty(),
+        "clone groups should not span SFC section boundaries. stdout: {} stderr: {}",
         output.stdout,
         output.stderr
     );

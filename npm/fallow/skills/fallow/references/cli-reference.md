@@ -140,7 +140,7 @@ fallow dead-code --format json --quiet --include-entry-exports
 
 ## `dupes`: Duplication Detection
 
-Finds code duplication and clones across the project.
+Finds code duplication and clones across the project. In addition to JS and TS source, it tokenizes CSS-family stylesheets and authored template/style regions in Vue, Svelte, and Astro files.
 
 By default, `fallow dupes` skips generated framework output matching `**/.next/**`, `**/.nuxt/**`, `**/.svelte-kit/**`, `**/.turbo/**`, `**/.parcel-cache/**`, `**/.vite/**`, `**/.cache/**`, `**/out/**`, and `**/storybook-static/**`. These defaults merge with `duplicates.ignore`. Set `duplicates.ignoreDefaults = false` to opt out and use only your configured ignore list. If the reported duplication percentage drops after upgrading, this generated-output filtering is the expected reason.
 

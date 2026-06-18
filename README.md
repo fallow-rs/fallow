@@ -178,7 +178,7 @@ Functions, files, and packages that combine complexity, churn, size, coupling, a
 
 ### Duplication
 
-Clone families and duplicated implementation patterns that increase maintenance cost. Four detection modes from exact token match to semantic clones with renamed variables.
+Clone families and duplicated implementation patterns that increase maintenance cost. Four detection modes from exact token match to semantic clones with renamed variables. Covers JS, TS, CSS-family stylesheets, Vue and Svelte template and style regions, and Astro template and style regions.
 
 ### Architecture
 
@@ -335,7 +335,7 @@ fallow dead-code --group-by section       # Group by GitLab CODEOWNERS section
 
 ## Duplication
 
-Finds copy-pasted code blocks across your codebase. Suffix-array algorithm -- no quadratic pairwise comparison. Repeated atomic function calls are filtered by default, so long calls to an existing shared abstraction do not show up as refactoring work.
+Finds copy-pasted code blocks across your codebase, including CSS-family stylesheets and authored template/style regions in Vue, Svelte, and Astro files. Suffix-array algorithm -- no quadratic pairwise comparison. Repeated atomic function calls are filtered by default, so long calls to an existing shared abstraction do not show up as refactoring work.
 
 ```bash
 fallow dupes                              # Default (mild mode)

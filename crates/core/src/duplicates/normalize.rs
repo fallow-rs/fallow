@@ -80,6 +80,11 @@ fn hash_token_resolved(kind: &TokenKind, norm: ResolvedNormalization) -> u64 {
         TokenKind::RegExpLiteral => hash_bytes(&[7]),
         TokenKind::Operator(op) => hash_bytes(&[8, *op as u8]),
         TokenKind::Punctuation(p) => hash_bytes(&[9, *p as u8]),
+        TokenKind::Boundary(name) => {
+            let mut buf = vec![10];
+            buf.extend_from_slice(name.as_bytes());
+            hash_bytes(&buf)
+        }
     }
 }
 

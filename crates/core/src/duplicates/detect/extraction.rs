@@ -1,4 +1,5 @@
 use super::FileData;
+use crate::duplicates::tokenize::TokenKind;
 
 /// A raw clone group before conversion to `CloneGroup`.
 pub(super) struct RawGroup {
@@ -40,6 +41,7 @@ pub(super) fn extract_clone_groups(input: &CloneGroupExtractionInput<'_>) -> Vec
     let focus_prefix = input
         .focus_file_ids
         .map(|ids| build_focus_prefix(sa, file_of, ids));
+    let boundary_prefixes = build_boundary_prefixes(files);
 
     #[expect(
         clippy::needless_range_loop,
@@ -70,6 +72,7 @@ pub(super) fn extract_clone_groups(input: &CloneGroupExtractionInput<'_>) -> Vec
                     file_of,
                     file_offsets,
                     files,
+                    boundary_prefixes: &boundary_prefixes,
                     interval_begin,
                     interval_end,
                     length: top_lcp,
@@ -107,6 +110,39 @@ fn interval_has_focus(focus_prefix: &[usize], begin: usize, end: usize) -> bool 
     focus_prefix[end] > focus_prefix[begin]
 }
 
+fn build_boundary_prefixes(files: &[FileData]) -> Vec<Option<Vec<u32>>> {
+    files
+        .iter()
+        .map(|file| {
+            if !file
+                .hashed_tokens
+                .iter()
+                .any(|token| hashed_token_is_boundary(file, token.original_index))
+            {
+                return None;
+            }
+
+            let mut prefix = Vec::with_capacity(file.hashed_tokens.len() + 1);
+            let mut count = 0_u32;
+            prefix.push(count);
+            for token in &file.hashed_tokens {
+                if hashed_token_is_boundary(file, token.original_index) {
+                    count += 1;
+                }
+                prefix.push(count);
+            }
+            Some(prefix)
+        })
+        .collect()
+}
+
+fn hashed_token_is_boundary(file: &FileData, original_index: usize) -> bool {
+    file.file_tokens
+        .tokens
+        .get(original_index)
+        .is_some_and(|source| matches!(source.kind, TokenKind::Boundary(_)))
+}
+
 /// Build a `RawGroup` from an LCP interval, filtering to non-overlapping
 /// instances.
 struct RawGroupInput<'a> {
@@ -114,6 +150,7 @@ struct RawGroupInput<'a> {
     file_of: &'a [usize],
     file_offsets: &'a [usize],
     files: &'a [FileData],
+    boundary_prefixes: &'a [Option<Vec<u32>>],
     interval_begin: usize,
     interval_end: usize,
     length: usize,
@@ -124,6 +161,7 @@ fn build_raw_group(input: &RawGroupInput<'_>) -> Option<RawGroup> {
     let file_of = input.file_of;
     let file_offsets = input.file_offsets;
     let files = input.files;
+    let boundary_prefixes = input.boundary_prefixes;
     let interval_begin = input.interval_begin;
     let interval_end = input.interval_end;
     let length = input.length;
@@ -137,6 +175,9 @@ fn build_raw_group(input: &RawGroupInput<'_>) -> Option<RawGroup> {
         let offset_in_file = pos - file_offsets[fid];
 
         if offset_in_file + length > files[fid].hashed_tokens.len() {
+            continue;
+        }
+        if range_contains_boundary(boundary_prefixes[fid].as_ref(), offset_in_file, length) {
             continue;
         }
 
@@ -167,4 +208,8 @@ fn build_raw_group(input: &RawGroupInput<'_>) -> Option<RawGroup> {
         instances: deduped,
         length,
     })
+}
+
+fn range_contains_boundary(prefix: Option<&Vec<u32>>, offset: usize, length: usize) -> bool {
+    prefix.is_some_and(|prefix| prefix[offset] != prefix[offset + length])
 }

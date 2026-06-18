@@ -184,6 +184,10 @@ const count = ref(0);
         .iter()
         .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Const)));
     assert!(has_const, "Should tokenize const in <script> block");
+    assert!(
+        has_identifier(&result.tokens, "template") && has_identifier(&result.tokens, "div"),
+        "Should tokenize template markup"
+    );
 }
 
 #[test]
@@ -209,24 +213,25 @@ function increment() { count += 1; }
         .iter()
         .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Function)));
     assert!(has_function, "Should tokenize function in <script> block");
+    assert!(
+        has_identifier(&result.tokens, "button") && has_identifier(&result.tokens, "on"),
+        "Should tokenize Svelte markup"
+    );
 }
 
 #[test]
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "test source lengths are trivially small"
-)]
 fn tokenize_vue_sfc_adjusts_span_offsets() {
     let vue_source = "<template><div/></template>\n<script>\nconst x = 1;\n</script>";
     let path = PathBuf::from("Test.vue");
     let result = tokenize_file(&path, vue_source, false);
-    let script_body_offset = vue_source.find("const x").unwrap() as u32;
     for token in &result.tokens {
+        if matches!(token.kind, TokenKind::Boundary(_)) {
+            continue;
+        }
         assert!(
-            token.span.start >= script_body_offset,
-            "Token span start ({}) should be >= script body offset ({})",
-            token.span.start,
-            script_body_offset
+            token.span.end as usize <= vue_source.len(),
+            "Token span end ({}) should stay inside the full SFC source",
+            token.span.end
         );
         let text = &vue_source[token.span.start as usize..token.span.end as usize];
         assert!(
@@ -250,16 +255,20 @@ fn tokenize_astro_extracts_frontmatter() {
         .iter()
         .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Import)));
     assert!(has_import, "Should tokenize import in frontmatter");
+    assert!(
+        has_identifier(&result.tokens, "layout") && has_identifier(&result.tokens, "h1"),
+        "Should tokenize Astro template markup"
+    );
 }
 
 #[test]
-fn tokenize_astro_without_frontmatter_returns_empty() {
+fn tokenize_astro_without_frontmatter_tokenizes_template() {
     let astro_source = "<html><body>Hello</body></html>";
     let path = PathBuf::from("page.astro");
     let result = tokenize_file(&path, astro_source, false);
     assert!(
-        result.tokens.is_empty(),
-        "Astro without frontmatter should produce no tokens"
+        has_identifier(&result.tokens, "html") && has_identifier(&result.tokens, "body"),
+        "Astro without frontmatter should tokenize template markup"
     );
 }
 
@@ -311,26 +320,67 @@ fn tokenize_mdx_without_statements_returns_empty() {
 }
 
 #[test]
-fn tokenize_css_returns_empty() {
+fn tokenize_css_returns_tokens() {
     let css_source = ".foo { color: red; }\n.bar { font-size: 16px; }";
     let path = PathBuf::from("styles.css");
     let result = tokenize_file(&path, css_source, false);
     assert!(
-        result.tokens.is_empty(),
-        "CSS files should produce no tokens"
+        has_identifier(&result.tokens, "foo")
+            && has_identifier(&result.tokens, "color")
+            && has_identifier(&result.tokens, "font-size"),
+        "CSS files should produce selector and declaration tokens"
     );
     assert!(result.line_count >= 1);
 }
 
 #[test]
-fn tokenize_scss_returns_empty() {
+fn tokenize_scss_returns_tokens() {
     let scss_source = "$color: red;\n.foo { color: $color; }";
     let path = PathBuf::from("styles.scss");
     let result = tokenize_file(&path, scss_source, false);
     assert!(
-        result.tokens.is_empty(),
-        "SCSS files should produce no tokens"
+        has_identifier(&result.tokens, "$color") && has_identifier(&result.tokens, "foo"),
+        "SCSS files should produce variable and selector tokens"
     );
+}
+
+#[test]
+fn tokenize_less_and_sass_return_tokens() {
+    let less = tokenize_file(
+        &PathBuf::from("styles.less"),
+        "@color: red;\n.foo { color: @color; }",
+        false,
+    );
+    assert!(has_identifier(&less.tokens, "@color"));
+
+    let sass = tokenize_file(
+        &PathBuf::from("styles.sass"),
+        "$color: red\n.foo\n  color: $color",
+        false,
+    );
+    assert!(has_identifier(&sass.tokens, "$color"));
+}
+
+#[test]
+fn tokenize_sfc_ignores_commented_out_template_blocks() {
+    let source =
+        "<!-- <template><IgnoredThing /></template> -->\n<template><UsedThing /></template>";
+    let result = tokenize_file(&PathBuf::from("Component.vue"), source, false);
+    assert!(!has_identifier(&result.tokens, "ignoredthing"));
+    assert!(has_identifier(&result.tokens, "usedthing"));
+}
+
+#[test]
+fn tokenize_sfc_style_src_does_not_tokenize_external_reference_as_style_body() {
+    let source = r#"<template><div /></template><style src="./theme.css"></style>"#;
+    let result = tokenize_file(&PathBuf::from("Component.vue"), source, false);
+    assert!(!has_identifier(&result.tokens, "theme"));
+}
+
+fn has_identifier(tokens: &[SourceToken], name: &str) -> bool {
+    tokens
+        .iter()
+        .any(|token| matches!(&token.kind, TokenKind::Identifier(value) if value == name))
 }
 
 #[test]

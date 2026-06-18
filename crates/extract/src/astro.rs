@@ -16,7 +16,7 @@ use oxc_span::{SourceType, Span};
 
 use crate::asset_url::normalize_asset_url;
 use crate::html::is_remote_url;
-use crate::sfc::SfcScript;
+use crate::sfc::{SfcScript, SourceRegion};
 use crate::source_map::ExtractionResult;
 use crate::visitor::ModuleInfoExtractor;
 use crate::{ImportInfo, ImportedName, ModuleInfo};
@@ -38,6 +38,13 @@ static SCRIPT_BLOCK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
 /// Regex matching opening `<script>` tags in the Astro template body.
 static SCRIPT_OPEN_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
     crate::static_regex(r#"(?is)<script\b(?P<attrs>(?:[^>"']|"[^"]*"|'[^']*')*)>"#)
+});
+
+/// Regex matching `<style>` blocks in the Astro template body.
+static STYLE_BLOCK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    crate::static_regex(
+        r#"(?is)<style\b(?P<attrs>(?:[^>"']|"[^"]*"|'[^']*')*)>(?P<body>[\s\S]*?)</style>"#,
+    )
 });
 
 /// Regex detecting and capturing a `src` attribute on a script tag.
@@ -64,6 +71,95 @@ pub fn extract_astro_frontmatter(source: &str) -> Option<SfcScript> {
             generic_attr: None,
         }
     })
+}
+
+/// Extract Astro template markup regions while preserving original byte offsets.
+///
+/// Frontmatter, `<script>` blocks, `<style>` blocks, and HTML comments are
+/// excluded. Inline scripts are deliberately not tokenized as markup; script
+/// handling stays with the Astro extraction path that understands processed
+/// Astro client scripts.
+#[must_use]
+pub fn extract_astro_template_regions(source: &str) -> Vec<SourceRegion> {
+    let mut ranges = Vec::new();
+    if let Some(frontmatter) = ASTRO_FRONTMATTER_RE.find(source) {
+        ranges.push((frontmatter.start(), frontmatter.end()));
+    }
+    ranges.extend(
+        SCRIPT_BLOCK_RE
+            .find_iter(source)
+            .map(|m| (m.start(), m.end())),
+    );
+    ranges.extend(
+        STYLE_BLOCK_RE
+            .find_iter(source)
+            .map(|m| (m.start(), m.end())),
+    );
+    ranges.extend(
+        HTML_COMMENT_RE
+            .find_iter(source)
+            .map(|m| (m.start(), m.end())),
+    );
+    ranges.sort_unstable_by_key(|(start, _)| *start);
+    ranges_to_gaps(source, &ranges)
+}
+
+/// Extract Astro `<style>` block bodies while preserving original byte offsets.
+#[must_use]
+pub fn extract_astro_style_regions(source: &str) -> Vec<SourceRegion> {
+    let comment_ranges: Vec<(usize, usize)> = HTML_COMMENT_RE
+        .find_iter(source)
+        .map(|m| (m.start(), m.end()))
+        .collect();
+
+    STYLE_BLOCK_RE
+        .captures_iter(source)
+        .filter(|cap| {
+            let start = cap.get(0).map_or(0, |m| m.start());
+            !comment_ranges
+                .iter()
+                .any(|&(cs, ce)| start >= cs && start < ce)
+        })
+        .filter_map(|cap| {
+            let body = cap.name("body")?;
+            let text = body.as_str();
+            if text.trim().is_empty() {
+                return None;
+            }
+            Some(SourceRegion {
+                body: text.to_string(),
+                byte_offset: body.start(),
+            })
+        })
+        .collect()
+}
+
+fn ranges_to_gaps(source: &str, ranges: &[(usize, usize)]) -> Vec<SourceRegion> {
+    let mut regions = Vec::new();
+    let mut cursor = 0;
+    for &(start, end) in ranges {
+        if start > cursor {
+            push_region(source, cursor, start, &mut regions);
+        }
+        cursor = cursor.max(end);
+    }
+    if cursor < source.len() {
+        push_region(source, cursor, source.len(), &mut regions);
+    }
+    regions
+}
+
+fn push_region(source: &str, start: usize, end: usize, regions: &mut Vec<SourceRegion>) {
+    let Some(body) = source.get(start..end) else {
+        return;
+    };
+    if body.trim().is_empty() {
+        return;
+    }
+    regions.push(SourceRegion {
+        body: body.to_string(),
+        byte_offset: start,
+    });
 }
 
 pub(crate) fn is_astro_file(path: &Path) -> bool {

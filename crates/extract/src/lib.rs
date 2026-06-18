@@ -57,7 +57,9 @@ pub use fallow_types::extract::{
     compute_line_offsets,
 };
 
-pub use astro::extract_astro_frontmatter;
+pub use astro::{
+    extract_astro_frontmatter, extract_astro_style_regions, extract_astro_template_regions,
+};
 pub use css::{
     ThemeScan, ThemeTokenDef, extract_apply_tokens, extract_css_module_exports, scan_theme_blocks,
 };
@@ -67,7 +69,10 @@ pub use css_classes::{
 pub use css_metrics::compute_css_analytics;
 pub use glimmer::{is_glimmer_file, strip_glimmer_templates};
 pub use mdx::extract_mdx_statements;
-pub use sfc::{extract_sfc_scripts, extract_sfc_styles, is_sfc_file};
+pub use sfc::{
+    SourceRegion, extract_sfc_scripts, extract_sfc_styles, extract_sfc_template_regions,
+    is_sfc_file,
+};
 pub use sfc_css::{scoped_unused_classes, sfc_virtual_stylesheet};
 pub use sfc_template::angular::{ANGULAR_THIS_SPREAD_SENTINEL, ANGULAR_TPL_SENTINEL};
 pub use tailwind::{TailwindArbitraryUse, scan_tailwind_arbitrary_values};

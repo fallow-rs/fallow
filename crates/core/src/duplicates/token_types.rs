@@ -28,6 +28,13 @@ pub enum TokenKind {
     RegExpLiteral,
     Operator(OperatorType),
     Punctuation(PunctuationType),
+    /// Logical separator between independently tokenized regions in the same file.
+    ///
+    /// Duplicate detection must not report a clone that starts in a script block
+    /// and continues into template or style markup just because the token streams
+    /// were concatenated. Boundary tokens hash to their own stable value and are
+    /// excluded from source fragments by virtue of their zero-width span.
+    Boundary(String),
 }
 
 /// TypeScript/JavaScript keyword types.
