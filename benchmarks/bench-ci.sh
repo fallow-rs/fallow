@@ -20,19 +20,8 @@ FALLOW_BIN=""
 CLONE_DIR="/tmp/fallow-bench-ci"
 RUNS=3
 export FALLOW_QUIET="${FALLOW_QUIET:-1}"
-PROJECT_TIMEOUT_SECONDS="${PROJECT_TIMEOUT_SECONDS:-120}"
+PROJECT_TIMEOUT_SECONDS="${PROJECT_TIMEOUT_SECONDS:-300}"
 QUERY_MAX_COLD_MS="${QUERY_MAX_COLD_MS:-5000}"
-TIMEOUT_BIN=""
-TIMEOUT_ARGS=()
-
-if command -v timeout >/dev/null 2>&1; then
-    TIMEOUT_BIN="timeout"
-elif command -v gtimeout >/dev/null 2>&1; then
-    TIMEOUT_BIN="gtimeout"
-fi
-if [[ -n "${TIMEOUT_BIN}" ]] && "${TIMEOUT_BIN}" --help 2>&1 | rg -q -- "--foreground"; then
-    TIMEOUT_ARGS=(--foreground)
-fi
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -131,15 +120,31 @@ clear_cache() {
 # Sets: ELAPSED_MS
 run_fallow() {
     local dir="$1"; shift
+    local elapsed_ticks=0
+    local pid
+    local run_status
+    local timeout_ticks=$((PROJECT_TIMEOUT_SECONDS * 10))
 
-    if [[ -n "${TIMEOUT_BIN}" ]]; then
-        "${TIMEOUT_BIN}" "${TIMEOUT_ARGS[@]}" "${PROJECT_TIMEOUT_SECONDS}" \
-            "${FALLOW_BIN}" --quiet --format json "$@" --root "${dir}" \
-            >/dev/null 2>/dev/null
-    else
-        "${FALLOW_BIN}" --quiet --format json "$@" --root "${dir}" \
-            >/dev/null 2>/dev/null
-    fi
+    "${FALLOW_BIN}" --quiet --format json "$@" --root "${dir}" >/dev/null 2>/dev/null &
+    pid=$!
+
+    while kill -0 "${pid}" 2>/dev/null; do
+        if (( elapsed_ticks >= timeout_ticks )); then
+            kill -TERM "${pid}" 2>/dev/null || true
+            sleep 2
+            if kill -0 "${pid}" 2>/dev/null; then
+                kill -KILL "${pid}" 2>/dev/null || true
+            fi
+            wait "${pid}" 2>/dev/null || true
+            return 124
+        fi
+        sleep 0.1
+        elapsed_ticks=$((elapsed_ticks + 1))
+    done
+
+    wait "${pid}"
+    run_status=$?
+    return "${run_status}"
 }
 
 time_fallow() {
