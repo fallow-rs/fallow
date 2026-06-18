@@ -48,7 +48,7 @@ jobs:
             --clone-dir /tmp/fallow-bench-ci \
             --runs 3 \
             > bench-real-world.json \
-            2>bench-real-world-stderr.txt
+            2> >(tee bench-real-world-stderr.txt >&2)
         continue-on-error: true
 
       - name: Store benchmark result
