@@ -423,8 +423,10 @@ export const buildInspectArgs = (options: InspectArgsOptions): string[] => {
     args.push("--workspace", options.workspace);
   }
 
-  if (options.production) {
+  if (options.production === true) {
     args.push("--production");
+  } else if (options.production === false) {
+    args.push("--no-production");
   }
 
   if (options.configPath) {

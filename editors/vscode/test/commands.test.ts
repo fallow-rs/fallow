@@ -123,6 +123,7 @@ import {
   execFallow,
   FallowExecError,
   findCliBinary,
+  buildInspectArgs,
   runInspectActiveFile,
   resolveCliBinary,
   resolveCliForRun,
@@ -747,6 +748,29 @@ describe("runInspectActiveFile", () => {
       setActiveEditor(null);
       await rm(dir, { recursive: true, force: true });
     }
+  });
+
+  it("forwards inspect production false as --no-production", () => {
+    expect(
+      buildInspectArgs({
+        filePath: "src/extension.ts",
+        production: false,
+        workspace: "app",
+        configPath: "/repo/.fallowrc.json",
+      }),
+    ).toEqual([
+      "inspect",
+      "--file",
+      "src/extension.ts",
+      "--format",
+      "json",
+      "--quiet",
+      "--workspace",
+      "app",
+      "--no-production",
+      "--config",
+      "/repo/.fallowrc.json",
+    ]);
   });
 
   it("resolves relative inspect config paths from the active editor workspace root", async () => {
