@@ -1,3 +1,4 @@
+use std::io::{BufWriter, Write};
 use std::process::ExitCode;
 
 use fallow_config::{OutputFormat, ResolvedConfig};
@@ -72,29 +73,35 @@ pub fn write_sarif_file(
     quiet: bool,
 ) {
     let sarif = report::build_sarif(results, &config.root, &config.rules);
-    match serde_json::to_string_pretty(&sarif) {
-        Ok(json) => {
-            if let Some(parent) = sarif_path.parent()
-                && !parent.as_os_str().is_empty()
-                && let Err(e) = std::fs::create_dir_all(parent)
-            {
-                eprintln!(
-                    "Warning: failed to create directory for SARIF file '{}': {e}",
-                    sarif_path.display()
-                );
-            }
-            if let Err(e) = std::fs::write(sarif_path, json) {
-                eprintln!(
-                    "Warning: failed to write SARIF file '{}': {e}",
-                    sarif_path.display()
-                );
-            } else if !quiet {
-                eprintln!("SARIF output written to {}", sarif_path.display());
-            }
-        }
+    if let Some(parent) = sarif_path.parent()
+        && !parent.as_os_str().is_empty()
+        && let Err(e) = std::fs::create_dir_all(parent)
+    {
+        eprintln!(
+            "Warning: failed to create directory for SARIF file '{}': {e}",
+            sarif_path.display()
+        );
+    }
+    let file = match std::fs::File::create(sarif_path) {
+        Ok(file) => file,
         Err(e) => {
-            eprintln!("Warning: failed to serialize SARIF output: {e}");
+            eprintln!(
+                "Warning: failed to write SARIF file '{}': {e}",
+                sarif_path.display()
+            );
+            return;
         }
+    };
+    let mut writer = BufWriter::new(file);
+    if let Err(e) = serde_json::to_writer_pretty(&mut writer, &sarif) {
+        eprintln!("Warning: failed to serialize SARIF output: {e}");
+    } else if let Err(e) = writer.flush() {
+        eprintln!(
+            "Warning: failed to write SARIF file '{}': {e}",
+            sarif_path.display()
+        );
+    } else if !quiet {
+        eprintln!("SARIF output written to {}", sarif_path.display());
     }
 }
 
