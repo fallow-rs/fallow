@@ -737,8 +737,9 @@ pub struct CachedModule {
     /// Whether the module had an unknowable-key provide. Round-trips so the
     /// `unprovided-inject` project-wide abstain holds on warm-cache loads.
     pub has_dynamic_provide: bool,
-    /// Vue `<script setup>` `defineProps` declared props. Round-trips so the
-    /// `unused-component-prop` detector sees them on warm-cache loads.
+    /// Vue `<script setup>` `defineProps` and Svelte 5 `$props()` declared props.
+    /// Round-trips so the `unused-component-prop` detector sees them on
+    /// warm-cache loads.
     pub component_props: Vec<fallow_types::extract::ComponentProp>,
     /// Whether the template spreads `$attrs`/`$props`/`props` or the
     /// `defineProps` return is rest-destructured. Round-trips for the abstain.

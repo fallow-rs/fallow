@@ -1132,8 +1132,8 @@ route_collisions?: RouteCollisionFinding[]
  */
 dynamic_segment_name_conflicts?: DynamicSegmentNameConflictFinding[]
 /**
- * Vue `<script setup>` `defineProps` props referenced nowhere in their own
- * SFC (neither `<script>` nor `<template>`). Wrapped in
+ * Vue `<script setup>` `defineProps`, Svelte 5 `$props()`, and React props
+ * referenced nowhere in their own component. Wrapped in
  * [`UnusedComponentPropFinding`] so each entry carries a typed `actions`
  * array natively. Default severity is `warn`.
  */
@@ -1303,7 +1303,7 @@ unprovided_injects?: number
  */
 unrendered_components?: number
 /**
- * Vue `<script setup>` props referenced nowhere inside their own SFC.
+ * Vue, Svelte, or React props referenced nowhere inside their own component.
  */
 unused_component_props?: number
 /**
@@ -2976,11 +2976,11 @@ introduced?: (AuditIntroduced | null)
  */
 export interface UnusedComponentPropFinding {
 /**
- * The `.vue` SFC declaring the unused prop.
+ * The component file declaring the unused prop.
  */
 path: string
 /**
- * The component name (the `.vue` file stem).
+ * The component name.
  */
 component_name: string
 /**
@@ -7227,8 +7227,8 @@ route_collisions?: RouteCollisionFinding[]
  */
 dynamic_segment_name_conflicts?: DynamicSegmentNameConflictFinding[]
 /**
- * Vue `<script setup>` `defineProps` props referenced nowhere in their own
- * SFC (neither `<script>` nor `<template>`). Wrapped in
+ * Vue `<script setup>` `defineProps`, Svelte 5 `$props()`, and React props
+ * referenced nowhere in their own component. Wrapped in
  * [`UnusedComponentPropFinding`] so each entry carries a typed `actions`
  * array natively. Default severity is `warn`.
  */

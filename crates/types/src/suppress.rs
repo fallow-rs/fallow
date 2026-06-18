@@ -120,9 +120,9 @@ pub enum IssueKind {
     /// A component defined in the project that is exported but never rendered
     /// (no JSX usage) anywhere across the analyzed project.
     UnrenderedComponent,
-    /// A Vue `<script setup>` `defineProps` declared prop that is referenced
-    /// NOWHERE inside its own single-file component (neither `<script>` nor
-    /// `<template>`). Single-file dead-input direction.
+    /// A Vue `<script setup>` `defineProps`, Svelte 5 `$props()`, or React
+    /// declared prop that is referenced NOWHERE inside its own component.
+    /// Single-component dead-input direction.
     UnusedComponentProp,
     /// A Vue `<script setup>` `defineEmits` declared event that is EMITTED
     /// nowhere inside its own single-file component (no `emit('<name>')` call).

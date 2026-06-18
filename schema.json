@@ -1047,7 +1047,7 @@
           "default": "error"
         },
         "unused-component-props": {
-          "description": "Vue `<script setup>` `defineProps` declared prop referenced nowhere\ninside its own single-file component (neither `<script>` nor\n`<template>`). The single-file dead-input direction. Defaults to `warn`,\nnot `error`: a prop can be part of a deliberately-stable public component\nAPI, so analyzer confidence is lower; warn encodes that without failing\nCI.",
+          "description": "Vue `<script setup>` `defineProps`, Svelte 5 `$props()`, or React\ndeclared prop referenced nowhere inside its own component. The\nsingle-component dead-input direction. Defaults to `warn`, not `error`: a\nprop can be part of a deliberately-stable public component API, so\nanalyzer confidence is lower; warn encodes that without failing CI.",
           "$ref": "#/$defs/Severity",
           "default": "error"
         },

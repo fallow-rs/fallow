@@ -107,12 +107,11 @@ pub struct RulesConfig {
     /// lower; warn encodes that without failing CI.
     #[serde(default, alias = "unrendered-component")]
     pub unrendered_components: Severity,
-    /// Vue `<script setup>` `defineProps` declared prop referenced nowhere
-    /// inside its own single-file component (neither `<script>` nor
-    /// `<template>`). The single-file dead-input direction. Defaults to `warn`,
-    /// not `error`: a prop can be part of a deliberately-stable public component
-    /// API, so analyzer confidence is lower; warn encodes that without failing
-    /// CI.
+    /// Vue `<script setup>` `defineProps`, Svelte 5 `$props()`, or React
+    /// declared prop referenced nowhere inside its own component. The
+    /// single-component dead-input direction. Defaults to `warn`, not `error`: a
+    /// prop can be part of a deliberately-stable public component API, so
+    /// analyzer confidence is lower; warn encodes that without failing CI.
     #[serde(default, alias = "unused-component-prop")]
     pub unused_component_props: Severity,
     /// Vue `<script setup>` `defineEmits` declared event emitted nowhere inside

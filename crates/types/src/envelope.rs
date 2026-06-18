@@ -111,7 +111,7 @@ pub struct CheckSummary {
     /// Vue/Svelte components reachable but rendered nowhere in the project.
     #[serde(default)]
     pub unrendered_components: usize,
-    /// Vue `<script setup>` props referenced nowhere inside their own SFC.
+    /// Vue, Svelte, or React props referenced nowhere inside their own component.
     #[serde(default)]
     pub unused_component_props: usize,
     /// Vue `<script setup>` emits emitted nowhere inside their own SFC.

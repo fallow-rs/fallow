@@ -1,6 +1,6 @@
-//! Detection of unused Vue `<script setup>` `defineProps` props: a declared prop
-//! referenced NOWHERE inside its own single-file component (neither `<script>`
-//! nor `<template>`).
+//! Detection of unused Vue `<script setup>` `defineProps` props and Svelte 5
+//! `$props()` props: a declared prop referenced NOWHERE inside its own
+//! single-file component (neither `<script>` nor `<template>`).
 //!
 //! Single-file finding, zero-FP doctrine. The harvest + usage flags live on
 //! `ModuleInfo.component_props` (set during extraction); this detector only reads
@@ -8,7 +8,7 @@
 //! finding per genuinely-unused prop.
 //!
 //! Abstain ladder (each abstains the WHOLE file's prop findings):
-//! - `has_unharvestable_props`: a type-reference `defineProps<Props>()` arg.
+//! - `has_unharvestable_props`: opaque or imported prop declarations.
 //! - `has_props_attrs_fallthrough`: `v-bind="$attrs"/$props/props"` or a
 //!   rest-destructure of the props return.
 //! - `has_define_expose`: a prop may be re-exposed.
@@ -26,9 +26,9 @@ use crate::results::UnusedComponentProp;
 
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 
-/// Find Vue `<script setup>` `defineProps` props referenced nowhere in their own
-/// SFC. Returns empty unless the project declares `vue` / `@vue/runtime-core` /
-/// `nuxt`.
+/// Find Vue `<script setup>` `defineProps` and Svelte 5 `$props()` props
+/// referenced nowhere in their own SFC. Returns framework findings only when
+/// the matching framework dependency is declared.
 #[must_use]
 pub fn find_unused_component_props(
     graph: &ModuleGraph,
@@ -36,10 +36,11 @@ pub fn find_unused_component_props(
     declared_deps: &FxHashSet<String>,
     line_offsets_by_file: &LineOffsetsMap<'_>,
 ) -> Vec<UnusedComponentProp> {
-    let gated = declared_deps.contains("vue")
+    let vue_gated = declared_deps.contains("vue")
         || declared_deps.contains("@vue/runtime-core")
         || declared_deps.contains("nuxt");
-    if !gated {
+    let svelte_gated = declared_deps.contains("svelte") || declared_deps.contains("@sveltejs/kit");
+    if !vue_gated && !svelte_gated {
         return Vec::new();
     }
 
@@ -51,8 +52,13 @@ pub fn find_unused_component_props(
         if !node.is_reachable() {
             continue;
         }
-        if !is_vue_file(&node.path) {
+        let Some(framework) = component_prop_framework(&node.path) else {
             continue;
+        };
+        match framework {
+            ComponentPropFramework::Vue if !vue_gated => continue,
+            ComponentPropFramework::Svelte if !svelte_gated => continue,
+            _ => {}
         }
         let Some(module) = modules_by_id.get(&node.file_id) else {
             continue;
@@ -96,12 +102,22 @@ pub fn find_unused_component_props(
     findings
 }
 
-/// Whether the path is a Vue SFC (`.vue`).
-fn is_vue_file(path: &Path) -> bool {
-    path.extension().and_then(|e| e.to_str()) == Some("vue")
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ComponentPropFramework {
+    Vue,
+    Svelte,
 }
 
-/// The component name: the `.vue` file stem.
+/// Whether the path is an SFC whose props feed `unused-component-prop`.
+fn component_prop_framework(path: &Path) -> Option<ComponentPropFramework> {
+    match path.extension().and_then(|e| e.to_str()) {
+        Some("vue") => Some(ComponentPropFramework::Vue),
+        Some("svelte") => Some(ComponentPropFramework::Svelte),
+        _ => None,
+    }
+}
+
+/// The component name: the SFC file stem.
 fn component_name_for(path: &Path) -> String {
     path.file_stem()
         .and_then(|s| s.to_str())

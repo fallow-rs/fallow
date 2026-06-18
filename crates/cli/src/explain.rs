@@ -319,8 +319,8 @@ pub const CHECK_RULES: &[RuleDef] = &[
         id: "fallow/unused-component-prop",
         category: "Dead code",
         name: "Unused component props",
-        short: "A Vue defineProps prop or React component prop is referenced nowhere in its own component",
-        full: "A declared component prop referenced nowhere inside its own component, in either of two framework shapes: a Vue `<script setup>` defineProps prop (unused in neither script nor template), or a React/Preact prop destructured from a component's first parameter and read nowhere in its body. vue-tsc / Volar / tsc check caller-side prop correctness, not this in-component dead-input direction. Conservative: Vue abstains on `$attrs` fallthrough, whole-object props use, defineExpose, defineModel, and imported prop-type aliases; React abstains on rest spread (`{...rest}`), props forwarded by spread, props passed wholesale to a hook, `forwardRef` / imported-interface props, and exported public-API component props. Default warn; suppress or remove the prop.",
+        short: "A Vue, Svelte, or React component prop is referenced nowhere in its own component",
+        full: "A declared component prop referenced nowhere inside its own component, in these framework shapes: a Vue `<script setup>` defineProps prop, a Svelte 5 `$props()` prop, or a React/Preact prop destructured from a component's first parameter and read nowhere in its body. Framework type checkers check caller-side prop correctness, not this in-component dead-input direction. Conservative: Vue abstains on `$attrs` fallthrough, whole-object props use, defineExpose, defineModel, and imported prop-type aliases; Svelte abstains on rest, computed, nested, and whole-object `$props()` shapes; React abstains on rest spread (`{...rest}`), props forwarded by spread, props passed wholesale to a hook, `forwardRef` / imported-interface props, and exported public-API component props. Default warn; suppress or remove the prop.",
         docs_path: "explanations/dead-code#unused-component-props",
     },
     RuleDef {

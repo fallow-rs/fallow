@@ -202,7 +202,7 @@ fn section_component_footer_text(title: &str) -> Option<(&'static str, &'static 
             "https://docs.fallow.tools/explanations/dead-code#unrendered-components",
         )),
         "Unused component props" => Some((
-            "A Vue defineProps prop or React component prop referenced nowhere inside its own component (remove it or use it)",
+            "A Vue, Svelte, or React component prop referenced nowhere inside its own component (remove it or use it)",
             "https://docs.fallow.tools/explanations/dead-code#unused-component-props",
         )),
         "Prop drilling" => Some((

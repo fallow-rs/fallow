@@ -1028,13 +1028,13 @@ fn populate_unrendered_component_findings(input: &mut FrameworkSpecificFindingsI
 }
 
 /// Populate `unused_component_props` when the rule is enabled. Gated on the
-/// project declaring `vue` / `@vue/runtime-core` / `nuxt` inside the detector
-/// (see [`find_unused_component_props`]).
+/// project declaring the matching framework dependency inside the detector (see
+/// [`find_unused_component_props`]).
 fn populate_unused_component_prop_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
     if input.config.rules.unused_component_props == Severity::Off {
         return;
     }
-    // Vue arm: one component per `.vue` SFC, flagged from `component_props`.
+    // Vue/Svelte arm: one component per SFC, flagged from `component_props`.
     input.results.unused_component_props = find_unused_component_props(
         input.graph,
         input.modules,
@@ -1071,7 +1071,7 @@ fn populate_unused_component_prop_findings(input: &mut FrameworkSpecificFindings
             .map(UnusedComponentPropFinding::with_actions),
     );
 
-    // Inline-suppression filter over BOTH arms: a `// fallow-ignore-next-line
+    // Inline-suppression filter over ALL arms: a `// fallow-ignore-next-line
     // unused-component-prop` above the prop (or a file-level
     // `// fallow-ignore-file unused-component-prop`) drops the finding. The
     // finding's `path` is the absolute graph node path, so it maps directly to a

@@ -683,7 +683,7 @@
           "items": {
             "$ref": "#/definitions/UnusedComponentPropFinding"
           },
-          "description": "Vue `<script setup>` `defineProps` props referenced nowhere in their own\nSFC (neither `<script>` nor `<template>`). Wrapped in\n[`UnusedComponentPropFinding`] so each entry carries a typed `actions`\narray natively. Default severity is `warn`."
+          "description": "Vue `<script setup>` `defineProps`, Svelte 5 `$props()`, and React props\nreferenced nowhere in their own component. Wrapped in\n[`UnusedComponentPropFinding`] so each entry carries a typed `actions`\narray natively. Default severity is `warn`."
         },
         "unused_component_emits": {
           "type": "array",
@@ -1144,7 +1144,7 @@
           "items": {
             "$ref": "#/definitions/UnusedComponentPropFinding"
           },
-          "description": "Vue `<script setup>` `defineProps` props referenced nowhere in their own\nSFC (neither `<script>` nor `<template>`). Wrapped in\n[`UnusedComponentPropFinding`] so each entry carries a typed `actions`\narray natively. Default severity is `warn`."
+          "description": "Vue `<script setup>` `defineProps`, Svelte 5 `$props()`, and React props\nreferenced nowhere in their own component. Wrapped in\n[`UnusedComponentPropFinding`] so each entry carries a typed `actions`\narray natively. Default severity is `warn`."
         },
         "unused_component_emits": {
           "type": "array",
@@ -5044,7 +5044,7 @@
         },
         "unused_component_props": {
           "type": "integer",
-          "description": "Vue `<script setup>` props referenced nowhere inside their own SFC."
+          "description": "Vue, Svelte, or React props referenced nowhere inside their own component."
         },
         "unused_component_emits": {
           "type": "integer",
@@ -5902,7 +5902,7 @@
           "items": {
             "$ref": "#/definitions/UnusedComponentPropFinding"
           },
-          "description": "Vue `<script setup>` `defineProps` props referenced nowhere in their own\nSFC (neither `<script>` nor `<template>`). Wrapped in\n[`UnusedComponentPropFinding`] so each entry carries a typed `actions`\narray natively. Default severity is `warn`."
+          "description": "Vue `<script setup>` `defineProps`, Svelte 5 `$props()`, and React props\nreferenced nowhere in their own component. Wrapped in\n[`UnusedComponentPropFinding`] so each entry carries a typed `actions`\narray natively. Default severity is `warn`."
         },
         "unused_component_emits": {
           "type": "array",
@@ -13465,11 +13465,11 @@
       "properties": {
         "path": {
           "type": "string",
-          "description": "The `.vue` SFC declaring the unused prop."
+          "description": "The component file declaring the unused prop."
         },
         "component_name": {
           "type": "string",
-          "description": "The component name (the `.vue` file stem)."
+          "description": "The component name."
         },
         "prop_name": {
           "type": "string",

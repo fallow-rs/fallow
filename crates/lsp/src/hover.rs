@@ -485,7 +485,7 @@ fn check_unrendered_component(
     None
 }
 
-/// Check if the position is on an unused Vue component prop anchor.
+/// Check if the position is on an unused component prop anchor.
 #[expect(
     clippy::cast_possible_truncation,
     reason = "prop name lengths are bounded by source size"

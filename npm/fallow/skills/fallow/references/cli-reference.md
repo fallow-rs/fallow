@@ -64,7 +64,7 @@ Common global flags for this command: [`--format`](#global-flags), [`--quiet`](#
 | `--unused-store-members` | Unused Pinia store members |
 | `--unprovided-injects` | inject() / getContext() reads a key that no provide() / setContext() supplies |
 | `--unrendered-components` | A Vue / Svelte component is reachable through a barrel but rendered nowhere |
-| `--unused-component-props` | A Vue defineProps prop or React component prop is referenced nowhere in its own component |
+| `--unused-component-props` | A Vue, Svelte, or React component prop is referenced nowhere in its own component |
 | `--unused-component-emits` | A Vue <script setup> defineEmits event is emitted nowhere in its own component |
 | `--unused-component-inputs` | An Angular @Input() / signal input() / model() is read nowhere in its own component (class body or template); needs `@angular/core` dep |
 | `--unused-component-outputs` | An Angular @Output() / signal output() is emitted (.emit()) nowhere in its own component; needs `@angular/core` dep |

@@ -162,7 +162,7 @@ Run `fallow <command> --help` for the full flag list per command (see also refer
 | `misplaced-directive` | - | - | `// fallow-ignore-next-line misplaced-directive` | "use client" / "use server" directive is not in the leading position and is ignored; Requires the project to declare next |
 | `unprovided-inject` | `--unprovided-injects` | - | `// fallow-ignore-next-line unprovided-inject` | inject() / getContext() reads a key that no provide() / setContext() supplies |
 | `unrendered-component` | `--unrendered-components` | - | `// fallow-ignore-next-line unrendered-component` | A Vue / Svelte component is reachable through a barrel but rendered nowhere |
-| `unused-component-prop` | `--unused-component-props` | - | `// fallow-ignore-next-line unused-component-prop` | A Vue defineProps prop or React component prop is referenced nowhere in its own component |
+| `unused-component-prop` | `--unused-component-props` | - | `// fallow-ignore-next-line unused-component-prop` | A Vue, Svelte, or React component prop is referenced nowhere in its own component |
 | `unused-component-emit` | `--unused-component-emits` | - | `// fallow-ignore-next-line unused-component-emit` | A Vue <script setup> defineEmits event is emitted nowhere in its own component |
 | `unused-component-input` | `--unused-component-inputs` | - | `// fallow-ignore-next-line unused-component-input` | An Angular @Input() / signal input() / model() is read nowhere in its own component (class body or template); needs `@angular/core` dep |
 | `unused-component-output` | `--unused-component-outputs` | - | `// fallow-ignore-next-line unused-component-output` | An Angular @Output() / signal output() is emitted (.emit()) nowhere in its own component; needs `@angular/core` dep |

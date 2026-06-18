@@ -1,6 +1,5 @@
 ---
 source: crates/cli/tests/snapshot_tests.rs
-assertion_line: 805
 expression: redact_sarif_version(&json_str)
 ---
 {
@@ -355,10 +354,10 @@ expression: redact_sarif_version(&json_str)
             {
               "id": "fallow/unused-component-prop",
               "shortDescription": {
-                "text": "A Vue defineProps prop or React component prop is referenced nowhere in its own component"
+                "text": "A Vue, Svelte, or React component prop is referenced nowhere in its own component"
               },
               "fullDescription": {
-                "text": "A declared component prop referenced nowhere inside its own component, in either of two framework shapes: a Vue `<script setup>` defineProps prop (unused in neither script nor template), or a React/Preact prop destructured from a component's first parameter and read nowhere in its body. vue-tsc / Volar / tsc check caller-side prop correctness, not this in-component dead-input direction. Conservative: Vue abstains on `$attrs` fallthrough, whole-object props use, defineExpose, defineModel, and imported prop-type aliases; React abstains on rest spread (`{...rest}`), props forwarded by spread, props passed wholesale to a hook, `forwardRef` / imported-interface props, and exported public-API component props. Default warn; suppress or remove the prop."
+                "text": "A declared component prop referenced nowhere inside its own component, in these framework shapes: a Vue `<script setup>` defineProps prop, a Svelte 5 `$props()` prop, or a React/Preact prop destructured from a component's first parameter and read nowhere in its body. Framework type checkers check caller-side prop correctness, not this in-component dead-input direction. Conservative: Vue abstains on `$attrs` fallthrough, whole-object props use, defineExpose, defineModel, and imported prop-type aliases; Svelte abstains on rest, computed, nested, and whole-object `$props()` shapes; React abstains on rest spread (`{...rest}`), props forwarded by spread, props passed wholesale to a hook, `forwardRef` / imported-interface props, and exported public-API component props. Default warn; suppress or remove the prop."
               },
               "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-component-props",
               "defaultConfiguration": {

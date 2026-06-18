@@ -165,14 +165,15 @@ pub struct ModuleInfo {
     /// Vue/Svelte SFC that some file actually imports-and-uses, distinguishing it
     /// from a component reachable only through a barrel re-export.
     pub referenced_import_bindings: Vec<String>,
-    /// Vue `<script setup>` `defineProps` declared props. Consumed by the
-    /// `unused-component-prop` detector to flag a prop referenced nowhere in its
-    /// own SFC. Each entry carries `used_in_script` / `used_in_template`.
+    /// Vue `<script setup>` `defineProps` and Svelte 5 `$props()` declared
+    /// props. Consumed by the `unused-component-prop` detector to flag a prop
+    /// referenced nowhere in its own SFC. Each entry carries `used_in_script` /
+    /// `used_in_template`.
     pub component_props: Vec<ComponentProp>,
     /// `true` when the template spreads the whole props/attrs object
-    /// (`v-bind="$attrs"` / `v-bind="$props"` / `v-bind="props"`) or the
-    /// `defineProps` return is destructured with a rest element. Either form can
-    /// consume a prop indirectly, so the detector abstains on the whole file.
+    /// (`v-bind="$attrs"` / `v-bind="$props"` / `v-bind="props"`) or the props
+    /// return is destructured with a rest element. Either form can consume a prop
+    /// indirectly, so the detector abstains on the whole file.
     pub has_props_attrs_fallthrough: bool,
     /// `true` when the SFC calls `defineExpose(...)`. A prop may be re-exposed,
     /// so the detector conservatively abstains on the whole file.
@@ -180,10 +181,10 @@ pub struct ModuleInfo {
     /// `true` when the SFC calls `defineModel(...)`. Two-way model props are out
     /// of scope for v1, so the detector abstains on the whole file.
     pub has_define_model: bool,
-    /// `true` when `defineProps` was called with an unharvestable argument (a
-    /// type-reference type argument such as `defineProps<Props>()` whose names
-    /// require cross-file type resolution). The detector abstains on the whole
-    /// file so a prop is never falsely flagged.
+    /// `true` when props were declared through an unharvestable shape, such as a
+    /// Vue type-reference argument or an opaque Svelte `$props()` destructure.
+    /// The detector abstains on the whole file so a prop is never falsely
+    /// flagged.
     pub has_unharvestable_props: bool,
     /// Vue `<script setup>` `defineEmits` declared events. Consumed by the
     /// `unused-component-emit` detector to flag an event emitted nowhere in its
@@ -1386,18 +1387,18 @@ pub struct DiKeySite {
     pub span_start: u32,
 }
 
-/// A Vue `<script setup>` `defineProps` declared prop, harvested from the
-/// runtime object form (`defineProps({ foo: {...} })`) or the inline TS literal
-/// form (`defineProps<{ foo: T }>()`). `used_in_script` / `used_in_template`
-/// are set during extraction; the `unused-component-prop` detector flags a prop
-/// where neither is true. See `harvest_define_props` in `sfc.rs`.
+/// A component prop declared by Vue `<script setup>` `defineProps` or Svelte 5
+/// `$props()`. `used_in_script` / `used_in_template` are set during extraction;
+/// the `unused-component-prop` detector flags a prop where neither is true. See
+/// `harvest_define_props` and `harvest_svelte_props` in `sfc_props.rs`.
 #[derive(Debug, Clone, bitcode::Encode, bitcode::Decode)]
 pub struct ComponentProp {
     /// The declared prop name.
     pub name: String,
     /// The template/script-visible local binding name: the destructure alias for
-    /// `const { name: alias } = defineProps()`, otherwise the prop name itself.
-    /// A renamed prop is read through this local, so usage must be checked against
+    /// `const { name: alias } = defineProps()` or
+    /// `let { name: alias } = $props()`, otherwise the prop name itself. A
+    /// renamed prop is read through this local, so usage must be checked against
     /// it, not the declared name.
     pub local: String,
     /// Start byte offset of the prop declaration (anchors the finding).

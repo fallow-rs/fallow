@@ -316,8 +316,8 @@ pub struct AnalysisResults {
     /// carries a typed `actions` array natively. Default severity is `warn`.
     #[serde(default)]
     pub dynamic_segment_name_conflicts: Vec<DynamicSegmentNameConflictFinding>,
-    /// Vue `<script setup>` `defineProps` props referenced nowhere in their own
-    /// SFC (neither `<script>` nor `<template>`). Wrapped in
+    /// Vue `<script setup>` `defineProps`, Svelte 5 `$props()`, and React props
+    /// referenced nowhere in their own component. Wrapped in
     /// [`UnusedComponentPropFinding`] so each entry carries a typed `actions`
     /// array natively. Default severity is `warn`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1371,17 +1371,17 @@ pub struct UnrenderedComponent {
     pub col: u32,
 }
 
-/// A Vue `<script setup>` `defineProps` declared prop that is referenced NOWHERE
-/// inside its own single-file component (neither `<script>` nor `<template>`).
-/// Single-file finding, zero-FP doctrine: the whole file abstains on any
-/// fallthrough / expose / model / unharvestable-type signal.
+/// A Vue `<script setup>` `defineProps`, Svelte 5 `$props()`, or React declared
+/// prop that is referenced NOWHERE inside its own component. Single-component
+/// finding, zero-FP doctrine: the component abstains on any opaque public or
+/// fallthrough signal.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedComponentProp {
-    /// The `.vue` SFC declaring the unused prop.
+    /// The component file declaring the unused prop.
     #[serde(serialize_with = "serde_path::serialize")]
     pub path: PathBuf,
-    /// The component name (the `.vue` file stem).
+    /// The component name.
     pub component_name: String,
     /// The declared prop name that is never referenced.
     pub prop_name: String,

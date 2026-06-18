@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`fallow dupes` now scans authored web-format code outside JS and TS.** Duplicate detection now tokenizes `.css`, `.scss`, `.sass`, and `.less` files, plus Vue and Svelte template and style regions and Astro template and style regions. SFC and Astro regions keep section boundaries, so a clone candidate cannot be formed by stitching script, markup, and style tokens together. Warm duplicate-token caches refresh on upgrade because older caches stored these files as empty or script-only streams.
 
+- **`unused-component-prop` now covers Svelte 5 `$props()` destructures.** Svelte components that declare a prop through `$props()` and never read it in their script or markup now report through the existing `unused-component-prop` rule. The finding keeps the same output shape, severity, manual action, and suppression token as Vue and React component-prop findings. It stays conservative by requiring a declared `svelte` or `@sveltejs/kit` dependency and abstaining when a `$props()` destructure contains rest, computed, nested, or whole-object shapes that could hide a use.
+
 ## [2.99.0] - 2026-06-18
 
 ### Added

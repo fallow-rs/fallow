@@ -700,11 +700,10 @@ fn merge_script_into_module(input: &mut SfcScriptMergeInput<'_>) {
         merge_vue_props_emits_into(input, &parser_return.program);
     }
 
-    // Svelte 5 `$props()` rune harvesting. Groundwork for the W2.2 dead-event /
-    // template-root crediting; this unit ships no detector for Svelte props
-    // (the compiler + eslint cover single-file prop deadness). `$props` is an
-    // instance-only rune, so harvest ONLY the template-visible instance script,
-    // never the module script (`<script context="module">` / `<script module>`).
+    // Svelte 5 `$props()` rune harvesting for `unused-component-prop`. `$props`
+    // is an instance-only rune, so harvest ONLY the template-visible instance
+    // script, never the module script (`<script context="module">` /
+    // `<script module>`).
     if input.kind == SfcKind::Svelte && is_template_visible_script(input.kind, input.script) {
         merge_svelte_props_into(
             input.combined,
