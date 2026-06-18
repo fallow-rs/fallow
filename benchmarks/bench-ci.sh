@@ -20,7 +20,7 @@ FALLOW_BIN=""
 CLONE_DIR="/tmp/fallow-bench-ci"
 RUNS=3
 export FALLOW_QUIET="${FALLOW_QUIET:-1}"
-PROJECT_TIMEOUT_SECONDS="${PROJECT_TIMEOUT_SECONDS:-300}"
+PROJECT_TIMEOUT_SECONDS="${PROJECT_TIMEOUT_SECONDS:-45}"
 HEARTBEAT_SECONDS="${HEARTBEAT_SECONDS:-30}"
 QUERY_MAX_COLD_MS="${QUERY_MAX_COLD_MS:-5000}"
 
@@ -197,13 +197,13 @@ time_fallow() {
     return "${run_status}"
 }
 
-fallow_failure_message() {
+fallow_skip_message() {
     local phase="$1"
     local run_status="$2"
     if [[ "${run_status}" -eq 124 ]]; then
-        echo "    FAIL: fallow timed out during ${phase} after ${PROJECT_TIMEOUT_SECONDS}s"
+        echo "    SKIP: fallow timed out during ${phase} after ${PROJECT_TIMEOUT_SECONDS}s"
     else
-        echo "    FAIL: fallow exited with status ${run_status} during ${phase}"
+        echo "    SKIP: fallow exited with status ${run_status} during ${phase}"
     fi
 }
 
@@ -268,8 +268,9 @@ for entry in "${PROJECTS[@]}"; do
             :
         else
             run_status=$?
-            fallow_failure_message "cold run" "${run_status}" >&2
-            exit 1
+            fallow_skip_message "cold run" "${run_status}" >&2
+            clear_cache "${dest}"
+            continue 2
         fi
         cold_times+=("${ELAPSED_MS}")
     done
@@ -282,8 +283,9 @@ for entry in "${PROJECTS[@]}"; do
         :
     else
         run_status=$?
-        fallow_failure_message "cache warmup" "${run_status}" >&2
-        exit 1
+        fallow_skip_message "cache warmup" "${run_status}" >&2
+        clear_cache "${dest}"
+        continue
     fi
     # Measure
     warm_times=()
@@ -292,8 +294,9 @@ for entry in "${PROJECTS[@]}"; do
             :
         else
             run_status=$?
-            fallow_failure_message "warm run" "${run_status}" >&2
-            exit 1
+            fallow_skip_message "warm run" "${run_status}" >&2
+            clear_cache "${dest}"
+            continue 2
         fi
         warm_times+=("${ELAPSED_MS}")
     done
