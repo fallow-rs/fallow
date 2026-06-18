@@ -21,6 +21,7 @@ CLONE_DIR="/tmp/fallow-bench-ci"
 RUNS=3
 export FALLOW_QUIET="${FALLOW_QUIET:-1}"
 PROJECT_TIMEOUT_SECONDS="${PROJECT_TIMEOUT_SECONDS:-300}"
+HEARTBEAT_SECONDS="${HEARTBEAT_SECONDS:-30}"
 QUERY_MAX_COLD_MS="${QUERY_MAX_COLD_MS:-5000}"
 
 # Parse arguments
@@ -100,14 +101,30 @@ clone_project() {
 
 install_deps() {
     local dir="$1" pm="$2"
+    local elapsed_seconds=0
+    local heartbeat_seconds="${HEARTBEAT_SECONDS}"
+    local pid
     if [[ -d "${dir}/node_modules" ]]; then
         return 0
     fi
     echo "    Installing dependencies (${pm})..." >&2
     if [[ "${pm}" == "pnpm" ]]; then
-        (cd "${dir}" && pnpm install --no-frozen-lockfile --ignore-scripts >/dev/null 2>/dev/null) || true
+        (cd "${dir}" && pnpm install --no-frozen-lockfile --ignore-scripts >/dev/null 2>/dev/null) &
     else
-        (cd "${dir}" && npm install --ignore-scripts --no-audit --no-fund >/dev/null 2>/dev/null) || true
+        (cd "${dir}" && npm install --ignore-scripts --no-audit --no-fund >/dev/null 2>/dev/null) &
+    fi
+    pid=$!
+
+    while kill -0 "${pid}" 2>/dev/null; do
+        sleep 1
+        elapsed_seconds=$((elapsed_seconds + 1))
+        if (( heartbeat_seconds > 0 && elapsed_seconds % heartbeat_seconds == 0 )); then
+            echo "    Still installing dependencies (${elapsed_seconds}s)..." >&2
+        fi
+    done
+
+    if ! wait "${pid}"; then
+        echo "    WARN: dependency install failed; continuing with available files" >&2
     fi
 }
 
@@ -124,6 +141,7 @@ run_fallow() {
     local pid
     local run_status
     local timeout_ticks=$((PROJECT_TIMEOUT_SECONDS * 10))
+    local heartbeat_ticks=$((HEARTBEAT_SECONDS * 10))
 
     "${FALLOW_BIN}" --quiet --format json "$@" --root "${dir}" >/dev/null 2>/dev/null &
     pid=$!
@@ -140,6 +158,9 @@ run_fallow() {
         fi
         sleep 0.1
         elapsed_ticks=$((elapsed_ticks + 1))
+        if (( heartbeat_ticks > 0 && elapsed_ticks % heartbeat_ticks == 0 )); then
+            echo "    Still running fallow ($((elapsed_ticks / 10))s)..." >&2
+        fi
     done
 
     wait "${pid}"
