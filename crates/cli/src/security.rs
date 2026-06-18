@@ -10,8 +10,9 @@
 //! only honest signals.
 
 use crate::report::sink::outln;
+use colored::Colorize;
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -31,7 +32,7 @@ use fallow_types::results::{
     SecurityUnresolvedCalleeDiagnostic, TaintConfidence,
 };
 use rustc_hash::FxHashSet;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use xxhash_rust::xxh3::xxh3_64;
 
 use crate::base_worktree::{BaseWorktree, git_rev_parse};
@@ -351,6 +352,172 @@ pub struct SecurityRuntimeStateCounts {
     pub not_collected: usize,
 }
 
+/// The `fallow security survivors --format json` schema version.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum SecuritySurvivorsSchemaVersion {
+    /// Initial survivor-renderer output contract.
+    #[serde(rename = "1")]
+    V1,
+}
+
+/// Verifier verdict status accepted by `fallow security survivors`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum SecurityVerifierVerdictStatus {
+    /// The verifier could not dismiss the candidate from supplied evidence.
+    Survivor,
+    /// The verifier dismissed the candidate from supplied evidence.
+    Dismissed,
+    /// The verifier needs human review before dismissal or remediation.
+    NeedsHumanReview,
+}
+
+/// One supported verifier verdict input row.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecurityVerifierVerdict {
+    /// Must be `fallow-security-verdict/v1`.
+    pub schema_version: String,
+    /// Stable candidate id from `security_findings[].finding_id`.
+    pub finding_id: String,
+    /// External verifier disposition.
+    pub verdict: SecurityVerifierVerdictStatus,
+    /// Short verifier reason.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// Short verifier rationale.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rationale: Option<String>,
+    /// Optional verifier-provided confidence or review priority.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<String>,
+    /// Optional verifier-provided impact statement.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub impact: Option<String>,
+    /// Optional verifier-owned remediation direction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fix_direction: Option<String>,
+}
+
+/// The `fallow security survivors --format json` envelope.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecuritySurvivorsOutput {
+    /// Schema version of this envelope.
+    pub schema_version: SecuritySurvivorsSchemaVersion,
+    /// Fallow CLI version that produced this output.
+    pub version: ToolVersion,
+    /// Wall-clock milliseconds spent producing the report.
+    pub elapsed_ms: ElapsedMs,
+    /// Survivor render summary.
+    pub summary: SecuritySurvivorsSummary,
+    /// Externally verified survivor candidates keyed by finding id.
+    pub survivors: BTreeMap<String, SecuritySurvivor>,
+    /// Ambiguous candidates keyed by finding id. These are not dismissed and are
+    /// kept explicit so queues can decide whether to include them.
+    pub needs_human_review: BTreeMap<String, SecuritySurvivor>,
+}
+
+/// Aggregate counts for survivor rendering.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecuritySurvivorsSummary {
+    pub candidates: usize,
+    pub verdicts: usize,
+    pub survivors: usize,
+    pub dismissed: usize,
+    pub needs_human_review: usize,
+}
+
+/// One externally verified candidate row.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecuritySurvivor {
+    /// Stable candidate id from `security_findings[].finding_id`.
+    pub finding_id: String,
+    /// External verifier disposition.
+    pub verdict: SecurityVerifierVerdictStatus,
+    /// Short verifier reason.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// Short verifier rationale.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rationale: Option<String>,
+    /// Optional verifier-provided confidence or review priority.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<String>,
+    /// Optional verifier-provided impact statement.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub impact: Option<String>,
+    /// Optional verifier-owned remediation direction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fix_direction: Option<String>,
+    /// Original typed fallow security candidate.
+    pub candidate: SecurityFinding,
+}
+
+/// The `fallow security blind-spots --format json` schema version.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum SecurityBlindSpotsSchemaVersion {
+    /// Initial blind-spot grouping output contract.
+    #[serde(rename = "1")]
+    V1,
+}
+
+/// The `fallow security blind-spots --format json` envelope.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecurityBlindSpotsOutput {
+    /// Schema version of this envelope.
+    pub schema_version: SecurityBlindSpotsSchemaVersion,
+    /// Fallow CLI version that produced this output.
+    pub version: ToolVersion,
+    /// Wall-clock milliseconds spent producing the report.
+    pub elapsed_ms: ElapsedMs,
+    /// Aggregate blind-spot counts from the security analysis.
+    pub summary: SecurityBlindSpotsSummary,
+    /// Grouped unresolved callee diagnostics, derived from existing samples.
+    pub groups: Vec<SecurityBlindSpotGroup>,
+}
+
+/// Aggregate counts for blind-spot output.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecurityBlindSpotsSummary {
+    pub unresolved_edge_files: usize,
+    pub unresolved_callee_sites: usize,
+    pub sampled_callee_sites: usize,
+}
+
+/// One actionable blind-spot group.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecurityBlindSpotGroup {
+    /// Why the callees were skipped.
+    pub reason: fallow_types::extract::SkippedSecurityCalleeReason,
+    /// Compact syntax shape of the skipped callee.
+    pub expression_kind: fallow_types::extract::SkippedSecurityCalleeExpressionKind,
+    /// Count in the bounded diagnostic sample.
+    pub sampled_count: usize,
+    /// Top files in this bounded diagnostic sample.
+    pub files: Vec<SecurityBlindSpotFile>,
+    /// Suggested next action for this group.
+    pub suggestion: String,
+}
+
+/// One file inside a blind-spot group.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecurityBlindSpotFile {
+    /// Project-relative source path.
+    pub path: String,
+    /// Count in the bounded diagnostic sample.
+    pub sampled_count: usize,
+}
+
 /// Options for `fallow security`, mirroring the global CLI flags it honors.
 pub struct SecurityOptions<'a> {
     /// Project root.
@@ -396,17 +563,72 @@ pub struct SecurityOptions<'a> {
     pub explain: bool,
 }
 
+/// Options for `fallow security survivors`.
+pub struct SecuritySurvivorsOptions<'a> {
+    /// Output format.
+    pub output: OutputFormat,
+    /// Raw `fallow security --format json` candidate file.
+    pub candidates: &'a Path,
+    /// Verifier verdict JSON file.
+    pub verdicts: &'a Path,
+}
+
+/// Run `fallow security survivors`.
+pub fn run_survivors(opts: &SecuritySurvivorsOptions<'_>) -> ExitCode {
+    let started = Instant::now();
+    if let Err(code) = validate_derived_security_output(opts.output, "survivors") {
+        return code;
+    }
+    let output = match build_survivors_output(opts, started) {
+        Ok(output) => output,
+        Err(message) => return emit_error(&message, 2, opts.output),
+    };
+    outln!("{}", render_survivors_output(opts.output, &output));
+    ExitCode::SUCCESS
+}
+
+/// Run `fallow security blind-spots`.
+pub fn run_blind_spots(opts: &SecurityOptions<'_>) -> ExitCode {
+    let started = Instant::now();
+    if let Err(code) = validate_derived_security_output(opts.output, "blind-spots") {
+        return code;
+    }
+    let (security_output, _) = match build_security_command_output(opts, started) {
+        Ok(output) => output,
+        Err(code) => return code,
+    };
+    let output = build_blind_spots_output(&security_output);
+    outln!("{}", render_blind_spots_output(opts.output, &output));
+    ExitCode::SUCCESS
+}
+
 /// Run `fallow security`. Always exits 0 unless the user explicitly raised the
 /// `security-client-server-leak` rule to `error` AND findings exist (the rule
 /// defaults to `off` and the command forces it to `warn`, so the common case is
 /// advisory). Unsupported output formats exit 2.
 pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
     let started = Instant::now();
-    if let Err(code) = validate_security_output(opts.output) {
+    let (output, effective_severities) = match build_security_command_output(opts, started) {
+        Ok(output) => output,
+        Err(code) => return code,
+    };
+    crate::telemetry::note_result_count(output.security_findings.len());
+
+    if let Err(code) = maybe_write_security_sarif(opts, &output) {
         return code;
     }
 
-    let mut config = match load_config_for_analysis(
+    outln!("{}", render_security_output(opts, &output));
+    security_exit_code(opts, &output, effective_severities)
+}
+
+fn build_security_command_output(
+    opts: &SecurityOptions<'_>,
+    started: Instant,
+) -> Result<(SecurityOutput, SecurityRuleSeverities), ExitCode> {
+    validate_security_output(opts.output)?;
+
+    let mut config = load_config_for_analysis(
         opts.root,
         opts.config_path,
         crate::ConfigLoadOptions {
@@ -417,28 +639,17 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
             quiet: opts.quiet,
         },
         ProductionAnalysis::DeadCode,
-    ) {
-        Ok(config) => config,
-        Err(code) => return code,
-    };
+    )?;
 
     let configured_severities = security_rule_severities(&config);
     force_security_rules(&mut config);
     let effective_severities = security_rule_severities(&config);
 
-    let mut analysis = match analyze_security_candidates(opts, &config) {
-        Ok(analysis) => analysis,
-        Err(code) => return code,
-    };
+    let mut analysis = analyze_security_candidates(opts, &config)?;
 
-    if let Err(code) = apply_security_scopes(opts, &mut analysis) {
-        return code;
-    }
+    apply_security_scopes(opts, &mut analysis)?;
 
-    let gate_mode = match apply_security_gate(opts, &config, &mut analysis.results) {
-        Ok(mode) => mode,
-        Err(code) => return code,
-    };
+    let gate_mode = apply_security_gate(opts, &config, &mut analysis.results)?;
 
     let unresolved_edge_files = analysis.results.security_unresolved_edge_files;
     let unresolved_callee_sites = analysis.results.security_unresolved_callee_sites;
@@ -446,10 +657,7 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
         &analysis.results.security_unresolved_callee_diagnostics,
         &config.root,
     );
-    let runtime_report = match security_runtime_report(opts, &mut analysis) {
-        Ok(report) => report,
-        Err(code) => return code,
-    };
+    let runtime_report = security_runtime_report(opts, &mut analysis)?;
     let PreparedSecurityFindings {
         findings,
         attack_surface,
@@ -473,14 +681,7 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
         unresolved_callee_sites,
         unresolved_callee_diagnostics,
     });
-    crate::telemetry::note_result_count(output.security_findings.len());
-
-    if let Err(code) = maybe_write_security_sarif(opts, &output) {
-        return code;
-    }
-
-    outln!("{}", render_security_output(opts, &output));
-    security_exit_code(opts, &output, effective_severities)
+    Ok((output, effective_severities))
 }
 
 #[derive(Clone, Copy)]
@@ -515,6 +716,179 @@ fn validate_security_output(output: OutputFormat) -> Result<(), ExitCode> {
             2,
             output,
         ))
+    }
+}
+
+fn validate_derived_security_output(
+    output: OutputFormat,
+    subcommand: &'static str,
+) -> Result<(), ExitCode> {
+    if matches!(output, OutputFormat::Human | OutputFormat::Json) {
+        Ok(())
+    } else {
+        Err(emit_error(
+            &format!("fallow security {subcommand} supports --format human or json only."),
+            2,
+            output,
+        ))
+    }
+}
+
+fn build_survivors_output(
+    opts: &SecuritySurvivorsOptions<'_>,
+    started: Instant,
+) -> Result<SecuritySurvivorsOutput, String> {
+    let candidates = load_candidate_map(opts.candidates)?;
+    let verdicts = load_verdicts(opts.verdicts)?;
+    let mut seen = BTreeSet::new();
+    let mut survivors = BTreeMap::new();
+    let mut needs_human_review = BTreeMap::new();
+    let mut dismissed = 0;
+
+    for verdict in &verdicts {
+        validate_verdict(verdict)?;
+        if !seen.insert(verdict.finding_id.clone()) {
+            return Err(format!(
+                "Verifier verdict file has duplicate verdict for finding_id `{}`.",
+                verdict.finding_id
+            ));
+        }
+        let Some(candidate) = candidates.get(&verdict.finding_id) else {
+            return Err(format!(
+                "Verifier verdict references unknown finding_id `{}`.",
+                verdict.finding_id
+            ));
+        };
+        match verdict.verdict {
+            SecurityVerifierVerdictStatus::Survivor => {
+                survivors.insert(
+                    verdict.finding_id.clone(),
+                    survivor_from_verdict(verdict, candidate),
+                );
+            }
+            SecurityVerifierVerdictStatus::Dismissed => dismissed += 1,
+            SecurityVerifierVerdictStatus::NeedsHumanReview => {
+                needs_human_review.insert(
+                    verdict.finding_id.clone(),
+                    survivor_from_verdict(verdict, candidate),
+                );
+            }
+        }
+    }
+
+    Ok(SecuritySurvivorsOutput {
+        schema_version: SecuritySurvivorsSchemaVersion::V1,
+        version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
+        elapsed_ms: ElapsedMs(started.elapsed().as_millis() as u64),
+        summary: SecuritySurvivorsSummary {
+            candidates: candidates.len(),
+            verdicts: verdicts.len(),
+            survivors: survivors.len(),
+            dismissed,
+            needs_human_review: needs_human_review.len(),
+        },
+        survivors,
+        needs_human_review,
+    })
+}
+
+fn load_candidate_map(path: &Path) -> Result<BTreeMap<String, SecurityFinding>, String> {
+    let value = load_json_file(path, "candidate")?;
+    let Some(findings) = value
+        .get("security_findings")
+        .and_then(serde_json::Value::as_array)
+    else {
+        return Err(format!(
+            "Candidate file {} must be raw `fallow security --format json` output with a security_findings array.",
+            path.display()
+        ));
+    };
+    let mut candidates = BTreeMap::new();
+    for finding in findings {
+        let finding: SecurityFinding = serde_json::from_value(finding.clone()).map_err(|err| {
+            format!(
+                "Candidate file {} contains a malformed security finding: {err}",
+                path.display()
+            )
+        })?;
+        if finding.finding_id.is_empty() {
+            return Err(format!(
+                "Candidate file {} contains a security finding with an empty finding_id.",
+                path.display()
+            ));
+        }
+        if candidates
+            .insert(finding.finding_id.clone(), finding.clone())
+            .is_some()
+        {
+            return Err(format!(
+                "Candidate file {} contains duplicate finding_id `{}`.",
+                path.display(),
+                finding.finding_id
+            ));
+        }
+    }
+    Ok(candidates)
+}
+
+fn load_verdicts(path: &Path) -> Result<Vec<SecurityVerifierVerdict>, String> {
+    let value = load_json_file(path, "verdict")?;
+    let verdicts_value = if let Some(items) = value.get("verdicts") {
+        if value
+            .get("schema_version")
+            .and_then(serde_json::Value::as_str)
+            != Some("fallow-security-verdicts/v1")
+        {
+            return Err(format!(
+                "Verifier verdict file {} must use schema_version `fallow-security-verdicts/v1`.",
+                path.display()
+            ));
+        }
+        items.clone()
+    } else {
+        value
+    };
+    serde_json::from_value::<Vec<SecurityVerifierVerdict>>(verdicts_value).map_err(|err| {
+        format!(
+            "Failed to parse verifier verdict file {}: {err}",
+            path.display()
+        )
+    })
+}
+
+fn load_json_file(path: &Path, label: &str) -> Result<serde_json::Value, String> {
+    let src = std::fs::read_to_string(path)
+        .map_err(|err| format!("Failed to read {label} file {}: {err}", path.display()))?;
+    serde_json::from_str(&src)
+        .map_err(|err| format!("Failed to parse {label} file {}: {err}", path.display()))
+}
+
+fn validate_verdict(verdict: &SecurityVerifierVerdict) -> Result<(), String> {
+    if verdict.schema_version != "fallow-security-verdict/v1" {
+        return Err(format!(
+            "Verifier verdict for finding_id `{}` must use schema_version `fallow-security-verdict/v1`.",
+            verdict.finding_id
+        ));
+    }
+    if verdict.finding_id.is_empty() {
+        return Err("Verifier verdict contains an empty finding_id.".to_owned());
+    }
+    Ok(())
+}
+
+fn survivor_from_verdict(
+    verdict: &SecurityVerifierVerdict,
+    candidate: &SecurityFinding,
+) -> SecuritySurvivor {
+    SecuritySurvivor {
+        finding_id: verdict.finding_id.clone(),
+        verdict: verdict.verdict,
+        reason: verdict.reason.clone(),
+        rationale: verdict.rationale.clone(),
+        confidence: verdict.confidence.clone(),
+        impact: verdict.impact.clone(),
+        fix_direction: verdict.fix_direction.clone(),
+        candidate: candidate.clone(),
     }
 }
 
@@ -1661,6 +2035,275 @@ pub fn render_json_summary(output: &SecurityOutput) -> String {
     })
 }
 
+fn render_survivors_output(
+    output_format: OutputFormat,
+    output: &SecuritySurvivorsOutput,
+) -> String {
+    match output_format {
+        OutputFormat::Json => render_survivors_json(output),
+        _ => render_survivors_human(output),
+    }
+}
+
+#[must_use]
+pub fn render_survivors_json(output: &SecuritySurvivorsOutput) -> String {
+    let Ok(value) = crate::output_envelope::serialize_root_output_without_telemetry(
+        crate::output_envelope::FallowOutput::SecuritySurvivors(output.clone()),
+    ) else {
+        return "{\"error\":\"failed to serialize security survivors output\"}".to_owned();
+    };
+    serde_json::to_string_pretty(&value).unwrap_or_else(|_| {
+        "{\"error\":\"failed to serialize security survivors output\"}".to_owned()
+    })
+}
+
+#[must_use]
+fn render_survivors_human(output: &SecuritySurvivorsOutput) -> String {
+    use crate::report::plural;
+    use std::fmt::Write as _;
+
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "Security survivors: {} externally verified candidate{}.",
+        output.summary.survivors,
+        plural(output.summary.survivors)
+    );
+    if output.summary.needs_human_review > 0 {
+        let _ = writeln!(
+            out,
+            "Needs human review: {} candidate{}.",
+            output.summary.needs_human_review,
+            plural(output.summary.needs_human_review)
+        );
+    }
+    out.push_str(
+        "These are verifier-filtered fallow candidates, not vulnerabilities proven by fallow.\n",
+    );
+
+    if output.survivors.is_empty() && output.needs_human_review.is_empty() {
+        out.push_str("\nNo survivor details to show.\n");
+        return out;
+    }
+
+    push_survivor_group(&mut out, "Survivors", &output.survivors);
+    push_survivor_group(&mut out, "Needs human review", &output.needs_human_review);
+    out
+}
+
+fn push_survivor_group(
+    out: &mut String,
+    title: &str,
+    survivors: &BTreeMap<String, SecuritySurvivor>,
+) {
+    use std::fmt::Write as _;
+
+    if survivors.is_empty() {
+        return;
+    }
+    let _ = writeln!(out, "\n{title}:");
+    for survivor in survivors.values() {
+        let path = survivor.candidate.path.to_string_lossy().replace('\\', "/");
+        let line = survivor.candidate.line;
+        let category = survivor
+            .candidate
+            .category
+            .as_deref()
+            .unwrap_or_else(|| security_kind_key(survivor.candidate.kind));
+        let _ = writeln!(
+            out,
+            "- {}:{} ({}) [{}]",
+            path, line, category, survivor.finding_id
+        );
+        if let Some(reason) = survivor.reason.as_ref().or(survivor.rationale.as_ref()) {
+            let _ = writeln!(out, "  reason: {reason}");
+        }
+        if let Some(impact) = &survivor.impact {
+            let _ = writeln!(out, "  impact: {impact}");
+        }
+        if let Some(fix_direction) = &survivor.fix_direction {
+            let _ = writeln!(out, "  fix direction: {fix_direction}");
+        }
+        out.push_str("  Next: review the original candidate evidence before editing code.\n");
+    }
+}
+
+fn build_blind_spots_output(output: &SecurityOutput) -> SecurityBlindSpotsOutput {
+    let groups = output
+        .unresolved_callee_diagnostics
+        .as_ref()
+        .map(group_blind_spot_samples)
+        .unwrap_or_default();
+    let sampled_callee_sites = output
+        .unresolved_callee_diagnostics
+        .as_ref()
+        .map_or(0, |diagnostics| diagnostics.sampled.len());
+
+    SecurityBlindSpotsOutput {
+        schema_version: SecurityBlindSpotsSchemaVersion::V1,
+        version: output.version.clone(),
+        elapsed_ms: output.elapsed_ms,
+        summary: SecurityBlindSpotsSummary {
+            unresolved_edge_files: output.unresolved_edge_files,
+            unresolved_callee_sites: output.unresolved_callee_sites,
+            sampled_callee_sites,
+        },
+        groups,
+    }
+}
+
+fn group_blind_spot_samples(
+    diagnostics: &SecurityUnresolvedCalleeDiagnostics,
+) -> Vec<SecurityBlindSpotGroup> {
+    let mut groups: BTreeMap<
+        (
+            fallow_types::extract::SkippedSecurityCalleeReason,
+            fallow_types::extract::SkippedSecurityCalleeExpressionKind,
+        ),
+        BTreeMap<String, usize>,
+    > = BTreeMap::new();
+
+    for sample in &diagnostics.sampled {
+        let files = groups
+            .entry((sample.reason, sample.expression_kind))
+            .or_default();
+        *files.entry(sample.path.clone()).or_insert(0) += 1;
+    }
+
+    let mut groups: Vec<SecurityBlindSpotGroup> = groups
+        .into_iter()
+        .map(|((reason, expression_kind), files)| {
+            let sampled_count = files.values().sum();
+            let mut files: Vec<SecurityBlindSpotFile> = files
+                .into_iter()
+                .map(|(path, sampled_count)| SecurityBlindSpotFile {
+                    path,
+                    sampled_count,
+                })
+                .collect();
+            files.sort_by(|a, b| {
+                b.sampled_count
+                    .cmp(&a.sampled_count)
+                    .then_with(|| a.path.cmp(&b.path))
+            });
+            SecurityBlindSpotGroup {
+                reason,
+                expression_kind,
+                sampled_count,
+                files,
+                suggestion: blind_spot_suggestion(reason).to_owned(),
+            }
+        })
+        .collect();
+
+    groups.sort_by(|a, b| {
+        b.sampled_count
+            .cmp(&a.sampled_count)
+            .then_with(|| {
+                unresolved_callee_reason_label(a.reason)
+                    .cmp(unresolved_callee_reason_label(b.reason))
+            })
+            .then_with(|| {
+                unresolved_callee_expression_label(a.expression_kind)
+                    .cmp(unresolved_callee_expression_label(b.expression_kind))
+            })
+    });
+    groups
+}
+
+fn render_blind_spots_output(
+    output_format: OutputFormat,
+    output: &SecurityBlindSpotsOutput,
+) -> String {
+    match output_format {
+        OutputFormat::Json => render_blind_spots_json(output),
+        _ => render_blind_spots_human(output),
+    }
+}
+
+#[must_use]
+pub fn render_blind_spots_json(output: &SecurityBlindSpotsOutput) -> String {
+    let Ok(value) = crate::output_envelope::serialize_root_output_without_telemetry(
+        crate::output_envelope::FallowOutput::SecurityBlindSpots(output.clone()),
+    ) else {
+        return "{\"error\":\"failed to serialize security blind-spots output\"}".to_owned();
+    };
+    serde_json::to_string_pretty(&value).unwrap_or_else(|_| {
+        "{\"error\":\"failed to serialize security blind-spots output\"}".to_owned()
+    })
+}
+
+#[must_use]
+fn render_blind_spots_human(output: &SecurityBlindSpotsOutput) -> String {
+    use crate::report::plural;
+    use std::fmt::Write as _;
+
+    let mut out = String::new();
+    let callee_count = output.summary.unresolved_callee_sites;
+    let edge_count = output.summary.unresolved_edge_files;
+    if callee_count == 0 && edge_count == 0 {
+        out.push_str("Security blind spots: no unresolved security edges or callees found.\n");
+        return out;
+    }
+
+    let _ = writeln!(
+        out,
+        "Security blind spots: {callee_count} unresolved callee{} and {edge_count} unresolved client import edge{}.",
+        plural(callee_count),
+        plural(edge_count)
+    );
+    out.push_str("A non-zero blind-spot count means fallow may have missed security candidates behind dynamic code shapes.\n");
+
+    for group in &output.groups {
+        let reason = unresolved_callee_reason_label(group.reason);
+        let expression = unresolved_callee_expression_label(group.expression_kind);
+        let _ = writeln!(
+            out,
+            "\n{} Blind spot: {reason} / {expression}, {} sampled site{}.",
+            "[I]".blue().bold(),
+            group.sampled_count,
+            plural(group.sampled_count)
+        );
+        for file in group.files.iter().take(3) {
+            let _ = writeln!(out, "  {} ({})", file.path, file.sampled_count);
+        }
+        let _ = writeln!(out, "  Next: {}", group.suggestion);
+    }
+
+    out
+}
+
+fn unresolved_callee_expression_label(
+    expression_kind: fallow_types::extract::SkippedSecurityCalleeExpressionKind,
+) -> &'static str {
+    match expression_kind {
+        fallow_types::extract::SkippedSecurityCalleeExpressionKind::ComputedMemberExpression => {
+            "computed-member"
+        }
+        fallow_types::extract::SkippedSecurityCalleeExpressionKind::Identifier => "identifier",
+        fallow_types::extract::SkippedSecurityCalleeExpressionKind::StaticMemberExpression => {
+            "member-expression"
+        }
+        fallow_types::extract::SkippedSecurityCalleeExpressionKind::Other => "other",
+    }
+}
+
+fn blind_spot_suggestion(
+    reason: fallow_types::extract::SkippedSecurityCalleeReason,
+) -> &'static str {
+    match reason {
+        fallow_types::extract::SkippedSecurityCalleeReason::ComputedMember => {
+            "inspect computed property names or convert hot sinks to explicit calls."
+        }
+        fallow_types::extract::SkippedSecurityCalleeReason::DynamicDispatch => {
+            "inspect dynamic dispatch targets and add a narrow wrapper or catalogue shape if the sink is real."
+        }
+        fallow_types::extract::SkippedSecurityCalleeReason::UnsupportedAssignmentObject => {
+            "inspect assignment targets and simplify the object shape if security sink calls are hidden there."
+        }
+    }
+}
+
 fn security_summary(output: &SecurityOutput) -> SecuritySummary {
     let mut by_severity = SecuritySeverityCounts::default();
     let mut by_reachability = SecurityReachabilityCounts::default();
@@ -2018,7 +2661,6 @@ fn push_human_next_step(out: &mut String, finding: &SecurityFinding) {
 
 fn push_human_blind_spots(out: &mut String, output: &SecurityOutput) {
     use crate::report::plural;
-    use colored::Colorize;
     use std::fmt::Write as _;
 
     if output.unresolved_edge_files > 0 {
@@ -2654,6 +3296,26 @@ mod tests {
         }
     }
 
+    fn survivor_candidate_json(
+        finding_id: &str,
+        path: &str,
+        line: u32,
+        kind: SecurityFindingKind,
+        category: Option<&str>,
+    ) -> serde_json::Value {
+        let root = Path::new("/proj/root");
+        let mut finding = relativize_finding(sample_finding(root), root);
+        finding.finding_id = finding_id.to_owned();
+        finding.path = PathBuf::from(path);
+        finding.line = line;
+        finding.kind = kind;
+        finding.category = category.map(str::to_owned);
+        finding.candidate.sink.path = PathBuf::from(path);
+        finding.candidate.sink.line = line;
+        finding.candidate.sink.category = category.map(str::to_owned);
+        serde_json::to_value(finding).expect("security finding serializes")
+    }
+
     fn sample_unresolved_callee_diagnostics(root: &Path) -> SecurityUnresolvedCalleeDiagnostics {
         unresolved_callee_diagnostics(
             &[
@@ -2700,6 +3362,190 @@ mod tests {
             categories_include: None,
             categories_exclude: None,
         }
+    }
+
+    #[test]
+    fn survivors_json_keeps_survivors_and_review_candidates_by_finding_id() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let candidates = dir.path().join("candidates.json");
+        let verdicts = dir.path().join("verdicts.json");
+        std::fs::write(
+            &candidates,
+            serde_json::json!({
+                "kind": "security",
+                "security_findings": [
+                    survivor_candidate_json("sec-a", "src/a.ts", 10, SecurityFindingKind::TaintedSink, Some("ssrf")),
+                    survivor_candidate_json("sec-b", "src/b.ts", 11, SecurityFindingKind::TaintedSink, Some("redos-regex")),
+                    survivor_candidate_json("sec-c", "src/c.ts", 12, SecurityFindingKind::ClientServerLeak, None)
+                ]
+            })
+            .to_string(),
+        )
+        .expect("write candidates");
+        std::fs::write(
+            &verdicts,
+            serde_json::json!({
+                "schema_version": "fallow-security-verdicts/v1",
+                "verdicts": [
+                    { "schema_version": "fallow-security-verdict/v1", "finding_id": "sec-b", "verdict": "dismissed" },
+                    { "schema_version": "fallow-security-verdict/v1", "finding_id": "sec-a", "verdict": "survivor", "rationale": "input controls URL" },
+                    { "schema_version": "fallow-security-verdict/v1", "finding_id": "sec-c", "verdict": "needs-human-review" }
+                ]
+            })
+            .to_string(),
+        )
+        .expect("write verdicts");
+
+        let output = build_survivors_output(
+            &SecuritySurvivorsOptions {
+                output: OutputFormat::Json,
+                candidates: &candidates,
+                verdicts: &verdicts,
+            },
+            Instant::now(),
+        )
+        .expect("survivors output");
+        let rendered: serde_json::Value =
+            serde_json::from_str(&render_survivors_json(&output)).expect("json");
+
+        assert_eq!(rendered["kind"], "security-survivors");
+        assert!(rendered["survivors"]["sec-a"].is_object());
+        assert!(rendered["survivors"]["sec-b"].is_null());
+        assert!(rendered["needs_human_review"]["sec-c"].is_object());
+        assert_eq!(rendered["summary"]["dismissed"], 1);
+    }
+
+    #[test]
+    fn survivors_reject_duplicate_verdicts_and_unknown_candidates() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let candidates = dir.path().join("candidates.json");
+        let verdicts = dir.path().join("verdicts.json");
+        std::fs::write(
+            &candidates,
+            serde_json::json!({
+                "security_findings": [
+                    survivor_candidate_json("sec-a", "src/a.ts", 1, SecurityFindingKind::TaintedSink, Some("ssrf"))
+                ]
+            })
+            .to_string(),
+        )
+        .expect("write candidates");
+        std::fs::write(
+            &verdicts,
+            r#"[
+                {"schema_version":"fallow-security-verdict/v1","finding_id":"sec-a","verdict":"survivor"},
+                {"schema_version":"fallow-security-verdict/v1","finding_id":"sec-a","verdict":"dismissed"}
+            ]"#,
+        )
+        .expect("write duplicate verdicts");
+        let duplicate = build_survivors_output(
+            &SecuritySurvivorsOptions {
+                output: OutputFormat::Json,
+                candidates: &candidates,
+                verdicts: &verdicts,
+            },
+            Instant::now(),
+        )
+        .expect_err("duplicate verdict should fail");
+        assert!(duplicate.contains("duplicate verdict"));
+
+        std::fs::write(
+            &verdicts,
+            r#"[{"schema_version":"fallow-security-verdict/v1","finding_id":"sec-missing","verdict":"survivor"}]"#,
+        )
+        .expect("write missing verdict");
+        let missing = build_survivors_output(
+            &SecuritySurvivorsOptions {
+                output: OutputFormat::Json,
+                candidates: &candidates,
+                verdicts: &verdicts,
+            },
+            Instant::now(),
+        )
+        .expect_err("missing candidate should fail");
+        assert!(missing.contains("unknown finding_id"));
+    }
+
+    #[test]
+    fn survivors_reject_malformed_schema_versions_and_unknown_verdicts() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let candidates = dir.path().join("candidates.json");
+        let verdicts = dir.path().join("verdicts.json");
+        std::fs::write(
+            &candidates,
+            serde_json::json!({
+                "security_findings": [
+                    survivor_candidate_json("sec-a", "src/a.ts", 1, SecurityFindingKind::TaintedSink, Some("ssrf"))
+                ]
+            })
+            .to_string(),
+        )
+        .expect("write candidates");
+        std::fs::write(
+            &verdicts,
+            r#"[{"schema_version":"wrong","finding_id":"sec-a","verdict":"survivor"}]"#,
+        )
+        .expect("write bad schema");
+        let bad_schema = build_survivors_output(
+            &SecuritySurvivorsOptions {
+                output: OutputFormat::Json,
+                candidates: &candidates,
+                verdicts: &verdicts,
+            },
+            Instant::now(),
+        )
+        .expect_err("bad schema should fail");
+        assert!(bad_schema.contains("schema_version"));
+
+        std::fs::write(
+            &verdicts,
+            r#"[{"schema_version":"fallow-security-verdict/v1","finding_id":"sec-a","verdict":"maybe"}]"#,
+        )
+        .expect("write unknown verdict");
+        let unknown = build_survivors_output(
+            &SecuritySurvivorsOptions {
+                output: OutputFormat::Json,
+                candidates: &candidates,
+                verdicts: &verdicts,
+            },
+            Instant::now(),
+        )
+        .expect_err("unknown verdict should fail");
+        assert!(unknown.contains("Failed to parse verifier verdict file"));
+    }
+
+    #[test]
+    fn blind_spots_group_existing_diagnostics_with_suggestions() {
+        let root = Path::new("/proj/root");
+        let mut output = output_with(vec![], 2);
+        output.unresolved_callee_sites = 3;
+        output.unresolved_callee_diagnostics = Some(sample_unresolved_callee_diagnostics(root));
+
+        let blind_spots = build_blind_spots_output(&output);
+        let rendered: serde_json::Value =
+            serde_json::from_str(&render_blind_spots_json(&blind_spots)).expect("json");
+
+        assert_eq!(rendered["kind"], "security-blind-spots");
+        assert_eq!(rendered["summary"]["unresolved_edge_files"], 2);
+        assert_eq!(rendered["summary"]["unresolved_callee_sites"], 3);
+        assert_eq!(rendered["groups"][0]["reason"], "dynamic-dispatch");
+        assert_eq!(rendered["groups"][0]["expression_kind"], "other");
+        assert_eq!(rendered["groups"][0]["files"][0]["path"], "src/a.ts");
+        assert!(rendered["groups"][0]["suggestion"].is_string());
+    }
+
+    #[test]
+    fn blind_spots_human_preserves_non_clean_bill_framing() {
+        let root = Path::new("/proj/root");
+        let mut output = output_with(vec![], 0);
+        output.unresolved_callee_sites = 3;
+        output.unresolved_callee_diagnostics = Some(sample_unresolved_callee_diagnostics(root));
+
+        let out = render_blind_spots_human(&build_blind_spots_output(&output));
+
+        assert!(out.contains("may have missed security candidates"));
+        assert!(out.contains("dynamic-dispatch / other"));
+        assert!(out.contains("Next: inspect dynamic dispatch targets"));
     }
 
     fn tainted_with_runtime(root: &Path, state: Option<SecurityRuntimeState>) -> SecurityFinding {

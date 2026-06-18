@@ -75,6 +75,10 @@ kind: "impact"
 kind: "impact-cross-repo"
 }) | ((SecurityOutput | SecuritySummaryOutput) & {
 kind: "security"
+}) | (SecuritySurvivorsOutput & {
+kind: "security-survivors"
+}) | (SecurityBlindSpotsOutput & {
+kind: "security-blind-spots"
 }) | (CheckOutput & {
 kind: "dead-code"
 }) | (CombinedOutput & {
@@ -730,6 +734,18 @@ export type SkippedSecurityCalleeReason = ("computed-member" | "dynamic-dispatch
  * Syntactic expression shape for a skipped security callee.
  */
 export type SkippedSecurityCalleeExpressionKind = ("static-member-expression" | "computed-member-expression" | "identifier" | "other")
+/**
+ * The `fallow security survivors --format json` schema version.
+ */
+export type SecuritySurvivorsSchemaVersion = "1"
+/**
+ * Verifier verdict status accepted by `fallow security survivors`.
+ */
+export type SecurityVerifierVerdictStatus = ("survivor" | "dismissed" | "needs-human-review")
+/**
+ * The `fallow security blind-spots --format json` schema version.
+ */
+export type SecurityBlindSpotsSchemaVersion = "1"
 /**
  * Discriminator value for [`CodeClimateIssue::kind`].
  */
@@ -8182,6 +8198,122 @@ low_traffic: number
 coverage_unavailable: number
 runtime_unknown: number
 not_collected: number
+}
+/**
+ * The `fallow security survivors --format json` envelope.
+ */
+export interface SecuritySurvivorsOutput {
+schema_version: SecuritySurvivorsSchemaVersion
+version: ToolVersion
+elapsed_ms: ElapsedMs
+summary: SecuritySurvivorsSummary
+/**
+ * Externally verified survivor candidates keyed by finding id.
+ */
+survivors: {
+[k: string]: SecuritySurvivor
+}
+/**
+ * Ambiguous candidates keyed by finding id. These are not dismissed and are
+ * kept explicit so queues can decide whether to include them.
+ */
+needs_human_review: {
+[k: string]: SecuritySurvivor
+}
+}
+/**
+ * Aggregate counts for survivor rendering.
+ */
+export interface SecuritySurvivorsSummary {
+candidates: number
+verdicts: number
+survivors: number
+dismissed: number
+needs_human_review: number
+}
+/**
+ * One externally verified candidate row.
+ */
+export interface SecuritySurvivor {
+/**
+ * Stable candidate id from `security_findings[].finding_id`.
+ */
+finding_id: string
+verdict: SecurityVerifierVerdictStatus
+/**
+ * Short verifier reason.
+ */
+reason?: (string | null)
+/**
+ * Short verifier rationale.
+ */
+rationale?: (string | null)
+/**
+ * Optional verifier-provided confidence or review priority.
+ */
+confidence?: (string | null)
+/**
+ * Optional verifier-provided impact statement.
+ */
+impact?: (string | null)
+/**
+ * Optional verifier-owned remediation direction.
+ */
+fix_direction?: (string | null)
+candidate: SecurityFinding
+}
+/**
+ * The `fallow security blind-spots --format json` envelope.
+ */
+export interface SecurityBlindSpotsOutput {
+schema_version: SecurityBlindSpotsSchemaVersion
+version: ToolVersion
+elapsed_ms: ElapsedMs
+summary: SecurityBlindSpotsSummary
+/**
+ * Grouped unresolved callee diagnostics, derived from existing samples.
+ */
+groups: SecurityBlindSpotGroup[]
+}
+/**
+ * Aggregate counts for blind-spot output.
+ */
+export interface SecurityBlindSpotsSummary {
+unresolved_edge_files: number
+unresolved_callee_sites: number
+sampled_callee_sites: number
+}
+/**
+ * One actionable blind-spot group.
+ */
+export interface SecurityBlindSpotGroup {
+reason: SkippedSecurityCalleeReason
+expression_kind: SkippedSecurityCalleeExpressionKind
+/**
+ * Count in the bounded diagnostic sample.
+ */
+sampled_count: number
+/**
+ * Top files in this bounded diagnostic sample.
+ */
+files: SecurityBlindSpotFile[]
+/**
+ * Suggested next action for this group.
+ */
+suggestion: string
+}
+/**
+ * One file inside a blind-spot group.
+ */
+export interface SecurityBlindSpotFile {
+/**
+ * Project-relative source path.
+ */
+path: string
+/**
+ * Count in the bounded diagnostic sample.
+ */
+sampled_count: number
 }
 /**
  * Bare `fallow --format json` envelope.

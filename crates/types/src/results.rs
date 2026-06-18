@@ -1798,7 +1798,7 @@ pub struct TypeOnlyDependency {
 
 /// The kind of security candidate. Findings are CANDIDATES for downstream agent
 /// verification, NOT verified vulnerabilities.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum SecurityFindingKind {
@@ -1812,7 +1812,7 @@ pub enum SecurityFindingKind {
 }
 
 /// The role a hop plays in a security finding's structural import trace.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum TraceHopRole {
@@ -1842,7 +1842,7 @@ pub enum TraceHopRole {
 /// One hop in a security finding's structural trace. Stored as an absolute path
 /// internally; JSON serialization strips the project root via
 /// `serde_path::serialize`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TraceHop {
     /// File on this hop of the import chain.
@@ -1864,7 +1864,7 @@ pub struct TraceHop {
 /// [`SecurityReachability::reachable_from_untrusted_source`] is true. Neither
 /// value proves exploitability; both are ranking signals (issue #885 doctrine:
 /// rank, never gate).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum TaintConfidence {
@@ -1886,7 +1886,7 @@ pub enum TaintConfidence {
 ///
 /// This is a relative-ordering signal, NOT a `confidence` or `signal_strength`
 /// score: fallow does not prove the path is exploitable.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityReachability {
     /// Whether the anchor module is reachable from a runtime/application entry
@@ -1929,7 +1929,7 @@ pub struct SecurityReachability {
 
 /// Dead-code cross-link attached to a security candidate when fallow's dead-code
 /// pass reports the same anchor as removable code.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityDeadCodeContext {
     /// Dead-code issue kind that matched the security candidate.
@@ -1945,7 +1945,7 @@ pub struct SecurityDeadCodeContext {
 }
 
 /// Dead-code issue kind linked to a security candidate.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum SecurityDeadCodeKind {
@@ -1957,7 +1957,7 @@ pub enum SecurityDeadCodeKind {
 
 /// Internal row for a security sink-shaped callee that extraction could not
 /// flatten to a static catalogue path.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityUnresolvedCalleeDiagnostic {
     /// File containing the skipped callee. Absolute internally.
@@ -1978,7 +1978,7 @@ pub struct SecurityUnresolvedCalleeDiagnostic {
 /// the catalogue `category`/`cwe` and the captured `callee`, so an agent can act
 /// on `candidate.sink` in isolation (e.g. after fanning a finding out to a
 /// sub-agent) without reading the parent finding.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityCandidateSink {
     /// File of the sink site. Absolute internally; JSON strips the project root
@@ -2013,7 +2013,7 @@ pub struct SecurityCandidateSink {
 
 /// A declared architecture-zone crossing, recovered by correlating a finding's
 /// anchor against the run's architecture-boundary violations.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityZoneCrossing {
     /// Zone the importing side belongs to.
@@ -2033,7 +2033,7 @@ pub struct SecurityZoneCrossing {
 /// cross an npm-package edge?). Both need new graph derivation that does not
 /// exist today; emitting them as `false` would misreport "we checked and it does
 /// not cross" when fallow has not checked at all.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityCandidateBoundary {
     /// Whether the finding crosses a client/server boundary (a `"use client"`
@@ -2055,7 +2055,7 @@ pub struct SecurityCandidateBoundary {
 /// network-category candidates. A consuming agent uses it to triage exfil
 /// (dynamic / untrusted destination) from intended auth (a literal provider
 /// host) without re-reading source.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityNetworkContext {
     /// The network call's destination as a static URL string literal, or absent
@@ -2073,7 +2073,7 @@ pub struct SecurityNetworkContext {
 /// agent's job. A perpetually-null `impact` key would only train consumers to
 /// ignore it. The agent reads this record, then writes its own impact verdict
 /// downstream.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityCandidate {
     /// The kind of untrusted input that reaches the sink, as a stable catalogue
@@ -2098,7 +2098,7 @@ pub struct SecurityCandidate {
 }
 
 /// One endpoint (source or sink node) of a [`SecurityTaintFlow`].
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TaintEndpoint {
     /// File of the endpoint. Absolute internally; JSON strips the project root.
@@ -2114,7 +2114,7 @@ pub struct TaintEndpoint {
 /// here: it lives on [`SecurityReachability::untrusted_source_trace`]. This
 /// carries only the flow's structural summary (intra-module flow plus the
 /// cross-module hop count) so consumers do not parse two copies of the hops.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TaintPath {
     /// Whether the source and sink sit in the same module (no import hop between
@@ -2129,7 +2129,7 @@ pub struct TaintPath {
 /// import-reachable to the sink (`reachability.reachable_from_untrusted_source`).
 /// The `{ source, sink, path }` shape matches the model agent SAST tooling
 /// expects (cf. Semgrep `taint_source` / `taint_sink`, SARIF `threadFlows`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityTaintFlow {
     /// The untrusted-source endpoint (first hop of the reachability trace).
@@ -2143,7 +2143,7 @@ pub struct SecurityTaintFlow {
 
 /// Runtime coverage state for the function enclosing a security sink.
 /// This is production-observation evidence, not an exploitability verdict.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum SecurityRuntimeState {
@@ -2166,7 +2166,7 @@ pub enum SecurityRuntimeState {
 
 /// Runtime coverage context attached to a security candidate when
 /// `fallow security --runtime-coverage` is supplied.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityRuntimeContext {
     /// Runtime state for the enclosing function.
@@ -2188,7 +2188,7 @@ pub struct SecurityRuntimeContext {
 
 /// Verification-priority tier for a security candidate. This is ranking, not an
 /// exploitability verdict.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum SecuritySeverity {
@@ -2201,7 +2201,7 @@ pub enum SecuritySeverity {
 }
 
 /// Defensive control found on an attack-surface path.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityDefensiveControl {
     /// Control family.
@@ -2218,7 +2218,7 @@ pub struct SecurityDefensiveControl {
 }
 
 /// Agent-facing defensive-boundary verification context for one surface path.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityDefensiveBoundary {
     /// Known controls detected along this path.
@@ -2229,7 +2229,7 @@ pub struct SecurityDefensiveBoundary {
 }
 
 /// One untrusted entry to reachable sink path for `fallow security --surface`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityAttackSurfaceEntry {
     /// The untrusted-source endpoint.
@@ -2248,7 +2248,7 @@ pub struct SecurityAttackSurfaceEntry {
 /// or the `audit` gate. There is deliberately no `confidence` or
 /// `signal_strength` field: fallow does not prove exploitability, so the trace
 /// (its hops and length) is the only honest signal.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityFinding {
     /// Stable per-finding correlation id, identical across runs for the same
@@ -2567,7 +2567,7 @@ pub struct MisconfiguredDependencyOverride {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TestOnlyDependency {
-    /// Production dependency that is only imported by test files — consider
+    /// Production dependency that is only imported by test files, consider
     /// moving to devDependencies.
     pub package_name: String,
     /// Path to the package.json where the dependency is listed.

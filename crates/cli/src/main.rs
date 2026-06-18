@@ -92,6 +92,8 @@ const SECURITY_UNSUPPORTED_GLOBAL_LONGS: &[&str] = &[
     "include-entry-exports",
 ];
 
+const DEFAULT_MIN_INVOCATIONS_HOT: u64 = 100;
+
 const TOP_LEVEL_HELP_TEMPLATE: &str =
     "{about-with-newline}\n{usage-heading} {usage}{after-help}\n\nOptions:\n{options}";
 
@@ -1160,6 +1162,8 @@ enum Command {
     /// `--diff-stdin`, `--workspace`, `--changed-workspaces`, `--ci`,
     /// `--fail-on-issues`, `--sarif-file`, `--summary`, `--explain`, and `--surface`.
     Security {
+        #[command(subcommand)]
+        subcommand: Option<SecuritySubcommand>,
         /// Paid runtime-coverage sidecar input. Accepts a V8 directory, a
         /// single V8 JSON file, or an Istanbul coverage map JSON. When set,
         /// `fallow security` annotates tainted-sink candidates with production
@@ -1301,6 +1305,22 @@ enum Command {
         #[arg(long)]
         uninstall: bool,
     },
+}
+
+#[derive(Subcommand)]
+enum SecuritySubcommand {
+    /// Render externally verified survivor candidates from fallow output plus verifier verdicts.
+    Survivors {
+        /// Raw `fallow security --format json` candidate output.
+        #[arg(long, value_name = "PATH")]
+        candidates: PathBuf,
+        /// Verifier verdict JSON file.
+        #[arg(long, value_name = "PATH")]
+        verdicts: PathBuf,
+    },
+    /// Group unresolved security callees into actionable blind-spot output.
+    #[command(name = "blind-spots")]
+    BlindSpots,
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
@@ -2930,9 +2950,9 @@ fn telemetry_analysis_mode_for_command(command: Option<&Command>) -> telemetry::
 
 fn handle_cli_parse_error(err: &clap::Error) -> ExitCode {
     if err.kind() == clap::error::ErrorKind::DisplayHelp
-        && args_request_security_help(std::env::args_os().skip(1))
+        && let Some(target) = security_help_target(std::env::args_os().skip(1))
     {
-        print!("{}", render_security_help());
+        print!("{}", render_security_help(target));
         return ExitCode::SUCCESS;
     }
 
@@ -2941,7 +2961,14 @@ fn handle_cli_parse_error(err: &clap::Error) -> ExitCode {
     ExitCode::from(u8::try_from(exit_code).unwrap_or(2))
 }
 
-fn args_request_security_help<I, S>(args: I) -> bool
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SecurityHelpTarget {
+    Parent,
+    Survivors,
+    BlindSpots,
+}
+
+fn security_help_target<I, S>(args: I) -> Option<SecurityHelpTarget>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
@@ -2952,23 +2979,54 @@ where
         .collect();
 
     if args.first().is_some_and(|arg| arg == "help") {
-        return args.get(1).is_some_and(|arg| arg == "security");
+        return match args.get(1).map(String::as_str) {
+            Some("security") if args.len() == 2 => Some(SecurityHelpTarget::Parent),
+            Some("security") if args.get(2).is_some_and(|arg| arg == "survivors") => {
+                Some(SecurityHelpTarget::Survivors)
+            }
+            Some("security") if args.get(2).is_some_and(|arg| arg == "blind-spots") => {
+                Some(SecurityHelpTarget::BlindSpots)
+            }
+            _ => None,
+        };
     }
 
     let mut saw_security = false;
+    let mut security_subcommand = None;
     for arg in args {
         if arg == "security" {
             saw_security = true;
             continue;
         }
+        if saw_security && is_security_subcommand(&arg) {
+            security_subcommand = Some(arg);
+            continue;
+        }
         if saw_security && matches!(arg.as_str(), "--help" | "-h") {
-            return true;
+            return match security_subcommand.as_deref() {
+                Some("survivors") => Some(SecurityHelpTarget::Survivors),
+                Some("blind-spots") => Some(SecurityHelpTarget::BlindSpots),
+                Some("help") => None,
+                _ => Some(SecurityHelpTarget::Parent),
+            };
         }
     }
-    false
+    None
 }
 
-fn render_security_help() -> String {
+fn is_security_subcommand(arg: &str) -> bool {
+    matches!(arg, "survivors" | "blind-spots" | "help")
+}
+
+fn render_security_help(target: SecurityHelpTarget) -> String {
+    match target {
+        SecurityHelpTarget::Parent => render_security_parent_help(),
+        SecurityHelpTarget::Survivors => render_security_survivors_help(),
+        SecurityHelpTarget::BlindSpots => render_security_blind_spots_help(),
+    }
+}
+
+fn render_security_parent_help() -> String {
     let mut root = Cli::command().mut_args(|arg| {
         if arg.get_long().is_some_and(security_unsupported_global_long) {
             arg.hide(true)
@@ -2980,6 +3038,47 @@ fn render_security_help() -> String {
         Ok(_) => String::new(),
         Err(err) => err.to_string(),
     }
+}
+
+fn render_security_survivors_help() -> String {
+    "\
+Render externally verified survivor candidates from fallow output plus verifier verdicts.
+
+Usage: fallow security survivors --candidates <PATH> --verdicts <PATH> [OPTIONS]
+
+Options:
+      --candidates <PATH>  Raw `fallow security --format json` candidate output
+      --verdicts <PATH>    Verifier verdict JSON file
+  -f, --format <FORMAT>    Output format: human or json [default: human]
+  -o, --output-file <PATH> Write the report to a file instead of stdout
+  -h, --help               Print help
+"
+    .to_owned()
+}
+
+fn render_security_blind_spots_help() -> String {
+    "\
+Group unresolved security callees into actionable blind-spot output.
+
+Usage: fallow security blind-spots [OPTIONS]
+
+Options:
+  -r, --root <ROOT>                  Project root directory
+  -c, --config <CONFIG>              Path to config file
+  -f, --format <FORMAT>              Output format: human or json [default: human]
+  -q, --quiet                        Suppress progress output
+      --no-cache                     Disable incremental caching
+      --threads <THREADS>            Number of parser threads
+      --changed-since <REF>          Scope analysis to files changed since this git ref
+      --diff-file <PATH>             Unified diff for line-level scoping
+      --diff-stdin                   Read the unified diff from stdin
+      --file <PATH>                  Scope diagnostics to selected files
+  -w, --workspace <WORKSPACE>        Scope output to selected workspaces
+      --changed-workspaces <REF>     Scope output to workspaces touched since this git ref
+  -o, --output-file <PATH>           Write the report to a file instead of stdout
+  -h, --help                         Print help
+"
+    .to_owned()
 }
 
 fn security_unsupported_global_long(long: &str) -> bool {
@@ -3325,6 +3424,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
 
 fn dispatch_security_command(command: Command, dispatch: &DispatchContext<'_>) -> ExitCode {
     let Command::Security {
+        subcommand,
         runtime_coverage,
         min_invocations_hot,
         file,
@@ -3339,7 +3439,29 @@ fn dispatch_security_command(command: Command, dispatch: &DispatchContext<'_>) -
     let root = dispatch.root;
     let threads = dispatch.threads;
     let (output, quiet, fail_on_issues) = dispatch.ci_defaults();
-    security::run(&security::SecurityOptions {
+    if let Some(SecuritySubcommand::Survivors {
+        candidates,
+        verdicts,
+    }) = &subcommand
+    {
+        if let Some(code) = validate_security_survivors_flags(
+            output,
+            runtime_coverage.as_deref(),
+            min_invocations_hot,
+            file.as_slice(),
+            gate,
+            surface,
+        ) {
+            return code;
+        }
+        return security::run_survivors(&security::SecuritySurvivorsOptions {
+            output,
+            candidates,
+            verdicts,
+        });
+    }
+
+    let opts = security::SecurityOptions {
         root,
         config_path: &cli.config,
         output,
@@ -3359,7 +3481,70 @@ fn dispatch_security_command(command: Command, dispatch: &DispatchContext<'_>) -
         runtime_coverage: runtime_coverage.as_deref(),
         min_invocations_hot,
         explain: cli.explain,
-    })
+    };
+    if matches!(subcommand, Some(SecuritySubcommand::BlindSpots)) {
+        if let Some(code) =
+            validate_security_blind_spots_flags(output, fail_on_issues, cli.summary, gate, surface)
+        {
+            return code;
+        }
+        security::run_blind_spots(&opts)
+    } else {
+        security::run(&opts)
+    }
+}
+
+fn validate_security_survivors_flags(
+    output: fallow_config::OutputFormat,
+    runtime_coverage: Option<&Path>,
+    min_invocations_hot: u64,
+    file: &[PathBuf],
+    gate: Option<security::SecurityGateMode>,
+    surface: bool,
+) -> Option<ExitCode> {
+    let flag = if runtime_coverage.is_some() {
+        Some("--runtime-coverage")
+    } else if min_invocations_hot != DEFAULT_MIN_INVOCATIONS_HOT {
+        Some("--min-invocations-hot")
+    } else if !file.is_empty() {
+        Some("--file")
+    } else if gate.is_some() {
+        Some("--gate")
+    } else if surface {
+        Some("--surface")
+    } else {
+        None
+    }?;
+    Some(emit_error(
+        &format!("{flag} is not valid with `fallow security survivors`."),
+        2,
+        output,
+    ))
+}
+
+fn validate_security_blind_spots_flags(
+    output: fallow_config::OutputFormat,
+    fail_on_issues: bool,
+    summary: bool,
+    gate: Option<security::SecurityGateMode>,
+    surface: bool,
+) -> Option<ExitCode> {
+    let flag = if fail_on_issues {
+        Some("--fail-on-issues")
+    } else if summary {
+        Some("--summary")
+    } else if gate.is_some() {
+        Some("--gate")
+    } else if surface {
+        Some("--surface")
+    } else {
+        None
+    }?;
+    Some(emit_error(
+        &format!("{flag} is not valid with `fallow security blind-spots`."),
+        2,
+        output,
+    ))
 }
 
 fn dispatch_dupes_command(command: Command, dispatch: &DispatchContext<'_>) -> ExitCode {
@@ -5089,7 +5274,7 @@ mod tests {
 
     #[test]
     fn security_help_hides_globals_rejected_by_security_validator() {
-        let help = render_security_help();
+        let help = render_security_help(SecurityHelpTarget::Parent);
 
         for long in SECURITY_UNSUPPORTED_GLOBAL_LONGS {
             assert!(
@@ -5129,14 +5314,44 @@ mod tests {
 
     #[test]
     fn security_help_detection_covers_subcommand_and_help_alias_forms() {
-        assert!(args_request_security_help(["security", "--help"]));
-        assert!(args_request_security_help(["security", "-h"]));
-        assert!(args_request_security_help([
-            "--format", "json", "security", "--help"
-        ]));
-        assert!(args_request_security_help(["help", "security"]));
-        assert!(!args_request_security_help(["health", "--help"]));
-        assert!(!args_request_security_help(["help", "health"]));
+        assert_eq!(
+            security_help_target(["security", "--help"]),
+            Some(SecurityHelpTarget::Parent)
+        );
+        assert_eq!(
+            security_help_target(["security", "-h"]),
+            Some(SecurityHelpTarget::Parent)
+        );
+        assert_eq!(
+            security_help_target(["--format", "json", "security", "--help"]),
+            Some(SecurityHelpTarget::Parent)
+        );
+        assert_eq!(
+            security_help_target(["help", "security"]),
+            Some(SecurityHelpTarget::Parent)
+        );
+        assert_eq!(
+            security_help_target(["security", "survivors", "--help"]),
+            Some(SecurityHelpTarget::Survivors)
+        );
+        assert_eq!(
+            security_help_target(["security", "survivors", "-h"]),
+            Some(SecurityHelpTarget::Survivors)
+        );
+        assert_eq!(
+            security_help_target(["help", "security", "survivors"]),
+            Some(SecurityHelpTarget::Survivors)
+        );
+        assert_eq!(
+            security_help_target(["security", "blind-spots", "--help"]),
+            Some(SecurityHelpTarget::BlindSpots)
+        );
+        assert_eq!(
+            security_help_target(["help", "security", "blind-spots"]),
+            Some(SecurityHelpTarget::BlindSpots)
+        );
+        assert_eq!(security_help_target(["health", "--help"]), None);
+        assert_eq!(security_help_target(["help", "health"]), None);
     }
 
     #[test]

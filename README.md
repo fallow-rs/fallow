@@ -274,6 +274,8 @@ fallow health --css          # + structural CSS analytics (specificity, !importa
 fallow dupes                 # Repeated logic
 fallow dead-code             # Cleanup candidates
 fallow security              # Security candidates, hardcoded-secret needs explicit category include
+fallow security survivors    # Render verifier-filtered survivor candidates
+fallow security blind-spots  # Group unresolved security callees
 fallow explain unused-export # Explain a rule without analyzing
 fallow watch                 # Re-analyze on file changes
 fallow fix --dry-run         # Preview automatic cleanup
@@ -293,7 +295,7 @@ Combined mode (`fallow`) and `fallow audit` support per-analysis production mode
 
 Use `--production-health`, `--production-dead-code`, or `--production-dupes` for one invocation, or `FALLOW_PRODUCTION_HEALTH=true` and related env vars in CI. The global `--production` flag still enables production mode for every analysis.
 
-`fallow security` remains opt-in and ranks reachable active-code candidates first. It includes source-backed ReDoS regex candidates for risky literal patterns applied to untrusted input, while safe literal patterns and source-free uses stay quiet. When a sink is also reported as dead code, JSON includes `dead_code` context and the command points agents toward deleting the unused file or removing the unused export before hardening that sink. Use `fallow security --gate new --changed-since <ref>` for changed-line candidate gating, or `fallow security --gate newly-reachable --changed-since <ref>` when an existing sink becoming entry-reachable should block the change for review. Use the [Security agent verification recipe](docs/security-agent-verification.md) to turn raw candidates into verifier-filtered survivors outside fallow core.
+`fallow security` remains opt-in and ranks reachable active-code candidates first. It includes source-backed ReDoS regex candidates for risky literal patterns applied to untrusted input, while safe literal patterns and source-free uses stay quiet. When a sink is also reported as dead code, JSON includes `dead_code` context and the command points agents toward deleting the unused file or removing the unused export before hardening that sink. Use `fallow security --gate new --changed-since <ref>` for changed-line candidate gating, or `fallow security --gate newly-reachable --changed-since <ref>` when an existing sink becoming entry-reachable should block the change for review. Use `fallow security survivors --candidates fallow-security.json --verdicts verdicts.json` to render verifier-filtered survivors, and `fallow security blind-spots` to group unresolved callee blind spots. See the [Security agent verification recipe](docs/security-agent-verification.md) for the full workflow.
 
 Precedence (highest to lowest): CLI flags, per-analysis env var, global `FALLOW_PRODUCTION`, config. CLI flags only enable; env vars and config can also disable. Worked examples:
 

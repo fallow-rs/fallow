@@ -8186,6 +8186,46 @@
           ]
         },
         {
+          "description": "`fallow security survivors --format json`. Required `survivors` and\n`needs_human_review`, keyed by `finding_id`.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/SecuritySurvivorsOutput"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "security-survivors"
+                }
+              },
+              "required": [
+                "kind"
+              ]
+            }
+          ]
+        },
+        {
+          "description": "`fallow security blind-spots --format json`. Required `summary` and\ngrouped unresolved-callee diagnostics.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/SecurityBlindSpotsOutput"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "security-blind-spots"
+                }
+              },
+              "required": [
+                "kind"
+              ]
+            }
+          ]
+        },
+        {
           "description": "`fallow dead-code --format json`.\nRequired `total_issues` plus `summary: CheckSummary`.",
           "allOf": [
             {
@@ -15047,6 +15087,344 @@
         "distinct_parents"
       ],
       "description": "One located high-fan-in React/Preact component for the descriptive\n`top_render_fan_in` blast-radius list on [`VitalSigns`].\n\nThe component-graph analogue of a high-fan-in module: `distinct_parents` is\nthe HEADLINE axis (the honest count of distinct parent components / render\nLOCATIONS that render this component), `render_sites` is secondary \"incl.\nrepeats\" context (every JSX render SITE, so a single parent rendering one\nchild five times is five sites but one parent). Undercount-safe like the\nunderlying metric: a child rendered via a JSX spread / dynamic /\nmember-expression tag resolves to no component, so a true high-fan-in\ncomponent can only be undersold."
+    },
+    "SecuritySurvivorsOutput": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "description": "Schema version of this envelope.",
+          "$ref": "#/definitions/SecuritySurvivorsSchemaVersion"
+        },
+        "version": {
+          "description": "Fallow CLI version that produced this output.",
+          "$ref": "#/definitions/ToolVersion"
+        },
+        "elapsed_ms": {
+          "description": "Wall-clock milliseconds spent producing the report.",
+          "$ref": "#/definitions/ElapsedMs"
+        },
+        "summary": {
+          "description": "Survivor render summary.",
+          "$ref": "#/definitions/SecuritySurvivorsSummary"
+        },
+        "survivors": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/SecuritySurvivor"
+          },
+          "description": "Externally verified survivor candidates keyed by finding id."
+        },
+        "needs_human_review": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/SecuritySurvivor"
+          },
+          "description": "Ambiguous candidates keyed by finding id. These are not dismissed and are\nkept explicit so queues can decide whether to include them."
+        }
+      },
+      "required": [
+        "schema_version",
+        "version",
+        "elapsed_ms",
+        "summary",
+        "survivors",
+        "needs_human_review"
+      ],
+      "description": "The `fallow security survivors --format json` envelope."
+    },
+    "SecuritySurvivorsSchemaVersion": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "1",
+          "description": "Initial survivor-renderer output contract."
+        }
+      ],
+      "description": "The `fallow security survivors --format json` schema version."
+    },
+    "SecuritySurvivorsSummary": {
+      "type": "object",
+      "properties": {
+        "candidates": {
+          "type": "integer"
+        },
+        "verdicts": {
+          "type": "integer"
+        },
+        "survivors": {
+          "type": "integer"
+        },
+        "dismissed": {
+          "type": "integer"
+        },
+        "needs_human_review": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "candidates",
+        "verdicts",
+        "survivors",
+        "dismissed",
+        "needs_human_review"
+      ],
+      "description": "Aggregate counts for survivor rendering."
+    },
+    "SecuritySurvivor": {
+      "type": "object",
+      "properties": {
+        "finding_id": {
+          "type": "string",
+          "description": "Stable candidate id from `security_findings[].finding_id`."
+        },
+        "verdict": {
+          "description": "External verifier disposition.",
+          "$ref": "#/definitions/SecurityVerifierVerdictStatus"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Short verifier reason."
+        },
+        "rationale": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Short verifier rationale."
+        },
+        "confidence": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Optional verifier-provided confidence or review priority."
+        },
+        "impact": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Optional verifier-provided impact statement."
+        },
+        "fix_direction": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Optional verifier-owned remediation direction."
+        },
+        "candidate": {
+          "description": "Original typed fallow security candidate.",
+          "$ref": "#/definitions/SecurityFinding"
+        }
+      },
+      "required": [
+        "finding_id",
+        "verdict",
+        "candidate"
+      ],
+      "description": "One externally verified candidate row."
+    },
+    "SecurityVerifierVerdict": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "type": "string",
+          "description": "Must be `fallow-security-verdict/v1`."
+        },
+        "finding_id": {
+          "type": "string",
+          "description": "Stable candidate id from `security_findings[].finding_id`."
+        },
+        "verdict": {
+          "description": "External verifier disposition.",
+          "$ref": "#/definitions/SecurityVerifierVerdictStatus"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Short verifier reason."
+        },
+        "rationale": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Short verifier rationale."
+        },
+        "confidence": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Optional verifier-provided confidence or review priority."
+        },
+        "impact": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Optional verifier-provided impact statement."
+        },
+        "fix_direction": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Optional verifier-owned remediation direction."
+        }
+      },
+      "required": [
+        "schema_version",
+        "finding_id",
+        "verdict"
+      ],
+      "description": "One supported verifier verdict input row."
+    },
+    "SecurityVerifierVerdictStatus": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "survivor",
+          "description": "The verifier could not dismiss the candidate from supplied evidence."
+        },
+        {
+          "type": "string",
+          "const": "dismissed",
+          "description": "The verifier dismissed the candidate from supplied evidence."
+        },
+        {
+          "type": "string",
+          "const": "needs-human-review",
+          "description": "The verifier needs human review before dismissal or remediation."
+        }
+      ],
+      "description": "Verifier verdict status accepted by `fallow security survivors`."
+    },
+    "SecurityBlindSpotsOutput": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "description": "Schema version of this envelope.",
+          "$ref": "#/definitions/SecurityBlindSpotsSchemaVersion"
+        },
+        "version": {
+          "description": "Fallow CLI version that produced this output.",
+          "$ref": "#/definitions/ToolVersion"
+        },
+        "elapsed_ms": {
+          "description": "Wall-clock milliseconds spent producing the report.",
+          "$ref": "#/definitions/ElapsedMs"
+        },
+        "summary": {
+          "description": "Aggregate blind-spot counts from the security analysis.",
+          "$ref": "#/definitions/SecurityBlindSpotsSummary"
+        },
+        "groups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SecurityBlindSpotGroup"
+          },
+          "description": "Grouped unresolved callee diagnostics, derived from existing samples."
+        }
+      },
+      "required": [
+        "schema_version",
+        "version",
+        "elapsed_ms",
+        "summary",
+        "groups"
+      ],
+      "description": "The `fallow security blind-spots --format json` envelope."
+    },
+    "SecurityBlindSpotsSchemaVersion": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "1",
+          "description": "Initial blind-spot grouping output contract."
+        }
+      ],
+      "description": "The `fallow security blind-spots --format json` schema version."
+    },
+    "SecurityBlindSpotsSummary": {
+      "type": "object",
+      "properties": {
+        "unresolved_edge_files": {
+          "type": "integer"
+        },
+        "unresolved_callee_sites": {
+          "type": "integer"
+        },
+        "sampled_callee_sites": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "unresolved_edge_files",
+        "unresolved_callee_sites",
+        "sampled_callee_sites"
+      ],
+      "description": "Aggregate counts for blind-spot output."
+    },
+    "SecurityBlindSpotGroup": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "description": "Why the callees were skipped.",
+          "$ref": "#/definitions/SkippedSecurityCalleeReason"
+        },
+        "expression_kind": {
+          "description": "Compact syntax shape of the skipped callee.",
+          "$ref": "#/definitions/SkippedSecurityCalleeExpressionKind"
+        },
+        "sampled_count": {
+          "type": "integer",
+          "description": "Count in the bounded diagnostic sample."
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SecurityBlindSpotFile"
+          },
+          "description": "Top files in this bounded diagnostic sample."
+        },
+        "suggestion": {
+          "type": "string",
+          "description": "Suggested next action for this group."
+        }
+      },
+      "required": [
+        "reason",
+        "expression_kind",
+        "sampled_count",
+        "files",
+        "suggestion"
+      ],
+      "description": "One actionable blind-spot group."
+    },
+    "SecurityBlindSpotFile": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Project-relative source path."
+        },
+        "sampled_count": {
+          "type": "integer",
+          "description": "Count in the bounded diagnostic sample."
+        }
+      },
+      "required": [
+        "path",
+        "sampled_count"
+      ],
+      "description": "One file inside a blind-spot group."
     }
   }
 }

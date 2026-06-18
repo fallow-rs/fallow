@@ -61,11 +61,14 @@ use fallow_cli::report::dupes_grouping::{
     AttributedCloneGroup, AttributedInstance, DuplicationGroup,
 };
 use fallow_cli::security::{
-    SecurityGate, SecurityGateMode, SecurityGateVerdict, SecurityOutput,
-    SecurityReachabilityCounts, SecurityRuntimeStateCounts, SecuritySchemaVersion,
-    SecuritySeverityCounts, SecuritySummary, SecuritySummaryOutput,
-    SecurityUnresolvedCalleeDiagnostics, SecurityUnresolvedCalleeReasonCount,
-    SecurityUnresolvedCalleeSample, SecurityUnresolvedCalleeTopFile,
+    SecurityBlindSpotFile, SecurityBlindSpotGroup, SecurityBlindSpotsOutput,
+    SecurityBlindSpotsSchemaVersion, SecurityBlindSpotsSummary, SecurityGate, SecurityGateMode,
+    SecurityGateVerdict, SecurityOutput, SecurityReachabilityCounts, SecurityRuntimeStateCounts,
+    SecuritySchemaVersion, SecuritySeverityCounts, SecuritySummary, SecuritySummaryOutput,
+    SecuritySurvivor, SecuritySurvivorsOutput, SecuritySurvivorsSchemaVersion,
+    SecuritySurvivorsSummary, SecurityUnresolvedCalleeDiagnostics,
+    SecurityUnresolvedCalleeReasonCount, SecurityUnresolvedCalleeSample,
+    SecurityUnresolvedCalleeTopFile, SecurityVerifierVerdict, SecurityVerifierVerdictStatus,
 };
 use fallow_config::{AuthoredRule, LogicalGroup, LogicalGroupStatus};
 use fallow_core::duplicates::{
@@ -356,6 +359,17 @@ const DERIVED_DEFINITION_NAMES: &[&str] = &[
     "SecuritySeverityCounts",
     "SecurityReachabilityCounts",
     "SecurityRuntimeStateCounts",
+    "SecuritySurvivorsOutput",
+    "SecuritySurvivorsSchemaVersion",
+    "SecuritySurvivorsSummary",
+    "SecuritySurvivor",
+    "SecurityVerifierVerdict",
+    "SecurityVerifierVerdictStatus",
+    "SecurityBlindSpotsOutput",
+    "SecurityBlindSpotsSchemaVersion",
+    "SecurityBlindSpotsSummary",
+    "SecurityBlindSpotGroup",
+    "SecurityBlindSpotFile",
     "SecuritySchemaVersion",
     "SecurityGate",
     "SecurityGateMode",
@@ -640,6 +654,17 @@ fn register_security_definitions(generator: &mut schemars::SchemaGenerator) {
     let _ = generator.subschema_for::<SecuritySeverityCounts>();
     let _ = generator.subschema_for::<SecurityReachabilityCounts>();
     let _ = generator.subschema_for::<SecurityRuntimeStateCounts>();
+    let _ = generator.subschema_for::<SecuritySurvivorsOutput>();
+    let _ = generator.subschema_for::<SecuritySurvivorsSchemaVersion>();
+    let _ = generator.subschema_for::<SecuritySurvivorsSummary>();
+    let _ = generator.subschema_for::<SecuritySurvivor>();
+    let _ = generator.subschema_for::<SecurityVerifierVerdict>();
+    let _ = generator.subschema_for::<SecurityVerifierVerdictStatus>();
+    let _ = generator.subschema_for::<SecurityBlindSpotsOutput>();
+    let _ = generator.subschema_for::<SecurityBlindSpotsSchemaVersion>();
+    let _ = generator.subschema_for::<SecurityBlindSpotsSummary>();
+    let _ = generator.subschema_for::<SecurityBlindSpotGroup>();
+    let _ = generator.subschema_for::<SecurityBlindSpotFile>();
 }
 
 fn register_health_action_definitions(generator: &mut schemars::SchemaGenerator) {
@@ -832,6 +857,16 @@ const FALLOW_OUTPUT_VARIANTS: &[(&str, &[&str], &str)] = &[
         "security",
         &["SecurityOutput", "SecuritySummaryOutput"],
         "`fallow security --format json`. Full mode requires `security_findings`,\n`unresolved_edge_files`, and `unresolved_callee_sites`; summary mode requires\n`summary` and omits per-finding arrays.",
+    ),
+    (
+        "security-survivors",
+        &["SecuritySurvivorsOutput"],
+        "`fallow security survivors --format json`. Required `survivors` and\n`needs_human_review`, keyed by `finding_id`.",
+    ),
+    (
+        "security-blind-spots",
+        &["SecurityBlindSpotsOutput"],
+        "`fallow security blind-spots --format json`. Required `summary` and\ngrouped unresolved-callee diagnostics.",
     ),
     (
         "dead-code",
@@ -1172,6 +1207,8 @@ mod drift_tests {
             ("ImpactCrossRepo", "CrossRepoImpactReport"),
             ("Security", "SecurityOutput"),
             ("SecuritySummary", "SecuritySummaryOutput"),
+            ("SecuritySurvivors", "SecuritySurvivorsOutput"),
+            ("SecurityBlindSpots", "SecurityBlindSpotsOutput"),
             ("Check", "CheckOutput"),
             ("Combined", "CombinedOutput"),
         ];
@@ -1197,6 +1234,8 @@ mod drift_tests {
                 FallowOutput::ImpactCrossRepo(_) => "ImpactCrossRepo",
                 FallowOutput::SecuritySummary(_) => "SecuritySummary",
                 FallowOutput::Security(_) => "Security",
+                FallowOutput::SecuritySurvivors(_) => "SecuritySurvivors",
+                FallowOutput::SecurityBlindSpots(_) => "SecurityBlindSpots",
                 FallowOutput::Check(_) => "Check",
                 FallowOutput::Combined(_) => "Combined",
             }

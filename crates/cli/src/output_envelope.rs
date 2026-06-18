@@ -1086,6 +1086,14 @@ pub enum FallowOutput {
     /// present here.
     #[serde(rename = "security")]
     Security(crate::security::SecurityOutput),
+    /// `fallow security survivors --format json`. Required `survivors` and
+    /// `needs_human_review`, both keyed by `finding_id`.
+    #[serde(rename = "security-survivors")]
+    SecuritySurvivors(crate::security::SecuritySurvivorsOutput),
+    /// `fallow security blind-spots --format json`. Required `summary` and
+    /// grouped unresolved-callee diagnostics.
+    #[serde(rename = "security-blind-spots")]
+    SecurityBlindSpots(crate::security::SecurityBlindSpotsOutput),
     /// `fallow dead-code --format json`.
     /// Required `total_issues` plus `summary: CheckSummary`.
     #[serde(rename = "dead-code")]

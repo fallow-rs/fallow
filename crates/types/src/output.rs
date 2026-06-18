@@ -13,7 +13,7 @@
 //! emission path through these types directly, eliminating the drift class
 //! between the augmentation list here and the `serde_json::json!` builders.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// A suggested action attached to a finding in the JSON output. Each finding
 /// carries an `actions` array; consumers (agents, IDE clients, CI bots) can
@@ -64,7 +64,7 @@ use serde::Serialize;
 /// `auto_fixable: false`. The field is non-singleton on the wire so that a
 /// future auto-applier (e.g. an LLM-driven suppression writer) can promote
 /// individual variants without a schema bump.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(untagged)]
 pub enum IssueAction {
@@ -87,7 +87,7 @@ pub enum IssueAction {
 
 /// A code-change fix. `type` is one of the kebab-case identifiers in
 /// [`FixActionType`].
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct FixAction {
     /// Kebab-case identifier for the fix action.
@@ -127,7 +127,7 @@ pub struct FixAction {
 
 /// Discriminant string for [`FixAction`]. Kebab-case per the JSON output
 /// contract.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum FixActionType {
@@ -235,7 +235,7 @@ pub enum FixActionType {
 }
 
 /// Inline-comment suppression for a single finding line.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SuppressLineAction {
     /// Action type identifier.
@@ -258,7 +258,7 @@ pub struct SuppressLineAction {
 }
 
 /// Singleton discriminant for [`SuppressLineAction`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum SuppressLineKind {
@@ -267,7 +267,7 @@ pub enum SuppressLineKind {
 }
 
 /// Scope marker for line suppressions that span multiple locations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum SuppressLineScope {
@@ -277,7 +277,7 @@ pub enum SuppressLineScope {
 }
 
 /// File-wide suppression placed at the top of the source file.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SuppressFileAction {
     /// Action type identifier.
@@ -293,7 +293,7 @@ pub struct SuppressFileAction {
 }
 
 /// Singleton discriminant for [`SuppressFileAction`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum SuppressFileKind {
@@ -303,7 +303,7 @@ pub enum SuppressFileKind {
 
 /// Edit a fallow config file (`.fallowrc.json`, `fallow.toml`, etc.) to
 /// add the offending value to an `ignore*` rule.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AddToConfigAction {
     /// Action type identifier.
@@ -351,7 +351,7 @@ pub struct AddToConfigAction {
 }
 
 /// Singleton discriminant for [`AddToConfigAction`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum AddToConfigKind {
@@ -362,7 +362,7 @@ pub enum AddToConfigKind {
 /// Value payload for [`AddToConfigAction::value`]. The variants line up with
 /// the documented per-`config_key` shapes; deserialization is untagged so
 /// downstream consumers can switch on the JSON value's type.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(untagged)]
 pub enum AddToConfigValue {
@@ -380,7 +380,7 @@ pub enum AddToConfigValue {
 
 /// Single `ignoreExports` rule entry. The fallow config accepts an array of
 /// these under the `ignoreExports` key.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct IgnoreExportsRule {
     /// File path (forward slashes, relative to project root) to which this
