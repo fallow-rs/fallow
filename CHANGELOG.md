@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`fallow dupes --format compact` now emits traceable clone lines.** Duplication compact output uses the `code-duplication` issue tag and includes the stable `dup:<id>` fingerprint plus group, token, line, and instance metadata on each clone instance line, so agents can jump straight to `fallow dupes --trace dup:<id>` without scraping human output.
+
 ## [2.99.0] - 2026-06-18
 
 ### Added
