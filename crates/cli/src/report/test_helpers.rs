@@ -267,6 +267,7 @@ pub fn sample_results(root: &Path) -> AnalysisResults {
             kind_known: false,
         },
         missing_reason: false,
+        actions: StaleSuppression::actions_for(false),
     });
 
     r

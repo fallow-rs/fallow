@@ -228,6 +228,10 @@ pub enum FixActionType {
     /// segments at the conflicting position to a single consistent slug name
     /// (manual).
     ResolveDynamicSegmentNameConflict,
+    /// Add a human-authored reason to a suppression that requires one.
+    AddSuppressionReason,
+    /// Remove or update a suppression that no longer matches a finding.
+    RemoveStaleSuppression,
 }
 
 /// Inline-comment suppression for a single finding line.

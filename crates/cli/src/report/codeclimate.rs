@@ -1371,18 +1371,28 @@ fn push_stale_suppression_issues(
     issues: &mut Vec<CodeClimateIssue>,
     suppressions: &[fallow_core::results::StaleSuppression],
     root: &Path,
-    severity: Severity,
+    rules: &RulesConfig,
 ) {
     if suppressions.is_empty() {
         return;
     }
-    let level = severity_to_codeclimate(severity);
     for s in suppressions {
+        let severity = if s.missing_reason {
+            rules.require_suppression_reason
+        } else {
+            rules.stale_suppressions
+        };
+        let level = severity_to_codeclimate(severity);
         let path = cc_path(&s.path, root);
         let line_str = s.line.to_string();
-        let fp = fingerprint_hash(&["fallow/stale-suppression", &path, &line_str]);
+        let check_name = if s.missing_reason {
+            "fallow/missing-suppression-reason"
+        } else {
+            "fallow/stale-suppression"
+        };
+        let fp = fingerprint_hash(&[check_name, &path, &line_str]);
         issues.push(cc_issue(
-            "fallow/stale-suppression",
+            check_name,
             &s.display_message(),
             level,
             "Bug Risk",
@@ -1936,7 +1946,7 @@ impl CodeClimateBuilder<'_> {
             &mut self.issues,
             &self.results.stale_suppressions,
             self.root,
-            self.rules.stale_suppressions,
+            self.rules,
         );
         push_unused_catalog_entry_issues(
             &mut self.issues,
@@ -2259,6 +2269,70 @@ mod tests {
         assert!(output.is_array());
         let arr = output.as_array().unwrap();
         assert!(!arr.is_empty());
+    }
+
+    #[test]
+    fn codeclimate_missing_suppression_reason_uses_reason_rule_severity() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results.stale_suppressions.push(StaleSuppression {
+            path: root.join("src/file.ts"),
+            line: 1,
+            col: 0,
+            origin: SuppressionOrigin::Comment {
+                issue_kind: Some("unused-exports".to_string()),
+                reason: None,
+                is_file_level: false,
+                kind_known: true,
+            },
+            missing_reason: true,
+            actions: StaleSuppression::actions_for(true),
+        });
+        let mut rules = RulesConfig::default();
+        rules.stale_suppressions = Severity::Off;
+        rules.require_suppression_reason = Severity::Error;
+
+        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+
+        assert_eq!(output[0]["check_name"], "fallow/missing-suppression-reason");
+        assert_eq!(output[0]["severity"], "major");
+    }
+
+    #[test]
+    fn codeclimate_stale_and_missing_suppression_have_distinct_identities() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        let origin = SuppressionOrigin::Comment {
+            issue_kind: Some("unused-exports".to_string()),
+            reason: None,
+            is_file_level: false,
+            kind_known: true,
+        };
+        results.stale_suppressions.push(StaleSuppression {
+            path: root.join("src/file.ts"),
+            line: 1,
+            col: 0,
+            origin: origin.clone(),
+            missing_reason: false,
+            actions: StaleSuppression::actions_for(false),
+        });
+        results.stale_suppressions.push(StaleSuppression {
+            path: root.join("src/file.ts"),
+            line: 1,
+            col: 0,
+            origin,
+            missing_reason: true,
+            actions: StaleSuppression::actions_for(true),
+        });
+        let mut rules = RulesConfig::default();
+        rules.stale_suppressions = Severity::Warn;
+        rules.require_suppression_reason = Severity::Error;
+
+        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+
+        assert_eq!(output[0]["check_name"], "fallow/stale-suppression");
+        assert_eq!(output[1]["check_name"], "fallow/missing-suppression-reason");
+        assert_ne!(output[0]["fingerprint"], output[1]["fingerprint"]);
     }
 
     #[test]

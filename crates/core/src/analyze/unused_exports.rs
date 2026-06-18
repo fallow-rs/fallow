@@ -1,7 +1,11 @@
 use std::sync::LazyLock;
 
-use oxc_ast::ast::{Declaration, Expression};
-use oxc_ast_visit::Visit;
+use oxc_ast::ast::{
+    ArrowFunctionExpression, BlockStatement, Declaration, Expression, FormalParameter, Function,
+    FunctionBody, Statement, VariableDeclaration, VariableDeclarator,
+};
+use oxc_ast_visit::{Visit, walk};
+use oxc_syntax::scope::ScopeFlags;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -245,6 +249,7 @@ fn collect_exports_used_in_file(module: &ModuleInfo, path: &std::path::Path) -> 
 struct ValueExportDependencyCollector {
     deps_by_export: FxHashMap<String, FxHashSet<String>>,
     current_export: Option<String>,
+    shadowed_names: FxHashSet<String>,
 }
 
 impl ValueExportDependencyCollector {
@@ -252,13 +257,82 @@ impl ValueExportDependencyCollector {
         Self {
             deps_by_export: FxHashMap::default(),
             current_export: None,
+            shadowed_names: FxHashSet::default(),
         }
     }
 
     fn collect_for_export(&mut self, export_name: &str, expression: &Expression<'_>) {
         self.current_export = Some(export_name.to_string());
+        self.shadowed_names.clear();
         self.visit_expression(expression);
+        self.shadowed_names.clear();
         self.current_export = None;
+    }
+
+    fn with_child_scope(&mut self, visit: impl FnOnce(&mut Self)) {
+        let previous = self.shadowed_names.clone();
+        visit(self);
+        self.shadowed_names = previous;
+    }
+
+    fn collect_direct_statement_bindings(&mut self, statement: &Statement<'_>) {
+        match statement {
+            Statement::VariableDeclaration(variable) => {
+                self.collect_variable_declaration_bindings(variable);
+            }
+            Statement::FunctionDeclaration(function) => {
+                if let Some(id) = function.id.as_ref() {
+                    self.shadowed_names.insert(id.name.to_string());
+                }
+            }
+            Statement::ExportNamedDeclaration(export) if export.source.is_none() => {
+                if let Some(declaration) = export.declaration.as_ref() {
+                    self.collect_declaration_bindings(declaration);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn collect_declaration_bindings(&mut self, declaration: &Declaration<'_>) {
+        match declaration {
+            Declaration::VariableDeclaration(variable) => {
+                self.collect_variable_declaration_bindings(variable);
+            }
+            Declaration::FunctionDeclaration(function) => {
+                if let Some(id) = function.id.as_ref() {
+                    self.shadowed_names.insert(id.name.to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn collect_variable_declaration_bindings(&mut self, variable: &VariableDeclaration<'_>) {
+        for declarator in &variable.declarations {
+            self.collect_variable_declarator_bindings(declarator);
+        }
+    }
+
+    fn collect_variable_declarator_bindings(&mut self, decl: &VariableDeclarator<'_>) {
+        for binding in decl.id.get_binding_identifiers() {
+            self.shadowed_names.insert(binding.name.to_string());
+        }
+    }
+
+    fn collect_block_bindings(&mut self, block: &BlockStatement<'_>) {
+        for statement in &block.body {
+            self.collect_direct_statement_bindings(statement);
+        }
+    }
+
+    fn collect_function_body_bindings(&mut self, body: Option<&FunctionBody<'_>>) {
+        let Some(body) = body else {
+            return;
+        };
+        for statement in &body.statements {
+            self.collect_direct_statement_bindings(statement);
+        }
     }
 }
 
@@ -290,10 +364,46 @@ impl<'a> Visit<'a> for ValueExportDependencyCollector {
         let Some(current_export) = self.current_export.as_ref() else {
             return;
         };
+        if self.shadowed_names.contains(ident.name.as_str()) {
+            return;
+        }
         self.deps_by_export
             .entry(current_export.clone())
             .or_default()
             .insert(ident.name.to_string());
+    }
+
+    fn visit_formal_parameter(&mut self, param: &FormalParameter<'a>) {
+        for binding in param.pattern.get_binding_identifiers() {
+            self.shadowed_names.insert(binding.name.to_string());
+        }
+        walk::walk_formal_parameter(self, param);
+    }
+
+    fn visit_arrow_function_expression(&mut self, expr: &ArrowFunctionExpression<'a>) {
+        self.with_child_scope(|collector| {
+            collector.collect_function_body_bindings(Some(&expr.body));
+            walk::walk_arrow_function_expression(collector, expr);
+        });
+    }
+
+    fn visit_function(&mut self, func: &Function<'a>, flags: ScopeFlags) {
+        self.with_child_scope(|collector| {
+            collector.collect_function_body_bindings(func.body.as_deref());
+            walk::walk_function(collector, func, flags);
+        });
+    }
+
+    fn visit_block_statement(&mut self, block: &BlockStatement<'a>) {
+        self.with_child_scope(|collector| {
+            collector.collect_block_bindings(block);
+            walk::walk_block_statement(collector, block);
+        });
+    }
+
+    fn visit_variable_declarator(&mut self, decl: &VariableDeclarator<'a>) {
+        self.collect_variable_declarator_bindings(decl);
+        walk::walk_variable_declarator(self, decl);
     }
 }
 
@@ -431,6 +541,7 @@ fn stale_expected_unused_suppression(
             reason: export.expected_unused_reason.clone(),
         },
         missing_reason: false,
+        actions: StaleSuppression::actions_for(false),
     }
 }
 
@@ -606,6 +717,7 @@ fn unused_export_for_module(
                     reason: None,
                 },
                 missing_reason: true,
+                actions: StaleSuppression::actions_for(true),
             });
         }
         if is_referenced {

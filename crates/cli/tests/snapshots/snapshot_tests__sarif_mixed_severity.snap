@@ -1,5 +1,6 @@
 ---
 source: crates/cli/tests/snapshot_tests.rs
+assertion_line: 805
 expression: redact_sarif_version(&json_str)
 ---
 {
@@ -516,6 +517,15 @@ expression: redact_sarif_version(&json_str)
                 "text": "A fallow-ignore-next-line, fallow-ignore-file, or @expected-unused suppression that no longer matches any active issue. The underlying problem was fixed but the suppression was left behind. Remove it to keep the codebase clean."
               },
               "helpUri": "https://docs.fallow.tools/explanations/dead-code#stale-suppressions",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "fallow/missing-suppression-reason",
+              "shortDescription": {
+                "text": "Suppression comment or tag is missing a required reason"
+              },
               "defaultConfiguration": {
                 "level": "warning"
               }

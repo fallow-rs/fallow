@@ -1,5 +1,6 @@
 ---
 source: crates/cli/tests/snapshot_tests.rs
+assertion_line: 1224
 expression: redact_sarif_version(&json_str)
 ---
 {
@@ -518,6 +519,15 @@ expression: redact_sarif_version(&json_str)
               "helpUri": "https://docs.fallow.tools/explanations/dead-code#stale-suppressions",
               "defaultConfiguration": {
                 "level": "warning"
+              }
+            },
+            {
+              "id": "fallow/missing-suppression-reason",
+              "shortDescription": {
+                "text": "Suppression comment or tag is missing a required reason"
+              },
+              "defaultConfiguration": {
+                "level": "none"
               }
             },
             {

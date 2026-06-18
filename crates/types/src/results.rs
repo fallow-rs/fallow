@@ -8,7 +8,9 @@ use crate::extract::{
     MemberKind, SecurityControlKind, SecurityUrlShape, SkippedSecurityCalleeExpressionKind,
     SkippedSecurityCalleeReason,
 };
-use crate::output::IssueAction;
+use crate::output::{
+    FixAction, FixActionType, IssueAction, SuppressLineAction, SuppressLineKind, SuppressLineScope,
+};
 use crate::output_dead_code::{
     BoundaryCallViolationFinding, BoundaryCoverageViolationFinding, BoundaryViolationFinding,
     CircularDependencyFinding, DuplicateExportFinding, DuplicatePropShapeFinding,
@@ -2876,9 +2878,47 @@ pub struct StaleSuppression {
     /// comment or tag that has no reason.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub missing_reason: bool,
+    /// Suggested next steps. Always emitted.
+    pub actions: Vec<IssueAction>,
 }
 
 impl StaleSuppression {
+    /// Build the typed action list for this suppression finding.
+    #[must_use]
+    pub fn actions_for(missing_reason: bool) -> Vec<IssueAction> {
+        let (kind, description) = if missing_reason {
+            (
+                FixActionType::AddSuppressionReason,
+                "Add a human-authored reason after `--` on the suppression",
+            )
+        } else {
+            (
+                FixActionType::RemoveStaleSuppression,
+                "Remove or update the stale suppression",
+            )
+        };
+        let mut actions = vec![IssueAction::Fix(FixAction {
+            kind,
+            auto_fixable: false,
+            description: description.to_string(),
+            note: None,
+            available_in_catalogs: None,
+            suggested_target: None,
+        })];
+        if !missing_reason {
+            actions.push(IssueAction::SuppressLine(SuppressLineAction {
+                kind: SuppressLineKind::SuppressLine,
+                auto_fixable: false,
+                description:
+                    "Suppress this stale suppression finding with a comment above the suppression"
+                        .to_string(),
+                comment: "// fallow-ignore-next-line stale-suppression".to_string(),
+                scope: Some(SuppressLineScope::PerLocation),
+            }));
+        }
+        actions
+    }
+
     /// Produce a human-readable description of this stale suppression.
     #[must_use]
     pub fn description(&self) -> String {

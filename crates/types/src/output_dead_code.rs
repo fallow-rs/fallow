@@ -2553,6 +2553,8 @@ mod position_0_invariants {
                 FixActionType::ResolveDynamicSegmentNameConflict => {
                     "resolve-dynamic-segment-name-conflict"
                 }
+                FixActionType::AddSuppressionReason => "add-suppression-reason",
+                FixActionType::RemoveStaleSuppression => "remove-stale-suppression",
             },
             IssueAction::SuppressLine(_) => "suppress-line",
             IssueAction::SuppressFile(_) => "suppress-file",

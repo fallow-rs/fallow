@@ -1036,6 +1036,7 @@ fn json_stale_suppression_unknown_kind_snapshot() {
             kind_known: false,
         },
         missing_reason: false,
+        actions: StaleSuppression::actions_for(false),
     });
     results.stale_suppressions.push(StaleSuppression {
         path: root.join("src/utils.ts"),
@@ -1048,6 +1049,7 @@ fn json_stale_suppression_unknown_kind_snapshot() {
             kind_known: true,
         },
         missing_reason: false,
+        actions: StaleSuppression::actions_for(false),
     });
     let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");

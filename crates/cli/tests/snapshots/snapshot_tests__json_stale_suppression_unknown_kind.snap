@@ -1,5 +1,6 @@
 ---
 source: crates/cli/tests/snapshot_tests.rs
+assertion_line: 1056
 expression: redact_version(&json_str)
 ---
 {
@@ -80,7 +81,21 @@ expression: redact_version(&json_str)
         "issue_kind": "complexity-typo",
         "is_file_level": false,
         "kind_known": false
-      }
+      },
+      "actions": [
+        {
+          "type": "remove-stale-suppression",
+          "auto_fixable": false,
+          "description": "Remove or update the stale suppression"
+        },
+        {
+          "type": "suppress-line",
+          "auto_fixable": false,
+          "description": "Suppress this stale suppression finding with a comment above the suppression",
+          "comment": "// fallow-ignore-next-line stale-suppression",
+          "scope": "per-location"
+        }
+      ]
     },
     {
       "path": "src/utils.ts",
@@ -90,7 +105,21 @@ expression: redact_version(&json_str)
         "type": "comment",
         "issue_kind": "unused-export",
         "is_file_level": false
-      }
+      },
+      "actions": [
+        {
+          "type": "remove-stale-suppression",
+          "auto_fixable": false,
+          "description": "Remove or update the stale suppression"
+        },
+        {
+          "type": "suppress-line",
+          "auto_fixable": false,
+          "description": "Suppress this stale suppression finding with a comment above the suppression",
+          "comment": "// fallow-ignore-next-line stale-suppression",
+          "scope": "per-location"
+        }
+      ]
     }
   ],
   "unused_catalog_entries": [],

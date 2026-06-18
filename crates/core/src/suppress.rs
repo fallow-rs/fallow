@@ -339,6 +339,7 @@ impl<'a> SuppressionContext<'a> {
                         kind_known: true,
                     },
                     missing_reason: false,
+                    actions: StaleSuppression::actions_for(false),
                 });
             }
         }
@@ -357,6 +358,7 @@ impl<'a> SuppressionContext<'a> {
                         kind_known: false,
                     },
                     missing_reason: false,
+                    actions: StaleSuppression::actions_for(false),
                 });
             }
         }
@@ -388,6 +390,7 @@ impl<'a> SuppressionContext<'a> {
                         kind_known: true,
                     },
                     missing_reason: true,
+                    actions: StaleSuppression::actions_for(true),
                 });
             }
         }
@@ -410,6 +413,7 @@ impl<'a> SuppressionContext<'a> {
                         kind_known: false,
                     },
                     missing_reason: true,
+                    actions: StaleSuppression::actions_for(true),
                 });
             }
         }

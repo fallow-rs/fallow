@@ -56,3 +56,38 @@ export const OrphanChildSchema = Schema.Struct({
 export const UnusedParentSchema = Schema.Struct({
   children: Schema.Array(OrphanChildSchema),
 });
+
+export const ShadowedParentSchema = [1].map(
+  (ShadowedChildSchema) => ShadowedChildSchema,
+);
+
+export const ShadowedChildSchema = Schema.Struct({
+  id: Schema.String,
+});
+
+export const BlockScopedParentSchema = (() => {
+  {
+    const BlockScopedChildSchema = Schema.String;
+    void BlockScopedChildSchema;
+  }
+
+  return Schema.Struct({
+    child: BlockScopedChildSchema,
+  });
+})();
+
+export const BlockScopedChildSchema = Schema.Struct({
+  id: Schema.String,
+});
+
+export const HoistedShadowParentSchema = (() => {
+  return HoistedShadowChildSchema;
+
+  function HoistedShadowChildSchema() {
+    return Schema.String;
+  }
+})();
+
+export const HoistedShadowChildSchema = Schema.Struct({
+  id: Schema.String,
+});

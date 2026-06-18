@@ -32,4 +32,16 @@ fn same_name_effect_schema_type_alias_keeps_nested_schema_value_used() {
         unused_export_names.contains(&"UnusedParentSchema"),
         "unused parent schemas must remain reportable, found: {unused_export_names:?}"
     );
+    assert!(
+        unused_export_names.contains(&"ShadowedChildSchema"),
+        "shadowed same-file references must not credit unrelated exports, found: {unused_export_names:?}"
+    );
+    assert!(
+        !unused_export_names.contains(&"BlockScopedChildSchema"),
+        "block-local shadows must not hide later real same-file export references, found: {unused_export_names:?}"
+    );
+    assert!(
+        unused_export_names.contains(&"HoistedShadowChildSchema"),
+        "same-scope hoisted declarations must shadow earlier references, found: {unused_export_names:?}"
+    );
 }

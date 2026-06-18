@@ -369,12 +369,16 @@ struct DocumentState {
     text: String,
 }
 
-/// Per-URI version map captured at `run_analysis` entry, threaded through to
+/// Per-URI document state captured at `run_analysis` entry, threaded through to
 /// `publish_collected_diagnostics` so it can drop per-URI publishes whose
-/// document has been edited during the analysis run. A type alias so future
-/// readers can grep for the snapshot's identity (it is also a stable seam
-/// for tests).
-type VersionSnapshot = FxHashMap<Uri, i32>;
+/// open buffer differs from what the disk-based analyzer saw.
+#[derive(Debug, Clone, Copy)]
+struct DocumentSnapshot {
+    version: i32,
+    matches_disk: bool,
+}
+
+type VersionSnapshot = FxHashMap<Uri, DocumentSnapshot>;
 
 fn initialization_config_path(opts: &serde_json::Value, root: Option<&Path>) -> Option<PathBuf> {
     let raw = opts.get("configPath").and_then(|v| v.as_str())?.trim();
@@ -1094,7 +1098,15 @@ impl FallowLspServer {
             .read()
             .await
             .iter()
-            .map(|(uri, state)| (uri.clone(), state.version))
+            .map(|(uri, state)| {
+                (
+                    uri.clone(),
+                    DocumentSnapshot {
+                        version: state.version,
+                        matches_disk: Self::document_matches_disk(uri, &state.text),
+                    },
+                )
+            })
             .collect();
 
         self.client
@@ -1153,16 +1165,15 @@ impl FallowLspServer {
                 self.publish_collected_diagnostics(all_diagnostics, &version_snapshot)
                     .await;
 
-                self.client
-                    .send_notification::<AnalysisComplete>(analysis_complete_params(
-                        &output.results,
-                        &output.duplication,
-                    ))
-                    .await;
-
+                let complete_params =
+                    analysis_complete_params(&output.results, &output.duplication);
                 *self.results.write().await = Some(output.results);
                 *self.duplication.write().await = Some(output.duplication);
                 *self.inline_complexity.write().await = output.inline_complexity;
+
+                self.client
+                    .send_notification::<AnalysisComplete>(complete_params)
+                    .await;
 
                 self.spawn_code_lens_refresh();
 
@@ -1199,10 +1210,14 @@ impl FallowLspServer {
     /// these are cross-file diagnostics anchored to files the user never
     /// `did_open`'d via the LSP (e.g. `package.json` for unlisted dependencies,
     /// `pnpm-workspace.yaml` for catalog references). No version race exists for them.
-    fn opened_mid_run_buffer_matches_disk(uri: &Uri, state: &DocumentState) -> bool {
+    fn document_matches_disk(uri: &Uri, text: &str) -> bool {
         uri.to_file_path()
             .and_then(|path| std::fs::read_to_string(path).ok())
-            .is_some_and(|disk_text| disk_text == state.text)
+            .is_some_and(|disk_text| disk_text == text)
+    }
+
+    fn opened_mid_run_buffer_matches_disk(uri: &Uri, state: &DocumentState) -> bool {
+        Self::document_matches_disk(uri, &state.text)
     }
 
     fn uri_is_stale(
@@ -1211,7 +1226,9 @@ impl FallowLspServer {
         live_documents: &FxHashMap<Uri, DocumentState>,
     ) -> bool {
         match (snapshot.get(uri), live_documents.get(uri)) {
-            (Some(&snapshot_version), Some(live_state)) => live_state.version > snapshot_version,
+            (Some(snapshot_state), Some(live_state)) => {
+                !snapshot_state.matches_disk || live_state.version > snapshot_state.version
+            }
             (Some(_), None) => true,
             (None, Some(live_state)) => !Self::opened_mid_run_buffer_matches_disk(uri, live_state),
             (None, None) => false,
@@ -1264,7 +1281,11 @@ impl FallowLspServer {
 
             if !use_pull_diagnostics || !live_documents.contains_key(uri) {
                 self.client
-                    .publish_diagnostics(uri.clone(), filtered.clone(), snapshot.get(uri).copied())
+                    .publish_diagnostics(
+                        uri.clone(),
+                        filtered.clone(),
+                        snapshot.get(uri).map(|state| state.version),
+                    )
                     .await;
             }
 
@@ -1290,7 +1311,7 @@ impl FallowLspServer {
                         .publish_diagnostics(
                             old_uri.clone(),
                             vec![],
-                            snapshot.get(old_uri).copied(),
+                            snapshot.get(old_uri).map(|state| state.version),
                         )
                         .await;
                 }
@@ -2653,6 +2674,7 @@ export function choose(value: number): string {
                     kind_known: true,
                 },
                 missing_reason: false,
+                actions: fallow_core::results::StaleSuppression::actions_for(false),
             }],
             unused_catalog_entries: vec![
                 fallow_core::results::UnusedCatalogEntryFinding::with_actions(
@@ -3198,6 +3220,28 @@ export function choose(value: number): string {
         );
     }
 
+    fn snapshot_for(uri: &Uri, version: i32) -> VersionSnapshot {
+        std::iter::once((
+            uri.clone(),
+            DocumentSnapshot {
+                version,
+                matches_disk: true,
+            },
+        ))
+        .collect()
+    }
+
+    fn dirty_snapshot_for(uri: &Uri, version: i32) -> VersionSnapshot {
+        std::iter::once((
+            uri.clone(),
+            DocumentSnapshot {
+                version,
+                matches_disk: false,
+            },
+        ))
+        .collect()
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn publish_skips_uri_when_live_version_advanced_past_snapshot() {
         let (service, _) = LspService::build(FallowLspServer::new).finish();
@@ -3205,7 +3249,7 @@ export function choose(value: number): string {
 
         let uri = "file:///stale.ts".parse::<Uri>().unwrap();
         install_document(backend, &uri, 1, "v1").await;
-        let snapshot: VersionSnapshot = std::iter::once((uri.clone(), 1)).collect();
+        let snapshot = snapshot_for(&uri, 1);
 
         install_document(backend, &uri, 2, "v2").await;
 
@@ -3228,7 +3272,7 @@ export function choose(value: number): string {
 
         let uri = "file:///fresh.ts".parse::<Uri>().unwrap();
         install_document(backend, &uri, 1, "v1").await;
-        let snapshot: VersionSnapshot = std::iter::once((uri.clone(), 1)).collect();
+        let snapshot = snapshot_for(&uri, 1);
 
         let mut diags_by_file: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
         diags_by_file.insert(uri.clone(), vec![make_diagnostic()]);
@@ -3246,6 +3290,32 @@ export function choose(value: number): string {
             cached_len,
             Some(1),
             "equal versions are not stale; publish must reach the cache"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn publish_skips_uri_when_snapshot_buffer_differs_from_disk() {
+        let temp = tempfile::tempdir().expect("tempdir should be created");
+        let file_path = temp.path().join("dirty-at-start.ts");
+        std::fs::write(&file_path, "export const disk = 1;\n")
+            .expect("fixture file should be written");
+
+        let (service, _) = LspService::build(FallowLspServer::new).finish();
+        let backend = service.inner();
+        let uri = Uri::from_file_path(&file_path).expect("temp path should convert to file URI");
+
+        install_document(backend, &uri, 1, "export const buffer = 1;\n").await;
+        let snapshot = dirty_snapshot_for(&uri, 1);
+
+        let mut diags_by_file: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
+        diags_by_file.insert(uri.clone(), vec![make_diagnostic()]);
+        backend
+            .publish_collected_diagnostics(diags_by_file, &snapshot)
+            .await;
+
+        assert!(
+            !backend.cached_diagnostics.read().await.contains_key(&uri),
+            "same-version dirty buffers are stale because analysis read disk, not the open buffer"
         );
     }
 
@@ -3330,7 +3400,7 @@ export function choose(value: number): string {
 
         let uri = "file:///closed.ts".parse::<Uri>().unwrap();
         install_document(backend, &uri, 1, "v1").await;
-        let snapshot: VersionSnapshot = std::iter::once((uri.clone(), 1)).collect();
+        let snapshot = snapshot_for(&uri, 1);
 
         backend.documents.write().await.remove(&uri);
 
@@ -3369,7 +3439,7 @@ export function choose(value: number): string {
 
         let uri = "file:///versioned.ts".parse::<Uri>().unwrap();
         install_document(backend, &uri, 7, "v7").await;
-        let snapshot: VersionSnapshot = std::iter::once((uri.clone(), 7)).collect();
+        let snapshot = snapshot_for(&uri, 7);
 
         let mut diags_by_file: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
         diags_by_file.insert(uri.clone(), vec![make_diagnostic()]);
@@ -3431,7 +3501,7 @@ export function choose(value: number): string {
         backend.client_pulls.store(true, Ordering::SeqCst);
         let uri = "file:///refresh.ts".parse::<Uri>().unwrap();
         install_document(backend, &uri, 1, "v1").await;
-        let snapshot: VersionSnapshot = std::iter::once((uri.clone(), 1)).collect();
+        let snapshot = snapshot_for(&uri, 1);
         let mut diags_by_file: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
         diags_by_file.insert(uri.clone(), vec![make_diagnostic()]);
 
@@ -3575,7 +3645,7 @@ export function choose(value: number): string {
         // `client_pulls` is intentionally NOT set: this client never pulls.
         let uri = "file:///never-pulled.ts".parse::<Uri>().unwrap();
         install_document(backend, &uri, 1, "v1").await;
-        let snapshot: VersionSnapshot = std::iter::once((uri.clone(), 1)).collect();
+        let snapshot = snapshot_for(&uri, 1);
         let mut diags_by_file: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
         diags_by_file.insert(uri.clone(), vec![make_diagnostic()]);
 
@@ -3648,7 +3718,7 @@ export function choose(value: number): string {
         // `client_pulls` is intentionally NOT set: this client never pulls.
         let uri = "file:///render.ts".parse::<Uri>().unwrap();
         install_document(backend, &uri, 1, "doRender();").await;
-        let snapshot: VersionSnapshot = std::iter::once((uri.clone(), 1)).collect();
+        let snapshot = snapshot_for(&uri, 1);
 
         let finding = fallow_core::results::SecurityFinding {
             finding_id: String::new(),
@@ -4057,7 +4127,7 @@ export function choose(value: number): string {
 
         let uri = "file:///clearing.ts".parse::<Uri>().unwrap();
         install_document(backend, &uri, 1, "v1").await;
-        let snapshot_v1: VersionSnapshot = std::iter::once((uri.clone(), 1)).collect();
+        let snapshot_v1 = snapshot_for(&uri, 1);
 
         let mut first_run: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
         first_run.insert(uri.clone(), vec![make_diagnostic()]);
@@ -4094,7 +4164,7 @@ export function choose(value: number): string {
 
         let uri = "file:///tracked.ts".parse::<Uri>().unwrap();
         install_document(backend, &uri, 1, "v1").await;
-        let snapshot: VersionSnapshot = std::iter::once((uri.clone(), 1)).collect();
+        let snapshot = snapshot_for(&uri, 1);
         install_document(backend, &uri, 2, "v2").await;
 
         let mut diags_by_file: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();

@@ -329,8 +329,13 @@ fn policy_violation_key(
 }
 
 fn stale_suppression_key(item: &fallow_core::results::StaleSuppression, root: &Path) -> String {
+    let rule_id = if item.missing_reason {
+        "missing-suppression-reason"
+    } else {
+        "stale-suppression"
+    };
     format!(
-        "stale-suppression:{}:{}",
+        "{rule_id}:{}:{}",
         relative_key_path(&item.path, root),
         item.description()
     )
@@ -1810,16 +1815,10 @@ fn annotate_policy_json(
     annotate_issue_array(
         json,
         "stale_suppressions",
-        results.stale_suppressions.iter().map(|item| {
-            issue_was_introduced(
-                &format!(
-                    "stale-suppression:{}:{}",
-                    relative_key_path(&item.path, root),
-                    item.description()
-                ),
-                base,
-            )
-        }),
+        results
+            .stale_suppressions
+            .iter()
+            .map(|item| issue_was_introduced(&stale_suppression_key(item, root), base)),
     );
 }
 
@@ -2318,6 +2317,20 @@ mod tests {
                 kind_known: true,
             },
             missing_reason: false,
+            actions: StaleSuppression::actions_for(false),
+        });
+        results.stale_suppressions.push(StaleSuppression {
+            path: root.join("src/app.ts"),
+            line: 2,
+            col: 0,
+            origin: SuppressionOrigin::Comment {
+                issue_kind: Some("unused-export".to_string()),
+                reason: None,
+                is_file_level: false,
+                kind_known: true,
+            },
+            missing_reason: true,
+            actions: StaleSuppression::actions_for(true),
         });
         results.unresolved_catalog_references.push(
             UnresolvedCatalogReferenceFinding::with_actions(UnresolvedCatalogReference {
@@ -2383,6 +2396,9 @@ mod tests {
         assert!(
             keys.contains("stale-suppression:src/app.ts:// fallow-ignore-next-line unused-export")
         );
+        assert!(keys.contains(
+            "missing-suppression-reason:src/app.ts:// fallow-ignore-next-line unused-export"
+        ));
         assert!(
             keys.contains("unresolved-catalog-reference:packages/app/package.json:9:default:react")
         );

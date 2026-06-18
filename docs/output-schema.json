@@ -4509,13 +4509,21 @@
         "missing_reason": {
           "type": "boolean",
           "description": "True when `rules.require-suppression-reason` reported a suppression\ncomment or tag that has no reason."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted."
         }
       },
       "required": [
         "path",
         "line",
         "col",
-        "origin"
+        "origin",
+        "actions"
       ],
       "description": "A suppression comment or JSDoc tag that no longer matches any issue."
     },
@@ -6501,6 +6509,16 @@
           "type": "string",
           "const": "resolve-dynamic-segment-name-conflict",
           "description": "Resolve a Next.js dynamic-segment name conflict by renaming the dynamic\nsegments at the conflicting position to a single consistent slug name\n(manual)."
+        },
+        {
+          "type": "string",
+          "const": "add-suppression-reason",
+          "description": "Add a human-authored reason to a suppression that requires one."
+        },
+        {
+          "type": "string",
+          "const": "remove-stale-suppression",
+          "description": "Remove or update a suppression that no longer matches a finding."
         }
       ],
       "description": "Discriminant string for [`FixAction`]. Kebab-case per the JSON output\ncontract."

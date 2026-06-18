@@ -481,9 +481,25 @@ fn baseline_member_import_keys(
         stale_suppressions: results
             .stale_suppressions
             .iter()
-            .map(|s| format!("{}:{}", relative_path(&s.path, root), s.line))
+            .map(|s| stale_suppression_baseline_key(s, root))
             .collect(),
     }
+}
+
+fn stale_suppression_baseline_key(
+    suppression: &fallow_core::results::StaleSuppression,
+    root: &Path,
+) -> String {
+    let rule_id = if suppression.missing_reason {
+        "missing-suppression-reason"
+    } else {
+        "stale-suppression"
+    };
+    format!(
+        "{rule_id}:{}:{}",
+        relative_path(&suppression.path, root),
+        suppression.line
+    )
 }
 
 fn enum_member_baseline_keys(
@@ -1359,12 +1375,13 @@ impl BaselineFilterContext<'_> {
             .map(String::as_str)
             .collect();
         results.stale_suppressions.retain(|suppression| {
-            let key = format!(
+            let key = stale_suppression_baseline_key(suppression, self.root);
+            let legacy_key = format!(
                 "{}:{}",
                 relative_path(&suppression.path, self.root),
                 suppression.line
             );
-            !baseline_stale.contains(key.as_str())
+            !baseline_stale.contains(key.as_str()) && !baseline_stale.contains(legacy_key.as_str())
         });
     }
 
@@ -3447,6 +3464,47 @@ mod tests {
         assert!(filtered.unused_store_members.is_empty(), "store members");
         assert!(filtered.unresolved_imports.is_empty(), "unresolved imports");
         assert!(filtered.duplicate_exports.is_empty(), "duplicate exports");
+    }
+
+    #[test]
+    fn stale_suppression_baseline_keys_include_missing_reason_state() {
+        let root = Path::new("/project");
+        let stale = fallow_core::results::StaleSuppression {
+            path: root.join("src/file.ts"),
+            line: 1,
+            col: 0,
+            origin: fallow_core::results::SuppressionOrigin::Comment {
+                issue_kind: Some("unused-export".to_string()),
+                reason: None,
+                is_file_level: false,
+                kind_known: true,
+            },
+            missing_reason: false,
+            actions: fallow_core::results::StaleSuppression::actions_for(false),
+        };
+        let missing = fallow_core::results::StaleSuppression {
+            missing_reason: true,
+            actions: fallow_core::results::StaleSuppression::actions_for(true),
+            ..stale.clone()
+        };
+        let results = AnalysisResults {
+            stale_suppressions: vec![stale, missing],
+            ..Default::default()
+        };
+        let baseline = BaselineData::from_results(&results, root);
+
+        assert_eq!(
+            baseline.stale_suppressions,
+            vec![
+                "stale-suppression:src/file.ts:1",
+                "missing-suppression-reason:src/file.ts:1",
+            ]
+        );
+
+        let mut legacy_baseline = BaselineData::from_results(&AnalysisResults::default(), root);
+        legacy_baseline.stale_suppressions = vec!["src/file.ts:1".to_string()];
+        let filtered = filter_new_issues(results, &legacy_baseline, root);
+        assert!(filtered.stale_suppressions.is_empty());
     }
 
     fn runtime_finding(

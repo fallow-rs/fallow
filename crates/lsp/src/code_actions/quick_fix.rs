@@ -663,7 +663,7 @@ fn build_parent_rewrite_edit(
                     clippy::cast_possible_truncation,
                     reason = "header length is bounded by source size"
                 )]
-                character: header.len() as u32,
+                character: header.encode_utf16().count() as u32,
             },
         },
         new_text,
@@ -1737,6 +1737,38 @@ mod tests {
         assert_eq!(edits[0].new_text, "");
         assert_eq!(edits[1].range.start.line, 1);
         assert_eq!(edits[1].new_text, "  react17: {}");
+    }
+
+    #[test]
+    fn catalog_action_parent_rewrite_uses_utf16_character_offsets() {
+        let dir = tempfile::tempdir().unwrap();
+        let uri = workspace_yaml_uri(&dir);
+
+        let mut results = AnalysisResults::default();
+        results
+            .unused_catalog_entries
+            .push(make_catalog_entry("react", "日本", 3, vec![]));
+
+        let lines = vec!["catalogs:", "  \"日本\":", "    react: ^17.0.2"];
+        let actions = build_remove_catalog_entry_actions(
+            &results,
+            dir.path(),
+            &uri,
+            &make_range(2, 2),
+            &lines,
+        );
+
+        assert_eq!(actions.len(), 1);
+        let ca = unwrap_code_action(&actions[0]);
+        let changes = ca.edit.as_ref().unwrap().changes.as_ref().unwrap();
+        let edits = changes.get(&uri).unwrap();
+        assert_eq!(edits.len(), 2);
+        assert_eq!(edits[1].range.start.character, 0);
+        assert_eq!(
+            edits[1].range.end.character,
+            lines[1].encode_utf16().count() as u32
+        );
+        assert_eq!(edits[1].new_text, "  \"日本\": {}");
     }
 
     #[test]

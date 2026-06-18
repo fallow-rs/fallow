@@ -843,13 +843,25 @@ fn sarif_stale_suppression_fields(
     level: &'static str,
 ) -> SarifFields {
     SarifFields {
-        rule_id: "fallow/stale-suppression",
+        rule_id: if suppression.missing_reason {
+            "fallow/missing-suppression-reason"
+        } else {
+            "fallow/stale-suppression"
+        },
         level,
         message: suppression.display_message(),
         uri: relative_uri(&suppression.path, root),
         region: Some((suppression.line, suppression.col + 1)),
         source_path: Some(suppression.path.clone()),
         properties: None,
+    }
+}
+
+fn stale_suppression_severity(suppression: &StaleSuppression, rules: &RulesConfig) -> Severity {
+    if suppression.missing_reason {
+        rules.require_suppression_reason
+    } else {
+        rules.stale_suppressions
     }
 }
 
@@ -1161,6 +1173,11 @@ fn sarif_graph_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
         "fallow/stale-suppression",
         "Suppression comment or tag no longer matches any issue",
         rules.stale_suppressions,
+    ));
+    specs.push((
+        "fallow/missing-suppression-reason",
+        "Suppression comment or tag is missing a required reason",
+        rules.require_suppression_reason,
     ));
     specs
 }
@@ -1879,7 +1896,11 @@ fn push_suppression_sarif_results(
     snippets: &mut SourceSnippetCache,
 ) {
     push_sarif_results(sarif_results, &results.stale_suppressions, snippets, |s| {
-        sarif_stale_suppression_fields(s, root, severity_to_sarif_level(rules.stale_suppressions))
+        sarif_stale_suppression_fields(
+            s,
+            root,
+            severity_to_sarif_level(stale_suppression_severity(s, rules)),
+        )
     });
 }
 
@@ -2629,6 +2650,84 @@ mod tests {
     }
 
     #[test]
+    fn sarif_missing_suppression_reason_uses_reason_rule_severity() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results.stale_suppressions.push(StaleSuppression {
+            path: root.join("src/file.ts"),
+            line: 1,
+            col: 0,
+            origin: SuppressionOrigin::Comment {
+                issue_kind: Some("unused-exports".to_string()),
+                reason: None,
+                is_file_level: false,
+                kind_known: true,
+            },
+            missing_reason: true,
+            actions: StaleSuppression::actions_for(true),
+        });
+        let mut rules = RulesConfig::default();
+        rules.stale_suppressions = Severity::Off;
+        rules.require_suppression_reason = Severity::Error;
+
+        let sarif = build_sarif(&results, &root, &rules);
+
+        assert_eq!(
+            sarif["runs"][0]["results"][0]["ruleId"],
+            "fallow/missing-suppression-reason"
+        );
+        assert_eq!(sarif["runs"][0]["results"][0]["level"], "error");
+        let rule_ids: Vec<&str> = sarif["runs"][0]["tool"]["driver"]["rules"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|rule| rule["id"].as_str().unwrap())
+            .collect();
+        assert!(rule_ids.contains(&"fallow/missing-suppression-reason"));
+    }
+
+    #[test]
+    fn sarif_stale_and_missing_suppression_have_distinct_identities() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        let origin = SuppressionOrigin::Comment {
+            issue_kind: Some("unused-exports".to_string()),
+            reason: None,
+            is_file_level: false,
+            kind_known: true,
+        };
+        results.stale_suppressions.push(StaleSuppression {
+            path: root.join("src/file.ts"),
+            line: 1,
+            col: 0,
+            origin: origin.clone(),
+            missing_reason: false,
+            actions: StaleSuppression::actions_for(false),
+        });
+        results.stale_suppressions.push(StaleSuppression {
+            path: root.join("src/file.ts"),
+            line: 1,
+            col: 0,
+            origin,
+            missing_reason: true,
+            actions: StaleSuppression::actions_for(true),
+        });
+        let mut rules = RulesConfig::default();
+        rules.stale_suppressions = Severity::Warn;
+        rules.require_suppression_reason = Severity::Error;
+
+        let sarif = build_sarif(&results, &root, &rules);
+        let results = sarif["runs"][0]["results"].as_array().unwrap();
+
+        assert_eq!(results[0]["ruleId"], "fallow/stale-suppression");
+        assert_eq!(results[1]["ruleId"], "fallow/missing-suppression-reason");
+        assert_ne!(
+            results[0]["partialFingerprints"][fingerprint::FINGERPRINT_KEY],
+            results[1]["partialFingerprints"][fingerprint::FINGERPRINT_KEY]
+        );
+    }
+
+    #[test]
     fn sarif_has_tool_driver_info() {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
@@ -2652,7 +2751,7 @@ mod tests {
         let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
             .as_array()
             .expect("rules should be an array");
-        assert_eq!(rules.len(), 44);
+        assert_eq!(rules.len(), 45);
 
         let rule_ids: Vec<&str> = rules.iter().map(|r| r["id"].as_str().unwrap()).collect();
         assert!(rule_ids.contains(&"fallow/duplicate-prop-shape"));

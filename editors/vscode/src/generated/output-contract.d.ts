@@ -174,7 +174,7 @@ export type IssueAction = (FixAction | SuppressLineAction | SuppressFileAction |
  * Discriminant string for [`FixAction`]. Kebab-case per the JSON output
  * contract.
  */
-export type FixActionType = ("remove-export" | "delete-file" | "remove-dependency" | "move-dependency" | "remove-enum-member" | "remove-class-member" | "resolve-import" | "install-dependency" | "remove-duplicate" | "move-to-dev" | "refactor-cycle" | "refactor-re-export-cycle" | "refactor-boundary" | "export-type" | "remove-catalog-entry" | "remove-empty-catalog-group" | "update-catalog-reference" | "add-catalog-entry" | "remove-catalog-reference" | "remove-dependency-override" | "fix-dependency-override" | "resolve-policy-violation" | "move-to-server-module" | "split-mixed-barrel" | "hoist-directive" | "wire-server-action" | "provide-inject" | "use-load-data" | "render-component" | "use-component-prop" | "emit-component-event" | "wire-svelte-event" | "resolve-route-collision" | "resolve-dynamic-segment-name-conflict")
+export type FixActionType = ("remove-export" | "delete-file" | "remove-dependency" | "move-dependency" | "remove-enum-member" | "remove-class-member" | "resolve-import" | "install-dependency" | "remove-duplicate" | "move-to-dev" | "refactor-cycle" | "refactor-re-export-cycle" | "refactor-boundary" | "export-type" | "remove-catalog-entry" | "remove-empty-catalog-group" | "update-catalog-reference" | "add-catalog-entry" | "remove-catalog-reference" | "remove-dependency-override" | "fix-dependency-override" | "resolve-policy-violation" | "move-to-server-module" | "split-mixed-barrel" | "hoist-directive" | "wire-server-action" | "provide-inject" | "use-load-data" | "render-component" | "use-component-prop" | "emit-component-event" | "wire-svelte-event" | "resolve-route-collision" | "resolve-dynamic-segment-name-conflict" | "add-suppression-reason" | "remove-stale-suppression")
 /**
  * Singleton discriminant for [`SuppressLineAction`].
  */
@@ -2445,6 +2445,10 @@ origin: SuppressionOrigin
  * comment or tag that has no reason.
  */
 missing_reason?: boolean
+/**
+ * Suggested next steps. Always emitted.
+ */
+actions: IssueAction[]
 }
 /**
  * Wire-shape envelope for an [`UnusedCatalogEntry`] finding. Per-instance

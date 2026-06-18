@@ -855,6 +855,7 @@ mod severity_gate {
                                 kind_known: true,
                             },
                             missing_reason: false,
+                            actions: fallow_core::results::StaleSuppression::actions_for(false),
                         });
                 }),
             ),
