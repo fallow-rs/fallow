@@ -25,13 +25,56 @@ pub enum RulePackRuleKind {
     /// Ban imports and re-exports whose raw specifier matches one of
     /// `specifiers`.
     BannedImport,
+    /// Ban call sites whose catalogue-derived effect matches one of `effects`.
+    BannedEffect,
+}
+
+/// Internal side-effect taxonomy derived from security catalogue rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum EffectKind {
+    Pure,
+    Read,
+    Write,
+    Network,
+    Storage,
+    Process,
+    Shell,
+    Crypto,
+    Randomness,
+    Dom,
+    Database,
+    FrameworkCallback,
+    Unknown,
+}
+
+impl EffectKind {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Pure => "pure",
+            Self::Read => "read",
+            Self::Write => "write",
+            Self::Network => "network",
+            Self::Storage => "storage",
+            Self::Process => "process",
+            Self::Shell => "shell",
+            Self::Crypto => "crypto",
+            Self::Randomness => "randomness",
+            Self::Dom => "dom",
+            Self::Database => "database",
+            Self::FrameworkCallback => "framework-callback",
+            Self::Unknown => "unknown",
+        }
+    }
 }
 
 /// One declarative policy rule inside a rule pack.
 ///
 /// `callees` applies only to `banned-call` rules; `specifiers` and
-/// `ignoreTypeOnly` apply only to `banned-import` rules. Setting a field on
-/// the wrong kind is a load error (fail loud, never silently ignore policy).
+/// `ignoreTypeOnly` apply only to `banned-import` rules; `effects` applies
+/// only to `banned-effect` rules. Setting a field on the wrong kind is a load
+/// error (fail loud, never silently ignore policy).
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RulePackRule {
@@ -54,6 +97,11 @@ pub struct RulePackRule {
     /// specifiers (e.g. `npm:moment`) are not matched.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub specifiers: Vec<String>,
+    /// Effect classes to ban (`banned-effect` only). Effects are derived from
+    /// `security_matchers.toml` catalogue rows and matched against captured
+    /// call sites after import-resolution canonicalization.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub effects: Vec<EffectKind>,
     /// When `true`, type-only imports (`import type ...` and type-only
     /// re-exports) are ignored by this `banned-import` rule. Defaults to
     /// `false`: type-only imports are flagged too.
@@ -81,8 +129,9 @@ pub struct RulePackRule {
 /// in the `rulePacks` config key.
 ///
 /// Rule packs are pure data: loading a pack never executes project code. They
-/// encode project-specific policy (banned calls, banned imports) evaluated
-/// over fallow's static extraction data, reporting as `policy-violation`
+/// encode project-specific policy (banned calls, banned imports, and
+/// catalogue-backed banned effects) evaluated over fallow's static extraction
+/// data, reporting as `policy-violation`
 /// findings.
 ///
 /// ```jsonc
@@ -98,6 +147,12 @@ pub struct RulePackRule {
 ///       "callees": ["child_process.*"],
 ///       "message": "Use the sandboxed runner instead.",
 ///       "severity": "error"
+///     },
+///     {
+///       "id": "no-network",
+///       "kind": "banned-effect",
+///       "effects": ["network"],
+///       "message": "Keep this package side-effect free."
 ///     },
 ///     {
 ///       "id": "no-moment",
@@ -319,6 +374,11 @@ fn validate_rule(rule: &RulePackRule, path: &Path, errors: &mut Vec<RulePackErro
                     "`specifiers` applies only to banned-import rules".to_owned()
                 ));
             }
+            if !rule.effects.is_empty() {
+                errors.push(err(
+                    "`effects` applies only to banned-effect rules".to_owned()
+                ));
+            }
             if rule.ignore_type_only {
                 errors.push(err(
                     "`ignoreTypeOnly` applies only to banned-import rules".to_owned()
@@ -339,6 +399,11 @@ fn validate_rule(rule: &RulePackRule, path: &Path, errors: &mut Vec<RulePackErro
             if !rule.callees.is_empty() {
                 errors.push(err("`callees` applies only to banned-call rules".to_owned()));
             }
+            if !rule.effects.is_empty() {
+                errors.push(err(
+                    "`effects` applies only to banned-effect rules".to_owned()
+                ));
+            }
             for specifier in &rule.specifiers {
                 if specifier.trim().is_empty() {
                     errors.push(err("specifier must not be empty".to_owned()));
@@ -349,6 +414,26 @@ fn validate_rule(rule: &RulePackRule, path: &Path, errors: &mut Vec<RulePackErro
                          covered automatically"
                     )));
                 }
+            }
+        }
+        RulePackRuleKind::BannedEffect => {
+            if rule.effects.is_empty() {
+                errors.push(err(
+                    "banned-effect rules must list at least one `effects` entry".to_owned(),
+                ));
+            }
+            if !rule.callees.is_empty() {
+                errors.push(err("`callees` applies only to banned-call rules".to_owned()));
+            }
+            if !rule.specifiers.is_empty() {
+                errors.push(err(
+                    "`specifiers` applies only to banned-import rules".to_owned()
+                ));
+            }
+            if rule.ignore_type_only {
+                errors.push(err(
+                    "`ignoreTypeOnly` applies only to banned-import rules".to_owned()
+                ));
             }
         }
     }
@@ -407,6 +492,12 @@ mod tests {
                     "severity": "error"
                 },
                 {
+                    "id": "no-network",
+                    "kind": "banned-effect",
+                    "effects": ["network"],
+                    "message": "Keep this package side-effect free."
+                },
+                {
                     "id": "no-moment",
                     "kind": "banned-import",
                     "specifiers": ["moment"],
@@ -424,12 +515,14 @@ mod tests {
         let packs = load_rule_packs(dir.path(), &[path]).unwrap();
         assert_eq!(packs.len(), 1);
         assert_eq!(packs[0].name, "team-policy");
-        assert_eq!(packs[0].rules.len(), 2);
+        assert_eq!(packs[0].rules.len(), 3);
         assert_eq!(packs[0].rules[0].kind, RulePackRuleKind::BannedCall);
         assert_eq!(packs[0].rules[0].severity, Some(Severity::Error));
-        assert_eq!(packs[0].rules[1].kind, RulePackRuleKind::BannedImport);
-        assert!(packs[0].rules[1].ignore_type_only);
-        assert_eq!(packs[0].rules[1].severity, None);
+        assert_eq!(packs[0].rules[1].kind, RulePackRuleKind::BannedEffect);
+        assert_eq!(packs[0].rules[1].effects, vec![EffectKind::Network]);
+        assert_eq!(packs[0].rules[2].kind, RulePackRuleKind::BannedImport);
+        assert!(packs[0].rules[2].ignore_type_only);
+        assert_eq!(packs[0].rules[2].severity, None);
     }
 
     #[test]
@@ -476,10 +569,11 @@ mod tests {
             dir.path(),
             "policy.json",
             r#"{ "version": 1, "name": "p", "rules": [
-                { "id": "a", "kind": "banned-effect", "callees": ["fetch"] }
+                { "id": "a", "kind": "banned-thing", "callees": ["fetch"] }
             ] }"#,
         );
         let errors = load_rule_packs(dir.path(), &[path]).unwrap_err();
+        assert!(errors[0].message.contains("banned-thing"));
         assert!(errors[0].message.contains("banned-effect"));
         assert!(errors[0].message.contains("banned-call"));
         assert!(errors[0].message.contains("banned-import"));
@@ -591,9 +685,11 @@ mod tests {
             "policy.json",
             r#"{ "version": 1, "name": "p", "rules": [
                 { "id": "a", "kind": "banned-call", "callees": ["fetch"],
-                  "specifiers": ["moment"], "ignoreTypeOnly": true },
+                  "specifiers": ["moment"], "effects": ["network"], "ignoreTypeOnly": true },
                 { "id": "b", "kind": "banned-import", "specifiers": ["moment"],
-                  "callees": ["fetch"] }
+                  "callees": ["fetch"], "effects": ["network"] },
+                { "id": "c", "kind": "banned-effect", "effects": ["network"],
+                  "callees": ["fetch"], "specifiers": ["moment"], "ignoreTypeOnly": true }
             ] }"#,
         );
         let errors = load_rule_packs(dir.path(), &[path]).unwrap_err();
@@ -605,6 +701,7 @@ mod tests {
         assert!(joined.contains("`specifiers` applies only to banned-import"));
         assert!(joined.contains("`ignoreTypeOnly` applies only to banned-import"));
         assert!(joined.contains("`callees` applies only to banned-call"));
+        assert!(joined.contains("`effects` applies only to banned-effect"));
     }
 
     #[test]
@@ -615,7 +712,8 @@ mod tests {
             "policy.json",
             r#"{ "version": 1, "name": "p", "rules": [
                 { "id": "a", "kind": "banned-call" },
-                { "id": "b", "kind": "banned-import" }
+                { "id": "b", "kind": "banned-import" },
+                { "id": "c", "kind": "banned-effect" }
             ] }"#,
         );
         let errors = load_rule_packs(dir.path(), &[path]).unwrap_err();
@@ -626,6 +724,7 @@ mod tests {
             .join("\n");
         assert!(joined.contains("must list at least one `callees` pattern"));
         assert!(joined.contains("must list at least one `specifiers` entry"));
+        assert!(joined.contains("must list at least one `effects` entry"));
     }
 
     #[test]

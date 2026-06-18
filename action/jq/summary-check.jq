@@ -127,7 +127,7 @@ else
     "Calls from zoned files to callees forbidden for that zone.\n\n| File | Callee | Zone | Pattern |\n|------|--------|------|---------|\n";
     "| `\(.path):\(.line)` | `\(.callee)` | \(.zone) | `\(.pattern)` |") +
   section("Policy violations"; "policy_violations";
-    "Banned calls and banned imports matched by configured rule packs.\n\n| File | Matched | Rule | Severity |\n|------|---------|------|----------|\n";
+    "Banned calls, imports, and catalogue-derived effects matched by configured rule packs.\n\n| File | Matched | Rule | Severity |\n|------|---------|------|----------|\n";
     "| `\(.path):\(.line)` | `\(.matched)` | `\(.pack)/\(.rule_id)` | \(.severity) |") +
   section("Invalid client exports"; "invalid_client_exports";
     "`\"use client\"` files exporting a Next.js server-only / route-config name. Next.js rejects this at build time.\n\n| File | Export | Directive |\n|------|--------|-----------|\n";

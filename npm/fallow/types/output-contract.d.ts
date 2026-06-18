@@ -245,7 +245,7 @@ export type ReExportCycleKind = ("multi-node" | "self-loop")
 /**
  * Which rule-pack rule kind produced a [`PolicyViolation`].
  */
-export type PolicyRuleKind = ("banned-call" | "banned-import")
+export type PolicyRuleKind = ("banned-call" | "banned-import" | "banned-effect")
 /**
  * Effective severity of a single [`PolicyViolation`]. Per-rule `severity`
  * overrides the `rules."policy-violation"` master; `off` rules emit nothing,
@@ -1064,7 +1064,8 @@ boundary_coverage_violations?: BoundaryCoverageViolationFinding[]
  */
 boundary_call_violations?: BoundaryCallViolationFinding[]
 /**
- * Banned calls and banned imports matched by declarative rule packs
+ * Banned calls, imports, and catalogue-derived effects matched by
+ * declarative rule packs
  * (`rulePacks` config). Wrapped in [`PolicyViolationFinding`] so each
  * entry carries a typed `actions` array natively. Each finding carries
  * its effective per-rule severity.
@@ -1409,7 +1410,8 @@ boundary_coverage_violations?: number
  */
 boundary_call_violations?: number
 /**
- * Banned calls and banned imports matched by declarative rule packs.
+ * Banned calls, imports, and catalogue-derived effects matched by
+ * declarative rule packs.
  */
 policy_violations?: number
 /**
@@ -2409,7 +2411,7 @@ introduced?: (AuditIntroduced | null)
 }
 /**
  * Wire-shape envelope for a [`PolicyViolation`] finding. Carries actions for
- * replacing the banned call or import, or suppressing it with a scoped
+ * replacing the banned call, import, or effect, or suppressing it with a scoped
  * `policy-violation:<pack>/<rule-id>` token.
  */
 export interface PolicyViolationFinding {
@@ -2437,8 +2439,8 @@ rule_id: string
 kind: PolicyRuleKind
 /**
  * What matched: the written callee path for `banned-call` (e.g.
- * `cp.exec`), or the raw import specifier for `banned-import` (e.g.
- * `moment/locale/nl`).
+ * `cp.exec`), the raw import specifier for `banned-import` (e.g.
+ * `moment/locale/nl`), or `<effect>: <callee>` for `banned-effect`.
  */
 matched: string
 severity: PolicyViolationSeverity
@@ -7239,7 +7241,8 @@ boundary_coverage_violations?: BoundaryCoverageViolationFinding[]
  */
 boundary_call_violations?: BoundaryCallViolationFinding[]
 /**
- * Banned calls and banned imports matched by declarative rule packs
+ * Banned calls, imports, and catalogue-derived effects matched by
+ * declarative rule packs
  * (`rulePacks` config). Wrapped in [`PolicyViolationFinding`] so each
  * entry carries a typed `actions` array natively. Each finding carries
  * its effective per-rule severity.

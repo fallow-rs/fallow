@@ -528,16 +528,24 @@ fn run_policy_detector(
     graph: &ModuleGraph,
     modules: &[ModuleInfo],
     config: &ResolvedConfig,
+    declared_deps: &FxHashSet<String>,
     suppressions: &crate::suppress::SuppressionContext<'_>,
     line_offsets_by_file: &LineOffsetsMap<'_>,
 ) -> Vec<PolicyViolationFinding> {
     if config.rules.policy_violation == Severity::Off || config.rule_packs.is_empty() {
         return Vec::new();
     }
-    policy::find_policy_violations(graph, modules, config, suppressions, line_offsets_by_file)
-        .into_iter()
-        .map(PolicyViolationFinding::with_actions)
-        .collect()
+    policy::find_policy_violations(
+        graph,
+        modules,
+        config,
+        declared_deps,
+        suppressions,
+        line_offsets_by_file,
+    )
+    .into_iter()
+    .map(PolicyViolationFinding::with_actions)
+    .collect()
 }
 
 /// Run the boundary-coverage, boundary-call, and rule-pack policy detectors
@@ -547,6 +555,7 @@ fn run_boundary_aux_detectors(
     graph: &ModuleGraph,
     modules: &[ModuleInfo],
     config: &ResolvedConfig,
+    declared_deps: &FxHashSet<String>,
     suppressions: &crate::suppress::SuppressionContext<'_>,
     line_offsets_by_file: &LineOffsetsMap<'_>,
 ) -> (
@@ -569,7 +578,16 @@ fn run_boundary_aux_detectors(
                         line_offsets_by_file,
                     )
                 },
-                || run_policy_detector(graph, modules, config, suppressions, line_offsets_by_file),
+                || {
+                    run_policy_detector(
+                        graph,
+                        modules,
+                        config,
+                        declared_deps,
+                        suppressions,
+                        line_offsets_by_file,
+                    )
+                },
             )
         },
     )
@@ -1670,6 +1688,7 @@ fn run_boundary_cycle_and_usage_detectors(
                         input.graph,
                         input.modules,
                         input.config,
+                        input.declared_deps,
                         input.suppressions,
                         input.line_offsets_by_file,
                     )

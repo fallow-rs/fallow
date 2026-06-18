@@ -585,7 +585,7 @@
           "items": {
             "$ref": "#/definitions/PolicyViolationFinding"
           },
-          "description": "Banned calls and banned imports matched by declarative rule packs\n(`rulePacks` config). Wrapped in [`PolicyViolationFinding`] so each\nentry carries a typed `actions` array natively. Each finding carries\nits effective per-rule severity."
+          "description": "Banned calls, imports, and catalogue-derived effects matched by\ndeclarative rule packs\n(`rulePacks` config). Wrapped in [`PolicyViolationFinding`] so each\nentry carries a typed `actions` array natively. Each finding carries\nits effective per-rule severity."
         },
         "stale_suppressions": {
           "type": "array",
@@ -1046,7 +1046,7 @@
           "items": {
             "$ref": "#/definitions/PolicyViolationFinding"
           },
-          "description": "Banned calls and banned imports matched by declarative rule packs\n(`rulePacks` config). Wrapped in [`PolicyViolationFinding`] so each\nentry carries a typed `actions` array natively. Each finding carries\nits effective per-rule severity."
+          "description": "Banned calls, imports, and catalogue-derived effects matched by\ndeclarative rule packs\n(`rulePacks` config). Wrapped in [`PolicyViolationFinding`] so each\nentry carries a typed `actions` array natively. Each finding carries\nits effective per-rule severity."
         },
         "stale_suppressions": {
           "type": "array",
@@ -5134,7 +5134,7 @@
         },
         "policy_violations": {
           "type": "integer",
-          "description": "Banned calls and banned imports matched by declarative rule packs."
+          "description": "Banned calls, imports, and catalogue-derived effects matched by\ndeclarative rule packs."
         },
         "stale_suppressions": {
           "type": "integer",
@@ -5826,7 +5826,7 @@
           "items": {
             "$ref": "#/definitions/PolicyViolationFinding"
           },
-          "description": "Banned calls and banned imports matched by declarative rule packs\n(`rulePacks` config). Wrapped in [`PolicyViolationFinding`] so each\nentry carries a typed `actions` array natively. Each finding carries\nits effective per-rule severity."
+          "description": "Banned calls, imports, and catalogue-derived effects matched by\ndeclarative rule packs\n(`rulePacks` config). Wrapped in [`PolicyViolationFinding`] so each\nentry carries a typed `actions` array natively. Each finding carries\nits effective per-rule severity."
         },
         "stale_suppressions": {
           "type": "array",
@@ -12754,7 +12754,7 @@
         },
         "matched": {
           "type": "string",
-          "description": "What matched: the written callee path for `banned-call` (e.g.\n`cp.exec`), or the raw import specifier for `banned-import` (e.g.\n`moment/locale/nl`)."
+          "description": "What matched: the written callee path for `banned-call` (e.g.\n`cp.exec`), the raw import specifier for `banned-import` (e.g.\n`moment/locale/nl`), or `<effect>: <callee>` for `banned-effect`."
         },
         "severity": {
           "description": "Effective severity for this finding (per-rule `severity`, else the\n`rules.\"policy-violation\"` master).",
@@ -12797,7 +12797,7 @@
         "severity",
         "actions"
       ],
-      "description": "Wire-shape envelope for a [`PolicyViolation`] finding. Carries actions for\nreplacing the banned call or import, or suppressing it with a scoped\n`policy-violation:<pack>/<rule-id>` token."
+      "description": "Wire-shape envelope for a [`PolicyViolation`] finding. Carries actions for\nreplacing the banned call, import, or effect, or suppressing it with a scoped\n`policy-violation:<pack>/<rule-id>` token."
     },
     "PolicyRuleKind": {
       "oneOf": [
@@ -12810,6 +12810,11 @@
           "type": "string",
           "const": "banned-import",
           "description": "An import or re-export specifier matched a `banned-import` rule."
+        },
+        {
+          "type": "string",
+          "const": "banned-effect",
+          "description": "A call site matched a catalogue-derived `banned-effect` rule."
         }
       ],
       "description": "Which rule-pack rule kind produced a [`PolicyViolation`]."

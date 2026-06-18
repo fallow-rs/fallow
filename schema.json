@@ -235,7 +235,7 @@
       "default": []
     },
     "rulePacks": {
-      "description": "Paths to declarative rule-pack files (JSON or JSONC), relative to the\nproject root. Each pack declares `banned-call` / `banned-import` rules\nthat report as `policy-violation` findings. Packs are pure data: no\nproject code is executed. Invalid or missing packs fail config load.",
+      "description": "Paths to declarative rule-pack files (JSON or JSONC), relative to the\nproject root. Each pack declares `banned-call`, `banned-import`, or\n`banned-effect` rules that report as `policy-violation` findings. Packs\nare pure data: no project code is executed. Invalid or missing packs\nfail config load.",
       "type": "array",
       "items": {
         "type": "string"

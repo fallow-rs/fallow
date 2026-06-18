@@ -197,9 +197,10 @@ pub struct FallowConfig {
     pub plugins: Vec<String>,
 
     /// Paths to declarative rule-pack files (JSON or JSONC), relative to the
-    /// project root. Each pack declares `banned-call` / `banned-import` rules
-    /// that report as `policy-violation` findings. Packs are pure data: no
-    /// project code is executed. Invalid or missing packs fail config load.
+    /// project root. Each pack declares `banned-call`, `banned-import`, or
+    /// `banned-effect` rules that report as `policy-violation` findings. Packs
+    /// are pure data: no project code is executed. Invalid or missing packs
+    /// fail config load.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rule_packs: Vec<String>,
 

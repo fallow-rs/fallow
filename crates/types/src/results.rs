@@ -229,7 +229,8 @@ pub struct AnalysisResults {
     /// `actions` array natively.
     #[serde(default)]
     pub boundary_call_violations: Vec<BoundaryCallViolationFinding>,
-    /// Banned calls and banned imports matched by declarative rule packs
+    /// Banned calls, imports, and catalogue-derived effects matched by
+    /// declarative rule packs
     /// (`rulePacks` config). Wrapped in [`PolicyViolationFinding`] so each
     /// entry carries a typed `actions` array natively. Each finding carries
     /// its effective per-rule severity.
@@ -2744,6 +2745,8 @@ pub enum PolicyRuleKind {
     BannedCall,
     /// An import or re-export specifier matched a `banned-import` rule.
     BannedImport,
+    /// A call site matched a catalogue-derived `banned-effect` rule.
+    BannedEffect,
 }
 
 /// Effective severity of a single [`PolicyViolation`]. Per-rule `severity`
@@ -2760,15 +2763,15 @@ pub enum PolicyViolationSeverity {
     Warn,
 }
 
-/// A banned call or banned import matched by a declarative rule pack
-/// (`rulePacks` config). Banned-call findings report one entry per unique
-/// callee path per file (first occurrence wins, matching
-/// `boundary_call_violations`); banned-import findings anchor at each
-/// matching import or re-export declaration.
+/// A banned call, banned import, or banned effect matched by a declarative rule
+/// pack (`rulePacks` config). Banned-call and banned-effect findings report
+/// one entry per unique callee path per file (first occurrence wins, matching
+/// `boundary_call_violations`); banned-import findings anchor at each matching
+/// import or re-export declaration.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PolicyViolation {
-    /// The source file containing the banned call or import.
+    /// The source file containing the banned call, import, or effectful usage.
     #[serde(serialize_with = "serde_path::serialize")]
     pub path: PathBuf,
     /// 1-based line number of the call site or import declaration.
@@ -2783,8 +2786,8 @@ pub struct PolicyViolation {
     /// Which rule kind matched.
     pub kind: PolicyRuleKind,
     /// What matched: the written callee path for `banned-call` (e.g.
-    /// `cp.exec`), or the raw import specifier for `banned-import` (e.g.
-    /// `moment/locale/nl`).
+    /// `cp.exec`), the raw import specifier for `banned-import` (e.g.
+    /// `moment/locale/nl`), or `<effect>: <callee>` for `banned-effect`.
     pub matched: String,
     /// Effective severity for this finding (per-rule `severity`, else the
     /// `rules."policy-violation"` master).

@@ -9,6 +9,7 @@ import { devOnly } from "./tooling/dev";
 // A literal-only argument: callee capture is argument-blind, so banned-call
 // policy still fires here.
 execSync("echo hello");
+fetch("/api/status");
 
 export const stamp: Moment = moment();
 export const zoned = tz;

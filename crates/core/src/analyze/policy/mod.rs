@@ -1,6 +1,7 @@
 use rustc_hash::FxHashMap;
+use rustc_hash::FxHashSet;
 
-use fallow_config::{ResolvedConfig, RulePackRule, RulePackRuleKind, Severity};
+use fallow_config::{EffectKind, ResolvedConfig, RulePackRule, RulePackRuleKind, Severity};
 use fallow_types::extract::ModuleInfo;
 use fallow_types::results::{PolicyRuleKind, PolicyViolation, PolicyViolationSeverity};
 
@@ -9,7 +10,7 @@ use crate::graph::ModuleGraph;
 use crate::suppress::SuppressionContext;
 
 use super::boundary_calls::canonical_callee_path;
-use super::security::CalleePattern;
+use super::security::{CalleePattern, catalogue_matchers};
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 
 /// One rule-pack rule with its matchers compiled for evaluation.
@@ -18,6 +19,7 @@ struct CompiledRule<'a> {
     rule: &'a RulePackRule,
     /// Parsed callee patterns (`banned-call` rules only).
     callee_patterns: Vec<CalleePattern>,
+    effects: FxHashSet<EffectKind>,
     files: Vec<globset::GlobMatcher>,
     exclude: Vec<globset::GlobMatcher>,
 }
@@ -51,10 +53,21 @@ impl CompiledRule<'_> {
                 .any(|pattern| pattern.matches(&canonical))
         })
     }
+
+    fn matches_effect(
+        &self,
+        module: &ModuleInfo,
+        callee_path: &str,
+        declared_deps: &FxHashSet<String>,
+    ) -> Option<EffectKind> {
+        effect_for_callee(module, callee_path, declared_deps)
+            .filter(|effect| self.effects.contains(effect))
+    }
 }
 
-/// Detect banned calls and banned imports declared by the configured rule
-/// packs (`rulePacks`), reporting one `policy-violation` finding per match.
+/// Detect banned calls, imports, and catalogue-derived effects declared by the
+/// configured rule packs (`rulePacks`), reporting one `policy-violation`
+/// finding per match.
 ///
 /// Severity model: each file's master severity is
 /// `resolve_rules_for_path(...).policy_violation` (so per-file `overrides`
@@ -74,13 +87,15 @@ impl CompiledRule<'_> {
 ///
 /// Multi-rule matching is intentionally asymmetric: for `banned-call` the
 /// first applicable rule in config order wins per callee (mirroring the
-/// boundary forbidden-call behavior), while every `banned-import` rule that
-/// matches a specifier emits its own finding, because each rule carries its
-/// own message and severity.
+/// boundary forbidden-call behavior). `banned-effect` follows the same first
+/// applicable rule policy over catalogue-derived effects. Every
+/// `banned-import` rule that matches a specifier emits its own finding, because
+/// each rule carries its own message and severity.
 pub fn find_policy_violations(
     graph: &ModuleGraph,
     modules: &[ModuleInfo],
     config: &ResolvedConfig,
+    declared_deps: &FxHashSet<String>,
     suppressions: &SuppressionContext<'_>,
     line_offsets_by_file: &LineOffsetsMap<'_>,
 ) -> Vec<PolicyViolation> {
@@ -137,6 +152,17 @@ pub fn find_policy_violations(
             module,
             node,
             master,
+            declared_deps,
+            suppressions,
+            line_offsets_by_file,
+            violations: &mut violations,
+        });
+        collect_banned_effects(&mut PolicyCollectionInput {
+            in_scope: &in_scope,
+            module,
+            node,
+            master,
+            declared_deps,
             suppressions,
             line_offsets_by_file,
             violations: &mut violations,
@@ -146,6 +172,7 @@ pub fn find_policy_violations(
             module,
             node,
             master,
+            declared_deps,
             suppressions,
             line_offsets_by_file,
             violations: &mut violations,
@@ -182,6 +209,7 @@ fn compile_rules(config: &ResolvedConfig) -> Vec<CompiledRule<'_>> {
                 .iter()
                 .filter_map(|raw| CalleePattern::parse(raw))
                 .collect();
+            let effects = rule.effects.iter().copied().collect();
             let compile = |patterns: &[String]| {
                 patterns
                     .iter()
@@ -193,6 +221,7 @@ fn compile_rules(config: &ResolvedConfig) -> Vec<CompiledRule<'_>> {
                 pack: pack.name.as_str(),
                 rule,
                 callee_patterns,
+                effects,
                 files: compile(&rule.files),
                 exclude: compile(&rule.exclude),
             });
@@ -208,6 +237,7 @@ struct PolicyCollectionInput<'a> {
     module: &'a ModuleInfo,
     node: &'a crate::graph::ModuleNode,
     master: Severity,
+    declared_deps: &'a FxHashSet<String>,
     suppressions: &'a SuppressionContext<'a>,
     line_offsets_by_file: &'a LineOffsetsMap<'a>,
     violations: &'a mut Vec<PolicyViolation>,
@@ -276,6 +306,46 @@ fn collect_banned_imports(input: &mut PolicyCollectionInput<'_>) {
     }
 }
 
+fn collect_banned_effects(input: &mut PolicyCollectionInput<'_>) {
+    for callee_use in &input.module.callee_uses {
+        let matched = input.in_scope.iter().find_map(|(_, rule)| {
+            if rule.rule.kind != RulePackRuleKind::BannedEffect {
+                return None;
+            }
+            let severity = wire_severity(rule.effective_severity(input.master))?;
+            rule.matches_effect(input.module, &callee_use.callee_path, input.declared_deps)
+                .map(|effect| (rule, severity, effect))
+        });
+        let Some((rule, severity, effect)) = matched else {
+            continue;
+        };
+        let (line, col) = byte_offset_to_line_col(
+            input.line_offsets_by_file,
+            input.node.file_id,
+            callee_use.span_start,
+        );
+        if input.suppressions.is_policy_suppressed(
+            input.node.file_id,
+            line,
+            rule.pack,
+            &rule.rule.id,
+        ) {
+            continue;
+        }
+        input.violations.push(PolicyViolation {
+            path: input.node.path.clone(),
+            line,
+            col,
+            pack: rule.pack.to_owned(),
+            rule_id: rule.rule.id.clone(),
+            kind: PolicyRuleKind::BannedEffect,
+            matched: format!("{}: {}", effect.as_str(), callee_use.callee_path),
+            severity,
+            message: rule.rule.message.clone(),
+        });
+    }
+}
+
 /// Emit one finding per unique callee path matched by the first applicable
 /// `banned-call` rule (config order), mirroring the boundary forbidden-call
 /// first-pattern-wins behavior.
@@ -317,6 +387,87 @@ fn collect_banned_calls(input: &mut PolicyCollectionInput<'_>) {
             message: rule.rule.message.clone(),
         });
     }
+}
+
+fn effect_for_callee(
+    module: &ModuleInfo,
+    callee_path: &str,
+    declared_deps: &FxHashSet<String>,
+) -> Option<EffectKind> {
+    let written = catalogue_matchers()
+        .iter()
+        .find(|matcher| matcher_matches_callee(matcher, module, callee_path, declared_deps))
+        .map(|matcher| matcher.effect);
+    if written.is_some() {
+        return written;
+    }
+    let canonical = canonical_callee_path(module, callee_path)?;
+    catalogue_matchers()
+        .iter()
+        .find(|matcher| matcher_matches_callee(matcher, module, &canonical, declared_deps))
+        .map(|matcher| matcher.effect)
+}
+
+fn matcher_matches_callee(
+    matcher: &super::security::Matcher,
+    module: &ModuleInfo,
+    callee_path: &str,
+    declared_deps: &FxHashSet<String>,
+) -> bool {
+    matcher.enabler_satisfied(declared_deps)
+        && provenance_satisfied(matcher, module, callee_path)
+        && matcher.first_matching_pattern(callee_path).is_some()
+}
+
+fn provenance_satisfied(
+    matcher: &super::security::Matcher,
+    module: &ModuleInfo,
+    callee_path: &str,
+) -> bool {
+    let Some(spec) = &matcher.import_provenance else {
+        return true;
+    };
+    let leading_ident = callee_path.split('.').next().unwrap_or(callee_path);
+    module.imports.iter().any(|imp| {
+        import_source_matches(&imp.source, spec)
+            && (!requires_binding_trace(matcher) || imp.local_name == leading_ident)
+    }) || module.require_calls.iter().any(|call| {
+        import_source_matches(&call.source, spec)
+            && (!requires_binding_trace(matcher)
+                || call.local_name.as_deref() == Some(leading_ident)
+                || call
+                    .destructured_names
+                    .iter()
+                    .any(|name| name == leading_ident))
+    })
+}
+
+fn requires_binding_trace(matcher: &super::security::Matcher) -> bool {
+    matches!(
+        matcher.id.as_str(),
+        "command-injection"
+            | "permissive-cors"
+            | "electron-unsafe-webpreferences"
+            | "insecure-temp-file"
+            | "jwt-alg-none"
+            | "jwt-verify-missing-algorithms"
+            | "tls-validation-disabled"
+            | "mysql-multiple-statements"
+            | "world-writable-permission"
+    ) || (matcher.id == "weak-crypto" && matcher.is_literal_aware())
+}
+
+fn import_source_matches(source: &str, spec: &str) -> bool {
+    fn strip_node_prefix(value: &str) -> &str {
+        value.strip_prefix("node:").unwrap_or(value)
+    }
+
+    let source = strip_node_prefix(source);
+    let spec = strip_node_prefix(spec);
+    source == spec
+        || source
+            .strip_prefix(spec)
+            .is_some_and(|rest| rest.starts_with('/'))
 }
 
 /// Segment-aware raw-specifier match: the pattern matches exactly or at a

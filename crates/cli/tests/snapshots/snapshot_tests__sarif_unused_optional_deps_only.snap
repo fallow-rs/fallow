@@ -276,10 +276,10 @@ expression: redact_sarif_version(&json_str)
             {
               "id": "fallow/policy-violation",
               "shortDescription": {
-                "text": "Banned call or import matched a rule-pack rule"
+                "text": "Banned usage matched a rule-pack rule"
               },
               "fullDescription": {
-                "text": "A call site or import matched a banned-call or banned-import rule from a configured rule pack (the rulePacks config key). Packs are pure declarative data; the check is syntactic and does not follow aliased or re-bound callees, and import matching uses the raw specifier. Replace the banned usage per the rule's message, scope the rule with files/exclude globs, or adjust its severity."
+                "text": "A call site, import, or catalogue-derived effect matched a rule from a configured rule pack (the rulePacks config key). Packs are pure declarative data; the check is syntactic, call and effect matching use written plus import-resolved canonical callees, and import matching uses the raw specifier. Replace the banned usage per the rule's message, scope the rule with files/exclude globs, or adjust its severity."
               },
               "helpUri": "https://docs.fallow.tools/explanations/dead-code#policy-violations",
               "defaultConfiguration": {

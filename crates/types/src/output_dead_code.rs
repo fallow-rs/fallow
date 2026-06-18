@@ -566,7 +566,7 @@ impl BoundaryCallViolationFinding {
 }
 
 /// Wire-shape envelope for a [`PolicyViolation`] finding. Carries actions for
-/// replacing the banned call or import, or suppressing it with a scoped
+/// replacing the banned call, import, or effect, or suppressing it with a scoped
 /// `policy-violation:<pack>/<rule-id>` token.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -589,6 +589,7 @@ impl PolicyViolationFinding {
         let what = match violation.kind {
             crate::results::PolicyRuleKind::BannedCall => "call",
             crate::results::PolicyRuleKind::BannedImport => "import",
+            crate::results::PolicyRuleKind::BannedEffect => "effect",
         };
         let description = match &violation.message {
             Some(message) => format!("Replace the `{}` {what}: {message}", violation.matched),

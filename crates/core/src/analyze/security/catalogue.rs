@@ -12,6 +12,7 @@
 //! Matchers default to non-literal arguments. A row can opt into narrowly
 //! captured literal or context predicates when the literal itself is the signal.
 
+use fallow_config::EffectKind;
 use fallow_types::extract::{SinkArgKind, SinkLiteralValue, SinkObjectProperty, SinkShape};
 use rustc_hash::FxHashSet;
 
@@ -54,6 +55,7 @@ struct RawMatcher {
     id: String,
     cwe: u32,
     title: String,
+    effect: EffectKind,
     /// Kebab-case shape string, validated into [`SinkShape`].
     sink_shape: String,
     callee_patterns: Vec<String>,
@@ -285,6 +287,7 @@ pub struct Matcher {
     pub id: String,
     pub cwe: u32,
     pub title: String,
+    pub effect: EffectKind,
     pub sink_shape: SinkShape,
     pub callee_patterns: Vec<CalleePattern>,
     pub arg_index: u32,
@@ -798,6 +801,7 @@ fn parse_catalogue(src: &str) -> Result<Catalogue, String> {
             id: entry.id,
             cwe: entry.cwe,
             title: entry.title,
+            effect: entry.effect,
             sink_shape,
             callee_patterns,
             arg_index: entry.arg_index,
@@ -1046,6 +1050,7 @@ mod tests {
 id = ""
 cwe = 79
 title = "x"
+effect = "unknown"
 sink_shape = "member-assign"
 callee_patterns = ["*.innerHTML"]
 arg_index = 0
@@ -1062,6 +1067,7 @@ evidence_template = "x"
 id = "x"
 cwe = 0
 title = "x"
+effect = "unknown"
 sink_shape = "member-assign"
 callee_patterns = ["*.innerHTML"]
 arg_index = 0
@@ -1072,12 +1078,29 @@ evidence_template = "x"
     }
 
     #[test]
+    fn parse_rejects_missing_effect() {
+        let toml = r#"
+[[matcher]]
+id = "x"
+cwe = 79
+title = "x"
+sink_shape = "member-assign"
+callee_patterns = ["*.innerHTML"]
+arg_index = 0
+evidence_template = "x"
+"#;
+        let err = parse_catalogue(toml).unwrap_err();
+        assert!(err.contains("missing field `effect`"), "got: {err}");
+    }
+
+    #[test]
     fn parse_rejects_unknown_sink_shape() {
         let toml = r#"
 [[matcher]]
 id = "x"
 cwe = 79
 title = "x"
+effect = "unknown"
 sink_shape = "not-a-shape"
 callee_patterns = ["*.innerHTML"]
 arg_index = 0
@@ -1094,6 +1117,7 @@ evidence_template = "x"
 id = "x"
 cwe = 79
 title = "x"
+effect = "unknown"
 sink_shape = "member-assign"
 callee_patterns = []
 arg_index = 0
@@ -1110,6 +1134,7 @@ evidence_template = "x"
 id = "x"
 cwe = 79
 title = "x"
+effect = "unknown"
 sink_shape = "member-assign"
 callee_patterns = ["   "]
 arg_index = 0
@@ -1126,6 +1151,7 @@ evidence_template = "x"
 id = "x"
 cwe = 79
 title = "x"
+effect = "unknown"
 sink_shape = "member-assign"
 callee_patterns = ["*.innerHTML"]
 arg_index = 0
@@ -1289,6 +1315,7 @@ evidence_template = "   "
 id = "x"
 cwe = 732
 title = "x"
+effect = "unknown"
 sink_shape = "member-call"
 callee_patterns = ["fs.chmod"]
 arg_index = 0
@@ -1331,6 +1358,7 @@ evidence_template = "x"
 id = "x"
 cwe = 89
 title = "x"
+effect = "unknown"
 sink_shape = "member-call"
 callee_patterns = ["*.query"]
 arg_index = 0
@@ -1422,6 +1450,7 @@ evidence_template = "x"
 id = "x"
 cwe = 79
 title = "x"
+effect = "unknown"
 sink_shape = "member-call"
 callee_patterns = ["*.html"]
 arg_index = 0
@@ -1565,6 +1594,7 @@ evidence_template = "x"
 id = "x"
 cwe = 79
 title = "x"
+effect = "unknown"
 sink_shape = "member-assign"
 callee_patterns = ["*.innerHTML"]
 arg_index = 0
@@ -1643,6 +1673,7 @@ receiver_allowlist = ["req", "  "]
 id = "x"
 cwe = 79
 title = "x"
+effect = "unknown"
 sink_shape = "member-assign"
 callee_patterns = ["*.innerHTML"]
 arg_index = 0
@@ -1664,6 +1695,7 @@ path_patterns = []
 id = "x"
 cwe = 89
 title = "x"
+effect = "unknown"
 sink_shape = "member-call"
 callee_patterns = ["*.query"]
 arg_index = 0

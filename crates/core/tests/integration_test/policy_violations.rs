@@ -26,7 +26,7 @@ fn fixture_config(rule_packs: Vec<String>) -> fallow_config::ResolvedConfig {
 }
 
 #[test]
-fn rule_pack_reports_banned_calls_and_imports_end_to_end() {
+fn rule_pack_reports_banned_calls_imports_and_effects_end_to_end() {
     let config = fixture_config(vec!["packs/team-policy.jsonc".to_string()]);
     assert_eq!(config.rule_packs.len(), 1, "pack should load from disk");
 
@@ -81,9 +81,22 @@ fn rule_pack_reports_banned_calls_and_imports_end_to_end() {
             .all(|entry| entry.3 == PolicyViolationSeverity::Warn)
     );
 
+    let banned_effects: Vec<_> = by_rule
+        .iter()
+        .filter(|(rule, ..)| *rule == "no-network")
+        .collect();
+    assert_eq!(
+        banned_effects.len(),
+        1,
+        "exactly one banned-effect finding expected: {by_rule:?}"
+    );
+    assert_eq!(banned_effects[0].1, "network: fetch");
+    assert_eq!(banned_effects[0].2, PolicyRuleKind::BannedEffect);
+    assert_eq!(banned_effects[0].3, PolicyViolationSeverity::Warn);
+
     // Nothing else fires: the suppressed call is consumed (not stale) and the
     // tooling file is excluded by the rule's glob.
-    assert_eq!(results.policy_violations.len(), 3, "{by_rule:?}");
+    assert_eq!(results.policy_violations.len(), 4, "{by_rule:?}");
     assert!(
         results
             .stale_suppressions
@@ -94,7 +107,7 @@ fn rule_pack_reports_banned_calls_and_imports_end_to_end() {
     );
 
     // Counted toward the run total.
-    assert!(results.total_issues() >= 3);
+    assert!(results.total_issues() >= 4);
 }
 
 #[test]

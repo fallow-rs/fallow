@@ -77,7 +77,7 @@ Common global flags for this command: [`--format`](#global-flags), [`--quiet`](#
 | `--circular-deps` | Circular dependencies |
 | `--re-export-cycles` | Re-export cycles (`kind: multi-node` for barrel files re-exporting from each other in a loop, `kind: self-loop` for a barrel re-exporting from itself). File-scoped finding; chain propagation through the loop is a no-op so imports may silently come up empty. Distinct from `--circular-deps` (runtime cycles). |
 | `--boundary-violations` | Boundary violations (imports crossing architecture zone boundaries, unzoned source files when `boundaries.coverage.requireAllFiles` is set, and forbidden calls from `boundaries.calls.forbidden`; suppression token `boundary-violation`, with `boundary-call-violation` and `boundary-call-violations` accepted as aliases for the whole family) |
-| `--policy-violations` | Rule-pack policy violations (banned calls and banned imports declared via the `rulePacks` config key) |
+| `--policy-violations` | Rule-pack policy violations (banned calls, imports, and catalogue-derived effects declared via the `rulePacks` config key) |
 | `--stale-suppressions` | Stale suppression comments or `@expected-unused` JSDoc tags |
 | `--unused-catalog-entries` | Unused pnpm catalog entries |
 | `--empty-catalog-groups` | Empty named pnpm catalog groups |

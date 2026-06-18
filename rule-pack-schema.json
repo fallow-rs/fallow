@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "RulePackDef",
-  "description": "A declarative rule pack loaded from a standalone JSON or JSONC file listed\nin the `rulePacks` config key.\n\nRule packs are pure data: loading a pack never executes project code. They\nencode project-specific policy (banned calls, banned imports) evaluated\nover fallow's static extraction data, reporting as `policy-violation`\nfindings.\n\n```jsonc\n{\n  \"$schema\": \"https://raw.githubusercontent.com/fallow-rs/fallow/main/rule-pack-schema.json\",\n  \"version\": 1,\n  \"name\": \"team-policy\",\n  \"description\": \"House rules for the platform team\",\n  \"rules\": [\n    {\n      \"id\": \"no-child-process\",\n      \"kind\": \"banned-call\",\n      \"callees\": [\"child_process.*\"],\n      \"message\": \"Use the sandboxed runner instead.\",\n      \"severity\": \"error\"\n    },\n    {\n      \"id\": \"no-moment\",\n      \"kind\": \"banned-import\",\n      \"specifiers\": [\"moment\"],\n      \"message\": \"Use date-fns.\"\n    }\n  ]\n}\n```",
+  "description": "A declarative rule pack loaded from a standalone JSON or JSONC file listed\nin the `rulePacks` config key.\n\nRule packs are pure data: loading a pack never executes project code. They\nencode project-specific policy (banned calls, banned imports, and\ncatalogue-backed banned effects) evaluated over fallow's static extraction\ndata, reporting as `policy-violation`\nfindings.\n\n```jsonc\n{\n  \"$schema\": \"https://raw.githubusercontent.com/fallow-rs/fallow/main/rule-pack-schema.json\",\n  \"version\": 1,\n  \"name\": \"team-policy\",\n  \"description\": \"House rules for the platform team\",\n  \"rules\": [\n    {\n      \"id\": \"no-child-process\",\n      \"kind\": \"banned-call\",\n      \"callees\": [\"child_process.*\"],\n      \"message\": \"Use the sandboxed runner instead.\",\n      \"severity\": \"error\"\n    },\n    {\n      \"id\": \"no-network\",\n      \"kind\": \"banned-effect\",\n      \"effects\": [\"network\"],\n      \"message\": \"Keep this package side-effect free.\"\n    },\n    {\n      \"id\": \"no-moment\",\n      \"kind\": \"banned-import\",\n      \"specifiers\": [\"moment\"],\n      \"message\": \"Use date-fns.\"\n    }\n  ]\n}\n```",
   "type": "object",
   "properties": {
     "version": {
@@ -37,7 +37,7 @@
   ],
   "$defs": {
     "RulePackRule": {
-      "description": "One declarative policy rule inside a rule pack.\n\n`callees` applies only to `banned-call` rules; `specifiers` and\n`ignoreTypeOnly` apply only to `banned-import` rules. Setting a field on\nthe wrong kind is a load error (fail loud, never silently ignore policy).",
+      "description": "One declarative policy rule inside a rule pack.\n\n`callees` applies only to `banned-call` rules; `specifiers` and\n`ignoreTypeOnly` apply only to `banned-import` rules; `effects` applies\nonly to `banned-effect` rules. Setting a field on the wrong kind is a load\nerror (fail loud, never silently ignore policy).",
       "type": "object",
       "properties": {
         "id": {
@@ -60,6 +60,13 @@
           "type": "array",
           "items": {
             "type": "string"
+          }
+        },
+        "effects": {
+          "description": "Effect classes to ban (`banned-effect` only). Effects are derived from\n`security_matchers.toml` catalogue rows and matched against captured\ncall sites after import-resolution canonicalization.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EffectKind"
           }
         },
         "ignoreTypeOnly": {
@@ -117,7 +124,31 @@
           "description": "Ban imports and re-exports whose raw specifier matches one of\n`specifiers`.",
           "type": "string",
           "const": "banned-import"
+        },
+        {
+          "description": "Ban call sites whose catalogue-derived effect matches one of `effects`.",
+          "type": "string",
+          "const": "banned-effect"
         }
+      ]
+    },
+    "EffectKind": {
+      "description": "Internal side-effect taxonomy derived from security catalogue rows.",
+      "type": "string",
+      "enum": [
+        "pure",
+        "read",
+        "write",
+        "network",
+        "storage",
+        "process",
+        "shell",
+        "crypto",
+        "randomness",
+        "dom",
+        "database",
+        "framework-callback",
+        "unknown"
       ]
     },
     "Severity": {

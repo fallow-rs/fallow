@@ -1216,7 +1216,7 @@ fn sarif_boundary_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
         ),
         (
             "fallow/policy-violation",
-            "Banned call or import matched a rule-pack rule",
+            "Banned usage matched a rule-pack rule",
             rules.policy_violation,
         ),
     ]

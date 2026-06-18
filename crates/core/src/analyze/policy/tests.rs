@@ -2,10 +2,12 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::PathBuf;
 
 use fallow_config::{
-    ConfigOverride, FallowConfig, OutputFormat, PartialRulesConfig, ResolvedConfig, RulePackDef,
-    RulePackRule, RulePackRuleKind, RulesConfig, Severity,
+    ConfigOverride, EffectKind, FallowConfig, OutputFormat, PartialRulesConfig, ResolvedConfig,
+    RulePackDef, RulePackRule, RulePackRuleKind, RulesConfig, Severity,
 };
-use fallow_types::extract::{CalleeUse, ImportInfo, ImportedName, ModuleInfo, ReExportInfo};
+use fallow_types::extract::{
+    CalleeUse, ImportInfo, ImportedName, ModuleInfo, ReExportInfo, RequireCallInfo,
+};
 use fallow_types::results::{PolicyRuleKind, PolicyViolationSeverity, SuppressionOrigin};
 
 use crate::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
@@ -13,7 +15,7 @@ use crate::graph::ModuleGraph;
 use crate::resolve::ResolvedModule;
 use crate::suppress::SuppressionContext;
 
-use super::find_policy_violations;
+use super::find_policy_violations as find_policy_violations_raw;
 
 fn rule(id: &str, kind: RulePackRuleKind) -> RulePackRule {
     RulePackRule {
@@ -21,6 +23,7 @@ fn rule(id: &str, kind: RulePackRuleKind) -> RulePackRule {
         kind,
         callees: Vec::new(),
         specifiers: Vec::new(),
+        effects: Vec::new(),
         ignore_type_only: false,
         files: Vec::new(),
         exclude: Vec::new(),
@@ -40,6 +43,13 @@ fn banned_import(id: &str, specifiers: &[&str]) -> RulePackRule {
     RulePackRule {
         specifiers: specifiers.iter().map(ToString::to_string).collect(),
         ..rule(id, RulePackRuleKind::BannedImport)
+    }
+}
+
+fn banned_effect(id: &str, effects: &[EffectKind]) -> RulePackRule {
+    RulePackRule {
+        effects: effects.to_vec(),
+        ..rule(id, RulePackRuleKind::BannedEffect)
     }
 }
 
@@ -204,6 +214,33 @@ fn import(source: &str, imported: ImportedName, local: &str, is_type_only: bool)
     }
 }
 
+fn require_call(source: &str, local: Option<&str>, destructured: &[&str]) -> RequireCallInfo {
+    RequireCallInfo {
+        source: source.to_string(),
+        span: oxc_span::Span::new(0, 10),
+        source_span: oxc_span::Span::new(0, 10),
+        destructured_names: destructured.iter().map(ToString::to_string).collect(),
+        local_name: local.map(ToString::to_string),
+    }
+}
+
+fn find_policy_violations(
+    graph: &ModuleGraph,
+    modules: &[ModuleInfo],
+    config: &ResolvedConfig,
+    suppressions: &SuppressionContext<'_>,
+    line_offsets_by_file: &super::super::LineOffsetsMap<'_>,
+) -> Vec<fallow_types::results::PolicyViolation> {
+    find_policy_violations_raw(
+        graph,
+        modules,
+        config,
+        &FxHashSet::default(),
+        suppressions,
+        line_offsets_by_file,
+    )
+}
+
 #[test]
 fn banned_call_fires_on_written_path_with_line_col() {
     let root = PathBuf::from("/tmp/policy-test");
@@ -261,6 +298,146 @@ fn banned_call_matches_import_resolved_canonical_path() {
         find_policy_violations(&graph, &modules, &config, &suppressions, &line_offsets);
     assert_eq!(violations.len(), 1);
     assert_eq!(violations[0].matched, "execSync");
+}
+
+#[test]
+fn banned_effect_matches_catalogue_effect() {
+    let root = PathBuf::from("/tmp/policy-test");
+    let config = make_config(
+        root.clone(),
+        vec![pack(vec![banned_effect(
+            "no-network",
+            &[EffectKind::Network],
+        )])],
+        Severity::Warn,
+    );
+    let graph = build_graph(&root, &["src/app.ts"]);
+    let modules = vec![module(0, vec![callee("fetch", 0)], Vec::new())];
+    let suppressions = SuppressionContext::empty();
+    let line_offsets = FxHashMap::default();
+
+    let violations =
+        find_policy_violations(&graph, &modules, &config, &suppressions, &line_offsets);
+
+    assert_eq!(violations.len(), 1);
+    assert_eq!(violations[0].kind, PolicyRuleKind::BannedEffect);
+    assert_eq!(violations[0].matched, "network: fetch");
+}
+
+#[test]
+fn banned_effect_honors_catalogue_enabler() {
+    let root = PathBuf::from("/tmp/policy-test");
+    let config = make_config(
+        root.clone(),
+        vec![pack(vec![banned_effect("no-dom", &[EffectKind::Dom])])],
+        Severity::Warn,
+    );
+    let graph = build_graph(&root, &["src/app.ts"]);
+    let modules = vec![module(
+        0,
+        vec![callee("BrowserWindow", 0)],
+        vec![import(
+            "electron",
+            ImportedName::Named("BrowserWindow".to_string()),
+            "BrowserWindow",
+            false,
+        )],
+    )];
+    let suppressions = SuppressionContext::empty();
+    let line_offsets = FxHashMap::default();
+
+    let without_electron = find_policy_violations_raw(
+        &graph,
+        &modules,
+        &config,
+        &FxHashSet::default(),
+        &suppressions,
+        &line_offsets,
+    );
+    assert!(without_electron.is_empty());
+
+    let declared_deps = FxHashSet::from_iter(["electron".to_string()]);
+    let with_electron = find_policy_violations_raw(
+        &graph,
+        &modules,
+        &config,
+        &declared_deps,
+        &suppressions,
+        &line_offsets,
+    );
+    assert_eq!(with_electron.len(), 1);
+    assert_eq!(with_electron[0].matched, "dom: BrowserWindow");
+}
+
+#[test]
+fn banned_effect_honors_catalogue_import_provenance() {
+    let root = PathBuf::from("/tmp/policy-test");
+    let config = make_config(
+        root.clone(),
+        vec![pack(vec![banned_effect(
+            "no-crypto",
+            &[EffectKind::Crypto],
+        )])],
+        Severity::Warn,
+    );
+    let graph = build_graph(&root, &["src/app.ts"]);
+    let suppressions = SuppressionContext::empty();
+    let line_offsets = FxHashMap::default();
+
+    let crypto_module = module(
+        0,
+        vec![callee("crypto.verify", 0)],
+        vec![import(
+            "node:crypto",
+            ImportedName::Namespace,
+            "crypto",
+            false,
+        )],
+    );
+    let crypto_violations = find_policy_violations(
+        &graph,
+        &[crypto_module],
+        &config,
+        &suppressions,
+        &line_offsets,
+    );
+    assert!(crypto_violations.is_empty());
+
+    let jwt_module = module(
+        0,
+        vec![callee("jwt.verify", 0)],
+        vec![import("jsonwebtoken", ImportedName::Default, "jwt", false)],
+    );
+    let jwt_violations =
+        find_policy_violations(&graph, &[jwt_module], &config, &suppressions, &line_offsets);
+    assert_eq!(jwt_violations.len(), 1);
+    assert_eq!(jwt_violations[0].matched, "crypto: jwt.verify");
+}
+
+#[test]
+fn banned_effect_honors_commonjs_import_provenance() {
+    let root = PathBuf::from("/tmp/policy-test");
+    let config = make_config(
+        root.clone(),
+        vec![pack(vec![banned_effect(
+            "no-crypto",
+            &[EffectKind::Crypto],
+        )])],
+        Severity::Warn,
+    );
+    let graph = build_graph(&root, &["src/app.cjs"]);
+    let suppressions = SuppressionContext::empty();
+    let line_offsets = FxHashMap::default();
+    let mut module = module(0, vec![callee("crypto.createHash", 0)], Vec::new());
+    module
+        .require_calls
+        .push(require_call("node:crypto", Some("crypto"), &[]));
+
+    let violations =
+        find_policy_violations(&graph, &[module], &config, &suppressions, &line_offsets);
+
+    assert_eq!(violations.len(), 1);
+    assert_eq!(violations[0].matched, "crypto: crypto.createHash");
 }
 
 #[test]

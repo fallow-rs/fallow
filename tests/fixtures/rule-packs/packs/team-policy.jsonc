@@ -18,6 +18,12 @@
       "specifiers": ["moment"],
       "ignoreTypeOnly": true,
       "message": "Use date-fns."
+    },
+    {
+      "id": "no-network",
+      "kind": "banned-effect",
+      "effects": ["network"],
+      "message": "Keep this fixture side-effect free."
     }
   ]
 }

@@ -223,8 +223,8 @@ pub const CHECK_RULES: &[RuleDef] = &[
         id: "fallow/policy-violation",
         category: "Policy",
         name: "Policy Violation",
-        short: "Banned call or import matched a rule-pack rule",
-        full: "A call site or import matched a banned-call or banned-import rule from a configured rule pack (the rulePacks config key). Packs are pure declarative data; the check is syntactic and does not follow aliased or re-bound callees, and import matching uses the raw specifier. Replace the banned usage per the rule's message, scope the rule with files/exclude globs, or adjust its severity.",
+        short: "Banned usage matched a rule-pack rule",
+        full: "A call site, import, or catalogue-derived effect matched a rule from a configured rule pack (the rulePacks config key). Packs are pure declarative data; the check is syntactic, call and effect matching use written plus import-resolved canonical callees, and import matching uses the raw specifier. Replace the banned usage per the rule's message, scope the rule with files/exclude globs, or adjust its severity.",
         docs_path: "explanations/dead-code#policy-violations",
     },
     RuleDef {
@@ -751,7 +751,7 @@ fn architecture_rule_guide(id: &str) -> Option<RuleGuide> {
         },
         "fallow/policy-violation" => RuleGuide {
             example: "src/app.ts imports moment while a rule pack bans the moment specifier with the message 'Use date-fns.'",
-            how_to_fix: "Replace the banned call or import with the alternative named in the rule's message. To waive one rule, use `// fallow-ignore-next-line policy-violation:<pack>/<rule-id>` or the file-level form. Use bare `policy-violation` only when you intend to suppress every rule-pack finding at that scope.",
+            how_to_fix: "Replace the banned call, import, or effectful usage with the alternative named in the rule's message. To waive one rule, use `// fallow-ignore-next-line policy-violation:<pack>/<rule-id>` or the file-level form. Use bare `policy-violation` only when you intend to suppress every rule-pack finding at that scope.",
         },
         "fallow/stale-suppression" => RuleGuide {
             example: "// fallow-ignore-next-line unused-export remains above an export that is now used.",
