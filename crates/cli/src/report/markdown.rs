@@ -950,8 +950,6 @@ pub(super) fn print_duplication_markdown(report: &DuplicationReport, root: &Path
 /// Build markdown output for duplication results.
 #[must_use]
 pub fn build_duplication_markdown(report: &DuplicationReport, root: &Path) -> String {
-    let rel = |p: &Path| normalize_uri(&relative_path(p, root).display().to_string());
-
     let mut out = String::new();
 
     if report.clone_groups.is_empty() {
@@ -968,6 +966,24 @@ pub fn build_duplication_markdown(report: &DuplicationReport, root: &Path) -> St
         stats.duplication_percentage,
     );
 
+    write_duplication_groups(&mut out, report, root);
+    write_duplication_families(&mut out, report, root);
+
+    let _ = writeln!(
+        out,
+        "**Summary:** {} duplicated lines ({:.1}%) across {} file{}",
+        stats.duplicated_lines,
+        stats.duplication_percentage,
+        stats.files_with_clones,
+        plural(stats.files_with_clones),
+    );
+
+    out
+}
+
+/// Write the clone-groups subsection of the duplication markdown.
+fn write_duplication_groups(out: &mut String, report: &DuplicationReport, root: &Path) {
+    let rel = |p: &Path| normalize_uri(&relative_path(p, root).display().to_string());
     out.push_str("### Duplicates\n\n");
     for (i, group) in report.clone_groups.iter().enumerate() {
         let instance_count = group.instances.len();
@@ -988,46 +1004,40 @@ pub fn build_duplication_markdown(report: &DuplicationReport, root: &Path) -> St
         }
         out.push('\n');
     }
+}
 
-    if !report.clone_families.is_empty() {
-        out.push_str("### Clone Families\n\n");
-        for (i, family) in report.clone_families.iter().enumerate() {
-            let file_names: Vec<_> = family.files.iter().map(|f| rel(f)).collect();
-            let _ = write!(
-                out,
-                "**Family {}** ({} group{}, {} lines across {})\n\n",
-                i + 1,
-                family.groups.len(),
-                plural(family.groups.len()),
-                family.total_duplicated_lines,
-                file_names
-                    .iter()
-                    .map(|s| format!("`{s}`"))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            );
-            for suggestion in &family.suggestions {
-                let savings = if suggestion.estimated_savings > 0 {
-                    format!(" (~{} lines saved)", suggestion.estimated_savings)
-                } else {
-                    String::new()
-                };
-                let _ = writeln!(out, "- {}{savings}", suggestion.description);
-            }
-            out.push('\n');
-        }
+/// Write the clone-families subsection of the duplication markdown.
+fn write_duplication_families(out: &mut String, report: &DuplicationReport, root: &Path) {
+    if report.clone_families.is_empty() {
+        return;
     }
-
-    let _ = writeln!(
-        out,
-        "**Summary:** {} duplicated lines ({:.1}%) across {} file{}",
-        stats.duplicated_lines,
-        stats.duplication_percentage,
-        stats.files_with_clones,
-        plural(stats.files_with_clones),
-    );
-
-    out
+    let rel = |p: &Path| normalize_uri(&relative_path(p, root).display().to_string());
+    out.push_str("### Clone Families\n\n");
+    for (i, family) in report.clone_families.iter().enumerate() {
+        let file_names: Vec<_> = family.files.iter().map(|f| rel(f)).collect();
+        let _ = write!(
+            out,
+            "**Family {}** ({} group{}, {} lines across {})\n\n",
+            i + 1,
+            family.groups.len(),
+            plural(family.groups.len()),
+            family.total_duplicated_lines,
+            file_names
+                .iter()
+                .map(|s| format!("`{s}`"))
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
+        for suggestion in &family.suggestions {
+            let savings = if suggestion.estimated_savings > 0 {
+                format!(" (~{} lines saved)", suggestion.estimated_savings)
+            } else {
+                String::new()
+            };
+            let _ = writeln!(out, "- {}{savings}", suggestion.description);
+        }
+        out.push('\n');
+    }
 }
 
 pub(super) fn print_health_markdown(report: &crate::health_types::HealthReport, root: &Path) {
@@ -1295,33 +1305,42 @@ fn write_coverage_intelligence_section(
     out.push_str("| ID | Path | Identity | Verdict | Recommendation | Confidence | Signals |\n");
     out.push_str("|:---|:-----|:---------|:--------|:---------------|:-----------|:--------|\n");
     for finding in &intelligence.findings {
-        let path = escape_backticks(&normalize_uri(
-            &relative_path(&finding.path, root).display().to_string(),
-        ));
-        let identity = finding
-            .identity
-            .as_deref()
-            .map_or_else(|| "-".to_owned(), escape_backticks);
-        let signals = finding
-            .signals
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join(", ");
-        let _ = writeln!(
-            out,
-            "| `{}` | `{}`:{} | `{}` | {} | {} | {} | {} |",
-            escape_backticks(&finding.id),
-            path,
-            finding.line,
-            identity,
-            finding.verdict,
-            finding.recommendation,
-            finding.confidence,
-            signals,
-        );
+        write_coverage_intelligence_row(out, finding, root);
     }
     out.push('\n');
+}
+
+/// Write one coverage-intelligence finding row.
+fn write_coverage_intelligence_row(
+    out: &mut String,
+    finding: &crate::health_types::CoverageIntelligenceFinding,
+    root: &Path,
+) {
+    let path = escape_backticks(&normalize_uri(
+        &relative_path(&finding.path, root).display().to_string(),
+    ));
+    let identity = finding
+        .identity
+        .as_deref()
+        .map_or_else(|| "-".to_owned(), escape_backticks);
+    let signals = finding
+        .signals
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let _ = writeln!(
+        out,
+        "| `{}` | `{}`:{} | `{}` | {} | {} | {} | {} |",
+        escape_backticks(&finding.id),
+        path,
+        finding.line,
+        identity,
+        finding.verdict,
+        finding.recommendation,
+        finding.confidence,
+        signals,
+    );
 }
 
 fn write_runtime_coverage_section(
@@ -1335,6 +1354,16 @@ fn write_runtime_coverage_section(
     if !out.is_empty() && !out.ends_with("\n\n") {
         out.push('\n');
     }
+    write_runtime_coverage_summary(out, production);
+    write_runtime_coverage_findings(out, production, root);
+    write_runtime_coverage_hot_paths(out, production, root);
+}
+
+/// Write the runtime-coverage summary header and capture-quality lines.
+fn write_runtime_coverage_summary(
+    out: &mut String,
+    production: &crate::health_types::RuntimeCoverageReport,
+) {
     let _ = writeln!(
         out,
         "## Runtime Coverage\n\n- Verdict: {}\n- Functions tracked: {}\n- Hit: {}\n- Unhit: {}\n- Untracked: {}\n- Coverage: {:.1}%\n- Traces observed: {}\n- Period: {} day(s), {} deployment(s)\n",
@@ -1361,49 +1390,66 @@ fn write_runtime_coverage_section(
             window, quality.instances_observed, quality.untracked_ratio_percent,
         );
     }
-    let rel = |p: &Path| {
-        escape_backticks(&normalize_uri(
-            &relative_path(p, root).display().to_string(),
-        ))
-    };
-    if !production.findings.is_empty() {
-        out.push_str("| ID | Path | Function | Verdict | Invocations | Confidence |\n");
-        out.push_str("|:---|:-----|:---------|:--------|------------:|:-----------|\n");
-        for finding in &production.findings {
-            let invocations = finding
-                .invocations
-                .map_or_else(|| "-".to_owned(), |hits| hits.to_string());
-            let _ = writeln!(
-                out,
-                "| `{}` | `{}`:{} | `{}` | {} | {} | {} |",
-                escape_backticks(&finding.id),
-                rel(&finding.path),
-                finding.line,
-                escape_backticks(&finding.function),
-                finding.verdict,
-                invocations,
-                finding.confidence,
-            );
-        }
-        out.push('\n');
+}
+
+/// Write the runtime-coverage per-finding table.
+fn write_runtime_coverage_findings(
+    out: &mut String,
+    production: &crate::health_types::RuntimeCoverageReport,
+    root: &Path,
+) {
+    if production.findings.is_empty() {
+        return;
     }
-    if !production.hot_paths.is_empty() {
-        out.push_str("| ID | Hot path | Function | Invocations | Percentile |\n");
-        out.push_str("|:---|:---------|:---------|------------:|-----------:|\n");
-        for entry in &production.hot_paths {
-            let _ = writeln!(
-                out,
-                "| `{}` | `{}`:{} | `{}` | {} | {} |",
-                escape_backticks(&entry.id),
-                rel(&entry.path),
-                entry.line,
-                escape_backticks(&entry.function),
-                entry.invocations,
-                entry.percentile,
-            );
-        }
-        out.push('\n');
+    out.push_str("| ID | Path | Function | Verdict | Invocations | Confidence |\n");
+    out.push_str("|:---|:-----|:---------|:--------|------------:|:-----------|\n");
+    for finding in &production.findings {
+        let invocations = finding
+            .invocations
+            .map_or_else(|| "-".to_owned(), |hits| hits.to_string());
+        let _ = writeln!(
+            out,
+            "| `{}` | `{}`:{} | `{}` | {} | {} | {} |",
+            escape_backticks(&finding.id),
+            escape_backticks(&normalize_uri(
+                &relative_path(&finding.path, root).display().to_string(),
+            )),
+            finding.line,
+            escape_backticks(&finding.function),
+            finding.verdict,
+            invocations,
+            finding.confidence,
+        );
     }
+    out.push('\n');
+}
+
+/// Write the runtime-coverage hot-paths table.
+fn write_runtime_coverage_hot_paths(
+    out: &mut String,
+    production: &crate::health_types::RuntimeCoverageReport,
+    root: &Path,
+) {
+    if production.hot_paths.is_empty() {
+        return;
+    }
+    out.push_str("| ID | Hot path | Function | Invocations | Percentile |\n");
+    out.push_str("|:---|:---------|:---------|------------:|-----------:|\n");
+    for entry in &production.hot_paths {
+        let _ = writeln!(
+            out,
+            "| `{}` | `{}`:{} | `{}` | {} | {} |",
+            escape_backticks(&entry.id),
+            escape_backticks(&normalize_uri(
+                &relative_path(&entry.path, root).display().to_string(),
+            )),
+            entry.line,
+            escape_backticks(&entry.function),
+            entry.invocations,
+            entry.percentile,
+        );
+    }
+    out.push('\n');
 }
 
 /// Write the trend comparison table to the output.
@@ -1429,34 +1475,7 @@ fn write_trend_section(out: &mut String, report: &crate::health_types::HealthRep
     out.push_str("| Metric | Previous | Current | Delta | Direction |\n");
     out.push_str("|:-------|:---------|:--------|:------|:----------|\n");
     for m in &trend.metrics {
-        let fmt_val = |v: f64| -> String {
-            if m.unit == "%" {
-                format!("{v:.1}%")
-            } else if (v - v.round()).abs() < 0.05 {
-                format!("{v:.0}")
-            } else {
-                format!("{v:.1}")
-            }
-        };
-        let prev = fmt_val(m.previous);
-        let cur = fmt_val(m.current);
-        let delta = if m.unit == "%" {
-            format!("{:+.1}%", m.delta)
-        } else if (m.delta - m.delta.round()).abs() < 0.05 {
-            format!("{:+.0}", m.delta)
-        } else {
-            format!("{:+.1}", m.delta)
-        };
-        let _ = writeln!(
-            out,
-            "| {} | {} | {} | {} | {} {} |",
-            m.label,
-            prev,
-            cur,
-            delta,
-            m.direction.arrow(),
-            m.direction.label(),
-        );
+        write_trend_metric_row(out, m);
     }
     let md_sha = trend
         .compared_to
@@ -1478,6 +1497,38 @@ fn write_trend_section(out: &mut String, report: &crate::health_types::HealthRep
         } else {
             "snapshots"
         },
+    );
+}
+
+/// Write one trend metric row with unit-aware value and delta formatting.
+fn write_trend_metric_row(out: &mut String, m: &crate::health_types::TrendMetric) {
+    let fmt_val = |v: f64| -> String {
+        if m.unit == "%" {
+            format!("{v:.1}%")
+        } else if (v - v.round()).abs() < 0.05 {
+            format!("{v:.0}")
+        } else {
+            format!("{v:.1}")
+        }
+    };
+    let prev = fmt_val(m.previous);
+    let cur = fmt_val(m.current);
+    let delta = if m.unit == "%" {
+        format!("{:+.1}%", m.delta)
+    } else if (m.delta - m.delta.round()).abs() < 0.05 {
+        format!("{:+.0}", m.delta)
+    } else {
+        format!("{:+.1}", m.delta)
+    };
+    let _ = writeln!(
+        out,
+        "| {} | {} | {} | {} | {} {} |",
+        m.label,
+        prev,
+        cur,
+        delta,
+        m.direction.arrow(),
+        m.direction.label(),
     );
 }
 
@@ -1529,18 +1580,38 @@ fn write_findings_section(
         return;
     }
 
-    let rel = |p: &Path| {
-        escape_backticks(&normalize_uri(
-            &relative_path(p, root).display().to_string(),
-        ))
-    };
-
-    let count = report.summary.functions_above_threshold;
-    let shown = report.findings.len();
     let has_synthetic = report
         .findings
         .iter()
         .any(|finding| matches!(finding.name.as_str(), "<template>" | "<component>"));
+    write_findings_heading(out, report, has_synthetic);
+    write_findings_table_header(out, has_synthetic);
+
+    for finding in &report.findings {
+        write_findings_row(out, finding, report, root);
+    }
+
+    let s = &report.summary;
+    let _ = write!(
+        out,
+        "\n**{files}** files, **{funcs}** functions analyzed \
+         (thresholds: cyclomatic > {cyc}, cognitive > {cog}, CRAP >= {crap:.1})\n",
+        files = s.files_analyzed,
+        funcs = s.functions_analyzed,
+        cyc = s.max_cyclomatic_threshold,
+        cog = s.max_cognitive_threshold,
+        crap = s.max_crap_threshold,
+    );
+}
+
+/// Write the heading line for the complexity findings section.
+fn write_findings_heading(
+    out: &mut String,
+    report: &crate::health_types::HealthReport,
+    has_synthetic: bool,
+) {
+    let count = report.summary.functions_above_threshold;
+    let shown = report.findings.len();
     let subject = if has_synthetic {
         "high complexity finding"
     } else {
@@ -1555,70 +1626,70 @@ fn write_findings_section(
     } else {
         let _ = write!(out, "## Fallow: {count} {subject}{}\n\n", plural(count));
     }
+}
 
+/// Write the table header row for the complexity findings section.
+fn write_findings_table_header(out: &mut String, has_synthetic: bool) {
     let name_header = if has_synthetic { "Entry" } else { "Function" };
     let _ = writeln!(
         out,
         "| File | {name_header} | Severity | Cyclomatic | Cognitive | CRAP | Lines |"
     );
     out.push_str("|:-----|:---------|:---------|:-----------|:----------|:-----|:------|\n");
+}
 
-    for finding in &report.findings {
-        let file_str = rel(&finding.path);
-        let thresholds = finding.effective_thresholds.unwrap_or(
-            crate::health_types::HealthEffectiveThresholds {
+/// Write one complexity finding row, including threshold-breach markers.
+fn write_findings_row(
+    out: &mut String,
+    finding: &crate::health_types::HealthFinding,
+    report: &crate::health_types::HealthReport,
+    root: &Path,
+) {
+    let file_str = escape_backticks(&normalize_uri(
+        &relative_path(&finding.path, root).display().to_string(),
+    ));
+    let thresholds =
+        finding
+            .effective_thresholds
+            .unwrap_or(crate::health_types::HealthEffectiveThresholds {
                 max_cyclomatic: report.summary.max_cyclomatic_threshold,
                 max_cognitive: report.summary.max_cognitive_threshold,
                 max_crap: report.summary.max_crap_threshold,
-            },
-        );
-        let cyc_marker = if finding.cyclomatic > thresholds.max_cyclomatic {
-            " **!**"
-        } else {
-            ""
-        };
-        let cog_marker = if finding.cognitive > thresholds.max_cognitive {
-            " **!**"
-        } else {
-            ""
-        };
-        let severity_label = match finding.severity {
-            crate::health_types::FindingSeverity::Critical => "critical",
-            crate::health_types::FindingSeverity::High => "high",
-            crate::health_types::FindingSeverity::Moderate => "moderate",
-        };
-        let crap_cell = match finding.crap {
-            Some(crap) => {
-                let marker = if crap >= thresholds.max_crap {
-                    " **!**"
-                } else {
-                    ""
-                };
-                format!("{crap:.1}{marker}")
-            }
-            None => "-".to_string(),
-        };
-        let _ = writeln!(
-            out,
-            "| `{file_str}:{line}` | `{name}` | {severity_label} | {cyc}{cyc_marker} | {cog}{cog_marker} | {crap_cell} | {lines} |",
-            line = finding.line,
-            name = escape_backticks(display_complexity_entry_name(&finding.name).as_ref()),
-            cyc = finding.cyclomatic,
-            cog = finding.cognitive,
-            lines = finding.line_count,
-        );
-    }
-
-    let s = &report.summary;
-    let _ = write!(
+            });
+    let cyc_marker = if finding.cyclomatic > thresholds.max_cyclomatic {
+        " **!**"
+    } else {
+        ""
+    };
+    let cog_marker = if finding.cognitive > thresholds.max_cognitive {
+        " **!**"
+    } else {
+        ""
+    };
+    let severity_label = match finding.severity {
+        crate::health_types::FindingSeverity::Critical => "critical",
+        crate::health_types::FindingSeverity::High => "high",
+        crate::health_types::FindingSeverity::Moderate => "moderate",
+    };
+    let crap_cell = match finding.crap {
+        Some(crap) => {
+            let marker = if crap >= thresholds.max_crap {
+                " **!**"
+            } else {
+                ""
+            };
+            format!("{crap:.1}{marker}")
+        }
+        None => "-".to_string(),
+    };
+    let _ = writeln!(
         out,
-        "\n**{files}** files, **{funcs}** functions analyzed \
-         (thresholds: cyclomatic > {cyc}, cognitive > {cog}, CRAP >= {crap:.1})\n",
-        files = s.files_analyzed,
-        funcs = s.functions_analyzed,
-        cyc = s.max_cyclomatic_threshold,
-        cog = s.max_cognitive_threshold,
-        crap = s.max_crap_threshold,
+        "| `{file_str}:{line}` | `{name}` | {severity_label} | {cyc}{cyc_marker} | {cog}{cog_marker} | {crap_cell} | {lines} |",
+        line = finding.line,
+        name = escape_backticks(display_complexity_entry_name(&finding.name).as_ref()),
+        cyc = finding.cyclomatic,
+        cog = finding.cognitive,
+        lines = finding.line_count,
     );
 }
 
@@ -1824,12 +1895,6 @@ fn write_hotspots_section(
         return;
     }
 
-    let rel = |p: &Path| {
-        escape_backticks(&normalize_uri(
-            &relative_path(p, root).display().to_string(),
-        ))
-    };
-
     out.push('\n');
     let header = report.hotspot_summary.as_ref().map_or_else(
         || format!("### Hotspots ({} files)\n", report.hotspots.len()),
@@ -1843,44 +1908,10 @@ fn write_hotspots_section(
     );
     let _ = writeln!(out, "{header}");
     let any_ownership = report.hotspots.iter().any(|e| e.ownership.is_some());
-    if any_ownership {
-        out.push_str(
-            "| File | Score | Commits | Churn | Density | Fan-in | Trend | Bus | Top | Owner | Notes |\n"
-        );
-        out.push_str(
-            "|:-----|:------|:--------|:------|:--------|:-------|:------|:----|:----|:------|:------|\n"
-        );
-    } else {
-        out.push_str("| File | Score | Commits | Churn | Density | Fan-in | Trend |\n");
-        out.push_str("|:-----|:------|:--------|:------|:--------|:-------|:------|\n");
-    }
+    write_hotspots_table_header(out, any_ownership);
 
     for entry in &report.hotspots {
-        let file_str = rel(&entry.path);
-        if any_ownership {
-            let (bus, top, owner, notes) = ownership_md_cells(entry.ownership.as_ref());
-            let _ = writeln!(
-                out,
-                "| `{file_str}` | {score:.1} | {commits} | {churn} | {density:.2} | {fi} | {trend} | {bus} | {top} | {owner} | {notes} |",
-                score = entry.score,
-                commits = entry.commits,
-                churn = entry.lines_added + entry.lines_deleted,
-                density = entry.complexity_density,
-                fi = entry.fan_in,
-                trend = entry.trend,
-            );
-        } else {
-            let _ = writeln!(
-                out,
-                "| `{file_str}` | {score:.1} | {commits} | {churn} | {density:.2} | {fi} | {trend} |",
-                score = entry.score,
-                commits = entry.commits,
-                churn = entry.lines_added + entry.lines_deleted,
-                density = entry.complexity_density,
-                fi = entry.fan_in,
-                trend = entry.trend,
-            );
-        }
+        write_hotspots_row(out, entry, any_ownership, root);
     }
 
     if let Some(ref summary) = report.hotspot_summary
@@ -1892,6 +1923,57 @@ fn write_hotspots_section(
             summary.files_excluded,
             plural(summary.files_excluded),
             summary.min_commits,
+        );
+    }
+}
+
+/// Write the hotspots table header, widening with ownership columns when present.
+fn write_hotspots_table_header(out: &mut String, any_ownership: bool) {
+    if any_ownership {
+        out.push_str(
+            "| File | Score | Commits | Churn | Density | Fan-in | Trend | Bus | Top | Owner | Notes |\n"
+        );
+        out.push_str(
+            "|:-----|:------|:--------|:------|:--------|:-------|:------|:----|:----|:------|:------|\n"
+        );
+    } else {
+        out.push_str("| File | Score | Commits | Churn | Density | Fan-in | Trend |\n");
+        out.push_str("|:-----|:------|:--------|:------|:--------|:-------|:------|\n");
+    }
+}
+
+/// Write one hotspot row, including ownership cells when the table is widened.
+fn write_hotspots_row(
+    out: &mut String,
+    entry: &crate::health_types::HotspotFinding,
+    any_ownership: bool,
+    root: &Path,
+) {
+    let file_str = escape_backticks(&normalize_uri(
+        &relative_path(&entry.path, root).display().to_string(),
+    ));
+    if any_ownership {
+        let (bus, top, owner, notes) = ownership_md_cells(entry.ownership.as_ref());
+        let _ = writeln!(
+            out,
+            "| `{file_str}` | {score:.1} | {commits} | {churn} | {density:.2} | {fi} | {trend} | {bus} | {top} | {owner} | {notes} |",
+            score = entry.score,
+            commits = entry.commits,
+            churn = entry.lines_added + entry.lines_deleted,
+            density = entry.complexity_density,
+            fi = entry.fan_in,
+            trend = entry.trend,
+        );
+    } else {
+        let _ = writeln!(
+            out,
+            "| `{file_str}` | {score:.1} | {commits} | {churn} | {density:.2} | {fi} | {trend} |",
+            score = entry.score,
+            commits = entry.commits,
+            churn = entry.lines_added + entry.lines_deleted,
+            density = entry.complexity_density,
+            fi = entry.fan_in,
+            trend = entry.trend,
         );
     }
 }

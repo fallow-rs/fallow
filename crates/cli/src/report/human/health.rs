@@ -1007,6 +1007,30 @@ pub fn render_health_trend(lines: &mut Vec<String>, report: &crate::health_types
 
     use crate::health_types::TrendDirection;
 
+    push_trend_header_line(lines, trend);
+    push_trend_model_notes(lines, trend, report);
+
+    let all_stable = trend
+        .metrics
+        .iter()
+        .all(|m| m.direction == TrendDirection::Stable);
+    if all_stable {
+        lines.push(format!(
+            "  {}",
+            format!("All {} metrics unchanged", trend.metrics.len()).dimmed()
+        ));
+        lines.push(String::new());
+        return;
+    }
+
+    push_trend_metric_rows(lines, trend);
+    lines.push(String::new());
+}
+
+/// Renders the trend header line with date, SHA, and colored overall direction.
+fn push_trend_header_line(lines: &mut Vec<String>, trend: &crate::health_types::HealthTrend) {
+    use crate::health_types::TrendDirection;
+
     let date = trend
         .compared_to
         .timestamp
@@ -1034,7 +1058,14 @@ pub fn render_health_trend(lines: &mut Vec<String>, report: &crate::health_types
         direction_colored,
         format!("(vs {date}{sha_str})").dimmed(),
     ));
+}
 
+/// Renders the optional CRAP-model-change and snapshot-schema-version notes.
+fn push_trend_model_notes(
+    lines: &mut Vec<String>,
+    trend: &crate::health_types::HealthTrend,
+    report: &crate::health_types::HealthReport,
+) {
     if let (Some(prev_model), Some(cur_model)) = (
         &trend.compared_to.coverage_model,
         &report.summary.coverage_model,
@@ -1065,19 +1096,11 @@ pub fn render_health_trend(lines: &mut Vec<String>, report: &crate::health_types
                 .yellow()
         ));
     }
+}
 
-    let all_stable = trend
-        .metrics
-        .iter()
-        .all(|m| m.direction == TrendDirection::Stable);
-    if all_stable {
-        lines.push(format!(
-            "  {}",
-            format!("All {} metrics unchanged", trend.metrics.len()).dimmed()
-        ));
-        lines.push(String::new());
-        return;
-    }
+/// Renders one row per trend metric with previous/current values and direction.
+fn push_trend_metric_rows(lines: &mut Vec<String>, trend: &crate::health_types::HealthTrend) {
+    use crate::health_types::TrendDirection;
 
     for m in &trend.metrics {
         let label = format!("{:<18}", m.label);
@@ -1102,8 +1125,6 @@ pub fn render_health_trend(lines: &mut Vec<String>, report: &crate::health_types
             "  {label} {values}  {delta_str:<10} {direction_str}"
         ));
     }
-
-    lines.push(String::new());
 }
 
 fn render_vital_signs(lines: &mut Vec<String>, report: &crate::health_types::HealthReport) {
@@ -1115,6 +1136,19 @@ fn render_vital_signs(lines: &mut Vec<String>, report: &crate::health_types::Hea
     };
 
     let mut parts = Vec::new();
+    push_vital_core_parts(&mut parts, vs);
+    push_vital_signal_parts(&mut parts, vs, report);
+    lines.push(format!(
+        "{} {} {}",
+        "\u{25a0}".dimmed(),
+        "Metrics:".dimmed(),
+        parts.join(" \u{00b7} ").dimmed()
+    ));
+    lines.push(String::new());
+}
+
+/// Appends the LOC, dead-code, cyclomatic, and maintainability vital-sign parts.
+fn push_vital_core_parts(parts: &mut Vec<String>, vs: &crate::health_types::VitalSigns) {
     if vs.total_loc > 0 {
         parts.push(format!("{} LOC", thousands(vs.total_loc as usize)));
     }
@@ -1136,6 +1170,14 @@ fn render_vital_signs(lines: &mut Vec<String>, report: &crate::health_types::Hea
         };
         parts.push(format!("maintainability {mi:.1} ({label})"));
     }
+}
+
+/// Appends the hotspot, circular-dep, unused-dep, and duplication vital-sign parts.
+fn push_vital_signal_parts(
+    parts: &mut Vec<String>,
+    vs: &crate::health_types::VitalSigns,
+    report: &crate::health_types::HealthReport,
+) {
     if let Some(hc) = vs.hotspot_count {
         let since_suffix = report
             .hotspot_summary
@@ -1166,13 +1208,6 @@ fn render_vital_signs(lines: &mut Vec<String>, report: &crate::health_types::Hea
     if let Some(dp) = vs.duplication_pct {
         parts.push(format!("duplication {dp:.1}%"));
     }
-    lines.push(format!(
-        "{} {} {}",
-        "\u{25a0}".dimmed(),
-        "Metrics:".dimmed(),
-        parts.join(" \u{00b7} ").dimmed()
-    ));
-    lines.push(String::new());
 }
 
 fn render_risk_profiles(lines: &mut Vec<String>, report: &crate::health_types::HealthReport) {
@@ -2133,6 +2168,26 @@ pub(in crate::report) fn print_health_summary(
         outln!("{}", "Health Summary".bold());
         outln!();
     }
+    print_health_summary_metrics(report);
+    print_health_summary_coverage(report);
+
+    if !quiet {
+        eprintln!(
+            "{}",
+            format!(
+                "\u{2713} {} functions analyzed ({:.2}s)",
+                s.functions_analyzed,
+                elapsed.as_secs_f64()
+            )
+            .green()
+            .bold()
+        );
+    }
+}
+
+/// Prints the function-count, maintainability, and health-score summary rows.
+fn print_health_summary_metrics(report: &crate::health_types::HealthReport) {
+    let s = &report.summary;
     outln!("  {:>6}  Functions analyzed", s.functions_analyzed);
     outln!("  {:>6}  Above threshold", s.functions_above_threshold);
     if let Some(mi) = s.average_maintainability {
@@ -2148,6 +2203,10 @@ pub(in crate::report) fn print_health_summary(
     if let Some(ref score) = report.health_score {
         outln!("  {:>5.0} {}  Health score", score.score, score.grade);
     }
+}
+
+/// Prints the coverage-gap and runtime-coverage summary rows.
+fn print_health_summary_coverage(report: &crate::health_types::HealthReport) {
     if let Some(ref gaps) = report.coverage_gaps {
         outln!(
             "  {:>6}  Untested {} ({:.1}% file coverage)",
@@ -2177,19 +2236,6 @@ pub(in crate::report) fn print_health_summary(
         outln!(
             "  {:>6}  Untracked by V8 (lazy-parsed / worker / dynamic)",
             production.summary.functions_untracked,
-        );
-    }
-
-    if !quiet {
-        eprintln!(
-            "{}",
-            format!(
-                "\u{2713} {} functions analyzed ({:.2}s)",
-                s.functions_analyzed,
-                elapsed.as_secs_f64()
-            )
-            .green()
-            .bold()
         );
     }
 }
@@ -2251,41 +2297,17 @@ pub(in crate::report) fn print_health_grouping(
         });
     }
 
-    let mut header = format!("  {:<width$}", "", width = key_width);
-    if any_score {
-        let _ = write!(header, "  {:>9}  grade", "score");
-    }
-    let _ = write!(header, "  {:>5}", "files");
-    let _ = write!(header, "  {:>3}", "hot");
-    if any_vitals {
-        let _ = write!(header, "  {:>3}", "p90");
-    }
-    outln!("{}", header.dimmed());
+    outln!(
+        "{}",
+        grouping_header(key_width, any_score, any_vitals).dimmed()
+    );
 
     let mut has_root_bucket = false;
     for group in ordered {
         if group.key == "(root)" {
             has_root_bucket = true;
         }
-        let mut row = format!("  {:<width$}", group.key, width = key_width);
-        if any_score {
-            if let Some(ref hs) = group.health_score {
-                let grade_colored = colorize_grade(hs.grade);
-                let _ = write!(row, "  {:>9.1}  {}", hs.score, grade_colored);
-            } else {
-                row.push_str("                  ");
-            }
-        }
-        let _ = write!(row, "  {:>5}", group.files_analyzed);
-        let _ = write!(row, "  {:>3}", group.hotspots.len());
-        if any_vitals {
-            if let Some(ref vs) = group.vital_signs {
-                let _ = write!(row, "  {:>3}", vs.p90_cyclomatic);
-            } else {
-                row.push_str("     ");
-            }
-        }
-        outln!("{row}");
+        outln!("{}", grouping_row(group, key_width, any_score, any_vitals));
     }
     if !quiet {
         if has_root_bucket {
@@ -2300,6 +2322,49 @@ pub(in crate::report) fn print_health_grouping(
                 .dimmed()
         );
     }
+}
+
+/// Builds the per-group header row, omitting score/grade and p90 columns when
+/// no group carries that data.
+fn grouping_header(key_width: usize, any_score: bool, any_vitals: bool) -> String {
+    let mut header = format!("  {:<width$}", "", width = key_width);
+    if any_score {
+        let _ = write!(header, "  {:>9}  grade", "score");
+    }
+    let _ = write!(header, "  {:>5}", "files");
+    let _ = write!(header, "  {:>3}", "hot");
+    if any_vitals {
+        let _ = write!(header, "  {:>3}", "p90");
+    }
+    header
+}
+
+/// Builds one per-group data row, matching the column layout of `grouping_header`.
+fn grouping_row(
+    group: &crate::health_types::HealthGroup,
+    key_width: usize,
+    any_score: bool,
+    any_vitals: bool,
+) -> String {
+    let mut row = format!("  {:<width$}", group.key, width = key_width);
+    if any_score {
+        if let Some(ref hs) = group.health_score {
+            let grade_colored = colorize_grade(hs.grade);
+            let _ = write!(row, "  {:>9.1}  {}", hs.score, grade_colored);
+        } else {
+            row.push_str("                  ");
+        }
+    }
+    let _ = write!(row, "  {:>5}", group.files_analyzed);
+    let _ = write!(row, "  {:>3}", group.hotspots.len());
+    if any_vitals {
+        if let Some(ref vs) = group.vital_signs {
+            let _ = write!(row, "  {:>3}", vs.p90_cyclomatic);
+        } else {
+            row.push_str("     ");
+        }
+    }
+    row
 }
 
 /// Color a grade letter to match the project-level grade rendering.

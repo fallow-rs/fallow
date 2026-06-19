@@ -408,46 +408,22 @@ pub(super) fn build_grouped_by_file<'out, 'items, T, P, F>(
         max_files,
         max_items_per_file,
     } = input;
-    let mut file_groups: Vec<(String, Vec<usize>)> = Vec::new();
-    let mut file_map: rustc_hash::FxHashMap<String, usize> = rustc_hash::FxHashMap::default();
 
-    for (i, item) in items.iter().enumerate() {
-        let file_str = relative_path(get_path(item), root).display().to_string();
-        if let Some(&group_idx) = file_map.get(&file_str) {
-            file_groups[group_idx].1.push(i);
-        } else {
-            file_map.insert(file_str.clone(), file_groups.len());
-            file_groups.push((file_str, vec![i]));
-        }
-    }
-
+    let mut file_groups = group_item_indices_by_file(items, root, get_path);
     file_groups.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then_with(|| a.0.cmp(&b.0)));
 
     let total_files = file_groups.len();
     let shown_files = total_files.min(max_files);
 
     for (file_str, indices) in &file_groups[..shown_files] {
-        let count_tag = if indices.len() > 1 {
-            format!(" ({})", indices.len()).dimmed().to_string()
-        } else {
-            String::new()
-        };
-        lines.push(format!("  {}{}", format_path(file_str), count_tag));
-
-        let shown_items = indices.len().min(max_items_per_file);
-        for &i in &indices[..shown_items] {
-            lines.push(format!("    {}", format_detail(&items[i])));
-        }
-        if indices.len() > max_items_per_file {
-            lines.push(format!(
-                "    {}",
-                format!(
-                    "... and {} more (--format json for full list)",
-                    indices.len() - max_items_per_file
-                )
-                .dimmed()
-            ));
-        }
+        push_grouped_file_lines(
+            lines,
+            file_str,
+            indices,
+            items,
+            format_detail,
+            max_items_per_file,
+        );
     }
 
     if total_files > max_files {
@@ -463,6 +439,64 @@ pub(super) fn build_grouped_by_file<'out, 'items, T, P, F>(
                 hidden_items,
                 hidden_files,
                 plural(hidden_files)
+            )
+            .dimmed()
+        ));
+    }
+}
+
+/// Group item indices by their relative file path, preserving first-seen order.
+fn group_item_indices_by_file<'items, T, P>(
+    items: &'items [T],
+    root: &Path,
+    get_path: P,
+) -> Vec<(String, Vec<usize>)>
+where
+    P: Fn(&'items T) -> &'items Path,
+{
+    let mut file_groups: Vec<(String, Vec<usize>)> = Vec::new();
+    let mut file_map: rustc_hash::FxHashMap<String, usize> = rustc_hash::FxHashMap::default();
+
+    for (i, item) in items.iter().enumerate() {
+        let file_str = relative_path(get_path(item), root).display().to_string();
+        if let Some(&group_idx) = file_map.get(&file_str) {
+            file_groups[group_idx].1.push(i);
+        } else {
+            file_map.insert(file_str.clone(), file_groups.len());
+            file_groups.push((file_str, vec![i]));
+        }
+    }
+    file_groups
+}
+
+/// Render one file's header and its (truncated) per-item detail lines.
+fn push_grouped_file_lines<T, F>(
+    lines: &mut Vec<String>,
+    file_str: &str,
+    indices: &[usize],
+    items: &[T],
+    format_detail: &F,
+    max_items_per_file: usize,
+) where
+    F: Fn(&T) -> String,
+{
+    let count_tag = if indices.len() > 1 {
+        format!(" ({})", indices.len()).dimmed().to_string()
+    } else {
+        String::new()
+    };
+    lines.push(format!("  {}{}", format_path(file_str), count_tag));
+
+    let shown_items = indices.len().min(max_items_per_file);
+    for &i in &indices[..shown_items] {
+        lines.push(format!("    {}", format_detail(&items[i])));
+    }
+    if indices.len() > max_items_per_file {
+        lines.push(format!(
+            "    {}",
+            format!(
+                "... and {} more (--format json for full list)",
+                indices.len() - max_items_per_file
             )
             .dimmed()
         ));

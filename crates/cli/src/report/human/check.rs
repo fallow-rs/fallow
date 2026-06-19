@@ -656,6 +656,26 @@ fn build_unused_code_section(input: &mut UnusedCodeSectionInput<'_>) {
     }
     push_category_header(input.lines, "Unused Code");
 
+    push_unused_files_section(input);
+    push_unused_export_sections(
+        input,
+        &filtered_exports,
+        &filtered_types,
+        suppressed_exports,
+        suppressed_types,
+    );
+
+    build_unused_member_sections(
+        input.lines,
+        input.results,
+        input.root,
+        input.rules,
+        input.max_grouped_files,
+    );
+}
+
+/// Renders the unused-files block (dir-rollup or flat) plus the test/src split.
+fn push_unused_files_section(input: &mut UnusedCodeSectionInput<'_>) {
     if input.results.unused_files.len() > DIR_ROLLUP_THRESHOLD {
         build_dir_rollup_section(
             input.lines,
@@ -681,10 +701,19 @@ fn build_unused_code_section(input: &mut UnusedCodeSectionInput<'_>) {
         );
     }
     insert_test_src_split(input.lines, &input.results.unused_files, |f| &f.file.path);
+}
 
+/// Renders the unused-export, unused-type, and private-type-leak grouped sections.
+fn push_unused_export_sections(
+    input: &mut UnusedCodeSectionInput<'_>,
+    filtered_exports: &[UnusedExportFinding],
+    filtered_types: &[UnusedTypeFinding],
+    suppressed_exports: usize,
+    suppressed_types: usize,
+) {
     build_human_grouped_section(GroupedSectionInput {
         lines: input.lines,
-        items: &filtered_exports,
+        items: filtered_exports,
         title: "Unused exports",
         level: severity_to_level(input.rules.unused_exports),
         root: input.root,
@@ -693,11 +722,11 @@ fn build_unused_code_section(input: &mut UnusedCodeSectionInput<'_>) {
         format_detail: &|e: &UnusedExportFinding| format_unused_export(&e.export),
     });
     push_suppressed_count_note(input.lines, suppressed_exports);
-    insert_test_src_split(input.lines, &filtered_exports, |e| &e.export.path);
+    insert_test_src_split(input.lines, filtered_exports, |e| &e.export.path);
 
     build_human_grouped_section(GroupedSectionInput {
         lines: input.lines,
-        items: &filtered_types,
+        items: filtered_types,
         title: "Unused type exports",
         level: severity_to_level(input.rules.unused_types),
         root: input.root,
@@ -717,14 +746,6 @@ fn build_unused_code_section(input: &mut UnusedCodeSectionInput<'_>) {
         get_path: |e| e.leak.path.as_path(),
         format_detail: &format_private_type_leak,
     });
-
-    build_unused_member_sections(
-        input.lines,
-        input.results,
-        input.root,
-        input.rules,
-        input.max_grouped_files,
-    );
 }
 
 fn build_unused_member_sections(
@@ -1116,54 +1137,61 @@ fn push_unresolved_catalog_references_section(
         level,
         max_items,
         total_issues,
-        |finding| {
-            let finding = &finding.reference;
-            let path_display = root.join(&finding.path);
-            let catalog_label = if finding.catalog_name == "default" {
-                "default".to_string()
-            } else {
-                finding.catalog_name.clone()
-            };
-            let row = format!(
-                "  {entry_name}  {catalog}  {loc}",
-                entry_name = finding.entry_name.bold(),
-                catalog = catalog_label.dimmed(),
-                loc = format!(
-                    "{}:{}",
-                    path_display
-                        .strip_prefix(root)
-                        .unwrap_or(&path_display)
-                        .display(),
-                    finding.line
-                )
-                .dimmed(),
-            );
-            let mut out = vec![row];
-            let detail = if finding.catalog_name == "default" {
-                "not in the default catalog".to_string()
-            } else {
-                format!("not in catalog '{}'", finding.catalog_name)
-            };
-            let detail_line = if finding.available_in_catalogs.is_empty() {
-                format!("    {}", detail.dimmed())
-            } else {
-                format!(
-                    "    {}; available in: {}",
-                    detail.dimmed(),
-                    finding.available_in_catalogs.join(", ").bold(),
-                )
-            };
-            out.push(detail_line);
-            if finding.available_in_catalogs.len() == 1 {
-                let target = &finding.available_in_catalogs[0];
-                out.push(format!(
-                    "    {}",
-                    format!("Suggested: switch to `catalog:{target}`").dimmed(),
-                ));
-            }
-            out
-        },
+        |finding| format_unresolved_catalog_reference(finding, root),
     );
+}
+
+/// Formats one unresolved-catalog-reference finding into its headline row,
+/// detail row, and optional single-catalog suggestion.
+fn format_unresolved_catalog_reference(
+    finding: &fallow_core::results::UnresolvedCatalogReferenceFinding,
+    root: &Path,
+) -> Vec<String> {
+    let finding = &finding.reference;
+    let path_display = root.join(&finding.path);
+    let catalog_label = if finding.catalog_name == "default" {
+        "default".to_string()
+    } else {
+        finding.catalog_name.clone()
+    };
+    let row = format!(
+        "  {entry_name}  {catalog}  {loc}",
+        entry_name = finding.entry_name.bold(),
+        catalog = catalog_label.dimmed(),
+        loc = format!(
+            "{}:{}",
+            path_display
+                .strip_prefix(root)
+                .unwrap_or(&path_display)
+                .display(),
+            finding.line
+        )
+        .dimmed(),
+    );
+    let mut out = vec![row];
+    let detail = if finding.catalog_name == "default" {
+        "not in the default catalog".to_string()
+    } else {
+        format!("not in catalog '{}'", finding.catalog_name)
+    };
+    let detail_line = if finding.available_in_catalogs.is_empty() {
+        format!("    {}", detail.dimmed())
+    } else {
+        format!(
+            "    {}; available in: {}",
+            detail.dimmed(),
+            finding.available_in_catalogs.join(", ").bold(),
+        )
+    };
+    out.push(detail_line);
+    if finding.available_in_catalogs.len() == 1 {
+        let target = &finding.available_in_catalogs[0];
+        out.push(format!(
+            "    {}",
+            format!("Suggested: switch to `catalog:{target}`").dimmed(),
+        ));
+    }
+    out
 }
 
 /// Render unused pnpm dependency overrides as a two-tier block: a headline row
@@ -1416,6 +1444,18 @@ fn build_framework_policy_section(
     root: &Path,
     rules: &RulesConfig,
 ) {
+    push_client_server_policy_sections(lines, results, root, rules);
+    push_provider_render_policy_sections(lines, results, root, rules);
+}
+
+/// Render the client/server boundary policy sections (invalid client exports,
+/// mixed client/server barrels, misplaced directives).
+fn push_client_server_policy_sections(
+    lines: &mut Vec<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+) {
     build_human_grouped_section(GroupedSectionInput {
         lines,
         items: &results.invalid_client_exports,
@@ -1454,7 +1494,16 @@ fn build_framework_policy_section(
         },
         format_detail: &format_misplaced_directive,
     });
+}
 
+/// Render the provider/render policy sections (unprovided injects, unrendered
+/// components).
+fn push_provider_render_policy_sections(
+    lines: &mut Vec<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+) {
     build_human_grouped_section(GroupedSectionInput {
         lines,
         items: &results.unprovided_injects,
@@ -1483,6 +1532,18 @@ fn build_framework_policy_section(
 }
 
 fn build_component_policy_section(
+    lines: &mut Vec<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+) {
+    push_component_io_sections(lines, results, root, rules);
+    push_framework_key_sections(lines, results, root, rules);
+}
+
+/// Render the component IO policy sections (props, React health, emits, inputs,
+/// outputs).
+fn push_component_io_sections(
     lines: &mut Vec<String>,
     results: &AnalysisResults,
     root: &Path,
@@ -1541,7 +1602,16 @@ fn build_component_policy_section(
         },
         format_detail: &format_unused_component_output,
     });
+}
 
+/// Render the framework-key policy sections (Svelte events, server actions,
+/// load data keys).
+fn push_framework_key_sections(
+    lines: &mut Vec<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+) {
     build_human_grouped_section(GroupedSectionInput {
         lines,
         items: &results.unused_svelte_events,
@@ -2184,6 +2254,37 @@ fn build_duplicate_exports_section(
     let title = "Duplicate exports";
     lines.push(build_section_header(title, items.len(), level));
 
+    let pair_groups = collect_duplicate_export_pairs(items, root);
+
+    let shown = pair_groups.len().min(MAX_FLAT_ITEMS);
+    for (file_a, file_b, exports) in &pair_groups[..shown] {
+        push_duplicate_export_group(lines, file_a, file_b, exports);
+    }
+
+    let truncation_emitted = pair_groups.len() > MAX_FLAT_ITEMS;
+    if truncation_emitted {
+        let remaining = pair_groups.len() - MAX_FLAT_ITEMS;
+        lines.push(format!(
+            "  {}",
+            truncation_hint(remaining, total_issues).dimmed()
+        ));
+    }
+    if should_show_namespace_barrel_hint(items) {
+        if truncation_emitted {
+            lines.push(String::new());
+        }
+        lines.push(format!("  {}", NAMESPACE_BARREL_HINT.dimmed()));
+    }
+    push_section_footer_with_count(lines, title, items.len());
+    lines.push(String::new());
+}
+
+/// Group duplicate-export findings by their first two distinct file paths,
+/// collecting the export names per pair and sorting groups by export count desc.
+fn collect_duplicate_export_pairs<'a>(
+    items: &'a [fallow_core::results::DuplicateExportFinding],
+    root: &Path,
+) -> Vec<(String, String, Vec<&'a str>)> {
     let mut pair_groups: Vec<(String, String, Vec<&str>)> = Vec::new();
     let mut pair_map: rustc_hash::FxHashMap<(String, String), usize> =
         rustc_hash::FxHashMap::default();
@@ -2215,50 +2316,39 @@ fn build_duplicate_exports_section(
     }
 
     pair_groups.sort_by_key(|b| std::cmp::Reverse(b.2.len()));
+    pair_groups
+}
 
-    let shown = pair_groups.len().min(MAX_FLAT_ITEMS);
-    for (file_a, file_b, exports) in &pair_groups[..shown] {
-        let export_list = if exports.len() <= 5 {
-            exports
-                .iter()
-                .map(|e| e.bold().to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        } else {
-            let mut display: Vec<String> =
-                exports[..5].iter().map(|e| e.bold().to_string()).collect();
-            display.push(format!("... +{}", exports.len() - 5).dimmed().to_string());
-            display.join(", ")
-        };
+/// Render one duplicate-export pair group: the source file, the linked file with
+/// export count, and the (possibly truncated) export list.
+fn push_duplicate_export_group(
+    lines: &mut Vec<String>,
+    file_a: &str,
+    file_b: &str,
+    exports: &[&str],
+) {
+    let export_list = if exports.len() <= 5 {
+        exports
+            .iter()
+            .map(|e| e.bold().to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    } else {
+        let mut display: Vec<String> = exports[..5].iter().map(|e| e.bold().to_string()).collect();
+        display.push(format!("... +{}", exports.len() - 5).dimmed().to_string());
+        display.join(", ")
+    };
 
-        let elided_b = elide_common_prefix(file_a, file_b);
-        lines.push(format!("  {}", format_path(file_a)));
-        lines.push(format!(
-            "    {} {} ({} export{})",
-            "\u{2194}".dimmed(),
-            format_path(elided_b),
-            exports.len(),
-            plural(exports.len())
-        ));
-        lines.push(format!("    {export_list}"));
-        lines.push(String::new());
-    }
-
-    let truncation_emitted = pair_groups.len() > MAX_FLAT_ITEMS;
-    if truncation_emitted {
-        let remaining = pair_groups.len() - MAX_FLAT_ITEMS;
-        lines.push(format!(
-            "  {}",
-            truncation_hint(remaining, total_issues).dimmed()
-        ));
-    }
-    if should_show_namespace_barrel_hint(items) {
-        if truncation_emitted {
-            lines.push(String::new());
-        }
-        lines.push(format!("  {}", NAMESPACE_BARREL_HINT.dimmed()));
-    }
-    push_section_footer_with_count(lines, title, items.len());
+    let elided_b = elide_common_prefix(file_a, file_b);
+    lines.push(format!("  {}", format_path(file_a)));
+    lines.push(format!(
+        "    {} {} ({} export{})",
+        "\u{2194}".dimmed(),
+        format_path(elided_b),
+        exports.len(),
+        plural(exports.len())
+    ));
+    lines.push(format!("    {export_list}"));
     lines.push(String::new());
 }
 
@@ -2979,102 +3069,174 @@ fn emit_config_quality_signal(results: &AnalysisResults, root: &Path) {
 /// `suppressed_exports` / `suppressed_types` are subtracted from the raw
 /// counts so the footer reflects the *visible* items when export suppression
 /// is active (exports from unused files are hidden).
-fn build_summary_footer(
+/// Pushes a pluralized `"<count> <label>"` part onto `parts` when `count > 0`.
+fn push_summary_part(parts: &mut Vec<String>, count: usize, label: &str) {
+    if count == 0 {
+        return;
+    }
+    let display_label = if count == 1 && label.ends_with("ies") {
+        format!("{}y", &label[..label.len() - 3])
+    } else if count == 1 && label.ends_with('s') {
+        label[..label.len() - 1].to_string()
+    } else {
+        label.to_string()
+    };
+    let mut s = String::new();
+    let _ = write!(s, "{count} {display_label}");
+    if count != 1 && !label.ends_with('s') {
+        s.push('s');
+    }
+    parts.push(s);
+}
+
+/// Counts distinct file pairs participating in duplicate-export findings.
+fn count_duplicate_export_pairs(results: &AnalysisResults) -> usize {
+    let mut pair_set = rustc_hash::FxHashSet::default();
+    for dup in &results.duplicate_exports {
+        let dup = &dup.export;
+        if dup.locations.len() >= 2 {
+            let mut paths: Vec<&std::path::Path> =
+                dup.locations.iter().map(|l| l.path.as_path()).collect();
+            paths.sort();
+            paths.dedup();
+            if paths.len() >= 2 {
+                pair_set.insert((paths[0].to_path_buf(), paths[1].to_path_buf()));
+            }
+        }
+    }
+    pair_set.len()
+}
+
+/// Appends the unused-code and dependency summary parts.
+fn push_summary_core_parts(
+    parts: &mut Vec<String>,
     results: &AnalysisResults,
     suppressed_exports: usize,
     suppressed_types: usize,
-) -> String {
-    let mut parts = Vec::new();
-    let mut add = |count: usize, label: &str| {
-        if count > 0 {
-            let display_label = if count == 1 && label.ends_with("ies") {
-                format!("{}y", &label[..label.len() - 3])
-            } else if count == 1 && label.ends_with('s') {
-                label[..label.len() - 1].to_string()
-            } else {
-                label.to_string()
-            };
-            let mut s = String::new();
-            let _ = write!(s, "{count} {display_label}");
-            if count != 1 && !label.ends_with('s') {
-                s.push('s');
-            }
-            parts.push(s);
-        }
-    };
-
-    add(results.unused_files.len(), "file");
-    add(
+) {
+    push_summary_part(parts, results.unused_files.len(), "file");
+    push_summary_part(
+        parts,
         results
             .unused_exports
             .len()
             .saturating_sub(suppressed_exports),
         "export",
     );
-    add(
+    push_summary_part(
+        parts,
         results.unused_types.len().saturating_sub(suppressed_types),
         "type",
     );
-    add(results.unused_dependencies.len(), "unused dependencies");
-    add(
+    push_summary_part(
+        parts,
+        results.unused_dependencies.len(),
+        "unused dependencies",
+    );
+    push_summary_part(
+        parts,
         results.unused_dev_dependencies.len() + results.unused_optional_dependencies.len(),
         "dev/optional dependencies",
     );
-    add(results.unused_enum_members.len(), "enum members");
-    add(results.unused_class_members.len(), "class members");
-    add(results.unused_store_members.len(), "store members");
-    add(results.unresolved_imports.len(), "unresolved imports");
-    add(results.unlisted_dependencies.len(), "unlisted dependencies");
-    {
-        let mut pair_set = rustc_hash::FxHashSet::default();
-        for dup in &results.duplicate_exports {
-            let dup = &dup.export;
-            if dup.locations.len() >= 2 {
-                let mut paths: Vec<&std::path::Path> =
-                    dup.locations.iter().map(|l| l.path.as_path()).collect();
-                paths.sort();
-                paths.dedup();
-                if paths.len() >= 2 {
-                    pair_set.insert((paths[0].to_path_buf(), paths[1].to_path_buf()));
-                }
-            }
-        }
-        add(pair_set.len(), "duplicate pair");
-    }
-    add(
+    push_summary_part(parts, results.unused_enum_members.len(), "enum members");
+    push_summary_part(parts, results.unused_class_members.len(), "class members");
+    push_summary_part(parts, results.unused_store_members.len(), "store members");
+    push_summary_part(
+        parts,
+        results.unresolved_imports.len(),
+        "unresolved imports",
+    );
+    push_summary_part(
+        parts,
+        results.unlisted_dependencies.len(),
+        "unlisted dependencies",
+    );
+    push_summary_part(
+        parts,
+        count_duplicate_export_pairs(results),
+        "duplicate pair",
+    );
+    push_summary_part(
+        parts,
         results.type_only_dependencies.len(),
         "type-only dependencies",
     );
-    add(
+    push_summary_part(
+        parts,
         results.test_only_dependencies.len(),
         "test-only dependencies",
     );
-    add(results.circular_dependencies.len(), "circular dependencies");
-    add(results.re_export_cycles.len(), "re-export cycles");
-    add(results.boundary_violations.len(), "violations");
-    add(results.unprovided_injects.len(), "unprovided injects");
-    add(results.unrendered_components.len(), "unrendered components");
-    add(
+    push_summary_part(
+        parts,
+        results.circular_dependencies.len(),
+        "circular dependencies",
+    );
+    push_summary_part(parts, results.re_export_cycles.len(), "re-export cycles");
+    push_summary_part(parts, results.boundary_violations.len(), "violations");
+}
+
+/// Appends the framework-specific summary parts.
+fn push_summary_framework_parts(parts: &mut Vec<String>, results: &AnalysisResults) {
+    push_summary_part(
+        parts,
+        results.unprovided_injects.len(),
+        "unprovided injects",
+    );
+    push_summary_part(
+        parts,
+        results.unrendered_components.len(),
+        "unrendered components",
+    );
+    push_summary_part(
+        parts,
         results.unused_component_props.len(),
         "unused component props",
     );
-    add(
+    push_summary_part(
+        parts,
         results.unused_component_emits.len(),
         "unused component emits",
     );
-    add(
+    push_summary_part(
+        parts,
         results.unused_component_inputs.len(),
         "unused component inputs",
     );
-    add(
+    push_summary_part(
+        parts,
         results.unused_component_outputs.len(),
         "unused component outputs",
     );
-    add(results.unused_svelte_events.len(), "unused Svelte events");
-    add(results.unused_server_actions.len(), "unused server actions");
-    add(results.unused_load_data_keys.len(), "unused load data keys");
-    add(results.stale_suppressions.len(), "stale suppressions");
+    push_summary_part(
+        parts,
+        results.unused_svelte_events.len(),
+        "unused Svelte events",
+    );
+    push_summary_part(
+        parts,
+        results.unused_server_actions.len(),
+        "unused server actions",
+    );
+    push_summary_part(
+        parts,
+        results.unused_load_data_keys.len(),
+        "unused load data keys",
+    );
+    push_summary_part(
+        parts,
+        results.stale_suppressions.len(),
+        "stale suppressions",
+    );
+}
 
+fn build_summary_footer(
+    results: &AnalysisResults,
+    suppressed_exports: usize,
+    suppressed_types: usize,
+) -> String {
+    let mut parts = Vec::new();
+    push_summary_core_parts(&mut parts, results, suppressed_exports, suppressed_types);
+    push_summary_framework_parts(&mut parts, results);
     parts.join(" \u{00b7} ")
 }
 
@@ -3130,6 +3292,15 @@ fn check_summary_core_categories(
     results: &AnalysisResults,
     rules: &RulesConfig,
 ) -> Vec<(&'static str, usize, Level)> {
+    let mut categories = check_summary_unused_export_categories(results, rules);
+    categories.extend(check_summary_member_categories(results, rules));
+    categories
+}
+
+fn check_summary_unused_export_categories(
+    results: &AnalysisResults,
+    rules: &RulesConfig,
+) -> Vec<(&'static str, usize, Level)> {
     vec![
         (
             "Unused files",
@@ -3166,6 +3337,14 @@ fn check_summary_core_categories(
             results.unused_optional_dependencies.len(),
             severity_to_level(rules.unused_optional_dependencies),
         ),
+    ]
+}
+
+fn check_summary_member_categories(
+    results: &AnalysisResults,
+    rules: &RulesConfig,
+) -> Vec<(&'static str, usize, Level)> {
+    vec![
         (
             "Unused enum members",
             results.unused_enum_members.len(),

@@ -22,7 +22,7 @@ pub use filtering::get_changed_files;
 pub use filtering::resolve_workspace_scope;
 pub use rules::has_error_severity_issues;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct IssueFilters {
     pub unused_files: bool,
     pub unused_exports: bool,

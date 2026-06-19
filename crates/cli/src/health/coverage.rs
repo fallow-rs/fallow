@@ -803,7 +803,7 @@ fn build_static_files(
             .iter()
             .map(|function| {
                 mark_ambiguous_function_line(&mut locations, path, &function.name, function.line);
-                build_static_function(BuildStaticFunctionInput {
+                build_static_function(&BuildStaticFunctionInput {
                     function,
                     path,
                     canonical_path: canonical_path.as_deref(),
@@ -859,7 +859,7 @@ struct BuildStaticFunctionInput<'a> {
 }
 
 /// Derive a `StaticFunction` from one parsed function plus static signals.
-fn build_static_function(input: BuildStaticFunctionInput<'_>) -> StaticFunction {
+fn build_static_function(input: &BuildStaticFunctionInput<'_>) -> StaticFunction {
     let static_used = function_static_used(input.path, input.function, input.static_signals);
     let test_covered = function_test_covered(
         input.path,

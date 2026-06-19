@@ -978,6 +978,44 @@ fn project_uses_tailwind(root: &std::path::Path) -> bool {
 /// ignore / changed / workspace filters as the CSS scan. Aggregates by token
 /// (total count + first location), sets the summary counts, and returns the
 /// located list sorted by use count descending.
+/// One eligible markup file (`jsx`/`tsx`/`html`/`astro`/`vue`/`svelte`) for a
+/// class-token scan: the forward-slash relative path plus source, or `None` when
+/// the file is filtered out (extension, ignore set, changed-files, workspace
+/// scope) or unreadable.
+fn read_markup_scan_source(
+    file: &fallow_types::discover::DiscoveredFile,
+    config: &ResolvedConfig,
+    ignore_set: &globset::GlobSet,
+    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
+    ws_roots: Option<&[std::path::PathBuf]>,
+) -> Option<(String, String)> {
+    let path = &file.path;
+    let extension = path.extension().and_then(|ext| ext.to_str());
+    if !matches!(
+        extension,
+        Some("jsx" | "tsx" | "html" | "astro" | "vue" | "svelte")
+    ) {
+        return None;
+    }
+    let relative = path.strip_prefix(&config.root).unwrap_or(path);
+    if ignore_set.is_match(relative) {
+        return None;
+    }
+    if let Some(changed) = changed_files
+        && !changed.contains(path)
+    {
+        return None;
+    }
+    if let Some(roots) = ws_roots
+        && !roots.iter().any(|root| path.starts_with(root))
+    {
+        return None;
+    }
+    let source = std::fs::read_to_string(path).ok()?;
+    let rel = relative.to_string_lossy().replace('\\', "/");
+    Some((rel, source))
+}
+
 fn scan_markup_tailwind_arbitrary_values(
     files: &[fallow_types::discover::DiscoveredFile],
     config: &ResolvedConfig,
@@ -997,32 +1035,11 @@ fn scan_markup_tailwind_arbitrary_values(
         rustc_hash::FxHashMap::default();
     let mut total_uses: u32 = 0;
     for file in files {
-        let path = &file.path;
-        let extension = path.extension().and_then(|ext| ext.to_str());
-        if !matches!(
-            extension,
-            Some("jsx" | "tsx" | "html" | "astro" | "vue" | "svelte")
-        ) {
-            continue;
-        }
-        let relative = path.strip_prefix(&config.root).unwrap_or(path);
-        if ignore_set.is_match(relative) {
-            continue;
-        }
-        if let Some(changed) = changed_files
-            && !changed.contains(path)
-        {
-            continue;
-        }
-        if let Some(roots) = ws_roots
-            && !roots.iter().any(|root| path.starts_with(root))
-        {
-            continue;
-        }
-        let Ok(source) = std::fs::read_to_string(path) else {
+        let Some((rel, source)) =
+            read_markup_scan_source(file, config, ignore_set, changed_files, ws_roots)
+        else {
             continue;
         };
-        let rel = relative.to_string_lossy().replace('\\', "/");
         for arb in fallow_core::extract::scan_tailwind_arbitrary_values(&source) {
             total_uses = total_uses.saturating_add(1);
             let entry = agg
@@ -1276,6 +1293,60 @@ fn is_tailwind_shaped(token: &str) -> bool {
     token.contains([':', '/', '[', ']'])
 }
 
+/// Length-bucketed index over the typo-target classes for O(1)-ish near-miss.
+/// Drops names ending in `-` / `_`: those are SCSS interpolation artifacts
+/// (`.display-#{$i}` parsed by lightningcss as a partial `display-`), never a
+/// real typo target.
+fn build_typo_target_index(
+    defined: &rustc_hash::FxHashSet<String>,
+) -> rustc_hash::FxHashMap<usize, Vec<&str>> {
+    let mut by_len: rustc_hash::FxHashMap<usize, Vec<&str>> = rustc_hash::FxHashMap::default();
+    for class in defined {
+        if class.len() >= MIN_DEFINED_CLASS_LEN && !class.ends_with('-') && !class.ends_with('_') {
+            by_len.entry(class.len()).or_default().push(class.as_str());
+        }
+    }
+    by_len
+}
+
+/// Collect the likely-typo class references in one markup source into `out`,
+/// deduping by `(rel, line, value)` via `seen`.
+fn collect_unresolved_class_refs_in_file<'a>(
+    source: &str,
+    rel: &str,
+    defined: &rustc_hash::FxHashSet<String>,
+    by_len: &'a rustc_hash::FxHashMap<usize, Vec<&'a str>>,
+    seen: &mut rustc_hash::FxHashSet<(String, u32, String)>,
+    out: &mut Vec<crate::health_types::UnresolvedClassReference>,
+) {
+    use crate::health_types::{CssCandidateAction, UnresolvedClassReference};
+    for token in fallow_core::extract::scan_markup_class_tokens(source).static_tokens {
+        if token.value.len() < MIN_TOKEN_LEN
+            || is_tailwind_shaped(&token.value)
+            || defined.contains(&token.value)
+        {
+            continue;
+        }
+        let Some(suggestion) = best_class_suggestion(&token.value, by_len) else {
+            continue;
+        };
+        let key = (rel.to_owned(), token.line, token.value.clone());
+        if !seen.insert(key) {
+            continue;
+        }
+        out.push(UnresolvedClassReference {
+            actions: vec![CssCandidateAction::verify_unresolved_class(
+                &token.value,
+                suggestion,
+            )],
+            class: token.value,
+            suggestion: suggestion.to_owned(),
+            path: rel.to_owned(),
+            line: token.line,
+        });
+    }
+}
+
 /// Scan markup for static `class` / `className` tokens that match no defined CSS
 /// class but are one edit from a defined class (a likely typo / stale rename).
 /// The defined set is the full project; markup honors the ignore / changed /
@@ -1290,7 +1361,7 @@ fn scan_unresolved_class_references(
     ws_roots: Option<&[std::path::PathBuf]>,
     summary: &mut crate::health_types::CssAnalyticsSummary,
 ) -> Vec<crate::health_types::UnresolvedClassReference> {
-    use crate::health_types::{CssCandidateAction, UnresolvedClassReference};
+    use crate::health_types::UnresolvedClassReference;
 
     // Abstain on preprocessor-dominant projects. lightningcss parses `.scss` /
     // `.sass` / `.less` source textually but cannot expand loops / mixins, so a
@@ -1308,71 +1379,19 @@ fn scan_unresolved_class_references(
     if defined.is_empty() {
         return Vec::new();
     }
-    // Length-bucketed index over the typo-target classes for O(1)-ish near-miss.
-    // Drop names ending in `-` / `_`: those are SCSS interpolation artifacts
-    // (`.display-#{$i}` parsed by lightningcss as a partial `display-`), never a
-    // real typo target.
-    let mut by_len: rustc_hash::FxHashMap<usize, Vec<&str>> = rustc_hash::FxHashMap::default();
-    for class in &defined {
-        if class.len() >= MIN_DEFINED_CLASS_LEN && !class.ends_with('-') && !class.ends_with('_') {
-            by_len.entry(class.len()).or_default().push(class.as_str());
-        }
-    }
+    let by_len = build_typo_target_index(&defined);
 
     let mut out: Vec<UnresolvedClassReference> = Vec::new();
     let mut seen: rustc_hash::FxHashSet<(String, u32, String)> = rustc_hash::FxHashSet::default();
     for file in files {
-        let path = &file.path;
-        let extension = path.extension().and_then(|ext| ext.to_str());
-        if !matches!(
-            extension,
-            Some("jsx" | "tsx" | "html" | "astro" | "vue" | "svelte")
-        ) {
-            continue;
-        }
-        let relative = path.strip_prefix(&config.root).unwrap_or(path);
-        if ignore_set.is_match(relative) {
-            continue;
-        }
-        if let Some(changed) = changed_files
-            && !changed.contains(path)
-        {
-            continue;
-        }
-        if let Some(roots) = ws_roots
-            && !roots.iter().any(|root| path.starts_with(root))
-        {
-            continue;
-        }
-        let Ok(source) = std::fs::read_to_string(path) else {
+        let Some((rel, source)) =
+            read_markup_scan_source(file, config, ignore_set, changed_files, ws_roots)
+        else {
             continue;
         };
-        let rel = relative.to_string_lossy().replace('\\', "/");
-        for token in fallow_core::extract::scan_markup_class_tokens(&source).static_tokens {
-            if token.value.len() < MIN_TOKEN_LEN
-                || is_tailwind_shaped(&token.value)
-                || defined.contains(&token.value)
-            {
-                continue;
-            }
-            let Some(suggestion) = best_class_suggestion(&token.value, &by_len) else {
-                continue;
-            };
-            let key = (rel.clone(), token.line, token.value.clone());
-            if !seen.insert(key) {
-                continue;
-            }
-            out.push(UnresolvedClassReference {
-                actions: vec![CssCandidateAction::verify_unresolved_class(
-                    &token.value,
-                    suggestion,
-                )],
-                class: token.value,
-                suggestion: suggestion.to_owned(),
-                path: rel.clone(),
-                line: token.line,
-            });
-        }
+        collect_unresolved_class_refs_in_file(
+            &source, &rel, &defined, &by_len, &mut seen, &mut out,
+        );
     }
 
     out.sort_by(|a, b| {
@@ -2080,35 +2099,23 @@ struct UnusedThemeTokenScanInput<'a> {
     summary: &'a mut crate::health_types::CssAnalyticsSummary,
 }
 
-fn scan_unused_theme_tokens(
-    input: &mut UnusedThemeTokenScanInput<'_>,
-) -> Vec<crate::health_types::UnusedThemeToken> {
-    use crate::health_types::{CssCandidateAction, UnusedThemeToken};
+/// A classified `@theme` token candidate (namespace + name + definition site)
+/// surviving the variant / published-library / unknown-namespace filters.
+struct ThemeTokenCandidate {
+    token: String,
+    namespace: String,
+    name: String,
+    path: String,
+    line: u32,
+}
 
-    // Partial scope cannot prove a token dead.
-    if input.changed_files.is_some() || input.ws_roots.is_some() {
-        return Vec::new();
-    }
-    // v4 gate: a Tailwind dependency AND at least one @theme token present.
-    if input.tokens.theme_token_definers.is_empty() || !project_uses_tailwind(&input.config.root) {
-        return Vec::new();
-    }
-    // Tailwind-plugin abstain (DI blind spot).
-    if project_uses_tailwind_plugin(input.tokens.any_plugin_directive, &input.config.root) {
-        return Vec::new();
-    }
-
-    // Classify candidate tokens; drop variant namespaces, published-library
-    // stylesheets, and anything that does not match a known namespace.
+/// Classify the project's `@theme` token definers, dropping variant namespaces,
+/// published-library stylesheets, and anything outside a known namespace.
+fn classify_theme_token_candidates(
+    input: &UnusedThemeTokenScanInput<'_>,
+) -> Vec<ThemeTokenCandidate> {
     let published = published_css_paths(input.config);
-    struct Candidate {
-        token: String,
-        namespace: String,
-        name: String,
-        path: String,
-        line: u32,
-    }
-    let mut candidates: Vec<Candidate> = Vec::new();
+    let mut candidates: Vec<ThemeTokenCandidate> = Vec::new();
     for (raw, (path, line)) in &input.tokens.theme_token_definers {
         if published.contains(path) {
             continue;
@@ -2119,7 +2126,7 @@ fn scan_unused_theme_tokens(
         if classified.is_variant {
             continue;
         }
-        candidates.push(Candidate {
+        candidates.push(ThemeTokenCandidate {
             token: format!("--{raw}"),
             namespace: classified.namespace,
             name: classified.name,
@@ -2127,14 +2134,14 @@ fn scan_unused_theme_tokens(
             line: *line,
         });
     }
-    if candidates.is_empty() {
-        input.summary.unused_theme_tokens = 0;
-        return Vec::new();
-    }
+    candidates
+}
 
-    // Build the usage surfaces: every utility-shaped token from `@apply` bodies
-    // and from non-CSS source (markup class attributes, `clsx` args, CSS-in-JS),
-    // plus the `var()` reads (CSS-side, including `@theme` interiors).
+/// Build the utility-shaped usage surface: every class-shaped token from `@apply`
+/// bodies plus non-CSS source (markup class attributes, `clsx` args, CSS-in-JS).
+fn collect_theme_usage_tokens(
+    input: &UnusedThemeTokenScanInput<'_>,
+) -> rustc_hash::FxHashSet<String> {
     let mut utility_tokens: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
     for apply in &input.tokens.apply_tokens {
         collect_class_shaped_tokens(apply, &mut utility_tokens);
@@ -2153,11 +2160,45 @@ fn scan_unused_theme_tokens(
             collect_class_shaped_tokens(&source, &mut utility_tokens);
         }
     }
+    utility_tokens
+}
 
-    let mut var_reads: rustc_hash::FxHashSet<String> = input.tokens.theme_var_reads.clone();
-    for referenced in &input.tokens.referenced_custom_props {
+/// The `var()` read surface: CSS-side `@theme` reads plus referenced custom
+/// properties (leading dashes trimmed to the property key form).
+fn collect_theme_var_reads(tokens: &CssTokenSets) -> rustc_hash::FxHashSet<String> {
+    let mut var_reads: rustc_hash::FxHashSet<String> = tokens.theme_var_reads.clone();
+    for referenced in &tokens.referenced_custom_props {
         var_reads.insert(referenced.trim_start_matches('-').to_owned());
     }
+    var_reads
+}
+
+fn scan_unused_theme_tokens(
+    input: &mut UnusedThemeTokenScanInput<'_>,
+) -> Vec<crate::health_types::UnusedThemeToken> {
+    use crate::health_types::{CssCandidateAction, UnusedThemeToken};
+
+    // Partial scope cannot prove a token dead.
+    if input.changed_files.is_some() || input.ws_roots.is_some() {
+        return Vec::new();
+    }
+    // v4 gate: a Tailwind dependency AND at least one @theme token present.
+    if input.tokens.theme_token_definers.is_empty() || !project_uses_tailwind(&input.config.root) {
+        return Vec::new();
+    }
+    // Tailwind-plugin abstain (DI blind spot).
+    if project_uses_tailwind_plugin(input.tokens.any_plugin_directive, &input.config.root) {
+        return Vec::new();
+    }
+
+    let candidates = classify_theme_token_candidates(input);
+    if candidates.is_empty() {
+        input.summary.unused_theme_tokens = 0;
+        return Vec::new();
+    }
+
+    let utility_tokens = collect_theme_usage_tokens(input);
+    let var_reads = collect_theme_var_reads(input.tokens);
 
     let mut out: Vec<UnusedThemeToken> = Vec::new();
     for candidate in candidates {
@@ -2341,16 +2382,36 @@ fn record_css_analytics_summary(
     }
 }
 
-fn compute_css_analytics_report(
+/// The per-file CSS walk accumulator: structural file reports, the project-wide
+/// token sets, scoped SFC unused-class findings, and the running summary.
+struct CssWalkAccum {
+    file_reports: Vec<crate::health_types::CssFileAnalytics>,
+    summary: crate::health_types::CssAnalyticsSummary,
+    scoped_unused: Vec<crate::health_types::ScopedUnusedClasses>,
+    tokens: CssTokenSets,
+}
+
+/// The finalized whole-project token metrics (keyframes, duplicate blocks, unused
+/// at-rules, font-size unit mix, unused font faces) derived after the file walk.
+struct CssTokenMetrics {
+    unreferenced_keyframes: Vec<crate::health_types::UnreferencedKeyframes>,
+    undefined_keyframes: Vec<crate::health_types::UndefinedKeyframes>,
+    duplicate_declaration_blocks: Vec<crate::health_types::CssDuplicateBlock>,
+    unused_at_rules: Vec<crate::health_types::UnusedAtRule>,
+    font_size_unit_mix: Option<crate::health_types::CssNotationConsistency>,
+    unused_font_faces: Vec<crate::health_types::UnusedFontFace>,
+}
+
+/// Walk every in-scope stylesheet / SFC, accumulating structural metrics, the
+/// project token sets, and scoped SFC unused-class findings.
+fn walk_css_files(
     files: &[fallow_types::discover::DiscoveredFile],
     config: &ResolvedConfig,
     ignore_set: &globset::GlobSet,
     changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
     ws_roots: Option<&[std::path::PathBuf]>,
-) -> Option<crate::health_types::CssAnalyticsReport> {
-    use crate::health_types::{
-        CssAnalyticsReport, CssAnalyticsSummary, CssFileAnalytics, ScopedUnusedClasses,
-    };
+) -> CssWalkAccum {
+    use crate::health_types::{CssAnalyticsSummary, CssFileAnalytics, ScopedUnusedClasses};
 
     let mut file_reports = Vec::new();
     let mut summary = CssAnalyticsSummary::default();
@@ -2397,6 +2458,23 @@ fn compute_css_analytics_report(
         }
     }
 
+    CssWalkAccum {
+        file_reports,
+        summary,
+        scoped_unused,
+        tokens,
+    }
+}
+
+/// Credit Tailwind-markup-applied keyframes, then finalize the whole-project
+/// token metrics and prune unused `@font-face` families referenced elsewhere.
+fn finalize_css_token_metrics(
+    tokens: &mut CssTokenSets,
+    summary: &mut crate::health_types::CssAnalyticsSummary,
+    files: &[fallow_types::discover::DiscoveredFile],
+    config: &ResolvedConfig,
+    ignore_set: &globset::GlobSet,
+) -> CssTokenMetrics {
     // Credit @keyframes applied via Tailwind markup (`animate-[name_...]` /
     // `animate-name`), not just CSS `animation:` declarations, before the
     // unreferenced diff. Filtered to actually-defined keyframes so a stray
@@ -2407,11 +2485,11 @@ fn compute_css_analytics_report(
         }
     }
 
-    let (unreferenced_keyframes, undefined_keyframes) = tokens.finalize(&mut summary);
-    let duplicate_declaration_blocks = tokens.group_duplicate_blocks(&mut summary);
-    let unused_at_rules = tokens.group_unused_at_rules(&mut summary);
-    let font_size_unit_mix = tokens.font_size_unit_mix(&mut summary);
-    let mut unused_font_faces = tokens.unused_font_faces(&mut summary);
+    let (unreferenced_keyframes, undefined_keyframes) = tokens.finalize(summary);
+    let duplicate_declaration_blocks = tokens.group_duplicate_blocks(summary);
+    let unused_at_rules = tokens.group_unused_at_rules(summary);
+    let font_size_unit_mix = tokens.font_size_unit_mix(summary);
+    let mut unused_font_faces = tokens.unused_font_faces(summary);
     // The CSS-only set difference cannot see a font family applied from
     // JavaScript / canvas (Excalidraw) or referenced from a `.scss`/`.sass`
     // theme the parser never reads (reveal.js). Drop any candidate whose family
@@ -2423,46 +2501,78 @@ fn compute_css_analytics_report(
         unused_font_faces.retain(|ff| !referenced.contains(&ff.family));
         summary.unused_font_faces = saturate_len(unused_font_faces.len());
     }
-    let MarkupCssCandidates {
-        tailwind_arbitrary_values,
-        unresolved_class_references,
-        unreferenced_css_classes,
-        unused_theme_tokens,
-    } = scan_markup_css_candidates(&mut MarkupCssCandidateInput {
-        tokens: &tokens,
+
+    CssTokenMetrics {
+        unreferenced_keyframes,
+        undefined_keyframes,
+        duplicate_declaration_blocks,
+        unused_at_rules,
+        font_size_unit_mix,
+        unused_font_faces,
+    }
+}
+
+fn compute_css_analytics_report(
+    files: &[fallow_types::discover::DiscoveredFile],
+    config: &ResolvedConfig,
+    ignore_set: &globset::GlobSet,
+    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
+    ws_roots: Option<&[std::path::PathBuf]>,
+) -> Option<crate::health_types::CssAnalyticsReport> {
+    let mut walk = walk_css_files(files, config, ignore_set, changed_files, ws_roots);
+    let metrics = finalize_css_token_metrics(
+        &mut walk.tokens,
+        &mut walk.summary,
+        files,
+        config,
+        ignore_set,
+    );
+    let candidates = scan_markup_css_candidates(&mut MarkupCssCandidateInput {
+        tokens: &walk.tokens,
         files,
         config,
         ignore_set,
         changed_files,
         ws_roots,
-        summary: &mut summary,
+        summary: &mut walk.summary,
     });
+    assemble_css_report(walk, metrics, candidates)
+}
 
-    if summary.files_analyzed == 0
-        && scoped_unused.is_empty()
-        && tailwind_arbitrary_values.is_empty()
-        && unresolved_class_references.is_empty()
-        && unreferenced_css_classes.is_empty()
-        && unused_font_faces.is_empty()
-        && unused_theme_tokens.is_empty()
-    {
+/// Assemble the final CSS analytics report from the walk accumulator, finalized
+/// token metrics, and markup candidates; returns `None` when nothing notable was
+/// found (no analyzed files and every candidate list empty).
+fn assemble_css_report(
+    walk: CssWalkAccum,
+    metrics: CssTokenMetrics,
+    candidates: MarkupCssCandidates,
+) -> Option<crate::health_types::CssAnalyticsReport> {
+    use crate::health_types::CssAnalyticsReport;
+
+    let candidates_empty = candidates.tailwind_arbitrary_values.is_empty()
+        && candidates.unresolved_class_references.is_empty()
+        && candidates.unreferenced_css_classes.is_empty()
+        && metrics.unused_font_faces.is_empty()
+        && candidates.unused_theme_tokens.is_empty();
+    if walk.summary.files_analyzed == 0 && walk.scoped_unused.is_empty() && candidates_empty {
         return None;
     }
+    let mut scoped_unused = walk.scoped_unused;
     scoped_unused.sort_by(|a, b| a.path.cmp(&b.path));
     Some(CssAnalyticsReport {
-        files: file_reports,
-        summary,
+        files: walk.file_reports,
+        summary: walk.summary,
         scoped_unused,
-        unreferenced_keyframes,
-        undefined_keyframes,
-        duplicate_declaration_blocks,
-        tailwind_arbitrary_values,
-        unused_at_rules,
-        unresolved_class_references,
-        unreferenced_css_classes,
-        unused_font_faces,
-        unused_theme_tokens,
-        font_size_unit_mix,
+        unreferenced_keyframes: metrics.unreferenced_keyframes,
+        undefined_keyframes: metrics.undefined_keyframes,
+        duplicate_declaration_blocks: metrics.duplicate_declaration_blocks,
+        tailwind_arbitrary_values: candidates.tailwind_arbitrary_values,
+        unused_at_rules: metrics.unused_at_rules,
+        unresolved_class_references: candidates.unresolved_class_references,
+        unreferenced_css_classes: candidates.unreferenced_css_classes,
+        unused_font_faces: metrics.unused_font_faces,
+        unused_theme_tokens: candidates.unused_theme_tokens,
+        font_size_unit_mix: metrics.font_size_unit_mix,
     })
 }
 
@@ -4628,15 +4738,92 @@ struct HealthVitalDataInput<'a> {
     needs_file_scores: bool,
 }
 
-fn prepare_health_vital_data(
-    input: &HealthVitalDataInput<'_>,
-) -> Result<HealthVitalData, ExitCode> {
-    let project_subset = if input.candidate_paths.len() == input.total_files {
-        SubsetFilter::Full
-    } else {
-        SubsetFilter::Paths(input.candidate_paths)
+/// Assign the prop-drilling chain count / max depth onto the vital signs. Prop
+/// drilling is a whole-project graph signal (the chains live in AnalysisResults,
+/// surfaced via FileScoreOutput); only populated when the opt-in `prop-drilling`
+/// rule emitted chains, so the small capped penalty stays dormant by default.
+fn apply_prop_drilling_metrics(
+    vital_signs: &mut crate::health_types::VitalSigns,
+    score_output: &scoring::FileScoreOutput,
+) {
+    if score_output.prop_drilling_chains.is_empty() {
+        return;
+    }
+    vital_signs.prop_drilling_chain_count =
+        u32::try_from(score_output.prop_drilling_chains.len()).ok();
+    vital_signs.prop_drilling_max_depth = score_output
+        .prop_drilling_chains
+        .iter()
+        .map(|c| c.chain.depth)
+        .max();
+}
+
+/// Assign the descriptive render fan-in blast-radius metric (p95 / high-pct / max
+/// distinct parents plus a located top-N list) onto the vital signs. Aggregates
+/// are precomputed in core and ride on FileScoreOutput; non-React runs leave the
+/// fields `None` (skip_serializing_if), so the JSON contract is unchanged.
+fn apply_render_fan_in_metrics(
+    vital_signs: &mut crate::health_types::VitalSigns,
+    score_output: &scoring::FileScoreOutput,
+    config: &ResolvedConfig,
+) {
+    let Some(metric) = score_output.render_fan_in.as_ref() else {
+        return;
     };
-    let total_files_scoped = input.candidate_paths.len();
+    vital_signs.p95_render_fan_in = metric.p95_distinct_parents;
+    vital_signs.render_fan_in_high_pct = metric.high_pct;
+    // The public headline (`max_render_fan_in`) is the max DISTINCT-PARENTS:
+    // honest blast radius = the most distinct render LOCATIONS any one
+    // component is rendered from. `render_sites` (incl. repeats) is secondary.
+    vital_signs.max_render_fan_in = metric.max_distinct_parents;
+
+    // Located top-N list so a consumer sees WHICH component carries the
+    // headline fan-in, not just the number. The core carrier is sorted by
+    // (path, component) for run-stability and INCLUDES rendered-nowhere `0`
+    // entries (for the percentile distribution), so re-sort by
+    // distinct_parents (the honest headline axis) descending, tie-break on
+    // render_sites descending, and drop the `0`-fan-in entries here. Final
+    // tie-break on (path, component) so the cap is deterministic. Cap at a
+    // small N.
+    const MAX_TOP_RENDER_FAN_IN: usize = 20;
+    let mut top: Vec<&fallow_types::results::RenderFanInComponent> = metric
+        .per_component
+        .iter()
+        .filter(|c| c.distinct_parents > 0)
+        .collect();
+    top.sort_by(|a, b| {
+        b.distinct_parents
+            .cmp(&a.distinct_parents)
+            .then_with(|| b.render_sites.cmp(&a.render_sites))
+            .then_with(|| a.file.cmp(&b.file))
+            .then_with(|| a.component.cmp(&b.component))
+    });
+    vital_signs.top_render_fan_in = top
+        .into_iter()
+        .take(MAX_TOP_RENDER_FAN_IN)
+        .map(|c| crate::health_types::RenderFanInTopComponent {
+            component: c.component.clone(),
+            path: c
+                .file
+                .strip_prefix(&config.root)
+                .unwrap_or(&c.file)
+                .to_path_buf(),
+            render_sites: c.render_sites,
+            distinct_parents: c.distinct_parents,
+        })
+        .collect();
+}
+
+/// Compute the scoped vital signs / counts for the candidate subset, then assign
+/// the prop-drilling and render fan-in metrics onto the vital signs.
+fn compute_scoped_vital_signs(
+    input: &HealthVitalDataInput<'_>,
+    total_files_scoped: usize,
+    project_subset: &SubsetFilter<'_>,
+) -> (
+    crate::health_types::VitalSigns,
+    crate::health_types::VitalSignsCounts,
+) {
     let vital_signs_input = VitalSignsAndCountsInput {
         score_output: input.score_output,
         modules: input.modules,
@@ -4646,79 +4833,49 @@ fn prepare_health_vital_data(
         needs_hotspots: input.opts.hotspots || input.opts.targets,
         hotspots: input.hotspots,
         total_files: total_files_scoped,
-        subset: &project_subset,
+        subset: project_subset,
     };
-    let (mut vital_signs, mut counts) = compute_vital_signs_and_counts(&vital_signs_input);
+    let (mut vital_signs, counts) = compute_vital_signs_and_counts(&vital_signs_input);
 
-    // Prop drilling is a whole-project graph signal (the chains live in
-    // AnalysisResults, surfaced via FileScoreOutput). Only populated when the
-    // opt-in `prop-drilling` rule is enabled (the detector emits no chains
-    // otherwise), so the small capped penalty stays dormant by default. `None`
-    // when the count is zero so the penalty / score is unchanged.
-    if let Some(score_output) = input.score_output
-        && !score_output.prop_drilling_chains.is_empty()
-    {
-        vital_signs.prop_drilling_chain_count =
-            u32::try_from(score_output.prop_drilling_chains.len()).ok();
-        vital_signs.prop_drilling_max_depth = score_output
-            .prop_drilling_chains
-            .iter()
-            .map(|c| c.chain.depth)
-            .max();
+    if let Some(score_output) = input.score_output {
+        apply_prop_drilling_metrics(&mut vital_signs, score_output);
+        apply_render_fan_in_metrics(&mut vital_signs, score_output, input.config);
     }
+    (vital_signs, counts)
+}
 
-    // Render fan-in is a descriptive whole-project blast-radius metric (the
-    // component-graph analogue of module fan-in). The aggregates are precomputed
-    // in core (it has the resolved-module graph) and ride on the
-    // `AnalysisResults` carrier surfaced via `FileScoreOutput`; assign them onto
-    // the descriptive vital signs whenever React was declared. Non-React runs
-    // leave them `None` (skip_serializing_if), so the JSON contract is unchanged.
-    if let Some(score_output) = input.score_output
-        && let Some(metric) = score_output.render_fan_in.as_ref()
-    {
-        vital_signs.p95_render_fan_in = metric.p95_distinct_parents;
-        vital_signs.render_fan_in_high_pct = metric.high_pct;
-        // The public headline (`max_render_fan_in`) is the max DISTINCT-PARENTS:
-        // honest blast radius = the most distinct render LOCATIONS any one
-        // component is rendered from. `render_sites` (incl. repeats) is secondary.
-        vital_signs.max_render_fan_in = metric.max_distinct_parents;
-
-        // Located top-N list so a consumer sees WHICH component carries the
-        // headline fan-in, not just the number. The core carrier is sorted by
-        // (path, component) for run-stability and INCLUDES rendered-nowhere `0`
-        // entries (for the percentile distribution), so re-sort by
-        // distinct_parents (the honest headline axis) descending, tie-break on
-        // render_sites descending, and drop the `0`-fan-in entries here. Final
-        // tie-break on (path, component) so the cap is deterministic. Cap at a
-        // small N.
-        const MAX_TOP_RENDER_FAN_IN: usize = 20;
-        let mut top: Vec<&fallow_types::results::RenderFanInComponent> = metric
-            .per_component
-            .iter()
-            .filter(|c| c.distinct_parents > 0)
-            .collect();
-        top.sort_by(|a, b| {
-            b.distinct_parents
-                .cmp(&a.distinct_parents)
-                .then_with(|| b.render_sites.cmp(&a.render_sites))
-                .then_with(|| a.file.cmp(&b.file))
-                .then_with(|| a.component.cmp(&b.component))
-        });
-        vital_signs.top_render_fan_in = top
-            .into_iter()
-            .take(MAX_TOP_RENDER_FAN_IN)
-            .map(|c| crate::health_types::RenderFanInTopComponent {
-                component: c.component.clone(),
-                path: c
-                    .file
-                    .strip_prefix(&input.config.root)
-                    .unwrap_or(&c.file)
-                    .to_path_buf(),
-                render_sites: c.render_sites,
-                distinct_parents: c.distinct_parents,
-            })
-            .collect();
+/// Persist the health snapshot when `--save-snapshot` was requested.
+fn maybe_save_health_snapshot(
+    input: &HealthVitalDataInput<'_>,
+    vital_signs: &crate::health_types::VitalSigns,
+    counts: &crate::health_types::VitalSignsCounts,
+    health_score: Option<&HealthScore>,
+) -> Result<(), ExitCode> {
+    if let Some(ref snapshot_path) = input.opts.save_snapshot {
+        save_snapshot(SnapshotInput {
+            opts: input.opts,
+            snapshot_path,
+            vital_signs,
+            counts,
+            hotspot_summary: input.hotspot_summary,
+            health_score,
+            coverage_model: Some(active_health_coverage_model(input.has_istanbul_coverage)),
+        })?;
     }
+    Ok(())
+}
+
+fn prepare_health_vital_data(
+    input: &HealthVitalDataInput<'_>,
+) -> Result<HealthVitalData, ExitCode> {
+    let project_subset = if input.candidate_paths.len() == input.total_files {
+        SubsetFilter::Full
+    } else {
+        SubsetFilter::Paths(input.candidate_paths)
+    };
+    let total_files_scoped = input.candidate_paths.len();
+    let (mut vital_signs, mut counts) =
+        compute_scoped_vital_signs(input, total_files_scoped, &project_subset);
 
     let health_score = compute_health_score_metrics(
         input.opts,
@@ -4737,17 +4894,7 @@ fn prepare_health_vital_data(
         ws_roots: input.ws_roots,
         diff_index: input.diff_index,
     });
-    if let Some(ref snapshot_path) = input.opts.save_snapshot {
-        save_snapshot(SnapshotInput {
-            opts: input.opts,
-            snapshot_path,
-            vital_signs: &vital_signs,
-            counts: &counts,
-            hotspot_summary: input.hotspot_summary,
-            health_score: health_score.as_ref(),
-            coverage_model: Some(active_health_coverage_model(input.has_istanbul_coverage)),
-        })?;
-    }
+    maybe_save_health_snapshot(input, &vital_signs, &counts, health_score.as_ref())?;
     let health_trend =
         compute_health_trend(input.opts, &vital_signs, &counts, health_score.as_ref());
 
@@ -5617,70 +5764,104 @@ type ComplexityByPosition<'a> = rustc_hash::FxHashMap<
     rustc_hash::FxHashMap<(u32, u32), &'a fallow_types::extract::FunctionComplexity>,
 >;
 
+/// The precomputed position-keyed lookup maps shared across the CRAP merge pass:
+/// existing-finding index, per-function complexity, React hook profiles, and
+/// per-path suppressions.
+struct CrapMergeMaps<'a> {
+    finding_index: rustc_hash::FxHashMap<(std::path::PathBuf, u32, u32), usize>,
+    complexity_by_pos: ComplexityByPosition<'a>,
+    hook_profiles_by_pos: rustc_hash::FxHashMap<
+        &'a std::path::Path,
+        rustc_hash::FxHashMap<(u32, u32), crate::health_types::ReactHookProfile>,
+    >,
+    suppressions_by_path:
+        rustc_hash::FxHashMap<&'a std::path::Path, &'a Vec<fallow_core::suppress::Suppression>>,
+}
+
+/// Process one path's per-function CRAP entries: record threshold state, skip
+/// below-threshold / suppressed frames, then merge into an existing finding or
+/// append a new one to `new_findings`.
+fn process_crap_findings_for_path(
+    path: &std::path::Path,
+    per_fn: &[scoring::PerFunctionCrap],
+    maps: &CrapMergeMaps<'_>,
+    findings: &mut [ComplexityViolation],
+    new_findings: &mut Vec<ComplexityViolation>,
+    input: &mut CrapFindingMergeInput<'_>,
+) {
+    for pf in per_fn {
+        let Some(fc) = maps
+            .complexity_by_pos
+            .get(path)
+            .and_then(|m| m.get(&(pf.line, pf.col)).copied())
+        else {
+            continue;
+        };
+        let relative = path.strip_prefix(input.config_root).unwrap_or(path);
+        let (applied_thresholds, matched_overrides) =
+            input.threshold_resolver.resolve(relative, &fc.name);
+        input.threshold_state_tracker.record_crap(
+            path,
+            &fc.name,
+            MeasuredThresholdMetrics {
+                cyclomatic: fc.cyclomatic,
+                cognitive: fc.cognitive,
+                crap: pf.crap,
+            },
+            &matched_overrides,
+            input.threshold_resolver.global,
+        );
+        if pf.crap < applied_thresholds.effective.max_crap
+            || crap_is_suppressed(path, pf, &maps.suppressions_by_path)
+        {
+            continue;
+        }
+
+        if let Some(&idx) = maps
+            .finding_index
+            .get(&(path.to_path_buf(), pf.line, pf.col))
+        {
+            merge_existing_crap_finding(&mut findings[idx], path, pf, input, applied_thresholds);
+        } else {
+            let hook_profile = maps
+                .hook_profiles_by_pos
+                .get(path)
+                .and_then(|m| m.get(&(pf.line, pf.col)).cloned());
+            new_findings.push(new_crap_finding(
+                path,
+                pf,
+                fc,
+                hook_profile,
+                input,
+                applied_thresholds,
+            ));
+        }
+    }
+}
+
 fn merge_crap_findings(
     findings: &mut Vec<ComplexityViolation>,
     input: &mut CrapFindingMergeInput<'_>,
 ) {
-    let finding_index = build_complexity_finding_index(findings);
-    let complexity_by_pos = build_complexity_by_position(input.modules, input.file_paths);
-    let hook_profiles_by_pos = build_hook_profiles_by_position(input.modules, input.file_paths);
-    let suppressions_by_path =
-        build_complexity_suppressions_by_path(input.modules, input.file_paths);
+    // Copy the `'a` references out so the lookup maps and the per-function map
+    // borrow the underlying analysis data, not `input`, leaving `input` free to
+    // be passed mutably into the per-path processor below.
+    let modules = input.modules;
+    let file_paths = input.file_paths;
+    let per_function_crap = input.per_function_crap;
+    let maps = CrapMergeMaps {
+        finding_index: build_complexity_finding_index(findings),
+        complexity_by_pos: build_complexity_by_position(modules, file_paths),
+        hook_profiles_by_pos: build_hook_profiles_by_position(modules, file_paths),
+        suppressions_by_path: build_complexity_suppressions_by_path(modules, file_paths),
+    };
 
     let mut new_findings: Vec<ComplexityViolation> = Vec::new();
-    for (path, per_fn) in input.per_function_crap {
+    for (path, per_fn) in per_function_crap {
         if !crap_path_in_scope(path, input) {
             continue;
         }
-        for pf in per_fn {
-            let Some(fc) = complexity_by_pos
-                .get(path.as_path())
-                .and_then(|m| m.get(&(pf.line, pf.col)).copied())
-            else {
-                continue;
-            };
-            let relative = path.strip_prefix(input.config_root).unwrap_or(path);
-            let (applied_thresholds, matched_overrides) =
-                input.threshold_resolver.resolve(relative, &fc.name);
-            input.threshold_state_tracker.record_crap(
-                path,
-                &fc.name,
-                MeasuredThresholdMetrics {
-                    cyclomatic: fc.cyclomatic,
-                    cognitive: fc.cognitive,
-                    crap: pf.crap,
-                },
-                &matched_overrides,
-                input.threshold_resolver.global,
-            );
-            if pf.crap < applied_thresholds.effective.max_crap
-                || crap_is_suppressed(path, pf, &suppressions_by_path)
-            {
-                continue;
-            }
-
-            if let Some(&idx) = finding_index.get(&(path.clone(), pf.line, pf.col)) {
-                merge_existing_crap_finding(
-                    &mut findings[idx],
-                    path,
-                    pf,
-                    input,
-                    applied_thresholds,
-                );
-            } else {
-                let hook_profile = hook_profiles_by_pos
-                    .get(path.as_path())
-                    .and_then(|m| m.get(&(pf.line, pf.col)).cloned());
-                new_findings.push(new_crap_finding(
-                    path,
-                    pf,
-                    fc,
-                    hook_profile,
-                    input,
-                    applied_thresholds,
-                ));
-            }
-        }
+        process_crap_findings_for_path(path, per_fn, &maps, findings, &mut new_findings, input);
     }
     findings.extend(new_findings);
 }
@@ -5992,40 +6173,46 @@ fn is_component_class_finding(finding: &crate::health_types::ComplexityViolation
             })
 }
 
-fn build_component_rollup(
+/// The rolled-up cyclomatic / cognitive totals for a component (worst frame plus
+/// its template) and whether each total exceeds its threshold.
+struct ComponentRollupTotals {
+    rollup_cyc: u16,
+    rollup_cog: u16,
+    exceeds_cyclomatic: bool,
+    exceeds_cognitive: bool,
+}
+
+/// Assemble the synthetic `<component>` rollup finding from the precomputed
+/// totals, the worst class frame, and its template frame.
+fn make_component_rollup_violation(
     owner: std::path::PathBuf,
     worst: &crate::health_types::ComplexityViolation,
     template: &crate::health_types::ComplexityViolation,
-    max_cyclomatic: u16,
-    max_cognitive: u16,
-) -> Option<crate::health_types::ComplexityViolation> {
+    totals: &ComponentRollupTotals,
+) -> crate::health_types::ComplexityViolation {
     use crate::health_types::{ComponentRollup, ExceededThreshold};
-
-    let rollup_cyc = worst.cyclomatic.saturating_add(template.cyclomatic);
-    let rollup_cog = worst.cognitive.saturating_add(template.cognitive);
-    let exceeds_cyclomatic = rollup_cyc > max_cyclomatic;
-    let exceeds_cognitive = rollup_cog > max_cognitive;
-    if !exceeds_cyclomatic && !exceeds_cognitive {
-        return None;
-    }
 
     let component = owner.file_stem().map_or_else(
         || "<unknown-component>".to_string(),
         |stem| stem.to_string_lossy().into_owned(),
     );
-    Some(crate::health_types::ComplexityViolation {
+    crate::health_types::ComplexityViolation {
         path: owner,
         name: "<component>".to_string(),
         line: worst.line,
         col: worst.col,
-        cyclomatic: rollup_cyc,
-        cognitive: rollup_cog,
+        cyclomatic: totals.rollup_cyc,
+        cognitive: totals.rollup_cog,
         line_count: worst.line_count.saturating_add(template.line_count),
         param_count: 0,
-        exceeded: ExceededThreshold::from_bools(exceeds_cyclomatic, exceeds_cognitive, false),
+        exceeded: ExceededThreshold::from_bools(
+            totals.exceeds_cyclomatic,
+            totals.exceeds_cognitive,
+            false,
+        ),
         severity: compute_finding_severity(
-            rollup_cog,
-            rollup_cyc,
+            totals.rollup_cog,
+            totals.rollup_cyc,
             None,
             DEFAULT_COGNITIVE_HIGH,
             DEFAULT_COGNITIVE_CRITICAL,
@@ -6053,7 +6240,33 @@ fn build_component_rollup(
         contributions: Vec::new(),
         effective_thresholds: None,
         threshold_source: None,
-    })
+    }
+}
+
+fn build_component_rollup(
+    owner: std::path::PathBuf,
+    worst: &crate::health_types::ComplexityViolation,
+    template: &crate::health_types::ComplexityViolation,
+    max_cyclomatic: u16,
+    max_cognitive: u16,
+) -> Option<crate::health_types::ComplexityViolation> {
+    let rollup_cyc = worst.cyclomatic.saturating_add(template.cyclomatic);
+    let rollup_cog = worst.cognitive.saturating_add(template.cognitive);
+    let exceeds_cyclomatic = rollup_cyc > max_cyclomatic;
+    let exceeds_cognitive = rollup_cog > max_cognitive;
+    if !exceeds_cyclomatic && !exceeds_cognitive {
+        return None;
+    }
+
+    let totals = ComponentRollupTotals {
+        rollup_cyc,
+        rollup_cog,
+        exceeds_cyclomatic,
+        exceeds_cognitive,
+    };
+    Some(make_component_rollup_violation(
+        owner, worst, template, &totals,
+    ))
 }
 
 /// Resolve the `inherited_from` provenance path for a CRAP finding.

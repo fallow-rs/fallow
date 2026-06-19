@@ -241,31 +241,22 @@ pub fn print_results(
             ExitCode::SUCCESS
         }
         OutputFormat::CodeClimate => codeclimate::print_codeclimate(results, ctx.root, ctx.rules),
-        OutputFormat::PrCommentGithub => {
-            let issues = codeclimate::build_codeclimate(results, ctx.root, ctx.rules);
-            let value = codeclimate::issues_to_value(&issues);
-            ci::pr_comment::print_pr_comment("dead-code", ci::pr_comment::Provider::Github, &value)
-        }
-        OutputFormat::PrCommentGitlab => {
-            let issues = codeclimate::build_codeclimate(results, ctx.root, ctx.rules);
-            let value = codeclimate::issues_to_value(&issues);
-            ci::pr_comment::print_pr_comment("dead-code", ci::pr_comment::Provider::Gitlab, &value)
-        }
-        OutputFormat::ReviewGithub => {
-            let issues = codeclimate::build_codeclimate(results, ctx.root, ctx.rules);
-            let value = codeclimate::issues_to_value(&issues);
-            ci::review::print_review_envelope("dead-code", ci::pr_comment::Provider::Github, &value)
-        }
-        OutputFormat::ReviewGitlab => {
-            let issues = codeclimate::build_codeclimate(results, ctx.root, ctx.rules);
-            let value = codeclimate::issues_to_value(&issues);
-            ci::review::print_review_envelope("dead-code", ci::pr_comment::Provider::Gitlab, &value)
-        }
-        OutputFormat::Badge => {
-            eprintln!("Error: badge format is only supported for the health command");
-            ExitCode::from(2)
-        }
+        ci_format => print_results_ci_comment(results, ctx, ci_format),
     }
+}
+
+/// Render the CI comment / review / badge fallback arms for dead-code results.
+fn print_results_ci_comment(
+    results: &AnalysisResults,
+    ctx: &ReportContext<'_>,
+    output: OutputFormat,
+) -> ExitCode {
+    let issues = codeclimate::build_codeclimate(results, ctx.root, ctx.rules);
+    let value = codeclimate::issues_to_value(&issues);
+    print_ci_comment_format("dead-code", &value, output).unwrap_or_else(|| {
+        eprintln!("Error: badge format is only supported for the health command");
+        ExitCode::from(2)
+    })
 }
 
 /// Render grouped results across all output formats.
@@ -311,30 +302,7 @@ fn print_grouped_results(
         OutputFormat::CodeClimate => {
             codeclimate::print_grouped_codeclimate(original, ctx.root, ctx.rules, resolver)
         }
-        OutputFormat::PrCommentGithub => {
-            let issues = codeclimate::build_codeclimate(original, ctx.root, ctx.rules);
-            let value = codeclimate::issues_to_value(&issues);
-            ci::pr_comment::print_pr_comment("dead-code", ci::pr_comment::Provider::Github, &value)
-        }
-        OutputFormat::PrCommentGitlab => {
-            let issues = codeclimate::build_codeclimate(original, ctx.root, ctx.rules);
-            let value = codeclimate::issues_to_value(&issues);
-            ci::pr_comment::print_pr_comment("dead-code", ci::pr_comment::Provider::Gitlab, &value)
-        }
-        OutputFormat::ReviewGithub => {
-            let issues = codeclimate::build_codeclimate(original, ctx.root, ctx.rules);
-            let value = codeclimate::issues_to_value(&issues);
-            ci::review::print_review_envelope("dead-code", ci::pr_comment::Provider::Github, &value)
-        }
-        OutputFormat::ReviewGitlab => {
-            let issues = codeclimate::build_codeclimate(original, ctx.root, ctx.rules);
-            let value = codeclimate::issues_to_value(&issues);
-            ci::review::print_review_envelope("dead-code", ci::pr_comment::Provider::Gitlab, &value)
-        }
-        OutputFormat::Badge => {
-            eprintln!("Error: badge format is only supported for the health command");
-            ExitCode::from(2)
-        }
+        ci_format => print_results_ci_comment(original, ctx, ci_format),
     }
 }
 
@@ -384,31 +352,22 @@ pub fn print_duplication_report(
             ExitCode::SUCCESS
         }
         OutputFormat::CodeClimate => codeclimate::print_duplication_codeclimate(report, ctx.root),
-        OutputFormat::PrCommentGithub => {
-            let issues = codeclimate::build_duplication_codeclimate(report, ctx.root);
-            let value = codeclimate::issues_to_value(&issues);
-            ci::pr_comment::print_pr_comment("dupes", ci::pr_comment::Provider::Github, &value)
-        }
-        OutputFormat::PrCommentGitlab => {
-            let issues = codeclimate::build_duplication_codeclimate(report, ctx.root);
-            let value = codeclimate::issues_to_value(&issues);
-            ci::pr_comment::print_pr_comment("dupes", ci::pr_comment::Provider::Gitlab, &value)
-        }
-        OutputFormat::ReviewGithub => {
-            let issues = codeclimate::build_duplication_codeclimate(report, ctx.root);
-            let value = codeclimate::issues_to_value(&issues);
-            ci::review::print_review_envelope("dupes", ci::pr_comment::Provider::Github, &value)
-        }
-        OutputFormat::ReviewGitlab => {
-            let issues = codeclimate::build_duplication_codeclimate(report, ctx.root);
-            let value = codeclimate::issues_to_value(&issues);
-            ci::review::print_review_envelope("dupes", ci::pr_comment::Provider::Gitlab, &value)
-        }
-        OutputFormat::Badge => {
-            eprintln!("Error: badge format is only supported for the health command");
-            ExitCode::from(2)
-        }
+        ci_format => print_duplication_ci_comment(report, ctx.root, ci_format),
     }
+}
+
+/// Render the CI comment / review / badge fallback arms for duplication results.
+fn print_duplication_ci_comment(
+    report: &DuplicationReport,
+    root: &Path,
+    output: OutputFormat,
+) -> ExitCode {
+    let issues = codeclimate::build_duplication_codeclimate(report, root);
+    let value = codeclimate::issues_to_value(&issues);
+    print_ci_comment_format("dupes", &value, output).unwrap_or_else(|| {
+        eprintln!("Error: badge format is only supported for the health command");
+        ExitCode::from(2)
+    })
 }
 
 /// Render grouped duplication results across all output formats.
@@ -442,26 +401,10 @@ fn print_grouped_duplication_report(
         OutputFormat::CodeClimate => {
             codeclimate::print_grouped_duplication_codeclimate(report, ctx.root, resolver)
         }
-        OutputFormat::PrCommentGithub => {
-            let issues = codeclimate::build_duplication_codeclimate(report, ctx.root);
-            let value = codeclimate::issues_to_value(&issues);
-            ci::pr_comment::print_pr_comment("dupes", ci::pr_comment::Provider::Github, &value)
-        }
-        OutputFormat::PrCommentGitlab => {
-            let issues = codeclimate::build_duplication_codeclimate(report, ctx.root);
-            let value = codeclimate::issues_to_value(&issues);
-            ci::pr_comment::print_pr_comment("dupes", ci::pr_comment::Provider::Gitlab, &value)
-        }
-        OutputFormat::ReviewGithub => {
-            let issues = codeclimate::build_duplication_codeclimate(report, ctx.root);
-            let value = codeclimate::issues_to_value(&issues);
-            ci::review::print_review_envelope("dupes", ci::pr_comment::Provider::Github, &value)
-        }
-        OutputFormat::ReviewGitlab => {
-            let issues = codeclimate::build_duplication_codeclimate(report, ctx.root);
-            let value = codeclimate::issues_to_value(&issues);
-            ci::review::print_review_envelope("dupes", ci::pr_comment::Provider::Gitlab, &value)
-        }
+        OutputFormat::PrCommentGithub
+        | OutputFormat::PrCommentGitlab
+        | OutputFormat::ReviewGithub
+        | OutputFormat::ReviewGitlab => print_duplication_ci_comment(report, ctx.root, output),
         OutputFormat::Compact => {
             compact::print_duplication_compact(report, ctx.root);
             warn_dupes_grouping_unsupported(grouping, "compact");
@@ -477,6 +420,33 @@ fn print_grouped_duplication_report(
             ExitCode::from(2)
         }
     }
+}
+
+/// Dispatch a PR-comment / review CI format from a precomputed CodeClimate value.
+///
+/// Returns `Some(exit_code)` for the four CI comment/review formats and `None`
+/// for every other output format, so callers keep their exhaustive match arms.
+fn print_ci_comment_format(
+    analysis: &str,
+    value: &serde_json::Value,
+    output: OutputFormat,
+) -> Option<ExitCode> {
+    let exit = match output {
+        OutputFormat::PrCommentGithub => {
+            ci::pr_comment::print_pr_comment(analysis, ci::pr_comment::Provider::Github, value)
+        }
+        OutputFormat::PrCommentGitlab => {
+            ci::pr_comment::print_pr_comment(analysis, ci::pr_comment::Provider::Gitlab, value)
+        }
+        OutputFormat::ReviewGithub => {
+            ci::review::print_review_envelope(analysis, ci::pr_comment::Provider::Github, value)
+        }
+        OutputFormat::ReviewGitlab => {
+            ci::review::print_review_envelope(analysis, ci::pr_comment::Provider::Gitlab, value)
+        }
+        _ => return None,
+    };
+    Some(exit)
 }
 
 fn warn_dupes_grouping_unsupported(grouping: &dupes_grouping::DuplicationGrouping, format: &str) {
@@ -513,27 +483,7 @@ pub fn print_health_report(
 ) -> ExitCode {
     match output {
         OutputFormat::Human => {
-            if ctx.summary {
-                human::health::print_health_summary(
-                    report,
-                    ctx.elapsed,
-                    ctx.quiet,
-                    ctx.summary_heading,
-                );
-            } else {
-                human::print_health_human(&human::PrintHealthHumanInput {
-                    report,
-                    root: ctx.root,
-                    elapsed: ctx.elapsed,
-                    quiet: ctx.quiet,
-                    show_explain_tip: ctx.show_explain_tip,
-                    explain: ctx.explain,
-                    skip_score_and_trend: ctx.skip_score_and_trend,
-                });
-                if let Some(grouping) = grouping {
-                    human::print_health_grouping(grouping, ctx.root, ctx.quiet);
-                }
-            }
+            print_health_human_report(report, grouping, ctx);
             ExitCode::SUCCESS
         }
         OutputFormat::Compact => {
@@ -566,31 +516,53 @@ pub fn print_health_report(
             }
             None => codeclimate::print_health_codeclimate(report, ctx.root),
         },
-        OutputFormat::PrCommentGithub => {
-            let issues = codeclimate::build_health_codeclimate(report, ctx.root);
-            let value = codeclimate::issues_to_value(&issues);
-            ci::pr_comment::print_pr_comment("health", ci::pr_comment::Provider::Github, &value)
-        }
-        OutputFormat::PrCommentGitlab => {
-            let issues = codeclimate::build_health_codeclimate(report, ctx.root);
-            let value = codeclimate::issues_to_value(&issues);
-            ci::pr_comment::print_pr_comment("health", ci::pr_comment::Provider::Gitlab, &value)
-        }
-        OutputFormat::ReviewGithub => {
-            let issues = codeclimate::build_health_codeclimate(report, ctx.root);
-            let value = codeclimate::issues_to_value(&issues);
-            ci::review::print_review_envelope("health", ci::pr_comment::Provider::Github, &value)
-        }
-        OutputFormat::ReviewGitlab => {
-            let issues = codeclimate::build_health_codeclimate(report, ctx.root);
-            let value = codeclimate::issues_to_value(&issues);
-            ci::review::print_review_envelope("health", ci::pr_comment::Provider::Gitlab, &value)
-        }
+        OutputFormat::PrCommentGithub
+        | OutputFormat::PrCommentGitlab
+        | OutputFormat::ReviewGithub
+        | OutputFormat::ReviewGitlab => print_health_ci_comment(report, ctx.root, output),
         OutputFormat::Badge => {
             warn_grouping_unsupported(grouping, "badge");
             badge::print_health_badge(report)
         }
     }
+}
+
+/// Render the human-format health report, including the per-group summary block.
+fn print_health_human_report(
+    report: &crate::health_types::HealthReport,
+    grouping: Option<&crate::health_types::HealthGrouping>,
+    ctx: &ReportContext<'_>,
+) {
+    if ctx.summary {
+        human::health::print_health_summary(report, ctx.elapsed, ctx.quiet, ctx.summary_heading);
+        return;
+    }
+    human::print_health_human(&human::PrintHealthHumanInput {
+        report,
+        root: ctx.root,
+        elapsed: ctx.elapsed,
+        quiet: ctx.quiet,
+        show_explain_tip: ctx.show_explain_tip,
+        explain: ctx.explain,
+        skip_score_and_trend: ctx.skip_score_and_trend,
+    });
+    if let Some(grouping) = grouping {
+        human::print_health_grouping(grouping, ctx.root, ctx.quiet);
+    }
+}
+
+/// Render the CI comment / review fallback arms for health results.
+fn print_health_ci_comment(
+    report: &crate::health_types::HealthReport,
+    root: &Path,
+    output: OutputFormat,
+) -> ExitCode {
+    let issues = codeclimate::build_health_codeclimate(report, root);
+    let value = codeclimate::issues_to_value(&issues);
+    print_ci_comment_format("health", &value, output).unwrap_or_else(|| {
+        eprintln!("Error: badge format is only supported for the health command");
+        ExitCode::from(2)
+    })
 }
 
 fn warn_grouping_unsupported(grouping: Option<&crate::health_types::HealthGrouping>, format: &str) {

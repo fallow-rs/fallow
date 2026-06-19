@@ -299,6 +299,13 @@ where
     }
 
     fn group_relationship_issues(&mut self, results: &AnalysisResults) {
+        self.group_structure_issues(results);
+        self.group_framework_boundary_issues(results);
+        self.group_component_contract_issues(results);
+    }
+
+    /// Group circular deps, boundary violations, and policy violations by owner.
+    fn group_structure_issues(&mut self, results: &AnalysisResults) {
         for item in &results.circular_dependencies {
             let key = item
                 .cycle
@@ -329,6 +336,10 @@ where
                 .policy_violations
                 .push(item.clone());
         }
+    }
+
+    /// Group client-export, barrel, directive, inject, and unrendered issues by owner.
+    fn group_framework_boundary_issues(&mut self, results: &AnalysisResults) {
         for item in &results.invalid_client_exports {
             self.entry_for_path(&item.export.path)
                 .invalid_client_exports
@@ -354,6 +365,10 @@ where
                 .unrendered_components
                 .push(item.clone());
         }
+    }
+
+    /// Group component-contract and stale-suppression issues by owner.
+    fn group_component_contract_issues(&mut self, results: &AnalysisResults) {
         for item in &results.unused_component_props {
             self.entry_for_path(&item.prop.path)
                 .unused_component_props

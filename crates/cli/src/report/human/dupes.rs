@@ -55,32 +55,37 @@ pub(in crate::report) fn print_duplication_human(
         outln!("{line}");
     }
 
-    let stats = &report.stats;
     if !quiet {
+        print_duplication_stats(report, elapsed);
+    }
+}
+
+/// Prints the duplication failure stats line and the high-rate mirrored-dir note.
+fn print_duplication_stats(report: &DuplicationReport, elapsed: Duration) {
+    let stats = &report.stats;
+    eprintln!(
+        "{}",
+        format!(
+            "\u{2717} {} lines ({:.1}%) duplicated across {} file{} ({:.2}s)",
+            thousands(stats.duplicated_lines),
+            stats.duplication_percentage,
+            stats.files_with_clones,
+            if stats.files_with_clones == 1 {
+                ""
+            } else {
+                "s"
+            },
+            elapsed.as_secs_f64(),
+        )
+        .red()
+        .bold()
+    );
+    if stats.duplication_percentage > 80.0 {
         eprintln!(
-            "{}",
-            format!(
-                "\u{2717} {} lines ({:.1}%) duplicated across {} file{} ({:.2}s)",
-                thousands(stats.duplicated_lines),
-                stats.duplication_percentage,
-                stats.files_with_clones,
-                if stats.files_with_clones == 1 {
-                    ""
-                } else {
-                    "s"
-                },
-                elapsed.as_secs_f64(),
-            )
-            .red()
-            .bold()
+            "  {}",
+            "Note: rates above 80% often indicate mirrored or generated directories \u{2014} consider ignorePatterns"
+                .dimmed()
         );
-        if stats.duplication_percentage > 80.0 {
-            eprintln!(
-                "  {}",
-                "Note: rates above 80% often indicate mirrored or generated directories \u{2014} consider ignorePatterns"
-                    .dimmed()
-            );
-        }
     }
 }
 
@@ -361,36 +366,7 @@ pub(super) fn detect_mirrored_families<'a>(
 ) {
     const MIN_MIRROR_FAMILIES: usize = 3;
 
-    type MirrorEntry = (usize, String, usize);
-    let mut pair_map: rustc_hash::FxHashMap<(String, String), Vec<MirrorEntry>> =
-        rustc_hash::FxHashMap::default();
-
-    for (idx, family) in families.iter().enumerate() {
-        if family.files.len() != 2 {
-            continue;
-        }
-        let path_a = crate::report::format_display_path(&family.files[0], root);
-        let path_b = crate::report::format_display_path(&family.files[1], root);
-
-        let (dir_a, file_a) = split_dir_filename(&path_a);
-        let (dir_b, file_b) = split_dir_filename(&path_b);
-
-        if file_a != file_b {
-            continue;
-        }
-
-        let (da, db) = if dir_a <= dir_b {
-            (dir_a.to_string(), dir_b.to_string())
-        } else {
-            (dir_b.to_string(), dir_a.to_string())
-        };
-
-        pair_map.entry((da, db)).or_default().push((
-            idx,
-            file_a.to_string(),
-            family.total_duplicated_lines,
-        ));
-    }
+    let pair_map = build_mirror_pair_map(families, root);
 
     let mut mirrored_indices: rustc_hash::FxHashSet<usize> = rustc_hash::FxHashSet::default();
     let mut mirrors: Vec<MirroredDirs> = Vec::new();
@@ -425,6 +401,48 @@ pub(super) fn detect_mirrored_families<'a>(
         .collect();
 
     (mirrors, non_mirrored)
+}
+
+/// Directory-pair key -> the two-file clone families (family index, filename,
+/// instance count) sharing one filename across both directories.
+type MirrorPairMap = rustc_hash::FxHashMap<(String, String), Vec<(usize, String, usize)>>;
+
+/// Map normalized directory-pair keys to the two-file clone families that share
+/// the same filename across both directories (candidates for mirror detection).
+fn build_mirror_pair_map(
+    families: &[fallow_core::duplicates::CloneFamily],
+    root: &Path,
+) -> MirrorPairMap {
+    let mut pair_map: MirrorPairMap = rustc_hash::FxHashMap::default();
+
+    for (idx, family) in families.iter().enumerate() {
+        if family.files.len() != 2 {
+            continue;
+        }
+        let path_a = crate::report::format_display_path(&family.files[0], root);
+        let path_b = crate::report::format_display_path(&family.files[1], root);
+
+        let (dir_a, file_a) = split_dir_filename(&path_a);
+        let (dir_b, file_b) = split_dir_filename(&path_b);
+
+        if file_a != file_b {
+            continue;
+        }
+
+        let (da, db) = if dir_a <= dir_b {
+            (dir_a.to_string(), dir_b.to_string())
+        } else {
+            (dir_b.to_string(), dir_a.to_string())
+        };
+
+        pair_map.entry((da, db)).or_default().push((
+            idx,
+            file_a.to_string(),
+            family.total_duplicated_lines,
+        ));
+    }
+
+    pair_map
 }
 
 /// Print a concise duplication summary showing only aggregate counts.

@@ -106,40 +106,53 @@ fn build_file_trace_human_lines(trace: &FileTrace) -> Vec<String> {
         trace.file.display().to_string().bold()
     ));
 
-    if !trace.exports.is_empty() {
-        lines.push(String::new());
-        lines.push(format!("  Exports ({}):", trace.exports.len()));
-        for export in &trace.exports {
-            let used_indicator = if export.reference_count > 0 {
-                format!("{} ref(s)", export.reference_count)
-                    .green()
-                    .to_string()
-            } else {
-                "unused".red().to_string()
-            };
-            let type_tag = if export.is_type_only {
-                " (type)".dimmed().to_string()
-            } else {
-                String::new()
-            };
+    push_file_trace_exports(&mut lines, trace);
+    push_file_trace_import_lists(&mut lines, trace);
+    push_file_trace_re_exports(&mut lines, trace);
+    lines.push(String::new());
+    lines
+}
+
+/// Renders the file trace's exports section, including per-export referrers.
+fn push_file_trace_exports(lines: &mut Vec<String>, trace: &FileTrace) {
+    if trace.exports.is_empty() {
+        return;
+    }
+    lines.push(String::new());
+    lines.push(format!("  Exports ({}):", trace.exports.len()));
+    for export in &trace.exports {
+        let used_indicator = if export.reference_count > 0 {
+            format!("{} ref(s)", export.reference_count)
+                .green()
+                .to_string()
+        } else {
+            "unused".red().to_string()
+        };
+        let type_tag = if export.is_type_only {
+            " (type)".dimmed().to_string()
+        } else {
+            String::new()
+        };
+        lines.push(format!(
+            "    {} {}{} [{}]",
+            "export".dimmed(),
+            export.name.bold(),
+            type_tag,
+            used_indicator
+        ));
+        for r in &export.referenced_by {
             lines.push(format!(
-                "    {} {}{} [{}]",
-                "export".dimmed(),
-                export.name.bold(),
-                type_tag,
-                used_indicator
+                "      {} {} ({})",
+                "->".dimmed(),
+                r.from_file.display(),
+                r.kind.dimmed()
             ));
-            for r in &export.referenced_by {
-                lines.push(format!(
-                    "      {} {} ({})",
-                    "->".dimmed(),
-                    r.from_file.display(),
-                    r.kind.dimmed()
-                ));
-            }
         }
     }
+}
 
+/// Renders the file trace's "Imports from" and "Imported by" path lists.
+fn push_file_trace_import_lists(lines: &mut Vec<String>, trace: &FileTrace) {
     if !trace.imports_from.is_empty() {
         lines.push(String::new());
         lines.push(format!("  Imports from ({}):", trace.imports_from.len()));
@@ -155,22 +168,24 @@ fn build_file_trace_human_lines(trace: &FileTrace) -> Vec<String> {
             lines.push(format!("    {} {}", "->".dimmed(), path.display()));
         }
     }
+}
 
-    if !trace.re_exports.is_empty() {
-        lines.push(String::new());
-        lines.push(format!("  Re-exports ({}):", trace.re_exports.len()));
-        for re in &trace.re_exports {
-            lines.push(format!(
-                "    {} '{}' as '{}' from {}",
-                "re-export".dimmed(),
-                re.imported_name,
-                re.exported_name,
-                re.source_file.display()
-            ));
-        }
+/// Renders the file trace's re-exports section.
+fn push_file_trace_re_exports(lines: &mut Vec<String>, trace: &FileTrace) {
+    if trace.re_exports.is_empty() {
+        return;
     }
     lines.push(String::new());
-    lines
+    lines.push(format!("  Re-exports ({}):", trace.re_exports.len()));
+    for re in &trace.re_exports {
+        lines.push(format!(
+            "    {} '{}' as '{}' from {}",
+            "re-export".dimmed(),
+            re.imported_name,
+            re.exported_name,
+            re.source_file.display()
+        ));
+    }
 }
 
 fn build_dependency_trace_human_lines(trace: &DependencyTrace) -> Vec<String> {
@@ -229,49 +244,7 @@ fn build_clone_trace_human_lines(trace: &CloneTrace, root: &Path) -> Vec<String>
         trace.clone_groups.len()
     ));
     for (i, group) in trace.clone_groups.iter().enumerate() {
-        lines.push(String::new());
-        lines.push(format!(
-            "  {}  {} ({} lines, {} tokens, {} instance{})",
-            format!("Clone group {}", i + 1).bold(),
-            group.fingerprint.dimmed(),
-            group.line_count,
-            group.token_count,
-            group.instances.len(),
-            plural(group.instances.len())
-        ));
-        for instance in &group.instances {
-            let relative = relative_path(&instance.file, root);
-            let is_queried = trace.matched_instance.as_ref().is_some_and(|m| {
-                m.file == instance.file
-                    && m.start_line == instance.start_line
-                    && m.end_line == instance.end_line
-            });
-            let marker = if is_queried {
-                ">>".cyan()
-            } else {
-                "->".dimmed()
-            };
-            lines.push(format!(
-                "    {} {}:{}-{}",
-                marker,
-                relative.display(),
-                instance.start_line,
-                instance.end_line
-            ));
-        }
-        lines.push(format!("    {}", "Suggested refactor".bold()));
-        lines.push(format!(
-            "      Extract function, saves ~{} line{}",
-            group.suggestion.estimated_savings,
-            plural(group.suggestion.estimated_savings),
-        ));
-        if let Some(ref name) = group.suggested_name {
-            lines.push(format!(
-                "      Proposed name: {}  {}",
-                name,
-                "(best-effort, verify before applying)".dimmed(),
-            ));
-        }
+        push_clone_group_lines(&mut lines, i, group, trace, root);
     }
     if let Some(ref matched) = trace.matched_instance {
         lines.push(String::new());
@@ -292,6 +265,60 @@ fn build_clone_trace_human_lines(trace: &CloneTrace, root: &Path) -> Vec<String>
     ));
     lines.push(String::new());
     lines
+}
+
+/// Renders one clone group: the header, each instance line (marking the queried
+/// instance), and the suggested-refactor block.
+fn push_clone_group_lines(
+    lines: &mut Vec<String>,
+    index: usize,
+    group: &fallow_core::trace::TracedCloneGroup,
+    trace: &CloneTrace,
+    root: &Path,
+) {
+    lines.push(String::new());
+    lines.push(format!(
+        "  {}  {} ({} lines, {} tokens, {} instance{})",
+        format!("Clone group {}", index + 1).bold(),
+        group.fingerprint.dimmed(),
+        group.line_count,
+        group.token_count,
+        group.instances.len(),
+        plural(group.instances.len())
+    ));
+    for instance in &group.instances {
+        let relative = relative_path(&instance.file, root);
+        let is_queried = trace.matched_instance.as_ref().is_some_and(|m| {
+            m.file == instance.file
+                && m.start_line == instance.start_line
+                && m.end_line == instance.end_line
+        });
+        let marker = if is_queried {
+            ">>".cyan()
+        } else {
+            "->".dimmed()
+        };
+        lines.push(format!(
+            "    {} {}:{}-{}",
+            marker,
+            relative.display(),
+            instance.start_line,
+            instance.end_line
+        ));
+    }
+    lines.push(format!("    {}", "Suggested refactor".bold()));
+    lines.push(format!(
+        "      Extract function, saves ~{} line{}",
+        group.suggestion.estimated_savings,
+        plural(group.suggestion.estimated_savings),
+    ));
+    if let Some(ref name) = group.suggested_name {
+        lines.push(format!(
+            "      Proposed name: {}  {}",
+            name,
+            "(best-effort, verify before applying)".dimmed(),
+        ));
+    }
 }
 
 #[cfg(test)]

@@ -79,71 +79,89 @@ pub struct DiffIndex {
     rename_pairs: FxHashMap<String, String>,
 }
 
+/// Mutable cursor state threaded through unified-diff parsing.
+#[derive(Default)]
+struct DiffParseState {
+    current_file: Option<String>,
+    new_line: u64,
+    warned_overflow: bool,
+    pending_rename_from: Option<String>,
+}
+
 impl DiffIndex {
     #[must_use]
     pub fn from_unified_diff(diff: &str) -> Self {
         let mut index = Self::default();
-        let mut current_file: Option<String> = None;
-        let mut new_line = 0_u64;
-        let mut warned_overflow = false;
-        let mut pending_rename_from: Option<String> = None;
+        let mut state = DiffParseState::default();
 
         for line in diff.lines() {
-            if line.starts_with("diff --git ") {
-                pending_rename_from = None;
+            if index.handle_diff_header_line(line, &mut state) {
                 continue;
             }
-            if let Some(rest) = line.strip_prefix("rename from ") {
-                pending_rename_from = Some(rest.to_owned());
-                continue;
-            }
-            if let Some(rest) = line.strip_prefix("rename to ") {
-                if let Some(from) = pending_rename_from.take() {
-                    index.rename_pairs.insert(rest.to_owned(), from);
-                    index.touched_files.insert(rest.to_owned());
-                }
-                continue;
-            }
-            if let Some(path) = line.strip_prefix("+++ b/") {
-                current_file = Some(path.to_string());
-                index.touched_files.insert(path.to_string());
-                continue;
-            }
-            if line.starts_with("+++ /dev/null") {
-                current_file = None;
-                continue;
-            }
-            if let Some(header) = line.strip_prefix("@@ ") {
-                if let Some(start) = parse_new_hunk_start(header) {
-                    new_line = start;
-                }
-                continue;
-            }
-            let Some(path) = current_file.as_ref() else {
-                continue;
-            };
-            if line.starts_with('+') && !line.starts_with("+++") {
-                if index.added_line_count < MAX_ADDED_LINES {
-                    index
-                        .added_lines
-                        .entry(path.clone())
-                        .or_default()
-                        .insert(new_line);
-                    index.added_line_count += 1;
-                } else if !warned_overflow {
-                    eprintln!(
-                        "fallow: diff exceeds {MAX_ADDED_LINES} added lines; \
-                         indexed prefix only, later additions skipped"
-                    );
-                    warned_overflow = true;
-                }
-                new_line += 1;
-            } else if !line.starts_with('-') {
-                new_line += 1;
-            }
+            index.handle_diff_content_line(line, &mut state);
         }
 
         index
+    }
+
+    /// Handle a metadata / header diff line; returns `true` if the line was consumed.
+    fn handle_diff_header_line(&mut self, line: &str, state: &mut DiffParseState) -> bool {
+        if line.starts_with("diff --git ") {
+            state.pending_rename_from = None;
+            return true;
+        }
+        if let Some(rest) = line.strip_prefix("rename from ") {
+            state.pending_rename_from = Some(rest.to_owned());
+            return true;
+        }
+        if let Some(rest) = line.strip_prefix("rename to ") {
+            if let Some(from) = state.pending_rename_from.take() {
+                self.rename_pairs.insert(rest.to_owned(), from);
+                self.touched_files.insert(rest.to_owned());
+            }
+            return true;
+        }
+        if let Some(path) = line.strip_prefix("+++ b/") {
+            state.current_file = Some(path.to_string());
+            self.touched_files.insert(path.to_string());
+            return true;
+        }
+        if line.starts_with("+++ /dev/null") {
+            state.current_file = None;
+            return true;
+        }
+        if let Some(header) = line.strip_prefix("@@ ") {
+            if let Some(start) = parse_new_hunk_start(header) {
+                state.new_line = start;
+            }
+            return true;
+        }
+        false
+    }
+
+    /// Handle a content diff line, recording added lines and advancing the cursor.
+    fn handle_diff_content_line(&mut self, line: &str, state: &mut DiffParseState) {
+        let Some(path) = state.current_file.as_ref() else {
+            return;
+        };
+        if line.starts_with('+') && !line.starts_with("+++") {
+            if self.added_line_count < MAX_ADDED_LINES {
+                self.added_lines
+                    .entry(path.clone())
+                    .or_default()
+                    .insert(state.new_line);
+                self.added_line_count += 1;
+            } else if !state.warned_overflow {
+                eprintln!(
+                    "fallow: diff exceeds {MAX_ADDED_LINES} added lines; \
+                     indexed prefix only, later additions skipped"
+                );
+                state.warned_overflow = true;
+            }
+            state.new_line += 1;
+        } else if !line.starts_with('-') {
+            state.new_line += 1;
+        }
     }
 
     /// Base-side path for a renamed file whose head-side path is
@@ -373,72 +391,79 @@ pub fn resolve_diff_source(
 #[must_use]
 pub fn load_diff_index_for_findings(source: &DiffSource, quiet: bool) -> Option<LoadedDiff> {
     match source {
-        DiffSource::Stdin => {
-            let mut buf = String::new();
-            match std::io::stdin().read_to_string(&mut buf) {
-                Ok(_) => {
-                    let index = DiffIndex::from_unified_diff(&buf);
-                    if !quiet && index.added_line_count() == 0 {
-                        eprintln!(
-                            "fallow: warning [diff-file]: --diff-stdin parsed \
-                             0 added lines; no findings will pass the diff filter. \
-                             Did you pipe a non-unified diff or an empty stream? \
-                             (Pure-rename, binary-only, and deletion-only diffs \
-                             also produce empty indices.)"
-                        );
-                    }
-                    Some(LoadedDiff { index })
-                }
-                Err(err) => {
-                    if !quiet {
-                        eprintln!(
-                            "fallow: warning [diff-file]: could not read stdin: {err} \
-                             (line-level filtering disabled; rerun with \
-                             --diff-file PATH to point at a file on disk)"
-                        );
-                    }
-                    None
-                }
-            }
-        }
+        DiffSource::Stdin => load_diff_index_from_stdin(quiet),
         DiffSource::Flag(path) | DiffSource::EnvVar(path) => {
-            let label = source.label();
-            if let Ok(meta) = std::fs::metadata(path)
-                && meta.len() > MAX_DIFF_BYTES
-            {
-                if !quiet {
-                    eprintln!(
-                        "fallow: warning [diff-file]: {label} is {} bytes (cap {MAX_DIFF_BYTES}); \
-                         line-level filtering disabled, reporting all findings",
-                        meta.len()
-                    );
-                }
-                return None;
+            load_diff_index_from_file(path, &source.label(), quiet)
+        }
+    }
+}
+
+/// Drain stdin once and parse it into a `LoadedDiff`, warning on failure / empty index.
+fn load_diff_index_from_stdin(quiet: bool) -> Option<LoadedDiff> {
+    let mut buf = String::new();
+    match std::io::stdin().read_to_string(&mut buf) {
+        Ok(_) => {
+            let index = DiffIndex::from_unified_diff(&buf);
+            if !quiet && index.added_line_count() == 0 {
+                eprintln!(
+                    "fallow: warning [diff-file]: --diff-stdin parsed \
+                     0 added lines; no findings will pass the diff filter. \
+                     Did you pipe a non-unified diff or an empty stream? \
+                     (Pure-rename, binary-only, and deletion-only diffs \
+                     also produce empty indices.)"
+                );
             }
-            match std::fs::read_to_string(path) {
-                Ok(text) => {
-                    let index = DiffIndex::from_unified_diff(&text);
-                    if !quiet && index.added_line_count() == 0 {
-                        eprintln!(
-                            "fallow: warning [diff-file]: {label} parsed 0 added \
-                             lines; no findings will pass the diff filter. \
-                             Verify the file is a unified diff (look for \
-                             `+++ b/<path>` headers). Pure-rename, binary-only, \
-                             and deletion-only diffs also produce empty indices."
-                        );
-                    }
-                    Some(LoadedDiff { index })
-                }
-                Err(err) => {
-                    if !quiet {
-                        eprintln!(
-                            "fallow: warning [diff-file]: could not read {label}: {err} \
-                             (line-level filtering disabled)"
-                        );
-                    }
-                    None
-                }
+            Some(LoadedDiff { index })
+        }
+        Err(err) => {
+            if !quiet {
+                eprintln!(
+                    "fallow: warning [diff-file]: could not read stdin: {err} \
+                     (line-level filtering disabled; rerun with \
+                     --diff-file PATH to point at a file on disk)"
+                );
             }
+            None
+        }
+    }
+}
+
+/// Read a diff file (respecting the size cap) and parse it into a `LoadedDiff`.
+fn load_diff_index_from_file(path: &Path, label: &str, quiet: bool) -> Option<LoadedDiff> {
+    if let Ok(meta) = std::fs::metadata(path)
+        && meta.len() > MAX_DIFF_BYTES
+    {
+        if !quiet {
+            eprintln!(
+                "fallow: warning [diff-file]: {label} is {} bytes (cap {MAX_DIFF_BYTES}); \
+                 line-level filtering disabled, reporting all findings",
+                meta.len()
+            );
+        }
+        return None;
+    }
+    match std::fs::read_to_string(path) {
+        Ok(text) => {
+            let index = DiffIndex::from_unified_diff(&text);
+            if !quiet && index.added_line_count() == 0 {
+                eprintln!(
+                    "fallow: warning [diff-file]: {label} parsed 0 added \
+                     lines; no findings will pass the diff filter. \
+                     Verify the file is a unified diff (look for \
+                     `+++ b/<path>` headers). Pure-rename, binary-only, \
+                     and deletion-only diffs also produce empty indices."
+                );
+            }
+            Some(LoadedDiff { index })
+        }
+        Err(err) => {
+            if !quiet {
+                eprintln!(
+                    "fallow: warning [diff-file]: could not read {label}: {err} \
+                     (line-level filtering disabled)"
+                );
+            }
+            None
         }
     }
 }

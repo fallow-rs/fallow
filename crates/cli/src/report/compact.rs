@@ -394,6 +394,12 @@ impl<'a> CompactLineBuilder<'a> {
     }
 
     fn push_component_lines(&mut self) {
+        self.push_component_member_lines();
+        self.push_component_framework_lines();
+    }
+
+    /// Push compact lines for unrendered components, props, emits, inputs, and outputs.
+    fn push_component_member_lines(&mut self) {
         for finding in &self.results.unrendered_components {
             self.lines.push(format!(
                 "unrendered-component:{}:{}:{}",
@@ -434,6 +440,10 @@ impl<'a> CompactLineBuilder<'a> {
                 finding.output.output_name,
             ));
         }
+    }
+
+    /// Push compact lines for Svelte events, server actions, and load-data keys.
+    fn push_component_framework_lines(&mut self) {
         for finding in &self.results.unused_svelte_events {
             self.lines.push(format!(
                 "unused-svelte-event:{}:{}:{}",

@@ -3483,7 +3483,7 @@ fn dispatch_check_command(command: Command, dispatch: &DispatchContext<'_>) -> E
 /// fields out of the same `Command` value afterwards. Split into two halves to
 /// keep each builder within the unit-size limit.
 fn check_issue_filters(command: &Command) -> IssueFilters {
-    check_issue_filters_framework(command, check_issue_filters_core(command))
+    check_issue_filters_framework(command, &check_issue_filters_core(command))
 }
 
 /// First half of the `IssueFilters` mapping: core/general filter flags over a
@@ -3536,7 +3536,7 @@ fn check_issue_filters_core(command: &Command) -> IssueFilters {
 
 /// Second half of the `IssueFilters` mapping: framework/component, store, svelte,
 /// catalog, and dependency-override flags, layered onto the core `base`.
-fn check_issue_filters_framework(command: &Command, base: IssueFilters) -> IssueFilters {
+fn check_issue_filters_framework(command: &Command, base: &IssueFilters) -> IssueFilters {
     let Command::Check {
         unused_store_members,
         unprovided_injects,
@@ -3575,7 +3575,7 @@ fn check_issue_filters_framework(command: &Command, base: IssueFilters) -> Issue
         unresolved_catalog_references: *unresolved_catalog_references,
         unused_dependency_overrides: *unused_dependency_overrides,
         misconfigured_dependency_overrides: *misconfigured_dependency_overrides,
-        ..base
+        ..base.clone()
     }
 }
 
@@ -3655,11 +3655,11 @@ fn dispatch_security_command(command: Command, dispatch: &DispatchContext<'_>) -
         gate,
         surface,
     };
-    if let Some(code) = try_run_security_survivors(&subcommand, &derived_flags) {
+    if let Some(code) = try_run_security_survivors(subcommand.as_ref(), &derived_flags) {
         return code;
     }
 
-    let scoped_files = scoped_security_files(&file, &subcommand);
+    let scoped_files = scoped_security_files(&file, subcommand.as_ref());
     run_security_blind_spots_or_default(
         dispatch,
         &SecurityRunInputs {
@@ -3730,7 +3730,7 @@ fn run_security_blind_spots_or_default(
 /// Handle `fallow security survivors` as an early return. Returns `Some(code)`
 /// when the subcommand is `survivors` (validated then run); `None` otherwise.
 fn try_run_security_survivors(
-    subcommand: &Option<SecuritySubcommand>,
+    subcommand: Option<&SecuritySubcommand>,
     flags: &SecurityDerivedFlagState<'_>,
 ) -> Option<ExitCode> {
     let Some(SecuritySubcommand::Survivors {
@@ -3757,7 +3757,7 @@ fn try_run_security_survivors(
 /// Build the scoped file list, folding in `blind-spots` extra `--file` values.
 fn scoped_security_files(
     file: &[PathBuf],
-    subcommand: &Option<SecuritySubcommand>,
+    subcommand: Option<&SecuritySubcommand>,
 ) -> Vec<PathBuf> {
     let mut scoped_files = file.to_vec();
     if let Some(SecuritySubcommand::BlindSpots {
@@ -4411,7 +4411,7 @@ fn run_hooks_command(
     match subcommand {
         HooksCli::Status => setup_hooks::run_hooks_status(root, output),
         install @ HooksCli::Install { .. } => run_hooks_install(root, install, output),
-        uninstall @ HooksCli::Uninstall { .. } => run_hooks_uninstall(root, uninstall, output),
+        uninstall @ HooksCli::Uninstall { .. } => run_hooks_uninstall(root, &uninstall, output),
     }
 }
 
@@ -4477,7 +4477,7 @@ fn run_hooks_install(
 /// Handle `fallow hooks uninstall` for both the git and agent targets.
 fn run_hooks_uninstall(
     root: &std::path::Path,
-    uninstall: HooksCli,
+    uninstall: &HooksCli,
     output: fallow_config::OutputFormat,
 ) -> ExitCode {
     let HooksCli::Uninstall {
@@ -4486,7 +4486,7 @@ fn run_hooks_uninstall(
         dry_run,
         force,
         user,
-    } = uninstall
+    } = *uninstall
     else {
         unreachable!("hooks uninstall handler only handles uninstall commands");
     };

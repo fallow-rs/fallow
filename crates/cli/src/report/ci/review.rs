@@ -98,23 +98,7 @@ pub fn render_review_envelope_with_diff(
             )
         })
         .collect();
-    let body_truncated = comments.iter().any(review_comment_truncated);
-    if body_truncated {
-        crate::telemetry::note_report_truncation(
-            true,
-            crate::telemetry::TruncationReason::SizeLimit,
-        );
-    } else if grouped.truncated {
-        crate::telemetry::note_report_truncation(
-            true,
-            crate::telemetry::TruncationReason::CommentLimit,
-        );
-    } else {
-        crate::telemetry::note_report_truncation(
-            false,
-            crate::telemetry::TruncationReason::Unknown,
-        );
-    }
+    note_review_truncation(&comments, grouped.truncated);
 
     let summary_text = format!(
         "### Fallow {}\n\n{} inline finding{} selected for {} review.\n\n<!-- fallow-review -->",
@@ -131,6 +115,38 @@ pub fn render_review_envelope_with_diff(
         fingerprint: summary_fp,
     };
 
+    build_review_envelope_output(provider, body, summary, comments, issues)
+}
+
+/// Record telemetry for body-size or comment-count truncation of the review.
+fn note_review_truncation(comments: &[ReviewComment], grouped_truncated: bool) {
+    let body_truncated = comments.iter().any(review_comment_truncated);
+    if body_truncated {
+        crate::telemetry::note_report_truncation(
+            true,
+            crate::telemetry::TruncationReason::SizeLimit,
+        );
+    } else if grouped_truncated {
+        crate::telemetry::note_report_truncation(
+            true,
+            crate::telemetry::TruncationReason::CommentLimit,
+        );
+    } else {
+        crate::telemetry::note_report_truncation(
+            false,
+            crate::telemetry::TruncationReason::Unknown,
+        );
+    }
+}
+
+/// Assemble the provider-specific `ReviewEnvelopeOutput` from rendered parts.
+fn build_review_envelope_output(
+    provider: Provider,
+    body: String,
+    summary: ReviewEnvelopeSummary,
+    comments: Vec<ReviewComment>,
+    issues: &[CiIssue],
+) -> ReviewEnvelopeOutput {
     match provider {
         Provider::Github => ReviewEnvelopeOutput {
             event: Some(ReviewEnvelopeEvent::Comment),
@@ -297,7 +313,6 @@ fn review_comment_truncated(comment: &ReviewComment) -> bool {
 /// fingerprints. The composite identity shifts whenever the set of
 /// constituents changes, so consumers' skip-if-fingerprint-exists logic
 /// correctly re-posts on content change.
-#[expect(clippy::expect_used, reason = "formatting into String is infallible")]
 fn render_merged_comment(
     provider: Provider,
     group: &[&CiIssue],
@@ -314,6 +329,28 @@ fn render_merged_comment(
         composite_fingerprint(&constituents)
     };
 
+    let content = build_merged_comment_content(provider, group, include_guidance);
+    let marker_line = format!("\n\n{MARKER_PREFIX_V2}{fingerprint}{MARKER_SUFFIX_V2}");
+    let (body, truncated) = cap_body_with_marker(&content, &marker_line);
+
+    build_review_comment(
+        provider,
+        representative,
+        gitlab_diff_refs,
+        diff_index,
+        body,
+        fingerprint,
+        truncated,
+    )
+}
+
+/// Concatenate each grouped finding into one merged comment body string.
+#[expect(clippy::expect_used, reason = "formatting into String is infallible")]
+fn build_merged_comment_content(
+    provider: Provider,
+    group: &[&CiIssue],
+    include_guidance: bool,
+) -> String {
     use std::fmt::Write as _;
     let mut content = String::new();
     for (index, issue) in group.iter().enumerate() {
@@ -336,10 +373,19 @@ fn render_merged_comment(
             content.push_str(&guidance);
         }
     }
+    content
+}
 
-    let marker_line = format!("\n\n{MARKER_PREFIX_V2}{fingerprint}{MARKER_SUFFIX_V2}");
-    let (body, truncated) = cap_body_with_marker(&content, &marker_line);
-
+/// Build the provider-specific `ReviewComment` from a rendered body and metadata.
+fn build_review_comment(
+    provider: Provider,
+    representative: &CiIssue,
+    gitlab_diff_refs: Option<&GitlabDiffRefs>,
+    diff_index: Option<&DiffIndex>,
+    body: String,
+    fingerprint: String,
+    truncated: bool,
+) -> ReviewComment {
     match provider {
         Provider::Github => ReviewComment::GitHub(GitHubReviewComment {
             path: representative.path.clone(),
