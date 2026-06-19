@@ -9,6 +9,7 @@ mod extraction;
 mod filtering;
 mod lcp;
 mod ranking;
+mod rolling;
 mod statistics;
 mod suffix_array;
 mod utils;
@@ -22,8 +23,11 @@ use oxc_span::Span;
 use rustc_hash::FxHashSet;
 
 use super::normalize::HashedToken;
-use super::tokenize::FileTokens;
+use super::tokenize::{FileTokens, TokenKind};
 use super::types::{DuplicationReport, DuplicationStats};
+
+const ROLLING_DETECTOR_ENV: &str = "FALLOW_DUPES_ROLLING";
+const ROLLING_BOUNDARY_FALLBACK_FILE_RATIO: f64 = 0.20;
 
 /// Data for a single file being analyzed.
 struct FileData {
@@ -127,6 +131,20 @@ impl CloneDetector {
         totals: CorpusTotals,
         focus_file_ids: Option<&[bool]>,
     ) -> DuplicationReport {
+        if std::env::var_os(ROLLING_DETECTOR_ENV).is_some() {
+            let boundary_summary = summarize_boundaries(files);
+            if !boundary_summary.is_component_heavy {
+                return rolling::detect(
+                    files,
+                    self.min_tokens,
+                    self.min_lines,
+                    self.skip_local,
+                    totals,
+                    boundary_summary.has_any_boundary,
+                );
+            }
+        }
+
         let (text, file_of, file_offsets, rank_time, concat_time) = rank_and_concatenate(files);
 
         if text.is_empty() {
@@ -213,6 +231,7 @@ impl CloneDetector {
             min_tokens: self.min_tokens,
             files,
             focus_file_ids,
+            may_have_boundaries: files_may_have_boundaries(files),
         });
         let extract_time = t0.elapsed();
         tracing::debug!(
@@ -315,6 +334,57 @@ fn build_focus_file_ids(files: &[FileData], focus_files: &FxHashSet<PathBuf>) ->
         .iter()
         .map(|file| normalized.contains(dunce::simplified(&file.path)))
         .collect()
+}
+
+#[derive(Clone, Copy)]
+struct BoundarySummary {
+    is_component_heavy: bool,
+    has_any_boundary: bool,
+}
+
+fn summarize_boundaries(files: &[FileData]) -> BoundarySummary {
+    let mut files_with_tokens = 0_usize;
+    let mut files_with_boundaries = 0_usize;
+
+    for file in files {
+        if file.hashed_tokens.is_empty() {
+            continue;
+        }
+
+        files_with_tokens += 1;
+        if file_has_boundary(file) {
+            files_with_boundaries += 1;
+        }
+    }
+
+    BoundarySummary {
+        is_component_heavy: files_with_tokens > 0
+            && (files_with_boundaries as f64 / files_with_tokens as f64)
+                >= ROLLING_BOUNDARY_FALLBACK_FILE_RATIO,
+        has_any_boundary: files_with_boundaries > 0,
+    }
+}
+
+fn file_has_boundary(file: &FileData) -> bool {
+    file.hashed_tokens.iter().any(|token| {
+        file.file_tokens
+            .tokens
+            .get(token.original_index)
+            .is_some_and(|source| matches!(source.kind, TokenKind::Boundary(_)))
+    })
+}
+
+fn files_may_have_boundaries(files: &[FileData]) -> bool {
+    files.iter().any(file_may_have_boundaries)
+}
+
+fn file_may_have_boundaries(file: &FileData) -> bool {
+    matches!(
+        file.path
+            .extension()
+            .and_then(|extension| extension.to_str()),
+        Some("astro" | "css" | "less" | "sass" | "scss" | "svelte" | "vue")
+    )
 }
 
 fn trace_clone_detection_input(

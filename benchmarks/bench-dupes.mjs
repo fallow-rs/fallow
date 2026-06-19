@@ -22,6 +22,7 @@ const projectFilter = projectsArg
         .filter(Boolean),
     )
   : null;
+const JS_WEB_FORMATS = "typescript,javascript,tsx,jsx";
 
 console.log("Building fallow (release)...");
 const buildResult = spawnSync("cargo", ["build", "--release"], {
@@ -37,6 +38,18 @@ const fallowBin = join(rootDir, "target", "release", "fallow");
 const jscpdBin = join(__dirname, "node_modules", ".bin", "jscpd");
 if (!existsSync(jscpdBin)) {
   console.error("jscpd not found. Run: cd benchmarks && npm install");
+  process.exit(1);
+}
+
+const packageLock = JSON.parse(readFileSync(join(__dirname, "package-lock.json"), "utf8"));
+const actualJscpdPackage = JSON.parse(
+  readFileSync(join(__dirname, "node_modules", "jscpd", "package.json"), "utf8"),
+);
+const expectedJscpdVersion = packageLock.packages?.["node_modules/jscpd"]?.version;
+if (expectedJscpdVersion && actualJscpdPackage.version !== expectedJscpdVersion) {
+  console.error(
+    `jscpd version mismatch: node_modules has ${actualJscpdPackage.version}, package-lock expects ${expectedJscpdVersion}. Run: npm ci --prefix benchmarks`,
+  );
   process.exit(1);
 }
 
@@ -210,7 +223,7 @@ function benchmarkProject(name, dir) {
     "--reporters",
     "json",
     "--format",
-    "typescript,javascript",
+    JS_WEB_FORMATS,
     "--output",
     jscpdReportDir,
     "--min-tokens",

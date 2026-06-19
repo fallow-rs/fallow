@@ -942,7 +942,7 @@ Fallow is not an AI assistant. It is the deterministic codebase intelligence lay
 
 ## Performance
 
-Benchmarked on real open-source projects, cold runs (no cache) so both tools work from scratch, median of 5 runs with 2 warmups. The benchmark scripts print exact tool and environment versions for reproducible local runs. Fastest tool per row in bold.
+Benchmarked on real open-source projects, cold runs (no cache) so each tool works from scratch. The benchmark scripts print exact tool and environment versions for reproducible local runs. Fastest tool per row in bold.
 
 ### Dead code: fallow vs knip
 
@@ -963,20 +963,22 @@ fallow is faster on smaller projects in this set, while current knip is faster o
 
 ### Duplication: fallow vs jscpd
 
-| Project | Files | fallow | jscpd | Faster |
-|:--------|------:|-------:|------:|-------:|
-| [astro](https://github.com/withastro/astro) | 2,859 | 750ms | **196ms** | jscpd 3.8x |
-| [fastify](https://github.com/fastify/fastify) | 286 | 142ms | **73ms** | jscpd 1.9x |
-| [next.js](https://github.com/vercel/next.js) | 20,552 | 3.13s | **900ms** | jscpd 3.5x |
-| [preact](https://github.com/preactjs/preact) | 244 | 90ms | **54ms** | jscpd 1.7x |
-| [TanStack/query](https://github.com/TanStack/query) | 901 | 174ms | **63ms** | jscpd 2.8x |
-| [svelte](https://github.com/sveltejs/svelte) | 3,337 | 371ms | **180ms** | jscpd 2.1x |
-| [TypeScript](https://github.com/microsoft/TypeScript) | 38,146 | 40.26s | **5.06s** | jscpd 8.0x |
-| [vite](https://github.com/vitejs/vite) | 1,420 | 217ms | **77ms** | jscpd 2.8x |
-| [vue/core](https://github.com/vuejs/core) | 522 | 171ms | **80ms** | jscpd 2.1x |
-| [zod](https://github.com/colinhacks/zod) | 174 | 84ms | **57ms** | jscpd 1.5x |
+Cold median of 3 measured runs. `Clone groups` and `Dup %` come from each tool's own report, so they are useful for scale but not a byte-for-byte equivalence check.
 
-jscpd's Rust rewrite is now faster for raw duplication scanning on these projects. fallow's duplication checker remains part of the broader audit flow, alongside dead code, dependency, complexity, CSS, framework, and security checks.
+| Project | Files | fallow | jscpd | Faster | fallow clone groups | fallow dup % | jscpd clone groups | jscpd dup % |
+|:--------|------:|-------:|------:|-------:|--------------------:|-------------:|-------------------:|------------:|
+| [astro](https://github.com/withastro/astro) | 2,859 | 656ms | **217ms** | jscpd 3.0x | 1,242 | 16.3% | 1,494 | 9.7% |
+| [fastify](https://github.com/fastify/fastify) | 286 | 122ms | **68ms** | jscpd 1.8x | 1,128 | 39.0% | 1,131 | 23.5% |
+| [next.js](https://github.com/vercel/next.js) | 20,552 | 13.56s | **1.07s** | jscpd 12.7x | 4,485 | 26.3% | 7,287 | 16.4% |
+| [preact](https://github.com/preactjs/preact) | 244 | 70ms | **51ms** | jscpd 1.4x | 368 | 20.2% | 421 | 12.3% |
+| [TanStack/query](https://github.com/TanStack/query) | 901 | 171ms | **100ms** | jscpd 1.7x | 1,084 | 32.7% | 1,237 | 19.4% |
+| [svelte](https://github.com/sveltejs/svelte) | 3,337 | 329ms | **193ms** | jscpd 1.7x | 528 | 13.6% | 658 | 9.1% |
+| [TypeScript](https://github.com/microsoft/TypeScript) | 38,146 | 14.97s | **5.22s** | jscpd 2.9x | 2,749 | 26.9% | 51,158 | 45.8% |
+| [vite](https://github.com/vitejs/vite) | 1,420 | 210ms | **81ms** | jscpd 2.6x | 219 | 13.6% | 260 | 5.1% |
+| [vue/core](https://github.com/vuejs/core) | 522 | 158ms | **80ms** | jscpd 2.0x | 864 | 15.7% | 696 | 6.9% |
+| [zod](https://github.com/colinhacks/zod) | 174 | 71ms | **55ms** | jscpd 1.3x | 78 | 94.1% | 140 | 49.6% |
+
+jscpd remains faster for raw duplication scanning on these projects. fallow's duplication checker runs inside the broader audit flow, alongside dead code, dependency, complexity, CSS, framework, and security checks.
 
 No TypeScript compiler, no Node.js runtime needed to analyze your code. [Fallow vs linters](https://docs.fallow.tools/explanations/fallow-vs-linters) | [Reproduce benchmarks](https://github.com/fallow-rs/fallow/tree/main/benchmarks)
 

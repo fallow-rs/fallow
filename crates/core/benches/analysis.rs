@@ -831,6 +831,25 @@ fn make_diverse_files(n: usize, tokens_per_file: usize) -> DupeInput {
         .collect()
 }
 
+/// Build files that repeat several shared blocks with per-file separators.
+/// This creates many high-LCP intervals without requiring a huge fixture.
+fn make_interval_pressure_files(n: usize, blocks: usize, block_tokens: usize) -> DupeInput {
+    (0..n)
+        .map(|i| {
+            let mut hashes = Vec::with_capacity(blocks * (block_tokens + 1));
+            for block in 0..blocks {
+                hashes.extend((1..=block_tokens as u64).map(|token| token + block as u64 * 10_000));
+                hashes.push(1_000_000 + (i * blocks + block) as u64);
+            }
+            (
+                PathBuf::from(format!("dir{i}/pressure{i}.ts")),
+                make_hashed_tokens(&hashes),
+                make_file_tokens_for(hashes.len()),
+            )
+        })
+        .collect()
+}
+
 fn dupe_detect_2x500_identical(c: &mut Criterion) {
     use fallow_core::duplicates::detect::CloneDetector;
     let data = make_identical_files(2, 500);
@@ -940,6 +959,18 @@ fn dupe_detect_100x200_mixed_focused(c: &mut Criterion) {
     });
 }
 
+fn dupe_detect_80x20x80_interval_pressure(c: &mut Criterion) {
+    use fallow_core::duplicates::detect::CloneDetector;
+    let data = make_interval_pressure_files(80, 20, 80);
+    c.bench_function("dupe_detect_80x20x80_interval_pressure", |bencher| {
+        bencher.iter_batched(
+            || data.clone(),
+            |d| CloneDetector::new(30, 5, false).detect(d),
+            BatchSize::LargeInput,
+        );
+    });
+}
+
 fn dupe_detect_2x5000_identical(c: &mut Criterion) {
     use fallow_core::duplicates::detect::CloneDetector;
     let data = make_identical_files(2, 5000);
@@ -966,6 +997,7 @@ criterion_group!(
     dupe_detect_50x200_diverse,
     dupe_detect_100x200_mixed,
     dupe_detect_100x200_mixed_focused,
+    dupe_detect_80x20x80_interval_pressure,
     dupe_detect_2x5000_identical
 );
 criterion_main!(benches);

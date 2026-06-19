@@ -23,6 +23,7 @@ pub(super) struct CloneGroupExtractionInput<'a> {
     pub(super) min_tokens: usize,
     pub(super) files: &'a [FileData],
     pub(super) focus_file_ids: Option<&'a [bool]>,
+    pub(super) may_have_boundaries: bool,
 }
 
 pub(super) fn extract_clone_groups(input: &CloneGroupExtractionInput<'_>) -> Vec<RawGroup> {
@@ -41,7 +42,12 @@ pub(super) fn extract_clone_groups(input: &CloneGroupExtractionInput<'_>) -> Vec
     let focus_prefix = input
         .focus_file_ids
         .map(|ids| build_focus_prefix(sa, file_of, ids));
-    let boundary_prefixes = build_boundary_prefixes(files);
+    let boundary_prefixes = if input.may_have_boundaries {
+        build_boundary_prefixes(files)
+    } else {
+        Vec::new()
+    };
+    let has_boundaries = input.may_have_boundaries && boundary_prefixes.iter().any(Option::is_some);
 
     #[expect(
         clippy::needless_range_loop,
@@ -73,6 +79,7 @@ pub(super) fn extract_clone_groups(input: &CloneGroupExtractionInput<'_>) -> Vec
                     file_offsets,
                     files,
                     boundary_prefixes: &boundary_prefixes,
+                    has_boundaries,
                     interval_begin,
                     interval_end,
                     length: top_lcp,
@@ -82,7 +89,10 @@ pub(super) fn extract_clone_groups(input: &CloneGroupExtractionInput<'_>) -> Vec
             }
         }
 
-        if i < n {
+        if i < n
+            && cur_lcp >= input.min_tokens
+            && stack.last().is_none_or(|&(last_lcp, _)| last_lcp < cur_lcp)
+        {
             stack.push((cur_lcp, start));
         }
     }
@@ -151,6 +161,7 @@ struct RawGroupInput<'a> {
     file_offsets: &'a [usize],
     files: &'a [FileData],
     boundary_prefixes: &'a [Option<Vec<u32>>],
+    has_boundaries: bool,
     interval_begin: usize,
     interval_end: usize,
     length: usize,
@@ -177,7 +188,9 @@ fn build_raw_group(input: &RawGroupInput<'_>) -> Option<RawGroup> {
         if offset_in_file + length > files[fid].hashed_tokens.len() {
             continue;
         }
-        if range_contains_boundary(boundary_prefixes[fid].as_ref(), offset_in_file, length) {
+        if input.has_boundaries
+            && range_contains_boundary(boundary_prefixes[fid].as_ref(), offset_in_file, length)
+        {
             continue;
         }
 
@@ -185,6 +198,20 @@ fn build_raw_group(input: &RawGroupInput<'_>) -> Option<RawGroup> {
     }
 
     if instances.len() < 2 {
+        return None;
+    }
+
+    if instances.len() == 2 {
+        if instances[1] < instances[0] {
+            instances.swap(0, 1);
+        }
+        let first = instances[0];
+        let second = instances[1];
+
+        if first.0 != second.0 || second.1 >= first.1 + length {
+            return Some(RawGroup { instances, length });
+        }
+
         return None;
     }
 

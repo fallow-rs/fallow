@@ -12,6 +12,7 @@
     "bench:dupes": "node bench-dupes.mjs",
     "bench:dupes:synthetic": "node bench-dupes.mjs --synthetic",
     "bench:dupes:real-world": "node bench-dupes.mjs --real-world",
+    "bench:dupes:rolling": "node compare-dupes-rolling.mjs",
     "generate:circular": "node generate-circular-fixtures.mjs",
     "bench:circular": "node bench-circular.mjs",
     "bench:circular:synthetic": "node bench-circular.mjs --synthetic",
