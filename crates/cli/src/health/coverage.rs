@@ -763,6 +763,18 @@ fn build_request(
         Some([only]) => only.as_path(),
         _ => input.root,
     };
+    let (files, locations) = build_static_files(input, static_signals);
+    (
+        assemble_request(options, project_root, coverage_sources, files),
+        locations,
+    )
+}
+
+/// Build the per-module `StaticFile` list and the ambiguous-line location map.
+fn build_static_files(
+    input: &RuntimeCoverageAnalysisInput<'_>,
+    static_signals: &StaticSignalIndex,
+) -> (Vec<StaticFile>, FunctionLocations) {
     let mut files = Vec::new();
     let mut locations = FxHashMap::default();
     let graph = input.analysis_output.graph.as_ref();
@@ -771,10 +783,13 @@ fn build_request(
         let Some(&path) = input.file_paths.get(&module.file_id) else {
             continue;
         };
+        let relative = path.strip_prefix(input.root).unwrap_or(path);
+        if !module_is_eligible(input, module, path, relative) {
+            continue;
+        }
         let canonical_path = input
             .istanbul_coverage
             .map(|_| dunce::canonicalize(path).unwrap_or_else(|_| path.clone()));
-        let relative = path.strip_prefix(input.root).unwrap_or(path);
         let caller_count = graph
             .and_then(|g| g.reverse_deps.get(module.file_id.0 as usize))
             .map_or(0_usize, Vec::len);
@@ -782,47 +797,21 @@ fn build_request(
         let owner_count = codeowners
             .as_ref()
             .map(|co| co.owner_count_of(relative).unwrap_or(0));
-        if input.ignore_set.is_match(relative) {
-            continue;
-        }
-        if let Some(changed) = input.changed_files
-            && !changed.contains(path.as_path())
-        {
-            continue;
-        }
-        if let Some(ws) = input.ws_roots
-            && !ws.iter().any(|r| path.starts_with(r))
-        {
-            continue;
-        }
-        if module.complexity.is_empty() {
-            continue;
-        }
         let relative_posix = relative.to_string_lossy().replace('\\', "/");
         let functions = module
             .complexity
             .iter()
             .map(|function| {
                 mark_ambiguous_function_line(&mut locations, path, &function.name, function.line);
-                let static_used = function_static_used(path, function, static_signals);
-                let test_covered = function_test_covered(
-                    path,
-                    canonical_path.as_deref(),
+                build_static_function(BuildStaticFunctionInput {
                     function,
+                    path,
+                    canonical_path: canonical_path.as_deref(),
                     static_signals,
-                    input.istanbul_coverage,
-                );
-                static_function(StaticFunctionInput {
+                    istanbul_coverage: input.istanbul_coverage,
                     relative_posix: &relative_posix,
-                    name: &function.name,
-                    start_line: function.line,
-                    end_line: function.line.saturating_add(function.line_count),
-                    cyclomatic: u32::from(function.cyclomatic),
-                    static_used,
-                    test_covered,
                     caller_count,
                     owner_count,
-                    source_hash: function.source_hash.clone(),
                 })
             })
             .collect();
@@ -831,29 +820,95 @@ fn build_request(
             functions,
         });
     }
-    (
-        Request {
-            protocol_version: PROTOCOL_VERSION.to_owned(),
-            license: fallow_cov_protocol::License {
-                jwt: options.license_jwt.clone(),
-            },
-            project_root: project_root.to_string_lossy().into_owned(),
-            coverage_sources,
-            static_findings: StaticFindings { files },
-            options: fallow_cov_protocol::Options {
-                include_hot_paths: true,
-                min_invocations_for_hot: Some(options.min_invocations_hot),
-                min_observation_volume: options.min_observation_volume,
-                low_traffic_threshold: options.low_traffic_threshold,
-                trace_count: None,
-                period_days: None,
-                deployments_seen: None,
-                window_seconds: None,
-                instances_observed: None,
-            },
+    (files, locations)
+}
+
+/// Whether a module should contribute functions to the request.
+fn module_is_eligible(
+    input: &RuntimeCoverageAnalysisInput<'_>,
+    module: &fallow_types::extract::ModuleInfo,
+    path: &Path,
+    relative: &Path,
+) -> bool {
+    if input.ignore_set.is_match(relative) {
+        return false;
+    }
+    if let Some(changed) = input.changed_files
+        && !changed.contains(path)
+    {
+        return false;
+    }
+    if let Some(ws) = input.ws_roots
+        && !ws.iter().any(|r| path.starts_with(r))
+    {
+        return false;
+    }
+    !module.complexity.is_empty()
+}
+
+/// Per-function inputs threaded from `build_static_files` into `static_function`.
+struct BuildStaticFunctionInput<'a> {
+    function: &'a fallow_types::extract::FunctionComplexity,
+    path: &'a Path,
+    canonical_path: Option<&'a Path>,
+    static_signals: &'a StaticSignalIndex,
+    istanbul_coverage: Option<&'a IstanbulCoverage>,
+    relative_posix: &'a str,
+    caller_count: u32,
+    owner_count: Option<usize>,
+}
+
+/// Derive a `StaticFunction` from one parsed function plus static signals.
+fn build_static_function(input: BuildStaticFunctionInput<'_>) -> StaticFunction {
+    let static_used = function_static_used(input.path, input.function, input.static_signals);
+    let test_covered = function_test_covered(
+        input.path,
+        input.canonical_path,
+        input.function,
+        input.static_signals,
+        input.istanbul_coverage,
+    );
+    static_function(StaticFunctionInput {
+        relative_posix: input.relative_posix,
+        name: &input.function.name,
+        start_line: input.function.line,
+        end_line: input.function.line.saturating_add(input.function.line_count),
+        cyclomatic: u32::from(input.function.cyclomatic),
+        static_used,
+        test_covered,
+        caller_count: input.caller_count,
+        owner_count: input.owner_count,
+        source_hash: input.function.source_hash.clone(),
+    })
+}
+
+/// Assemble the protocol `Request` envelope around the built static files.
+fn assemble_request(
+    options: &RuntimeCoverageOptions,
+    project_root: &Path,
+    coverage_sources: Vec<CoverageSource>,
+    files: Vec<StaticFile>,
+) -> Request {
+    Request {
+        protocol_version: PROTOCOL_VERSION.to_owned(),
+        license: fallow_cov_protocol::License {
+            jwt: options.license_jwt.clone(),
         },
-        locations,
-    )
+        project_root: project_root.to_string_lossy().into_owned(),
+        coverage_sources,
+        static_findings: StaticFindings { files },
+        options: fallow_cov_protocol::Options {
+            include_hot_paths: true,
+            min_invocations_for_hot: Some(options.min_invocations_hot),
+            min_observation_volume: options.min_observation_volume,
+            low_traffic_threshold: options.low_traffic_threshold,
+            trace_count: None,
+            period_days: None,
+            deployments_seen: None,
+            window_seconds: None,
+            instances_observed: None,
+        },
+    }
 }
 
 fn build_static_signal_index(
@@ -866,7 +921,33 @@ fn build_static_signal_index(
         .as_ref()
         .ok_or_else(|| "analysis graph not available for runtime coverage".to_owned())?;
     let mut index = StaticSignalIndex::default();
+    index_dead_code_signals(&mut index, analysis_output);
 
+    let module_by_id: FxHashMap<_, _> = modules
+        .iter()
+        .map(|module| (module.file_id, module))
+        .collect();
+    for node in &graph.modules {
+        let Some(&path) = file_paths.get(&node.file_id) else {
+            continue;
+        };
+        index_node_exports(
+            &mut index,
+            graph,
+            node,
+            module_by_id.get(&node.file_id).copied(),
+            path,
+        );
+    }
+
+    Ok(index)
+}
+
+/// Seed the signal index with unused-file and unused-export dead-code signals.
+fn index_dead_code_signals(
+    index: &mut StaticSignalIndex,
+    analysis_output: &fallow_core::AnalysisOutput,
+) {
     for file in &analysis_output.results.unused_files {
         index.unused_files.insert(file.file.path.clone());
     }
@@ -882,61 +963,58 @@ fn build_static_signal_index(
             .or_default()
             .insert(export.export.line);
     }
+}
 
-    let module_by_id: FxHashMap<_, _> = modules
-        .iter()
-        .map(|module| (module.file_id, module))
-        .collect();
-    for node in &graph.modules {
-        let Some(&path) = file_paths.get(&node.file_id) else {
+/// Index the value exports of one graph node, including test-referenced ones.
+fn index_node_exports(
+    index: &mut StaticSignalIndex,
+    graph: &fallow_core::graph::ModuleGraph,
+    node: &fallow_core::graph::ModuleNode,
+    module: Option<&fallow_types::extract::ModuleInfo>,
+    path: &Path,
+) {
+    for export in &node.exports {
+        if export.is_type_only {
             continue;
-        };
-        let module = module_by_id.get(&node.file_id);
-        for export in &node.exports {
-            if export.is_type_only {
-                continue;
-            }
+        }
 
+        index
+            .exported_names
+            .entry(path.to_path_buf())
+            .or_default()
+            .insert(export.name.to_string());
+
+        if let Some(module) = module {
+            let (line, _) = fallow_types::extract::byte_offset_to_line_col(
+                &module.line_offsets,
+                export.span.start,
+            );
             index
-                .exported_names
-                .entry(path.clone())
+                .exported_lines
+                .entry(path.to_path_buf())
                 .or_default()
-                .insert(export.name.to_string());
+                .insert(line);
 
-            if let Some(module) = module {
-                let (line, _) = fallow_types::extract::byte_offset_to_line_col(
-                    &module.line_offsets,
-                    export.span.start,
-                );
+            let has_test_ref = export.references.iter().any(|reference| {
+                graph
+                    .modules
+                    .get(reference.from_file.0 as usize)
+                    .is_some_and(fallow_core::graph::ModuleNode::is_test_reachable)
+            });
+            if has_test_ref {
                 index
-                    .exported_lines
-                    .entry(path.clone())
+                    .test_referenced_export_names
+                    .entry(path.to_path_buf())
+                    .or_default()
+                    .insert(export.name.to_string());
+                index
+                    .test_referenced_export_lines
+                    .entry(path.to_path_buf())
                     .or_default()
                     .insert(line);
-
-                let has_test_ref = export.references.iter().any(|reference| {
-                    graph
-                        .modules
-                        .get(reference.from_file.0 as usize)
-                        .is_some_and(fallow_core::graph::ModuleNode::is_test_reachable)
-                });
-                if has_test_ref {
-                    index
-                        .test_referenced_export_names
-                        .entry(path.clone())
-                        .or_default()
-                        .insert(export.name.to_string());
-                    index
-                        .test_referenced_export_lines
-                        .entry(path.clone())
-                        .or_default()
-                        .insert(line);
-                }
             }
         }
     }
-
-    Ok(index)
 }
 
 fn function_static_used(
@@ -1113,11 +1191,35 @@ fn preprocess_v8_coverage_file(
         return Ok(None);
     };
 
+    let (remapped_files, residual_scripts) = remap_dump_scripts(dump.result, &cache);
+
+    if remapped_files.is_empty() {
+        return Ok(None);
+    }
+
+    let temp_root = ensure_temp_dir(temp_dir)?;
+    let remapped_path = temp_root.join(format!("coverage-remapped-{index}.json"));
+    write_istanbul_coverage_file(&remapped_path, &remapped_files)?;
+
+    let residual_path = write_residual_coverage(temp_root, index, residual_scripts)?;
+
+    Ok(Some((remapped_path, residual_path)))
+}
+
+/// Split V8 scripts into source-map-remapped Istanbul functions and the
+/// residual scripts that had no usable source map.
+fn remap_dump_scripts(
+    scripts: Vec<fallow_v8_coverage::ScriptCoverage>,
+    cache: &BTreeMap<String, SourceMapCacheEntry>,
+) -> (
+    BTreeMap<PathBuf, BTreeMap<RemappedFnKey, AccumulatedFunction>>,
+    Vec<fallow_v8_coverage::ScriptCoverage>,
+) {
     let mut remapped_files: BTreeMap<PathBuf, BTreeMap<RemappedFnKey, AccumulatedFunction>> =
         BTreeMap::new();
     let mut residual_scripts = Vec::new();
 
-    for script in dump.result {
+    for script in scripts {
         let Some(entry) = cache.get(&script.url) else {
             residual_scripts.push(script);
             continue;
@@ -1132,41 +1234,39 @@ fn preprocess_v8_coverage_file(
         }
     }
 
-    if remapped_files.is_empty() {
+    (remapped_files, residual_scripts)
+}
+
+/// Write the residual (non-remapped) V8 scripts to a temp file, if any.
+fn write_residual_coverage(
+    temp_root: &Path,
+    index: usize,
+    residual_scripts: Vec<fallow_v8_coverage::ScriptCoverage>,
+) -> Result<Option<PathBuf>, String> {
+    if residual_scripts.is_empty() {
         return Ok(None);
     }
-
-    let temp_root = ensure_temp_dir(temp_dir)?;
-    let remapped_path = temp_root.join(format!("coverage-remapped-{index}.json"));
-    write_istanbul_coverage_file(&remapped_path, &remapped_files)?;
-
-    let residual_path = if residual_scripts.is_empty() {
-        None
-    } else {
-        let residual_path = temp_root.join(format!("coverage-residual-{index}.json"));
-        let residual_dump = V8CoverageDump {
-            result: residual_scripts,
-            source_map_cache: None,
-        };
-        fs::write(
-            &residual_path,
-            serde_json::to_vec(&residual_dump).map_err(|err| {
-                format!(
-                    "failed to serialize residual v8 coverage {}: {err}",
-                    residual_path.display()
-                )
-            })?,
-        )
-        .map_err(|err| {
+    let residual_path = temp_root.join(format!("coverage-residual-{index}.json"));
+    let residual_dump = V8CoverageDump {
+        result: residual_scripts,
+        source_map_cache: None,
+    };
+    fs::write(
+        &residual_path,
+        serde_json::to_vec(&residual_dump).map_err(|err| {
             format!(
-                "failed to write residual v8 coverage {}: {err}",
+                "failed to serialize residual v8 coverage {}: {err}",
                 residual_path.display()
             )
-        })?;
-        Some(residual_path)
-    };
-
-    Ok(Some((remapped_path, residual_path)))
+        })?,
+    )
+    .map_err(|err| {
+        format!(
+            "failed to write residual v8 coverage {}: {err}",
+            residual_path.display()
+        )
+    })?;
+    Ok(Some(residual_path))
 }
 
 fn parse_source_map_cache(dump: &V8CoverageDump) -> Option<BTreeMap<String, SourceMapCacheEntry>> {
@@ -1611,21 +1711,8 @@ fn run_sidecar(
         )
     })?;
 
-    if let Some(mut stdin) = child.take_stdin() {
-        if let Err(err) = serde_json::to_writer(&mut stdin, request) {
-            return Err(emit_error(
-                &format!("failed to serialize sidecar request: {err}"),
-                4,
-                output,
-            ));
-        }
-        if let Err(err) = stdin.flush() {
-            return Err(emit_error(
-                &format!("failed to flush sidecar request: {err}"),
-                4,
-                output,
-            ));
-        }
+    if let Some(stdin) = child.take_stdin() {
+        write_sidecar_request(stdin, request, output)?;
     }
 
     let output_data = child
@@ -1637,43 +1724,7 @@ fn run_sidecar(
         eprint!("{stderr}");
     }
 
-    match output_data.status.code() {
-        Some(0) => {}
-        Some(4) => {
-            return Err(emit_error(
-                &stderr_message(&output_data.stderr, "sidecar protocol mismatch"),
-                4,
-                output,
-            ));
-        }
-        Some(5) => {
-            return Err(emit_error(
-                &stderr_message(
-                    &output_data.stderr,
-                    "failed to parse runtime coverage input",
-                ),
-                5,
-                output,
-            ));
-        }
-        Some(6) => {
-            return Err(emit_error(
-                &stderr_message(&output_data.stderr, "sidecar internal error"),
-                6,
-                output,
-            ));
-        }
-        Some(code) => {
-            return Err(emit_error(
-                &stderr_message(&output_data.stderr, "sidecar execution failed"),
-                u8::try_from(code).unwrap_or(4),
-                output,
-            ));
-        }
-        None => {
-            return Err(emit_error("sidecar terminated by signal", 4, output));
-        }
-    }
+    check_sidecar_exit_status(&output_data, output)?;
 
     let response: Response = serde_json::from_slice(&output_data.stdout).map_err(|err| {
         emit_error(
@@ -1683,6 +1734,70 @@ fn run_sidecar(
         )
     })?;
 
+    check_response_protocol(&response, output)?;
+
+    Ok(response)
+}
+
+/// Serialize and flush the protocol request onto the sidecar's stdin.
+fn write_sidecar_request(
+    mut stdin: impl Write,
+    request: &Request,
+    output: OutputFormat,
+) -> Result<(), ExitCode> {
+    if let Err(err) = serde_json::to_writer(&mut stdin, request) {
+        return Err(emit_error(
+            &format!("failed to serialize sidecar request: {err}"),
+            4,
+            output,
+        ));
+    }
+    if let Err(err) = stdin.flush() {
+        return Err(emit_error(
+            &format!("failed to flush sidecar request: {err}"),
+            4,
+            output,
+        ));
+    }
+    Ok(())
+}
+
+/// Map the sidecar's exit code onto fallow's exit-code ladder.
+fn check_sidecar_exit_status(
+    output_data: &std::process::Output,
+    output: OutputFormat,
+) -> Result<(), ExitCode> {
+    match output_data.status.code() {
+        Some(0) => Ok(()),
+        Some(4) => Err(emit_error(
+            &stderr_message(&output_data.stderr, "sidecar protocol mismatch"),
+            4,
+            output,
+        )),
+        Some(5) => Err(emit_error(
+            &stderr_message(
+                &output_data.stderr,
+                "failed to parse runtime coverage input",
+            ),
+            5,
+            output,
+        )),
+        Some(6) => Err(emit_error(
+            &stderr_message(&output_data.stderr, "sidecar internal error"),
+            6,
+            output,
+        )),
+        Some(code) => Err(emit_error(
+            &stderr_message(&output_data.stderr, "sidecar execution failed"),
+            u8::try_from(code).unwrap_or(4),
+            output,
+        )),
+        None => Err(emit_error("sidecar terminated by signal", 4, output)),
+    }
+}
+
+/// Reject responses whose protocol major version does not match this build.
+fn check_response_protocol(response: &Response, output: OutputFormat) -> Result<(), ExitCode> {
     let supported_major = PROTOCOL_VERSION.split('.').next().unwrap_or("0");
     let response_major = response.protocol_version.split('.').next().unwrap_or("0");
     if response_major != supported_major {
@@ -1699,8 +1814,7 @@ fn run_sidecar(
         };
         return Err(emit_error(&message, 4, output));
     }
-
-    Ok(response)
+    Ok(())
 }
 
 fn stderr_message(stderr: &[u8], fallback: &str) -> String {
