@@ -84,54 +84,71 @@ fn build_risky_change_findings(
         .hot_paths
         .iter()
         .filter_map(|hot_path| {
-            let matched = match_complexity(
-                report,
-                root,
-                &hot_path.path,
-                &hot_path.function,
-                hot_path.line,
-                skipped_ambiguous_matches,
-            )?;
-            if !is_low_test_coverage(matched.finding) || !is_high_crap(matched.finding) {
-                return None;
-            }
-
-            let signals = ordered_signals([
-                CoverageIntelligenceSignal::Changed,
-                CoverageIntelligenceSignal::HotPath,
-                CoverageIntelligenceSignal::LowTestCoverage,
-                CoverageIntelligenceSignal::HighCrap,
-            ]);
-            let evidence = CoverageIntelligenceEvidence {
-                coverage_pct: matched.finding.coverage_pct,
-                crap: matched.finding.crap,
-                runtime_verdict: None,
-                invocations: Some(hot_path.invocations),
-                static_status: None,
-                test_coverage: matched
-                    .finding
-                    .coverage_tier
-                    .map(|tier| coverage_tier_label(tier).to_owned()),
-                changed: true,
-                ownership_state: ownership_state_for(&report.hotspots, root, &hot_path.path),
-                match_confidence: matched.confidence,
-            };
-            Some(make_finding(FindingInput {
-                path: root_relative_path(root, &hot_path.path),
-                identity: Some(hot_path.function.clone()),
-                line: hot_path.line,
-                verdict: CoverageIntelligenceVerdict::RiskyChangeDetected,
-                signals,
-                recommendation: CoverageIntelligenceRecommendation::AddTestOrSplitBeforeMerge,
-                confidence: confidence_from_match(matched.confidence),
-                related_ids: related_ids([
-                    Some(hot_path.id.as_str()),
-                    hot_path.stable_id.as_deref(),
-                ]),
-                evidence,
-            }))
+            risky_finding_for_hot_path(report, root, hot_path, skipped_ambiguous_matches)
         })
         .collect()
+}
+
+/// Assemble the evidence block for a matched risky-change hot path.
+fn build_risky_finding_evidence(
+    report: &HealthReport,
+    root: &Path,
+    hot_path: &crate::health_types::RuntimeCoverageHotPath,
+    matched: &MatchedComplexity<'_>,
+) -> CoverageIntelligenceEvidence {
+    CoverageIntelligenceEvidence {
+        coverage_pct: matched.finding.coverage_pct,
+        crap: matched.finding.crap,
+        runtime_verdict: None,
+        invocations: Some(hot_path.invocations),
+        static_status: None,
+        test_coverage: matched
+            .finding
+            .coverage_tier
+            .map(|tier| coverage_tier_label(tier).to_owned()),
+        changed: true,
+        ownership_state: ownership_state_for(&report.hotspots, root, &hot_path.path),
+        match_confidence: matched.confidence,
+    }
+}
+
+/// Resolve one hot path into a risky-change finding, gating on coverage + CRAP.
+fn risky_finding_for_hot_path(
+    report: &HealthReport,
+    root: &Path,
+    hot_path: &crate::health_types::RuntimeCoverageHotPath,
+    skipped_ambiguous_matches: &mut usize,
+) -> Option<CoverageIntelligenceFinding> {
+    let matched = match_complexity(
+        report,
+        root,
+        &hot_path.path,
+        &hot_path.function,
+        hot_path.line,
+        skipped_ambiguous_matches,
+    )?;
+    if !is_low_test_coverage(matched.finding) || !is_high_crap(matched.finding) {
+        return None;
+    }
+
+    let signals = ordered_signals([
+        CoverageIntelligenceSignal::Changed,
+        CoverageIntelligenceSignal::HotPath,
+        CoverageIntelligenceSignal::LowTestCoverage,
+        CoverageIntelligenceSignal::HighCrap,
+    ]);
+    let evidence = build_risky_finding_evidence(report, root, hot_path, &matched);
+    Some(make_finding(FindingInput {
+        path: root_relative_path(root, &hot_path.path),
+        identity: Some(hot_path.function.clone()),
+        line: hot_path.line,
+        verdict: CoverageIntelligenceVerdict::RiskyChangeDetected,
+        signals,
+        recommendation: CoverageIntelligenceRecommendation::AddTestOrSplitBeforeMerge,
+        confidence: confidence_from_match(matched.confidence),
+        related_ids: related_ids([Some(hot_path.id.as_str()), hot_path.stable_id.as_deref()]),
+        evidence,
+    }))
 }
 
 fn build_delete_findings(
