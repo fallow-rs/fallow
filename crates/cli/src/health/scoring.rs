@@ -324,10 +324,6 @@ pub(super) struct IstanbulCrapResult {
 /// using the file's test-reachability status.
 ///
 /// Returns CRAP scores and match statistics for reporting.
-#[expect(
-    clippy::suboptimal_flops,
-    reason = "cc * cc + cc matches the CRAP formula specification"
-)]
 fn compute_crap_scores_istanbul(
     complexity: &[fallow_types::extract::FunctionComplexity],
     file_coverage: Option<&IstanbulFileCoverage>,
@@ -347,31 +343,8 @@ fn compute_crap_scores_istanbul(
     let mut matched = 0usize;
     let mut per_function = Vec::with_capacity(complexity.len());
     for f in complexity {
-        let cc = f64::from(f.cyclomatic);
-        let lookup = file_coverage.and_then(|fc| fc.lookup(f.name.as_str(), f.line, f.col));
-        let (crap, coverage_pct, tier, source) = if let Some(cov_pct) = lookup {
-            matched += 1;
-            (
-                crap_formula(cc, cov_pct),
-                Some(cov_pct),
-                crate::health_types::CoverageTier::from_pct(cov_pct),
-                crate::health_types::CoverageSource::Istanbul,
-            )
-        } else if is_test_reachable {
-            (
-                cc,
-                None,
-                crate::health_types::CoverageTier::from_pct(INDIRECT_TEST_COVERAGE_ESTIMATE),
-                crate::health_types::CoverageSource::Estimated,
-            )
-        } else {
-            (
-                cc * cc + cc,
-                None,
-                crate::health_types::CoverageTier::None,
-                crate::health_types::CoverageSource::Estimated,
-            )
-        };
+        let (crap, coverage_pct, tier, source) =
+            crap_for_function(f, file_coverage, is_test_reachable, &mut matched);
         let crap_rounded = (crap * 10.0).round() / 10.0;
         max = max.max(crap);
         if crap >= CRAP_THRESHOLD {
@@ -393,6 +366,51 @@ fn compute_crap_scores_istanbul(
         total: complexity.len(),
         per_function,
     }
+}
+
+/// Resolve one function's `(crap, coverage_pct, tier, source)` from Istanbul
+/// coverage, falling back to the test-reachability estimate model. Increments
+/// `matched` when a real coverage value is found.
+#[expect(
+    clippy::suboptimal_flops,
+    reason = "cc * cc + cc matches the CRAP formula specification"
+)]
+fn crap_for_function(
+    f: &fallow_types::extract::FunctionComplexity,
+    file_coverage: Option<&IstanbulFileCoverage>,
+    is_test_reachable: bool,
+    matched: &mut usize,
+) -> (
+    f64,
+    Option<f64>,
+    crate::health_types::CoverageTier,
+    crate::health_types::CoverageSource,
+) {
+    let cc = f64::from(f.cyclomatic);
+    let lookup = file_coverage.and_then(|fc| fc.lookup(f.name.as_str(), f.line, f.col));
+    if let Some(cov_pct) = lookup {
+        *matched += 1;
+        return (
+            crap_formula(cc, cov_pct),
+            Some(cov_pct),
+            crate::health_types::CoverageTier::from_pct(cov_pct),
+            crate::health_types::CoverageSource::Istanbul,
+        );
+    }
+    if is_test_reachable {
+        return (
+            cc,
+            None,
+            crate::health_types::CoverageTier::from_pct(INDIRECT_TEST_COVERAGE_ESTIMATE),
+            crate::health_types::CoverageSource::Estimated,
+        );
+    }
+    (
+        cc * cc + cc,
+        None,
+        crate::health_types::CoverageTier::None,
+        crate::health_types::CoverageSource::Estimated,
+    )
 }
 
 /// Estimated coverage for functions directly referenced by test-reachable modules.
@@ -1176,12 +1194,7 @@ pub(super) fn compute_file_scores(
     let top_complex_fns = collect_top_complex_fns(modules, file_paths);
     let cycle_members = collect_cycle_members(results);
     let direct_callers = collect_direct_callers(&graph, file_paths);
-    let mut unused_export_names = collect_unused_export_names(results);
-
-    let mut entry_points: rustc_hash::FxHashSet<std::path::PathBuf> =
-        rustc_hash::FxHashSet::default();
-    let mut value_export_counts: rustc_hash::FxHashMap<std::path::PathBuf, usize> =
-        rustc_hash::FxHashMap::default();
+    let unused_export_names = collect_unused_export_names(results);
 
     let unused_files: rustc_hash::FxHashSet<&std::path::Path> = results
         .unused_files
@@ -1196,114 +1209,199 @@ pub(super) fn compute_file_scores(
         coverage,
     } = prepare_file_score_coverage_setup(modules, file_paths, results, &graph, root);
 
-    let mut scores = Vec::with_capacity(graph.modules.len());
-    let mut istanbul_matched = 0usize;
-    let mut istanbul_total = 0usize;
-    let mut per_function_crap: rustc_hash::FxHashMap<std::path::PathBuf, Vec<PerFunctionCrap>> =
-        rustc_hash::FxHashMap::default();
-
     let template_inherit = build_template_inherit_contexts(&graph, &module_by_id, file_paths);
 
-    for node in &graph.modules {
-        let Some(path) = file_paths.get(&node.file_id) else {
-            continue;
-        };
-
-        record_entry_point(&mut entry_points, node, path);
-
-        let fan_in = graph
-            .reverse_deps
-            .get(node.file_id.0 as usize)
-            .map_or(0, Vec::len);
-
-        let fan_out = node.edge_range.len();
-
-        let (total_cyclomatic, total_cognitive, function_count, lines) = module_by_id
-            .get(&node.file_id)
-            .map_or((0, 0, 0, 0), |module| aggregate_complexity(module));
-
-        let value_exports = node.exports.iter().filter(|e| !e.is_type_only).count();
-        let path_owned = (*path).clone();
-        value_export_counts.insert(path_owned.clone(), value_exports);
-        record_unused_file_export_names(
-            path_owned.as_path(),
-            &node.exports,
-            &unused_files,
-            &mut unused_export_names,
-        );
-
-        let dead_code_ratio = compute_dead_code_ratio(
-            path_owned.as_path(),
-            &node.exports,
-            &unused_files,
-            &unused_exports_by_path,
-        );
-        let complexity_density = compute_complexity_density(total_cyclomatic, lines);
-
-        let dead_code_ratio_rounded = (dead_code_ratio * 100.0).round() / 100.0;
-        let complexity_density_rounded = (complexity_density * 100.0).round() / 100.0;
-
-        let maintainability_index = compute_maintainability_index(
-            complexity_density_rounded,
-            dead_code_ratio_rounded,
-            fan_out,
-            lines,
-        );
-
-        let crap = compute_file_score_crap(
-            node,
-            module_by_id.get(&node.file_id).copied(),
-            &graph,
-            template_inherit.get(&node.file_id),
+    let mut acc = FileScoreAccumulator {
+        unused_export_names,
+        ..FileScoreAccumulator::with_capacity(graph.modules.len())
+    };
+    accumulate_file_scores(
+        &mut acc,
+        &FileScoreLoopCtx {
+            graph: &graph,
+            file_paths,
+            module_by_id: &module_by_id,
+            unused_files: &unused_files,
+            unused_exports_by_path: &unused_exports_by_path,
+            template_inherit: &template_inherit,
             istanbul_coverage,
-            &path_owned,
-        );
-        istanbul_matched += crap.istanbul_matched;
-        istanbul_total += crap.istanbul_total;
-        record_per_function_crap(&mut per_function_crap, &path_owned, crap.per_function);
-
-        scores.push(FileHealthScore {
-            path: path_owned,
-            fan_in,
-            fan_out,
-            dead_code_ratio: dead_code_ratio_rounded,
-            complexity_density: complexity_density_rounded,
-            maintainability_index: (maintainability_index * 10.0).round() / 10.0,
-            total_cyclomatic,
-            total_cognitive,
-            function_count,
-            lines,
-            crap_max: crap.max,
-            crap_above_threshold: crap.above_threshold,
-        });
-    }
+        },
+    );
 
     if let Some(changed) = changed_files {
-        scores.retain(|s| changed.contains(&s.path));
+        acc.scores.retain(|s| changed.contains(&s.path));
     }
 
-    scores.retain(|s| s.function_count > 0);
+    acc.scores.retain(|s| s.function_count > 0);
 
-    scores.sort_by(compare_file_score_triage);
+    acc.scores.sort_by(compare_file_score_triage);
 
     Ok(build_file_score_output(FileScoreOutputParts {
         graph: &graph,
         file_paths,
         results,
-        scores,
+        scores: acc.scores,
         coverage,
         circular_files,
         top_complex_fns,
-        entry_points,
-        value_export_counts,
-        unused_export_names,
+        entry_points: acc.entry_points,
+        value_export_counts: acc.value_export_counts,
+        unused_export_names: acc.unused_export_names,
         cycle_members,
         direct_callers,
-        istanbul_matched,
-        istanbul_total,
-        per_function_crap,
+        istanbul_matched: acc.istanbul_matched,
+        istanbul_total: acc.istanbul_total,
+        per_function_crap: acc.per_function_crap,
         template_inherit,
     }))
+}
+
+/// Read-only inputs threaded into the per-node file-score loop.
+struct FileScoreLoopCtx<'a> {
+    graph: &'a fallow_core::graph::ModuleGraph,
+    file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
+    module_by_id: &'a rustc_hash::FxHashMap<
+        fallow_core::discover::FileId,
+        &'a fallow_core::extract::ModuleInfo,
+    >,
+    unused_files: &'a rustc_hash::FxHashSet<&'a std::path::Path>,
+    unused_exports_by_path: &'a rustc_hash::FxHashMap<&'a std::path::Path, usize>,
+    template_inherit:
+        &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, TemplateInheritContext>,
+    istanbul_coverage: Option<&'a IstanbulCoverage>,
+}
+
+/// Mutable accumulators populated by the per-node file-score loop.
+struct FileScoreAccumulator {
+    scores: Vec<FileHealthScore>,
+    entry_points: rustc_hash::FxHashSet<std::path::PathBuf>,
+    value_export_counts: rustc_hash::FxHashMap<std::path::PathBuf, usize>,
+    unused_export_names: rustc_hash::FxHashMap<std::path::PathBuf, Vec<String>>,
+    per_function_crap: rustc_hash::FxHashMap<std::path::PathBuf, Vec<PerFunctionCrap>>,
+    istanbul_matched: usize,
+    istanbul_total: usize,
+}
+
+impl FileScoreAccumulator {
+    /// Empty accumulator with the score vector pre-sized to the module count.
+    fn with_capacity(modules: usize) -> Self {
+        FileScoreAccumulator {
+            scores: Vec::with_capacity(modules),
+            entry_points: rustc_hash::FxHashSet::default(),
+            value_export_counts: rustc_hash::FxHashMap::default(),
+            unused_export_names: rustc_hash::FxHashMap::default(),
+            per_function_crap: rustc_hash::FxHashMap::default(),
+            istanbul_matched: 0,
+            istanbul_total: 0,
+        }
+    }
+}
+
+/// Drive the per-node loop, populating `acc` with one score per analyzable file.
+fn accumulate_file_scores(acc: &mut FileScoreAccumulator, ctx: &FileScoreLoopCtx<'_>) {
+    for node in &ctx.graph.modules {
+        let Some(path) = ctx.file_paths.get(&node.file_id) else {
+            continue;
+        };
+        record_entry_point(&mut acc.entry_points, node, path);
+        let score = compute_one_file_score(acc, ctx, node, path);
+        acc.scores.push(score);
+    }
+}
+
+/// Compute the `FileHealthScore` for one node and fold its side data into `acc`.
+fn compute_one_file_score(
+    acc: &mut FileScoreAccumulator,
+    ctx: &FileScoreLoopCtx<'_>,
+    node: &fallow_core::graph::ModuleNode,
+    path: &std::path::Path,
+) -> FileHealthScore {
+    let fan_in = ctx
+        .graph
+        .reverse_deps
+        .get(node.file_id.0 as usize)
+        .map_or(0, Vec::len);
+    let fan_out = node.edge_range.len();
+
+    let (total_cyclomatic, total_cognitive, function_count, lines) = ctx
+        .module_by_id
+        .get(&node.file_id)
+        .map_or((0, 0, 0, 0), |module| aggregate_complexity(module));
+
+    let value_exports = node.exports.iter().filter(|e| !e.is_type_only).count();
+    let path_owned = path.to_path_buf();
+    acc.value_export_counts
+        .insert(path_owned.clone(), value_exports);
+    record_unused_file_export_names(
+        path_owned.as_path(),
+        &node.exports,
+        ctx.unused_files,
+        &mut acc.unused_export_names,
+    );
+
+    let (dead_code_ratio_rounded, complexity_density_rounded, maintainability_index_rounded) =
+        compute_file_score_metrics(node, &path_owned, ctx, total_cyclomatic, lines, fan_out);
+
+    let crap = compute_file_score_crap(
+        node,
+        ctx.module_by_id.get(&node.file_id).copied(),
+        ctx.graph,
+        ctx.template_inherit.get(&node.file_id),
+        ctx.istanbul_coverage,
+        &path_owned,
+    );
+    acc.istanbul_matched += crap.istanbul_matched;
+    acc.istanbul_total += crap.istanbul_total;
+    record_per_function_crap(&mut acc.per_function_crap, &path_owned, crap.per_function);
+
+    FileHealthScore {
+        path: path_owned,
+        fan_in,
+        fan_out,
+        dead_code_ratio: dead_code_ratio_rounded,
+        complexity_density: complexity_density_rounded,
+        maintainability_index: maintainability_index_rounded,
+        total_cyclomatic,
+        total_cognitive,
+        function_count,
+        lines,
+        crap_max: crap.max,
+        crap_above_threshold: crap.above_threshold,
+    }
+}
+
+/// Compute the rounded dead-code-ratio, complexity-density, and
+/// maintainability-index metrics for one file.
+fn compute_file_score_metrics(
+    node: &fallow_core::graph::ModuleNode,
+    path: &std::path::Path,
+    ctx: &FileScoreLoopCtx<'_>,
+    total_cyclomatic: u32,
+    lines: u32,
+    fan_out: usize,
+) -> (f64, f64, f64) {
+    let dead_code_ratio = compute_dead_code_ratio(
+        path,
+        &node.exports,
+        ctx.unused_files,
+        ctx.unused_exports_by_path,
+    );
+    let complexity_density = compute_complexity_density(total_cyclomatic, lines);
+
+    let dead_code_ratio_rounded = (dead_code_ratio * 100.0).round() / 100.0;
+    let complexity_density_rounded = (complexity_density * 100.0).round() / 100.0;
+
+    let maintainability_index = compute_maintainability_index(
+        complexity_density_rounded,
+        dead_code_ratio_rounded,
+        fan_out,
+        lines,
+    );
+    (
+        dead_code_ratio_rounded,
+        complexity_density_rounded,
+        (maintainability_index * 10.0).round() / 10.0,
+    )
 }
 
 fn build_file_score_output(parts: FileScoreOutputParts<'_>) -> FileScoreOutput {
