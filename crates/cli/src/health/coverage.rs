@@ -855,7 +855,7 @@ struct BuildStaticFunctionInput<'a> {
     istanbul_coverage: Option<&'a IstanbulCoverage>,
     relative_posix: &'a str,
     caller_count: u32,
-    owner_count: Option<usize>,
+    owner_count: Option<u32>,
 }
 
 /// Derive a `StaticFunction` from one parsed function plus static signals.
@@ -872,7 +872,10 @@ fn build_static_function(input: BuildStaticFunctionInput<'_>) -> StaticFunction 
         relative_posix: input.relative_posix,
         name: &input.function.name,
         start_line: input.function.line,
-        end_line: input.function.line.saturating_add(input.function.line_count),
+        end_line: input
+            .function
+            .line
+            .saturating_add(input.function.line_count),
         cyclomatic: u32::from(input.function.cyclomatic),
         static_used,
         test_covered,
