@@ -26,18 +26,53 @@ pub(super) fn assemble_health_report(
     action_ctx: &crate::health_types::HealthActionContext,
     assembly: HealthReportAssembly,
 ) -> HealthReport {
+    // The summary reads the assembly by reference (scalars, findings, and the
+    // score output) before the rest of the build consumes the owned fields.
+    let summary = build_summary_from_assembly(opts, &assembly);
+    build_health_report(opts, action_ctx, assembly, summary)
+}
+
+/// Compute the report summary from the assembly without consuming it.
+fn build_summary_from_assembly(
+    opts: &HealthOptions<'_>,
+    assembly: &HealthReportAssembly,
+) -> HealthSummary {
+    let (ist_matched, ist_total) =
+        istanbul_counts_from_score_output(assembly.score_output.as_ref());
+    build_health_summary(
+        opts,
+        &HealthSummaryAssembly {
+            findings: &assembly.findings,
+            files_analyzed: assembly.files_analyzed,
+            total_functions: assembly.total_functions,
+            total_above_threshold: assembly.total_above_threshold,
+            max_cyclomatic: assembly.max_cyclomatic,
+            max_cognitive: assembly.max_cognitive,
+            max_crap: assembly.max_crap,
+            files_scored: assembly.files_scored,
+            average_maintainability: assembly.average_maintainability,
+            report_coverage_gaps: assembly.report_coverage_gaps,
+            has_istanbul_coverage: assembly.has_istanbul_coverage,
+            istanbul_matched: ist_matched,
+            istanbul_total: ist_total,
+            sev_critical: assembly.sev_critical,
+            sev_high: assembly.sev_high,
+            sev_moderate: assembly.sev_moderate,
+        },
+    )
+}
+
+/// Consume the assembly and the precomputed summary into the final report.
+fn build_health_report(
+    opts: &HealthOptions<'_>,
+    action_ctx: &crate::health_types::HealthActionContext,
+    assembly: HealthReportAssembly,
+    summary: HealthSummary,
+) -> HealthReport {
     let HealthReportAssembly {
         report_coverage_gaps,
         findings,
         threshold_overrides,
-        files_analyzed,
-        total_functions,
-        total_above_threshold,
-        max_cyclomatic,
-        max_cognitive,
-        max_crap,
-        files_scored,
-        average_maintainability,
         vital_signs,
         health_score,
         score_output,
@@ -46,27 +81,59 @@ pub(super) fn assemble_health_report(
         targets,
         target_thresholds,
         health_trend,
-        has_istanbul_coverage,
         runtime_coverage,
         framework_health,
         large_functions,
-        sev_critical,
-        sev_high,
-        sev_moderate,
+        ..
     } = assembly;
+    let prelude =
+        compute_report_prelude(opts, score_output, hotspots, hotspot_summary, report_coverage_gaps);
+    build_health_report_struct(
+        opts,
+        action_ctx,
+        HealthReportStructParts {
+            summary,
+            threshold_overrides,
+            vital_signs,
+            health_score,
+            findings,
+            file_scores: prelude.file_scores,
+            coverage_gaps: prelude.coverage_gaps,
+            prop_drilling_chains: prelude.prop_drilling_chains,
+            report_hotspots: prelude.report_hotspots,
+            report_hotspot_summary: prelude.report_hotspot_summary,
+            runtime_coverage,
+            large_functions,
+            targets,
+            target_thresholds,
+            health_trend,
+            framework_health,
+            render_fan_in_top: prelude.render_fan_in_top,
+        },
+    )
+}
+
+/// Score-output-derived report sections built before the struct assembly.
+struct ReportPrelude {
+    coverage_gaps: Option<crate::health_types::CoverageGaps>,
+    prop_drilling_chains: Vec<fallow_types::output_dead_code::PropDrillingChainFinding>,
+    render_fan_in_top: rustc_hash::FxHashMap<std::path::PathBuf, (String, u32)>,
+    file_scores: Vec<crate::health_types::FileHealthScore>,
+    report_hotspots: Vec<crate::health_types::HotspotEntry>,
+    report_hotspot_summary: Option<crate::health_types::HotspotSummary>,
+}
+
+/// Build the score-output-derived report sections, consuming `score_output`,
+/// `hotspots`, and `hotspot_summary`.
+fn compute_report_prelude(
+    opts: &HealthOptions<'_>,
+    score_output: Option<super::scoring::FileScoreOutput>,
+    hotspots: Vec<crate::health_types::HotspotEntry>,
+    hotspot_summary: Option<crate::health_types::HotspotSummary>,
+    report_coverage_gaps: bool,
+) -> ReportPrelude {
     let coverage_gaps = build_report_coverage_gaps(report_coverage_gaps, score_output.as_ref());
-    let (ist_matched, ist_total) = istanbul_counts_from_score_output(score_output.as_ref());
-    // Prop-drilling chains ride on the whole-project score output. Surfaced in
-    // the report (unless score-only output) so `health --hotspots` and the JSON
-    // envelope carry the located records. Empty unless the opt-in rule is on.
-    let prop_drilling_chains = if opts.score_only_output {
-        Vec::new()
-    } else {
-        score_output
-            .as_ref()
-            .map(|o| o.prop_drilling_chains.clone())
-            .unwrap_or_default()
-    };
+    let prop_drilling_chains = build_prop_drilling_chains(opts, score_output.as_ref());
     // Render fan-in is a descriptive blast-radius signal. Build the per-file
     // top-component lookup BEFORE moving `score_output` into the file-scores
     // builder, so the human hotspot/complexity drill-down can show `rendered in N
@@ -80,82 +147,120 @@ pub(super) fn assemble_health_report(
     let file_scores = build_report_file_scores(opts, score_output);
     let (report_hotspots, report_hotspot_summary) =
         report_hotspot_data(opts, hotspots, hotspot_summary);
-    let summary = build_health_summary(
-        opts,
-        &HealthSummaryAssembly {
-            findings: &findings,
-            files_analyzed,
-            total_functions,
-            total_above_threshold,
-            max_cyclomatic,
-            max_cognitive,
-            max_crap,
-            files_scored,
-            average_maintainability,
-            report_coverage_gaps,
-            has_istanbul_coverage,
-            istanbul_matched: ist_matched,
-            istanbul_total: ist_total,
-            sev_critical,
-            sev_high,
-            sev_moderate,
-        },
-    );
+    ReportPrelude {
+        coverage_gaps,
+        prop_drilling_chains,
+        render_fan_in_top,
+        file_scores,
+        report_hotspots,
+        report_hotspot_summary,
+    }
+}
 
+/// Prop-drilling chains ride on the whole-project score output. Surfaced in
+/// the report (unless score-only output) so `health --hotspots` and the JSON
+/// envelope carry the located records. Empty unless the opt-in rule is on.
+fn build_prop_drilling_chains(
+    opts: &HealthOptions<'_>,
+    score_output: Option<&super::scoring::FileScoreOutput>,
+) -> Vec<fallow_types::output_dead_code::PropDrillingChainFinding> {
+    if opts.score_only_output {
+        Vec::new()
+    } else {
+        score_output
+            .map(|o| o.prop_drilling_chains.clone())
+            .unwrap_or_default()
+    }
+}
+
+/// Pieces consumed by the `HealthReport` struct literal builder.
+struct HealthReportStructParts {
+    summary: HealthSummary,
+    threshold_overrides: Vec<crate::health_types::ThresholdOverrideState>,
+    vital_signs: crate::health_types::VitalSigns,
+    health_score: Option<crate::health_types::HealthScore>,
+    findings: Vec<ComplexityViolation>,
+    file_scores: Vec<crate::health_types::FileHealthScore>,
+    coverage_gaps: Option<crate::health_types::CoverageGaps>,
+    prop_drilling_chains: Vec<fallow_types::output_dead_code::PropDrillingChainFinding>,
+    report_hotspots: Vec<crate::health_types::HotspotEntry>,
+    report_hotspot_summary: Option<crate::health_types::HotspotSummary>,
+    runtime_coverage: Option<crate::health_types::RuntimeCoverageReport>,
+    large_functions: Vec<crate::health_types::LargeFunctionEntry>,
+    targets: Vec<crate::health_types::RefactoringTarget>,
+    target_thresholds: Option<crate::health_types::TargetThresholds>,
+    health_trend: Option<crate::health_types::HealthTrend>,
+    framework_health: Option<crate::health_types::FrameworkHealthDiagnostics>,
+    render_fan_in_top: rustc_hash::FxHashMap<std::path::PathBuf, (String, u32)>,
+}
+
+/// Build the `HealthReport` struct, applying the score-only output gates and
+/// (unless score-only) filling `coverage_intelligence` from the built report.
+fn build_health_report_struct(
+    opts: &HealthOptions<'_>,
+    action_ctx: &crate::health_types::HealthActionContext,
+    parts: HealthReportStructParts,
+) -> HealthReport {
     let mut report = HealthReport {
-        summary,
-        threshold_overrides: build_report_threshold_overrides(opts, threshold_overrides),
+        summary: parts.summary,
+        threshold_overrides: build_report_threshold_overrides(opts, parts.threshold_overrides),
         vital_signs: if opts.score_only_output {
             None
         } else {
-            Some(vital_signs)
+            Some(parts.vital_signs)
         },
-        health_score,
-        findings: build_report_findings(opts, action_ctx, findings),
-        file_scores,
+        health_score: parts.health_score,
+        findings: build_report_findings(opts, action_ctx, parts.findings),
+        file_scores: parts.file_scores,
         coverage_gaps: if opts.score_only_output {
             None
         } else {
-            coverage_gaps
+            parts.coverage_gaps
         },
-        prop_drilling_chains,
-        hotspots: build_report_hotspots(opts, report_hotspots),
+        prop_drilling_chains: parts.prop_drilling_chains,
+        hotspots: build_report_hotspots(opts, parts.report_hotspots),
         hotspot_summary: if opts.score_only_output {
             None
         } else {
-            report_hotspot_summary
+            parts.report_hotspot_summary
         },
-        runtime_coverage,
+        runtime_coverage: parts.runtime_coverage,
         coverage_intelligence: None,
         large_functions: if opts.score_only_output {
             Vec::new()
         } else {
-            large_functions
+            parts.large_functions
         },
-        targets: build_report_targets(opts, targets),
+        targets: build_report_targets(opts, parts.targets),
         target_thresholds: if opts.score_only_output {
             None
         } else {
-            target_thresholds
+            parts.target_thresholds
         },
-        health_trend,
+        health_trend: parts.health_trend,
         actions_meta: build_health_actions_meta(action_ctx),
-        framework_health,
+        framework_health: parts.framework_health,
         css_analytics: None,
-        render_fan_in_top,
+        render_fan_in_top: parts.render_fan_in_top,
     };
-    if !opts.score_only_output {
-        report.coverage_intelligence = coverage_intelligence::build_coverage_intelligence(
-            &report,
-            opts.root,
-            coverage_intelligence::CoverageIntelligenceContext {
-                has_change_scope: opts.changed_since.is_some()
-                    || opts.diff_index.is_some()
-                    || opts.use_shared_diff_index,
-            },
-        );
-    }
+    fill_coverage_intelligence(&mut report, opts);
     report
+}
+
+/// Populate `coverage_intelligence` from the built report unless score-only.
+fn fill_coverage_intelligence(report: &mut HealthReport, opts: &HealthOptions<'_>) {
+    if opts.score_only_output {
+        return;
+    }
+    report.coverage_intelligence = coverage_intelligence::build_coverage_intelligence(
+        report,
+        opts.root,
+        coverage_intelligence::CoverageIntelligenceContext {
+            has_change_scope: opts.changed_since.is_some()
+                || opts.diff_index.is_some()
+                || opts.use_shared_diff_index,
+        },
+    );
 }
 
 fn build_report_coverage_gaps(
