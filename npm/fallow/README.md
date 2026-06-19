@@ -88,6 +88,23 @@ Fallow gives AI agents structured repo truth instead of forcing them to infer ev
 
 Every issue in `--format json` carries a machine-actionable `actions` array with an `auto_fixable` flag so agents can self-correct.
 
+### MCP server
+
+Agents that speak MCP can launch the bundled `fallow-mcp` server. Installed as a devDependency, the binary lives in `node_modules/.bin/` and is not on your `PATH`, so launch it through your package manager's runner:
+
+```json
+{
+  "mcpServers": {
+    "fallow": {
+      "command": "npx",
+      "args": ["fallow-mcp"]
+    }
+  }
+}
+```
+
+Swap `npx` for `pnpm exec` / `yarn` / `bunx` to match your package manager. If `fallow-mcp` is installed globally (on your `PATH`), `"command": "fallow-mcp"` works directly. See the [MCP integration guide](https://docs.fallow.tools/integrations/mcp).
+
 ## Framework support
 
 122 built-in plugins covering Next.js, Nuxt, Remix, Qwik, SvelteKit, Gatsby, Astro, Angular, NestJS, AdonisJS, Ember, Expo Router, Vite, Webpack, Vitest, Jest, Playwright, Cypress, Storybook, ESLint, TypeScript, Tailwind, UnoCSS, Prisma, Drizzle, Convex, Turborepo, Hardhat, and many more. Auto-detected from your `package.json`.

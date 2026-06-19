@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`fallow dupes` avoids cross-format clone groups for web-format tokens.** Duplicate token hashes now include the active source namespace, so JS, style, and markup regions do not form clone groups with each other just because their punctuation or identifier shapes match. Large-corpus duplicate detection also prefilters files with no repeated `minTokens` shingle before suffix-array analysis, and the real-world benchmark watchdog now allows the expanded Next.js combined-analysis surface to complete on CI while streaming progress, preserving diagnostics through a script-local timeout, and avoiding unused full-report serialization.
 
+### Documentation
+
+- **MCP server setup now covers project devDependency installs.** The MCP config snippets previously assumed `fallow-mcp` was on your `PATH` (a global install). When fallow is installed as a project devDependency, the binary lives in `node_modules/.bin/` and the server fails to start with `ENOENT`. The MCP integration guide, quickstart, and npm README now show the package-manager runner variants (`npx` / `pnpm exec` / `yarn` / `bunx`) alongside the global form. Thanks to the reporter for flagging it. (Closes [#1343](https://github.com/fallow-rs/fallow/issues/1343).)
+
 ## [2.99.0] - 2026-06-18
 
 ### Added
