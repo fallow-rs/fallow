@@ -12,7 +12,7 @@ Fallow turns a JS/TS repository into a trusted quality report: health score, cha
 
 It helps you answer: what changed, what got riskier, what should be reviewed, what should be refactored, and what can be safely removed. No AI inside the analyzer. Fallow produces deterministic findings, typed output contracts, and traceable explanations that downstream tools can trust.
 
-Static analysis is free and open source. An optional paid runtime layer (Fallow Runtime) adds production execution evidence. Rust-native, sub-second, 122 framework plugins, 5-18x faster than [knip](https://knip.dev) v5 (2.7-9x faster than knip v6), 8-29x faster than [jscpd](https://github.com/kucherenko/jscpd) for duplication detection, with no Node.js runtime dependency for analysis.
+Static analysis is free and open source. An optional paid runtime layer (Fallow Runtime) adds production execution evidence. Rust-native, sub-second, 122 framework plugins, no Node.js runtime dependency for analysis. fallow's edge is doing more in one pass: dead code, duplication, dependencies, complexity, architecture, and security in a single tool. For head-to-head timings against [knip](https://knip.dev) and [jscpd](https://github.com/kucherenko/jscpd), see the [benchmarks](https://github.com/fallow-rs/fallow/tree/main/benchmarks): fallow is faster than knip on smaller projects, knip is faster on several larger repos, and jscpd's Rust rewrite is faster for raw duplication scanning.
 
 ## Installation
 
