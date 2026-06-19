@@ -493,6 +493,106 @@ fn audit_default_gate_ignores_inherited_issues() {
 }
 
 #[test]
+fn audit_new_only_inherits_shifted_duplicate_group() {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let dir = tmp.path();
+
+    let duplicate = "export function sharedBlock(x: number): number {\n\
+          const a = x + 1;\n\
+          const b = a * 2;\n\
+          const c = b - 3;\n\
+          const d = c * c;\n\
+          const e = d + a;\n\
+          const f = e - b;\n\
+          const g = f + c;\n\
+          const h = g * d;\n\
+          const i = h - e;\n\
+          return a + b + c + d + e + f + g + h + i;\n\
+        }\n";
+    fs::write(dir.join("fileB.ts"), duplicate).unwrap();
+
+    let mut shifted_source = String::new();
+    for n in 1..=120 {
+        shifted_source.push_str(&format!("export const v{n} = {n};\n"));
+    }
+    shifted_source.push_str(duplicate);
+    fs::write(dir.join("fileA.ts"), &shifted_source).unwrap();
+
+    git(dir, &["init", "-b", "main"]);
+    commit_all(dir, "initial");
+    git(dir, &["checkout", "-b", "edit"]);
+
+    fs::write(
+        dir.join("fileA.ts"),
+        format!("export const NEW_TOP_CONST = 0;\n{shifted_source}"),
+    )
+    .unwrap();
+    commit_all(dir, "shift unchanged duplicate");
+
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.to_str().unwrap(),
+        "--base",
+        "main",
+        "--gate",
+        "new-only",
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+        "--performance",
+        "--dupes-mode",
+        "strict",
+        "--dupes-min-tokens",
+        "10",
+        "--dupes-min-lines",
+        "3",
+    ]);
+
+    assert_eq!(
+        output.code, 0,
+        "audit should pass when only line numbers changed for an inherited duplicate. stdout: {}\nstderr: {}",
+        output.stdout, output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["base_snapshot_skipped"].as_bool(), Some(false));
+    assert_eq!(
+        json["attribution"]["duplication_introduced"].as_u64(),
+        Some(0)
+    );
+    assert!(
+        json["attribution"]["duplication_inherited"]
+            .as_u64()
+            .is_some_and(|count| count > 0),
+        "expected inherited duplicate attribution"
+    );
+
+    let groups = json["duplication"]["clone_groups"]
+        .as_array()
+        .expect("duplication.clone_groups should be an array");
+    assert!(!groups.is_empty(), "expected at least one clone group");
+    assert!(
+        groups.iter().all(|group| group["introduced"] == false),
+        "all duplicate groups should be marked inherited"
+    );
+    assert!(
+        groups.iter().any(|group| {
+            group["instances"].as_array().is_some_and(|instances| {
+                let has_shifted_file = instances
+                    .iter()
+                    .any(|instance| instance["file"].as_str() == Some("fileA.ts"));
+                let has_peer_file = instances
+                    .iter()
+                    .any(|instance| instance["file"].as_str() == Some("fileB.ts"));
+                has_shifted_file && has_peer_file
+            })
+        }),
+        "expected a clone group spanning fileA.ts and fileB.ts"
+    );
+}
+
+#[test]
 fn audit_gate_all_reports_preexisting_issues() {
     let tmp = create_audit_baseline_fixture();
     fs::write(tmp.path().join("fallow.toml"), "[audit]\ngate = \"all\"\n").unwrap();
