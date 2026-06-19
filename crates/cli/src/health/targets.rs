@@ -153,82 +153,80 @@ pub(super) fn compute_refactoring_targets(
     let mut targets = Vec::new();
 
     for score in file_scores {
-        let hotspot = hotspot_map.get(score.path.as_path());
-        let hotspot_score = hotspot.map(|h| h.score);
-        let is_circular = aux.circular_files.contains(&score.path);
-        let is_entry = aux.entry_points.contains(&score.path);
-        let top_fns = aux.top_complex_fns.get(&score.path);
-        let value_exports = aux
-            .value_export_counts
-            .get(&score.path)
-            .copied()
-            .unwrap_or(0);
-
-        let mut factors = Vec::new();
-
-        push_structural_target_factors(
-            &mut factors,
-            score,
-            value_exports,
-            is_circular,
-            &thresholds,
-        );
-        push_runtime_target_factors(
-            &mut factors,
-            score,
-            hotspot.copied(),
-            top_fns.map(Vec::as_slice),
-        );
-
-        if factors.is_empty() {
-            continue;
+        let hotspot = hotspot_map.get(score.path.as_path()).copied();
+        if let Some(target) = build_target_for_score(score, hotspot, aux, &thresholds) {
+            targets.push(target);
         }
-
-        let matched = try_match_rules(
-            score,
-            hotspot.copied(),
-            is_circular,
-            is_entry,
-            top_fns,
-            value_exports,
-            &thresholds,
-        );
-
-        let Some((category, recommendation)) = matched else {
-            continue;
-        };
-
-        let priority = compute_target_priority(score, hotspot_score, &thresholds);
-        let effort = compute_effort_estimate(score, &thresholds);
-        let confidence = confidence_for_category(&category);
-        let efficiency = (priority / effort.numeric() * 10.0).round() / 10.0;
-        let evidence = build_evidence(
-            &category,
-            &score.path,
-            aux.unused_export_names,
-            top_fns,
-            aux.cycle_members,
-            aux.direct_callers,
-            aux.clone_siblings,
-        );
-
-        targets.push(RefactoringTarget {
-            path: score.path.clone(),
-            priority,
-            efficiency,
-            recommendation,
-            category,
-            effort,
-            confidence,
-            factors,
-            evidence,
-        });
     }
 
     sort_refactoring_targets(&mut targets);
     let exported_thresholds = export_target_thresholds(&thresholds);
 
     (targets, exported_thresholds)
+}
+
+/// Build a refactoring target for one file score, or `None` if no rule matches
+/// (or the file has no contributing factors).
+fn build_target_for_score(
+    score: &FileHealthScore,
+    hotspot: Option<&HotspotEntry>,
+    aux: &TargetAuxData<'_>,
+    thresholds: &DistributionThresholds,
+) -> Option<RefactoringTarget> {
+    let hotspot_score = hotspot.map(|h| h.score);
+    let is_circular = aux.circular_files.contains(&score.path);
+    let is_entry = aux.entry_points.contains(&score.path);
+    let top_fns = aux.top_complex_fns.get(&score.path);
+    let value_exports = aux
+        .value_export_counts
+        .get(&score.path)
+        .copied()
+        .unwrap_or(0);
+
+    let mut factors = Vec::new();
+
+    push_structural_target_factors(&mut factors, score, value_exports, is_circular, thresholds);
+    push_runtime_target_factors(&mut factors, score, hotspot, top_fns.map(Vec::as_slice));
+
+    if factors.is_empty() {
+        return None;
+    }
+
+    let (category, recommendation) = try_match_rules(
+        score,
+        hotspot,
+        is_circular,
+        is_entry,
+        top_fns,
+        value_exports,
+        thresholds,
+    )?;
+
+    let priority = compute_target_priority(score, hotspot_score, thresholds);
+    let effort = compute_effort_estimate(score, thresholds);
+    let confidence = confidence_for_category(&category);
+    let efficiency = (priority / effort.numeric() * 10.0).round() / 10.0;
+    let evidence = build_evidence(
+        &category,
+        &score.path,
+        aux.unused_export_names,
+        top_fns,
+        aux.cycle_members,
+        aux.direct_callers,
+        aux.clone_siblings,
+    );
+
+    Some(RefactoringTarget {
+        path: score.path.clone(),
+        priority,
+        efficiency,
+        recommendation,
+        category,
+        effort,
+        confidence,
+        factors,
+        evidence,
+    })
 }
 
 #[expect(
@@ -588,49 +586,16 @@ fn build_evidence(
 
     match category {
         RecommendationCategory::RemoveDeadCode => {
-            let exports = unused_export_names.get(path).cloned().unwrap_or_default();
-            evidence.unused_exports = exports;
+            evidence.unused_exports = unused_export_names.get(path).cloned().unwrap_or_default();
         }
         RecommendationCategory::ExtractComplexFunctions => {
-            let functions = top_fns
-                .map(|fns| {
-                    fns.iter()
-                        .filter(|(_, _, cog)| *cog >= COGNITIVE_EXTRACTION_THRESHOLD)
-                        .map(|(name, line, cog)| EvidenceFunction {
-                            name: name.clone(),
-                            line: *line,
-                            cognitive: *cog,
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            evidence.complex_functions = functions;
+            evidence.complex_functions = evidence_functions(top_fns, true);
         }
         RecommendationCategory::BreakCircularDependency => {
-            let members = cycle_members
-                .get(path)
-                .map(|files| {
-                    files
-                        .iter()
-                        .map(|f| f.to_string_lossy().into_owned())
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            evidence.cycle_path = members;
+            evidence.cycle_path = cycle_path_evidence(cycle_members, path);
         }
         RecommendationCategory::AddTestCoverage => {
-            let functions = top_fns
-                .map(|fns| {
-                    fns.iter()
-                        .map(|(name, line, cog)| EvidenceFunction {
-                            name: name.clone(),
-                            line: *line,
-                            cognitive: *cog,
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            evidence.complex_functions = functions;
+            evidence.complex_functions = evidence_functions(top_fns, false);
         }
         _ => {}
     }
@@ -640,6 +605,42 @@ fn build_evidence(
     } else {
         Some(evidence)
     }
+}
+
+/// Map top complex functions to evidence entries. When `extraction_only`, keep
+/// only functions at or above the cognitive extraction threshold.
+fn evidence_functions(
+    top_fns: Option<&Vec<(String, u32, u16)>>,
+    extraction_only: bool,
+) -> Vec<EvidenceFunction> {
+    top_fns
+        .map(|fns| {
+            fns.iter()
+                .filter(|(_, _, cog)| !extraction_only || *cog >= COGNITIVE_EXTRACTION_THRESHOLD)
+                .map(|(name, line, cog)| EvidenceFunction {
+                    name: name.clone(),
+                    line: *line,
+                    cognitive: *cog,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Render a file's circular-dependency cycle members as display strings.
+fn cycle_path_evidence(
+    cycle_members: &rustc_hash::FxHashMap<std::path::PathBuf, Vec<std::path::PathBuf>>,
+    path: &std::path::Path,
+) -> Vec<String> {
+    cycle_members
+        .get(path)
+        .map(|files| {
+            files
+                .iter()
+                .map(|f| f.to_string_lossy().into_owned())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn target_evidence_is_empty(evidence: &TargetEvidence) -> bool {
