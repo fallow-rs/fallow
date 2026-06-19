@@ -1211,12 +1211,8 @@ pub(super) fn compute_file_scores(
 
     let template_inherit = build_template_inherit_contexts(&graph, &module_by_id, file_paths);
 
-    let mut acc = FileScoreAccumulator {
+    let mut acc = accumulate_file_scores(
         unused_export_names,
-        ..FileScoreAccumulator::with_capacity(graph.modules.len())
-    };
-    accumulate_file_scores(
-        &mut acc,
         &FileScoreLoopCtx {
             graph: &graph,
             file_paths,
@@ -1227,14 +1223,7 @@ pub(super) fn compute_file_scores(
             istanbul_coverage,
         },
     );
-
-    if let Some(changed) = changed_files {
-        acc.scores.retain(|s| changed.contains(&s.path));
-    }
-
-    acc.scores.retain(|s| s.function_count > 0);
-
-    acc.scores.sort_by(compare_file_score_triage);
+    acc.scores = finalize_file_score_list(acc.scores, changed_files);
 
     Ok(build_file_score_output(FileScoreOutputParts {
         graph: &graph,
@@ -1297,16 +1286,39 @@ impl FileScoreAccumulator {
     }
 }
 
-/// Drive the per-node loop, populating `acc` with one score per analyzable file.
-fn accumulate_file_scores(acc: &mut FileScoreAccumulator, ctx: &FileScoreLoopCtx<'_>) {
+/// Drive the per-node loop, returning an accumulator with one score per
+/// analyzable file. `unused_export_names` seeds the accumulator's same field.
+fn accumulate_file_scores(
+    unused_export_names: rustc_hash::FxHashMap<std::path::PathBuf, Vec<String>>,
+    ctx: &FileScoreLoopCtx<'_>,
+) -> FileScoreAccumulator {
+    let mut acc = FileScoreAccumulator {
+        unused_export_names,
+        ..FileScoreAccumulator::with_capacity(ctx.graph.modules.len())
+    };
     for node in &ctx.graph.modules {
         let Some(path) = ctx.file_paths.get(&node.file_id) else {
             continue;
         };
         record_entry_point(&mut acc.entry_points, node, path);
-        let score = compute_one_file_score(acc, ctx, node, path);
+        let score = compute_one_file_score(&mut acc, ctx, node, path);
         acc.scores.push(score);
     }
+    acc
+}
+
+/// Apply the changed-file scope filter, drop zero-function barrels, and sort by
+/// risk-aware triage concern.
+fn finalize_file_score_list(
+    mut scores: Vec<FileHealthScore>,
+    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
+) -> Vec<FileHealthScore> {
+    if let Some(changed) = changed_files {
+        scores.retain(|s| changed.contains(&s.path));
+    }
+    scores.retain(|s| s.function_count > 0);
+    scores.sort_by(compare_file_score_triage);
+    scores
 }
 
 /// Compute the `FileHealthScore` for one node and fold its side data into `acc`.
