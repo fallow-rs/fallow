@@ -948,18 +948,20 @@ Benchmarked on real open-source projects, cold runs (no cache) so each tool work
 
 | Project | Files | fallow | knip | Faster |
 |:--------|------:|-------:|-----:|-------:|
-| [astro](https://github.com/withastro/astro) | 2,859 | 4.10s | **1.38s** | knip 3.0x |
-| [fastify](https://github.com/fastify/fastify) | 286 | **80ms** | 207ms | fallow 2.6x |
-| [next.js](https://github.com/vercel/next.js) | 20,558 | 3.56s | **2.26s** | knip 1.6x |
-| [preact](https://github.com/preactjs/preact) | 244 | **105ms** | 2.29s | fallow 21.8x |
-| [TanStack/query](https://github.com/TanStack/query) | 901 | **634ms** | 1.09s | fallow 1.7x |
-| [svelte](https://github.com/sveltejs/svelte) | 3,337 | 761ms | **697ms** | knip 1.1x |
-| [TypeScript](https://github.com/microsoft/TypeScript) | 38,146 | 2.63s | **830ms** | knip 3.2x |
-| [vite](https://github.com/vitejs/vite) | 1,420 | **885ms** | 2.21s | fallow 2.5x |
-| [vue/core](https://github.com/vuejs/core) | 522 | **164ms** | 505ms | fallow 3.1x |
-| [zod](https://github.com/colinhacks/zod) | 174 | **59ms** | 269ms | fallow 4.6x |
+| [astro](https://github.com/withastro/astro) | 2,859 | 3.76s | **1.21s** | knip 3.1x |
+| [fastify](https://github.com/fastify/fastify) | 286 | **64ms** | 205ms | fallow 3.2x |
+| [next.js](https://github.com/vercel/next.js) | 20,558 | 2.95s | errors* | fallow only |
+| [preact](https://github.com/preactjs/preact) | 244 | **74ms** | 2.01s | fallow 27.1x |
+| [TanStack/query](https://github.com/TanStack/query) | 901 | **560ms** | 1.04s | fallow 1.9x |
+| [svelte](https://github.com/sveltejs/svelte) | 3,337 | **611ms** | 632ms | fallow 1.0x |
+| [TypeScript](https://github.com/microsoft/TypeScript) | 38,146 | 2.22s | **736ms** | knip 3.0x |
+| [vite](https://github.com/vitejs/vite) | 1,420 | 595ms | errors* | fallow only |
+| [vue/core](https://github.com/vuejs/core) | 522 | 138ms | errors* | fallow only |
+| [zod](https://github.com/colinhacks/zod) | 174 | **47ms** | 279ms | fallow 5.9x |
 
-fallow is faster on smaller projects in this set, while current knip is faster on several larger framework and compiler repositories. fallow's edge is doing more in one tool, not always raw dead-code speed. fallow's persistent cache makes repeat (warm) runs faster again; the table uses the conservative cold numbers.
+\* knip exits without valid output on next.js, vite, and vue/core (it fails loading those projects' own config files); fallow analyzes them.
+
+fallow is faster on the small-to-mid projects in this set (fastify, preact, query, svelte, zod), while current knip is faster on astro and TypeScript. fallow's edge is doing more in one tool, not always raw dead-code speed, and it analyzes the three projects knip cannot load here. fallow's persistent cache makes repeat (warm) runs faster again; the table uses the conservative cold numbers.
 
 ### Duplication: fallow vs jscpd
 
@@ -967,16 +969,16 @@ Cold median of 3 measured runs. `Clone groups` and `Dup %` come from each tool's
 
 | Project | Files | fallow | jscpd | Faster | fallow clone groups | fallow dup % | jscpd clone groups | jscpd dup % |
 |:--------|------:|-------:|------:|-------:|--------------------:|-------------:|-------------------:|------------:|
-| [astro](https://github.com/withastro/astro) | 2,859 | 656ms | **217ms** | jscpd 3.0x | 1,242 | 16.3% | 1,494 | 9.7% |
-| [fastify](https://github.com/fastify/fastify) | 286 | 122ms | **68ms** | jscpd 1.8x | 1,128 | 39.0% | 1,131 | 23.5% |
-| [next.js](https://github.com/vercel/next.js) | 20,552 | 13.56s | **1.07s** | jscpd 12.7x | 4,485 | 26.3% | 7,287 | 16.4% |
-| [preact](https://github.com/preactjs/preact) | 244 | 70ms | **51ms** | jscpd 1.4x | 368 | 20.2% | 421 | 12.3% |
-| [TanStack/query](https://github.com/TanStack/query) | 901 | 171ms | **100ms** | jscpd 1.7x | 1,084 | 32.7% | 1,237 | 19.4% |
-| [svelte](https://github.com/sveltejs/svelte) | 3,337 | 329ms | **193ms** | jscpd 1.7x | 528 | 13.6% | 658 | 9.1% |
-| [TypeScript](https://github.com/microsoft/TypeScript) | 38,146 | 14.97s | **5.22s** | jscpd 2.9x | 2,749 | 26.9% | 51,158 | 45.8% |
-| [vite](https://github.com/vitejs/vite) | 1,420 | 210ms | **81ms** | jscpd 2.6x | 219 | 13.6% | 260 | 5.1% |
-| [vue/core](https://github.com/vuejs/core) | 522 | 158ms | **80ms** | jscpd 2.0x | 864 | 15.7% | 696 | 6.9% |
-| [zod](https://github.com/colinhacks/zod) | 174 | 71ms | **55ms** | jscpd 1.3x | 78 | 94.1% | 140 | 49.6% |
+| [astro](https://github.com/withastro/astro) | 2,859 | 549ms | **189ms** | jscpd 2.9x | 1,242 | 16.3% | 1,494 | 9.7% |
+| [fastify](https://github.com/fastify/fastify) | 286 | 90ms | **64ms** | jscpd 1.4x | 1,128 | 39.0% | 1,131 | 23.5% |
+| [next.js](https://github.com/vercel/next.js) | 20,552 | 12.66s | **861ms** | jscpd 14.7x | 4,485 | 26.3% | 7,287 | 16.4% |
+| [preact](https://github.com/preactjs/preact) | 244 | 58ms | **49ms** | jscpd 1.2x | 368 | 20.2% | 421 | 12.3% |
+| [TanStack/query](https://github.com/TanStack/query) | 901 | 133ms | **96ms** | jscpd 1.4x | 1,084 | 32.7% | 1,237 | 19.4% |
+| [svelte](https://github.com/sveltejs/svelte) | 3,337 | 317ms | **172ms** | jscpd 1.8x | 528 | 13.6% | 658 | 9.1% |
+| [TypeScript](https://github.com/microsoft/TypeScript) | 38,146 | 13.45s | **4.58s** | jscpd 2.9x | 2,749 | 26.9% | 51,158 | 45.8% |
+| [vite](https://github.com/vitejs/vite) | 1,420 | 174ms | **74ms** | jscpd 2.3x | 219 | 13.6% | 260 | 5.1% |
+| [vue/core](https://github.com/vuejs/core) | 522 | 109ms | **78ms** | jscpd 1.4x | 864 | 15.7% | 696 | 6.9% |
+| [zod](https://github.com/colinhacks/zod) | 174 | 54ms | **53ms** | jscpd 1.0x | 78 | 94.1% | 140 | 49.6% |
 
 jscpd remains faster for raw duplication scanning on these projects. fallow's duplication checker runs inside the broader audit flow, alongside dead code, dependency, complexity, CSS, framework, and security checks.
 

@@ -6,8 +6,8 @@ This document describes how fallow's performance benchmarks are structured, how 
 
 Fallow uses two benchmark layers:
 
-1. **Criterion (Rust)** — Microbenchmarks for regression detection in CI. Measures individual pipeline stages and full end-to-end analysis at various project sizes (10, 100, 1000, 5000 files).
-2. **Comparative (Node.js)** — Wall-clock comparisons against knip (unused code), jscpd (duplication), and madge/dpdm (circular dependencies) on synthetic and real-world projects.
+1. **Criterion (Rust)**: Microbenchmarks for regression detection in CI. Measures individual pipeline stages and full end-to-end analysis at various project sizes (10, 100, 1000, 5000 files).
+2. **Comparative (Node.js)**: Wall-clock comparisons against knip (unused code), jscpd (duplication), and madge/dpdm (circular dependencies) on synthetic and real-world projects.
 
 ## Project Sizes
 
@@ -129,62 +129,68 @@ Benchmark results vary with hardware. Key factors:
 
 When publishing results, always include the environment info printed by the benchmark scripts.
 
-## Reference Results (2026-03-22)
+## Reference Results (2026-06-19)
 
-Environment: Apple M5 (10 cores), 32 GB RAM, macOS 25.3.0, Node v22.21.1, rustc 1.93.0. fallow 1.2.0, knip 5.87.0, knip 6.0.0, jscpd 4.0.8, madge 8.0.0. Median of 5 runs, 2 warmup.
+Environment: Apple M5 (10 cores), 32 GB RAM, macOS 26.4, Node v22.22.1, rustc 1.95.0. fallow 2.100.0, knip 5.87.0, knip 6.6.1, jscpd 5.0.10, madge 8.0.0, dpdm 4.0.1. Real-world fixtures, cold runs, median of 5, 2 warmup.
 
 ### Dead code: fallow dead-code vs knip
 
-| Project | Files | fallow | knip v5 | knip v6 | vs v5 | vs v6 | fallow RSS | knip v5 RSS | knip v6 RSS |
-|:--------|------:|-------:|--------:|--------:|------:|------:|-----------:|------------:|------------:|
-| zod | 174 | 19ms | 639ms | 334ms | 34.4x | 18.0x | 21 MB | 250 MB | 161 MB |
-| preact | 244 | 20ms | 819ms | —* | 40.6x | — | 22 MB | 235 MB | — |
-| fastify | 286 | 24ms | 1.13s | 289ms | 46.3x | 11.9x | 27 MB | 289 MB | 107 MB |
-| vue/core | 522 | 63ms | 702ms | 299ms | 11.2x | 4.8x | 34 MB | 271 MB | 119 MB |
-| TanStack/query | 901 | 148ms | 2.75s | 1.41s | 18.6x | 9.6x | 59 MB | 673 MB | 354 MB |
-| vite | 1,420 | 596ms | —† | —† | — | — | 52 MB | — | — |
-| svelte | 3,337 | 325ms | 1.93s | 860ms | 5.9x | 2.6x | 67 MB | 460 MB | 243 MB |
-| next.js | 20,416 | 1.48s | —† | —† | — | — | 194 MB | — | — |
+| Project | Files | fallow | knip v5 | knip v6 | vs v5 | vs v6 | fallow RSS | knip v6 RSS |
+|---------|------:|-------:|--------:|--------:|------:|------:|-----------:|------------:|
+| astro | 2,859 | 3.76s | 3.91s | 1.21s | knip 1.0x | knip 3.1x | 873.1 MB | 371.4 MB |
+| fastify | 286 | 64ms | 903ms | 205ms | fallow 13.7x | fallow 3.2x | 53.5 MB | 105.3 MB |
+| next.js | 20,558 | 2.95s | errors* | errors* | n/a | n/a | 513.1 MB | n/a |
+| preact | 244 | 74ms | 822ms | 2.01s | fallow 10.3x | fallow 27.1x | 40.5 MB | 107.3 MB |
+| TanStack/query | 901 | 560ms | 2.86s | 1.04s | fallow 4.9x | fallow 1.9x | 228.4 MB | 363.6 MB |
+| svelte | 3,337 | 611ms | 2.00s | 632ms | fallow 2.6x | fallow 1.0x | 128.4 MB | 233.3 MB |
+| TypeScript | 38,146 | 2.22s | 2.84s | 736ms | fallow 1.2x | knip 3.0x | 494.2 MB | 339.2 MB |
+| vite | 1,420 | 595ms | errors* | errors* | n/a | n/a | 102.8 MB | n/a |
+| vue/core | 522 | 138ms | errors* | errors* | n/a | n/a | 71.7 MB | n/a |
+| zod | 174 | 47ms | 614ms | 279ms | fallow 13.0x | fallow 5.9x | 39.1 MB | 160.2 MB |
 
-\* knip v6 excluded for preact due to a v6 regression.
-† knip errors out on vite and next.js (exits without producing valid results).
+\* knip (both v5 and v6) exits without valid output on next.js, vite, and vue/core: it fails loading those projects' own config files (jest.config.js, a BOM-prefixed config, and a nested vite.config.ts). fallow analyzes all three. fallow numbers are cold; warm (cached) runs are faster again.
 
 ### Duplication: fallow dupes vs jscpd
 
+jscpd's Rust rewrite (5.x) is faster than fallow for raw duplication scanning on every project here. fallow's duplication checker runs inside the broader audit flow (dead code, dependencies, complexity, CSS, framework, security) rather than as a standalone scanner.
+
 | Project | Files | fallow | jscpd | Speedup | fallow RSS | jscpd RSS |
-|:--------|------:|-------:|------:|--------:|-----------:|----------:|
-| zod | 174 | 46ms | 909ms | 19.7x | 54 MB | 188 MB |
-| preact | 244 | 44ms | 1.33s | 30.4x | 57 MB | 262 MB |
-| fastify | 286 | 84ms | 2.83s | 33.6x | 97 MB | 315 MB |
-| vue/core | 522 | 120ms | 3.13s | 26.1x | 155 MB | 430 MB |
-| TanStack/query | 901 | 120ms | 1.19s | 9.9x | 132 MB | 226 MB |
-| vite | 1,420 | 113ms | 1.82s | 16.0x | 92 MB | 292 MB |
-| svelte | 3,337 | 400ms | 3.63s | 9.1x | 155 MB | 470 MB |
-| next.js | 20,416 | 3.16s | 24.64s | 7.8x | 834 MB | 1.52 GB |
+|---------|------:|-------:|------:|--------:|-----------:|----------:|
+| astro | 2,859 | 549ms | 189ms | jscpd 2.9x | 199.5 MB | 245.6 MB |
+| fastify | 286 | 90ms | 64ms | jscpd 1.4x | 105.3 MB | 95.3 MB |
+| next.js | 20,552 | 12.66s | 861ms | jscpd 14.7x | 981.9 MB | 668.7 MB |
+| preact | 244 | 58ms | 49ms | jscpd 1.2x | 67.0 MB | 67.8 MB |
+| TanStack/query | 901 | 133ms | 96ms | jscpd 1.4x | 131.9 MB | 126.3 MB |
+| svelte | 3,337 | 317ms | 172ms | jscpd 1.8x | 124.5 MB | 117.3 MB |
+| TypeScript | 38,146 | 13.45s | 4.58s | jscpd 2.9x | 1.94 GB | 4.56 GB |
+| vite | 1,420 | 174ms | 74ms | jscpd 2.3x | 93.1 MB | 80.9 MB |
+| vue/core | 522 | 109ms | 78ms | jscpd 1.4x | 149.1 MB | 143.1 MB |
+| zod | 174 | 54ms | 53ms | jscpd 1.0x | 62.5 MB | 69.5 MB |
 
 ### Circular dependencies: fallow dead-code --circular-deps vs madge/dpdm
 
-| Project | Files | fallow | madge | dpdm | vs madge | vs dpdm | fallow RSS |
-|:--------|------:|-------:|------:|-----:|---------:|--------:|-----------:|
-| zod | 174 | 17ms | 540ms | 190ms | 31.5x | 11.1x | 21 MB |
-| preact | 244 | 19ms | 298ms | 132ms | 15.5x | 6.9x | 22 MB |
-| fastify | 286 | 20ms | 165ms | 132ms | 8.2x | 6.6x | 27 MB |
-| vue/core | 522 | 59ms | 175ms | 143ms | 3.0x | 2.4x | 36 MB |
-| TanStack/query | 901 | 134ms | 168ms | 137ms | 1.3x | 1.0x | 60 MB |
-| svelte | 3,337 | 310ms | 165ms | 132ms | 0.5x | 0.4x | 67 MB |
-| vite | 1,420 | 564ms | 164ms | 133ms | 0.3x | 0.2x | 52 MB |
-| next.js | 20,416 | 1.21s | 472ms | 427ms | 0.4x | 0.4x | 193 MB |
+| Project | Files | fallow | cycles | madge | vs madge | dpdm | vs dpdm | fallow RSS |
+|---------|------:|-------:|-------:|------:|---------:|-----:|--------:|-----------:|
+| astro | 2,859 | 3.81s | 42 | 170ms | 0.0x | 138ms | 0.0x | 842.8 MB |
+| fastify | 286 | 97ms | 20 | 224ms | 2.3x | 165ms | 1.7x | 50.7 MB |
+| next.js | 20,552 | 3.00s | 178 | 485ms | 0.2x | 463ms | 0.2x | 474.5 MB |
+| preact | 244 | 75ms | 5 | 299ms | 4.0x | 134ms | 1.8x | 39.8 MB |
+| TanStack/query | 901 | 557ms | 0 | 169ms | 0.3x | 138ms | 0.2x | 229.7 MB |
+| svelte | 3,337 | 595ms | 39 | 165ms | 0.3x | 134ms | 0.2x | 123.8 MB |
+| TypeScript | 38,146 | 2.18s | 114 | 5.16s | 2.4x | 136ms | 0.1x | 519.0 MB |
+| vite | 1,420 | 581ms | 66 | 165ms | 0.3x | 133ms | 0.2x | 101.6 MB |
+| vue/core | 522 | 137ms | 58 | 173ms | 1.3x | 145ms | 1.1x | 72.6 MB |
+| zod | 174 | 43ms | 0 | 532ms | 12.4x | 192ms | 4.5x | 38.4 MB |
 
-Note: fallow runs a full analysis pipeline (discovery, parsing, graph building, SCC detection) while madge/dpdm only build a dependency graph from imports. On large monorepos the pipeline overhead dominates. On small-to-medium projects fallow's native speed wins. Madge and dpdm report `?` for cycle counts on many projects, suggesting incomplete detection.
+Note: fallow runs a full analysis pipeline (discovery, parsing, graph building, SCC detection) while madge/dpdm only build an import dependency graph, so this is not a like-for-like comparison. On large monorepos fallow's pipeline overhead dominates; on small-to-medium projects and on TypeScript (vs madge) fallow wins. dpdm reports `?` for cycle counts on these projects, indicating incomplete detection, so its timings are not directly comparable.
 
 ### Summary ranges
 
 | Comparison | Speed | Memory |
 |:-----------|:------|:-------|
-| fallow vs knip v5 | 6-46x faster | 4-11x less |
-| fallow vs knip v6 | 3-18x faster | 3-6x less |
-| fallow vs jscpd | 8-34x faster | 2-4x less |
-| fallow vs madge | 1-32x faster (small-medium), 0.3-0.5x on large monorepos | 4-13x less |
+| fallow vs knip v6 | Mixed: fallow up to 27x faster (small/mid projects); knip faster on astro and TypeScript (around 3x); knip cannot analyze next.js, vite, or vue/core here | Generally less, except astro |
+| fallow vs jscpd 5.x | jscpd 1.0-14.7x faster (its Rust rewrite); fallow does more per pass | Comparable, except TypeScript (fallow much less) |
+| fallow vs madge | fallow faster on small/mid and on TypeScript; madge faster on large monorepos (it does far less) | Mixed |
 
 ## CI Integration
 
