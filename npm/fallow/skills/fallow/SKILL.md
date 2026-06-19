@@ -126,6 +126,22 @@ Route by intent before reaching for the big analysis commands. Same matrix as `f
 Run `fallow <command> --help` for the full flag list per command (see also references/cli-reference.md).
 <!-- generated:commands:end -->
 
+Security survivor verdict files may be either a bare array or a wrapper object with `verdicts`. Supported verdicts are `survivor`, `needs-human-review`, and `dismissed`:
+
+```json
+{
+  "schema_version": "fallow-security-verdicts/v1",
+  "verdicts": [
+    {
+      "schema_version": "fallow-security-verdict/v1",
+      "finding_id": "sec-a",
+      "verdict": "survivor",
+      "rationale": "validated reachable user input"
+    }
+  ]
+}
+```
+
 ## Issue Types
 
 <!-- generated:issue-types:start -->

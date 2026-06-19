@@ -2092,6 +2092,11 @@ fn render_survivors_human(output: &SecuritySurvivorsOutput) -> String {
         output.summary.survivors,
         plural(output.summary.survivors)
     );
+    let _ = writeln!(
+        out,
+        "Verdicts: {}/{} candidates covered, {} dismissed.",
+        output.summary.verdicts, output.summary.candidates, output.summary.dismissed
+    );
     if output.summary.needs_human_review > 0 {
         let _ = writeln!(
             out,
@@ -2167,15 +2172,19 @@ fn push_survivor_group(
 }
 
 fn build_blind_spots_output(output: &SecurityOutput) -> SecurityBlindSpotsOutput {
-    let groups = output
-        .unresolved_callee_diagnostics
-        .as_ref()
+    let diagnostics = output.unresolved_callee_diagnostics.as_ref();
+    let groups = diagnostics
         .map(group_blind_spot_samples)
         .unwrap_or_default();
-    let sampled_callee_sites = output
-        .unresolved_callee_diagnostics
-        .as_ref()
-        .map_or(0, |diagnostics| diagnostics.sampled.len());
+    let sampled_callee_sites = diagnostics.map_or(0, |diagnostics| diagnostics.sampled.len());
+    let unresolved_callee_sites =
+        diagnostics.map_or(output.unresolved_callee_sites, |diagnostics| {
+            diagnostics
+                .by_reason
+                .iter()
+                .map(|reason| reason.count)
+                .sum()
+        });
 
     SecurityBlindSpotsOutput {
         schema_version: SecurityBlindSpotsSchemaVersion::V1,
@@ -2183,7 +2192,7 @@ fn build_blind_spots_output(output: &SecurityOutput) -> SecurityBlindSpotsOutput
         elapsed_ms: output.elapsed_ms,
         summary: SecurityBlindSpotsSummary {
             unresolved_edge_files: output.unresolved_edge_files,
-            unresolved_callee_sites: output.unresolved_callee_sites,
+            unresolved_callee_sites,
             sampled_callee_sites,
         },
         groups,
@@ -3561,7 +3570,7 @@ mod tests {
     fn blind_spots_group_existing_diagnostics_with_suggestions() {
         let root = Path::new("/proj/root");
         let mut output = output_with(vec![], 2);
-        output.unresolved_callee_sites = 3;
+        output.unresolved_callee_sites = 99;
         output.unresolved_callee_diagnostics = Some(sample_unresolved_callee_diagnostics(root));
 
         let blind_spots = build_blind_spots_output(&output);

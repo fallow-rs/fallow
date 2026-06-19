@@ -3133,7 +3133,7 @@ Options:
 Verdict JSON:
   [{\"schema_version\":\"fallow-security-verdict/v1\",\"finding_id\":\"sec-a\",\"verdict\":\"survivor\"}]
 
-Docs: docs/security-agent-verification.md
+Repo-local docs: docs/security-agent-verification.md
 "
     .to_owned()
 }

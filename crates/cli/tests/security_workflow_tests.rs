@@ -286,6 +286,29 @@ fn security_blind_spots_accepts_subcommand_file_scope() {
 }
 
 #[test]
+fn security_blind_spots_merges_parent_and_subcommand_file_scope() {
+    let output = run_fallow(
+        "security",
+        "security-tls-validation-disabled-895",
+        &[
+            "--file",
+            "src/a.ts",
+            "blind-spots",
+            "--file",
+            "src/b.ts",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    );
+
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["kind"], "security-blind-spots");
+}
+
+#[test]
 fn security_subcommand_help_reaches_subcommands() {
     let survivors = run_fallow_raw(&["security", "survivors", "--help"]);
     assert_eq!(survivors.code, 0);
@@ -300,7 +323,7 @@ fn security_subcommand_help_reaches_subcommands() {
     assert!(
         survivors
             .stdout
-            .contains("docs/security-agent-verification.md")
+            .contains("Repo-local docs: docs/security-agent-verification.md")
     );
     assert!(!survivors.stdout.contains("sarif"));
     assert!(!survivors.stdout.contains("markdown"));
