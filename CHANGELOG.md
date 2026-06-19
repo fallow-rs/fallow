@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Local-only value exports now report consistently as unused exports.** A value export that is only referenced by another export in the same file is again treated as unused public surface by default, so `dead-code`, `trace`, and stale suppression detection agree. The fix action still removes only the export modifier, leaving the local declaration available to same-file consumers. Teams that intentionally export this pattern can keep using `@public`, `ignoreExports`, or `ignoreExportsUsedInFile`.
+
 - **`fallow dupes` avoids cross-format clone groups for web-format tokens.** Duplicate token hashes now include the active source namespace, so JS, style, and markup regions do not form clone groups with each other just because their punctuation or identifier shapes match. Large-corpus duplicate detection also prefilters files with no repeated `minTokens` shingle before suffix-array analysis, and the real-world benchmark watchdog now allows the expanded Next.js combined-analysis surface to complete on CI while streaming progress, preserving diagnostics through a script-local timeout, and avoiding unused full-report serialization.
 
 ## [2.99.0] - 2026-06-18

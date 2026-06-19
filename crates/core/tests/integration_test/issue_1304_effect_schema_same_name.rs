@@ -1,7 +1,7 @@
 use super::common::{create_config, fixture_path};
 
 #[test]
-fn same_name_effect_schema_type_alias_keeps_nested_schema_value_used() {
+fn same_name_effect_schema_reports_local_only_value_export_surface() {
     let root = fixture_path("issue-1304-effect-schema-same-name");
     let config = create_config(root);
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
@@ -13,8 +13,8 @@ fn same_name_effect_schema_type_alias_keeps_nested_schema_value_used() {
         .collect();
 
     assert!(
-        !unused_export_names.contains(&"ServiceCategoryResponse"),
-        "ServiceCategoryResponse should be credited through Schema.Array(ServiceCategoryResponse), found: {unused_export_names:?}"
+        unused_export_names.contains(&"ServiceCategoryResponse"),
+        "ServiceCategoryResponse is only used inside another same-file export, so its export surface should report as unused: {unused_export_names:?}"
     );
     assert!(
         !unused_export_names.contains(&"AssistantPromptResponse"),
@@ -37,8 +37,8 @@ fn same_name_effect_schema_type_alias_keeps_nested_schema_value_used() {
         "shadowed same-file references must not credit unrelated exports, found: {unused_export_names:?}"
     );
     assert!(
-        !unused_export_names.contains(&"BlockScopedChildSchema"),
-        "block-local shadows must not hide later real same-file export references, found: {unused_export_names:?}"
+        unused_export_names.contains(&"BlockScopedChildSchema"),
+        "BlockScopedChildSchema is only used inside another same-file export, so its export surface should report as unused: {unused_export_names:?}"
     );
     assert!(
         unused_export_names.contains(&"HoistedShadowChildSchema"),

@@ -44,6 +44,23 @@ fn active_suppression_not_reported_stale() {
 }
 
 #[test]
+fn same_file_value_dependency_suppression_not_reported_stale() {
+    let root = fixture_path("stale-suppressions");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let stale_for_local_only_helper = results
+        .stale_suppressions
+        .iter()
+        .any(|s| s.path.ends_with("utils.ts") && s.line == 10);
+
+    assert!(
+        !stale_for_local_only_helper,
+        "Suppression for localOnlyHelper should NOT be stale when it suppresses an export used only by another same-file export"
+    );
+}
+
+#[test]
 fn stale_blanket_suppression() {
     let root = fixture_path("stale-suppressions");
     let config = create_config(root);
