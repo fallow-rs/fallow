@@ -190,46 +190,15 @@ pub(super) fn compute_hotspots(
     let since = churn_fetch.since;
 
     let shallow_clone = churn_result.shallow_clone;
-    if shallow_clone && !opts.quiet {
-        eprintln!(
-            "Warning: shallow clone detected. Hotspot analysis may be incomplete. \
-             Use `git fetch --unshallow` for full history."
-        );
-        if opts.ownership {
-            eprintln!(
-                "Warning: shallow clones inflate single-author dominance, so \
-                 ownership signals will be skewed."
-            );
-        }
-    }
+    warn_shallow_clone(opts, shallow_clone);
 
     let min_commits = opts.min_commits.unwrap_or(3);
     let (max_weighted, max_density) =
         compute_normalization_maxima(file_scores, &churn_result.files, min_commits);
 
     let ownership_cfg = &config.health.ownership;
-    let bot_globs_owned: Option<globset::GlobSet> = opts.ownership.then(|| {
-        compile_bot_globs(&ownership_cfg.bot_patterns).unwrap_or_else(|e| {
-            if !opts.quiet {
-                eprintln!("Warning: invalid bot pattern in health.ownership.botPatterns: {e}");
-            }
-            globset::GlobSet::empty()
-        })
-    });
-    let codeowners_owned: Option<crate::codeowners::CodeOwners> = opts
-        .ownership
-        .then(
-            || match crate::codeowners::CodeOwners::load(&config.root, None) {
-                Ok(co) => Some(co),
-                Err(e) => {
-                    if !opts.quiet && !e.contains("no CODEOWNERS file found") {
-                        eprintln!("Warning: failed to parse CODEOWNERS: {e}");
-                    }
-                    None
-                }
-            },
-        )
-        .flatten();
+    let bot_globs_owned = load_ownership_bot_globs(opts, ownership_cfg);
+    let codeowners_owned = load_ownership_codeowners(opts, &config.root);
     let now_secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -242,46 +211,17 @@ pub(super) fn compute_hotspots(
         now_secs,
     });
 
-    let mut hotspot_entries = Vec::new();
-    let mut files_excluded: usize = 0;
-
-    for score in file_scores {
-        if is_excluded_from_hotspots(&score.path, &config.root, ignore_set, ws_roots) {
-            continue;
-        }
-
-        let Some(churn) = churn_result.files.get(&score.path) else {
-            continue;
-        };
-        if churn.commits < min_commits {
-            files_excluded += 1;
-            continue;
-        }
-
-        let relative = score.path.strip_prefix(&config.root).unwrap_or(&score.path);
-        let ownership = ownership_ctx
-            .as_ref()
-            .and_then(|ctx| compute_ownership(churn, relative, ctx));
-
-        hotspot_entries.push(HotspotEntry {
-            path: score.path.clone(),
-            score: compute_hotspot_score(
-                churn.weighted_commits,
-                max_weighted,
-                score.complexity_density,
-                max_density,
-            ),
-            commits: churn.commits,
-            weighted_commits: churn.weighted_commits,
-            lines_added: churn.lines_added,
-            lines_deleted: churn.lines_deleted,
-            complexity_density: score.complexity_density,
-            fan_in: score.fan_in,
-            trend: churn.trend,
-            ownership,
-            is_test_path: is_test_path(relative),
-        });
-    }
+    let (mut hotspot_entries, files_excluded) = collect_hotspot_entries(&HotspotEntryCtx {
+        file_scores,
+        root: &config.root,
+        ignore_set,
+        ws_roots,
+        churn_files: &churn_result.files,
+        min_commits,
+        max_weighted,
+        max_density,
+        ownership_ctx: ownership_ctx.as_ref(),
+    });
 
     hotspot_entries.sort_by(|a, b| {
         b.score
@@ -303,6 +243,115 @@ pub(super) fn compute_hotspots(
     }
 
     (hotspot_entries, Some(summary))
+}
+
+/// Emit shallow-clone warnings (and the ownership-skew note) when relevant.
+fn warn_shallow_clone(opts: &HealthOptions<'_>, shallow_clone: bool) {
+    if shallow_clone && !opts.quiet {
+        eprintln!(
+            "Warning: shallow clone detected. Hotspot analysis may be incomplete. \
+             Use `git fetch --unshallow` for full history."
+        );
+        if opts.ownership {
+            eprintln!(
+                "Warning: shallow clones inflate single-author dominance, so \
+                 ownership signals will be skewed."
+            );
+        }
+    }
+}
+
+/// Compile the bot-author glob set for ownership analysis, warning on a bad pattern.
+fn load_ownership_bot_globs(
+    opts: &HealthOptions<'_>,
+    ownership_cfg: &fallow_config::OwnershipConfig,
+) -> Option<globset::GlobSet> {
+    opts.ownership.then(|| {
+        compile_bot_globs(&ownership_cfg.bot_patterns).unwrap_or_else(|e| {
+            if !opts.quiet {
+                eprintln!("Warning: invalid bot pattern in health.ownership.botPatterns: {e}");
+            }
+            globset::GlobSet::empty()
+        })
+    })
+}
+
+/// Load CODEOWNERS for ownership analysis, warning on a real parse error only.
+fn load_ownership_codeowners(
+    opts: &HealthOptions<'_>,
+    root: &std::path::Path,
+) -> Option<crate::codeowners::CodeOwners> {
+    opts.ownership
+        .then(|| match crate::codeowners::CodeOwners::load(root, None) {
+            Ok(co) => Some(co),
+            Err(e) => {
+                if !opts.quiet && !e.contains("no CODEOWNERS file found") {
+                    eprintln!("Warning: failed to parse CODEOWNERS: {e}");
+                }
+                None
+            }
+        })
+        .flatten()
+}
+
+/// Read-only inputs for the per-file hotspot-entry loop.
+struct HotspotEntryCtx<'a> {
+    file_scores: &'a [FileHealthScore],
+    root: &'a std::path::Path,
+    ignore_set: &'a globset::GlobSet,
+    ws_roots: Option<&'a [std::path::PathBuf]>,
+    churn_files: &'a rustc_hash::FxHashMap<std::path::PathBuf, fallow_core::churn::FileChurn>,
+    min_commits: u32,
+    max_weighted: f64,
+    max_density: f64,
+    ownership_ctx: Option<&'a OwnershipContext<'a>>,
+}
+
+/// Build hotspot entries for eligible files; returns the entries plus the count
+/// of files excluded for not meeting the minimum-commits threshold.
+fn collect_hotspot_entries(ctx: &HotspotEntryCtx<'_>) -> (Vec<HotspotEntry>, usize) {
+    let mut hotspot_entries = Vec::new();
+    let mut files_excluded: usize = 0;
+
+    for score in ctx.file_scores {
+        if is_excluded_from_hotspots(&score.path, ctx.root, ctx.ignore_set, ctx.ws_roots) {
+            continue;
+        }
+
+        let Some(churn) = ctx.churn_files.get(&score.path) else {
+            continue;
+        };
+        if churn.commits < ctx.min_commits {
+            files_excluded += 1;
+            continue;
+        }
+
+        let relative = score.path.strip_prefix(ctx.root).unwrap_or(&score.path);
+        let ownership = ctx
+            .ownership_ctx
+            .and_then(|own| compute_ownership(churn, relative, own));
+
+        hotspot_entries.push(HotspotEntry {
+            path: score.path.clone(),
+            score: compute_hotspot_score(
+                churn.weighted_commits,
+                ctx.max_weighted,
+                score.complexity_density,
+                ctx.max_density,
+            ),
+            commits: churn.commits,
+            weighted_commits: churn.weighted_commits,
+            lines_added: churn.lines_added,
+            lines_deleted: churn.lines_deleted,
+            complexity_density: score.complexity_density,
+            fan_in: score.fan_in,
+            trend: churn.trend,
+            ownership,
+            is_test_path: is_test_path(relative),
+        });
+    }
+
+    (hotspot_entries, files_excluded)
 }
 
 #[cfg(test)]
