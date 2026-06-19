@@ -1,7 +1,7 @@
 use crate::report::sink::outln;
 use std::path::Path;
 
-use fallow_core::duplicates::DuplicationReport;
+use fallow_core::duplicates::{CloneFingerprintSet, DuplicationReport};
 use fallow_core::results::{AnalysisResults, UnusedExport, UnusedMember};
 
 use super::grouping::ResultGroup;
@@ -881,17 +881,20 @@ fn build_coverage_intelligence_compact_lines(
 }
 
 pub(super) fn print_duplication_compact(report: &DuplicationReport, root: &Path) {
-    for (i, group) in report.clone_groups.iter().enumerate() {
+    let fingerprints = CloneFingerprintSet::from_groups(&report.clone_groups);
+    for (index, group) in report.clone_groups.iter().enumerate() {
+        let fingerprint = fingerprints.fingerprint_for_group(group);
         for instance in &group.instances {
-            let relative =
-                normalize_uri(&relative_path(&instance.file, root).display().to_string());
             outln!(
-                "clone-group-{}:{}:{}-{}:{}tokens",
-                i + 1,
-                relative,
+                "code-duplication:{}:{}-{}:fingerprint={},group={},tokens={},lines={},instances={}",
+                compact_path(&instance.file, root),
                 instance.start_line,
                 instance.end_line,
-                group.token_count
+                fingerprint,
+                index + 1,
+                group.token_count,
+                group.line_count,
+                group.instances.len(),
             );
         }
     }

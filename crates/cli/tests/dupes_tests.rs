@@ -682,6 +682,37 @@ fn dupes_json_paths_are_relative() {
 }
 
 #[test]
+fn dupes_compact_output_includes_traceable_clone_metadata() {
+    let output = run_fallow(
+        "dupes",
+        "duplicate-code",
+        &["--format", "compact", "--quiet"],
+    );
+    assert!(
+        output.stdout.contains("code-duplication:"),
+        "compact dupes output should use the code-duplication issue tag. stdout: {}",
+        output.stdout
+    );
+    assert!(
+        output.stdout.contains(":fingerprint=dup:"),
+        "compact dupes output should include traceable clone fingerprints. stdout: {}",
+        output.stdout
+    );
+    assert!(
+        output.stdout.contains(",tokens=")
+            && output.stdout.contains(",lines=")
+            && output.stdout.contains(",instances="),
+        "compact dupes output should include parseable clone metadata. stdout: {}",
+        output.stdout
+    );
+    assert!(
+        !output.stdout.contains("clone-group-"),
+        "compact dupes output should not rely on ordinal-only clone labels. stdout: {}",
+        output.stdout
+    );
+}
+
+#[test]
 fn dupes_human_output_snapshot() {
     let output = run_fallow("dupes", "duplicate-code", &["--quiet"]);
     let root = fixture_path("duplicate-code");

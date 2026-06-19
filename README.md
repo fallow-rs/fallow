@@ -346,6 +346,7 @@ fallow dupes --mode semantic              # Catch clones with renamed variables
 fallow dupes --skip-local                 # Only cross-directory duplicates
 fallow dupes --group-by owner             # Partition clone groups by CODEOWNERS team
 fallow dupes --group-by directory         # Partition clone groups by directory
+fallow dupes --format compact             # One parseable line per clone instance
 fallow dupes --trace src/utils.ts:42      # Show all clones of code at this location
 fallow dupes --trace dup:7f3a2c1e         # Deep-dive a clone group by its dup:<id> fingerprint
 ```
