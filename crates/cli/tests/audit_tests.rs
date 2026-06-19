@@ -511,9 +511,10 @@ fn audit_new_only_inherits_shifted_duplicate_group() {
         }\n";
     fs::write(dir.join("fileB.ts"), duplicate).unwrap();
 
+    use std::fmt::Write as _;
     let mut shifted_source = String::new();
     for n in 1..=120 {
-        shifted_source.push_str(&format!("export const v{n} = {n};\n"));
+        writeln!(shifted_source, "export const v{n} = {n};").unwrap();
     }
     shifted_source.push_str(duplicate);
     fs::write(dir.join("fileA.ts"), &shifted_source).unwrap();
