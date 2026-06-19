@@ -1,8 +1,8 @@
 //! Suffix Array + LCP based clone detection engine.
 //!
-//! Uses an O(N log N) prefix-doubling suffix array construction (with radix
-//! sort) followed by an O(N) LCP scan. This avoids quadratic pairwise
-//! comparisons and naturally finds all maximal clones in a single linear pass.
+//! Uses a linear-time SA-IS (suffix array by induced sorting) construction
+//! followed by an O(N) LCP scan. This avoids quadratic pairwise comparisons
+//! and naturally finds all maximal clones in a single linear pass.
 
 mod concatenation;
 mod extraction;

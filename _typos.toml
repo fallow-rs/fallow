@@ -36,3 +36,6 @@ unparseable = "unparseable"
 # `vulnerabilit` is a deliberate truncated substring matched via `.includes()`
 # in the VS Code package-manifest test, not a misspelling of "vulnerability".
 vulnerabilit = "vulnerabilit"
+# `sais` is the SA-IS algorithm (Suffix Array by Induced Sorting) used for
+# clone-detection suffix array construction, not a misspelling of "says".
+sais = "sais"

@@ -1,13 +1,224 @@
-/// Build a suffix array using the O(N log N) prefix-doubling algorithm with
-/// radix sort.
+/// Build a suffix array for the concatenated token stream.
 ///
 /// Returns `sa` where `sa[i]` is the starting position of the i-th
-/// lexicographically smallest suffix in `text`.
+/// lexicographically smallest suffix in `text`. Suffixes that are a prefix of
+/// a longer suffix sort first (equivalent to appending a unique smallest
+/// terminator), matching the convention used by the downstream LCP and clone
+/// extraction passes.
+///
+/// Implemented with the linear-time SA-IS (suffix array by induced sorting)
+/// algorithm. The input alphabet (token ranks plus per-file negative
+/// sentinels) is remapped to a dense `0..=k` range and a virtual smallest
+/// terminator is appended; the terminator's position is dropped from the
+/// returned array.
+pub(super) fn build_suffix_array(text: &[i64]) -> Vec<usize> {
+    let n = text.len();
+    if n == 0 {
+        return vec![];
+    }
+
+    // Remap the i64 alphabet to a dense, non-negative range and reserve symbol
+    // `0` for the appended terminator (shift every real symbol up by one).
+    let min_val = text.iter().copied().min().unwrap_or(0);
+    let max_val = text.iter().copied().max().unwrap_or(0);
+    debug_assert!(max_val >= min_val);
+    // Real symbols occupy `1..=(max_val - min_val + 1)`; `0` is the terminator.
+    let alphabet = (max_val - min_val) as usize + 2;
+
+    let mut s: Vec<usize> = Vec::with_capacity(n + 1);
+    s.extend(text.iter().map(|&v| (v - min_val) as usize + 1));
+    s.push(0); // unique smallest terminator
+
+    let sa_full = sais(&s, alphabet);
+    debug_assert_eq!(sa_full[0], n, "terminator must sort first");
+
+    // Drop the terminator's position (always sa_full[0]); the remainder is a
+    // permutation of `0..n`.
+    sa_full[1..].to_vec()
+}
+
+const SA_EMPTY: usize = usize::MAX;
+
+/// Linear-time suffix array construction via induced sorting (SA-IS).
+///
+/// `s` must be a sequence over the alphabet `0..alphabet` whose final element
+/// is the unique smallest symbol (a terminator). Returns the suffix array of
+/// `s` (length `s.len()`).
+fn sais(s: &[usize], alphabet: usize) -> Vec<usize> {
+    let n = s.len();
+    let mut sa = vec![SA_EMPTY; n];
+    if n == 0 {
+        return sa;
+    }
+    if n == 1 {
+        sa[0] = 0;
+        return sa;
+    }
+
+    let is_s = classify_types(s);
+
+    // Symbol counts and bucket boundaries (start = first index of a bucket,
+    // end = one past the last index of a bucket).
+    let mut counts = vec![0usize; alphabet];
+    for &c in s {
+        counts[c] += 1;
+    }
+    let bucket_starts = bucket_bounds(&counts, false);
+    let bucket_ends = bucket_bounds(&counts, true);
+
+    // --- Stage 1: sort the LMS substrings via a first induced-sort pass. ---
+    let lms_positions: Vec<usize> = (1..n).filter(|&i| is_lms(&is_s, i)).collect();
+    let mut tails = bucket_ends.clone();
+    for &pos in &lms_positions {
+        let c = s[pos];
+        tails[c] -= 1;
+        sa[tails[c]] = pos;
+    }
+    induce_l_type(s, &mut sa, &is_s, &bucket_starts);
+    induce_s_type(s, &mut sa, &is_s, &bucket_ends);
+
+    // Collect LMS suffixes in their now-sorted order and assign names by
+    // comparing adjacent LMS substrings.
+    let mut names = vec![SA_EMPTY; n];
+    let mut next_name = 0usize;
+    let mut prev: Option<usize> = None;
+    for &pos in &sa {
+        if pos == SA_EMPTY || !is_lms(&is_s, pos) {
+            continue;
+        }
+        if prev.is_some_and(|p| !lms_substrings_equal(s, &is_s, p, pos)) {
+            next_name += 1;
+        }
+        names[pos] = next_name;
+        prev = Some(pos);
+    }
+    let name_count = next_name + 1;
+
+    // Reduced problem: one symbol (its name) per LMS suffix, in original order.
+    let s1: Vec<usize> = lms_positions.iter().map(|&p| names[p]).collect();
+
+    let sa1 = if name_count == s1.len() {
+        // All names distinct: the suffix array is the inverse permutation.
+        let mut inv = vec![0usize; s1.len()];
+        for (i, &name) in s1.iter().enumerate() {
+            inv[name] = i;
+        }
+        inv
+    } else {
+        sais(&s1, name_count)
+    };
+
+    // --- Stage 3: induce the final suffix array from the sorted LMS order. ---
+    sa.fill(SA_EMPTY);
+    let mut tails = bucket_ends.clone();
+    for &idx in sa1.iter().rev() {
+        let pos = lms_positions[idx];
+        let c = s[pos];
+        tails[c] -= 1;
+        sa[tails[c]] = pos;
+    }
+    induce_l_type(s, &mut sa, &is_s, &bucket_starts);
+    induce_s_type(s, &mut sa, &is_s, &bucket_ends);
+
+    sa
+}
+
+/// Classify each position as S-type (`true`) or L-type (`false`). The final
+/// position (the terminator) is S-type by definition.
+fn classify_types(s: &[usize]) -> Vec<bool> {
+    let n = s.len();
+    let mut is_s = vec![false; n];
+    is_s[n - 1] = true;
+    for i in (0..n - 1).rev() {
+        is_s[i] = s[i] < s[i + 1] || (s[i] == s[i + 1] && is_s[i + 1]);
+    }
+    is_s
+}
+
+/// An LMS (left-most S-type) position is an S-type position preceded by an
+/// L-type position.
+#[inline]
+fn is_lms(is_s: &[bool], i: usize) -> bool {
+    i > 0 && is_s[i] && !is_s[i - 1]
+}
+
+/// Compute bucket boundaries from per-symbol counts. With `end == true`, entry
+/// `c` is one past the last index of symbol `c`'s bucket; otherwise it is the
+/// first index.
+fn bucket_bounds(counts: &[usize], end: bool) -> Vec<usize> {
+    let mut bounds = vec![0usize; counts.len()];
+    let mut sum = 0usize;
+    for (c, &count) in counts.iter().enumerate() {
+        sum += count;
+        bounds[c] = if end { sum } else { sum - count };
+    }
+    bounds
+}
+
+/// Induce-sort L-type suffixes left-to-right into the front of their buckets.
+fn induce_l_type(s: &[usize], sa: &mut [usize], is_s: &[bool], bucket_starts: &[usize]) {
+    let mut heads = bucket_starts.to_vec();
+    for i in 0..sa.len() {
+        let p = sa[i];
+        if p != SA_EMPTY && p > 0 {
+            let j = p - 1;
+            if !is_s[j] {
+                let c = s[j];
+                sa[heads[c]] = j;
+                heads[c] += 1;
+            }
+        }
+    }
+}
+
+/// Induce-sort S-type suffixes right-to-left into the back of their buckets.
+fn induce_s_type(s: &[usize], sa: &mut [usize], is_s: &[bool], bucket_ends: &[usize]) {
+    let mut tails = bucket_ends.to_vec();
+    for i in (0..sa.len()).rev() {
+        let p = sa[i];
+        if p != SA_EMPTY && p > 0 {
+            let j = p - 1;
+            if is_s[j] {
+                let c = s[j];
+                tails[c] -= 1;
+                sa[tails[c]] = j;
+            }
+        }
+    }
+}
+
+/// Compare the LMS substrings starting at `lhs` and `rhs` for equality. An LMS
+/// substring runs from one LMS position up to and including the next.
+fn lms_substrings_equal(s: &[usize], is_s: &[bool], lhs: usize, rhs: usize) -> bool {
+    let len = s.len();
+    let mut offset = 0usize;
+    loop {
+        let li = lhs + offset;
+        let ri = rhs + offset;
+        if li >= len || ri >= len {
+            return li >= len && ri >= len;
+        }
+        if s[li] != s[ri] || is_s[li] != is_s[ri] {
+            return false;
+        }
+        let lhs_lms = offset > 0 && is_lms(is_s, li);
+        let rhs_lms = offset > 0 && is_lms(is_s, ri);
+        if lhs_lms || rhs_lms {
+            return lhs_lms && rhs_lms;
+        }
+        offset += 1;
+    }
+}
+
+/// Build a suffix array using the O(N log N) prefix-doubling algorithm with
+/// radix sort. Retained as a reference implementation for differential tests
+/// against [`build_suffix_array`].
+#[cfg(test)]
 #[expect(
     clippy::cast_possible_truncation,
     reason = "ranks are bounded by text length which fits in usize"
 )]
-pub(super) fn build_suffix_array(text: &[i64]) -> Vec<usize> {
+pub(super) fn build_suffix_array_doubling(text: &[i64]) -> Vec<usize> {
     let n = text.len();
     if n == 0 {
         return vec![];
@@ -296,5 +507,92 @@ mod tests {
                 "rank/sa inverse property violated at position {i}"
             );
         }
+    }
+
+    /// Reference suffix array: sort every starting position by its suffix
+    /// slice. Shorter suffixes (prefixes of longer ones) sort first, matching
+    /// the smallest-terminator convention.
+    fn naive_suffix_array(text: &[i64]) -> Vec<usize> {
+        let n = text.len();
+        let mut sa: Vec<usize> = (0..n).collect();
+        sa.sort_by(|&a, &b| text[a..].cmp(&text[b..]));
+        sa
+    }
+
+    struct XorShift(u64);
+    impl XorShift {
+        fn next_u64(&mut self) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0
+        }
+        fn below(&mut self, bound: u64) -> u64 {
+            self.next_u64() % bound
+        }
+    }
+
+    #[test]
+    fn sais_matches_naive_on_small_exhaustive_alphabet() {
+        // Tiny alphabet maximizes repeated substrings (the SA-IS recursion).
+        let mut rng = XorShift(0x9E37_79B9_7F4A_7C15);
+        for _ in 0..4000 {
+            let n = 1 + rng.below(40) as usize;
+            let alphabet = 1 + rng.below(3); // values 0..alphabet
+            let text: Vec<i64> = std::iter::repeat_with(|| rng.below(alphabet) as i64)
+                .take(n)
+                .collect();
+            let expected = naive_suffix_array(&text);
+            let got = build_suffix_array(&text);
+            assert_eq!(got, expected, "SA-IS mismatch on {text:?}");
+        }
+    }
+
+    #[test]
+    fn sais_matches_doubling_with_negative_sentinels() {
+        // Mimic concatenate_with_sentinels: blocks of non-negative ranks
+        // separated by distinct decreasing negative sentinels.
+        let mut rng = XorShift(0x1234_5678_9ABC_DEF0);
+        for _ in 0..2000 {
+            let file_count = 1 + rng.below(6) as usize;
+            let mut text: Vec<i64> = Vec::new();
+            let mut sentinel: i64 = -1;
+            for f in 0..file_count {
+                let len = rng.below(12) as usize;
+                for _ in 0..len {
+                    text.push(rng.below(5) as i64);
+                }
+                if f + 1 < file_count {
+                    text.push(sentinel);
+                    sentinel -= 1;
+                }
+            }
+            if text.is_empty() {
+                continue;
+            }
+            let expected = build_suffix_array_doubling(&text);
+            let got = build_suffix_array(&text);
+            assert_eq!(got, expected, "SA-IS vs doubling mismatch on {text:?}");
+            assert_suffix_order(&text, &got);
+        }
+    }
+
+    #[test]
+    fn sais_matches_doubling_on_large_repetitive_input() {
+        // A larger input with long repeats, exercising deeper recursion.
+        let mut rng = XorShift(0xDEAD_BEEF_CAFE_F00D);
+        let block: Vec<i64> = std::iter::repeat_with(|| rng.below(8) as i64)
+            .take(50)
+            .collect();
+        let mut text: Vec<i64> = Vec::new();
+        for r in 0..40 {
+            text.extend_from_slice(&block);
+            text.push(-(r + 1)); // distinct sentinel
+        }
+        let expected = build_suffix_array_doubling(&text);
+        let got = build_suffix_array(&text);
+        assert_eq!(got, expected);
+        assert_is_permutation(&got, text.len());
+        assert_suffix_order(&text, &got);
     }
 }
