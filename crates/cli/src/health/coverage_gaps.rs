@@ -71,10 +71,8 @@ fn collect_untested_exports(
             continue;
         }
 
-        let (line, col) = fallow_types::extract::byte_offset_to_line_col(
-            &module.line_offsets,
-            export.span.start,
-        );
+        let (line, col) =
+            fallow_types::extract::byte_offset_to_line_col(&module.line_offsets, export.span.start);
         exports.push(UntestedExport {
             path: path.to_path_buf(),
             export_name: export.name.to_string(),

@@ -86,8 +86,13 @@ fn build_health_report(
         large_functions,
         ..
     } = assembly;
-    let prelude =
-        compute_report_prelude(opts, score_output, hotspots, hotspot_summary, report_coverage_gaps);
+    let prelude = compute_report_prelude(
+        opts,
+        score_output,
+        hotspots,
+        hotspot_summary,
+        report_coverage_gaps,
+    );
     build_health_report_struct(
         opts,
         action_ctx,
