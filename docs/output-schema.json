@@ -12730,7 +12730,7 @@
       "properties": {
         "path": {
           "type": "string",
-          "description": "The source file containing the banned call or import."
+          "description": "The source file containing the banned call, import, or effectful usage."
         },
         "line": {
           "type": "integer",

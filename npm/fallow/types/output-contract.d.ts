@@ -2416,7 +2416,7 @@ introduced?: (AuditIntroduced | null)
  */
 export interface PolicyViolationFinding {
 /**
- * The source file containing the banned call or import.
+ * The source file containing the banned call, import, or effectful usage.
  */
 path: string
 /**
