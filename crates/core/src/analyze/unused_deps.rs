@@ -413,11 +413,7 @@ pub fn find_unused_dependencies(
         .map(String::as_str)
         .collect();
 
-    let used_packages: FxHashSet<&str> = graph.package_usage.keys().map(String::as_str).collect();
-    let package_workspace_usage = collect_package_workspace_usage(graph, workspaces);
-    let workspace_used_packages = collect_workspace_used_packages(graph, workspaces);
-    let root_peer_used = PeerDependencyResolver::new()
-        .peer_dependency_closure(&config.root, used_packages.iter().copied());
+    let usage = collect_dependency_usage_indices(graph, config, workspaces);
 
     let root_pkg_path = config.root.join("package.json");
     let root_pkg_content = read_pkg_json_content(&root_pkg_path);
@@ -433,38 +429,17 @@ pub fn find_unused_dependencies(
         &ignore_deps,
     );
 
-    let is_used_globally = |dep: &str| used_packages.contains(dep) || root_peer_used.contains(dep);
-    let no_workspace_context = |_dep: &str| Vec::new();
+    let is_used_globally =
+        |dep: &str| usage.used_packages.contains(dep) || usage.root_peer_used.contains(dep);
 
-    let mut unused_deps = collect_unused_for_category(UnusedCategoryInput {
-        dep_names: pkg.production_dependency_names(),
-        category: &prod_category(),
-        shared: &shared,
-        is_used: &is_used_globally,
-        used_in_workspaces: &no_workspace_context,
-        pkg_path: &root_pkg_path,
-        pkg_content: root_pkg_content.as_deref(),
-    });
-
-    let mut unused_dev_deps = collect_unused_for_category(UnusedCategoryInput {
-        dep_names: pkg.dev_dependency_names(),
-        category: &dev_category(),
-        shared: &shared,
-        is_used: &is_used_globally,
-        used_in_workspaces: &no_workspace_context,
-        pkg_path: &root_pkg_path,
-        pkg_content: root_pkg_content.as_deref(),
-    });
-
-    let mut unused_optional_deps = collect_unused_for_category(UnusedCategoryInput {
-        dep_names: pkg.optional_dependency_names(),
-        category: &optional_category(),
-        shared: &shared,
-        is_used: &is_used_globally,
-        used_in_workspaces: &no_workspace_context,
-        pkg_path: &root_pkg_path,
-        pkg_content: root_pkg_content.as_deref(),
-    });
+    let (mut unused_deps, mut unused_dev_deps, mut unused_optional_deps) =
+        collect_root_unused_categories(
+            pkg,
+            &shared,
+            &is_used_globally,
+            &root_pkg_path,
+            root_pkg_content.as_deref(),
+        );
 
     let root_flagged: FxHashSet<String> = unused_deps
         .iter()
@@ -473,37 +448,95 @@ pub fn find_unused_dependencies(
         .map(|d| d.package_name.clone())
         .collect();
 
-    use rayon::prelude::*;
-    let workspace_findings: Vec<(
-        Vec<UnusedDependency>,
-        Vec<UnusedDependency>,
-        Vec<UnusedDependency>,
-    )> = workspaces
-        .par_iter()
-        .map(|ws| {
-            let inputs = WorkspaceUnusedDependencyInputs {
-                config,
-                package_referenced: &package_referenced,
-                empty_package_referenced: &empty_package_referenced,
-                plugin_referenced: &plugin_referenced,
-                plugin_tooling: &plugin_tooling,
-                script_used: &script_used,
-                ignore_deps: &ignore_deps,
-                workspace_used_packages: &workspace_used_packages,
-                package_workspace_usage: &package_workspace_usage,
-                root_flagged: &root_flagged,
-            };
-            collect_workspace_unused_dependencies(ws, &inputs)
-        })
-        .collect();
-
-    for (prod, dev, optional) in workspace_findings {
+    let inputs = WorkspaceUnusedDependencyInputs {
+        config,
+        package_referenced: &package_referenced,
+        empty_package_referenced: &empty_package_referenced,
+        plugin_referenced: &plugin_referenced,
+        plugin_tooling: &plugin_tooling,
+        script_used: &script_used,
+        ignore_deps: &ignore_deps,
+        workspace_used_packages: &usage.workspace_used_packages,
+        package_workspace_usage: &usage.package_workspace_usage,
+        root_flagged: &root_flagged,
+    };
+    for (prod, dev, optional) in collect_workspaces_unused_dependencies(workspaces, &inputs) {
         unused_deps.extend(prod);
         unused_dev_deps.extend(dev);
         unused_optional_deps.extend(optional);
     }
 
     (unused_deps, unused_dev_deps, unused_optional_deps)
+}
+
+type UnusedDependencyTriple = (
+    Vec<UnusedDependency>,
+    Vec<UnusedDependency>,
+    Vec<UnusedDependency>,
+);
+
+/// Package-usage indices shared by the root and per-workspace unused-dependency passes.
+struct DependencyUsageIndices<'a> {
+    used_packages: FxHashSet<&'a str>,
+    package_workspace_usage: FxHashMap<String, Vec<PathBuf>>,
+    workspace_used_packages: FxHashMap<&'a Path, FxHashSet<&'a str>>,
+    root_peer_used: FxHashSet<String>,
+}
+
+/// Compute the package-usage indices used to decide whether a dependency is used.
+fn collect_dependency_usage_indices<'a>(
+    graph: &'a ModuleGraph,
+    config: &ResolvedConfig,
+    workspaces: &'a [fallow_config::WorkspaceInfo],
+) -> DependencyUsageIndices<'a> {
+    let used_packages: FxHashSet<&str> = graph.package_usage.keys().map(String::as_str).collect();
+    let root_peer_used = PeerDependencyResolver::new()
+        .peer_dependency_closure(&config.root, used_packages.iter().copied());
+    DependencyUsageIndices {
+        package_workspace_usage: collect_package_workspace_usage(graph, workspaces),
+        workspace_used_packages: collect_workspace_used_packages(graph, workspaces),
+        used_packages,
+        root_peer_used,
+    }
+}
+
+/// Collect unused prod/dev/optional dependencies for the root package.json.
+fn collect_root_unused_categories(
+    pkg: &PackageJson,
+    shared: &SharedDepSets<'_>,
+    is_used_globally: &dyn Fn(&str) -> bool,
+    root_pkg_path: &Path,
+    root_pkg_content: Option<&str>,
+) -> UnusedDependencyTriple {
+    let no_workspace_context = |_dep: &str| Vec::new();
+    let category = |dep_names: Vec<String>, category: &DepCategoryConfig| {
+        collect_unused_for_category(UnusedCategoryInput {
+            dep_names,
+            category,
+            shared,
+            is_used: is_used_globally,
+            used_in_workspaces: &no_workspace_context,
+            pkg_path: root_pkg_path,
+            pkg_content: root_pkg_content,
+        })
+    };
+
+    let unused_deps = category(pkg.production_dependency_names(), &prod_category());
+    let unused_dev_deps = category(pkg.dev_dependency_names(), &dev_category());
+    let unused_optional_deps = category(pkg.optional_dependency_names(), &optional_category());
+    (unused_deps, unused_dev_deps, unused_optional_deps)
+}
+
+/// Run the per-workspace unused-dependency pass in parallel.
+fn collect_workspaces_unused_dependencies(
+    workspaces: &[fallow_config::WorkspaceInfo],
+    inputs: &WorkspaceUnusedDependencyInputs<'_>,
+) -> Vec<UnusedDependencyTriple> {
+    use rayon::prelude::*;
+    workspaces
+        .par_iter()
+        .map(|ws| collect_workspace_unused_dependencies(ws, inputs))
+        .collect()
 }
 
 struct WorkspaceUnusedDependencyInputs<'a> {
@@ -733,6 +766,52 @@ pub fn find_type_only_dependencies(
     type_only_deps
 }
 
+/// Build the glob set matching production-excluded test/story files.
+///
+/// Returns `None` when the glob set fails to compile, mirroring the original
+/// early-return-empty behavior of `find_test_only_dependencies`.
+fn build_production_exclude_globset() -> Option<globset::GlobSet> {
+    let mut builder = globset::GlobSetBuilder::new();
+    for pattern in crate::discover::PRODUCTION_EXCLUDE_PATTERNS {
+        if let Ok(glob) = globset::GlobBuilder::new(pattern)
+            .literal_separator(true)
+            .build()
+        {
+            builder.add(glob);
+        }
+    }
+    builder.build().ok()
+}
+
+/// Return `true` when every file importing `dep` is a test/story or config file
+/// and the dependency is not exclusively type-only imported.
+fn dependency_is_test_only(
+    dep: &str,
+    graph: &ModuleGraph,
+    config: &ResolvedConfig,
+    test_globs: &globset::GlobSet,
+) -> bool {
+    let Some(file_ids) = graph.package_usage.get(dep) else {
+        return false;
+    };
+
+    let total_count = file_ids.len();
+    let type_only_count = graph.type_only_package_usage.get(dep).map_or(0, Vec::len);
+    if type_only_count == total_count {
+        return false;
+    }
+
+    file_ids.iter().all(|id| {
+        graph.modules.get(id.0 as usize).is_some_and(|module| {
+            let relative = module
+                .path
+                .strip_prefix(&config.root)
+                .unwrap_or(&module.path);
+            test_globs.is_match(relative) || is_config_file(&module.path)
+        })
+    })
+}
+
 /// Find production dependencies that are only imported by test/dev files.
 ///
 /// When NOT in production mode (where test files are still discovered), a dep
@@ -743,20 +822,8 @@ pub fn find_test_only_dependencies(
     config: &ResolvedConfig,
     workspaces: &[fallow_config::WorkspaceInfo],
 ) -> Vec<TestOnlyDependency> {
-    let test_globs = {
-        let mut builder = globset::GlobSetBuilder::new();
-        for pattern in crate::discover::PRODUCTION_EXCLUDE_PATTERNS {
-            if let Ok(glob) = globset::GlobBuilder::new(pattern)
-                .literal_separator(true)
-                .build()
-            {
-                builder.add(glob);
-            }
-        }
-        match builder.build() {
-            Ok(set) => set,
-            Err(_) => return Vec::new(),
-        }
+    let Some(test_globs) = build_production_exclude_globset() else {
+        return Vec::new();
     };
 
     let root_pkg_path = config.root.join("package.json");
@@ -778,30 +845,7 @@ pub fn find_test_only_dependencies(
             continue;
         }
 
-        let Some(file_ids) = graph.package_usage.get(dep.as_str()) else {
-            continue;
-        };
-
-        let total_count = file_ids.len();
-        let type_only_count = graph
-            .type_only_package_usage
-            .get(dep.as_str())
-            .map_or(0, Vec::len);
-        if type_only_count == total_count {
-            continue;
-        }
-
-        let all_test_only = file_ids.iter().all(|id| {
-            graph.modules.get(id.0 as usize).is_some_and(|module| {
-                let relative = module
-                    .path
-                    .strip_prefix(&config.root)
-                    .unwrap_or(&module.path);
-                test_globs.is_match(relative) || is_config_file(&module.path)
-            })
-        });
-
-        if all_test_only {
+        if dependency_is_test_only(&dep, graph, config, &test_globs) {
             let line = root_pkg_content
                 .as_deref()
                 .map_or(1, |c| find_dep_line_in_json(c, &dep));
@@ -1102,7 +1146,6 @@ pub fn find_unlisted_dependencies(
         .map(String::as_str)
         .collect();
 
-    let mut unlisted: FxHashMap<String, Vec<ImportSite>> = FxHashMap::default();
     let ctx = UnlistedDependencyContext {
         graph,
         config,
@@ -1118,11 +1161,18 @@ pub fn find_unlisted_dependencies(
         line_offsets_by_file,
     };
 
-    for (package_name, file_ids) in &graph.package_usage {
-        if should_skip_unlisted_package(package_name, &ctx) {
+    collect_unlisted_dependencies(&ctx)
+}
+
+/// Walk `package_usage`, gathering per-package import sites into findings.
+fn collect_unlisted_dependencies(ctx: &UnlistedDependencyContext<'_>) -> Vec<UnlistedDependency> {
+    let mut unlisted: FxHashMap<String, Vec<ImportSite>> = FxHashMap::default();
+
+    for (package_name, file_ids) in &ctx.graph.package_usage {
+        if should_skip_unlisted_package(package_name, ctx) {
             continue;
         }
-        let mut unlisted_sites = collect_unlisted_import_sites(package_name, file_ids, &ctx);
+        let mut unlisted_sites = collect_unlisted_import_sites(package_name, file_ids, ctx);
         if !unlisted_sites.is_empty() {
             unlisted_sites.sort_by(|a, b| a.path.cmp(&b.path).then(a.line.cmp(&b.line)));
             unlisted_sites.dedup_by(|a, b| a.path == b.path);
@@ -1214,6 +1264,78 @@ fn collect_unlisted_import_sites(
     unlisted_sites
 }
 
+/// Plumbing for the per-spec skip checks in `find_unresolved_imports`.
+struct UnresolvedImportFilters<'a> {
+    config: &'a ResolvedConfig,
+    virtual_prefixes: &'a [&'a str],
+    generated_patterns: &'a [&'a str],
+    generated_type_prefixes: &'a [&'a str],
+}
+
+/// Return `true` when an unresolvable specifier should be silenced (builtin,
+/// virtual, generated artifact, type-only generated prefix, or config-ignored).
+fn unresolved_spec_is_silenced(
+    spec: &str,
+    is_type_only: bool,
+    filters: &UnresolvedImportFilters<'_>,
+) -> bool {
+    if is_builtin_module(spec) || is_virtual_module(spec) {
+        return true;
+    }
+    if filters
+        .virtual_prefixes
+        .iter()
+        .any(|prefix| matches_virtual_prefix(prefix, spec))
+    {
+        return true;
+    }
+    if !filters.generated_patterns.is_empty() {
+        let bare = spec
+            .strip_suffix(".js")
+            .or_else(|| spec.strip_suffix(".ts"))
+            .unwrap_or(spec);
+        if filters
+            .generated_patterns
+            .iter()
+            .any(|pat| bare.ends_with(pat))
+        {
+            return true;
+        }
+    }
+    if is_type_only
+        && filters
+            .generated_type_prefixes
+            .iter()
+            .any(|prefix| spec.starts_with(prefix))
+    {
+        return true;
+    }
+    filters
+        .config
+        .ignore_unresolved_imports
+        .iter()
+        .any(|matcher| matcher.is_match(spec))
+}
+
+/// Resolve the declaration `(line, col)` plus the specifier column for an edge.
+fn unresolved_import_location(
+    edge: &crate::resolve::ResolvedSourceEdge<'_>,
+    file_id: FileId,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+) -> (u32, u32, u32) {
+    let (line, col) = byte_offset_to_line_col(line_offsets_by_file, file_id, edge.span().start);
+
+    let source_span = edge.source_span();
+    let specifier_col = if source_span.end > source_span.start {
+        let (_, sc) = byte_offset_to_line_col(line_offsets_by_file, file_id, source_span.start);
+        sc
+    } else {
+        col
+    };
+
+    (line, col, specifier_col)
+}
+
 /// Find imports that could not be resolved.
 pub fn find_unresolved_imports(
     resolved_modules: &[ResolvedModule],
@@ -1224,76 +1346,34 @@ pub fn find_unresolved_imports(
     generated_type_prefixes: &[&str],
     line_offsets_by_file: &LineOffsetsMap<'_>,
 ) -> Vec<UnresolvedImport> {
+    let filters = UnresolvedImportFilters {
+        config,
+        virtual_prefixes,
+        generated_patterns,
+        generated_type_prefixes,
+    };
     let mut unresolved = Vec::new();
 
     for module in resolved_modules {
         for edge in module.all_resolved_source_edges() {
-            if let crate::resolve::ResolveResult::Unresolvable(spec) = edge.target() {
-                if is_builtin_module(spec) {
-                    continue;
-                }
-                if is_virtual_module(spec) {
-                    continue;
-                }
-                if virtual_prefixes
-                    .iter()
-                    .any(|prefix| matches_virtual_prefix(prefix, spec))
-                {
-                    continue;
-                }
-                if !generated_patterns.is_empty() {
-                    let bare = spec
-                        .strip_suffix(".js")
-                        .or_else(|| spec.strip_suffix(".ts"))
-                        .unwrap_or(spec);
-                    if generated_patterns.iter().any(|pat| bare.ends_with(pat)) {
-                        continue;
-                    }
-                }
-                if edge.is_type_only()
-                    && generated_type_prefixes
-                        .iter()
-                        .any(|prefix| spec.starts_with(prefix))
-                {
-                    continue;
-                }
-                if config
-                    .ignore_unresolved_imports
-                    .iter()
-                    .any(|matcher| matcher.is_match(spec))
-                {
-                    continue;
-                }
-                let (line, col) = byte_offset_to_line_col(
-                    line_offsets_by_file,
-                    module.file_id,
-                    edge.span().start,
-                );
-
-                let source_span = edge.source_span();
-                let specifier_col = if source_span.end > source_span.start {
-                    let (_, sc) = byte_offset_to_line_col(
-                        line_offsets_by_file,
-                        module.file_id,
-                        source_span.start,
-                    );
-                    sc
-                } else {
-                    col
-                };
-
-                if suppressions.is_suppressed(module.file_id, line, IssueKind::UnresolvedImport) {
-                    continue;
-                }
-
-                unresolved.push(UnresolvedImport {
-                    path: module.path.clone(),
-                    specifier: spec.clone(),
-                    line,
-                    col,
-                    specifier_col,
-                });
+            let crate::resolve::ResolveResult::Unresolvable(spec) = edge.target() else {
+                continue;
+            };
+            if unresolved_spec_is_silenced(spec, edge.is_type_only(), &filters) {
+                continue;
             }
+            let (line, col, specifier_col) =
+                unresolved_import_location(&edge, module.file_id, line_offsets_by_file);
+            if suppressions.is_suppressed(module.file_id, line, IssueKind::UnresolvedImport) {
+                continue;
+            }
+            unresolved.push(UnresolvedImport {
+                path: module.path.clone(),
+                specifier: spec.clone(),
+                line,
+                col,
+                specifier_col,
+            });
         }
     }
 

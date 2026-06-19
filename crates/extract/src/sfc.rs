@@ -443,21 +443,8 @@ pub(crate) fn parse_sfc_to_module(
         &mut combined,
     );
 
-    // Synthetic per-SFC `<template>` complexity: count template control flow
-    // (`v-if`/`v-for`, `{#if}`/`{#each}`) and bound-expression/interpolation
-    // complexity so a template-heavy SFC is not scored as artificially simple.
-    // The scanners mask `<script>`/`<style>`/comments, so script control flow is
-    // NOT double-counted (it is scored by `translate_script_complexity` above).
-    // Mirrors Angular's `template_complexity` synthetic entry; no new rule or
-    // threshold, the entry folds into the existing complexity aggregate.
     if need_complexity {
-        let template_complexity = match kind {
-            SfcKind::Vue => crate::template_complexity::compute_vue_template_complexity(source),
-            SfcKind::Svelte => {
-                crate::template_complexity::compute_svelte_template_complexity(source)
-            }
-        };
-        combined.complexity.extend(template_complexity);
+        append_template_complexity(kind, source, &mut combined);
     }
 
     // Credit `<emit_binding>('event')` / `$emit('event')` calls in the template
@@ -475,9 +462,31 @@ pub(crate) fn parse_sfc_to_module(
             crate::sfc_template::collect_svelte_listened_events(source);
     }
 
-    // Static relative asset references in markup (`<img src="./logo.png">`)
-    // become SideEffect imports so a genuinely-missing asset surfaces as
-    // `unresolved-import` (existing assets resolve to `ExternalFile`, no finding).
+    append_template_asset_imports(source, &mut combined);
+    dedup_import_binding_lists(&mut combined);
+
+    combined
+}
+
+/// Append the synthetic `<template>` complexity entry for the SFC. Counts
+/// template control flow (`v-if`/`v-for`, `{#if}`/`{#each}`) and
+/// bound-expression/interpolation complexity so a template-heavy SFC is not
+/// scored as artificially simple. The scanners mask `<script>`/`<style>`/comments,
+/// so script control flow is NOT double-counted (it is scored by
+/// `translate_script_complexity`). Mirrors Angular's synthetic entry; no new rule
+/// or threshold, the entry folds into the existing complexity aggregate.
+fn append_template_complexity(kind: SfcKind, source: &str, combined: &mut ModuleInfo) {
+    let template_complexity = match kind {
+        SfcKind::Vue => crate::template_complexity::compute_vue_template_complexity(source),
+        SfcKind::Svelte => crate::template_complexity::compute_svelte_template_complexity(source),
+    };
+    combined.complexity.extend(template_complexity);
+}
+
+/// Turn static relative asset references in markup (`<img src="./logo.png">`)
+/// into `SideEffect` imports so a genuinely-missing asset surfaces as
+/// `unresolved-import` (existing assets resolve to `ExternalFile`, no finding).
+fn append_template_asset_imports(source: &str, combined: &mut ModuleInfo) {
     for (specifier, span) in collect_template_asset_refs(source) {
         combined.imports.push(ImportInfo {
             source: specifier,
@@ -489,7 +498,11 @@ pub(crate) fn parse_sfc_to_module(
             source_span: span,
         });
     }
+}
 
+/// Sort and dedup the per-script import-binding accumulator lists so the merged
+/// SFC module reports each binding once in a stable order.
+fn dedup_import_binding_lists(combined: &mut ModuleInfo) {
     combined.unused_import_bindings.sort_unstable();
     combined.unused_import_bindings.dedup();
     combined.type_referenced_import_bindings.sort_unstable();
@@ -498,8 +511,6 @@ pub(crate) fn parse_sfc_to_module(
     combined.value_referenced_import_bindings.dedup();
     combined.auto_import_candidates.sort_unstable();
     combined.auto_import_candidates.dedup();
-
-    combined
 }
 
 fn sfc_kind(path: &Path) -> SfcKind {
@@ -641,47 +652,7 @@ fn merge_script_into_module(input: &mut SfcScriptMergeInput<'_>) {
     extractor.remap_spans_with(|span| extraction.remap_span(span));
     extractor.resolve_typed_destructure_bindings();
 
-    let augmented_body = build_generic_attr_probe_source(input.script);
-    let empty_template_used = rustc_hash::FxHashSet::default();
-    let (binding_usage, auto_import_candidates) = if let Some(augmented) = augmented_body.as_deref()
-    {
-        let augmented_return =
-            Parser::new(&allocator, augmented, source_type_for_script(input.script)).parse();
-        (
-            compute_import_binding_usage(
-                &augmented_return.program,
-                &extractor.imports,
-                &empty_template_used,
-            ),
-            compute_auto_import_candidates(&parser_return.program),
-        )
-    } else {
-        let semantic_usage = compute_semantic_usage(
-            &parser_return.program,
-            &extractor.imports,
-            &empty_template_used,
-        );
-        (
-            semantic_usage.import_binding_usage,
-            semantic_usage.auto_import_candidates,
-        )
-    };
-    input
-        .combined
-        .unused_import_bindings
-        .extend(binding_usage.unused.iter().cloned());
-    input
-        .combined
-        .type_referenced_import_bindings
-        .extend(binding_usage.type_referenced.iter().cloned());
-    input
-        .combined
-        .value_referenced_import_bindings
-        .extend(binding_usage.value_referenced.iter().cloned());
-    input
-        .combined
-        .auto_import_candidates
-        .extend(auto_import_candidates);
+    merge_script_binding_usage(input, &allocator, &parser_return, &extractor.imports);
     if input.need_complexity {
         input
             .combined
@@ -713,20 +684,7 @@ fn merge_script_into_module(input: &mut SfcScriptMergeInput<'_>) {
     }
 
     if is_template_visible_script(input.kind, input.script) {
-        input.template_visible_imports.extend(
-            extractor
-                .imports
-                .iter()
-                .filter(|import| !import.local_name.is_empty())
-                .map(|import| import.local_name.clone()),
-        );
-        input.template_visible_bound_targets.extend(
-            extractor
-                .binding_target_names()
-                .iter()
-                .filter(|(local, _)| !local.starts_with("this."))
-                .map(|(local, target)| (local.clone(), target.clone())),
-        );
+        harvest_template_visible_bindings(input, &extractor);
     }
 
     // Dispatched events recorded by the visitor carry body-relative spans, like
@@ -738,6 +696,75 @@ fn merge_script_into_module(input: &mut SfcScriptMergeInput<'_>) {
     for event in &mut input.combined.svelte_dispatched_events[dispatch_base..] {
         event.span_start += input.script.byte_offset as u32;
     }
+}
+
+/// Compute and merge this script's import-binding usage (unused / type- and
+/// value-referenced) plus auto-import candidates into `combined`. A
+/// `generic="..."` attribute re-parses an augmented body so a type-only import
+/// consumed solely inside the constraint stays classified as type-referenced.
+fn merge_script_binding_usage(
+    input: &mut SfcScriptMergeInput<'_>,
+    allocator: &Allocator,
+    parser_return: &oxc_parser::ParserReturn<'_>,
+    imports: &[ImportInfo],
+) {
+    let augmented_body = build_generic_attr_probe_source(input.script);
+    let empty_template_used = FxHashSet::default();
+    let (binding_usage, auto_import_candidates) = if let Some(augmented) = augmented_body.as_deref()
+    {
+        let augmented_return =
+            Parser::new(allocator, augmented, source_type_for_script(input.script)).parse();
+        (
+            compute_import_binding_usage(&augmented_return.program, imports, &empty_template_used),
+            compute_auto_import_candidates(&parser_return.program),
+        )
+    } else {
+        let semantic_usage =
+            compute_semantic_usage(&parser_return.program, imports, &empty_template_used);
+        (
+            semantic_usage.import_binding_usage,
+            semantic_usage.auto_import_candidates,
+        )
+    };
+    input
+        .combined
+        .unused_import_bindings
+        .extend(binding_usage.unused.iter().cloned());
+    input
+        .combined
+        .type_referenced_import_bindings
+        .extend(binding_usage.type_referenced.iter().cloned());
+    input
+        .combined
+        .value_referenced_import_bindings
+        .extend(binding_usage.value_referenced.iter().cloned());
+    input
+        .combined
+        .auto_import_candidates
+        .extend(auto_import_candidates);
+}
+
+/// Carry an instance script's import locals and binding-target names into the
+/// template-visible sets (dropping empty locals and `this.`-prefixed targets) so
+/// the template scanner can credit them.
+fn harvest_template_visible_bindings(
+    input: &mut SfcScriptMergeInput<'_>,
+    extractor: &ModuleInfoExtractor,
+) {
+    input.template_visible_imports.extend(
+        extractor
+            .imports
+            .iter()
+            .filter(|import| !import.local_name.is_empty())
+            .map(|import| import.local_name.clone()),
+    );
+    input.template_visible_bound_targets.extend(
+        extractor
+            .binding_target_names()
+            .iter()
+            .filter(|(local, _)| !local.starts_with("this."))
+            .map(|(local, target)| (local.clone(), target.clone())),
+    );
 }
 
 /// Harvest Svelte 5 `$props()` declared props from an instance `<script>`
@@ -773,68 +800,86 @@ fn merge_vue_props_emits_into(
 ) {
     let byte_offset = input.script.byte_offset as u32;
     if input.script.is_setup {
-        let harvest = crate::sfc_props::harvest_define_props(program);
-        if harvest.has_unharvestable_props {
-            input.combined.has_unharvestable_props = true;
-        }
-        if harvest.has_props_attrs_fallthrough {
-            input.combined.has_props_attrs_fallthrough = true;
-        }
-        if harvest.has_define_expose {
-            input.combined.has_define_expose = true;
-        }
-        if harvest.has_define_model {
-            input.combined.has_define_model = true;
-        }
-        if let Some(binding) = harvest.props_return_binding {
-            *input.props_return_binding = Some(binding);
-        }
-        for mut prop in harvest.props {
-            prop.span_start += byte_offset;
-            input.combined.component_props.push(prop);
-        }
-
-        let emit_harvest = crate::sfc_props::harvest_define_emits(program);
-        if emit_harvest.has_unharvestable_emits {
-            input.combined.has_unharvestable_emits = true;
-        }
-        if emit_harvest.has_dynamic_emit {
-            input.combined.has_dynamic_emit = true;
-        }
-        if emit_harvest.has_emit_whole_object_use {
-            input.combined.has_emit_whole_object_use = true;
-        }
-        if let Some(binding) = emit_harvest.emit_binding {
-            *input.emit_return_binding = Some(binding);
-        }
-        for mut emit in emit_harvest.emits {
-            emit.span_start += byte_offset;
-            input.combined.component_emits.push(emit);
-        }
+        apply_props_harvest(
+            input,
+            crate::sfc_props::harvest_define_props(program),
+            byte_offset,
+        );
+        apply_emits_harvest(
+            input,
+            crate::sfc_props::harvest_define_emits(program),
+            byte_offset,
+        );
     } else {
-        let harvest = crate::sfc_props::harvest_options_api_props(program);
-        if harvest.has_unharvestable_props {
-            input.combined.has_unharvestable_props = true;
-        }
-        if harvest.has_props_attrs_fallthrough {
-            input.combined.has_props_attrs_fallthrough = true;
-        }
-        for mut prop in harvest.props {
-            prop.span_start += byte_offset;
-            input.combined.component_props.push(prop);
-        }
+        apply_props_harvest(
+            input,
+            crate::sfc_props::harvest_options_api_props(program),
+            byte_offset,
+        );
+        apply_emits_harvest(
+            input,
+            crate::sfc_props::harvest_options_api_emits(program),
+            byte_offset,
+        );
+    }
+}
 
-        let emit_harvest = crate::sfc_props::harvest_options_api_emits(program);
-        if emit_harvest.has_unharvestable_emits {
-            input.combined.has_unharvestable_emits = true;
-        }
-        if emit_harvest.has_dynamic_emit {
-            input.combined.has_dynamic_emit = true;
-        }
-        for mut emit in emit_harvest.emits {
-            emit.span_start += byte_offset;
-            input.combined.component_emits.push(emit);
-        }
+/// Fold a prop harvest (setup `defineProps` or Options-API `props:`) into
+/// `combined`: copy the abstain flags and `defineProps` return binding, then push
+/// each prop with its span remapped onto the SFC source. The setup-only fields
+/// (`has_define_expose` / `has_define_model` / `props_return_binding`) default to
+/// `false`/`None` in the Options-API harvest, so the shared copy is inert there.
+fn apply_props_harvest(
+    input: &mut SfcScriptMergeInput<'_>,
+    harvest: crate::sfc_props::DefinePropsHarvest,
+    byte_offset: u32,
+) {
+    if harvest.has_unharvestable_props {
+        input.combined.has_unharvestable_props = true;
+    }
+    if harvest.has_props_attrs_fallthrough {
+        input.combined.has_props_attrs_fallthrough = true;
+    }
+    if harvest.has_define_expose {
+        input.combined.has_define_expose = true;
+    }
+    if harvest.has_define_model {
+        input.combined.has_define_model = true;
+    }
+    if let Some(binding) = harvest.props_return_binding {
+        *input.props_return_binding = Some(binding);
+    }
+    for mut prop in harvest.props {
+        prop.span_start += byte_offset;
+        input.combined.component_props.push(prop);
+    }
+}
+
+/// Fold an emit harvest (setup `defineEmits` or Options-API `emits:`) into
+/// `combined`: copy the abstain flags and emit return binding, then push each
+/// emit with its span remapped onto the SFC source. The setup-only fields
+/// (`has_emit_whole_object_use` / `emit_binding`) default to `false`/`None` in
+/// the Options-API harvest, so the shared copy is inert there.
+fn apply_emits_harvest(
+    input: &mut SfcScriptMergeInput<'_>,
+    harvest: crate::sfc_props::DefineEmitsHarvest,
+    byte_offset: u32,
+) {
+    if harvest.has_unharvestable_emits {
+        input.combined.has_unharvestable_emits = true;
+    }
+    if harvest.has_dynamic_emit {
+        input.combined.has_dynamic_emit = true;
+    }
+    if harvest.has_emit_whole_object_use {
+        input.combined.has_emit_whole_object_use = true;
+    }
+    if let Some(binding) = harvest.emit_binding {
+        *input.emit_return_binding = Some(binding);
+    }
+    for mut emit in harvest.emits {
+        emit.span_start += byte_offset;
+        input.combined.component_emits.push(emit);
     }
 }
 
@@ -961,31 +1006,45 @@ fn apply_template_usage(
     credit_load_data: bool,
     combined: &mut ModuleInfo,
 ) {
-    // Props are NOT imports, so the template scanner does not credit them by
-    // default. Thread the harvested prop names (and the `defineProps` return
-    // binding, so `props.<name>` template member accesses are emitted) in as an
-    // additional credited set alongside `template_visible_imports`. Crediting a
-    // prop name against an import is inert (no import binding shares the name),
-    // so the unused-import retain is unaffected.
+    let credited = build_template_credited_set(
+        template_visible_imports,
+        props_return_binding,
+        credit_load_data,
+        source,
+        combined,
+    );
+    let template_usage = compute_template_usage(
+        kind,
+        source,
+        &credited,
+        template_visible_bound_targets,
+        credit_load_data,
+    );
+    apply_prop_template_credit(&template_usage, props_return_binding, combined);
+    merge_template_usage_into_combined(template_usage, combined);
+}
+
+/// Build the set of template-credited names: the template-visible imports plus
+/// each harvested prop name / destructure local, Vue's implicit `$props`, the
+/// `defineProps` return binding, and (for SvelteKit route components) the `data`
+/// load prop. Crediting a prop name against an import is inert. Also sets
+/// `has_load_data_whole_use` when a route spreads / passes the whole `data` prop.
+fn build_template_credited_set(
+    template_visible_imports: &FxHashSet<String>,
+    props_return_binding: Option<&str>,
+    credit_load_data: bool,
+    source: &str,
+    combined: &mut ModuleInfo,
+) -> FxHashSet<String> {
     let mut credited: FxHashSet<String> = template_visible_imports.clone();
-    // unused-load-data-key Primitive B: a SvelteKit route component
-    // (`+page.svelte` / `+layout.svelte`) receives a `data` prop populated by
-    // the route's `load()` return object. The prop is template-visible
-    // (`{data.x}`, `{#each data.items as i}`) but is neither an import nor a
-    // tracked binding, so the member-access scanner gates it out by default.
-    // Credit `data` as a recognized root so its template member accesses
-    // (`data.<key>`) are emitted for the cross-file load-data-key join. Gated to
-    // route components only (`credit_load_data`): a non-route component's
-    // `let { data } = $props()` is a different, parent-passed `data`, so
-    // crediting it as load data would be semantically wrong. Inert for every
-    // other detector unless a tracked export/instance is named `data` (mirrors
-    // Primitive A); the load-data-key join is the only consumer of `data.<key>`.
+    // unused-load-data-key Primitive B: a SvelteKit route component receives a
+    // `data` prop populated by the route's `load()` return object. Credit `data`
+    // as a recognized root so its template member accesses (`data.<key>`) are
+    // emitted for the cross-file load-data-key join, gated to route components.
     if credit_load_data {
         credited.insert("data".to_string());
         // FP-1: a route component spreading / passing the whole `data` prop in
-        // markup consumes arbitrary keys opaquely; force the detector to abstain
-        // on this route. A false abstain only suppresses findings, never creates
-        // one, so matching the full source (script + template) is safe.
+        // markup consumes arbitrary keys opaquely; force the detector to abstain.
         if SVELTE_TEMPLATE_DATA_WHOLE_USE_RE.is_match(source) {
             combined.has_load_data_whole_use = true;
         }
@@ -1004,35 +1063,43 @@ fn apply_template_usage(
             credited.insert(binding.to_string());
         }
     }
+    credited
+}
 
-    // unused-load-data-key Primitive B: a route `data` prop is usually typed as
-    // SvelteKit's generated `PageData` / `LayoutData` (`export let data:
-    // PageData`). That typed binding (`data -> PageData`) would otherwise make the
-    // template scanner remap `{data.x}` / `<Child foo={data.x} />` member accesses
-    // onto the generated type (`PageData.x`), dropping the `data`-keyed access the
-    // cross-file load-data join needs. Drop `data` from the bound-targets for the
-    // template scan so its template member accesses stay keyed on `data`. The
-    // generated `$types` aliases carry no real members for any member detector, so
-    // losing the type-keyed template credit is inert; script-side `data` reads are
-    // unaffected (their resolution already ran during `merge_into`).
-    let template_usage = if credit_load_data && template_visible_bound_targets.contains_key("data")
-    {
+/// Scan the template for usage of the credited names and bound targets. For a
+/// SvelteKit route, `data` is dropped from the bound targets so its template
+/// member accesses stay keyed on `data` (not remapped onto the generated
+/// `PageData` / `LayoutData` type) for the cross-file load-data join.
+fn compute_template_usage(
+    kind: SfcKind,
+    source: &str,
+    credited: &FxHashSet<String>,
+    template_visible_bound_targets: &FxHashMap<String, String>,
+    credit_load_data: bool,
+) -> crate::template_usage::TemplateUsage {
+    if credit_load_data && template_visible_bound_targets.contains_key("data") {
         let mut filtered = template_visible_bound_targets.clone();
         filtered.remove("data");
-        collect_template_usage_with_bound_targets(kind, source, &credited, &filtered)
+        collect_template_usage_with_bound_targets(kind, source, credited, &filtered)
     } else {
         collect_template_usage_with_bound_targets(
             kind,
             source,
-            &credited,
+            credited,
             template_visible_bound_targets,
         )
-    };
+    }
+}
 
-    // A template reference credits `used_in_template`: either a bare prop name in
-    // `used_bindings` (destructured prop form, or template uses the bare name) OR
-    // a `<props>.<name>` / `$props.<name>` member access (the
-    // `const props = defineProps()` form and Vue's implicit `$props`).
+/// Mark each harvested prop `used_in_template` when the template references it by
+/// bare name (destructure form) or via a `<props>.<name>` / `$props.<name>`
+/// member access. A bare reference to a custom `defineProps` return binding as a
+/// whole object means abstain on the whole file (`has_props_attrs_fallthrough`).
+fn apply_prop_template_credit(
+    template_usage: &crate::template_usage::TemplateUsage,
+    props_return_binding: Option<&str>,
+    combined: &mut ModuleInfo,
+) {
     if !combined.component_props.is_empty() {
         let member_used: FxHashSet<&str> = template_usage
             .member_accesses
@@ -1053,12 +1120,6 @@ fn apply_template_usage(
         }
     }
 
-    // A custom-named `defineProps` return spread as a whole object in the template
-    // (`const myProps = defineProps(); <Child v-bind="myProps" />`) consumes every
-    // prop opaquely; the literal `props`/`$props`/`$attrs` regex misses a custom
-    // name. The scanner records a bare `v-bind="myProps"` value as a used binding
-    // (not a whole-object use), so a bare reference to the return binding in either
-    // set means abstain on the whole file.
     if let Some(binding) = props_return_binding
         && (template_usage.used_bindings.contains(binding)
             || template_usage
@@ -1068,7 +1129,16 @@ fn apply_template_usage(
     {
         combined.has_props_attrs_fallthrough = true;
     }
+}
 
+/// Drain the scanned template usage into `combined`: retain unused-import
+/// bindings the template did not consume, extend member accesses / whole-object
+/// uses / security sinks, and fold unresolved tag names into auto-import
+/// candidates (sorted + deduped).
+fn merge_template_usage_into_combined(
+    template_usage: crate::template_usage::TemplateUsage,
+    combined: &mut ModuleInfo,
+) {
     combined
         .unused_import_bindings
         .retain(|binding| !template_usage.used_bindings.contains(binding));

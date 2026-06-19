@@ -6,7 +6,7 @@ use crate::template_usage::TemplateUsage;
 
 use super::scanners::{scan_curly_section, scan_html_tag};
 use super::shared::{
-    HTML_COMMENT_RE, extract_pattern_binding_names, merge_component_tag_usage,
+    HTML_COMMENT_RE, ParsedAttr, extract_pattern_binding_names, merge_component_tag_usage,
     merge_expression_usage_allow_dollar_refs_with_bound_targets,
     merge_statement_usage_allow_dollar_refs_with_bound_targets, parse_tag_attrs,
 };
@@ -295,17 +295,14 @@ fn apply_svelte_block_tag(
     }
 
     if let Some(expr) = tag.strip_prefix("#if") {
-        merge_expression_usage_allow_dollar_refs_with_bound_targets(
-            usage,
-            expr.trim(),
+        merge_expr_and_open_block(
+            expr,
+            SvelteBlockKind::If,
             imported_bindings,
             bound_targets,
-            &current_locals(scopes),
+            scopes,
+            usage,
         );
-        scopes.push(SvelteScopeFrame {
-            kind: SvelteBlockKind::If,
-            locals: Vec::new(),
-        });
         return true;
     }
 
@@ -319,28 +316,24 @@ fn apply_svelte_block_tag(
         return true;
     }
 
-    if let Some(captures) = SVELTE_THEN_RE.captures(tag) {
-        update_await_branch_locals(&captures, scopes);
-        return true;
-    }
-
-    if let Some(captures) = SVELTE_CATCH_RE.captures(tag) {
+    // `{:then binding}` / `{:catch binding}` both rebind the await frame's locals.
+    if let Some(captures) = SVELTE_THEN_RE
+        .captures(tag)
+        .or_else(|| SVELTE_CATCH_RE.captures(tag))
+    {
         update_await_branch_locals(&captures, scopes);
         return true;
     }
 
     if let Some(expr) = tag.strip_prefix("#key") {
-        merge_expression_usage_allow_dollar_refs_with_bound_targets(
-            usage,
-            expr.trim(),
+        merge_expr_and_open_block(
+            expr,
+            SvelteBlockKind::Key,
             imported_bindings,
             bound_targets,
-            &current_locals(scopes),
+            scopes,
+            usage,
         );
-        scopes.push(SvelteScopeFrame {
-            kind: SvelteBlockKind::Key,
-            locals: Vec::new(),
-        });
         return true;
     }
 
@@ -356,6 +349,29 @@ fn apply_svelte_block_tag(
     false
 }
 
+/// Merge a block opener's condition expression, then push a new scope frame of
+/// the given kind (`{#if expr}`, `{#key expr}`).
+fn merge_expr_and_open_block(
+    expr: &str,
+    kind: SvelteBlockKind,
+    imported_bindings: &FxHashSet<String>,
+    bound_targets: &FxHashMap<String, String>,
+    scopes: &mut Vec<SvelteScopeFrame>,
+    usage: &mut TemplateUsage,
+) {
+    merge_expression_usage_allow_dollar_refs_with_bound_targets(
+        usage,
+        expr.trim(),
+        imported_bindings,
+        bound_targets,
+        &current_locals(scopes),
+    );
+    scopes.push(SvelteScopeFrame {
+        kind,
+        locals: Vec::new(),
+    });
+}
+
 struct SvelteExpressionDirectiveInput<'a> {
     tag: &'a str,
     tag_start: usize,
@@ -368,40 +384,17 @@ struct SvelteExpressionDirectiveInput<'a> {
 
 fn apply_svelte_expression_directive(input: &mut SvelteExpressionDirectiveInput<'_>) -> bool {
     if let Some(expr) = input.tag.strip_prefix("@attach") {
-        apply_expression_tag(
-            expr,
-            input.imported_bindings,
-            input.bound_targets,
-            input.scopes,
-            input.usage,
-        );
+        apply_directive_expression(input, expr);
         return true;
     }
 
     if let Some(expr) = input.tag.strip_prefix("@html") {
-        if let Some(sink) =
-            crate::template_usage::template_html_sink(expr, input.tag_start, input.tag_end)
-        {
-            input.usage.security_sinks.push(sink);
-        }
-        merge_expression_usage_allow_dollar_refs_with_bound_targets(
-            input.usage,
-            expr.trim(),
-            input.imported_bindings,
-            input.bound_targets,
-            &current_locals(input.scopes),
-        );
+        apply_html_directive(input, expr);
         return true;
     }
 
     if let Some(expr) = input.tag.strip_prefix("@render") {
-        apply_expression_tag(
-            expr,
-            input.imported_bindings,
-            input.bound_targets,
-            input.scopes,
-            input.usage,
-        );
+        apply_directive_expression(input, expr);
         return true;
     }
 
@@ -417,24 +410,12 @@ fn apply_svelte_expression_directive(input: &mut SvelteExpressionDirectiveInput<
     }
 
     if let Some(expr) = input.tag.strip_prefix("@debug") {
-        apply_expression_tag(
-            expr,
-            input.imported_bindings,
-            input.bound_targets,
-            input.scopes,
-            input.usage,
-        );
+        apply_directive_expression(input, expr);
         return true;
     }
 
     if let Some(expr) = input.tag.strip_prefix(":else if") {
-        apply_expression_tag(
-            expr,
-            input.imported_bindings,
-            input.bound_targets,
-            input.scopes,
-            input.usage,
-        );
+        apply_directive_expression(input, expr);
         return true;
     }
 
@@ -443,6 +424,33 @@ fn apply_svelte_expression_directive(input: &mut SvelteExpressionDirectiveInput<
     }
 
     false
+}
+
+/// Merge a directive's expression operand into template usage.
+fn apply_directive_expression(input: &mut SvelteExpressionDirectiveInput<'_>, expr: &str) {
+    apply_expression_tag(
+        expr,
+        input.imported_bindings,
+        input.bound_targets,
+        input.scopes,
+        input.usage,
+    );
+}
+
+/// Record a `{@html expr}` security sink, then merge the expression usage.
+fn apply_html_directive(input: &mut SvelteExpressionDirectiveInput<'_>, expr: &str) {
+    if let Some(sink) =
+        crate::template_usage::template_html_sink(expr, input.tag_start, input.tag_end)
+    {
+        input.usage.security_sinks.push(sink);
+    }
+    merge_expression_usage_allow_dollar_refs_with_bound_targets(
+        input.usage,
+        expr.trim(),
+        input.imported_bindings,
+        input.bound_targets,
+        &current_locals(input.scopes),
+    );
 }
 
 fn apply_each_tag(
@@ -593,15 +601,41 @@ fn apply_markup_tag(
         merge_component_tag_usage(usage, &parsed.name, imported_bindings, &current, false);
     }
 
+    let element_locals = merge_markup_attr_usage(
+        &parsed.attrs,
+        imported_bindings,
+        bound_targets,
+        &current,
+        usage,
+    );
+
+    if !parsed.self_closing && !is_void_html_tag(&parsed.name) {
+        scopes.push(SvelteScopeFrame {
+            kind: SvelteBlockKind::Element,
+            locals: element_locals,
+        });
+    }
+}
+
+/// Merge usage from each markup attribute (directive bindings, shorthand
+/// expressions, attribute values), returning the `let:` locals the element scope
+/// introduces.
+fn merge_markup_attr_usage(
+    attrs: &[ParsedAttr],
+    imported_bindings: &FxHashSet<String>,
+    bound_targets: &FxHashMap<String, String>,
+    current: &[String],
+    usage: &mut TemplateUsage,
+) -> Vec<String> {
     let mut element_locals = Vec::new();
-    for attr in &parsed.attrs {
+    for attr in attrs {
         if let Some(binding) = directive_binding_name(&attr.name) {
             merge_expression_usage_allow_dollar_refs_with_bound_targets(
                 usage,
                 binding,
                 imported_bindings,
                 bound_targets,
-                &current,
+                current,
             );
         }
         if let Some(local) = attr.name.strip_prefix("let:")
@@ -615,20 +649,14 @@ fn apply_markup_tag(
                 expr,
                 imported_bindings,
                 bound_targets,
-                &current,
+                current,
             );
         }
         if let Some(value) = attr.value.as_deref() {
-            merge_attribute_value_usage(usage, value, imported_bindings, bound_targets, &current);
+            merge_attribute_value_usage(usage, value, imported_bindings, bound_targets, current);
         }
     }
-
-    if !parsed.self_closing && !is_void_html_tag(&parsed.name) {
-        scopes.push(SvelteScopeFrame {
-            kind: SvelteBlockKind::Element,
-            locals: element_locals,
-        });
-    }
+    element_locals
 }
 
 fn merge_markup_brace_usage(

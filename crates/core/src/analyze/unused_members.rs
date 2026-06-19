@@ -999,73 +999,21 @@ fn build_playwright_fixture_targets(
     for resolved in resolved_modules {
         let local_to_export_keys = build_local_to_export_keys(resolved);
         let local_playwright_test_names = collect_playwright_local_test_names(resolved);
-        for access in &resolved.member_accesses {
-            let Some((test_local_name, fixture_name)) = parse_playwright_fixture_sentinel(
-                access.object.as_str(),
-                PLAYWRIGHT_FIXTURE_DEF_SENTINEL,
-            ) else {
-                continue;
-            };
-            let test_keys = playwright_test_keys_for_local(
-                &local_to_export_keys,
-                &local_playwright_test_names,
-                resolved.file_id,
-                test_local_name,
-            );
-            let Some(target_keys) = local_to_export_keys.get(access.member.as_str()) else {
-                continue;
-            };
-
-            for test_key in test_keys {
-                let fixture_targets = targets_by_test.entry(test_key).or_default();
-                for target_key in target_keys {
-                    push_playwright_fixture_target(
-                        graph,
-                        &type_targets,
-                        fixture_targets,
-                        fixture_name,
-                        target_key,
-                    );
-                }
-            }
-        }
-
-        for access in &resolved.member_accesses {
-            let Some((test_local_name, _)) = parse_playwright_fixture_sentinel(
-                access.object.as_str(),
-                PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL,
-            ) else {
-                continue;
-            };
-            let test_keys = playwright_test_keys_for_local(
-                &local_to_export_keys,
-                &local_playwright_test_names,
-                resolved.file_id,
-                test_local_name,
-            );
-            let base_keys = playwright_test_keys_for_local(
-                &local_to_export_keys,
-                &local_playwright_test_names,
-                resolved.file_id,
-                access.member.as_str(),
-            );
-
-            for test_key in test_keys {
-                let aliases = aliases_by_test.entry(test_key).or_default();
-                for base_key in &base_keys {
-                    match base_key {
-                        PlaywrightTestKey::Export(export_key) => {
-                            for key in export_key_with_origins(graph, export_key) {
-                                push_playwright_test_key(aliases, PlaywrightTestKey::Export(key));
-                            }
-                        }
-                        PlaywrightTestKey::Local { .. } => {
-                            push_playwright_test_key(aliases, base_key.clone());
-                        }
-                    }
-                }
-            }
-        }
+        collect_playwright_fixture_def_targets(
+            graph,
+            resolved,
+            &local_to_export_keys,
+            &local_playwright_test_names,
+            &type_targets,
+            &mut targets_by_test,
+        );
+        collect_playwright_fixture_aliases(
+            graph,
+            resolved,
+            &local_to_export_keys,
+            &local_playwright_test_names,
+            &mut aliases_by_test,
+        );
     }
 
     expand_playwright_fixture_aliases(&mut targets_by_test, &aliases_by_test);
@@ -1076,6 +1024,95 @@ fn build_playwright_fixture_targets(
             PlaywrightTestKey::Local { .. } => None,
         })
         .collect()
+}
+
+/// Collect fixture-definition sentinels for one module, recording each fixture's
+/// POM-type export keys under its owning test key.
+fn collect_playwright_fixture_def_targets(
+    graph: &ModuleGraph,
+    resolved: &ResolvedModule,
+    local_to_export_keys: &FxHashMap<&str, Vec<ExportKey>>,
+    local_playwright_test_names: &FxHashSet<&str>,
+    type_targets: &FxHashMap<ExportKey, FxHashMap<String, Vec<ExportKey>>>,
+    targets_by_test: &mut FxHashMap<PlaywrightTestKey, FxHashMap<String, Vec<ExportKey>>>,
+) {
+    for access in &resolved.member_accesses {
+        let Some((test_local_name, fixture_name)) = parse_playwright_fixture_sentinel(
+            access.object.as_str(),
+            PLAYWRIGHT_FIXTURE_DEF_SENTINEL,
+        ) else {
+            continue;
+        };
+        let test_keys = playwright_test_keys_for_local(
+            local_to_export_keys,
+            local_playwright_test_names,
+            resolved.file_id,
+            test_local_name,
+        );
+        let Some(target_keys) = local_to_export_keys.get(access.member.as_str()) else {
+            continue;
+        };
+
+        for test_key in test_keys {
+            let fixture_targets = targets_by_test.entry(test_key).or_default();
+            for target_key in target_keys {
+                push_playwright_fixture_target(
+                    graph,
+                    type_targets,
+                    fixture_targets,
+                    fixture_name,
+                    target_key,
+                );
+            }
+        }
+    }
+}
+
+/// Collect wrapper-alias sentinels for one module, recording each alias's base
+/// test keys (origins expanded) under its owning test key.
+fn collect_playwright_fixture_aliases(
+    graph: &ModuleGraph,
+    resolved: &ResolvedModule,
+    local_to_export_keys: &FxHashMap<&str, Vec<ExportKey>>,
+    local_playwright_test_names: &FxHashSet<&str>,
+    aliases_by_test: &mut FxHashMap<PlaywrightTestKey, Vec<PlaywrightTestKey>>,
+) {
+    for access in &resolved.member_accesses {
+        let Some((test_local_name, _)) = parse_playwright_fixture_sentinel(
+            access.object.as_str(),
+            PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL,
+        ) else {
+            continue;
+        };
+        let test_keys = playwright_test_keys_for_local(
+            local_to_export_keys,
+            local_playwright_test_names,
+            resolved.file_id,
+            test_local_name,
+        );
+        let base_keys = playwright_test_keys_for_local(
+            local_to_export_keys,
+            local_playwright_test_names,
+            resolved.file_id,
+            access.member.as_str(),
+        );
+
+        for test_key in test_keys {
+            let aliases = aliases_by_test.entry(test_key).or_default();
+            for base_key in &base_keys {
+                match base_key {
+                    PlaywrightTestKey::Export(export_key) => {
+                        for key in export_key_with_origins(graph, export_key) {
+                            push_playwright_test_key(aliases, PlaywrightTestKey::Export(key));
+                        }
+                    }
+                    PlaywrightTestKey::Local { .. } => {
+                        push_playwright_test_key(aliases, base_key.clone());
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn expand_playwright_fixture_aliases(
@@ -1412,53 +1449,97 @@ fn propagate_accesses_through_typed_instance_bindings(
 
     for resolved in resolved_modules {
         let local_to_export_keys = build_local_to_export_keys(resolved);
-        for access in &resolved.member_accesses {
-            if access.object.starts_with(INSTANCE_EXPORT_SENTINEL)
-                || access.object.starts_with(FACTORY_CALL_SENTINEL)
-                || access.object.starts_with(FLUENT_CHAIN_SENTINEL)
-                || access.object.starts_with(FLUENT_CHAIN_NEW_SENTINEL)
-                || access.object.starts_with(PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL)
-                || access.object.starts_with(PLAYWRIGHT_FIXTURE_DEF_SENTINEL)
-                || access.object.starts_with(PLAYWRIGHT_FIXTURE_TYPE_SENTINEL)
-                || access.object.starts_with(PLAYWRIGHT_FIXTURE_USE_SENTINEL)
-                || access.object == ANGULAR_TPL_SENTINEL
-            {
-                continue;
-            }
+        propagate_typed_member_accesses(
+            graph,
+            resolved,
+            &typed_instance_targets,
+            &local_to_export_keys,
+            accessed_members,
+        );
+        propagate_typed_whole_object_uses(
+            graph,
+            resolved,
+            &typed_instance_targets,
+            &local_to_export_keys,
+            whole_object_used_exports,
+        );
+    }
+}
 
-            for target_key in resolve_typed_instance_chain_targets(
-                graph,
-                &typed_instance_targets,
-                &local_to_export_keys,
-                &access.object,
-            ) {
-                accessed_members
-                    .entry(target_key)
-                    .or_default()
-                    .insert(access.member.clone());
-            }
+/// Whether an access-object name is a synthetic sentinel (instance / factory /
+/// fluent-chain / Playwright-fixture / Angular-template), which the typed-instance
+/// chain resolver must skip because it is handled by a dedicated propagation pass.
+fn is_typed_instance_member_sentinel(object: &str) -> bool {
+    object.starts_with(INSTANCE_EXPORT_SENTINEL)
+        || object.starts_with(FACTORY_CALL_SENTINEL)
+        || object.starts_with(FLUENT_CHAIN_SENTINEL)
+        || object.starts_with(FLUENT_CHAIN_NEW_SENTINEL)
+        || object.starts_with(PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL)
+        || object.starts_with(PLAYWRIGHT_FIXTURE_DEF_SENTINEL)
+        || object.starts_with(PLAYWRIGHT_FIXTURE_TYPE_SENTINEL)
+        || object.starts_with(PLAYWRIGHT_FIXTURE_USE_SENTINEL)
+        || object == ANGULAR_TPL_SENTINEL
+}
+
+/// Whether a whole-object-use name is a synthetic sentinel the typed-instance
+/// chain resolver must skip (the fluent-chain sentinels never appear here).
+fn is_typed_instance_whole_object_sentinel(object: &str) -> bool {
+    object.starts_with(INSTANCE_EXPORT_SENTINEL)
+        || object.starts_with(FACTORY_CALL_SENTINEL)
+        || object.starts_with(PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL)
+        || object.starts_with(PLAYWRIGHT_FIXTURE_DEF_SENTINEL)
+        || object.starts_with(PLAYWRIGHT_FIXTURE_TYPE_SENTINEL)
+        || object.starts_with(PLAYWRIGHT_FIXTURE_USE_SENTINEL)
+        || object == ANGULAR_TPL_SENTINEL
+}
+
+/// Credit each non-sentinel member access in one module onto the typed-instance
+/// chain's target export keys.
+fn propagate_typed_member_accesses(
+    graph: &ModuleGraph,
+    resolved: &ResolvedModule,
+    typed_instance_targets: &FxHashMap<ExportKey, FxHashMap<String, Vec<ExportKey>>>,
+    local_to_export_keys: &FxHashMap<&str, Vec<ExportKey>>,
+    accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
+) {
+    for access in &resolved.member_accesses {
+        if is_typed_instance_member_sentinel(&access.object) {
+            continue;
         }
+        for target_key in resolve_typed_instance_chain_targets(
+            graph,
+            typed_instance_targets,
+            local_to_export_keys,
+            &access.object,
+        ) {
+            accessed_members
+                .entry(target_key)
+                .or_default()
+                .insert(access.member.clone());
+        }
+    }
+}
 
-        for object_name in &resolved.whole_object_uses {
-            if object_name.starts_with(INSTANCE_EXPORT_SENTINEL)
-                || object_name.starts_with(FACTORY_CALL_SENTINEL)
-                || object_name.starts_with(PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL)
-                || object_name.starts_with(PLAYWRIGHT_FIXTURE_DEF_SENTINEL)
-                || object_name.starts_with(PLAYWRIGHT_FIXTURE_TYPE_SENTINEL)
-                || object_name.starts_with(PLAYWRIGHT_FIXTURE_USE_SENTINEL)
-                || object_name == ANGULAR_TPL_SENTINEL
-            {
-                continue;
-            }
-
-            for target_key in resolve_typed_instance_chain_targets(
-                graph,
-                &typed_instance_targets,
-                &local_to_export_keys,
-                object_name,
-            ) {
-                whole_object_used_exports.insert(target_key);
-            }
+/// Mark each non-sentinel whole-object use in one module as whole-object-used on
+/// the typed-instance chain's target export keys.
+fn propagate_typed_whole_object_uses(
+    graph: &ModuleGraph,
+    resolved: &ResolvedModule,
+    typed_instance_targets: &FxHashMap<ExportKey, FxHashMap<String, Vec<ExportKey>>>,
+    local_to_export_keys: &FxHashMap<&str, Vec<ExportKey>>,
+    whole_object_used_exports: &mut FxHashSet<ExportKey>,
+) {
+    for object_name in &resolved.whole_object_uses {
+        if is_typed_instance_whole_object_sentinel(object_name) {
+            continue;
+        }
+        for target_key in resolve_typed_instance_chain_targets(
+            graph,
+            typed_instance_targets,
+            local_to_export_keys,
+            object_name,
+        ) {
+            whole_object_used_exports.insert(target_key);
         }
     }
 }
@@ -1957,15 +2038,7 @@ impl MemberReportContext<'_, '_> {
         store_only_scan: bool,
         buckets: &mut MemberScanBuckets,
     ) {
-        if should_skip_export_member_scan(self.input.graph, module, export) {
-            return;
-        }
-        if store_only_scan
-            && !export
-                .members
-                .iter()
-                .any(|m| m.kind == MemberKind::StoreMember)
-        {
+        if self.export_member_scan_skipped(module, export, store_only_scan) {
             return;
         }
 
@@ -1979,6 +2052,44 @@ impl MemberReportContext<'_, '_> {
             return;
         }
 
+        self.collect_export_members(
+            module,
+            export,
+            &export_name,
+            &export_key,
+            store_only_scan,
+            buckets,
+        );
+    }
+
+    /// Whether this export is skipped for member scanning: not member-scannable,
+    /// or a store-only (entry-point) scan with no store members.
+    fn export_member_scan_skipped(
+        &self,
+        module: &crate::graph::ModuleNode,
+        export: &crate::graph::ExportSymbol,
+        store_only_scan: bool,
+    ) -> bool {
+        if should_skip_export_member_scan(self.input.graph, module, export) {
+            return true;
+        }
+        store_only_scan
+            && !export
+                .members
+                .iter()
+                .any(|m| m.kind == MemberKind::StoreMember)
+    }
+
+    /// Build the shared per-export skip context and scan each declared member.
+    fn collect_export_members(
+        &self,
+        module: &crate::graph::ModuleNode,
+        export: &crate::graph::ExportSymbol,
+        export_name: &str,
+        export_key: &ExportKey,
+        store_only_scan: bool,
+        buckets: &mut MemberScanBuckets,
+    ) {
         let file_self_accesses = self.prepared.self_accessed_members.get(&module.file_id);
         let is_public_api_class_export = is_entry_point_public_class_export(
             self.input.graph,
@@ -1991,7 +2102,7 @@ impl MemberReportContext<'_, '_> {
             .prepared
             .heritage_context
             .class_heritage_by_export
-            .get(&export_key)
+            .get(export_key)
             .map_or((None, &[][..]), |(super_class, interfaces)| {
                 (super_class.as_deref(), interfaces.as_slice())
             });
@@ -2000,9 +2111,9 @@ impl MemberReportContext<'_, '_> {
             self.collect_member(
                 module,
                 member,
-                &export_name,
+                export_name,
                 &MemberSkipContext {
-                    export_key: &export_key,
+                    export_key,
                     accessed_members: &self.prepared.accessed_members,
                     file_self_accesses,
                     ignore_decorators: self.ignore_decorators,
@@ -2060,7 +2171,41 @@ fn push_unused_member(buckets: &mut MemberScanBuckets, unused: UnusedMember, kin
 fn prepare_member_scan(input: UnusedMemberScanInput<'_>) -> PreparedMemberScan<'_> {
     let heritage_context =
         build_member_heritage_context(input.graph, input.resolved_modules, input.modules);
+    let parent_to_children = build_parent_to_children(input.graph, input.resolved_modules);
 
+    let MemberAccessCollections {
+        accessed_members,
+        self_accessed_members,
+        whole_object_used_exports,
+    } = collect_propagated_member_accesses(input, &heritage_context, &parent_to_children);
+
+    let entry_star_targets =
+        entry_point_star_re_export_targets(input.graph, input.public_api_entry_points);
+
+    let error_subclass_keys = build_error_subclass_export_keys(
+        &parent_to_children,
+        &heritage_context.class_heritage_by_export,
+    );
+
+    PreparedMemberScan {
+        heritage_context,
+        accessed_members,
+        self_accessed_members,
+        whole_object_used_exports,
+        entry_star_targets,
+        error_subclass_keys,
+    }
+}
+
+/// Collect direct member accesses and run every access-propagation pass
+/// (fixtures, factory/fluent chains, typed instances, re-exports, instance
+/// exports, interfaces, Angular templates, class inheritance) into one populated
+/// `MemberAccessCollections`.
+fn collect_propagated_member_accesses(
+    input: UnusedMemberScanInput<'_>,
+    heritage_context: &MemberHeritageContext<'_>,
+    parent_to_children: &FxHashMap<ExportKey, Vec<ExportKey>>,
+) -> MemberAccessCollections {
     let MemberAccessCollections {
         mut accessed_members,
         mut self_accessed_members,
@@ -2099,34 +2244,21 @@ fn prepare_member_scan(input: UnusedMemberScanInput<'_>) -> PreparedMemberScan<'
     propagate_angular_template_member_accesses(
         input.graph,
         input.resolved_modules,
-        &heritage_context,
+        heritage_context,
         &mut accessed_members,
         &mut self_accessed_members,
     );
-
-    let parent_to_children = build_parent_to_children(input.graph, input.resolved_modules);
 
     propagate_class_inheritance(
-        &parent_to_children,
+        parent_to_children,
         &mut accessed_members,
         &mut self_accessed_members,
     );
 
-    let entry_star_targets =
-        entry_point_star_re_export_targets(input.graph, input.public_api_entry_points);
-
-    let error_subclass_keys = build_error_subclass_export_keys(
-        &parent_to_children,
-        &heritage_context.class_heritage_by_export,
-    );
-
-    PreparedMemberScan {
-        heritage_context,
+    MemberAccessCollections {
         accessed_members,
         self_accessed_members,
         whole_object_used_exports,
-        entry_star_targets,
-        error_subclass_keys,
     }
 }
 

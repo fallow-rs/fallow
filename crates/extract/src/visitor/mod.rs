@@ -442,6 +442,14 @@ impl ModuleInfoExtractor {
     }
 
     pub(crate) fn remap_spans_with(&mut self, mut remap: impl FnMut(Span) -> Span) {
+        self.remap_graph_spans(&mut remap);
+        self.remap_type_and_signature_spans(&mut remap);
+        self.remap_handled_spans(&mut remap);
+        self.remap_security_spans(&mut remap);
+    }
+
+    /// Remap import/export/re-export/dynamic-import/require graph spans.
+    fn remap_graph_spans(&mut self, remap: &mut impl FnMut(Span) -> Span) {
         for export in &mut self.exports {
             export.span = remap(export.span);
             for member in &mut export.members {
@@ -464,6 +472,11 @@ impl ModuleInfoExtractor {
         for require_call in &mut self.require_calls {
             require_call.span = remap(require_call.span);
         }
+    }
+
+    /// Remap type declarations, signature references, pending specifiers, and
+    /// local class member spans.
+    fn remap_type_and_signature_spans(&mut self, remap: &mut impl FnMut(Span) -> Span) {
         for declaration in &mut self.local_type_declarations {
             declaration.span = remap(declaration.span);
         }
@@ -481,6 +494,10 @@ impl ModuleInfoExtractor {
                 member.span = remap(member.span);
             }
         }
+    }
+
+    /// Remap the deduped handled-require / handled-import span sets.
+    fn remap_handled_spans(&mut self, remap: &mut impl FnMut(Span) -> Span) {
         self.handled_require_spans = self
             .handled_require_spans
             .iter()
@@ -491,6 +508,10 @@ impl ModuleInfoExtractor {
             .iter()
             .map(|span| remap(*span))
             .collect();
+    }
+
+    /// Remap inline-template, security sink, and security control site spans.
+    fn remap_security_spans(&mut self, remap: &mut impl FnMut(Span) -> Span) {
         for finding in &mut self.inline_template_findings {
             finding.decorator_start =
                 remap(Span::new(finding.decorator_start, finding.decorator_start)).start;
@@ -1016,16 +1037,9 @@ impl ModuleInfoExtractor {
         });
     }
 
-    pub(crate) fn into_module_info(
-        mut self,
-        file_id: fallow_types::discover::FileId,
-        content_hash: u64,
-        parsed: ParsedSuppressions,
-    ) -> ModuleInfo {
-        let ParsedSuppressions {
-            suppressions,
-            unknown_kinds,
-        } = parsed;
+    /// Run every finalize/resolve pass shared by `into_module_info` and
+    /// `merge_into`, returning the collected namespace object aliases.
+    fn finalize_resolution_phase(&mut self) -> Vec<fallow_types::extract::NamespaceObjectAlias> {
         self.resolve_typed_destructure_bindings();
         self.resolve_pending_local_export_specifiers();
         self.enrich_local_class_exports();
@@ -1039,7 +1053,20 @@ impl ModuleInfoExtractor {
         self.resolve_bound_member_accesses();
         self.map_local_signature_refs_to_exports();
         self.apply_side_effect_registrations();
-        let namespace_object_aliases = self.collect_namespace_object_aliases();
+        self.collect_namespace_object_aliases()
+    }
+
+    pub(crate) fn into_module_info(
+        mut self,
+        file_id: fallow_types::discover::FileId,
+        content_hash: u64,
+        parsed: ParsedSuppressions,
+    ) -> ModuleInfo {
+        let ParsedSuppressions {
+            suppressions,
+            unknown_kinds,
+        } = parsed;
+        let namespace_object_aliases = self.finalize_resolution_phase();
         ModuleInfo {
             file_id,
             exports: self.exports,
@@ -1123,20 +1150,7 @@ impl ModuleInfoExtractor {
              Angular content here, plumb inline_template_findings into the \
              merge step before relying on this assertion"
         );
-        self.resolve_typed_destructure_bindings();
-        self.resolve_pending_local_export_specifiers();
-        self.enrich_local_class_exports();
-        self.enrich_store_exports();
-        self.finalize_di_key_sites();
-        self.record_exported_instance_bindings();
-        self.resolve_object_binding_candidates();
-        self.resolve_factory_call_candidates();
-        self.resolve_playwright_factory_call_definitions();
-        self.resolve_structural_class_calls();
-        self.resolve_bound_member_accesses();
-        self.map_local_signature_refs_to_exports();
-        self.apply_side_effect_registrations();
-        let namespace_object_aliases = self.collect_namespace_object_aliases();
+        let namespace_object_aliases = self.finalize_resolution_phase();
         info.imports.extend(self.imports);
         info.exports.extend(self.exports);
         info.re_exports.extend(self.re_exports);
@@ -1347,63 +1361,67 @@ fn try_extract_import_then_callback(expr: &CallExpression<'_>) -> Option<ImportT
     let source = lit.value.to_string();
     let import_span = import_expr.span;
 
-    let first_arg = expr.arguments.first()?;
-
-    match first_arg {
-        Argument::ArrowFunctionExpression(arrow) => {
-            let param = arrow.params.items.first()?;
-            match &param.pattern {
-                BindingPattern::ObjectPattern(obj_pat) => Some(ImportThenCallback {
-                    source,
-                    import_span,
-                    destructured_names: extract_destructured_names(obj_pat),
-                    local_name: None,
-                }),
-                BindingPattern::BindingIdentifier(id) => {
-                    let param_name = id.name.to_string();
-
-                    if arrow.expression
-                        && let Some(Statement::ExpressionStatement(expr_stmt)) =
-                            arrow.body.statements.first()
-                        && let Some(names) =
-                            extract_member_names_from_expr(&expr_stmt.expression, &param_name)
-                    {
-                        return Some(ImportThenCallback {
-                            source,
-                            import_span,
-                            destructured_names: names,
-                            local_name: None,
-                        });
-                    }
-
-                    Some(ImportThenCallback {
-                        source,
-                        import_span,
-                        destructured_names: Vec::new(),
-                        local_name: Some(param_name),
-                    })
-                }
-                _ => None,
-            }
-        }
+    match expr.arguments.first()? {
+        Argument::ArrowFunctionExpression(arrow) => arrow_then_callback(arrow, source, import_span),
         Argument::FunctionExpression(func) => {
             let param = func.params.items.first()?;
-            match &param.pattern {
-                BindingPattern::ObjectPattern(obj_pat) => Some(ImportThenCallback {
-                    source,
-                    import_span,
-                    destructured_names: extract_destructured_names(obj_pat),
-                    local_name: None,
-                }),
-                BindingPattern::BindingIdentifier(id) => Some(ImportThenCallback {
-                    source,
-                    import_span,
-                    destructured_names: Vec::new(),
-                    local_name: Some(id.name.to_string()),
-                }),
-                _ => None,
-            }
+            then_callback_from_pattern(&param.pattern, source, import_span)
         }
+        _ => None,
+    }
+}
+
+/// Build an `ImportThenCallback` from a `.then()` arrow callback, handling the
+/// expression-body member-access shape before falling back to the bare param.
+fn arrow_then_callback(
+    arrow: &oxc_ast::ast::ArrowFunctionExpression<'_>,
+    source: String,
+    import_span: Span,
+) -> Option<ImportThenCallback> {
+    let param = arrow.params.items.first()?;
+    if let BindingPattern::BindingIdentifier(id) = &param.pattern {
+        let param_name = id.name.to_string();
+        if arrow.expression
+            && let Some(Statement::ExpressionStatement(expr_stmt)) = arrow.body.statements.first()
+            && let Some(names) = extract_member_names_from_expr(&expr_stmt.expression, &param_name)
+        {
+            return Some(ImportThenCallback {
+                source,
+                import_span,
+                destructured_names: names,
+                local_name: None,
+            });
+        }
+        return Some(ImportThenCallback {
+            source,
+            import_span,
+            destructured_names: Vec::new(),
+            local_name: Some(param_name),
+        });
+    }
+    then_callback_from_pattern(&param.pattern, source, import_span)
+}
+
+/// Build an `ImportThenCallback` from a callback param pattern: object pattern
+/// yields destructured names, a bare identifier yields a namespace local.
+fn then_callback_from_pattern(
+    pattern: &BindingPattern<'_>,
+    source: String,
+    import_span: Span,
+) -> Option<ImportThenCallback> {
+    match pattern {
+        BindingPattern::ObjectPattern(obj_pat) => Some(ImportThenCallback {
+            source,
+            import_span,
+            destructured_names: extract_destructured_names(obj_pat),
+            local_name: None,
+        }),
+        BindingPattern::BindingIdentifier(id) => Some(ImportThenCallback {
+            source,
+            import_span,
+            destructured_names: Vec::new(),
+            local_name: Some(id.name.to_string()),
+        }),
         _ => None,
     }
 }

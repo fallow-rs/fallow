@@ -470,6 +470,61 @@ pub fn discover_files(config: &ResolvedConfig) -> Vec<DiscoveredFile> {
     discover_files_with_additional_hidden_dirs(config, &[])
 }
 
+/// Build the file-type filter selecting only known source extensions.
+#[expect(
+    clippy::expect_used,
+    reason = "source file globs are hard-coded compile-time constants"
+)]
+fn build_source_types() -> ignore::types::Types {
+    let mut types_builder = ignore::types::TypesBuilder::new();
+    for ext in SOURCE_EXTENSIONS {
+        types_builder
+            .add("source", &format!("*.{ext}"))
+            .expect("valid glob");
+    }
+    types_builder.select("source");
+    types_builder.build().expect("valid types")
+}
+
+/// Construct the parallel walker, applying the appropriate hidden-dir filter.
+fn build_source_walk_builder(
+    config: &ResolvedConfig,
+    additional_hidden_dir_scopes: &[HiddenDirScope],
+) -> WalkBuilder {
+    let mut walk_builder = WalkBuilder::new(&config.root);
+    walk_builder
+        .hidden(false)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .types(build_source_types())
+        .threads(config.threads);
+    if additional_hidden_dir_scopes.is_empty() {
+        walk_builder.filter_entry(is_allowed_hidden);
+    } else {
+        let scopes = additional_hidden_dir_scopes.to_vec();
+        walk_builder.filter_entry(move |entry| is_allowed_hidden_with_scopes(entry, &scopes));
+    }
+    walk_builder
+}
+
+/// Compile the production-mode exclude glob set, or `None` outside production mode.
+fn build_production_excludes(config: &ResolvedConfig) -> Option<globset::GlobSet> {
+    if !config.production {
+        return None;
+    }
+    let mut builder = globset::GlobSetBuilder::new();
+    for pattern in PRODUCTION_EXCLUDE_PATTERNS {
+        if let Ok(glob) = globset::GlobBuilder::new(pattern)
+            .literal_separator(true)
+            .build()
+        {
+            builder.add(glob);
+        }
+    }
+    builder.build().ok()
+}
+
 /// Discover all source files in the project, with package-scoped hidden dirs.
 ///
 /// # Panics
@@ -479,54 +534,15 @@ pub fn discover_files(config: &ResolvedConfig) -> Vec<DiscoveredFile> {
     clippy::cast_possible_truncation,
     reason = "file count is bounded by project size, well under u32::MAX"
 )]
-#[expect(
-    clippy::expect_used,
-    reason = "source file globs are hard-coded and the collector lock must remain usable"
-)]
+#[expect(clippy::expect_used, reason = "the collector lock must remain usable")]
 pub fn discover_files_with_additional_hidden_dirs(
     config: &ResolvedConfig,
     additional_hidden_dir_scopes: &[HiddenDirScope],
 ) -> Vec<DiscoveredFile> {
     let _span = tracing::info_span!("discover_files").entered();
 
-    let mut types_builder = ignore::types::TypesBuilder::new();
-    for ext in SOURCE_EXTENSIONS {
-        types_builder
-            .add("source", &format!("*.{ext}"))
-            .expect("valid glob");
-    }
-    types_builder.select("source");
-    let types = types_builder.build().expect("valid types");
-
-    let mut walk_builder = WalkBuilder::new(&config.root);
-    walk_builder
-        .hidden(false)
-        .git_ignore(true)
-        .git_global(true)
-        .git_exclude(true)
-        .types(types)
-        .threads(config.threads);
-    if additional_hidden_dir_scopes.is_empty() {
-        walk_builder.filter_entry(is_allowed_hidden);
-    } else {
-        let scopes = additional_hidden_dir_scopes.to_vec();
-        walk_builder.filter_entry(move |entry| is_allowed_hidden_with_scopes(entry, &scopes));
-    }
-
-    let production_excludes = if config.production {
-        let mut builder = globset::GlobSetBuilder::new();
-        for pattern in PRODUCTION_EXCLUDE_PATTERNS {
-            if let Ok(glob) = globset::GlobBuilder::new(pattern)
-                .literal_separator(true)
-                .build()
-            {
-                builder.add(glob);
-            }
-        }
-        builder.build().ok()
-    } else {
-        None
-    };
+    let walk_builder = build_source_walk_builder(config, additional_hidden_dir_scopes);
+    let production_excludes = build_production_excludes(config);
 
     let collected: Mutex<Vec<(std::path::PathBuf, u64)>> = Mutex::new(Vec::new());
     let mut visitor_builder = FileVisitorBuilder {

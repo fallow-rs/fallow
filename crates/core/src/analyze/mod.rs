@@ -674,113 +674,24 @@ pub fn find_dead_code_full(
     let pkg = PackageJson::load(&pkg_path).ok();
     let public_api_entry_points =
         public_api_package_entry_points(graph, config, pkg.as_ref(), workspaces);
-
-    let iconify_referenced =
-        iconify::collect_iconify_referenced_deps(modules, pkg.as_ref(), workspaces);
-    let augmented_plugin_result;
-    let plugin_result = if iconify_referenced.is_empty() {
-        plugin_result
-    } else {
-        let mut owned = plugin_result.cloned().unwrap_or_default();
-        owned.referenced_dependencies.extend(iconify_referenced);
-        augmented_plugin_result = owned;
-        Some(&augmented_plugin_result)
-    };
-
-    let mut user_class_members = config.used_class_members.clone();
-    if let Some(plugin_result) = plugin_result {
-        user_class_members.extend(plugin_result.used_class_members.iter().cloned());
-    }
-
-    let virtual_prefixes: Vec<&str> = plugin_result
-        .map(|pr| {
-            pr.virtual_module_prefixes
-                .iter()
-                .map(String::as_str)
-                .collect()
-        })
-        .unwrap_or_default();
-    let generated_patterns: Vec<&str> = plugin_result
-        .map(|pr| {
-            pr.generated_import_patterns
-                .iter()
-                .map(String::as_str)
-                .collect()
-        })
-        .unwrap_or_default();
-    let generated_type_prefixes: Vec<&str> = plugin_result
-        .map(|pr| {
-            pr.generated_type_import_prefixes
-                .iter()
-                .map(String::as_str)
-                .collect()
-        })
-        .unwrap_or_default();
-
     let declared_deps = collect_declared_dependency_names(config, pkg.as_ref(), workspaces);
 
-    let mut results = run_parallel_dead_code_detectors(DeadCodeDetectorInput {
+    let mut results = run_setup_and_detect(&SetupAndDetectInput {
         graph,
         config,
         resolved_modules,
+        plugin_result,
         workspaces,
         modules,
         suppressions: &suppressions,
         line_offsets_by_file: &line_offsets_by_file,
-        plugin_result,
         pkg: pkg.as_ref(),
-        user_class_members: &user_class_members,
         public_api_entry_points: &public_api_entry_points,
-        virtual_prefixes: &virtual_prefixes,
-        generated_patterns: &generated_patterns,
-        generated_type_prefixes: &generated_type_prefixes,
         declared_deps: &declared_deps,
         collect_usages,
     });
 
-    filter_public_workspace_results(config, workspaces, &mut results);
-
-    // Reclassify the server-action subset of unused exports BEFORE stale
-    // detection so a `// fallow-ignore-next-line unused-server-action` marker is
-    // recorded as consumed. Gate-off keeps the findings as plain unused-exports.
-    if config.rules.unused_server_actions != Severity::Off {
-        reclassify_unused_server_actions(
-            graph,
-            modules,
-            &declared_deps,
-            &suppressions,
-            &mut results,
-        );
-    }
-
-    let request_receivers = config
-        .security
-        .request_receivers
-        .iter()
-        .cloned()
-        .collect::<FxHashSet<_>>();
-
-    populate_security_findings(
-        &SecurityDetectionContext {
-            graph,
-            modules,
-            config,
-            suppressions: &suppressions,
-            line_offsets_by_file: &line_offsets_by_file,
-            declared_deps: &declared_deps,
-            request_receivers: &request_receivers,
-        },
-        &mut results,
-    );
-
-    // Framework-convention detectors run BEFORE stale-suppression detection so
-    // any inline suppression they consume (e.g. a `// fallow-ignore-next-line
-    // unused-component-prop` honored by the prop/emit/component detectors) is
-    // recorded consumed and not falsely reported stale. These detectors gate on
-    // their own rule severity and dep presence, so they are no-ops when inactive.
-    populate_pnpm_catalog_findings(config, workspaces, &mut results);
-    populate_pnpm_override_findings(config, workspaces, &mut results);
-    populate_framework_specific_findings(&mut FrameworkSpecificFindingsInput {
+    populate_post_detection_findings(&mut PostDetectionInput {
         graph,
         modules,
         resolved_modules,
@@ -793,22 +704,205 @@ pub fn find_dead_code_full(
         results: &mut results,
     });
 
-    if config.rules.stale_suppressions != Severity::Off {
-        results
-            .stale_suppressions
-            .extend(suppressions.find_stale(graph, config));
-    }
-    if config.rules.require_suppression_reason != Severity::Off {
-        results
-            .stale_suppressions
-            .extend(suppressions.find_missing_reasons(graph));
-    }
-    results.suppression_count = suppressions.used_count();
-    results.active_suppressions = suppressions.all_suppressions(graph);
-
     results.sort();
 
     results
+}
+
+/// Inputs to the dead-code setup-and-detect phase: the pre-run-shared context
+/// plus the raw plugin result the iconify augmentation may extend.
+struct SetupAndDetectInput<'a, 'm> {
+    graph: &'a ModuleGraph,
+    config: &'a ResolvedConfig,
+    resolved_modules: &'a [ResolvedModule],
+    plugin_result: Option<&'a crate::plugins::AggregatedPluginResult>,
+    workspaces: &'a [fallow_config::WorkspaceInfo],
+    modules: &'a [ModuleInfo],
+    suppressions: &'a SuppressionContext<'m>,
+    line_offsets_by_file: &'a LineOffsetsMap<'m>,
+    pkg: Option<&'a PackageJson>,
+    public_api_entry_points: &'a FxHashSet<FileId>,
+    declared_deps: &'a FxHashSet<String>,
+    collect_usages: bool,
+}
+
+/// Build the iconify-augmented plugin result, derive plugin-backed slices and
+/// the user class-member set, then run the parallel dead-code detectors.
+/// Extracted from `find_dead_code_full` to keep that orchestrator's body as
+/// setup -> detect -> populate.
+fn run_setup_and_detect(input: &SetupAndDetectInput<'_, '_>) -> AnalysisResults {
+    let iconify_referenced =
+        iconify::collect_iconify_referenced_deps(input.modules, input.pkg, input.workspaces);
+    let augmented_plugin_result;
+    let plugin_result = if iconify_referenced.is_empty() {
+        input.plugin_result
+    } else {
+        let mut owned = input.plugin_result.cloned().unwrap_or_default();
+        owned.referenced_dependencies.extend(iconify_referenced);
+        augmented_plugin_result = owned;
+        Some(&augmented_plugin_result)
+    };
+
+    let mut user_class_members = input.config.used_class_members.clone();
+    if let Some(plugin_result) = plugin_result {
+        user_class_members.extend(plugin_result.used_class_members.iter().cloned());
+    }
+
+    let (virtual_prefixes, generated_patterns, generated_type_prefixes) =
+        derive_plugin_string_slices(plugin_result);
+
+    run_parallel_dead_code_detectors(DeadCodeDetectorInput {
+        graph: input.graph,
+        config: input.config,
+        resolved_modules: input.resolved_modules,
+        workspaces: input.workspaces,
+        modules: input.modules,
+        suppressions: input.suppressions,
+        line_offsets_by_file: input.line_offsets_by_file,
+        plugin_result,
+        pkg: input.pkg,
+        user_class_members: &user_class_members,
+        public_api_entry_points: input.public_api_entry_points,
+        virtual_prefixes: &virtual_prefixes,
+        generated_patterns: &generated_patterns,
+        generated_type_prefixes: &generated_type_prefixes,
+        declared_deps: input.declared_deps,
+        collect_usages: input.collect_usages,
+    })
+}
+
+/// Derive the borrowed plugin string slices (virtual module prefixes, generated
+/// import patterns, generated type-import prefixes) consumed by the detectors.
+fn derive_plugin_string_slices(
+    plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
+) -> (Vec<&str>, Vec<&str>, Vec<&str>) {
+    let virtual_prefixes = plugin_result
+        .map(|pr| {
+            pr.virtual_module_prefixes
+                .iter()
+                .map(String::as_str)
+                .collect()
+        })
+        .unwrap_or_default();
+    let generated_patterns = plugin_result
+        .map(|pr| {
+            pr.generated_import_patterns
+                .iter()
+                .map(String::as_str)
+                .collect()
+        })
+        .unwrap_or_default();
+    let generated_type_prefixes = plugin_result
+        .map(|pr| {
+            pr.generated_type_import_prefixes
+                .iter()
+                .map(String::as_str)
+                .collect()
+        })
+        .unwrap_or_default();
+    (
+        virtual_prefixes,
+        generated_patterns,
+        generated_type_prefixes,
+    )
+}
+
+/// Shared context for the post-detector populate sequence in
+/// `find_dead_code_full`.
+struct PostDetectionInput<'a, 'm> {
+    graph: &'a ModuleGraph,
+    modules: &'a [ModuleInfo],
+    resolved_modules: &'a [ResolvedModule],
+    config: &'a ResolvedConfig,
+    workspaces: &'a [fallow_config::WorkspaceInfo],
+    declared_deps: &'a FxHashSet<String>,
+    public_api_entry_points: &'a FxHashSet<FileId>,
+    suppressions: &'a SuppressionContext<'m>,
+    line_offsets_by_file: &'a LineOffsetsMap<'m>,
+    results: &'a mut AnalysisResults,
+}
+
+/// Run the post-detector populate/reclassify phases: server-action
+/// reclassification, security, catalog/override, framework-convention findings,
+/// and stale-suppression accounting. Extracted from `find_dead_code_full` so
+/// that orchestrator reads as setup -> detect -> populate.
+fn populate_post_detection_findings(input: &mut PostDetectionInput<'_, '_>) {
+    filter_public_workspace_results(input.config, input.workspaces, input.results);
+
+    // Reclassify the server-action subset of unused exports BEFORE stale
+    // detection so a `// fallow-ignore-next-line unused-server-action` marker is
+    // recorded as consumed. Gate-off keeps the findings as plain unused-exports.
+    if input.config.rules.unused_server_actions != Severity::Off {
+        reclassify_unused_server_actions(
+            input.graph,
+            input.modules,
+            input.declared_deps,
+            input.suppressions,
+            input.results,
+        );
+    }
+
+    let request_receivers = input
+        .config
+        .security
+        .request_receivers
+        .iter()
+        .cloned()
+        .collect::<FxHashSet<_>>();
+
+    populate_security_findings(
+        &SecurityDetectionContext {
+            graph: input.graph,
+            modules: input.modules,
+            config: input.config,
+            suppressions: input.suppressions,
+            line_offsets_by_file: input.line_offsets_by_file,
+            declared_deps: input.declared_deps,
+            request_receivers: &request_receivers,
+        },
+        input.results,
+    );
+
+    // Framework-convention detectors run BEFORE stale-suppression detection so
+    // any inline suppression they consume (e.g. a `// fallow-ignore-next-line
+    // unused-component-prop` honored by the prop/emit/component detectors) is
+    // recorded consumed and not falsely reported stale. These detectors gate on
+    // their own rule severity and dep presence, so they are no-ops when inactive.
+    populate_pnpm_catalog_findings(input.config, input.workspaces, input.results);
+    populate_pnpm_override_findings(input.config, input.workspaces, input.results);
+    populate_framework_specific_findings(&mut FrameworkSpecificFindingsInput {
+        graph: input.graph,
+        modules: input.modules,
+        resolved_modules: input.resolved_modules,
+        config: input.config,
+        workspaces: input.workspaces,
+        declared_deps: input.declared_deps,
+        public_api_entry_points: input.public_api_entry_points,
+        suppressions: input.suppressions,
+        line_offsets_by_file: input.line_offsets_by_file,
+        results: input.results,
+    });
+
+    populate_stale_suppression_findings(input);
+}
+
+/// Append stale-suppression and missing-reason findings, then record the
+/// suppression accounting metadata onto the results.
+fn populate_stale_suppression_findings(input: &mut PostDetectionInput<'_, '_>) {
+    if input.config.rules.stale_suppressions != Severity::Off {
+        input
+            .results
+            .stale_suppressions
+            .extend(input.suppressions.find_stale(input.graph, input.config));
+    }
+    if input.config.rules.require_suppression_reason != Severity::Off {
+        input
+            .results
+            .stale_suppressions
+            .extend(input.suppressions.find_missing_reasons(input.graph));
+    }
+    input.results.suppression_count = input.suppressions.used_count();
+    input.results.active_suppressions = input.suppressions.all_suppressions(input.graph);
 }
 
 /// Run the framework-convention detectors that share the resolved-graph and
@@ -2153,46 +2247,13 @@ struct DependencyDetectorInput<'a> {
     line_offsets_by_file: &'a LineOffsetsMap<'a>,
 }
 
-#[expect(
-    deprecated,
-    reason = "ADR-008 deprecates detector helpers for external callers; core orchestration still calls them internally"
-)]
 fn run_dependency_detectors(input: DependencyDetectorInput<'_>) -> AnalysisResults {
     let mut results = AnalysisResults::default();
     let Some(pkg) = input.pkg else {
         return results;
     };
 
-    if input.config.rules.unused_dependencies != Severity::Off
-        || input.config.rules.unused_dev_dependencies != Severity::Off
-        || input.config.rules.unused_optional_dependencies != Severity::Off
-    {
-        let (deps, dev_deps, optional_deps) = find_unused_dependencies(
-            input.graph,
-            pkg,
-            input.config,
-            input.plugin_result,
-            input.workspaces,
-        );
-        if input.config.rules.unused_dependencies != Severity::Off {
-            results.unused_dependencies = deps
-                .into_iter()
-                .map(UnusedDependencyFinding::with_actions)
-                .collect();
-        }
-        if input.config.rules.unused_dev_dependencies != Severity::Off {
-            results.unused_dev_dependencies = dev_deps
-                .into_iter()
-                .map(UnusedDevDependencyFinding::with_actions)
-                .collect();
-        }
-        if input.config.rules.unused_optional_dependencies != Severity::Off {
-            results.unused_optional_dependencies = optional_deps
-                .into_iter()
-                .map(UnusedOptionalDependencyFinding::with_actions)
-                .collect();
-        }
-    }
+    populate_unused_dependency_findings(input, pkg, &mut results);
 
     if input.config.rules.unlisted_dependencies != Severity::Off {
         results.unlisted_dependencies = find_unlisted_dependencies(
@@ -2225,6 +2286,52 @@ fn run_dependency_detectors(input: DependencyDetectorInput<'_>) -> AnalysisResul
                 .collect();
     }
     results
+}
+
+/// Populate the unused-dependency family (prod / dev / optional) on `results`,
+/// each gated on its own rule severity. The three collections share one
+/// `find_unused_dependencies` computation, so they are populated together.
+#[expect(
+    deprecated,
+    reason = "ADR-008 deprecates detector helpers for external callers; core orchestration still calls them internally"
+)]
+fn populate_unused_dependency_findings(
+    input: DependencyDetectorInput<'_>,
+    pkg: &PackageJson,
+    results: &mut AnalysisResults,
+) {
+    if input.config.rules.unused_dependencies == Severity::Off
+        && input.config.rules.unused_dev_dependencies == Severity::Off
+        && input.config.rules.unused_optional_dependencies == Severity::Off
+    {
+        return;
+    }
+
+    let (deps, dev_deps, optional_deps) = find_unused_dependencies(
+        input.graph,
+        pkg,
+        input.config,
+        input.plugin_result,
+        input.workspaces,
+    );
+    if input.config.rules.unused_dependencies != Severity::Off {
+        results.unused_dependencies = deps
+            .into_iter()
+            .map(UnusedDependencyFinding::with_actions)
+            .collect();
+    }
+    if input.config.rules.unused_dev_dependencies != Severity::Off {
+        results.unused_dev_dependencies = dev_deps
+            .into_iter()
+            .map(UnusedDevDependencyFinding::with_actions)
+            .collect();
+    }
+    if input.config.rules.unused_optional_dependencies != Severity::Off {
+        results.unused_optional_dependencies = optional_deps
+            .into_iter()
+            .map(UnusedOptionalDependencyFinding::with_actions)
+            .collect();
+    }
 }
 
 #[derive(Clone, Copy)]

@@ -37,114 +37,154 @@ const ANGULAR_SIGNAL_APIS: &[&str] = &[
 
 pub fn extract_angular_component_metadata(class: &Class<'_>) -> Option<AngularComponentMetadata> {
     for decorator in &class.decorators {
-        let Expression::CallExpression(call) = &decorator.expression else {
-            continue;
-        };
-        let Expression::Identifier(id) = &call.callee else {
-            continue;
-        };
-        if !matches!(id.name.as_str(), "Component" | "Directive") {
-            continue;
-        }
-        let is_component = id.name.as_str() == "Component";
-        let Some(Argument::ObjectExpression(obj)) = call.arguments.first() else {
-            continue;
-        };
-
-        let mut template_url = None;
-        let mut style_urls = Vec::new();
-        let mut inline_template = None;
-        let mut inline_template_offset = None;
-        let mut host_member_refs = Vec::new();
-        let mut input_output_members = Vec::new();
-        let mut selector = None;
-
-        for prop in &obj.properties {
-            let ObjectPropertyKind::ObjectProperty(p) = prop else {
-                continue;
-            };
-            let Some(key_name) = p.key.static_name() else {
-                continue;
-            };
-            match key_name.as_ref() {
-                "selector" if is_component => {
-                    if let Expression::StringLiteral(lit) = &p.value {
-                        selector = Some(lit.value.to_string());
-                    }
-                }
-                "templateUrl" => {
-                    if let Expression::StringLiteral(lit) = &p.value {
-                        template_url = Some(lit.value.to_string());
-                    }
-                }
-                "template" => {
-                    if let Expression::StringLiteral(lit) = &p.value {
-                        inline_template = Some(lit.value.to_string());
-                        inline_template_offset = Some(lit.span.start.saturating_add(1));
-                    } else if let Expression::TemplateLiteral(tpl) = &p.value
-                        && tpl.expressions.is_empty()
-                        && let Some(quasi) = tpl.quasis.first()
-                    {
-                        let source = quasi
-                            .value
-                            .cooked
-                            .as_ref()
-                            .map_or_else(|| quasi.value.raw.as_str(), |c| c.as_str())
-                            .to_string();
-                        inline_template = Some(source);
-                        inline_template_offset = Some(p.value.span().start.saturating_add(1));
-                    }
-                }
-                "styleUrl" => {
-                    if let Expression::StringLiteral(lit) = &p.value {
-                        style_urls.push(lit.value.to_string());
-                    }
-                }
-                "styleUrls" => {
-                    if let Expression::ArrayExpression(arr) = &p.value {
-                        for elem in &arr.elements {
-                            if let ArrayExpressionElement::StringLiteral(lit) = elem {
-                                style_urls.push(lit.value.to_string());
-                            }
-                        }
-                    }
-                }
-                "host" => {
-                    if let Expression::ObjectExpression(host_obj) = &p.value {
-                        extract_host_member_refs(host_obj, &mut host_member_refs);
-                    }
-                }
-                "inputs" | "outputs" => {
-                    extract_input_output_members(&p.value, &mut input_output_members);
-                }
-                "queries" => {
-                    extract_query_members(&p.value, &mut input_output_members);
-                }
-                _ => {}
-            }
-        }
-
-        let has_data = template_url.is_some()
-            || !style_urls.is_empty()
-            || inline_template.is_some()
-            || !host_member_refs.is_empty()
-            || !input_output_members.is_empty()
-            || selector.is_some();
-
-        if has_data {
-            return Some(AngularComponentMetadata {
-                template_url,
-                style_urls,
-                inline_template,
-                inline_template_offset,
-                decorator_span: decorator.span(),
-                host_member_refs,
-                input_output_members,
-                selector,
-            });
+        if let Some(metadata) = extract_decorator_metadata(decorator) {
+            return Some(metadata);
         }
     }
     None
+}
+
+/// Mutable accumulator for `@Component` / `@Directive` decorator metadata while
+/// its object properties are walked.
+#[derive(Default)]
+struct AngularMetadataAccumulator {
+    template_url: Option<String>,
+    style_urls: Vec<String>,
+    inline_template: Option<String>,
+    inline_template_offset: Option<u32>,
+    host_member_refs: Vec<String>,
+    input_output_members: Vec<String>,
+    selector: Option<String>,
+}
+
+impl AngularMetadataAccumulator {
+    /// True when at least one metadata field was populated.
+    fn has_data(&self) -> bool {
+        self.template_url.is_some()
+            || !self.style_urls.is_empty()
+            || self.inline_template.is_some()
+            || !self.host_member_refs.is_empty()
+            || !self.input_output_members.is_empty()
+            || self.selector.is_some()
+    }
+
+    /// Build the public metadata struct, anchoring it at the decorator span.
+    fn into_metadata(self, decorator_span: Span) -> AngularComponentMetadata {
+        AngularComponentMetadata {
+            template_url: self.template_url,
+            style_urls: self.style_urls,
+            inline_template: self.inline_template,
+            inline_template_offset: self.inline_template_offset,
+            decorator_span,
+            host_member_refs: self.host_member_refs,
+            input_output_members: self.input_output_members,
+            selector: self.selector,
+        }
+    }
+}
+
+/// Extract Angular metadata from a single decorator, or `None` if it is not a
+/// data-bearing `@Component` / `@Directive` decorator.
+fn extract_decorator_metadata(
+    decorator: &oxc_ast::ast::Decorator<'_>,
+) -> Option<AngularComponentMetadata> {
+    let Expression::CallExpression(call) = &decorator.expression else {
+        return None;
+    };
+    let Expression::Identifier(id) = &call.callee else {
+        return None;
+    };
+    if !matches!(id.name.as_str(), "Component" | "Directive") {
+        return None;
+    }
+    let is_component = id.name.as_str() == "Component";
+    let Some(Argument::ObjectExpression(obj)) = call.arguments.first() else {
+        return None;
+    };
+
+    let mut acc = AngularMetadataAccumulator::default();
+    for prop in &obj.properties {
+        let ObjectPropertyKind::ObjectProperty(p) = prop else {
+            continue;
+        };
+        let Some(key_name) = p.key.static_name() else {
+            continue;
+        };
+        apply_decorator_property(&mut acc, key_name.as_ref(), p, is_component);
+    }
+
+    acc.has_data().then(|| acc.into_metadata(decorator.span()))
+}
+
+/// Apply one `@Component` / `@Directive` object property to the accumulator.
+fn apply_decorator_property(
+    acc: &mut AngularMetadataAccumulator,
+    key_name: &str,
+    p: &oxc_ast::ast::ObjectProperty<'_>,
+    is_component: bool,
+) {
+    match key_name {
+        "selector" if is_component => {
+            if let Expression::StringLiteral(lit) = &p.value {
+                acc.selector = Some(lit.value.to_string());
+            }
+        }
+        "templateUrl" => {
+            if let Expression::StringLiteral(lit) = &p.value {
+                acc.template_url = Some(lit.value.to_string());
+            }
+        }
+        "template" => apply_inline_template(acc, p),
+        "styleUrl" => {
+            if let Expression::StringLiteral(lit) = &p.value {
+                acc.style_urls.push(lit.value.to_string());
+            }
+        }
+        "styleUrls" => {
+            if let Expression::ArrayExpression(arr) = &p.value {
+                for elem in &arr.elements {
+                    if let ArrayExpressionElement::StringLiteral(lit) = elem {
+                        acc.style_urls.push(lit.value.to_string());
+                    }
+                }
+            }
+        }
+        "host" => {
+            if let Expression::ObjectExpression(host_obj) = &p.value {
+                extract_host_member_refs(host_obj, &mut acc.host_member_refs);
+            }
+        }
+        "inputs" | "outputs" => {
+            extract_input_output_members(&p.value, &mut acc.input_output_members);
+        }
+        "queries" => {
+            extract_query_members(&p.value, &mut acc.input_output_members);
+        }
+        _ => {}
+    }
+}
+
+/// Capture an inline `template:` string or expressionless template literal.
+fn apply_inline_template(
+    acc: &mut AngularMetadataAccumulator,
+    p: &oxc_ast::ast::ObjectProperty<'_>,
+) {
+    if let Expression::StringLiteral(lit) = &p.value {
+        acc.inline_template = Some(lit.value.to_string());
+        acc.inline_template_offset = Some(lit.span.start.saturating_add(1));
+    } else if let Expression::TemplateLiteral(tpl) = &p.value
+        && tpl.expressions.is_empty()
+        && let Some(quasi) = tpl.quasis.first()
+    {
+        let source = quasi
+            .value
+            .cooked
+            .as_ref()
+            .map_or_else(|| quasi.value.raw.as_str(), |c| c.as_str())
+            .to_string();
+        acc.inline_template = Some(source);
+        acc.inline_template_offset = Some(p.value.span().start.saturating_add(1));
+    }
 }
 
 fn extract_host_member_refs(host_obj: &oxc_ast::ast::ObjectExpression<'_>, refs: &mut Vec<String>) {
@@ -486,71 +526,89 @@ pub fn extract_class_members(class: &Class<'_>, is_angular_class: bool) -> Vec<M
     for element in &class.body.body {
         match element {
             ClassElement::MethodDefinition(method) => {
-                if let Some(name) = method.key.static_name() {
-                    let name_str = name.to_string();
-                    if name_str != "constructor"
-                        && !matches!(
-                            method.accessibility,
-                            Some(
-                                TSAccessibility::Private | oxc_ast::ast::TSAccessibility::Protected
-                            )
-                        )
-                    {
-                        let is_instance_returning_static = method.r#static
-                            && is_instance_returning_static_method(method, class_name);
-                        let is_self_returning = !method.r#static
-                            && is_self_returning_instance_method(method, class_name);
-                        let decorator_names = method
-                            .decorators
-                            .iter()
-                            .map(|d| decorator_path(&d.expression))
-                            .collect();
-                        members.push(MemberInfo {
-                            name: name_str,
-                            kind: MemberKind::ClassMethod,
-                            span: method.span,
-                            has_decorator: !method.decorators.is_empty(),
-                            decorator_names,
-                            is_instance_returning_static,
-                            is_self_returning,
-                        });
-                    }
+                if let Some(member) = build_method_member(method, class_name) {
+                    members.push(member);
                 }
             }
             ClassElement::PropertyDefinition(prop) => {
-                if let Some(name) = prop.key.static_name()
-                    && !prop.declare
-                    && !matches!(
-                        prop.accessibility,
-                        Some(TSAccessibility::Private | oxc_ast::ast::TSAccessibility::Protected)
-                    )
-                {
-                    let has_decorator = !prop.decorators.is_empty()
-                        || (is_angular_class
-                            && prop
-                                .value
-                                .as_ref()
-                                .is_some_and(is_angular_signal_initializer));
-                    let decorator_names = prop
-                        .decorators
-                        .iter()
-                        .map(|d| decorator_path(&d.expression))
-                        .collect();
-                    members.push(MemberInfo {
-                        name: name.to_string(),
-                        kind: MemberKind::ClassProperty,
-                        span: prop.span,
-                        has_decorator,
-                        decorator_names,
-                        is_instance_returning_static: false,
-                        is_self_returning: false,
-                    });
+                if let Some(member) = build_property_member(prop, is_angular_class) {
+                    members.push(member);
                 }
             }
             _ => {}
         }
     }
     members
+}
+
+/// Build a `MemberInfo` for a non-constructor, non-private/protected method.
+fn build_method_member(
+    method: &oxc_ast::ast::MethodDefinition<'_>,
+    class_name: Option<&str>,
+) -> Option<MemberInfo> {
+    let name_str = method.key.static_name()?.to_string();
+    if name_str == "constructor"
+        || matches!(
+            method.accessibility,
+            Some(TSAccessibility::Private | oxc_ast::ast::TSAccessibility::Protected)
+        )
+    {
+        return None;
+    }
+    let is_instance_returning_static =
+        method.r#static && is_instance_returning_static_method(method, class_name);
+    let is_self_returning =
+        !method.r#static && is_self_returning_instance_method(method, class_name);
+    let decorator_names = method
+        .decorators
+        .iter()
+        .map(|d| decorator_path(&d.expression))
+        .collect();
+    Some(MemberInfo {
+        name: name_str,
+        kind: MemberKind::ClassMethod,
+        span: method.span,
+        has_decorator: !method.decorators.is_empty(),
+        decorator_names,
+        is_instance_returning_static,
+        is_self_returning,
+    })
+}
+
+/// Build a `MemberInfo` for a non-`declare`, non-private/protected property.
+fn build_property_member(
+    prop: &oxc_ast::ast::PropertyDefinition<'_>,
+    is_angular_class: bool,
+) -> Option<MemberInfo> {
+    let name = prop.key.static_name()?;
+    if prop.declare
+        || matches!(
+            prop.accessibility,
+            Some(TSAccessibility::Private | oxc_ast::ast::TSAccessibility::Protected)
+        )
+    {
+        return None;
+    }
+    let has_decorator = !prop.decorators.is_empty()
+        || (is_angular_class
+            && prop
+                .value
+                .as_ref()
+                .is_some_and(is_angular_signal_initializer));
+    let decorator_names = prop
+        .decorators
+        .iter()
+        .map(|d| decorator_path(&d.expression))
+        .collect();
+    Some(MemberInfo {
+        name: name.to_string(),
+        kind: MemberKind::ClassProperty,
+        span: prop.span,
+        has_decorator,
+        decorator_names,
+        is_instance_returning_static: false,
+        is_self_returning: false,
+    })
 }
 
 /// Harvest declared Angular component/directive inputs and outputs from a class.
@@ -843,79 +901,109 @@ where
         match element {
             ClassElement::MethodDefinition(method) => {
                 if matches!(method.kind, MethodDefinitionKind::Constructor) {
-                    for param in &method.value.params.items {
-                        let Some(accessibility) = param.accessibility else {
-                            continue;
-                        };
-                        if matches!(accessibility, TSAccessibility::Private) {
-                            continue;
-                        }
-                        let BindingPattern::BindingIdentifier(id) = &param.pattern else {
-                            continue;
-                        };
-                        let Some(type_annotation) = param.type_annotation.as_deref() else {
-                            continue;
-                        };
-                        let Some(type_name) = extract_type_annotation_name(type_annotation) else {
-                            continue;
-                        };
-                        let Some(resolved) = resolve(type_name) else {
-                            continue;
-                        };
-                        bindings.push((id.name.to_string(), resolved));
-                    }
+                    collect_constructor_param_bindings(method, &resolve, &mut bindings);
                 } else if matches!(method.kind, MethodDefinitionKind::Get) {
-                    if matches!(method.accessibility, Some(TSAccessibility::Private)) {
-                        continue;
-                    }
-                    let Some(name) = method.key.static_name() else {
-                        continue;
-                    };
-                    let Some(type_annotation) = method.value.return_type.as_deref() else {
-                        continue;
-                    };
-                    let Some(type_name) = extract_type_annotation_name(type_annotation) else {
-                        continue;
-                    };
-                    let Some(resolved) = resolve(type_name) else {
-                        continue;
-                    };
-                    bindings.push((name.to_string(), resolved));
+                    collect_getter_binding(method, &resolve, &mut bindings);
                 }
             }
             ClassElement::PropertyDefinition(prop) => {
-                if matches!(prop.accessibility, Some(TSAccessibility::Private)) {
-                    continue;
-                }
-                let Some(name) = prop.key.static_name() else {
-                    continue;
-                };
-                if let Some(type_annotation) = prop.type_annotation.as_deref()
-                    && let Some(type_name) = extract_type_annotation_name(type_annotation)
-                {
-                    if let Some(resolved) = resolve(type_name) {
-                        bindings.push((name.to_string(), resolved));
-                    }
-                    continue;
-                }
-                if let Some(Expression::NewExpression(new_expr)) = &prop.value
-                    && let Expression::Identifier(callee) = &new_expr.callee
-                    && !is_builtin_constructor(callee.name.as_str())
-                {
-                    bindings.push((name.to_string(), callee.name.to_string()));
-                    continue;
-                }
-                if let Some(Expression::CallExpression(call)) = &prop.value
-                    && let Some(type_name) =
-                        extract_angular_inject_target(call, &is_named_import_from)
-                {
-                    bindings.push((name.to_string(), type_name));
-                }
+                collect_property_binding(prop, &resolve, &is_named_import_from, &mut bindings);
             }
             _ => {}
         }
     }
     bindings
+}
+
+/// Push instance bindings for each non-private typed constructor parameter.
+fn collect_constructor_param_bindings(
+    method: &oxc_ast::ast::MethodDefinition<'_>,
+    resolve: &impl Fn(String) -> Option<String>,
+    bindings: &mut Vec<(String, String)>,
+) {
+    for param in &method.value.params.items {
+        let Some(accessibility) = param.accessibility else {
+            continue;
+        };
+        if matches!(accessibility, TSAccessibility::Private) {
+            continue;
+        }
+        let BindingPattern::BindingIdentifier(id) = &param.pattern else {
+            continue;
+        };
+        let Some(type_annotation) = param.type_annotation.as_deref() else {
+            continue;
+        };
+        let Some(type_name) = extract_type_annotation_name(type_annotation) else {
+            continue;
+        };
+        let Some(resolved) = resolve(type_name) else {
+            continue;
+        };
+        bindings.push((id.name.to_string(), resolved));
+    }
+}
+
+/// Push an instance binding for a non-private typed getter's return type.
+fn collect_getter_binding(
+    method: &oxc_ast::ast::MethodDefinition<'_>,
+    resolve: &impl Fn(String) -> Option<String>,
+    bindings: &mut Vec<(String, String)>,
+) {
+    if matches!(method.accessibility, Some(TSAccessibility::Private)) {
+        return;
+    }
+    let Some(name) = method.key.static_name() else {
+        return;
+    };
+    let Some(type_annotation) = method.value.return_type.as_deref() else {
+        return;
+    };
+    let Some(type_name) = extract_type_annotation_name(type_annotation) else {
+        return;
+    };
+    let Some(resolved) = resolve(type_name) else {
+        return;
+    };
+    bindings.push((name.to_string(), resolved));
+}
+
+/// Push an instance binding for a non-private property: typed annotation first,
+/// then a `new Class()` initializer, then an Angular `inject()` initializer.
+fn collect_property_binding<F>(
+    prop: &oxc_ast::ast::PropertyDefinition<'_>,
+    resolve: &impl Fn(String) -> Option<String>,
+    is_named_import_from: &F,
+    bindings: &mut Vec<(String, String)>,
+) where
+    F: Fn(&str, &str, &str) -> bool,
+{
+    if matches!(prop.accessibility, Some(TSAccessibility::Private)) {
+        return;
+    }
+    let Some(name) = prop.key.static_name() else {
+        return;
+    };
+    if let Some(type_annotation) = prop.type_annotation.as_deref()
+        && let Some(type_name) = extract_type_annotation_name(type_annotation)
+    {
+        if let Some(resolved) = resolve(type_name) {
+            bindings.push((name.to_string(), resolved));
+        }
+        return;
+    }
+    if let Some(Expression::NewExpression(new_expr)) = &prop.value
+        && let Expression::Identifier(callee) = &new_expr.callee
+        && !is_builtin_constructor(callee.name.as_str())
+    {
+        bindings.push((name.to_string(), callee.name.to_string()));
+        return;
+    }
+    if let Some(Expression::CallExpression(call)) = &prop.value
+        && let Some(type_name) = extract_angular_inject_target(call, is_named_import_from)
+    {
+        bindings.push((name.to_string(), type_name));
+    }
 }
 
 pub fn extract_angular_inject_target<F>(

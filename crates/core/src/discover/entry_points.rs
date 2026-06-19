@@ -170,18 +170,66 @@ fn resolve_entry_path_with_tracking(
     }
 
     if entry_has_parent_dir(entry) {
-        if let Some(skipped_entries) = skipped_entries.as_mut() {
-            *skipped_entries.entry(entry.to_owned()).or_default() += 1;
-        } else {
-            tracing::warn!(path = %entry, "Skipping entry point containing parent directory traversal");
-        }
+        record_or_warn_skipped_entry(
+            skipped_entries.as_deref_mut(),
+            entry,
+            "Skipping entry point containing parent directory traversal",
+        );
         return None;
     }
 
-    let resolved = base.join(entry);
+    if let OutputDirEntry::ShortCircuit(result) = resolve_entry_via_output_dir(
+        base,
+        entry,
+        canonical_root,
+        source.clone(),
+        skipped_entries.as_deref_mut(),
+    ) {
+        return result;
+    }
 
+    resolve_entry_via_filesystem_probe(base, entry, canonical_root, source, skipped_entries)
+}
+
+/// Record a skipped entry in the dedup map, or warn when no map is tracking skips.
+fn record_or_warn_skipped_entry(
+    skipped_entries: Option<&mut FxHashMap<String, usize>>,
+    entry: &str,
+    warning: &str,
+) {
+    if let Some(skipped_entries) = skipped_entries {
+        *skipped_entries.entry(entry.to_owned()).or_default() += 1;
+    } else {
+        tracing::warn!(path = %entry, "{warning}");
+    }
+}
+
+/// Outcome of the output-directory mapping step.
+///
+/// `ShortCircuit` means an output-dir branch applied and carries the resolved
+/// entry (which may itself be `None` when validation rejected the candidate);
+/// `Continue` signals that filesystem probing should proceed.
+enum OutputDirEntry {
+    ShortCircuit(Option<EntryPoint>),
+    Continue,
+}
+
+/// Map an output-directory entry back to a source file, short-circuiting resolution.
+fn resolve_entry_via_output_dir(
+    base: &Path,
+    entry: &str,
+    canonical_root: &Path,
+    source: EntryPointSource,
+    mut skipped_entries: Option<&mut FxHashMap<String, usize>>,
+) -> OutputDirEntry {
     if let Some(source_path) = try_output_to_source_path(base, entry) {
-        return validated_entry_point(&source_path, canonical_root, entry, source, skipped_entries);
+        return OutputDirEntry::ShortCircuit(validated_entry_point(
+            &source_path,
+            canonical_root,
+            entry,
+            source,
+            skipped_entries.as_deref_mut(),
+        ));
     }
 
     if is_entry_in_output_dir(entry)
@@ -192,8 +240,28 @@ fn resolve_entry_path_with_tracking(
             fallback = %source_path.display(),
             "package.json entry resolves to an ignored output directory; falling back to source index"
         );
-        return validated_entry_point(&source_path, canonical_root, entry, source, skipped_entries);
+        return OutputDirEntry::ShortCircuit(validated_entry_point(
+            &source_path,
+            canonical_root,
+            entry,
+            source,
+            skipped_entries,
+        ));
     }
+
+    OutputDirEntry::Continue
+}
+
+/// Probe the filesystem for the entry: exact file, extension fallback, directory
+/// index, then a package-root source-index fallback.
+fn resolve_entry_via_filesystem_probe(
+    base: &Path,
+    entry: &str,
+    canonical_root: &Path,
+    source: EntryPointSource,
+    mut skipped_entries: Option<&mut FxHashMap<String, usize>>,
+) -> Option<EntryPoint> {
+    let resolved = base.join(entry);
 
     if resolved.is_file() {
         return validated_entry_point(
@@ -445,11 +513,91 @@ fn apply_default_fallback(
     entries
 }
 
-/// Discover entry points from package.json, framework rules, and defaults.
+/// Compute each file's path relative to `root` as a forward-slash-lossy string.
+fn relative_paths_for(files: &[DiscoveredFile], root: &Path) -> Vec<String> {
+    files
+        .iter()
+        .map(|f| {
+            f.path
+                .strip_prefix(root)
+                .unwrap_or(&f.path)
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect()
+}
+
+/// Push entries for files matching the user-configured manual entry glob patterns.
 #[expect(
     clippy::expect_used,
     reason = "entry glob patterns are validated before entry point discovery"
 )]
+fn push_manual_entry_matches(
+    entries: &mut Vec<EntryPoint>,
+    config: &ResolvedConfig,
+    relative_paths: &[String],
+    files: &[DiscoveredFile],
+) {
+    let mut builder = globset::GlobSetBuilder::new();
+    for pattern in &config.entry_patterns {
+        builder.add(
+            globset::Glob::new(pattern).expect("entry pattern was validated at config load time"),
+        );
+    }
+    let Ok(glob_set) = builder.build() else {
+        return;
+    };
+    if glob_set.is_empty() {
+        return;
+    }
+    for (idx, rel) in relative_paths.iter().enumerate() {
+        if glob_set.is_match(rel) {
+            entries.push(EntryPoint {
+                path: files[idx].path.clone(),
+                source: EntryPointSource::ManualEntry,
+            });
+        }
+    }
+}
+
+/// Push entries derived from a package.json's declared entry points and scripts.
+fn push_package_json_entries(
+    discovery: &mut EntryPointDiscovery,
+    root: &Path,
+    pkg: &PackageJson,
+    canonical_root: &Path,
+) {
+    for entry_path in pkg.entry_points() {
+        if let Some(ep) = resolve_entry_path_with_tracking(
+            root,
+            &entry_path,
+            canonical_root,
+            EntryPointSource::PackageJsonMain,
+            Some(&mut discovery.skipped_entries),
+        ) {
+            discovery.entries.push(ep);
+        }
+    }
+
+    let Some(scripts) = &pkg.scripts else {
+        return;
+    };
+    for script_value in scripts.values() {
+        for file_ref in extract_script_file_refs(script_value) {
+            if let Some(ep) = resolve_entry_path_with_tracking(
+                root,
+                &file_ref,
+                canonical_root,
+                EntryPointSource::PackageJsonScript,
+                Some(&mut discovery.skipped_entries),
+            ) {
+                discovery.entries.push(ep);
+            }
+        }
+    }
+}
+
+/// Discover entry points from package.json, framework rules, and defaults.
 fn discover_entry_points_with_warnings_impl(
     config: &ResolvedConfig,
     files: &[DiscoveredFile],
@@ -459,68 +607,12 @@ fn discover_entry_points_with_warnings_impl(
     let _span = tracing::info_span!("discover_entry_points").entered();
     let mut discovery = EntryPointDiscovery::default();
 
-    let relative_paths: Vec<String> = files
-        .iter()
-        .map(|f| {
-            f.path
-                .strip_prefix(&config.root)
-                .unwrap_or(&f.path)
-                .to_string_lossy()
-                .into_owned()
-        })
-        .collect();
-
-    {
-        let mut builder = globset::GlobSetBuilder::new();
-        for pattern in &config.entry_patterns {
-            builder.add(
-                globset::Glob::new(pattern)
-                    .expect("entry pattern was validated at config load time"),
-            );
-        }
-        if let Ok(glob_set) = builder.build()
-            && !glob_set.is_empty()
-        {
-            for (idx, rel) in relative_paths.iter().enumerate() {
-                if glob_set.is_match(rel) {
-                    discovery.entries.push(EntryPoint {
-                        path: files[idx].path.clone(),
-                        source: EntryPointSource::ManualEntry,
-                    });
-                }
-            }
-        }
-    }
+    let relative_paths = relative_paths_for(files, &config.root);
+    push_manual_entry_matches(&mut discovery.entries, config, &relative_paths, files);
 
     let canonical_root = dunce::canonicalize(&config.root).unwrap_or_else(|_| config.root.clone());
     if let Some(pkg) = root_pkg {
-        for entry_path in pkg.entry_points() {
-            if let Some(ep) = resolve_entry_path_with_tracking(
-                &config.root,
-                &entry_path,
-                &canonical_root,
-                EntryPointSource::PackageJsonMain,
-                Some(&mut discovery.skipped_entries),
-            ) {
-                discovery.entries.push(ep);
-            }
-        }
-
-        if let Some(scripts) = &pkg.scripts {
-            for script_value in scripts.values() {
-                for file_ref in extract_script_file_refs(script_value) {
-                    if let Some(ep) = resolve_entry_path_with_tracking(
-                        &config.root,
-                        &file_ref,
-                        &canonical_root,
-                        EntryPointSource::PackageJsonScript,
-                        Some(&mut discovery.skipped_entries),
-                    ) {
-                        discovery.entries.push(ep);
-                    }
-                }
-            }
-        }
+        push_package_json_entries(&mut discovery, &config.root, pkg, &canonical_root);
     }
 
     if include_nested_package_entries {
@@ -805,17 +897,21 @@ pub fn discover_plugin_entry_point_sets(
 ) -> CategorizedEntryPoints {
     let mut entries = CategorizedEntryPoints::default();
 
-    let relative_paths: Vec<String> = files
-        .iter()
-        .map(|f| {
-            f.path
-                .strip_prefix(&config.root)
-                .unwrap_or(&f.path)
-                .to_string_lossy()
-                .into_owned()
-        })
-        .collect();
+    let relative_paths = relative_paths_for(files, &config.root);
+    let (glob_set, glob_meta) = build_plugin_glob_meta(plugin_result);
+    if let Some(glob_set) = glob_set.filter(|set| !set.is_empty()) {
+        match_plugin_entry_files(&mut entries, &glob_set, &glob_meta, &relative_paths, files);
+    }
 
+    push_plugin_setup_files(&mut entries, &config.root, plugin_result);
+
+    entries.dedup()
+}
+
+/// Compile plugin entry-pattern and support globs into a glob set plus per-glob metadata.
+fn build_plugin_glob_meta(
+    plugin_result: &crate::plugins::AggregatedPluginResult,
+) -> (Option<globset::GlobSet>, Vec<CompiledEntryRule<'_>>) {
     let mut builder = globset::GlobSetBuilder::new();
     let mut glob_meta: Vec<CompiledEntryRule<'_>> = Vec::new();
     for (rule, pname) in &plugin_result.entry_patterns {
@@ -847,50 +943,74 @@ pub fn discover_plugin_entry_point_sets(
             }
         }
     }
-    if let Ok(glob_set) = builder.build()
-        && !glob_set.is_empty()
-    {
-        for (idx, rel) in relative_paths.iter().enumerate() {
-            let matches: Vec<usize> = glob_set
-                .matches(rel)
-                .into_iter()
-                .filter(|match_idx| glob_meta[*match_idx].matches(rel))
-                .collect();
-            if !matches.is_empty() {
-                let name = glob_meta[matches[0]].plugin_name;
-                let entry = EntryPoint {
-                    path: files[idx].path.clone(),
-                    source: EntryPointSource::Plugin {
-                        name: name.to_string(),
-                    },
-                };
+    (builder.build().ok(), glob_meta)
+}
 
-                let mut has_runtime = false;
-                let mut has_test = false;
-                let mut has_support = false;
-                for match_idx in matches {
-                    match glob_meta[match_idx].role {
-                        EntryPointRole::Runtime => has_runtime = true,
-                        EntryPointRole::Test => has_test = true,
-                        EntryPointRole::Support => has_support = true,
-                    }
-                }
+/// Match each file against the compiled plugin glob set, categorizing hits by role.
+fn match_plugin_entry_files(
+    entries: &mut CategorizedEntryPoints,
+    glob_set: &globset::GlobSet,
+    glob_meta: &[CompiledEntryRule<'_>],
+    relative_paths: &[String],
+    files: &[DiscoveredFile],
+) {
+    for (idx, rel) in relative_paths.iter().enumerate() {
+        let matches: Vec<usize> = glob_set
+            .matches(rel)
+            .into_iter()
+            .filter(|match_idx| glob_meta[*match_idx].matches(rel))
+            .collect();
+        if matches.is_empty() {
+            continue;
+        }
+        let name = glob_meta[matches[0]].plugin_name;
+        let entry = EntryPoint {
+            path: files[idx].path.clone(),
+            source: EntryPointSource::Plugin {
+                name: name.to_string(),
+            },
+        };
+        categorize_plugin_match(entries, entry, glob_meta, &matches);
+    }
+}
 
-                if has_runtime {
-                    entries.push_runtime(entry.clone());
-                }
-                if has_test {
-                    entries.push_test(entry.clone());
-                }
-                if has_support || (!has_runtime && !has_test) {
-                    entries.push_support(entry);
-                }
-            }
+/// Push a matched entry into the runtime/test/support buckets implied by its roles.
+fn categorize_plugin_match(
+    entries: &mut CategorizedEntryPoints,
+    entry: EntryPoint,
+    glob_meta: &[CompiledEntryRule<'_>],
+    matches: &[usize],
+) {
+    let mut has_runtime = false;
+    let mut has_test = false;
+    let mut has_support = false;
+    for &match_idx in matches {
+        match glob_meta[match_idx].role {
+            EntryPointRole::Runtime => has_runtime = true,
+            EntryPointRole::Test => has_test = true,
+            EntryPointRole::Support => has_support = true,
         }
     }
 
+    if has_runtime {
+        entries.push_runtime(entry.clone());
+    }
+    if has_test {
+        entries.push_test(entry.clone());
+    }
+    if has_support || (!has_runtime && !has_test) {
+        entries.push_support(entry);
+    }
+}
+
+/// Resolve plugin-declared setup files (with source-extension fallback) into support entries.
+fn push_plugin_setup_files(
+    entries: &mut CategorizedEntryPoints,
+    root: &Path,
+    plugin_result: &crate::plugins::AggregatedPluginResult,
+) {
     for (setup_file, pname) in &plugin_result.setup_files {
-        let resolved = resolve_plugin_setup_file(&config.root, setup_file);
+        let resolved = resolve_plugin_setup_file(root, setup_file);
         if resolved.exists() {
             entries.push_support(EntryPoint {
                 path: resolved,
@@ -898,23 +1018,21 @@ pub fn discover_plugin_entry_point_sets(
                     name: pname.clone(),
                 },
             });
-        } else {
-            for ext in SOURCE_EXTENSIONS {
-                let with_ext = resolved.with_extension(ext);
-                if with_ext.exists() {
-                    entries.push_support(EntryPoint {
-                        path: with_ext,
-                        source: EntryPointSource::Plugin {
-                            name: pname.clone(),
-                        },
-                    });
-                    break;
-                }
+            continue;
+        }
+        for ext in SOURCE_EXTENSIONS {
+            let with_ext = resolved.with_extension(ext);
+            if with_ext.exists() {
+                entries.push_support(EntryPoint {
+                    path: with_ext,
+                    source: EntryPointSource::Plugin {
+                        name: pname.clone(),
+                    },
+                });
+                break;
             }
         }
     }
-
-    entries.dedup()
 }
 
 fn resolve_plugin_setup_file(root: &Path, setup_file: &Path) -> PathBuf {

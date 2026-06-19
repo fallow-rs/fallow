@@ -114,92 +114,31 @@ impl CloneDetector {
             }));
         }
 
-        let files: Vec<FileData> = file_data
-            .into_iter()
-            .map(|(path, hashed_tokens, file_tokens)| FileData {
-                atomic_invocation_spans: file_tokens.atomic_invocation_spans.clone(),
-                path,
-                hashed_tokens,
-                file_tokens,
-            })
-            .collect();
+        let (files, totals, focus_file_ids) =
+            build_detection_inputs(file_data, focus_files, corpus_totals);
+        self.run_clone_pipeline(&files, totals, focus_file_ids.as_deref())
+    }
 
-        let totals = corpus_totals.unwrap_or_else(|| CorpusTotals {
-            files: files.len(),
-            lines: files.iter().map(|f| f.file_tokens.line_count).sum(),
-            tokens: files.iter().map(|f| f.hashed_tokens.len()).sum(),
-        });
-        let focus_file_ids = focus_files.map(|focus| build_focus_file_ids(&files, focus));
-        trace_clone_detection_input(
-            totals.files,
-            totals.tokens,
-            totals.lines,
-            focus_file_ids.as_deref(),
-        );
-
-        let t0 = std::time::Instant::now();
-        let ranked_files = ranking::rank_reduce(&files);
-        let rank_time = t0.elapsed();
-        let unique_ranks: usize = ranked_files
-            .iter()
-            .flat_map(|f| f.iter())
-            .copied()
-            .max()
-            .map_or(0, |m| m as usize + 1);
-        tracing::debug!(
-            elapsed_us = rank_time.as_micros(),
-            unique_ranks,
-            "step1_rank_reduce"
-        );
-
-        let t0 = std::time::Instant::now();
-        let (text, file_of, file_offsets) =
-            concatenation::concatenate_with_sentinels(&ranked_files);
-        let concat_time = t0.elapsed();
-        tracing::debug!(
-            elapsed_us = concat_time.as_micros(),
-            concat_len = text.len(),
-            "step2_concatenate"
-        );
+    /// Run the timed clone-detection pipeline (rank, concatenate, suffix array,
+    /// LCP, extract, build, stats) over prepared inputs and assemble the report.
+    fn run_clone_pipeline(
+        &self,
+        files: &[FileData],
+        totals: CorpusTotals,
+        focus_file_ids: Option<&[bool]>,
+    ) -> DuplicationReport {
+        let (text, file_of, file_offsets, rank_time, concat_time) = rank_and_concatenate(files);
 
         if text.is_empty() {
             return empty_report(totals);
         }
 
-        let t0 = std::time::Instant::now();
-        let sa = suffix_array::build_suffix_array(&text);
-        let sa_time = t0.elapsed();
-        tracing::debug!(
-            elapsed_us = sa_time.as_micros(),
-            n = text.len(),
-            "step3_suffix_array"
-        );
-
-        let t0 = std::time::Instant::now();
-        let lcp_arr = lcp::build_lcp(&text, &sa);
-        let lcp_time = t0.elapsed();
-        tracing::debug!(elapsed_us = lcp_time.as_micros(), "step4_lcp_array");
-
-        let t0 = std::time::Instant::now();
-        let raw_groups = extraction::extract_clone_groups(&extraction::CloneGroupExtractionInput {
-            sa: &sa,
-            lcp: &lcp_arr,
-            file_of: &file_of,
-            file_offsets: &file_offsets,
-            min_tokens: self.min_tokens,
-            files: &files,
-            focus_file_ids: focus_file_ids.as_deref(),
-        });
-        let extract_time = t0.elapsed();
-        tracing::debug!(
-            elapsed_us = extract_time.as_micros(),
-            raw_groups = raw_groups.len(),
-            "step5_extract_groups"
-        );
+        let (raw_groups, sa_time, lcp_time, extract_time) =
+            self.extract_raw_groups(&text, &file_of, &file_offsets, files, focus_file_ids);
 
         let t0 = std::time::Instant::now();
         let clone_groups =
-            filtering::build_groups(raw_groups, &files, self.min_lines, self.skip_local);
+            filtering::build_groups(raw_groups, files, self.min_lines, self.skip_local);
         let build_time = t0.elapsed();
         tracing::debug!(
             elapsed_us = build_time.as_micros(),
@@ -234,6 +173,127 @@ impl CloneDetector {
             stats,
         }
     }
+
+    /// Run the suffix-array clone-extraction core (steps 3-5: suffix array, LCP,
+    /// extract) over the concatenated text, returning the raw groups and each
+    /// step's elapsed time for the completion trace.
+    fn extract_raw_groups(
+        &self,
+        text: &[i64],
+        file_of: &[usize],
+        file_offsets: &[usize],
+        files: &[FileData],
+        focus_file_ids: Option<&[bool]>,
+    ) -> (
+        Vec<extraction::RawGroup>,
+        std::time::Duration,
+        std::time::Duration,
+        std::time::Duration,
+    ) {
+        let t0 = std::time::Instant::now();
+        let sa = suffix_array::build_suffix_array(text);
+        let sa_time = t0.elapsed();
+        tracing::debug!(
+            elapsed_us = sa_time.as_micros(),
+            n = text.len(),
+            "step3_suffix_array"
+        );
+
+        let t0 = std::time::Instant::now();
+        let lcp_arr = lcp::build_lcp(text, &sa);
+        let lcp_time = t0.elapsed();
+        tracing::debug!(elapsed_us = lcp_time.as_micros(), "step4_lcp_array");
+
+        let t0 = std::time::Instant::now();
+        let raw_groups = extraction::extract_clone_groups(&extraction::CloneGroupExtractionInput {
+            sa: &sa,
+            lcp: &lcp_arr,
+            file_of,
+            file_offsets,
+            min_tokens: self.min_tokens,
+            files,
+            focus_file_ids,
+        });
+        let extract_time = t0.elapsed();
+        tracing::debug!(
+            elapsed_us = extract_time.as_micros(),
+            raw_groups = raw_groups.len(),
+            "step5_extract_groups"
+        );
+
+        (raw_groups, sa_time, lcp_time, extract_time)
+    }
+}
+
+/// Build the prepared clone-detection inputs (`FileData` vec, corpus totals,
+/// optional focus-file id mask) from raw file data and emit the input trace.
+fn build_detection_inputs(
+    file_data: Vec<(PathBuf, Vec<HashedToken>, FileTokens)>,
+    focus_files: Option<&FxHashSet<PathBuf>>,
+    corpus_totals: Option<CorpusTotals>,
+) -> (Vec<FileData>, CorpusTotals, Option<Vec<bool>>) {
+    let files: Vec<FileData> = file_data
+        .into_iter()
+        .map(|(path, hashed_tokens, file_tokens)| FileData {
+            atomic_invocation_spans: file_tokens.atomic_invocation_spans.clone(),
+            path,
+            hashed_tokens,
+            file_tokens,
+        })
+        .collect();
+
+    let totals = corpus_totals.unwrap_or_else(|| CorpusTotals {
+        files: files.len(),
+        lines: files.iter().map(|f| f.file_tokens.line_count).sum(),
+        tokens: files.iter().map(|f| f.hashed_tokens.len()).sum(),
+    });
+    let focus_file_ids = focus_files.map(|focus| build_focus_file_ids(&files, focus));
+    trace_clone_detection_input(
+        totals.files,
+        totals.tokens,
+        totals.lines,
+        focus_file_ids.as_deref(),
+    );
+    (files, totals, focus_file_ids)
+}
+
+/// Run the clone-detection front half (steps 1-2: rank-reduce then concatenate
+/// with sentinels), returning the concatenated text, file index maps, and each
+/// step's elapsed time for the completion trace.
+fn rank_and_concatenate(
+    files: &[FileData],
+) -> (
+    Vec<i64>,
+    Vec<usize>,
+    Vec<usize>,
+    std::time::Duration,
+    std::time::Duration,
+) {
+    let t0 = std::time::Instant::now();
+    let ranked_files = ranking::rank_reduce(files);
+    let rank_time = t0.elapsed();
+    let unique_ranks: usize = ranked_files
+        .iter()
+        .flat_map(|f| f.iter())
+        .copied()
+        .max()
+        .map_or(0, |m| m as usize + 1);
+    tracing::debug!(
+        elapsed_us = rank_time.as_micros(),
+        unique_ranks,
+        "step1_rank_reduce"
+    );
+
+    let t0 = std::time::Instant::now();
+    let (text, file_of, file_offsets) = concatenation::concatenate_with_sentinels(&ranked_files);
+    let concat_time = t0.elapsed();
+    tracing::debug!(
+        elapsed_us = concat_time.as_micros(),
+        concat_len = text.len(),
+        "step2_concatenate"
+    );
+
+    (text, file_of, file_offsets, rank_time, concat_time)
 }
 
 struct CloneDetectionTimings {

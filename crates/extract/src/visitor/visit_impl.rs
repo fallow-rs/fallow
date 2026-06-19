@@ -447,8 +447,13 @@ impl ModuleInfoExtractor {
         refs
     }
 
-    fn collect_class_signature_refs(class: &Class<'_>) -> Vec<(String, Span)> {
-        let mut collector = SignatureTypeCollector::default();
+    /// Collect signature type references from a class's heritage clauses: type
+    /// parameters, the `extends` super class + its type arguments, and each
+    /// `implements` interface + its type arguments.
+    fn collect_class_heritage_signature_refs(
+        class: &Class<'_>,
+        collector: &mut SignatureTypeCollector,
+    ) {
         if let Some(type_parameters) = class.type_parameters.as_deref() {
             collector.visit_ts_type_parameter_declaration(type_parameters);
         }
@@ -468,6 +473,11 @@ impl ModuleInfoExtractor {
                 collector.visit_ts_type_parameter_instantiation(type_arguments);
             }
         }
+    }
+
+    fn collect_class_signature_refs(class: &Class<'_>) -> Vec<(String, Span)> {
+        let mut collector = SignatureTypeCollector::default();
+        Self::collect_class_heritage_signature_refs(class, &mut collector);
         for element in &class.body.body {
             match element {
                 ClassElement::MethodDefinition(method) => {
@@ -3016,15 +3026,33 @@ impl ModuleInfoExtractor {
     }
 }
 
-impl<'a> Visit<'a> for ModuleInfoExtractor {
-    fn visit_program(&mut self, program: &Program<'a>) {
-        // Capture file-level string directives (`"use client"`, `"use server"`)
-        // for the security client-server-leak detector. `directive.directive` is
-        // the cooked directive text without surrounding quotes.
-        for directive in &program.directives {
-            self.directives
-                .push(directive.directive.as_str().to_string());
+impl<'a> ModuleInfoExtractor {
+    /// Record a misplaced `"use client"` / `"use server"` directive: oxc places
+    /// honored leading-prologue directives in `program.directives`, so any
+    /// string-literal expression statement reaching `program.body` is by
+    /// definition NOT in the leading position (some non-directive statement
+    /// preceded it), so the RSC bundler parses it as an ordinary expression and
+    /// silently ignores it. Only the two RSC directive strings match; a stray
+    /// `"use strict"` is harmless.
+    fn record_misplaced_directive_statement(&mut self, stmt: &ExpressionStatement<'a>) {
+        if let Expression::StringLiteral(lit) = &stmt.expression {
+            let is_server = match lit.value.as_str() {
+                "use server" => Some(true),
+                "use client" => Some(false),
+                _ => None,
+            };
+            if let Some(is_server) = is_server {
+                self.misplaced_directives.push(MisplacedDirectiveSite {
+                    is_server,
+                    span_start: stmt.span.start,
+                });
+            }
         }
+    }
+
+    /// First top-level pass: record source-returning + sanitizer function
+    /// declarations (bare and `export`-prefixed) and misplaced RSC directives.
+    fn record_program_prologue(&mut self, program: &Program<'a>) {
         for statement in &program.body {
             match statement {
                 Statement::FunctionDeclaration(function) => {
@@ -3043,34 +3071,17 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                         self.record_sanitizer_function_declaration(function);
                     }
                 }
-                // Detect MISPLACED `"use client"` / `"use server"`
-                // directives. oxc places honored leading-prologue directives in
-                // `program.directives` (handled above), so any string-literal
-                // expression statement reaching `program.body` is by definition
-                // NOT in the leading position: some non-string-literal statement
-                // (an import, a const, a function call, anything that is not part
-                // of the directive prologue) preceded it, so the RSC bundler
-                // parses the string as an ordinary expression and silently
-                // ignores it. Match ONLY the two RSC directive strings; a stray
-                // `"use strict"` is harmless.
                 Statement::ExpressionStatement(stmt) => {
-                    if let Expression::StringLiteral(lit) = &stmt.expression {
-                        let is_server = match lit.value.as_str() {
-                            "use server" => Some(true),
-                            "use client" => Some(false),
-                            _ => None,
-                        };
-                        if let Some(is_server) = is_server {
-                            self.misplaced_directives.push(MisplacedDirectiveSite {
-                                is_server,
-                                span_start: stmt.span.start,
-                            });
-                        }
-                    }
+                    self.record_misplaced_directive_statement(stmt);
                 }
                 _ => {}
             }
         }
+    }
+
+    /// Second top-level pass: re-record sanitizer function declarations (bare and
+    /// `export`-prefixed) after the prologue pass has populated module state.
+    fn record_program_sanitizer_functions(&mut self, program: &Program<'a>) {
         for statement in &program.body {
             match statement {
                 Statement::FunctionDeclaration(function) => {
@@ -3090,6 +3101,608 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 _ => {}
             }
         }
+    }
+
+    /// Record a named import specifier (`import { fork } from ...`), tracking the
+    /// `child_process.fork` and `node:url` `fileURLToPath` provenance bindings.
+    fn handle_import_specifier(
+        &mut self,
+        s: &ImportSpecifier<'a>,
+        source: &str,
+        is_type_only: bool,
+        source_span: Span,
+    ) {
+        if self.is_module_scope() && is_child_process_source(source) && s.imported.name() == "fork"
+        {
+            self.child_process_fork_bindings
+                .insert(s.local.name.to_string());
+        }
+        if self.is_module_scope()
+            && is_node_url_source(source)
+            && s.imported.name() == "fileURLToPath"
+        {
+            self.node_url_file_url_to_path_bindings
+                .insert(s.local.name.to_string());
+        }
+        self.imports.push(ImportInfo {
+            source: source.to_string(),
+            imported_name: ImportedName::Named(s.imported.name().to_string()),
+            local_name: s.local.name.to_string(),
+            is_type_only: is_type_only || s.import_kind.is_type(),
+            from_style: false,
+            span: s.span,
+            source_span,
+        });
+    }
+
+    /// Record a default import specifier (`import x from ...`), tracking the
+    /// DOMPurify and `node:path` provenance bindings.
+    fn handle_import_default_specifier(
+        &mut self,
+        s: &ImportDefaultSpecifier<'a>,
+        source: &str,
+        is_type_only: bool,
+        source_span: Span,
+    ) {
+        self.record_dompurify_import_binding(source, s.local.name.as_str(), is_type_only);
+        if self.is_module_scope() && is_node_path_source(source) {
+            self.node_path_namespace_bindings
+                .insert(s.local.name.to_string());
+        }
+        self.imports.push(ImportInfo {
+            source: source.to_string(),
+            imported_name: ImportedName::Default,
+            local_name: s.local.name.to_string(),
+            is_type_only,
+            from_style: false,
+            span: s.span,
+            source_span,
+        });
+    }
+
+    /// Record a namespace import specifier (`import * as ns from ...`), tracking
+    /// the DOMPurify, `child_process`, `node:path`, and `node:url` provenance
+    /// bindings plus the namespace binding name.
+    fn handle_import_namespace_specifier(
+        &mut self,
+        s: &ImportNamespaceSpecifier<'a>,
+        source: &str,
+        is_type_only: bool,
+        source_span: Span,
+    ) {
+        let local = s.local.name.to_string();
+        self.record_dompurify_import_binding(source, &local, is_type_only);
+        if self.is_module_scope() && is_child_process_source(source) {
+            self.child_process_namespace_bindings.insert(local.clone());
+        }
+        if self.is_module_scope() && is_node_path_source(source) {
+            self.node_path_namespace_bindings.insert(local.clone());
+        }
+        if self.is_module_scope() && is_node_url_source(source) {
+            self.node_url_file_url_to_path_bindings
+                .insert(local.clone());
+        }
+        self.namespace_binding_names.push(local.clone());
+        self.imports.push(ImportInfo {
+            source: source.to_string(),
+            imported_name: ImportedName::Namespace,
+            local_name: local,
+            is_type_only,
+            from_style: false,
+            span: s.span,
+            source_span,
+        });
+    }
+
+    /// Record `export { x } from './src'` re-export specifiers, abstaining the
+    /// SvelteKit load-data harvest on a re-exported `load`.
+    fn record_export_re_exports(
+        &mut self,
+        decl: &ExportNamedDeclaration<'a>,
+        source: &oxc_ast::ast::StringLiteral<'a>,
+        is_type_only: bool,
+    ) {
+        for spec in &decl.specifiers {
+            // `export { load } from './x'` re-exports the load: the terminal
+            // object is not a direct literal here, so the load-data harvest
+            // abstains on this file.
+            if !is_type_only
+                && !spec.export_kind.is_type()
+                && spec.exported.name().as_str() == "load"
+            {
+                self.has_unharvestable_load = true;
+            }
+            self.re_exports.push(ReExportInfo {
+                source: source.value.to_string(),
+                imported_name: spec.local.name().to_string(),
+                exported_name: spec.exported.name().to_string(),
+                is_type_only: is_type_only || spec.export_kind.is_type(),
+                span: spec.span,
+            });
+        }
+    }
+
+    /// Record local declaration exports and `export { x }` local specifiers
+    /// (no source), abstaining the load-data harvest on a bare `export { load }`.
+    fn record_export_local_specifiers(
+        &mut self,
+        decl: &ExportNamedDeclaration<'a>,
+        is_type_only: bool,
+    ) {
+        if let Some(declaration) = &decl.declaration {
+            self.extract_declaration_exports(declaration, is_type_only);
+            if !is_type_only {
+                self.try_harvest_load_export(declaration);
+            }
+        }
+        for spec in &decl.specifiers {
+            let local_name_str = spec.local.name().as_str();
+            let spec_type_only = is_type_only || spec.export_kind.is_type();
+
+            // A local `export { load }` re-exports a `const load` declared
+            // elsewhere in the file; the declaration-side harvest above already
+            // covered a direct `const load = ...`. A bare `export { load }` with
+            // no matching local declaration means the terminal object is not
+            // visible here, so abstain.
+            if !spec_type_only && local_name_str == "load" && self.load_return_keys.is_empty() {
+                self.has_unharvestable_load = true;
+            }
+
+            self.pending_local_export_specifiers
+                .push(PendingLocalExportSpecifier {
+                    local_name: local_name_str.to_string(),
+                    exported_name: spec.exported.name().to_string(),
+                    is_type_only: spec_type_only,
+                    span: spec.span,
+                });
+        }
+    }
+
+    /// Record public-API / local signature type references for a default export
+    /// class, function, or interface declaration. A named declaration records a
+    /// local type declaration + local refs; an anonymous one records public refs
+    /// keyed on `"default"`.
+    fn record_default_export_signature_refs(&mut self, decl: &ExportDefaultDeclaration<'a>) {
+        match &decl.declaration {
+            ExportDefaultDeclarationKind::ClassDeclaration(class) => {
+                let refs = Self::collect_class_signature_refs(class);
+                if let Some(id) = class.id.as_ref() {
+                    self.record_local_type_declaration(&id.name, id.span);
+                    self.record_local_signature_refs(&id.name, refs);
+                } else {
+                    self.record_public_signature_refs("default", refs);
+                }
+            }
+            ExportDefaultDeclarationKind::FunctionDeclaration(function) => {
+                let refs = Self::collect_function_signature_refs(function);
+                if let Some(id) = function.id.as_ref() {
+                    self.record_local_signature_refs(&id.name, refs);
+                } else {
+                    self.record_public_signature_refs("default", refs);
+                }
+            }
+            ExportDefaultDeclarationKind::TSInterfaceDeclaration(iface) => {
+                self.record_local_type_declaration(&iface.id.name, iface.id.span);
+                let refs = Self::collect_interface_signature_refs(iface);
+                self.record_public_signature_refs("default", refs);
+            }
+            _ => {}
+        }
+    }
+
+    /// Record a dynamic-import glob pattern from an interpolated template
+    /// literal (`import(\`./views/${name}.js\`)`): a relative-prefixed quasi
+    /// becomes a `DynamicImportPattern`; multiple interpolations widen the
+    /// prefix with a recursive `**/` segment.
+    fn record_dynamic_import_template_pattern(&mut self, tpl: &TemplateLiteral<'a>, span: Span) {
+        let first_quasi = tpl.quasis[0].value.raw.to_string();
+        if !(first_quasi.starts_with("./") || first_quasi.starts_with("../")) {
+            return;
+        }
+        let prefix = if tpl.expressions.len() > 1 {
+            format!("{first_quasi}**/")
+        } else {
+            first_quasi
+        };
+        let suffix = if tpl.quasis.len() > 1 {
+            let last = &tpl.quasis[tpl.quasis.len() - 1];
+            let s = last.value.raw.to_string();
+            if s.is_empty() { None } else { Some(s) }
+        } else {
+            None
+        };
+        self.dynamic_import_patterns.push(DynamicImportPattern {
+            prefix,
+            suffix,
+            span,
+        });
+    }
+
+    /// Record `binding_target_names` / factory-call candidates from an
+    /// initialized declarator: a `new Class()` RHS, a Svelte `$derived(new ...)`,
+    /// a factory `[svc] = wrap(...)` array destructure, a `useMemo(() => new ...)`
+    /// product binding, and a `Obj.method(...)` factory-call candidate.
+    fn record_declarator_instance_bindings(
+        &mut self,
+        declarator: &VariableDeclarator<'a>,
+        init: &Expression<'a>,
+    ) {
+        if let Expression::NewExpression(new_expr) = init
+            && let Expression::Identifier(callee) = &new_expr.callee
+            && let BindingPattern::BindingIdentifier(id) = &declarator.id
+            && !super::helpers::is_builtin_constructor(callee.name.as_str())
+        {
+            self.binding_target_names
+                .insert(id.name.to_string(), callee.name.to_string());
+        }
+
+        if let BindingPattern::BindingIdentifier(id) = &declarator.id
+            && let Some(class_name) = Self::svelte_derived_new_class(init)
+        {
+            self.binding_target_names
+                .insert(id.name.to_string(), class_name);
+        }
+
+        if let Expression::CallExpression(call) = init
+            && let BindingPattern::ArrayPattern(arr_pat) = &declarator.id
+            && let Some(Some(BindingPattern::BindingIdentifier(id))) = arr_pat.elements.first()
+            && let Some(class_name) = super::helpers::try_extract_factory_new_class(&call.arguments)
+        {
+            self.binding_target_names
+                .insert(id.name.to_string(), class_name);
+        }
+
+        // `const svc = useMemo(() => new Svc())`: useMemo returns the factory's
+        // product directly, so the non-destructured binding is a class instance.
+        // Scoped to useMemo (see `is_value_returning_memo_callee`) so arbitrary
+        // wrappers and tuple-returning hooks like useState are not over-credited.
+        // `or_insert` so a stronger pre-existing binding wins. See issue #844.
+        if let Expression::CallExpression(call) = init
+            && let BindingPattern::BindingIdentifier(id) = &declarator.id
+            && is_value_returning_memo_callee(&call.callee)
+            && let Some(class_name) = super::helpers::try_extract_factory_new_class(&call.arguments)
+        {
+            self.binding_target_names
+                .entry(id.name.to_string())
+                .or_insert(class_name);
+        }
+
+        if let Expression::CallExpression(call) = init
+            && let BindingPattern::BindingIdentifier(id) = &declarator.id
+            && let Expression::StaticMemberExpression(member) = &call.callee
+            && let Expression::Identifier(callee_object) = &member.object
+        {
+            self.factory_call_candidates
+                .push(super::FactoryCallCandidate {
+                    local_name: id.name.to_string(),
+                    callee_object: callee_object.name.to_string(),
+                    callee_method: member.property.name.to_string(),
+                });
+        }
+    }
+
+    /// Process a single variable declarator: metadata, binding-target
+    /// extraction, require / namespace-destructure / dynamic-import handling.
+    /// Early returns mirror the original loop's `continue` control flow.
+    fn record_variable_declarator(
+        &mut self,
+        decl: &VariableDeclaration<'a>,
+        declarator: &VariableDeclarator<'a>,
+    ) {
+        self.record_variable_declarator_metadata(declarator);
+
+        let Some(init) = &declarator.init else {
+            self.record_uninitialized_variable_bindings(declarator);
+            return;
+        };
+
+        self.record_initialized_variable_bindings(decl, declarator, init);
+        self.record_playwright_variable_helpers(declarator, init);
+        self.record_pinia_store(declarator, init);
+
+        // FP-1 (unused-load-data-key): `const X = data` passes the whole
+        // SvelteKit `data` prop opaquely, so a child could read any key the
+        // detector cannot see. Name-gated on the bare `data` identifier; read
+        // only by the load-data detector, so capturing it everywhere is
+        // byte-identity-safe. The `{...data}` script-spread and
+        // `{a, ...rest} = data` rest forms are already in `whole_object_uses`.
+        if matches!(init, Expression::Identifier(id) if id.name == "data") {
+            self.has_load_data_whole_use = true;
+        }
+
+        if let BindingPattern::BindingIdentifier(id) = &declarator.id
+            && let Expression::ObjectExpression(obj) = init
+        {
+            self.record_object_binding_targets(id.name.as_str(), obj);
+        }
+
+        if let Some((call, source)) = try_extract_require(init) {
+            self.record_dompurify_require_binding(declarator, source);
+            self.record_child_process_require_binding(declarator, source);
+            self.handle_require_declaration(declarator, call, source);
+            return;
+        }
+
+        self.record_declarator_instance_bindings(declarator, init);
+
+        if let Expression::Identifier(ident) = init
+            && self
+                .namespace_binding_names
+                .iter()
+                .any(|n| n == ident.name.as_str())
+        {
+            self.handle_namespace_destructuring(declarator, &ident.name);
+            return;
+        }
+
+        // Primitive A (unused-load-data-key): a destructure off the SvelteKit
+        // `data` prop local (`const { user } = data` / `let { user } = data`)
+        // emits `data.<key>` member accesses so the cross-file detector can see
+        // the consumed load-return keys. Rooted on the `data` local (not an
+        // import); a rest element (`const { a, ...rest } = data`) records a
+        // whole-object use of `data` (abstain). Crediting a member against a
+        // binding named `data` is inert for every other detector unless a
+        // tracked export / instance is also named `data`; the load-data-key
+        // join is the only consumer of `data.<key>`.
+        if let Expression::Identifier(ident) = init
+            && ident.name == "data"
+        {
+            self.handle_namespace_destructuring(declarator, &ident.name);
+            return;
+        }
+
+        let Some((import_expr, source)) = try_extract_dynamic_import(init) else {
+            return;
+        };
+        self.handle_dynamic_import_declaration(declarator, import_expr, source);
+    }
+
+    /// Record a CommonJS named export (`module.exports.X = ...` /
+    /// `exports.X = ...` / a `module.exports = {...}` key) and flag the module
+    /// as carrying CJS exports.
+    fn push_cjs_named_export(&mut self, name: String, span: Span) {
+        self.has_cjs_exports = true;
+        self.exports.push(ExportInfo {
+            name: ExportName::Named(name),
+            local_name: None,
+            is_type_only: false,
+            visibility: VisibilityTag::None,
+            expected_unused_reason: None,
+            span,
+            members: vec![],
+            is_side_effect_used: false,
+            super_class: None,
+        });
+    }
+
+    /// Handle CommonJS export assignments: `module.exports = { a, b }` (each key
+    /// becomes a named export), `exports.X = ...`, and `module.exports.X = ...`.
+    fn handle_cjs_member_export(
+        &mut self,
+        member: &StaticMemberExpression<'a>,
+        expr: &AssignmentExpression<'a>,
+    ) {
+        if let Expression::Identifier(obj) = &member.object {
+            if obj.name == "module" && member.property.name == "exports" {
+                self.has_cjs_exports = true;
+                if let Expression::ObjectExpression(obj_expr) = &expr.right {
+                    for prop in &obj_expr.properties {
+                        if let oxc_ast::ast::ObjectPropertyKind::ObjectProperty(p) = prop
+                            && let Some(name) = p.key.static_name()
+                        {
+                            self.push_cjs_named_export(name.to_string(), p.span);
+                        }
+                    }
+                }
+            }
+            if obj.name == "exports" {
+                self.push_cjs_named_export(member.property.name.to_string(), expr.span);
+            }
+        } else if let Expression::StaticMemberExpression(inner) = &member.object
+            && let Expression::Identifier(obj) = &inner.object
+            && obj.name == "module"
+            && inner.property.name == "exports"
+        {
+            self.push_cjs_named_export(member.property.name.to_string(), expr.span);
+        }
+    }
+
+    /// Handle `this.member = ...` assignments: record the member access and
+    /// propagate the instance-binding target name from a `new Class()` RHS, an
+    /// identifier bound to a known class, and nested binding targets.
+    fn handle_this_member_assignment(
+        &mut self,
+        member: &StaticMemberExpression<'a>,
+        expr: &AssignmentExpression<'a>,
+    ) {
+        self.member_accesses.push(MemberAccess {
+            object: "this".to_string(),
+            member: member.property.name.to_string(),
+        });
+        if let Expression::NewExpression(new_expr) = &expr.right
+            && let Expression::Identifier(callee) = &new_expr.callee
+            && !super::helpers::is_builtin_constructor(callee.name.as_str())
+        {
+            self.binding_target_names.insert(
+                format!("this.{}", member.property.name),
+                callee.name.to_string(),
+            );
+        } else if let Expression::Identifier(ident) = &expr.right
+            && let Some(target_name) = self.binding_target_names.get(ident.name.as_str()).cloned()
+        {
+            self.binding_target_names
+                .insert(format!("this.{}", member.property.name), target_name);
+        }
+        if let Expression::Identifier(ident) = &expr.right {
+            self.copy_nested_binding_targets(
+                ident.name.as_str(),
+                format!("this.{}", member.property.name).as_str(),
+            );
+        }
+    }
+
+    /// Record sanitizer / allowlist / regex / path bindings cleared by an
+    /// assignment to an identifier or member-object target.
+    fn record_assignment_target_bindings(&mut self, left: &AssignmentTarget<'a>) {
+        if let Some(name) = assignment_target_identifier_name(left) {
+            self.record_sanitizer_binding(name, None);
+            self.record_literal_allowlist_binding(name, false);
+            self.record_risky_regex_binding(name, None);
+            self.record_path_sink_binding(name, None);
+            self.record_path_relative_binding(name, None);
+        } else if let Some(name) = assignment_target_member_object_name(left)
+            && self.literal_allowlist_binding(name)
+        {
+            self.record_literal_allowlist_binding(name, false);
+        }
+    }
+
+    /// Record a Lit `@customElement('tag')` class as a side-effect registration
+    /// candidate, keyed on the local class name or the pending anonymous default
+    /// export slot.
+    fn record_lit_custom_element(&mut self, class: &Class<'a>) {
+        let Some(decorator) = lit_custom_element_decorator(class) else {
+            return;
+        };
+        if let Some(id) = class.id.as_ref() {
+            self.record_lit_custom_element_candidate(
+                decorator,
+                SideEffectRegistrationTarget::LocalClass(id.name.to_string()),
+            );
+        } else if let Some(export) = self.exports.last()
+            && matches!(export.name, crate::ExportName::Default)
+            && export.local_name.is_none()
+        {
+            let export_index = self.exports.len() - 1;
+            self.record_lit_custom_element_candidate(
+                decorator,
+                SideEffectRegistrationTarget::AnonymousDefaultExport(export_index),
+            );
+        }
+    }
+
+    /// Harvest the `@Component` selector(s) + class name + span for the Angular
+    /// arm of the `unrendered-component` detector. Only a `@Component` (never
+    /// `@Directive`) carries a selector here. A multi-selector string is split on
+    /// `,` into the list; the detector restricts first-cut scope to
+    /// all-element-selector components.
+    fn record_angular_selector(
+        &mut self,
+        class: &Class<'a>,
+        meta: &super::helpers::AngularComponentMetadata,
+    ) {
+        if let Some(ref selector_raw) = meta.selector
+            && let Some(id) = class.id.as_ref()
+        {
+            let selectors = split_angular_selectors(selector_raw);
+            if !selectors.is_empty() {
+                self.angular_component_selectors
+                    .push(AngularComponentSelector {
+                        selectors,
+                        span_start: class.span.start,
+                        class_name: id.name.to_string(),
+                    });
+            }
+        }
+    }
+
+    /// Record `templateUrl` / `styleUrls` external asset references as
+    /// `SideEffect` imports for an Angular component.
+    fn record_angular_template_assets(&mut self, meta: &super::helpers::AngularComponentMetadata) {
+        if let Some(ref template_url) = meta.template_url {
+            self.imports.push(ImportInfo {
+                source: normalize_asset_url(template_url),
+                imported_name: ImportedName::SideEffect,
+                local_name: String::new(),
+                is_type_only: false,
+                from_style: false,
+                span: oxc_span::Span::default(),
+                source_span: oxc_span::Span::default(),
+            });
+            self.has_angular_component_template_url = true;
+        }
+        for style_url in &meta.style_urls {
+            self.imports.push(ImportInfo {
+                source: normalize_asset_url(style_url),
+                imported_name: ImportedName::SideEffect,
+                local_name: String::new(),
+                is_type_only: false,
+                from_style: false,
+                span: oxc_span::Span::default(),
+                source_span: oxc_span::Span::default(),
+            });
+        }
+    }
+
+    /// Scan an Angular inline `template:` string: record used selectors, the
+    /// dynamic-render abstain, template member-access refs, offset-remapped
+    /// security sinks, and the inline-template complexity finding.
+    fn record_angular_inline_template(&mut self, meta: &super::helpers::AngularComponentMetadata) {
+        let Some(ref template) = meta.inline_template else {
+            return;
+        };
+        self.angular_used_selectors
+            .extend(crate::sfc_template::angular::collect_angular_used_selectors(template));
+        // `*ngComponentOutlet` dynamically renders a component from a non-literal
+        // class reference; abstain project-wide.
+        if template.contains("ngComponentOutlet") {
+            self.has_dynamic_component_render = true;
+        }
+
+        let refs = crate::sfc_template::angular::collect_angular_template_refs(template);
+        for name in refs.identifiers {
+            self.member_accesses.push(MemberAccess {
+                object: crate::sfc_template::angular::ANGULAR_TPL_SENTINEL.to_string(),
+                member: name,
+            });
+        }
+        self.member_accesses.extend(refs.member_accesses);
+        let template_offset = meta
+            .inline_template_offset
+            .unwrap_or(meta.decorator_span.start);
+        self.security_sinks
+            .extend(refs.security_sinks.into_iter().map(|mut sink| {
+                sink.span_start = sink.span_start.saturating_add(template_offset);
+                sink.span_end = sink.span_end.saturating_add(template_offset);
+                sink
+            }));
+
+        self.inline_template_findings
+            .push(super::InlineTemplateFinding {
+                template_source: template.clone(),
+                decorator_start: meta.decorator_span.start,
+            });
+    }
+
+    /// Record Angular `host:` binding and `inputs:` / `outputs:` member refs as
+    /// template-sentinel member accesses.
+    fn record_angular_template_members(&mut self, meta: &super::helpers::AngularComponentMetadata) {
+        for name in &meta.host_member_refs {
+            self.member_accesses.push(MemberAccess {
+                object: crate::sfc_template::angular::ANGULAR_TPL_SENTINEL.to_string(),
+                member: name.clone(),
+            });
+        }
+        for name in &meta.input_output_members {
+            self.member_accesses.push(MemberAccess {
+                object: crate::sfc_template::angular::ANGULAR_TPL_SENTINEL.to_string(),
+                member: name.clone(),
+            });
+        }
+    }
+}
+
+impl<'a> Visit<'a> for ModuleInfoExtractor {
+    fn visit_program(&mut self, program: &Program<'a>) {
+        // Capture file-level string directives (`"use client"`, `"use server"`)
+        // for the security client-server-leak detector. `directive.directive` is
+        // the cooked directive text without surrounding quotes.
+        for directive in &program.directives {
+            self.directives
+                .push(directive.directive.as_str().to_string());
+        }
+        self.record_program_prologue(program);
+        self.record_program_sanitizer_functions(program);
         walk::walk_program(self, program);
     }
 
@@ -3240,73 +3853,18 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             for spec in specifiers {
                 match spec {
                     ImportDeclarationSpecifier::ImportSpecifier(s) => {
-                        if self.is_module_scope()
-                            && is_child_process_source(&source)
-                            && s.imported.name() == "fork"
-                        {
-                            self.child_process_fork_bindings
-                                .insert(s.local.name.to_string());
-                        }
-                        if self.is_module_scope()
-                            && is_node_url_source(&source)
-                            && s.imported.name() == "fileURLToPath"
-                        {
-                            self.node_url_file_url_to_path_bindings
-                                .insert(s.local.name.to_string());
-                        }
-                        self.imports.push(ImportInfo {
-                            source: source.clone(),
-                            imported_name: ImportedName::Named(s.imported.name().to_string()),
-                            local_name: s.local.name.to_string(),
-                            is_type_only: is_type_only || s.import_kind.is_type(),
-                            from_style: false,
-                            span: s.span,
-                            source_span,
-                        });
+                        self.handle_import_specifier(s, &source, is_type_only, source_span);
                     }
                     ImportDeclarationSpecifier::ImportDefaultSpecifier(s) => {
-                        self.record_dompurify_import_binding(
-                            &source,
-                            s.local.name.as_str(),
-                            is_type_only,
-                        );
-                        if self.is_module_scope() && is_node_path_source(&source) {
-                            self.node_path_namespace_bindings
-                                .insert(s.local.name.to_string());
-                        }
-                        self.imports.push(ImportInfo {
-                            source: source.clone(),
-                            imported_name: ImportedName::Default,
-                            local_name: s.local.name.to_string(),
-                            is_type_only,
-                            from_style: false,
-                            span: s.span,
-                            source_span,
-                        });
+                        self.handle_import_default_specifier(s, &source, is_type_only, source_span);
                     }
                     ImportDeclarationSpecifier::ImportNamespaceSpecifier(s) => {
-                        let local = s.local.name.to_string();
-                        self.record_dompurify_import_binding(&source, &local, is_type_only);
-                        if self.is_module_scope() && is_child_process_source(&source) {
-                            self.child_process_namespace_bindings.insert(local.clone());
-                        }
-                        if self.is_module_scope() && is_node_path_source(&source) {
-                            self.node_path_namespace_bindings.insert(local.clone());
-                        }
-                        if self.is_module_scope() && is_node_url_source(&source) {
-                            self.node_url_file_url_to_path_bindings
-                                .insert(local.clone());
-                        }
-                        self.namespace_binding_names.push(local.clone());
-                        self.imports.push(ImportInfo {
-                            source: source.clone(),
-                            imported_name: ImportedName::Namespace,
-                            local_name: local,
+                        self.handle_import_namespace_specifier(
+                            s,
+                            &source,
                             is_type_only,
-                            from_style: false,
-                            span: s.span,
                             source_span,
-                        });
+                        );
                     }
                 }
             }
@@ -3343,52 +3901,9 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         let is_type_only = decl.export_kind.is_type();
 
         if let Some(source) = &decl.source {
-            for spec in &decl.specifiers {
-                // `export { load } from './x'` re-exports the load: the terminal
-                // object is not a direct literal here, so the load-data harvest
-                // abstains on this file.
-                if !is_type_only
-                    && !spec.export_kind.is_type()
-                    && spec.exported.name().as_str() == "load"
-                {
-                    self.has_unharvestable_load = true;
-                }
-                self.re_exports.push(ReExportInfo {
-                    source: source.value.to_string(),
-                    imported_name: spec.local.name().to_string(),
-                    exported_name: spec.exported.name().to_string(),
-                    is_type_only: is_type_only || spec.export_kind.is_type(),
-                    span: spec.span,
-                });
-            }
+            self.record_export_re_exports(decl, source, is_type_only);
         } else {
-            if let Some(declaration) = &decl.declaration {
-                self.extract_declaration_exports(declaration, is_type_only);
-                if !is_type_only {
-                    self.try_harvest_load_export(declaration);
-                }
-            }
-            for spec in &decl.specifiers {
-                let local_name_str = spec.local.name().as_str();
-                let spec_type_only = is_type_only || spec.export_kind.is_type();
-
-                // A local `export { load }` re-exports a `const load` declared
-                // elsewhere in the file; the declaration-side harvest above
-                // already covered a direct `const load = ...`. A bare
-                // `export { load }` with no matching local declaration means the
-                // terminal object is not visible here, so abstain.
-                if !spec_type_only && local_name_str == "load" && self.load_return_keys.is_empty() {
-                    self.has_unharvestable_load = true;
-                }
-
-                self.pending_local_export_specifiers
-                    .push(PendingLocalExportSpecifier {
-                        local_name: local_name_str.to_string(),
-                        exported_name: spec.exported.name().to_string(),
-                        is_type_only: spec_type_only,
-                        span: spec.span,
-                    });
-            }
+            self.record_export_local_specifiers(decl, is_type_only);
         }
 
         if is_namespace {
@@ -3434,31 +3949,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             _ => None,
         };
 
-        match &decl.declaration {
-            ExportDefaultDeclarationKind::ClassDeclaration(class) => {
-                let refs = Self::collect_class_signature_refs(class);
-                if let Some(id) = class.id.as_ref() {
-                    self.record_local_type_declaration(&id.name, id.span);
-                    self.record_local_signature_refs(&id.name, refs);
-                } else {
-                    self.record_public_signature_refs("default", refs);
-                }
-            }
-            ExportDefaultDeclarationKind::FunctionDeclaration(function) => {
-                let refs = Self::collect_function_signature_refs(function);
-                if let Some(id) = function.id.as_ref() {
-                    self.record_local_signature_refs(&id.name, refs);
-                } else {
-                    self.record_public_signature_refs("default", refs);
-                }
-            }
-            ExportDefaultDeclarationKind::TSInterfaceDeclaration(iface) => {
-                self.record_local_type_declaration(&iface.id.name, iface.id.span);
-                let refs = Self::collect_interface_signature_refs(iface);
-                self.record_public_signature_refs("default", refs);
-            }
-            _ => {}
-        }
+        self.record_default_export_signature_refs(decl);
 
         if super_class.is_some()
             || !implemented_interfaces.is_empty()
@@ -3523,26 +4014,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             Expression::TemplateLiteral(tpl)
                 if !tpl.quasis.is_empty() && !tpl.expressions.is_empty() =>
             {
-                let first_quasi = tpl.quasis[0].value.raw.to_string();
-                if first_quasi.starts_with("./") || first_quasi.starts_with("../") {
-                    let prefix = if tpl.expressions.len() > 1 {
-                        format!("{first_quasi}**/")
-                    } else {
-                        first_quasi
-                    };
-                    let suffix = if tpl.quasis.len() > 1 {
-                        let last = &tpl.quasis[tpl.quasis.len() - 1];
-                        let s = last.value.raw.to_string();
-                        if s.is_empty() { None } else { Some(s) }
-                    } else {
-                        None
-                    };
-                    self.dynamic_import_patterns.push(DynamicImportPattern {
-                        prefix,
-                        suffix,
-                        span: expr.span,
-                    });
-                }
+                self.record_dynamic_import_template_pattern(tpl, expr.span);
             }
             Expression::TemplateLiteral(tpl)
                 if !tpl.quasis.is_empty() && tpl.expressions.is_empty() =>
@@ -3583,126 +4055,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         // binding name. Runs before the body is walked. No-op on non-JSX files.
         self.react_prescan_variable_declaration(decl);
         for declarator in &decl.declarations {
-            self.record_variable_declarator_metadata(declarator);
-
-            let Some(init) = &declarator.init else {
-                self.record_uninitialized_variable_bindings(declarator);
-                continue;
-            };
-
-            self.record_initialized_variable_bindings(decl, declarator, init);
-            self.record_playwright_variable_helpers(declarator, init);
-            self.record_pinia_store(declarator, init);
-
-            // FP-1 (unused-load-data-key): `const X = data` passes the whole
-            // SvelteKit `data` prop opaquely, so a child could read any key the
-            // detector cannot see. Name-gated on the bare `data` identifier;
-            // read only by the load-data detector, so capturing it everywhere is
-            // byte-identity-safe. The `{...data}` script-spread and
-            // `{a, ...rest} = data` rest forms are already in `whole_object_uses`.
-            if matches!(init, Expression::Identifier(id) if id.name == "data") {
-                self.has_load_data_whole_use = true;
-            }
-
-            if let BindingPattern::BindingIdentifier(id) = &declarator.id
-                && let Expression::ObjectExpression(obj) = init
-            {
-                self.record_object_binding_targets(id.name.as_str(), obj);
-            }
-
-            if let Some((call, source)) = try_extract_require(init) {
-                self.record_dompurify_require_binding(declarator, source);
-                self.record_child_process_require_binding(declarator, source);
-                self.handle_require_declaration(declarator, call, source);
-                continue;
-            }
-
-            if let Expression::NewExpression(new_expr) = init
-                && let Expression::Identifier(callee) = &new_expr.callee
-                && let BindingPattern::BindingIdentifier(id) = &declarator.id
-                && !super::helpers::is_builtin_constructor(callee.name.as_str())
-            {
-                self.binding_target_names
-                    .insert(id.name.to_string(), callee.name.to_string());
-            }
-
-            if let BindingPattern::BindingIdentifier(id) = &declarator.id
-                && let Some(class_name) = Self::svelte_derived_new_class(init)
-            {
-                self.binding_target_names
-                    .insert(id.name.to_string(), class_name);
-            }
-
-            if let Expression::CallExpression(call) = init
-                && let BindingPattern::ArrayPattern(arr_pat) = &declarator.id
-                && let Some(Some(BindingPattern::BindingIdentifier(id))) = arr_pat.elements.first()
-                && let Some(class_name) =
-                    super::helpers::try_extract_factory_new_class(&call.arguments)
-            {
-                self.binding_target_names
-                    .insert(id.name.to_string(), class_name);
-            }
-
-            // `const svc = useMemo(() => new Svc())`: useMemo returns the
-            // factory's product directly, so the non-destructured binding is a
-            // class instance. Scoped to useMemo (see `is_value_returning_memo_callee`)
-            // so arbitrary wrappers and tuple-returning hooks like useState are
-            // not over-credited. `or_insert` so a stronger pre-existing binding
-            // wins. See issue #844.
-            if let Expression::CallExpression(call) = init
-                && let BindingPattern::BindingIdentifier(id) = &declarator.id
-                && is_value_returning_memo_callee(&call.callee)
-                && let Some(class_name) =
-                    super::helpers::try_extract_factory_new_class(&call.arguments)
-            {
-                self.binding_target_names
-                    .entry(id.name.to_string())
-                    .or_insert(class_name);
-            }
-
-            if let Expression::CallExpression(call) = init
-                && let BindingPattern::BindingIdentifier(id) = &declarator.id
-                && let Expression::StaticMemberExpression(member) = &call.callee
-                && let Expression::Identifier(callee_object) = &member.object
-            {
-                self.factory_call_candidates
-                    .push(super::FactoryCallCandidate {
-                        local_name: id.name.to_string(),
-                        callee_object: callee_object.name.to_string(),
-                        callee_method: member.property.name.to_string(),
-                    });
-            }
-
-            if let Expression::Identifier(ident) = init
-                && self
-                    .namespace_binding_names
-                    .iter()
-                    .any(|n| n == ident.name.as_str())
-            {
-                self.handle_namespace_destructuring(declarator, &ident.name);
-                continue;
-            }
-
-            // Primitive A (unused-load-data-key): a destructure off the SvelteKit
-            // `data` prop local (`const { user } = data` / `let { user } = data`)
-            // emits `data.<key>` member accesses so the cross-file detector can
-            // see the consumed load-return keys. Rooted on the `data` local (not
-            // an import); a rest element (`const { a, ...rest } = data`) records a
-            // whole-object use of `data` (abstain). Crediting a member against a
-            // binding named `data` is inert for every other detector unless a
-            // tracked export / instance is also named `data`; the load-data-key
-            // join is the only consumer of `data.<key>`.
-            if let Expression::Identifier(ident) = init
-                && ident.name == "data"
-            {
-                self.handle_namespace_destructuring(declarator, &ident.name);
-                continue;
-            }
-
-            let Some((import_expr, source)) = try_extract_dynamic_import(init) else {
-                continue;
-            };
-            self.handle_dynamic_import_declaration(declarator, import_expr, source);
+            self.record_variable_declarator(decl, declarator);
         }
         walk::walk_variable_declaration(self, decl);
     }
@@ -3858,10 +4211,6 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         walk::walk_ts_import_type(self, node);
     }
 
-    #[expect(
-        clippy::excessive_nesting,
-        reason = "CJS export pattern matching requires deep nesting"
-    )]
     fn visit_assignment_expression(&mut self, expr: &AssignmentExpression<'a>) {
         // FP-1 (unused-load-data-key): a destructure-ASSIGNMENT from the `data`
         // prop (`({ guests } = data)` in a Svelte `$effect`, or `$: ({a} = data)`)
@@ -3884,100 +4233,12 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             self.capture_hardcoded_secret_literal_sink(name.as_str(), &expr.right, expr.span);
         }
 
-        if let Some(name) = assignment_target_identifier_name(&expr.left) {
-            self.record_sanitizer_binding(name, None);
-            self.record_literal_allowlist_binding(name, false);
-            self.record_risky_regex_binding(name, None);
-            self.record_path_sink_binding(name, None);
-            self.record_path_relative_binding(name, None);
-        } else if let Some(name) = assignment_target_member_object_name(&expr.left)
-            && self.literal_allowlist_binding(name)
-        {
-            self.record_literal_allowlist_binding(name, false);
-        }
+        self.record_assignment_target_bindings(&expr.left);
 
         if let AssignmentTarget::StaticMemberExpression(member) = &expr.left {
-            if let Expression::Identifier(obj) = &member.object {
-                if obj.name == "module" && member.property.name == "exports" {
-                    self.has_cjs_exports = true;
-                    if let Expression::ObjectExpression(obj_expr) = &expr.right {
-                        for prop in &obj_expr.properties {
-                            if let oxc_ast::ast::ObjectPropertyKind::ObjectProperty(p) = prop
-                                && let Some(name) = p.key.static_name()
-                            {
-                                self.exports.push(ExportInfo {
-                                    name: ExportName::Named(name.to_string()),
-                                    local_name: None,
-                                    is_type_only: false,
-                                    visibility: VisibilityTag::None,
-                                    expected_unused_reason: None,
-                                    span: p.span,
-                                    members: vec![],
-                                    is_side_effect_used: false,
-                                    super_class: None,
-                                });
-                            }
-                        }
-                    }
-                }
-                if obj.name == "exports" {
-                    self.has_cjs_exports = true;
-                    self.exports.push(ExportInfo {
-                        name: ExportName::Named(member.property.name.to_string()),
-                        local_name: None,
-                        is_type_only: false,
-                        visibility: VisibilityTag::None,
-                        expected_unused_reason: None,
-                        span: expr.span,
-                        members: vec![],
-                        is_side_effect_used: false,
-                        super_class: None,
-                    });
-                }
-            } else if let Expression::StaticMemberExpression(inner) = &member.object
-                && let Expression::Identifier(obj) = &inner.object
-                && obj.name == "module"
-                && inner.property.name == "exports"
-            {
-                self.has_cjs_exports = true;
-                self.exports.push(ExportInfo {
-                    name: ExportName::Named(member.property.name.to_string()),
-                    local_name: None,
-                    is_type_only: false,
-                    visibility: VisibilityTag::None,
-                    expected_unused_reason: None,
-                    span: expr.span,
-                    members: vec![],
-                    is_side_effect_used: false,
-                    super_class: None,
-                });
-            }
+            self.handle_cjs_member_export(member, expr);
             if matches!(member.object, Expression::ThisExpression(_)) {
-                self.member_accesses.push(MemberAccess {
-                    object: "this".to_string(),
-                    member: member.property.name.to_string(),
-                });
-                if let Expression::NewExpression(new_expr) = &expr.right
-                    && let Expression::Identifier(callee) = &new_expr.callee
-                    && !super::helpers::is_builtin_constructor(callee.name.as_str())
-                {
-                    self.binding_target_names.insert(
-                        format!("this.{}", member.property.name),
-                        callee.name.to_string(),
-                    );
-                } else if let Expression::Identifier(ident) = &expr.right
-                    && let Some(target_name) =
-                        self.binding_target_names.get(ident.name.as_str()).cloned()
-                {
-                    self.binding_target_names
-                        .insert(format!("this.{}", member.property.name), target_name);
-                }
-                if let Expression::Identifier(ident) = &expr.right {
-                    self.copy_nested_binding_targets(
-                        ident.name.as_str(),
-                        format!("this.{}", member.property.name).as_str(),
-                    );
-                }
+                self.handle_this_member_assignment(member, expr);
             }
         }
         self.capture_member_assign_sink(expr);
@@ -4105,117 +4366,13 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_class(&mut self, class: &Class<'a>) {
-        if let Some(decorator) = lit_custom_element_decorator(class) {
-            if let Some(id) = class.id.as_ref() {
-                self.record_lit_custom_element_candidate(
-                    decorator,
-                    SideEffectRegistrationTarget::LocalClass(id.name.to_string()),
-                );
-            } else if let Some(export) = self.exports.last()
-                && matches!(export.name, crate::ExportName::Default)
-                && export.local_name.is_none()
-            {
-                let export_index = self.exports.len() - 1;
-                self.record_lit_custom_element_candidate(
-                    decorator,
-                    SideEffectRegistrationTarget::AnonymousDefaultExport(export_index),
-                );
-            }
-        }
+        self.record_lit_custom_element(class);
 
         if let Some(meta) = extract_angular_component_metadata(class) {
-            // Harvest the `@Component` selector(s) + class name + span for the
-            // Angular arm of the `unrendered-component` detector. Only a
-            // `@Component` (never `@Directive`) carries a selector here. A
-            // multi-selector string is split on `,` into the list; the detector
-            // restricts first-cut scope to all-element-selector components.
-            if let Some(ref selector_raw) = meta.selector
-                && let Some(id) = class.id.as_ref()
-            {
-                let selectors = split_angular_selectors(selector_raw);
-                if !selectors.is_empty() {
-                    self.angular_component_selectors
-                        .push(AngularComponentSelector {
-                            selectors,
-                            span_start: class.span.start,
-                            class_name: id.name.to_string(),
-                        });
-                }
-            }
-
-            if let Some(ref template) = meta.inline_template {
-                self.angular_used_selectors
-                    .extend(crate::sfc_template::angular::collect_angular_used_selectors(template));
-                // `*ngComponentOutlet` dynamically renders a component from a
-                // non-literal class reference; abstain project-wide.
-                if template.contains("ngComponentOutlet") {
-                    self.has_dynamic_component_render = true;
-                }
-            }
-
-            if let Some(ref template_url) = meta.template_url {
-                self.imports.push(ImportInfo {
-                    source: normalize_asset_url(template_url),
-                    imported_name: ImportedName::SideEffect,
-                    local_name: String::new(),
-                    is_type_only: false,
-                    from_style: false,
-                    span: oxc_span::Span::default(),
-                    source_span: oxc_span::Span::default(),
-                });
-                self.has_angular_component_template_url = true;
-            }
-            for style_url in &meta.style_urls {
-                self.imports.push(ImportInfo {
-                    source: normalize_asset_url(style_url),
-                    imported_name: ImportedName::SideEffect,
-                    local_name: String::new(),
-                    is_type_only: false,
-                    from_style: false,
-                    span: oxc_span::Span::default(),
-                    source_span: oxc_span::Span::default(),
-                });
-            }
-
-            if let Some(ref template) = meta.inline_template {
-                let refs = crate::sfc_template::angular::collect_angular_template_refs(template);
-                for name in refs.identifiers {
-                    self.member_accesses.push(MemberAccess {
-                        object: crate::sfc_template::angular::ANGULAR_TPL_SENTINEL.to_string(),
-                        member: name,
-                    });
-                }
-                self.member_accesses.extend(refs.member_accesses);
-                let template_offset = meta
-                    .inline_template_offset
-                    .unwrap_or(meta.decorator_span.start);
-                self.security_sinks
-                    .extend(refs.security_sinks.into_iter().map(|mut sink| {
-                        sink.span_start = sink.span_start.saturating_add(template_offset);
-                        sink.span_end = sink.span_end.saturating_add(template_offset);
-                        sink
-                    }));
-
-                self.inline_template_findings
-                    .push(super::InlineTemplateFinding {
-                        template_source: template.clone(),
-                        decorator_start: meta.decorator_span.start,
-                    });
-            }
-
-            for name in &meta.host_member_refs {
-                self.member_accesses.push(MemberAccess {
-                    object: crate::sfc_template::angular::ANGULAR_TPL_SENTINEL.to_string(),
-                    member: name.clone(),
-                });
-            }
-
-            for name in &meta.input_output_members {
-                self.member_accesses.push(MemberAccess {
-                    object: crate::sfc_template::angular::ANGULAR_TPL_SENTINEL.to_string(),
-                    member: name.clone(),
-                });
-            }
+            self.record_angular_selector(class, &meta);
+            self.record_angular_template_assets(&meta);
+            self.record_angular_inline_template(&meta);
+            self.record_angular_template_members(&meta);
         }
         self.class_super_stack
             .push(super::helpers::extract_super_class_name(class));
@@ -6061,21 +6218,40 @@ fn is_token_like_security_name(name: &str) -> bool {
     .any(|needle| lower.contains(needle))
 }
 
+/// A zero-argument `Math.random()` call (the literal insecure-randomness shape).
+fn is_math_random_zero_arg_call(call: &CallExpression<'_>) -> bool {
+    call.arguments.is_empty() && flatten_callee_path(&call.callee).as_deref() == Some("Math.random")
+}
+
+/// Whether a call expression is, or contains in its callee / arguments, a
+/// `Math.random()` use.
+fn call_contains_math_random(call: &CallExpression<'_>) -> bool {
+    is_math_random_zero_arg_call(call)
+        || expression_callee_contains_math_random(&call.callee)
+        || call
+            .arguments
+            .iter()
+            .filter_map(Argument::as_expression)
+            .any(expression_contains_math_random_call)
+}
+
+/// Whether an optional-chain element is, or contains, a `Math.random()` use.
+fn chain_element_contains_math_random(chain: &ChainExpression<'_>) -> bool {
+    match &chain.expression {
+        ChainElement::CallExpression(call) => {
+            is_math_random_zero_arg_call(call)
+                || expression_callee_contains_math_random(&call.callee)
+        }
+        ChainElement::StaticMemberExpression(member) => {
+            expression_contains_math_random_call(&member.object)
+        }
+        _ => false,
+    }
+}
+
 fn expression_contains_math_random_call(expr: &Expression<'_>) -> bool {
     match unwrap_parens(expr) {
-        Expression::CallExpression(call) => {
-            if call.arguments.is_empty()
-                && flatten_callee_path(&call.callee).as_deref() == Some("Math.random")
-            {
-                return true;
-            }
-            expression_callee_contains_math_random(&call.callee)
-                || call
-                    .arguments
-                    .iter()
-                    .filter_map(Argument::as_expression)
-                    .any(expression_contains_math_random_call)
-        }
+        Expression::CallExpression(call) => call_contains_math_random(call),
         Expression::BinaryExpression(bin) => {
             expression_contains_math_random_call(&bin.left)
                 || expression_contains_math_random_call(&bin.right)
@@ -6110,20 +6286,7 @@ fn expression_contains_math_random_call(expr: &Expression<'_>) -> bool {
         Expression::StaticMemberExpression(member) => {
             expression_contains_math_random_call(&member.object)
         }
-        Expression::ChainExpression(chain) => match &chain.expression {
-            ChainElement::CallExpression(call) => {
-                if call.arguments.is_empty()
-                    && flatten_callee_path(&call.callee).as_deref() == Some("Math.random")
-                {
-                    return true;
-                }
-                expression_callee_contains_math_random(&call.callee)
-            }
-            ChainElement::StaticMemberExpression(member) => {
-                expression_contains_math_random_call(&member.object)
-            }
-            _ => false,
-        },
+        Expression::ChainExpression(chain) => chain_element_contains_math_random(chain),
         _ => false,
     }
 }
@@ -6212,6 +6375,26 @@ fn push_member_source_paths(path: &str, out: &mut Vec<String>) {
     }
 }
 
+/// Collect secret source paths from a `StaticMemberExpression`: flatten the
+/// member path and push it (and its source prefixes), then recurse into the
+/// object. #890: a public env read (`process.env.NEXT_PUBLIC_*`) contributes no
+/// secret source, and returns before recursing so the bare `process.env` /
+/// `import.meta.env` object is not re-pushed as a source and defeat the
+/// exclusion.
+fn collect_static_member_source_path(
+    expr: &Expression<'_>,
+    member: &StaticMemberExpression<'_>,
+    out: &mut Vec<String>,
+) {
+    if let Some(path) = flatten_member_path(expr) {
+        if fallow_types::extract::is_public_env_path(&path) {
+            return;
+        }
+        push_member_source_paths(&path, out);
+    }
+    collect_source_paths_into(&member.object, out);
+}
+
 fn collect_source_paths_into(expr: &Expression<'_>, out: &mut Vec<String>) {
     match expr {
         Expression::ParenthesizedExpression(paren) => {
@@ -6227,17 +6410,7 @@ fn collect_source_paths_into(expr: &Expression<'_>, out: &mut Vec<String>) {
             collect_source_paths_into(&ts_non_null.expression, out);
         }
         Expression::StaticMemberExpression(member) => {
-            if let Some(path) = flatten_member_path(expr) {
-                // #890: a public env read contributes no secret source. Return
-                // before recursing into the object, otherwise the bare
-                // `process.env` / `import.meta.env` object would be re-pushed as a
-                // source and defeat the exclusion.
-                if fallow_types::extract::is_public_env_path(&path) {
-                    return;
-                }
-                push_member_source_paths(&path, out);
-            }
-            collect_source_paths_into(&member.object, out);
+            collect_static_member_source_path(expr, member, out);
         }
         Expression::ComputedMemberExpression(member) => {
             collect_source_paths_into(&member.object, out);
@@ -6823,8 +6996,12 @@ impl ModuleInfoExtractor {
         }
     }
 
-    fn record_di_key_site(&mut self, expr: &CallExpression<'_>) {
-        let classified = match &expr.callee {
+    /// Classify a call as a framework DI provide / inject site, gating each
+    /// named-callee form on its import provenance. The app-level
+    /// `*.provide(KEY, value)` member form is FN-preferring (no provenance gate),
+    /// since a captured provide can only suppress a finding, never create one.
+    fn classify_di_call_site(&self, expr: &CallExpression<'_>) -> Option<(DiFramework, DiRole)> {
+        match &expr.callee {
             Expression::Identifier(callee) => {
                 let name = callee.name.as_str();
                 if self.nested_scope_shadows(name) {
@@ -6855,19 +7032,17 @@ impl ModuleInfoExtractor {
                     None
                 }
             }
-            // App-level `*.provide(KEY, value)` (e.g. `app.provide` in main.ts).
-            // FN-preferring: no provenance gate, since a captured provide can
-            // only suppress a finding, never create one. Exactly two arguments
-            // separates the Vue app-provide shape from unrelated `.provide`
-            // calls reasonably well.
             Expression::StaticMemberExpression(member)
                 if member.property.name == "provide" && expr.arguments.len() == 2 =>
             {
                 Some((DiFramework::Vue, DiRole::Provide))
             }
             _ => None,
-        };
-        let Some((framework, role)) = classified else {
+        }
+    }
+
+    fn record_di_key_site(&mut self, expr: &CallExpression<'_>) {
+        let Some((framework, role)) = self.classify_di_call_site(expr) else {
             return;
         };
 
@@ -7603,6 +7778,114 @@ impl ModuleInfoExtractor {
     /// Capture a call/member-call sink site (category-blind). Pushes one
     /// `SinkSite` per admitted positional argument; a callee that cannot be
     /// flattened to a static path increments the blind-spot counter instead.
+    /// Capture one argument of a call / new-expression sink into
+    /// `security_sinks`, applying the literal / non-literal capture gates.
+    ///
+    /// Shared by `capture_call_sink` and `capture_new_expression_sink` (oxc
+    /// represents `new X(...)` as a distinct `NewExpression`), keeping the
+    /// per-argument `SinkSite` construction byte-identical across both shapes.
+    /// `url_arg_literal` is the call-level arg-0 URL signal (always `None` for
+    /// new-expressions). `span` is the owning call / new expression's span.
+    fn push_security_sink_arg(
+        &mut self,
+        callee_path: &str,
+        sink_shape: SinkShape,
+        arg_index: u32,
+        arg_expr: &Expression<'_>,
+        url_arg_literal: Option<String>,
+        span: Span,
+    ) {
+        let arg_literal = self.static_sink_literal_value(arg_expr);
+        let arg_is_non_literal = arg_literal.is_none() && is_non_literal_arg(arg_expr);
+        if arg_is_non_literal
+            && should_skip_clamped_resource_amplification_arg(
+                callee_path,
+                sink_shape,
+                arg_index,
+                arg_expr,
+            )
+        {
+            return;
+        }
+        if !arg_is_non_literal
+            && !arg_literal.as_ref().is_some_and(|literal| {
+                should_capture_literal_sink_value(callee_path, sink_shape, arg_index, literal)
+            })
+        {
+            return;
+        }
+        if arg_is_non_literal {
+            self.record_sanitized_sink_arg(span.start, arg_index, arg_expr);
+        }
+        let site = self.build_arg_sink_site(
+            callee_path,
+            sink_shape,
+            arg_index,
+            arg_expr,
+            arg_literal,
+            arg_is_non_literal,
+            url_arg_literal,
+            span,
+        );
+        self.security_sinks.push(site);
+    }
+
+    /// Build the per-argument `SinkSite` for `push_security_sink_arg` once the
+    /// capture gates have passed. Non-literal arguments carry the ident /
+    /// source-path / arg-kind / url-shape metadata; literal arguments carry the
+    /// literal value with empty metadata.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "mirrors the SinkSite shape; splitting further would obscure the build"
+    )]
+    fn build_arg_sink_site(
+        &self,
+        callee_path: &str,
+        sink_shape: SinkShape,
+        arg_index: u32,
+        arg_expr: &Expression<'_>,
+        arg_literal: Option<SinkLiteralValue>,
+        arg_is_non_literal: bool,
+        url_arg_literal: Option<String>,
+        span: Span,
+    ) -> SinkSite {
+        let object_keys = object_key_metadata(arg_expr);
+        SinkSite {
+            sink_shape,
+            callee_path: callee_path.to_string(),
+            arg_index,
+            arg_is_non_literal,
+            arg_kind: if arg_is_non_literal {
+                classify_arg_kind(arg_expr)
+            } else {
+                SinkArgKind::Literal
+            },
+            arg_literal,
+            object_properties: object_literal_properties(arg_expr),
+            object_property_keys: object_keys.keys,
+            object_property_keys_complete: object_keys.complete,
+            arg_idents: if arg_is_non_literal {
+                collect_arg_idents(arg_expr)
+            } else {
+                Vec::new()
+            },
+            arg_source_paths: if arg_is_non_literal {
+                collect_arg_source_paths(arg_expr)
+            } else {
+                Vec::new()
+            },
+            regex_pattern: None,
+            span_start: span.start,
+            span_end: span.end,
+            url_arg_literal,
+            url_shape: if arg_is_non_literal {
+                classify_url_shape(arg_expr, &self.static_string_bindings)
+            } else {
+                None
+            },
+        }
+    }
+
     fn capture_call_sink(&mut self, expr: &CallExpression<'_>) {
         let Some(callee_path) = flatten_callee_path(&expr.callee) else {
             if self.redos_regex_application(expr).is_some() {
@@ -7632,63 +7915,14 @@ impl ModuleInfoExtractor {
             let Ok(arg_index) = u32::try_from(index) else {
                 continue;
             };
-            let arg_literal = self.static_sink_literal_value(arg_expr);
-            let arg_is_non_literal = arg_literal.is_none() && is_non_literal_arg(arg_expr);
-            if arg_is_non_literal
-                && should_skip_clamped_resource_amplification_arg(
-                    &callee_path,
-                    sink_shape,
-                    arg_index,
-                    arg_expr,
-                )
-            {
-                continue;
-            }
-            if !arg_is_non_literal
-                && !arg_literal.as_ref().is_some_and(|literal| {
-                    should_capture_literal_sink_value(&callee_path, sink_shape, arg_index, literal)
-                })
-            {
-                continue;
-            }
-            if arg_is_non_literal {
-                self.record_sanitized_sink_arg(expr.span.start, arg_index, arg_expr);
-            }
-            let object_keys = object_key_metadata(arg_expr);
-            self.security_sinks.push(SinkSite {
+            self.push_security_sink_arg(
+                &callee_path,
                 sink_shape,
-                callee_path: callee_path.clone(),
                 arg_index,
-                arg_is_non_literal,
-                arg_kind: if arg_is_non_literal {
-                    classify_arg_kind(arg_expr)
-                } else {
-                    SinkArgKind::Literal
-                },
-                arg_literal,
-                object_properties: object_literal_properties(arg_expr),
-                object_property_keys: object_keys.keys,
-                object_property_keys_complete: object_keys.complete,
-                arg_idents: if arg_is_non_literal {
-                    collect_arg_idents(arg_expr)
-                } else {
-                    Vec::new()
-                },
-                arg_source_paths: if arg_is_non_literal {
-                    collect_arg_source_paths(arg_expr)
-                } else {
-                    Vec::new()
-                },
-                regex_pattern: None,
-                span_start: expr.span.start,
-                span_end: expr.span.end,
-                url_arg_literal: url_arg_literal.clone(),
-                url_shape: if arg_is_non_literal {
-                    classify_url_shape(arg_expr, &self.static_string_bindings)
-                } else {
-                    None
-                },
-            });
+                arg_expr,
+                url_arg_literal.clone(),
+                expr.span,
+            );
         }
         if should_capture_missing_jwt_verify_options(&callee_path, sink_shape, expr.arguments.len())
         {
@@ -7727,65 +7961,14 @@ impl ModuleInfoExtractor {
             let Ok(arg_index) = u32::try_from(index) else {
                 continue;
             };
-            let arg_literal = self.static_sink_literal_value(arg_expr);
-            let arg_is_non_literal = arg_literal.is_none() && is_non_literal_arg(arg_expr);
-            if arg_is_non_literal
-                && should_skip_clamped_resource_amplification_arg(
-                    &callee_path,
-                    SinkShape::NewExpression,
-                    arg_index,
-                    arg_expr,
-                )
-            {
-                continue;
-            }
-            if !arg_is_non_literal
-                && !arg_literal.as_ref().is_some_and(|literal| {
-                    should_capture_literal_sink_value(
-                        &callee_path,
-                        SinkShape::NewExpression,
-                        arg_index,
-                        literal,
-                    )
-                })
-            {
-                continue;
-            }
-            let object_keys = object_key_metadata(arg_expr);
-            self.security_sinks.push(SinkSite {
-                sink_shape: SinkShape::NewExpression,
-                callee_path: callee_path.clone(),
+            self.push_security_sink_arg(
+                &callee_path,
+                SinkShape::NewExpression,
                 arg_index,
-                arg_is_non_literal,
-                arg_kind: if arg_is_non_literal {
-                    classify_arg_kind(arg_expr)
-                } else {
-                    SinkArgKind::Literal
-                },
-                arg_literal,
-                object_properties: object_literal_properties(arg_expr),
-                object_property_keys: object_keys.keys,
-                object_property_keys_complete: object_keys.complete,
-                arg_idents: if arg_is_non_literal {
-                    collect_arg_idents(arg_expr)
-                } else {
-                    Vec::new()
-                },
-                arg_source_paths: if arg_is_non_literal {
-                    collect_arg_source_paths(arg_expr)
-                } else {
-                    Vec::new()
-                },
-                regex_pattern: None,
-                span_start: expr.span.start,
-                span_end: expr.span.end,
-                url_arg_literal: None,
-                url_shape: if arg_is_non_literal {
-                    classify_url_shape(arg_expr, &self.static_string_bindings)
-                } else {
-                    None
-                },
-            });
+                arg_expr,
+                None,
+                expr.span,
+            );
         }
     }
 

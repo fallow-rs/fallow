@@ -102,81 +102,174 @@ fn parse_source_to_module_inner(
     let mut parsed_suppressions =
         crate::suppress::parse_suppressions(&parser_return.program.comments, source);
 
+    let (mut extractor, mut semantic_usage) =
+        build_primary_extractor(&parser_return.program, path, source, source_type);
+
+    let line_offsets = fallow_types::extract::compute_line_offsets(source);
+
+    let (mut complexity, mut flag_uses) = compute_primary_complexity_and_flags(
+        &parser_return.program,
+        parser_source,
+        &extractor.inline_template_findings,
+        &line_offsets,
+        need_complexity,
+    );
+
+    apply_jsx_retry_or_jsdoc(
+        path,
+        parser_source,
+        source_type,
+        need_complexity,
+        &line_offsets,
+        &mut ParseOutputs {
+            extractor: &mut extractor,
+            semantic_usage: &mut semantic_usage,
+            complexity: &mut complexity,
+            flag_uses: &mut flag_uses,
+            parsed_suppressions: &mut parsed_suppressions,
+        },
+        &parser_return.program.comments,
+        source,
+    );
+
+    assemble_module_info(
+        extractor,
+        file_id,
+        content_hash,
+        parsed_suppressions,
+        semantic_usage,
+        line_offsets,
+        complexity,
+        flag_uses,
+    )
+}
+
+/// Build the primary extractor: run the AST walk (JSX-gated), fold in Glimmer
+/// template usage, and compute import-binding semantic usage.
+fn build_primary_extractor(
+    program: &Program<'_>,
+    path: &Path,
+    source: &str,
+    source_type: SourceType,
+) -> (ModuleInfoExtractor, SemanticUsage) {
     let mut extractor = ModuleInfoExtractor::new();
     // Gate the React/JSX structural walk on a JSX-capable parse so it is a
     // no-op on non-JSX files (perf: the `audit` hot path on non-React repos
     // must not regress).
     extractor.jsx_capable = source_type.is_jsx();
-    extractor.visit_program(&parser_return.program);
+    extractor.visit_program(program);
     extractor.resolve_pending_local_export_specifiers();
 
     let template_used_imports =
         collect_glimmer_template_into_extractor(&mut extractor, path, source);
+    let semantic_usage =
+        compute_semantic_usage(program, &extractor.imports, &template_used_imports);
+    (extractor, semantic_usage)
+}
 
-    let mut semantic_usage = compute_semantic_usage(
-        &parser_return.program,
-        &extractor.imports,
-        &template_used_imports,
-    );
-
-    let line_offsets = fallow_types::extract::compute_line_offsets(source);
-
+/// Compute per-function complexity (with inline-template findings folded in) and
+/// feature-flag uses for the primary parse, honoring `need_complexity`.
+fn compute_primary_complexity_and_flags(
+    program: &Program<'_>,
+    parser_source: &str,
+    inline_template_findings: &[crate::visitor::InlineTemplateFinding],
+    line_offsets: &[u32],
+    need_complexity: bool,
+) -> (Vec<FunctionComplexity>, Vec<FlagUse>) {
     let mut complexity = if need_complexity {
-        crate::complexity::compute_complexity(&parser_return.program, parser_source, &line_offsets)
+        crate::complexity::compute_complexity(program, parser_source, line_offsets)
     } else {
         Vec::new()
     };
     if need_complexity {
-        append_inline_template_complexity(
-            &mut complexity,
-            &extractor.inline_template_findings,
-            &line_offsets,
-        );
+        append_inline_template_complexity(&mut complexity, inline_template_findings, line_offsets);
     }
 
-    let mut flag_uses = crate::flags::extract_flags(
-        &parser_return.program,
-        &line_offsets,
+    let flag_uses = crate::flags::extract_flags(
+        program,
+        line_offsets,
         &[],   // built-in patterns only at parse time
         &[],   // built-in prefixes only at parse time
         false, // config object heuristics off at parse time (opt-in via config)
     );
+    (complexity, flag_uses)
+}
 
-    let total_extracted =
-        extractor.exports.len() + extractor.imports.len() + extractor.re_exports.len();
+/// Mutable references to the primary-parse outputs a JSX retry replaces wholesale.
+struct ParseOutputs<'a> {
+    extractor: &'a mut ModuleInfoExtractor,
+    semantic_usage: &'a mut SemanticUsage,
+    complexity: &'a mut Vec<FunctionComplexity>,
+    flag_uses: &'a mut Vec<FlagUse>,
+    parsed_suppressions: &'a mut crate::suppress::ParsedSuppressions,
+}
+
+/// Run the JSX retry parse: when it improves extraction, overwrite every
+/// primary-parse output in place; otherwise apply JSDoc tags to the primary
+/// extractor. The retry's own parse already applies JSDoc tags.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "threads the retry inputs plus the primary-parse outputs to overwrite in place"
+)]
+fn apply_jsx_retry_or_jsdoc(
+    path: &Path,
+    parser_source: &str,
+    source_type: SourceType,
+    need_complexity: bool,
+    line_offsets: &[u32],
+    outputs: &mut ParseOutputs<'_>,
+    comments: &[Comment],
+    source: &str,
+) {
     let retry_input = JsxRetryInput {
         path,
         source,
         parser_source,
         source_type,
-        total_extracted,
+        total_extracted: outputs.extractor.exports.len()
+            + outputs.extractor.imports.len()
+            + outputs.extractor.re_exports.len(),
         need_complexity,
-        line_offsets: &line_offsets,
+        line_offsets,
     };
-    let used_retry = if let Some(retry) = parse_with_jsx_retry(&retry_input) {
-        extractor = retry.extractor;
-        semantic_usage = retry.semantic_usage;
-        complexity = retry.complexity;
-        flag_uses = retry.flag_uses;
-        parsed_suppressions = retry.parsed_suppressions;
-        true
-    } else {
-        false
+    let Some(retry) = parse_with_jsx_retry(&retry_input) else {
+        apply_jsdoc_tags_to_extractor(&mut *outputs.extractor, comments, source);
+        return;
     };
+    *outputs.extractor = retry.extractor;
+    *outputs.semantic_usage = retry.semantic_usage;
+    *outputs.complexity = retry.complexity;
+    *outputs.flag_uses = retry.flag_uses;
+    *outputs.parsed_suppressions = retry.parsed_suppressions;
+}
 
-    if !used_retry {
-        apply_jsdoc_visibility_tags(
-            &mut extractor.exports,
-            &parser_return.program.comments,
-            source,
-        );
-        extract_jsdoc_import_types(
-            &mut extractor.imports,
-            &parser_return.program.comments,
-            source,
-        );
-    }
+/// Apply JSDoc visibility tags and JSDoc `import()` type references to the
+/// extractor's exports/imports for the primary (non-retry) parse.
+fn apply_jsdoc_tags_to_extractor(
+    extractor: &mut ModuleInfoExtractor,
+    comments: &[Comment],
+    source: &str,
+) {
+    apply_jsdoc_visibility_tags(&mut extractor.exports, comments, source);
+    extract_jsdoc_import_types(&mut extractor.imports, comments, source);
+}
 
+/// Convert the finalized extractor into a `ModuleInfo`, attaching semantic-usage,
+/// line-offset, complexity, and flag-use side data.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "assembly step threads the independently-computed parse outputs onto ModuleInfo"
+)]
+fn assemble_module_info(
+    extractor: ModuleInfoExtractor,
+    file_id: FileId,
+    content_hash: u64,
+    parsed_suppressions: crate::suppress::ParsedSuppressions,
+    semantic_usage: SemanticUsage,
+    line_offsets: Vec<u32>,
+    complexity: Vec<FunctionComplexity>,
+    flag_uses: Vec<FlagUse>,
+) -> ModuleInfo {
     let mut info = extractor.into_module_info(file_id, content_hash, parsed_suppressions);
     info.unused_import_bindings = semantic_usage.import_binding_usage.unused;
     info.type_referenced_import_bindings = semantic_usage.import_binding_usage.type_referenced;
@@ -185,7 +278,6 @@ fn parse_source_to_module_inner(
     info.line_offsets = line_offsets;
     info.complexity = complexity;
     info.flag_uses = flag_uses;
-
     info
 }
 
@@ -414,66 +506,88 @@ fn apply_jsdoc_visibility_tags(exports: &mut [ExportInfo], comments: &[Comment],
         return;
     }
 
-    let mut tag_offsets: Vec<(u32, VisibilityTag, Option<String>)> = Vec::new();
-    for comment in comments {
-        if comment.is_jsdoc() {
-            let content_span = comment.content_span();
-            let start = content_span.start as usize;
-            let end = (content_span.end as usize).min(source.len());
-            if start < end {
-                let text = &source[start..end];
-                let (tag, reason) = if has_public_tag(text) {
-                    (VisibilityTag::Public, None)
-                } else if has_internal_tag(text) {
-                    (VisibilityTag::Internal, None)
-                } else if has_alpha_tag(text) {
-                    (VisibilityTag::Alpha, None)
-                } else if has_beta_tag(text) {
-                    (VisibilityTag::Beta, None)
-                } else {
-                    let (has_expected_unused, reason) = expected_unused_tag(text);
-                    if has_expected_unused {
-                        (VisibilityTag::ExpectedUnused, reason)
-                    } else {
-                        continue;
-                    }
-                };
-                tag_offsets.push((comment.attached_to, tag, reason));
-            }
-        }
-    }
-
+    let mut tag_offsets = collect_jsdoc_tag_offsets(comments, source);
     if tag_offsets.is_empty() {
         return;
     }
-
     tag_offsets.sort_unstable_by_key(|&(offset, _, _)| offset);
 
     for export in exports.iter_mut() {
-        if export.span.start == 0 && export.span.end == 0 {
+        apply_visibility_tag_to_export(export, &tag_offsets, source);
+    }
+}
+
+/// Classify a JSDoc comment body into a visibility tag (and optional reason),
+/// or `None` when no recognized tag is present.
+fn classify_jsdoc_visibility_tag(text: &str) -> Option<(VisibilityTag, Option<String>)> {
+    if has_public_tag(text) {
+        Some((VisibilityTag::Public, None))
+    } else if has_internal_tag(text) {
+        Some((VisibilityTag::Internal, None))
+    } else if has_alpha_tag(text) {
+        Some((VisibilityTag::Alpha, None))
+    } else if has_beta_tag(text) {
+        Some((VisibilityTag::Beta, None))
+    } else {
+        let (has_expected_unused, reason) = expected_unused_tag(text);
+        has_expected_unused.then_some((VisibilityTag::ExpectedUnused, reason))
+    }
+}
+
+/// Collect `(attachment_offset, tag, reason)` triples for every JSDoc comment
+/// that carries a recognized visibility tag.
+fn collect_jsdoc_tag_offsets(
+    comments: &[Comment],
+    source: &str,
+) -> Vec<(u32, VisibilityTag, Option<String>)> {
+    let mut tag_offsets: Vec<(u32, VisibilityTag, Option<String>)> = Vec::new();
+    for comment in comments {
+        if !comment.is_jsdoc() {
             continue;
         }
-
-        if let Ok(idx) = tag_offsets.binary_search_by_key(&export.span.start, |&(o, _, _)| o) {
-            export.visibility = tag_offsets[idx].1;
-            export
-                .expected_unused_reason
-                .clone_from(&tag_offsets[idx].2);
+        let content_span = comment.content_span();
+        let start = content_span.start as usize;
+        let end = (content_span.end as usize).min(source.len());
+        if start >= end {
             continue;
         }
+        if let Some((tag, reason)) = classify_jsdoc_visibility_tag(&source[start..end]) {
+            tag_offsets.push((comment.attached_to, tag, reason));
+        }
+    }
+    tag_offsets
+}
 
-        let idx = tag_offsets.partition_point(|&(o, _, _)| o <= export.span.start);
-        if idx > 0 {
-            let (offset, tag, ref reason) = tag_offsets[idx - 1];
-            let offset = offset as usize;
-            let export_start = export.span.start as usize;
-            if offset < export_start && export_start <= source.len() {
-                let between = &source[offset..export_start];
-                if between.starts_with("export") && !between.contains(';') && !between.contains('}')
-                {
-                    export.visibility = tag;
-                    export.expected_unused_reason.clone_from(reason);
-                }
+/// Apply the best-matching visibility tag to a single export: an exact
+/// attachment-offset hit, else the nearest preceding tag within the same
+/// `export` statement prefix.
+fn apply_visibility_tag_to_export(
+    export: &mut ExportInfo,
+    tag_offsets: &[(u32, VisibilityTag, Option<String>)],
+    source: &str,
+) {
+    if export.span.start == 0 && export.span.end == 0 {
+        return;
+    }
+
+    if let Ok(idx) = tag_offsets.binary_search_by_key(&export.span.start, |&(o, _, _)| o) {
+        export.visibility = tag_offsets[idx].1;
+        export
+            .expected_unused_reason
+            .clone_from(&tag_offsets[idx].2);
+        return;
+    }
+
+    let idx = tag_offsets.partition_point(|&(o, _, _)| o <= export.span.start);
+    if idx > 0 {
+        let (offset, tag, ref reason) = tag_offsets[idx - 1];
+        let offset = offset as usize;
+        let export_start = export.span.start as usize;
+        if offset < export_start && export_start <= source.len() {
+            let between = &source[offset..export_start];
+            if between.starts_with("export") && !between.contains(';') && !between.contains('}') {
+                export.visibility = tag;
+                export.expected_unused_reason.clone_from(reason);
             }
         }
     }
@@ -613,75 +727,121 @@ fn scan_jsdoc_imports_in(body: &str, imports: &mut Vec<ImportInfo>) {
             continue;
         }
         let open = import_pos + "import(".len();
-        cursor = open;
-        if open >= bytes.len() {
-            break;
+        match locate_jsdoc_import_path(body, bytes, open) {
+            JsdocImportScan::Stop => break,
+            JsdocImportScan::Skip(next) => {
+                cursor = next;
+            }
+            JsdocImportScan::Found { path, after_paren } => {
+                cursor = resolve_jsdoc_import(body, bytes, after_paren, path, imports);
+            }
         }
-        let mut i = open;
-        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
-            i += 1;
-        }
-        if i >= bytes.len() {
-            break;
-        }
-        let quote = bytes[i];
-        if quote != b'\'' && quote != b'"' {
-            continue;
-        }
-        let path_start = i + 1;
-        let Some(rel_close) = body[path_start..].find(quote as char) else {
-            break;
-        };
-        let path_end = path_start + rel_close;
-        let path = &body[path_start..path_end];
-        if path.is_empty() {
-            cursor = path_end + 1;
-            continue;
-        }
-        let mut j = path_end + 1;
-        while j < bytes.len() && bytes[j].is_ascii_whitespace() {
-            j += 1;
-        }
-        if j >= bytes.len() || bytes[j] != b')' {
-            cursor = path_end + 1;
-            continue;
-        }
+    }
+}
+
+/// Outcome of locating the path literal and closing paren of one JSDoc
+/// `import(...)` occurrence.
+enum JsdocImportScan<'a> {
+    /// Malformed or truncated; abandon the whole scan.
+    Stop,
+    /// Not a recoverable import here; resume scanning from this cursor.
+    Skip(usize),
+    /// A non-empty path was parsed; `after_paren` is the cursor past the `)`.
+    Found { path: &'a str, after_paren: usize },
+}
+
+/// Parse the quoted path literal following `import(` at `open` and locate the
+/// closing paren, returning where the caller should resume.
+fn locate_jsdoc_import_path<'a>(body: &'a str, bytes: &[u8], open: usize) -> JsdocImportScan<'a> {
+    if open >= bytes.len() {
+        return JsdocImportScan::Stop;
+    }
+    let mut i = open;
+    while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i >= bytes.len() {
+        return JsdocImportScan::Stop;
+    }
+    let quote = bytes[i];
+    if quote != b'\'' && quote != b'"' {
+        return JsdocImportScan::Skip(open);
+    }
+    let path_start = i + 1;
+    let Some(rel_close) = body[path_start..].find(quote as char) else {
+        return JsdocImportScan::Stop;
+    };
+    let path_end = path_start + rel_close;
+    let path = &body[path_start..path_end];
+    if path.is_empty() {
+        return JsdocImportScan::Skip(path_end + 1);
+    }
+    let mut j = path_end + 1;
+    while j < bytes.len() && bytes[j].is_ascii_whitespace() {
         j += 1;
-        while j < bytes.len() && bytes[j].is_ascii_whitespace() {
-            j += 1;
-        }
-        cursor = j;
-        if j >= bytes.len() || bytes[j] != b'.' {
-            imports.push(ImportInfo {
-                source: path.to_string(),
-                imported_name: fallow_types::extract::ImportedName::SideEffect,
-                local_name: String::new(),
-                is_type_only: true,
-                from_style: false,
-                span: oxc_span::Span::default(),
-                source_span: oxc_span::Span::default(),
-            });
-            continue;
-        }
+    }
+    if j >= bytes.len() || bytes[j] != b')' {
+        return JsdocImportScan::Skip(path_end + 1);
+    }
+    j += 1;
+    while j < bytes.len() && bytes[j].is_ascii_whitespace() {
         j += 1;
-        let name_start = j;
-        while j < bytes.len() && is_ident_char(bytes[j]) {
-            j += 1;
-        }
-        if name_start == j {
-            continue;
-        }
-        let member = &body[name_start..j];
-        cursor = j;
-        imports.push(ImportInfo {
-            source: path.to_string(),
-            imported_name: fallow_types::extract::ImportedName::Named(member.to_string()),
-            local_name: String::new(),
-            is_type_only: true,
-            from_style: false,
-            span: oxc_span::Span::default(),
-            source_span: oxc_span::Span::default(),
-        });
+    }
+    JsdocImportScan::Found {
+        path,
+        after_paren: j,
+    }
+}
+
+/// Resolve the imported name after the `)` (member access -> `Named`, otherwise
+/// `SideEffect`), push the `ImportInfo`, and return the next scan cursor.
+fn resolve_jsdoc_import(
+    body: &str,
+    bytes: &[u8],
+    after_paren: usize,
+    path: &str,
+    imports: &mut Vec<ImportInfo>,
+) -> usize {
+    let mut j = after_paren;
+    if j >= bytes.len() || bytes[j] != b'.' {
+        imports.push(jsdoc_type_import(
+            path,
+            fallow_types::extract::ImportedName::SideEffect,
+        ));
+        return after_paren;
+    }
+    j += 1;
+    let name_start = j;
+    while j < bytes.len() && is_ident_char(bytes[j]) {
+        j += 1;
+    }
+    if name_start == j {
+        // No identifier after `.`: leave the cursor at the post-paren position,
+        // matching the original `continue` (which never updated `cursor` here).
+        return after_paren;
+    }
+    let member = &body[name_start..j];
+    imports.push(jsdoc_type_import(
+        path,
+        fallow_types::extract::ImportedName::Named(member.to_string()),
+    ));
+    j
+}
+
+/// Build a type-only `ImportInfo` for a JSDoc `import('...')` reference. Spans
+/// are defaulted because JSDoc imports carry no real source position.
+fn jsdoc_type_import(
+    source: &str,
+    imported_name: fallow_types::extract::ImportedName,
+) -> ImportInfo {
+    ImportInfo {
+        source: source.to_string(),
+        imported_name,
+        local_name: String::new(),
+        is_type_only: true,
+        from_style: false,
+        span: oxc_span::Span::default(),
+        source_span: oxc_span::Span::default(),
     }
 }
 
