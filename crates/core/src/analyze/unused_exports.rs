@@ -916,10 +916,35 @@ pub(super) fn find_duplicate_exports_with_plugins(
     plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
     resolved_modules: &[crate::resolve::ResolvedModule],
 ) -> Vec<DuplicateExport> {
-    let ignore_matchers = config.compiled_ignore_exports.as_slice();
-    let tanstack_duplicate_matchers = compile_tanstack_duplicate_export_matchers(plugin_result);
-    let has_tanstack_router = is_tanstack_router_active(plugin_result);
+    let re_export_sources = build_re_export_source_map(graph, resolved_modules);
+    let export_locations =
+        collect_duplicate_export_locations(graph, config, suppressions, plugin_result);
 
+    let mut sorted_locations: Vec<_> = export_locations.into_iter().collect();
+    sorted_locations.sort_by(|a, b| a.0.cmp(&b.0));
+
+    sorted_locations
+        .into_iter()
+        .filter_map(|(name, locations)| {
+            evaluate_duplicate_export_group(
+                name,
+                locations,
+                &re_export_sources,
+                graph,
+                line_offsets_by_file,
+            )
+        })
+        .collect()
+}
+
+/// Map each module index to the set of module indices it re-exports from
+/// (static `export ... from` edges plus dynamically-resolved re-exports). Used
+/// to strip re-export chain members from a duplicate-export group: a module that
+/// re-exports from another group member is not an independent origin.
+fn build_re_export_source_map(
+    graph: &ModuleGraph,
+    resolved_modules: &[crate::resolve::ResolvedModule],
+) -> FxHashMap<usize, FxHashSet<usize>> {
     let mut re_export_sources: FxHashMap<usize, FxHashSet<usize>> = FxHashMap::default();
     for (idx, module) in graph.modules.iter().enumerate() {
         debug_assert_eq!(
@@ -935,6 +960,21 @@ pub(super) fn find_duplicate_exports_with_plugins(
     }
 
     collect_dynamic_reexport_sources(resolved_modules, graph, &mut re_export_sources);
+    re_export_sources
+}
+
+/// Collect every non-default, non-ignored named export across reachable,
+/// non-entry-point modules, keyed by export name. The resulting groups feed
+/// duplicate detection.
+fn collect_duplicate_export_locations(
+    graph: &ModuleGraph,
+    config: &ResolvedConfig,
+    suppressions: &SuppressionContext<'_>,
+    plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
+) -> FxHashMap<String, Vec<ExportEntry>> {
+    let ignore_matchers = config.compiled_ignore_exports.as_slice();
+    let tanstack_duplicate_matchers = compile_tanstack_duplicate_export_matchers(plugin_result);
+    let has_tanstack_router = is_tanstack_router_active(plugin_result);
 
     let mut export_locations: FxHashMap<String, Vec<ExportEntry>> = FxHashMap::default();
 
@@ -988,94 +1028,108 @@ pub(super) fn find_duplicate_exports_with_plugins(
         }
     }
 
-    let mut sorted_locations: Vec<_> = export_locations.into_iter().collect();
-    sorted_locations.sort_by(|a, b| a.0.cmp(&b.0));
+    export_locations
+}
 
-    sorted_locations
+/// Evaluate one same-name export group into an optional duplicate finding:
+/// strip re-export chain members, partition the remaining origins into
+/// importer-connected components, and collect the surviving locations.
+fn evaluate_duplicate_export_group(
+    name: String,
+    locations: Vec<ExportEntry>,
+    re_export_sources: &FxHashMap<usize, FxHashSet<usize>>,
+    graph: &ModuleGraph,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+) -> Option<DuplicateExport> {
+    if locations.len() <= 1 {
+        return None;
+    }
+
+    // Strip re-export chain members: a module that re-exports from another
+    // group member is not an independent origin.
+    let module_indices: FxHashSet<usize> = locations.iter().map(|e| e.module_idx).collect();
+    let independent_entries: Vec<ExportEntry> = locations
         .into_iter()
-        .filter_map(|(name, locations)| {
-            if locations.len() <= 1 {
-                return None;
+        .filter(|e| {
+            let sources = re_export_sources.get(&e.module_idx);
+            let has_source_in_set =
+                sources.is_some_and(|s| s.iter().any(|src| module_indices.contains(src)));
+            !has_source_in_set
+        })
+        .collect();
+
+    if independent_entries.len() <= 1 {
+        return None;
+    }
+
+    // Partition independent entries into connected components where two
+    // entries are connected when they share a common importer. This prevents
+    // a cross-package member (e.g. a backend `class Label` that no frontend
+    // module imports) from inflating `value_modules` and defeating the
+    // value+type self-suppression check that should apply only to the
+    // frontend component.
+    let components = partition_by_common_importer(&independent_entries, graph);
+
+    let mut surviving_locations: Vec<DuplicateLocation> = Vec::new();
+    for component_indices in components {
+        surviving_locations.extend(component_duplicate_locations(
+            &component_indices,
+            &independent_entries,
+            line_offsets_by_file,
+        ));
+    }
+
+    if surviving_locations.len() <= 1 {
+        return None;
+    }
+
+    Some(DuplicateExport {
+        export_name: name,
+        locations: surviving_locations,
+    })
+}
+
+/// Resolve one importer-connected component into the duplicate locations it
+/// contributes, dropping unrelated singletons and the TypeScript value+type
+/// self-pair (a runtime value re-declared alongside its type alias).
+fn component_duplicate_locations(
+    component_indices: &[usize],
+    independent_entries: &[ExportEntry],
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+) -> Vec<DuplicateLocation> {
+    if component_indices.len() <= 1 {
+        // A singleton component shares no importer with any sibling; it is an
+        // unrelated leaf and must be dropped.
+        return Vec::new();
+    }
+
+    // Value+type self-suppression: a single value export paired with a single
+    // type export in the same importer-connected component is the TypeScript
+    // pattern of re-declaring a runtime value alongside its type alias, not a
+    // genuine duplicate.
+    let value_count = component_indices
+        .iter()
+        .filter(|&&i| !independent_entries[i].is_type_only)
+        .count();
+    let type_count = component_indices
+        .iter()
+        .filter(|&&i| independent_entries[i].is_type_only)
+        .count();
+    if value_count == 1 && type_count == 1 {
+        return Vec::new();
+    }
+
+    component_indices
+        .iter()
+        .map(|&i| {
+            let e = &independent_entries[i];
+            let (line, col) =
+                byte_offset_to_line_col(line_offsets_by_file, e.file_id, e.span_start);
+            DuplicateLocation {
+                path: e.path.clone(),
+                line,
+                col,
             }
-
-            // Strip re-export chain members: a module that re-exports from another
-            // group member is not an independent origin.
-            let module_indices: FxHashSet<usize> = locations.iter().map(|e| e.module_idx).collect();
-            let independent_entries: Vec<ExportEntry> = locations
-                .into_iter()
-                .filter(|e| {
-                    let sources = re_export_sources.get(&e.module_idx);
-                    let has_source_in_set =
-                        sources.is_some_and(|s| s.iter().any(|src| module_indices.contains(src)));
-                    !has_source_in_set
-                })
-                .collect();
-
-            if independent_entries.len() <= 1 {
-                return None;
-            }
-
-            // Partition independent entries into connected components where two
-            // entries are connected when they share a common importer. This prevents
-            // a cross-package member (e.g. a backend `class Label` that no frontend
-            // module imports) from inflating `value_modules` and defeating the
-            // value+type self-suppression check that should apply only to the
-            // frontend component.
-            let components = partition_by_common_importer(&independent_entries, graph);
-
-            // Collect locations from all components that represent a genuine duplicate.
-            let mut surviving_locations: Vec<DuplicateLocation> = Vec::new();
-            for component_indices in components {
-                if component_indices.len() <= 1 {
-                    // A singleton component shares no importer with any sibling;
-                    // it is an unrelated leaf and must be dropped.
-                    continue;
-                }
-
-                // Value+type self-suppression: a single value export paired with a
-                // single type export in the same importer-connected component is the
-                // TypeScript pattern of re-declaring a runtime value alongside its
-                // type alias, not a genuine duplicate.
-                let comp_has_value = component_indices
-                    .iter()
-                    .any(|&i| !independent_entries[i].is_type_only);
-                let comp_has_type = component_indices
-                    .iter()
-                    .any(|&i| independent_entries[i].is_type_only);
-                if comp_has_value && comp_has_type {
-                    let value_count = component_indices
-                        .iter()
-                        .filter(|&&i| !independent_entries[i].is_type_only)
-                        .count();
-                    let type_count = component_indices
-                        .iter()
-                        .filter(|&&i| independent_entries[i].is_type_only)
-                        .count();
-                    if value_count <= 1 && type_count <= 1 {
-                        continue;
-                    }
-                }
-
-                for i in component_indices {
-                    let e = &independent_entries[i];
-                    let (line, col) =
-                        byte_offset_to_line_col(line_offsets_by_file, e.file_id, e.span_start);
-                    surviving_locations.push(DuplicateLocation {
-                        path: e.path.clone(),
-                        line,
-                        col,
-                    });
-                }
-            }
-
-            if surviving_locations.len() <= 1 {
-                return None;
-            }
-
-            Some(DuplicateExport {
-                export_name: name,
-                locations: surviving_locations,
-            })
         })
         .collect()
 }
