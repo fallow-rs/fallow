@@ -108,36 +108,10 @@ pub fn compute_ownership(
         return None;
     }
 
-    let mut filtered: Vec<RankedAuthor<'_>> = churn
-        .authors
-        .iter()
-        .filter_map(|(idx, contribution)| {
-            let raw_email = ctx.author_pool.get(*idx as usize)?;
-            if is_bot(raw_email, ctx.bot_globs) {
-                return None;
-            }
-            Some(RankedAuthor {
-                idx: *idx,
-                raw_email,
-                contribution,
-                rendered: String::new(),
-            })
-        })
-        .collect();
-
+    let filtered = rank_non_bot_authors(churn, ctx);
     if filtered.is_empty() {
         return None;
     }
-
-    render_author_identifiers(&mut filtered, ctx.email_mode);
-
-    filtered.sort_by(|a, b| {
-        b.contribution
-            .weighted_commits
-            .partial_cmp(&a.contribution.weighted_commits)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| a.raw_email.cmp(b.raw_email))
-    });
 
     let total_weighted: f64 = filtered
         .iter()
@@ -150,33 +124,8 @@ pub fn compute_ownership(
     let bus_factor = compute_bus_factor(&filtered, total_weighted);
     let format = identifier_format(ctx.email_mode);
 
-    let top = &filtered[0];
-    let top_contributor = ContributorEntry {
-        identifier: top.rendered.clone(),
-        format,
-        share: round3(top.contribution.weighted_commits / total_weighted),
-        stale_days: stale_days(top.contribution.last_commit_ts, ctx.now_secs),
-        commits: top.contribution.commits,
-    };
-
-    let recent_contributors: Vec<ContributorEntry> = filtered
-        .iter()
-        .skip(1)
-        .take(3)
-        .map(|a| ContributorEntry {
-            identifier: a.rendered.clone(),
-            format,
-            share: round3(a.contribution.weighted_commits / total_weighted),
-            stale_days: stale_days(a.contribution.last_commit_ts, ctx.now_secs),
-            commits: a.contribution.commits,
-        })
-        .collect();
-
-    let suggested_reviewers: Vec<ContributorEntry> = recent_contributors
-        .iter()
-        .filter(|c| c.stale_days < 90)
-        .cloned()
-        .collect();
+    let (top_contributor, recent_contributors, suggested_reviewers) =
+        build_ownership_contributors(&filtered, total_weighted, format, ctx.now_secs);
 
     let (raw_drift, raw_drift_reason) = compute_drift(&filtered, total_weighted, ctx.now_secs);
 
@@ -211,6 +160,89 @@ pub fn compute_ownership(
         drift,
         drift_reason,
     })
+}
+
+/// Build the non-bot author ranking for one file: filtered, identifier-rendered,
+/// and sorted by recency-weighted commits (then raw email for determinism).
+fn rank_non_bot_authors<'a>(
+    churn: &'a FileChurn,
+    ctx: &OwnershipContext<'a>,
+) -> Vec<RankedAuthor<'a>> {
+    let mut filtered: Vec<RankedAuthor<'a>> = churn
+        .authors
+        .iter()
+        .filter_map(|(idx, contribution)| {
+            let raw_email = ctx.author_pool.get(*idx as usize)?;
+            if is_bot(raw_email, ctx.bot_globs) {
+                return None;
+            }
+            Some(RankedAuthor {
+                idx: *idx,
+                raw_email,
+                contribution,
+                rendered: String::new(),
+            })
+        })
+        .collect();
+
+    if filtered.is_empty() {
+        return filtered;
+    }
+
+    render_author_identifiers(&mut filtered, ctx.email_mode);
+
+    filtered.sort_by(|a, b| {
+        b.contribution
+            .weighted_commits
+            .partial_cmp(&a.contribution.weighted_commits)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.raw_email.cmp(b.raw_email))
+    });
+
+    filtered
+}
+
+/// Derive the top, recent (next three), and suggested-reviewer contributor
+/// entries from the ranked author list.
+fn build_ownership_contributors(
+    filtered: &[RankedAuthor<'_>],
+    total_weighted: f64,
+    format: ContributorIdentifierFormat,
+    now_secs: u64,
+) -> (
+    ContributorEntry,
+    Vec<ContributorEntry>,
+    Vec<ContributorEntry>,
+) {
+    let top = &filtered[0];
+    let top_contributor = ContributorEntry {
+        identifier: top.rendered.clone(),
+        format,
+        share: round3(top.contribution.weighted_commits / total_weighted),
+        stale_days: stale_days(top.contribution.last_commit_ts, now_secs),
+        commits: top.contribution.commits,
+    };
+
+    let recent_contributors: Vec<ContributorEntry> = filtered
+        .iter()
+        .skip(1)
+        .take(3)
+        .map(|a| ContributorEntry {
+            identifier: a.rendered.clone(),
+            format,
+            share: round3(a.contribution.weighted_commits / total_weighted),
+            stale_days: stale_days(a.contribution.last_commit_ts, now_secs),
+            commits: a.contribution.commits,
+        })
+        .collect();
+
+    let suggested_reviewers: Vec<ContributorEntry> = recent_contributors
+        .iter()
+        .filter(|c| c.stale_days < 90)
+        .cloned()
+        .collect();
+
+    (top_contributor, recent_contributors, suggested_reviewers)
 }
 
 /// Per-author working entry used during ranking.
