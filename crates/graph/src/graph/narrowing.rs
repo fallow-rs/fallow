@@ -288,46 +288,22 @@ fn attach_direct_export_references(
         .filter(|idx| !target_module.exports[*idx].is_type_only)
         .collect();
 
-    let has_type_usage = import_binding_has_type_usage(source_mod, &sym.local_name);
-    let has_value_usage = import_binding_has_value_usage(source_mod, &sym.local_name);
-
-    let attach_type_exports = if type_exports.is_empty() {
-        false
-    } else if value_exports.is_empty() || sym.is_type_only {
-        true
-    } else {
-        has_type_usage
-    };
-
-    let attach_value_exports = if value_exports.is_empty() {
-        false
-    } else if type_exports.is_empty() {
-        true
-    } else {
-        has_value_usage
-    };
+    let (attach_type_exports, attach_value_exports) = decide_attach_targets(
+        sym,
+        source_mod,
+        !type_exports.is_empty(),
+        !value_exports.is_empty(),
+    );
 
     if attach_type_exports || attach_value_exports {
-        for idx in &type_exports {
-            if attach_type_exports {
-                attach_reference(
-                    &mut target_module.exports[*idx],
-                    source_id,
-                    ref_kind,
-                    sym.import_span,
-                );
-            }
-        }
-        for idx in &value_exports {
-            if attach_value_exports {
-                attach_reference(
-                    &mut target_module.exports[*idx],
-                    source_id,
-                    ref_kind,
-                    sym.import_span,
-                );
-            }
-        }
+        attach_to_export_groups(
+            target_module,
+            source_id,
+            sym,
+            ref_kind,
+            (&type_exports, attach_type_exports),
+            (&value_exports, attach_value_exports),
+        );
         return;
     }
 
@@ -350,6 +326,59 @@ fn attach_direct_export_references(
             ref_kind,
             sym.import_span,
         );
+    }
+}
+
+/// Decide whether to attach references to the matched type and/or value
+/// exports, based on the import's type-only flag and the binding's recorded
+/// type/value usage. Returns `(attach_type, attach_value)`.
+fn decide_attach_targets(
+    sym: &ImportedSymbol,
+    source_mod: Option<&&ResolvedModule>,
+    has_type_exports: bool,
+    has_value_exports: bool,
+) -> (bool, bool) {
+    let attach_type_exports = if !has_type_exports {
+        false
+    } else if !has_value_exports || sym.is_type_only {
+        true
+    } else {
+        import_binding_has_type_usage(source_mod, &sym.local_name)
+    };
+
+    let attach_value_exports = if !has_value_exports {
+        false
+    } else if !has_type_exports {
+        true
+    } else {
+        import_binding_has_value_usage(source_mod, &sym.local_name)
+    };
+
+    (attach_type_exports, attach_value_exports)
+}
+
+/// Attach a reference to each export in the type and value groups for which the
+/// corresponding attach flag is set.
+fn attach_to_export_groups(
+    target_module: &mut ModuleNode,
+    source_id: FileId,
+    sym: &ImportedSymbol,
+    ref_kind: ReferenceKind,
+    type_group: (&[usize], bool),
+    value_group: (&[usize], bool),
+) {
+    for (group, should_attach) in [type_group, value_group] {
+        if !should_attach {
+            continue;
+        }
+        for idx in group {
+            attach_reference(
+                &mut target_module.exports[*idx],
+                source_id,
+                ref_kind,
+                sym.import_span,
+            );
+        }
     }
 }
 

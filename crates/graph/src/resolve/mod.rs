@@ -94,27 +94,7 @@ pub fn resolve_all_imports(input: &ResolveAllImportsInput<'_>) -> Vec<ResolvedMo
         .zip(canonical_ws_roots.iter())
         .map(|(ws, canonical)| (ws.name.as_str(), canonical.as_path()))
         .collect();
-    let root_canonical =
-        dunce::canonicalize(input.root).unwrap_or_else(|_| input.root.to_path_buf());
-    let mut package_manifests = Vec::new();
-    if let Ok(package_json) = fallow_config::PackageJson::load(&input.root.join("package.json")) {
-        package_manifests.push(PackageManifestInfo {
-            root: input.root.to_path_buf(),
-            canonical_root: root_canonical,
-            name: package_json.name.clone(),
-            package_json,
-        });
-    }
-    for (ws, canonical_root) in input.workspaces.iter().zip(canonical_ws_roots.iter()) {
-        if let Ok(package_json) = fallow_config::PackageJson::load(&ws.root.join("package.json")) {
-            package_manifests.push(PackageManifestInfo {
-                root: ws.root.clone(),
-                canonical_root: canonical_root.clone(),
-                name: package_json.name.clone().or_else(|| Some(ws.name.clone())),
-                package_json,
-            });
-        }
-    }
+    let package_manifests = build_package_manifests(input, &canonical_ws_roots);
 
     let root_is_canonical = dunce::canonicalize(input.root).is_ok_and(|c| c == input.root);
 
@@ -128,19 +108,7 @@ pub fn resolve_all_imports(input: &ResolveAllImportsInput<'_>) -> Vec<ResolvedMo
             .collect()
     };
 
-    let path_to_id: FxHashMap<&Path, FileId> = if root_is_canonical {
-        input
-            .files
-            .iter()
-            .map(|f| (f.path.as_path(), f.id))
-            .collect()
-    } else {
-        canonical_paths
-            .iter()
-            .enumerate()
-            .map(|(idx, canonical)| (canonical.as_path(), input.files[idx].id))
-            .collect()
-    };
+    let path_to_id = build_path_to_id(input.files, &canonical_paths, root_is_canonical);
 
     let raw_path_to_id: FxHashMap<&Path, FileId> = input
         .files
@@ -202,6 +170,54 @@ pub fn resolve_all_imports(input: &ResolveAllImportsInput<'_>) -> Vec<ResolvedMo
     );
 
     resolved
+}
+
+/// Load the root package manifest plus each workspace manifest into the
+/// `PackageManifestInfo` list used for `exports` / `imports` resolution.
+fn build_package_manifests(
+    input: &ResolveAllImportsInput<'_>,
+    canonical_ws_roots: &[PathBuf],
+) -> Vec<PackageManifestInfo> {
+    let root_canonical =
+        dunce::canonicalize(input.root).unwrap_or_else(|_| input.root.to_path_buf());
+    let mut package_manifests = Vec::new();
+    if let Ok(package_json) = fallow_config::PackageJson::load(&input.root.join("package.json")) {
+        package_manifests.push(PackageManifestInfo {
+            root: input.root.to_path_buf(),
+            canonical_root: root_canonical,
+            name: package_json.name.clone(),
+            package_json,
+        });
+    }
+    for (ws, canonical_root) in input.workspaces.iter().zip(canonical_ws_roots.iter()) {
+        if let Ok(package_json) = fallow_config::PackageJson::load(&ws.root.join("package.json")) {
+            package_manifests.push(PackageManifestInfo {
+                root: ws.root.clone(),
+                canonical_root: canonical_root.clone(),
+                name: package_json.name.clone().or_else(|| Some(ws.name.clone())),
+                package_json,
+            });
+        }
+    }
+    package_manifests
+}
+
+/// Build the path-to-`FileId` index, keyed by canonical paths when the root is
+/// not already canonical and by raw paths otherwise.
+fn build_path_to_id<'a>(
+    files: &'a [DiscoveredFile],
+    canonical_paths: &'a [PathBuf],
+    root_is_canonical: bool,
+) -> FxHashMap<&'a Path, FileId> {
+    if root_is_canonical {
+        files.iter().map(|f| (f.path.as_path(), f.id)).collect()
+    } else {
+        canonical_paths
+            .iter()
+            .enumerate()
+            .map(|(idx, canonical)| (canonical.as_path(), files[idx].id))
+            .collect()
+    }
 }
 
 fn resolve_module_imports(

@@ -43,69 +43,95 @@ pub struct DefinePropsHarvest {
 /// Harvest `defineProps` declared props and abstain flags from a `<script setup>`
 /// program. The byte spans returned are RELATIVE to the script body; the caller
 /// remaps them onto the SFC source.
+/// Accumulators gathered while scanning top-level `<script setup>` statements
+/// for the `defineProps` declaration.
+#[derive(Default)]
+struct DefinePropsScan {
+    props_return_binding: Option<String>,
+    destructured_locals: FxHashSet<String>,
+    /// prop name -> local binding name (for `const { name: alias } = defineProps()`).
+    prop_aliases: FxHashMap<String, String>,
+    prop_names: Vec<(String, u32)>,
+}
+
 pub fn harvest_define_props(program: &Program<'_>) -> DefinePropsHarvest {
     let mut harvest = DefinePropsHarvest::default();
 
     // A pass over top-level statements: find the defineProps call, its return
     // binding (for member-access credit), the destructured prop locals (for
     // resolved-reference credit), and defineExpose / defineModel presence.
-    let mut props_return_binding: Option<String> = None;
-    let mut destructured_locals: FxHashSet<String> = FxHashSet::default();
-    // prop name -> local binding name (for `const { name: alias } = defineProps()`).
-    let mut prop_aliases: FxHashMap<String, String> = FxHashMap::default();
-    let mut prop_names: Vec<(String, u32)> = Vec::new();
-
+    let mut scan = DefinePropsScan::default();
     for stmt in &program.body {
-        match stmt {
-            Statement::VariableDeclaration(decl) => {
-                for declarator in &decl.declarations {
-                    let Some(init) = &declarator.init else {
-                        continue;
-                    };
-                    // `const m = defineModel(...)` / `const e = defineExpose(...)`:
-                    // detect the macro on the assigned-call form too.
-                    if let Expression::CallExpression(call) = init {
-                        inspect_macro_call(call, &mut harvest);
-                    }
-                    let Some(call) = unwrap_define_props_call(init) else {
-                        continue;
-                    };
-                    if prop_names.is_empty() && !harvest.has_unharvestable_props {
-                        collect_define_props_names(call, &mut prop_names, &mut harvest);
-                    }
-                    bind_define_props_target(
-                        &declarator.id,
-                        &mut props_return_binding,
-                        &mut destructured_locals,
-                        &mut prop_aliases,
-                        &mut harvest,
-                    );
-                }
-            }
-            Statement::ExpressionStatement(expr_stmt) => {
-                // Bare `defineProps(...)` / `defineExpose(...)` / `defineModel(...)`.
-                if let Expression::CallExpression(call) = &expr_stmt.expression {
-                    inspect_macro_call(call, &mut harvest);
-                    if prop_names.is_empty()
-                        && !harvest.has_unharvestable_props
-                        && let Some(inner) = unwrap_define_props_call(&expr_stmt.expression)
-                    {
-                        collect_define_props_names(inner, &mut prop_names, &mut harvest);
-                    }
-                }
-            }
-            _ => {}
-        }
+        scan_define_props_statement(stmt, &mut scan, &mut harvest);
     }
 
-    if prop_names.is_empty() {
+    if scan.prop_names.is_empty() {
         return harvest;
     }
 
+    finalize_define_props(program, scan, &mut harvest);
+    harvest
+}
+
+/// Process one top-level statement of a `<script setup>` program, folding any
+/// `defineProps` / `defineExpose` / `defineModel` findings into `scan`/`harvest`.
+fn scan_define_props_statement(
+    stmt: &Statement<'_>,
+    scan: &mut DefinePropsScan,
+    harvest: &mut DefinePropsHarvest,
+) {
+    match stmt {
+        Statement::VariableDeclaration(decl) => {
+            for declarator in &decl.declarations {
+                let Some(init) = &declarator.init else {
+                    continue;
+                };
+                // `const m = defineModel(...)` / `const e = defineExpose(...)`:
+                // detect the macro on the assigned-call form too.
+                if let Expression::CallExpression(call) = init {
+                    inspect_macro_call(call, harvest);
+                }
+                let Some(call) = unwrap_define_props_call(init) else {
+                    continue;
+                };
+                if scan.prop_names.is_empty() && !harvest.has_unharvestable_props {
+                    collect_define_props_names(call, &mut scan.prop_names, harvest);
+                }
+                bind_define_props_target(
+                    &declarator.id,
+                    &mut scan.props_return_binding,
+                    &mut scan.destructured_locals,
+                    &mut scan.prop_aliases,
+                    harvest,
+                );
+            }
+        }
+        Statement::ExpressionStatement(expr_stmt) => {
+            // Bare `defineProps(...)` / `defineExpose(...)` / `defineModel(...)`.
+            if let Expression::CallExpression(call) = &expr_stmt.expression {
+                inspect_macro_call(call, harvest);
+                if scan.prop_names.is_empty()
+                    && !harvest.has_unharvestable_props
+                    && let Some(inner) = unwrap_define_props_call(&expr_stmt.expression)
+                {
+                    collect_define_props_names(inner, &mut scan.prop_names, harvest);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Compute per-prop script usage and push each harvested prop onto `harvest`.
+fn finalize_define_props(
+    program: &Program<'_>,
+    scan: DefinePropsScan,
+    harvest: &mut DefinePropsHarvest,
+) {
     // Script usage: resolved references for destructured locals, plus member
     // accesses `props.<name>` against the return binding.
-    let used_locals = resolve_used_locals(program, &destructured_locals);
-    let (member_used, props_used_whole) = props_return_binding.as_deref().map_or_else(
+    let used_locals = resolve_used_locals(program, &scan.destructured_locals);
+    let (member_used, props_used_whole) = scan.props_return_binding.as_deref().map_or_else(
         || (FxHashSet::default(), false),
         |binding| collect_prop_binding_usage(program, binding),
     );
@@ -117,11 +143,12 @@ pub fn harvest_define_props(program: &Program<'_>) -> DefinePropsHarvest {
         harvest.has_props_attrs_fallthrough = true;
     }
 
-    for (name, span_start) in prop_names {
+    for (name, span_start) in scan.prop_names {
         // A renamed prop (`const { name: alias } = defineProps()`) is read through
         // its local alias; default the local to the prop name (shorthand
         // destructure, or the non-destructure `props.name` / template `name` form).
-        let local = prop_aliases
+        let local = scan
+            .prop_aliases
             .get(&name)
             .cloned()
             .unwrap_or_else(|| name.clone());
@@ -140,8 +167,7 @@ pub fn harvest_define_props(program: &Program<'_>) -> DefinePropsHarvest {
         });
     }
 
-    harvest.props_return_binding = props_return_binding;
-    harvest
+    harvest.props_return_binding = scan.props_return_binding;
 }
 
 /// Harvest Svelte 5 `$props()` declared props and abstain flags from a parsed
@@ -548,40 +574,12 @@ pub fn harvest_define_emits(program: &Program<'_>) -> DefineEmitsHarvest {
     let mut emit_names: Vec<(String, u32)> = Vec::new();
 
     for stmt in &program.body {
-        match stmt {
-            Statement::VariableDeclaration(decl) => {
-                for declarator in &decl.declarations {
-                    let Some(init) = &declarator.init else {
-                        continue;
-                    };
-                    let Some(call) = unwrap_define_emits_call(init) else {
-                        continue;
-                    };
-                    if emit_names.is_empty() && !harvest.has_unharvestable_emits {
-                        collect_define_emits_names(call, &mut emit_names, &mut harvest);
-                    }
-                    // The return must bind to a plain identifier to be trackable.
-                    if let BindingPattern::BindingIdentifier(ident) = &declarator.id {
-                        emit_return_binding = Some(ident.name.to_string());
-                    } else {
-                        // A destructured / non-identifier binding hides the emit
-                        // function name: usage untrackable, abstain.
-                        harvest.has_unharvestable_emits = true;
-                    }
-                }
-            }
-            Statement::ExpressionStatement(expr_stmt) => {
-                // Bare `defineEmits(...)` with no binding: the component cannot
-                // emit through a name we can track. Abstain.
-                if let Some(call) = unwrap_define_emits_call(&expr_stmt.expression) {
-                    if emit_names.is_empty() && !harvest.has_unharvestable_emits {
-                        collect_define_emits_names(call, &mut emit_names, &mut harvest);
-                    }
-                    harvest.has_unharvestable_emits = true;
-                }
-            }
-            _ => {}
-        }
+        scan_define_emits_statement(
+            stmt,
+            &mut emit_names,
+            &mut emit_return_binding,
+            &mut harvest,
+        );
     }
 
     if emit_names.is_empty() {
@@ -594,6 +592,62 @@ pub fn harvest_define_emits(program: &Program<'_>) -> DefineEmitsHarvest {
         return harvest;
     };
 
+    finalize_define_emits(program, emit_names, binding, &mut harvest);
+    harvest
+}
+
+/// Process one top-level statement for the `defineEmits` declaration, folding
+/// declared event names and the return binding into the accumulators.
+fn scan_define_emits_statement(
+    stmt: &Statement<'_>,
+    emit_names: &mut Vec<(String, u32)>,
+    emit_return_binding: &mut Option<String>,
+    harvest: &mut DefineEmitsHarvest,
+) {
+    match stmt {
+        Statement::VariableDeclaration(decl) => {
+            for declarator in &decl.declarations {
+                let Some(init) = &declarator.init else {
+                    continue;
+                };
+                let Some(call) = unwrap_define_emits_call(init) else {
+                    continue;
+                };
+                if emit_names.is_empty() && !harvest.has_unharvestable_emits {
+                    collect_define_emits_names(call, emit_names, harvest);
+                }
+                // The return must bind to a plain identifier to be trackable.
+                if let BindingPattern::BindingIdentifier(ident) = &declarator.id {
+                    *emit_return_binding = Some(ident.name.to_string());
+                } else {
+                    // A destructured / non-identifier binding hides the emit
+                    // function name: usage untrackable, abstain.
+                    harvest.has_unharvestable_emits = true;
+                }
+            }
+        }
+        Statement::ExpressionStatement(expr_stmt) => {
+            // Bare `defineEmits(...)` with no binding: the component cannot
+            // emit through a name we can track. Abstain.
+            if let Some(call) = unwrap_define_emits_call(&expr_stmt.expression) {
+                if emit_names.is_empty() && !harvest.has_unharvestable_emits {
+                    collect_define_emits_names(call, emit_names, harvest);
+                }
+                harvest.has_unharvestable_emits = true;
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Walk the program for emit-binding usage and push each declared event onto
+/// `harvest` with its used flag and the abstain signals from the walk.
+fn finalize_define_emits(
+    program: &Program<'_>,
+    emit_names: Vec<(String, u32)>,
+    binding: String,
+    harvest: &mut DefineEmitsHarvest,
+) {
     let mut visitor = EmitBindingVisitor {
         binding: &binding,
         emitted: FxHashSet::default(),
@@ -618,7 +672,6 @@ pub fn harvest_define_emits(program: &Program<'_>) -> DefineEmitsHarvest {
     }
 
     harvest.emit_binding = Some(binding);
-    harvest
 }
 
 /// Unwrap an expression to the inner `defineEmits(...)` call. Returns `None` for

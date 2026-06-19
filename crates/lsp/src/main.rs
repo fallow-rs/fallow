@@ -204,10 +204,8 @@ struct BlockingAnalysisOutput {
 }
 
 fn analyze_project_root(input: &mut ProjectRootAnalysisInput<'_>) {
-    let (mut config, message) = match fallow_core::config_for_project(
-        input.project_root,
-        input.config_path,
-    ) {
+    let load = fallow_core::config_for_project(input.project_root, input.config_path);
+    let (mut config, message) = match load {
         Ok((config, Some(path))) => (
             config,
             (
@@ -226,22 +224,7 @@ fn analyze_project_root(input: &mut ProjectRootAnalysisInput<'_>) {
             ),
         ),
         Err(e) => {
-            let detail = config_load_error_detail(input.project_root, input.config_path, &e);
-            input.config_messages.push((MessageType::WARNING, detail));
-            if input.config_path.is_none() {
-                #[expect(
-                    deprecated,
-                    reason = "ADR-008 deprecates fallow_core::analyze_project externally; the LSP still uses the workspace path dependency"
-                )]
-                if let Ok(results) = fallow_core::analyze_project(input.project_root) {
-                    merge_results(input.merged_results, results);
-                }
-                let duplication = fallow_core::duplicates::find_duplicates_in_project(
-                    input.project_root,
-                    &DuplicatesConfig::default(),
-                );
-                merge_duplication(input.merged_duplication, duplication);
-            }
+            analyze_project_root_config_fallback(input, &e);
             return;
         }
     };
@@ -256,26 +239,7 @@ fn analyze_project_root(input: &mut ProjectRootAnalysisInput<'_>) {
 
     input.config_messages.push(message);
 
-    if input.inline_complexity_enabled {
-        #[expect(
-            deprecated,
-            reason = "ADR-008 deprecates fallow_core typed analysis externally; the LSP still uses the workspace path dependency"
-        )]
-        if let Ok(output) = fallow_core::analyze_with_usages_and_complexity(&config) {
-            input
-                .merged_inline_complexity
-                .extend(collect_inline_complexity(&config, &output));
-            merge_results(input.merged_results, output.results);
-        }
-    } else {
-        #[expect(
-            deprecated,
-            reason = "ADR-008 deprecates fallow_core::analyze_with_usages externally; the LSP still uses the workspace path dependency"
-        )]
-        if let Ok(results) = fallow_core::analyze_with_usages(&config) {
-            merge_results(input.merged_results, results);
-        }
-    }
+    run_typed_dead_code_analysis(input, &config);
 
     let files = fallow_core::discover::discover_files_with_plugin_scopes(&config);
     let duplicates_config = input.duplication_options.map_or_else(
@@ -285,6 +249,61 @@ fn analyze_project_root(input: &mut ProjectRootAnalysisInput<'_>) {
     let duplication =
         fallow_core::duplicates::find_duplicates(input.project_root, &files, &duplicates_config);
     merge_duplication(input.merged_duplication, duplication);
+}
+
+/// Config-load failure path: record the warning, and when no explicit config
+/// path was given, fall back to the path-based analysis + default duplication
+/// scan so the editor still surfaces findings.
+fn analyze_project_root_config_fallback(
+    input: &mut ProjectRootAnalysisInput<'_>,
+    err: &impl std::fmt::Display,
+) {
+    let detail = config_load_error_detail(input.project_root, input.config_path, err);
+    input.config_messages.push((MessageType::WARNING, detail));
+    if input.config_path.is_some() {
+        return;
+    }
+    #[expect(
+        deprecated,
+        reason = "ADR-008 deprecates fallow_core::analyze_project externally; the LSP still uses the workspace path dependency"
+    )]
+    if let Ok(results) = fallow_core::analyze_project(input.project_root) {
+        merge_results(input.merged_results, results);
+    }
+    let duplication = fallow_core::duplicates::find_duplicates_in_project(
+        input.project_root,
+        &DuplicatesConfig::default(),
+    );
+    merge_duplication(input.merged_duplication, duplication);
+}
+
+/// Run the typed dead-code analysis for a loaded config, with the optional
+/// inline-complexity pass when the client opted in, folding results into the
+/// accumulators.
+fn run_typed_dead_code_analysis(
+    input: &mut ProjectRootAnalysisInput<'_>,
+    config: &fallow_config::ResolvedConfig,
+) {
+    if input.inline_complexity_enabled {
+        #[expect(
+            deprecated,
+            reason = "ADR-008 deprecates fallow_core typed analysis externally; the LSP still uses the workspace path dependency"
+        )]
+        if let Ok(output) = fallow_core::analyze_with_usages_and_complexity(config) {
+            input
+                .merged_inline_complexity
+                .extend(collect_inline_complexity(config, &output));
+            merge_results(input.merged_results, output.results);
+        }
+    } else {
+        #[expect(
+            deprecated,
+            reason = "ADR-008 deprecates fallow_core::analyze_with_usages externally; the LSP still uses the workspace path dependency"
+        )]
+        if let Ok(results) = fallow_core::analyze_with_usages(config) {
+            merge_results(input.merged_results, results);
+        }
+    }
 }
 
 fn run_blocking_analysis(input: &BlockingAnalysisInput) -> BlockingAnalysisOutput {
@@ -1093,21 +1112,7 @@ impl FallowLspServer {
             return;
         }
 
-        let version_snapshot: VersionSnapshot = self
-            .documents
-            .read()
-            .await
-            .iter()
-            .map(|(uri, state)| {
-                (
-                    uri.clone(),
-                    DocumentSnapshot {
-                        version: state.version,
-                        matches_disk: Self::document_matches_disk(uri, &state.text),
-                    },
-                )
-            })
-            .collect();
+        let version_snapshot = self.snapshot_document_versions().await;
 
         self.client
             .log_message(MessageType::INFO, "Running fallow analysis...")
@@ -1147,39 +1152,13 @@ impl FallowLspServer {
 
         match join_result {
             Ok(output) => {
-                if self.cancellation.load(Ordering::SeqCst) {
-                    return;
-                }
-
-                for (level, msg) in output.config_messages {
-                    self.client.log_message(level, msg).await;
-                }
-
-                if let Some((level, msg)) = output.changed_message {
-                    self.client.log_message(level, msg).await;
-                }
-
-                let mut all_diagnostics =
-                    diagnostics::build_diagnostics(&output.results, &output.duplication, &root);
-                attach_changed_since_data(&mut all_diagnostics, changed_since_for_data.as_deref());
-                self.publish_collected_diagnostics(all_diagnostics, &version_snapshot)
-                    .await;
-
-                let complete_params =
-                    analysis_complete_params(&output.results, &output.duplication);
-                *self.results.write().await = Some(output.results);
-                *self.duplication.write().await = Some(output.duplication);
-                *self.inline_complexity.write().await = output.inline_complexity;
-
-                self.client
-                    .send_notification::<AnalysisComplete>(complete_params)
-                    .await;
-
-                self.spawn_code_lens_refresh();
-
-                self.client
-                    .log_message(MessageType::INFO, "Analysis complete")
-                    .await;
+                self.apply_analysis_output(
+                    output,
+                    &root,
+                    &version_snapshot,
+                    changed_since_for_data.as_deref(),
+                )
+                .await;
             }
             Err(e) => {
                 self.client
@@ -1187,6 +1166,69 @@ impl FallowLspServer {
                     .await;
             }
         }
+    }
+
+    /// Snapshot every open document's version + disk-match state at analysis
+    /// entry, used by `publish_collected_diagnostics` for the staleness check.
+    async fn snapshot_document_versions(&self) -> VersionSnapshot {
+        self.documents
+            .read()
+            .await
+            .iter()
+            .map(|(uri, state)| {
+                (
+                    uri.clone(),
+                    DocumentSnapshot {
+                        version: state.version,
+                        matches_disk: Self::document_matches_disk(uri, &state.text),
+                    },
+                )
+            })
+            .collect()
+    }
+
+    /// Publish diagnostics and cache the results from a completed analysis,
+    /// logging config / changed-since messages and firing the completion
+    /// notification + code-lens refresh.
+    async fn apply_analysis_output(
+        &self,
+        output: BlockingAnalysisOutput,
+        root: &Path,
+        version_snapshot: &VersionSnapshot,
+        changed_since_for_data: Option<&str>,
+    ) {
+        if self.cancellation.load(Ordering::SeqCst) {
+            return;
+        }
+
+        for (level, msg) in output.config_messages {
+            self.client.log_message(level, msg).await;
+        }
+
+        if let Some((level, msg)) = output.changed_message {
+            self.client.log_message(level, msg).await;
+        }
+
+        let mut all_diagnostics =
+            diagnostics::build_diagnostics(&output.results, &output.duplication, root);
+        attach_changed_since_data(&mut all_diagnostics, changed_since_for_data);
+        self.publish_collected_diagnostics(all_diagnostics, version_snapshot)
+            .await;
+
+        let complete_params = analysis_complete_params(&output.results, &output.duplication);
+        *self.results.write().await = Some(output.results);
+        *self.duplication.write().await = Some(output.duplication);
+        *self.inline_complexity.write().await = output.inline_complexity;
+
+        self.client
+            .send_notification::<AnalysisComplete>(complete_params)
+            .await;
+
+        self.spawn_code_lens_refresh();
+
+        self.client
+            .log_message(MessageType::INFO, "Analysis complete")
+            .await;
     }
 
     /// Decide whether a URI is stale relative to a captured version snapshot.
@@ -1264,20 +1306,7 @@ impl FallowLspServer {
                 continue;
             }
 
-            let filtered: Vec<Diagnostic> = if disabled.is_empty() {
-                diags.clone()
-            } else {
-                diags
-                    .iter()
-                    .filter(|d| {
-                        d.code.as_ref().is_none_or(|code| match code {
-                            NumberOrString::String(s) => !disabled.contains(s.as_str()),
-                            NumberOrString::Number(_) => true,
-                        })
-                    })
-                    .cloned()
-                    .collect()
-            };
+            let filtered = filter_disabled_diagnostics(diags, &disabled);
 
             if !use_pull_diagnostics || !live_documents.contains_key(uri) {
                 self.client
@@ -1295,34 +1324,51 @@ impl FallowLspServer {
                 .insert(uri.clone(), filtered);
         }
 
-        {
-            let previous_uris = self.previous_diagnostic_uris.read().await;
-            let mut cache = self.cached_diagnostics.write().await;
-            for old_uri in previous_uris.iter() {
-                if new_uris.contains(old_uri) {
-                    continue;
-                }
-                if Self::uri_is_stale(old_uri, snapshot, &live_documents) {
-                    new_uris.insert(old_uri.clone());
-                    continue;
-                }
-                if !use_pull_diagnostics || !live_documents.contains_key(old_uri) {
-                    self.client
-                        .publish_diagnostics(
-                            old_uri.clone(),
-                            vec![],
-                            snapshot.get(old_uri).map(|state| state.version),
-                        )
-                        .await;
-                }
-                cache.remove(old_uri);
-            }
-        }
+        self.clear_stale_diagnostics(
+            &mut new_uris,
+            snapshot,
+            &live_documents,
+            use_pull_diagnostics,
+        )
+        .await;
 
         *self.previous_diagnostic_uris.write().await = new_uris;
 
         if use_pull_diagnostics {
             self.spawn_diagnostic_refresh();
+        }
+    }
+
+    /// Clear diagnostics for URIs that had findings on the previous run but do
+    /// not this run, skipping stale URIs (re-inserted into `new_uris` so their
+    /// last-valid diagnostics survive) and removing them from the cache.
+    async fn clear_stale_diagnostics(
+        &self,
+        new_uris: &mut FxHashSet<Uri>,
+        snapshot: &VersionSnapshot,
+        live_documents: &FxHashMap<Uri, DocumentState>,
+        use_pull_diagnostics: bool,
+    ) {
+        let previous_uris = self.previous_diagnostic_uris.read().await;
+        let mut cache = self.cached_diagnostics.write().await;
+        for old_uri in previous_uris.iter() {
+            if new_uris.contains(old_uri) {
+                continue;
+            }
+            if Self::uri_is_stale(old_uri, snapshot, live_documents) {
+                new_uris.insert(old_uri.clone());
+                continue;
+            }
+            if !use_pull_diagnostics || !live_documents.contains_key(old_uri) {
+                self.client
+                    .publish_diagnostics(
+                        old_uri.clone(),
+                        vec![],
+                        snapshot.get(old_uri).map(|state| state.version),
+                    )
+                    .await;
+            }
+            cache.remove(old_uri);
         }
     }
 
@@ -1439,6 +1485,27 @@ fn find_project_roots(workspace_root: &std::path::Path) -> Vec<std::path::PathBu
 /// and `changedSince` is not stamped on that one diagnostic; that case is
 /// not used by `build_diagnostics` today and is logged via the structured
 /// fact that `data` for any fallow diagnostic should be an object.
+/// Drop diagnostics whose string `code` is in the `disabled` set, cloning the
+/// survivors. A diagnostic with no code or a numeric code is always kept.
+fn filter_disabled_diagnostics(
+    diags: &[Diagnostic],
+    disabled: &FxHashSet<String>,
+) -> Vec<Diagnostic> {
+    if disabled.is_empty() {
+        return diags.to_vec();
+    }
+    diags
+        .iter()
+        .filter(|d| {
+            d.code.as_ref().is_none_or(|code| match code {
+                NumberOrString::String(s) => !disabled.contains(s.as_str()),
+                NumberOrString::Number(_) => true,
+            })
+        })
+        .cloned()
+        .collect()
+}
+
 fn attach_changed_since_data(
     diagnostics_by_file: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     changed_since: Option<&str>,

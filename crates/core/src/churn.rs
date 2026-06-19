@@ -277,6 +277,19 @@ pub fn analyze_churn_from_file(path: &Path, root: &Path) -> Result<ChurnResult, 
         ));
     }
 
+    let state = churn_event_state_from_doc(doc, path, root)?;
+    Ok(build_churn_result(state, false))
+}
+
+/// Validate and fold a parsed `fallow-churn/v1` document into event state.
+///
+/// Rejects empty paths and far-future (likely millisecond) timestamps; interns
+/// authors into the pool exactly as the git-log path does.
+fn churn_event_state_from_doc(
+    doc: ChurnFileDoc,
+    path: &Path,
+    root: &Path,
+) -> Result<ChurnEventState, String> {
     let now_secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -323,10 +336,7 @@ pub fn analyze_churn_from_file(path: &Path, root: &Path) -> Result<ChurnResult, 
             });
     }
 
-    Ok(build_churn_result(
-        ChurnEventState { files, author_pool },
-        false,
-    ))
+    Ok(ChurnEventState { files, author_pool })
 }
 
 /// Check if the repository is a shallow clone.
@@ -672,11 +682,72 @@ fn parse_git_log_events(stdout: &str, root: &Path) -> ChurnEventState {
     ChurnEventState { files, author_pool }
 }
 
-/// Convert event-level churn state into the public aggregate result.
+/// Aggregate one file's raw commit events into a [`FileChurn`], applying
+/// recency weighting, trend detection, and per-author accumulation.
 #[expect(
     clippy::cast_possible_truncation,
     reason = "commit count per file is bounded by git history depth"
 )]
+fn aggregate_file_churn(path: PathBuf, file: FileEvents, now_secs: u64) -> FileChurn {
+    let mut timestamps = Vec::with_capacity(file.events.len());
+    let mut weighted_commits = 0.0;
+    let mut lines_added = 0;
+    let mut lines_deleted = 0;
+    let mut authors: FxHashMap<u32, AuthorContribution> = FxHashMap::default();
+
+    for event in file.events {
+        timestamps.push(event.timestamp);
+        let age_days = (now_secs.saturating_sub(event.timestamp)) as f64 / SECS_PER_DAY;
+        let weight = 0.5_f64.powf(age_days / HALF_LIFE_DAYS);
+        weighted_commits += weight;
+        lines_added += event.lines_added;
+        lines_deleted += event.lines_deleted;
+        accumulate_author(&mut authors, event.author_idx, weight, event.timestamp);
+    }
+
+    let commits = timestamps.len() as u32;
+    let trend = compute_trend(&timestamps);
+    for c in authors.values_mut() {
+        c.weighted_commits = (c.weighted_commits * 100.0).round() / 100.0;
+    }
+    FileChurn {
+        path,
+        commits,
+        weighted_commits: (weighted_commits * 100.0).round() / 100.0,
+        lines_added,
+        lines_deleted,
+        trend,
+        authors,
+    }
+}
+
+/// Fold a single commit's author contribution into the per-author map.
+fn accumulate_author(
+    authors: &mut FxHashMap<u32, AuthorContribution>,
+    author_idx: Option<u32>,
+    weight: f64,
+    timestamp: u64,
+) {
+    let Some(idx) = author_idx else {
+        return;
+    };
+    authors
+        .entry(idx)
+        .and_modify(|c| {
+            c.commits += 1;
+            c.weighted_commits += weight;
+            c.first_commit_ts = c.first_commit_ts.min(timestamp);
+            c.last_commit_ts = c.last_commit_ts.max(timestamp);
+        })
+        .or_insert(AuthorContribution {
+            commits: 1,
+            weighted_commits: weight,
+            first_commit_ts: timestamp,
+            last_commit_ts: timestamp,
+        });
+}
+
+/// Convert event-level churn state into the public aggregate result.
 fn build_churn_result(state: ChurnEventState, shallow_clone: bool) -> ChurnResult {
     let now_secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -687,52 +758,7 @@ fn build_churn_result(state: ChurnEventState, shallow_clone: bool) -> ChurnResul
         .files
         .into_iter()
         .map(|(path, file)| {
-            let mut timestamps = Vec::with_capacity(file.events.len());
-            let mut weighted_commits = 0.0;
-            let mut lines_added = 0;
-            let mut lines_deleted = 0;
-            let mut authors: FxHashMap<u32, AuthorContribution> = FxHashMap::default();
-
-            for event in file.events {
-                timestamps.push(event.timestamp);
-                let age_days = (now_secs.saturating_sub(event.timestamp)) as f64 / SECS_PER_DAY;
-                let weight = 0.5_f64.powf(age_days / HALF_LIFE_DAYS);
-                weighted_commits += weight;
-                lines_added += event.lines_added;
-                lines_deleted += event.lines_deleted;
-
-                if let Some(idx) = event.author_idx {
-                    authors
-                        .entry(idx)
-                        .and_modify(|c| {
-                            c.commits += 1;
-                            c.weighted_commits += weight;
-                            c.first_commit_ts = c.first_commit_ts.min(event.timestamp);
-                            c.last_commit_ts = c.last_commit_ts.max(event.timestamp);
-                        })
-                        .or_insert(AuthorContribution {
-                            commits: 1,
-                            weighted_commits: weight,
-                            first_commit_ts: event.timestamp,
-                            last_commit_ts: event.timestamp,
-                        });
-                }
-            }
-
-            let commits = timestamps.len() as u32;
-            let trend = compute_trend(&timestamps);
-            for c in authors.values_mut() {
-                c.weighted_commits = (c.weighted_commits * 100.0).round() / 100.0;
-            }
-            let churn = FileChurn {
-                path: path.clone(),
-                commits,
-                weighted_commits: (weighted_commits * 100.0).round() / 100.0,
-                lines_added,
-                lines_deleted,
-                trend,
-                authors,
-            };
+            let churn = aggregate_file_churn(path.clone(), file, now_secs);
             (path, churn)
         })
         .collect();

@@ -175,20 +175,7 @@ fn build_clone_group(
     min_lines: usize,
     skip_local: bool,
 ) -> Option<CloneGroup> {
-    let mut seen: FxHashSet<(usize, usize)> = FxHashSet::default();
-    let mut instances: Vec<CloneInstance> = Vec::new();
-
-    for &(file_id, offset) in &rg.instances {
-        if !seen.insert((file_id, offset)) {
-            continue;
-        }
-        let file = &files[file_id];
-        if let Some(inst) =
-            build_clone_instance_fast(file, offset, rg.length, &line_tables[file_id])
-        {
-            instances.push(inst);
-        }
-    }
+    let mut instances = collect_clone_instances(rg, files, line_tables);
 
     if skip_local && instances.len() >= 2 {
         let dirs: FxHashSet<_> = instances
@@ -215,7 +202,47 @@ fn build_clone_group(
     }
 
     instances.sort_by(|a, b| a.file.cmp(&b.file).then(a.start_line.cmp(&b.start_line)));
+    merge_overlapping_instances(&mut instances);
 
+    if instances.len() < 2 {
+        return None;
+    }
+
+    Some(CloneGroup {
+        instances,
+        token_count: rg.length,
+        line_count,
+    })
+}
+
+/// Materialize each unique `(file_id, offset)` instance of a raw group into a
+/// [`CloneInstance`], skipping exact-position duplicates.
+fn collect_clone_instances(
+    rg: &RawGroup,
+    files: &[FileData],
+    line_tables: &[Vec<usize>],
+) -> Vec<CloneInstance> {
+    let mut seen: FxHashSet<(usize, usize)> = FxHashSet::default();
+    let mut instances: Vec<CloneInstance> = Vec::new();
+
+    for &(file_id, offset) in &rg.instances {
+        if !seen.insert((file_id, offset)) {
+            continue;
+        }
+        let file = &files[file_id];
+        if let Some(inst) =
+            build_clone_instance_fast(file, offset, rg.length, &line_tables[file_id])
+        {
+            instances.push(inst);
+        }
+    }
+    instances
+}
+
+/// Coalesce instances in the same file whose line ranges overlap or abut,
+/// extending the surviving entry's end position. `instances` must be sorted by
+/// `(file, start_line)`.
+fn merge_overlapping_instances(instances: &mut Vec<CloneInstance>) {
     instances.dedup_by(|b, a| {
         if a.file != b.file {
             return false;
@@ -230,16 +257,6 @@ fn build_clone_group(
             false
         }
     });
-
-    if instances.len() < 2 {
-        return None;
-    }
-
-    Some(CloneGroup {
-        instances,
-        token_count: rg.length,
-        line_count,
-    })
 }
 
 /// Remove groups whose line ranges are fully contained within a larger

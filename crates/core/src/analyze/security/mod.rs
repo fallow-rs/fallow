@@ -42,7 +42,7 @@ use fallow_types::suppress::IssueKind;
 
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 use crate::discover::FileId;
-use crate::graph::ModuleGraph;
+use crate::graph::{ModuleGraph, ModuleNode};
 use crate::suppress::SuppressionContext;
 
 mod catalogue;
@@ -204,6 +204,80 @@ fn compute_server_only_source_set(
 /// Both can fire for one client file (they are different concerns). Type-only
 /// edges are skipped (erased at build, so they cannot carry a secret or a
 /// server-only import into the client bundle).
+/// Result of a single client file's import-cone BFS: the parent map for trace
+/// reconstruction, the first secret / server-only module reached, and whether
+/// any unresolved dynamic-import edge was seen in the cone.
+struct ClientConeResult {
+    parent: FxHashMap<FileId, (FileId, Option<u32>)>,
+    reached_secret: Option<FileId>,
+    reached_server_only: Option<FileId>,
+    had_unresolved_edge: bool,
+}
+
+/// BFS the static import cone of a `"use client"` file, draining the FULL cone
+/// (no early break) so the dynamic-import blind-spot count reflects every edge,
+/// not just the path to the first finding. Type-only and `next/dynamic
+/// ssr:false`-only edges are excluded (neither can leak into the client bundle).
+fn walk_client_cone(
+    graph: &ModuleGraph,
+    client_id: FileId,
+    modules_by_id: &FxHashMap<FileId, &ModuleInfo>,
+    secret_sources: &FxHashMap<FileId, Vec<String>>,
+    server_only_sources: &FxHashSet<FileId>,
+    client_only_spans: &FxHashMap<FileId, FxHashSet<u32>>,
+    empty_spans: &FxHashSet<u32>,
+) -> ClientConeResult {
+    let mut visited: FxHashSet<FileId> = FxHashSet::default();
+    visited.insert(client_id);
+    let mut result = ClientConeResult {
+        parent: FxHashMap::default(),
+        reached_secret: None,
+        reached_server_only: None,
+        had_unresolved_edge: false,
+    };
+    let mut queue: VecDeque<FileId> = VecDeque::new();
+    queue.push_back(client_id);
+
+    while let Some(current) = queue.pop_front() {
+        if let Some(current_module) = modules_by_id.get(&current)
+            && !current_module.dynamic_import_patterns.is_empty()
+        {
+            result.had_unresolved_edge = true;
+        }
+
+        if current != client_id {
+            if result.reached_secret.is_none() && secret_sources.contains_key(&current) {
+                result.reached_secret = Some(current);
+            }
+            if result.reached_server_only.is_none() && server_only_sources.contains(&current) {
+                result.reached_server_only = Some(current);
+            }
+        }
+
+        // Exclude edges reached only through a `next/dynamic ssr:false`
+        // dynamic import made by `current` (the client-only escape hatch).
+        let excluded = client_only_spans.get(&current).unwrap_or(empty_spans);
+        for (target, all_type_only, span_start, all_client_only) in
+            graph.outgoing_edge_summaries_with_exclusions(current, excluded)
+        {
+            if all_type_only {
+                continue; // type-only imports are erased at build; cannot leak.
+            }
+            if all_client_only {
+                // Reached only via next/dynamic ssr:false: the sanctioned
+                // client-only escape hatch, not a leak edge.
+                continue;
+            }
+            if visited.insert(target) {
+                result.parent.insert(target, (current, span_start));
+                queue.push_back(target);
+            }
+        }
+    }
+
+    result
+}
+
 fn find_client_server_leaks(
     graph: &ModuleGraph,
     modules_by_id: &FxHashMap<FileId, &ModuleInfo>,
@@ -231,126 +305,19 @@ fn find_client_server_leaks(
         .collect();
     let empty_spans: FxHashSet<u32> = FxHashSet::default();
 
+    let scan = LeakScanInput {
+        graph,
+        modules_by_id,
+        secret_sources,
+        server_only_sources,
+        suppressions,
+        line_offsets_by_file,
+        client_only_spans: &client_only_spans,
+        empty_spans: &empty_spans,
+    };
+
     for node in &graph.modules {
-        let Some(module) = modules_by_id.get(&node.file_id) else {
-            continue;
-        };
-        if !module.directives.iter().any(|d| d == USE_CLIENT) {
-            continue;
-        }
-        let client_id = node.file_id;
-        // A file-level `// fallow-ignore-file security-client-server-leak`
-        // (or a blanket file ignore) opts the whole client file out. Routed
-        // through the SuppressionContext so the marker is recorded as consumed
-        // (otherwise a working suppression would later be flagged stale).
-        if suppressions.is_file_suppressed(client_id, IssueKind::SecurityClientServerLeak) {
-            continue;
-        }
-
-        // Direct case: the client file itself reads a non-public secret. The
-        // most direct leak; no import hop needed.
-        if secret_sources.contains_key(&client_id) {
-            findings.push(build_direct_finding(graph, client_id, secret_sources));
-            // Still count its dynamic-import blind spot below.
-        }
-
-        // Direct server-only case: the client file itself IS a server-only sink
-        // (carries "use server", imports a server-only package, or imports a
-        // server-only next/headers API). The most direct server-only leak; no
-        // import hop needed. The transitive server-only emit below is gated so a
-        // file that is both a direct AND a transitive sink is flagged once.
-        if server_only_sources.contains(&client_id) {
-            findings.push(build_direct_server_only_finding(graph, client_id));
-        }
-
-        // Transitive case: BFS the import cone. parent maps child ->
-        // (parent, span_start of the parent's import).
-        let mut visited: FxHashSet<FileId> = FxHashSet::default();
-        visited.insert(client_id);
-        let mut parent: FxHashMap<FileId, (FileId, Option<u32>)> = FxHashMap::default();
-        let mut queue: VecDeque<FileId> = VecDeque::new();
-        queue.push_back(client_id);
-        let mut had_unresolved_edge = false;
-        let mut reached_secret: Option<FileId> = None;
-        let mut reached_server_only: Option<FileId> = None;
-
-        // Drain the FULL cone (no early break): the first sink reached via BFS
-        // is the shortest-path trace, but we keep going so the dynamic-import
-        // blind-spot count reflects the whole cone, not just the path to the
-        // first finding (otherwise a sink hidden behind a dynamic edge past the
-        // first finding would be silently uncounted).
-        while let Some(current) = queue.pop_front() {
-            if let Some(current_module) = modules_by_id.get(&current)
-                && !current_module.dynamic_import_patterns.is_empty()
-            {
-                had_unresolved_edge = true;
-            }
-
-            if current != client_id {
-                if reached_secret.is_none() && secret_sources.contains_key(&current) {
-                    reached_secret = Some(current);
-                }
-                if reached_server_only.is_none() && server_only_sources.contains(&current) {
-                    reached_server_only = Some(current);
-                }
-            }
-
-            // Exclude edges reached only through a `next/dynamic ssr:false`
-            // dynamic import made by `current` (the client-only escape hatch).
-            let excluded = client_only_spans.get(&current).unwrap_or(&empty_spans);
-            for (target, all_type_only, span_start, all_client_only) in
-                graph.outgoing_edge_summaries_with_exclusions(current, excluded)
-            {
-                if all_type_only {
-                    continue; // type-only imports are erased at build; cannot leak.
-                }
-                if all_client_only {
-                    // Reached only via next/dynamic ssr:false: the sanctioned
-                    // client-only escape hatch, not a leak edge.
-                    continue;
-                }
-                if visited.insert(target) {
-                    parent.insert(target, (current, span_start));
-                    queue.push_back(target);
-                }
-            }
-        }
-
-        if had_unresolved_edge {
-            stats.client_files_with_unresolved_edges += 1;
-        }
-
-        // Only emit a transitive secret finding when the client is not ALREADY
-        // flagged by the direct case (avoid double-flagging the same file).
-        if let Some(secret_id) = reached_secret
-            && !secret_sources.contains_key(&client_id)
-        {
-            findings.push(build_leak_finding(
-                graph,
-                client_id,
-                secret_id,
-                &parent,
-                secret_sources,
-                line_offsets_by_file,
-            ));
-        }
-
-        // The server-only sink is a DISTINCT category, independent of the secret
-        // case: a client cone can reach BOTH a secret reader and a server-only
-        // module, and a reviewer wants to see both. Only emit a transitive
-        // server-only finding when the client is not ALREADY flagged by the
-        // direct server-only case above (avoid double-flagging the same file).
-        if let Some(server_id) = reached_server_only
-            && !server_only_sources.contains(&client_id)
-        {
-            findings.push(build_server_only_finding(
-                graph,
-                client_id,
-                server_id,
-                &parent,
-                line_offsets_by_file,
-            ));
-        }
+        scan_client_file_for_leaks(&scan, node, &mut findings, &mut stats);
     }
 
     findings.sort_by(|a, b| {
@@ -360,6 +327,114 @@ fn find_client_server_leaks(
             .then(a.category.cmp(&b.category))
     });
     (findings, stats)
+}
+
+/// Shared immutable inputs for the per-client-file leak scan.
+struct LeakScanInput<'a> {
+    graph: &'a ModuleGraph,
+    modules_by_id: &'a FxHashMap<FileId, &'a ModuleInfo>,
+    secret_sources: &'a FxHashMap<FileId, Vec<String>>,
+    server_only_sources: &'a FxHashSet<FileId>,
+    suppressions: &'a SuppressionContext<'a>,
+    line_offsets_by_file: &'a LineOffsetsMap<'a>,
+    client_only_spans: &'a FxHashMap<FileId, FxHashSet<u32>>,
+    empty_spans: &'a FxHashSet<u32>,
+}
+
+/// Emit direct and transitive client-server leak findings for one module when it
+/// is a non-suppressed `"use client"` file. Non-client and file-suppressed nodes
+/// are skipped. Direct secret / server-only reads and transitive cone reaches
+/// each emit at most one finding, never double-flagging the same file.
+fn scan_client_file_for_leaks(
+    scan: &LeakScanInput<'_>,
+    node: &ModuleNode,
+    findings: &mut Vec<SecurityFinding>,
+    stats: &mut UnresolvedEdgeStats,
+) {
+    let Some(module) = scan.modules_by_id.get(&node.file_id) else {
+        return;
+    };
+    if !module.directives.iter().any(|d| d == USE_CLIENT) {
+        return;
+    }
+    let client_id = node.file_id;
+    // A file-level `// fallow-ignore-file security-client-server-leak`
+    // (or a blanket file ignore) opts the whole client file out. Routed
+    // through the SuppressionContext so the marker is recorded as consumed
+    // (otherwise a working suppression would later be flagged stale).
+    if scan
+        .suppressions
+        .is_file_suppressed(client_id, IssueKind::SecurityClientServerLeak)
+    {
+        return;
+    }
+
+    // Direct case: the client file itself reads a non-public secret. The
+    // most direct leak; no import hop needed.
+    if scan.secret_sources.contains_key(&client_id) {
+        findings.push(build_direct_finding(
+            scan.graph,
+            client_id,
+            scan.secret_sources,
+        ));
+        // Still count its dynamic-import blind spot below.
+    }
+
+    // Direct server-only case: the client file itself IS a server-only sink
+    // (carries "use server", imports a server-only package, or imports a
+    // server-only next/headers API). The most direct server-only leak; no
+    // import hop needed. The transitive server-only emit below is gated so a
+    // file that is both a direct AND a transitive sink is flagged once.
+    if scan.server_only_sources.contains(&client_id) {
+        findings.push(build_direct_server_only_finding(scan.graph, client_id));
+    }
+
+    // Transitive case: BFS the import cone.
+    let cone = walk_client_cone(
+        scan.graph,
+        client_id,
+        scan.modules_by_id,
+        scan.secret_sources,
+        scan.server_only_sources,
+        scan.client_only_spans,
+        scan.empty_spans,
+    );
+
+    if cone.had_unresolved_edge {
+        stats.client_files_with_unresolved_edges += 1;
+    }
+
+    // Only emit a transitive secret finding when the client is not ALREADY
+    // flagged by the direct case (avoid double-flagging the same file).
+    if let Some(secret_id) = cone.reached_secret
+        && !scan.secret_sources.contains_key(&client_id)
+    {
+        findings.push(build_leak_finding(
+            scan.graph,
+            client_id,
+            secret_id,
+            &cone.parent,
+            scan.secret_sources,
+            scan.line_offsets_by_file,
+        ));
+    }
+
+    // The server-only sink is a DISTINCT category, independent of the secret
+    // case: a client cone can reach BOTH a secret reader and a server-only
+    // module, and a reviewer wants to see both. Only emit a transitive
+    // server-only finding when the client is not ALREADY flagged by the
+    // direct server-only case above (avoid double-flagging the same file).
+    if let Some(server_id) = cone.reached_server_only
+        && !scan.server_only_sources.contains(&client_id)
+    {
+        findings.push(build_server_only_finding(
+            scan.graph,
+            client_id,
+            server_id,
+            &cone.parent,
+            scan.line_offsets_by_file,
+        ));
+    }
 }
 
 /// Walk the BFS parent map from `sink_id` back to `client_id`, building the

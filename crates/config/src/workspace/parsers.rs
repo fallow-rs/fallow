@@ -250,50 +250,15 @@ pub(super) fn expand_workspace_glob_with_diagnostics(
         Ok(paths) => {
             let mut results = Vec::new();
             for path in paths.filter_map(Result::ok) {
-                if !path.is_dir() {
-                    continue;
-                }
-                if path.components().any(|c| c.as_os_str() == "node_modules") {
-                    continue;
-                }
-                if path.join("package.json").exists() {
-                    if let Some(cp) = dunce::canonicalize(&path)
-                        .ok()
-                        .filter(|cp| cp.starts_with(canonical_root))
-                    {
-                        results.push((path, cp));
-                    }
-                    continue;
-                }
-                // The glob matched a bare intermediate directory with no
-                // package.json (e.g. `packages/themes` for `packages/*`, where the
-                // real package lives at `packages/themes/<pkg>`). Descend one level
-                // and recover any child that is itself a named package, so a file
-                // under it is attributed to its own manifest instead of falling
-                // back to the project root. See issue #842.
-                let recovered = recover_nested_packages(&path, canonical_root, ignore_patterns);
-                if recovered.is_empty() {
-                    maybe_emit_glob_no_pkg_diag(
-                        root,
-                        raw_pattern,
-                        &path,
-                        ignore_patterns,
-                        diagnostics,
-                    );
-                } else {
-                    // The user's glob is one level too shallow: it named the bare
-                    // grouping directory, not the package below it. Recovery keeps
-                    // the deep package discovered, but nudge the user toward the
-                    // glob the package manager itself would need.
-                    tracing::debug!(
-                        "workspace glob '{raw_pattern}' matched '{}' which has no package.json; \
-                         recovered {} nested package(s) one level down. Consider '{raw_pattern}/*' \
-                         so npm/pnpm/yarn resolve them as workspace members too.",
-                        path.display(),
-                        recovered.len()
-                    );
-                    results.extend(recovered);
-                }
+                collect_globbed_workspace_dir(
+                    path,
+                    root,
+                    raw_pattern,
+                    canonical_root,
+                    ignore_patterns,
+                    &mut results,
+                    diagnostics,
+                );
             }
             results
         }
@@ -301,6 +266,52 @@ pub(super) fn expand_workspace_glob_with_diagnostics(
             tracing::warn!("invalid workspace glob pattern '{raw_pattern}': {e}");
             Vec::new()
         }
+    }
+}
+
+/// Process one non-recursive glob match: keep package directories, recover named
+/// packages under a bare grouping directory, or emit a no-package.json
+/// diagnostic. See issue #842 for the recovery path.
+fn collect_globbed_workspace_dir(
+    path: PathBuf,
+    root: &Path,
+    raw_pattern: &str,
+    canonical_root: &Path,
+    ignore_patterns: &globset::GlobSet,
+    results: &mut Vec<(PathBuf, PathBuf)>,
+    diagnostics: &mut Vec<WorkspaceDiagnostic>,
+) {
+    if !path.is_dir() {
+        return;
+    }
+    if path.components().any(|c| c.as_os_str() == "node_modules") {
+        return;
+    }
+    if path.join("package.json").exists() {
+        if let Some(cp) = dunce::canonicalize(&path)
+            .ok()
+            .filter(|cp| cp.starts_with(canonical_root))
+        {
+            results.push((path, cp));
+        }
+        return;
+    }
+    let recovered = recover_nested_packages(&path, canonical_root, ignore_patterns);
+    if recovered.is_empty() {
+        maybe_emit_glob_no_pkg_diag(root, raw_pattern, &path, ignore_patterns, diagnostics);
+    } else {
+        // The user's glob is one level too shallow: it named the bare grouping
+        // directory, not the package below it. Recovery keeps the deep package
+        // discovered, but nudge the user toward the glob the package manager
+        // itself would need.
+        tracing::debug!(
+            "workspace glob '{raw_pattern}' matched '{}' which has no package.json; \
+             recovered {} nested package(s) one level down. Consider '{raw_pattern}/*' \
+             so npm/pnpm/yarn resolve them as workspace members too.",
+            path.display(),
+            recovered.len()
+        );
+        results.extend(recovered);
     }
 }
 

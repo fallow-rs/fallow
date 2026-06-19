@@ -454,6 +454,90 @@ fn source_read_location(
     }
 }
 
+/// Build a `SecurityFinding` for one matched sink: evidence, source-read anchor,
+/// network destination, candidate slots, and the single sink trace hop.
+fn build_tainted_sink_finding(
+    matcher: &Matcher,
+    sink: &SinkSite,
+    node: &ModuleNode,
+    source: Option<(&str, &str, Option<u32>)>,
+    sink_line_col: (u32, u32),
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+    file_id: FileId,
+) -> SecurityFinding {
+    let (line, col) = sink_line_col;
+    let url_shape = candidate_url_shape(&matcher.id, sink);
+    let source_backed = source.is_some();
+    let evidence =
+        tainted_sink_evidence(matcher, sink, source.map(|(_, title, _)| title), url_shape);
+
+    // Arg-level source-read anchor (issue #1093): for a source-backed
+    // finding, point the trace's source node at the real read. The
+    // binding path carries the read's byte offset (`Some(span)`); a `0`
+    // span (synthetic framework-param / helper-return source) and the
+    // direct path (`None`, the read sits inside the sink statement) both
+    // fall back to the sink line/col rather than a spurious line. `None`
+    // for module-level findings keeps the trace honest (role
+    // `ModuleSource`, set by the ranking pass).
+    let source_read = source
+        .map(|(_, _, span)| source_read_location(span, line_offsets_by_file, file_id, (line, col)));
+
+    // The destination-host signal for the secret-to-network category
+    // (#890): the arg-0 URL literal, or `None` (dynamic) when not a
+    // literal. The agent triages exfil (dynamic / untrusted host) from
+    // intended auth (a literal provider host) with this.
+    let network = (matcher.id == NETWORK_EXFIL_CATEGORY).then(|| SecurityNetworkContext {
+        destination: sink.url_arg_literal.clone(),
+    });
+
+    // Slot 1 (source kind) is the stable catalogue source id; slot 2
+    // (sink) carries the callee path the evidence already names. The
+    // boundary slot is filled by the post-detection ranking pass once
+    // reachability is known. See issue #900.
+    let candidate = SecurityCandidate {
+        source_kind: source.map(|(id, _, _)| id.to_string()),
+        sink: SecurityCandidateSink {
+            path: node.path.clone(),
+            line,
+            col,
+            category: Some(matcher.id.clone()),
+            cwe: Some(matcher.cwe),
+            callee: Some(sink.callee_path.clone()),
+            url_shape,
+        },
+        boundary: SecurityCandidateBoundary::default(),
+        network,
+    };
+
+    let path = node.path.clone();
+    SecurityFinding {
+        finding_id: String::new(),
+        kind: SecurityFindingKind::TaintedSink,
+        category: Some(matcher.id.clone()),
+        cwe: Some(matcher.cwe),
+        path: path.clone(),
+        line,
+        col,
+        evidence,
+        source_backed,
+        source_read,
+        severity: SecuritySeverity::Low,
+        trace: vec![TraceHop {
+            path,
+            line,
+            col,
+            role: TraceHopRole::Sink,
+        }],
+        actions: build_actions(),
+        dead_code: None,
+        reachability: None,
+        candidate,
+        taint_flow: None,
+        runtime: None,
+        attack_surface: None,
+    }
+}
+
 /// Run the catalogue-driven tainted-sink detector. Returns the findings plus the
 /// in-band blind-spot stats. Callers gate this on the `security_sink` rule
 /// severity; it never runs under bare `fallow` or the `audit` gate.
@@ -481,6 +565,14 @@ pub fn find_tainted_sinks(
     let modules_by_id: FxHashMap<FileId, &ModuleInfo> =
         modules.iter().map(|m| (m.file_id, m)).collect();
 
+    let run = TaintedSinkRun {
+        active: &active,
+        suppressions,
+        line_offsets_by_file,
+        declared_deps,
+        context,
+    };
+
     let mut findings = Vec::new();
     for node in &graph.modules {
         let Some(module) = modules_by_id.get(&node.file_id) else {
@@ -488,135 +580,7 @@ pub fn find_tainted_sinks(
         };
         // Always count the module's blind spots, even when it has no sinks.
         record_unresolved_callee_diagnostics(&mut stats, module, node, line_offsets_by_file);
-        if module.security_sinks.is_empty() {
-            continue;
-        }
-        // Skip test / spec / story / fixture files and tooling config files
-        // (`vite.config.ts`, `jest.config.js`, etc.). A sink there is low-value
-        // noise: build configs run at build time and test files exercise code
-        // with synthetic inputs, neither is an attacker-reachable surface. This
-        // mirrors the production-mode dead-code exclusion. Matching runs on the
-        // PROJECT-RELATIVE path so the `**/tests/**` glob does not catch every
-        // file when the project itself lives under a `tests/` directory.
-        let rel_path = node.path.strip_prefix(context.root).unwrap_or(&node.path);
-        if is_low_value_anchor(rel_path) {
-            continue;
-        }
-        let file_id = node.file_id;
-        // File-level suppression opts the whole file out. Routed through the
-        // SuppressionContext so the marker is recorded as consumed (otherwise a
-        // working suppression would later be flagged stale).
-        if suppressions.is_file_suppressed(file_id, IssueKind::SecuritySink) {
-            continue;
-        }
-
-        // Source-tainted local names for this module (issue #859). Computed once
-        // per module; empty for modules with no source-shaped bindings.
-        let tainted_locals = source_tainted_locals(
-            &module.tainted_bindings,
-            declared_deps,
-            context.request_receivers,
-        );
-
-        for sink in &module.security_sinks {
-            let source = sink_source(
-                sink,
-                &tainted_locals,
-                declared_deps,
-                context.request_receivers,
-            );
-            // The matcher gate only needs (id, title); the optional source-read
-            // span (third element) anchors the trace and is handled below.
-            let source_id = source.map(|(id, title, _)| (id, title));
-            let Some(matcher) = active.iter().copied().find(|m| {
-                matcher_admits_sink(m, sink, source_id)
-                    && provenance_satisfied(m, module, &sink.callee_path)
-            }) else {
-                continue;
-            };
-
-            if sink_is_sanitized_for_matcher(matcher, module, sink) {
-                continue;
-            }
-
-            let (line, col) =
-                byte_offset_to_line_col(line_offsets_by_file, file_id, sink.span_start);
-            if suppressions.is_suppressed(file_id, line, IssueKind::SecuritySink) {
-                continue;
-            }
-
-            let url_shape = candidate_url_shape(&matcher.id, sink);
-            let source_backed = source.is_some();
-            let evidence =
-                tainted_sink_evidence(matcher, sink, source.map(|(_, title, _)| title), url_shape);
-
-            // Arg-level source-read anchor (issue #1093): for a source-backed
-            // finding, point the trace's source node at the real read. The
-            // binding path carries the read's byte offset (`Some(span)`); a `0`
-            // span (synthetic framework-param / helper-return source) and the
-            // direct path (`None`, the read sits inside the sink statement) both
-            // fall back to the sink line/col rather than a spurious line. `None`
-            // for module-level findings keeps the trace honest (role
-            // `ModuleSource`, set by the ranking pass).
-            let source_read = source.map(|(_, _, span)| {
-                source_read_location(span, line_offsets_by_file, file_id, (line, col))
-            });
-
-            // The destination-host signal for the secret-to-network category
-            // (#890): the arg-0 URL literal, or `None` (dynamic) when not a
-            // literal. The agent triages exfil (dynamic / untrusted host) from
-            // intended auth (a literal provider host) with this.
-            let network = (matcher.id == NETWORK_EXFIL_CATEGORY).then(|| SecurityNetworkContext {
-                destination: sink.url_arg_literal.clone(),
-            });
-
-            // Slot 1 (source kind) is the stable catalogue source id; slot 2
-            // (sink) carries the callee path the evidence already names. The
-            // boundary slot is filled by the post-detection ranking pass once
-            // reachability is known. See issue #900.
-            let candidate = SecurityCandidate {
-                source_kind: source.map(|(id, _, _)| id.to_string()),
-                sink: SecurityCandidateSink {
-                    path: node.path.clone(),
-                    line,
-                    col,
-                    category: Some(matcher.id.clone()),
-                    cwe: Some(matcher.cwe),
-                    callee: Some(sink.callee_path.clone()),
-                    url_shape,
-                },
-                boundary: SecurityCandidateBoundary::default(),
-                network,
-            };
-
-            let path = node.path.clone();
-            findings.push(SecurityFinding {
-                finding_id: String::new(),
-                kind: SecurityFindingKind::TaintedSink,
-                category: Some(matcher.id.clone()),
-                cwe: Some(matcher.cwe),
-                path: path.clone(),
-                line,
-                col,
-                evidence,
-                source_backed,
-                source_read,
-                severity: SecuritySeverity::Low,
-                trace: vec![TraceHop {
-                    path,
-                    line,
-                    col,
-                    role: TraceHopRole::Sink,
-                }],
-                actions: build_actions(),
-                dead_code: None,
-                reachability: None,
-                candidate,
-                taint_flow: None,
-                runtime: None,
-                attack_surface: None,
-            });
-        }
+        collect_module_tainted_sinks(&run, node, module, &mut findings);
     }
 
     // Rank source-backed candidates first (issue #859): a sink whose argument
@@ -631,6 +595,102 @@ pub fn find_tainted_sinks(
             .then(a.category.cmp(&b.category))
     });
     (findings, stats)
+}
+
+/// Shared immutable inputs threaded through the per-module tainted-sink scan.
+struct TaintedSinkRun<'a> {
+    active: &'a [&'static Matcher],
+    suppressions: &'a SuppressionContext<'a>,
+    line_offsets_by_file: &'a LineOffsetsMap<'a>,
+    declared_deps: &'a FxHashSet<String>,
+    context: &'a TaintedSinkContext<'a>,
+}
+
+/// Match every sink in one module against the active catalogue and push a
+/// finding per admitted, non-sanitized, non-suppressed sink. Low-value-anchor
+/// and file-level-suppressed modules are skipped wholesale.
+fn collect_module_tainted_sinks(
+    run: &TaintedSinkRun<'_>,
+    node: &ModuleNode,
+    module: &ModuleInfo,
+    findings: &mut Vec<SecurityFinding>,
+) {
+    if module.security_sinks.is_empty() {
+        return;
+    }
+    // Skip test / spec / story / fixture files and tooling config files
+    // (`vite.config.ts`, `jest.config.js`, etc.). A sink there is low-value
+    // noise: build configs run at build time and test files exercise code
+    // with synthetic inputs, neither is an attacker-reachable surface. This
+    // mirrors the production-mode dead-code exclusion. Matching runs on the
+    // PROJECT-RELATIVE path so the `**/tests/**` glob does not catch every
+    // file when the project itself lives under a `tests/` directory.
+    let rel_path = node
+        .path
+        .strip_prefix(run.context.root)
+        .unwrap_or(&node.path);
+    if is_low_value_anchor(rel_path) {
+        return;
+    }
+    let file_id = node.file_id;
+    // File-level suppression opts the whole file out. Routed through the
+    // SuppressionContext so the marker is recorded as consumed (otherwise a
+    // working suppression would later be flagged stale).
+    if run
+        .suppressions
+        .is_file_suppressed(file_id, IssueKind::SecuritySink)
+    {
+        return;
+    }
+
+    // Source-tainted local names for this module (issue #859). Computed once
+    // per module; empty for modules with no source-shaped bindings.
+    let tainted_locals = source_tainted_locals(
+        &module.tainted_bindings,
+        run.declared_deps,
+        run.context.request_receivers,
+    );
+
+    for sink in &module.security_sinks {
+        let source = sink_source(
+            sink,
+            &tainted_locals,
+            run.declared_deps,
+            run.context.request_receivers,
+        );
+        // The matcher gate only needs (id, title); the optional source-read
+        // span (third element) anchors the trace and is handled below.
+        let source_id = source.map(|(id, title, _)| (id, title));
+        let Some(matcher) = run.active.iter().copied().find(|m| {
+            matcher_admits_sink(m, sink, source_id)
+                && provenance_satisfied(m, module, &sink.callee_path)
+        }) else {
+            continue;
+        };
+
+        if sink_is_sanitized_for_matcher(matcher, module, sink) {
+            continue;
+        }
+
+        let (line, col) =
+            byte_offset_to_line_col(run.line_offsets_by_file, file_id, sink.span_start);
+        if run
+            .suppressions
+            .is_suppressed(file_id, line, IssueKind::SecuritySink)
+        {
+            continue;
+        }
+
+        findings.push(build_tainted_sink_finding(
+            matcher,
+            sink,
+            node,
+            source,
+            (line, col),
+            run.line_offsets_by_file,
+            file_id,
+        ));
+    }
 }
 
 #[cfg(test)]

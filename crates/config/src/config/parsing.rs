@@ -961,34 +961,61 @@ impl FallowConfig {
     pub fn validate_user_globs(
         &self,
     ) -> Result<(), Vec<super::glob_validation::GlobValidationError>> {
-        use super::glob_validation::{
-            compile_user_glob, validate_user_globs, validate_user_path, validate_user_paths,
-            validate_user_specifier_globs,
-        };
-
         let mut errors = Vec::new();
 
-        validate_user_globs(&self.entry, "entry", &mut errors);
-        validate_user_globs(&self.ignore_patterns, "ignorePatterns", &mut errors);
-        validate_user_globs(&self.dynamically_loaded, "dynamicallyLoaded", &mut errors);
+        self.validate_top_level_globs(&mut errors);
+        self.validate_ignore_rule_globs(&mut errors);
+        self.validate_boundary_globs(&mut errors);
+
+        for plugin in &self.framework {
+            if let Err(mut plugin_errors) = plugin.validate_user_globs() {
+                errors.append(&mut plugin_errors);
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
+    /// Validate the top-level filesystem and specifier glob fields plus the
+    /// per-override and threshold-override file globs.
+    fn validate_top_level_globs(
+        &self,
+        errors: &mut Vec<super::glob_validation::GlobValidationError>,
+    ) {
+        use super::glob_validation::{validate_user_globs, validate_user_specifier_globs};
+
+        validate_user_globs(&self.entry, "entry", errors);
+        validate_user_globs(&self.ignore_patterns, "ignorePatterns", errors);
+        validate_user_globs(&self.dynamically_loaded, "dynamicallyLoaded", errors);
         validate_user_specifier_globs(
             &self.ignore_unresolved_imports,
             "ignoreUnresolvedImports",
-            &mut errors,
+            errors,
         );
-        validate_user_globs(&self.duplicates.ignore, "duplicates.ignore", &mut errors);
-        validate_user_globs(&self.health.ignore, "health.ignore", &mut errors);
+        validate_user_globs(&self.duplicates.ignore, "duplicates.ignore", errors);
+        validate_user_globs(&self.health.ignore, "health.ignore", errors);
         for override_entry in &self.health.threshold_overrides {
             validate_user_globs(
                 &override_entry.files,
                 "health.thresholdOverrides[].files",
-                &mut errors,
+                errors,
             );
         }
-
         for override_entry in &self.overrides {
-            validate_user_globs(&override_entry.files, "overrides[].files", &mut errors);
+            validate_user_globs(&override_entry.files, "overrides[].files", errors);
         }
+    }
+
+    /// Validate the `ignoreExports` and `ignoreCatalogReferences` rule globs.
+    fn validate_ignore_rule_globs(
+        &self,
+        errors: &mut Vec<super::glob_validation::GlobValidationError>,
+    ) {
+        use super::glob_validation::compile_user_glob;
 
         for rule in &self.ignore_exports {
             if let Err(e) = compile_user_glob(&rule.file, "ignoreExports[].file") {
@@ -1003,9 +1030,20 @@ impl FallowConfig {
                 errors.push(e);
             }
         }
+    }
+
+    /// Validate the `boundaries.zones[]` patterns/roots/autoDiscover and the
+    /// coverage `allowUnmatched` globs.
+    fn validate_boundary_globs(
+        &self,
+        errors: &mut Vec<super::glob_validation::GlobValidationError>,
+    ) {
+        use super::glob_validation::{
+            validate_user_globs, validate_user_path, validate_user_paths,
+        };
 
         for zone in &self.boundaries.zones {
-            validate_user_globs(&zone.patterns, "boundaries.zones[].patterns", &mut errors);
+            validate_user_globs(&zone.patterns, "boundaries.zones[].patterns", errors);
             if let Some(root) = &zone.root
                 && let Err(e) = validate_user_path(root, "boundaries.zones[].root")
             {
@@ -1014,26 +1052,14 @@ impl FallowConfig {
             validate_user_paths(
                 &zone.auto_discover,
                 "boundaries.zones[].autoDiscover",
-                &mut errors,
+                errors,
             );
         }
         validate_user_globs(
             &self.boundaries.coverage.allow_unmatched,
             "boundaries.coverage.allowUnmatched",
-            &mut errors,
+            errors,
         );
-
-        for plugin in &self.framework {
-            if let Err(mut plugin_errors) = plugin.validate_user_globs() {
-                errors.append(&mut plugin_errors);
-            }
-        }
-
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(errors)
-        }
     }
 
     /// Find the config file path without loading it.

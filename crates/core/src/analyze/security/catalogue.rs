@@ -728,97 +728,7 @@ fn parse_catalogue(src: &str) -> Result<Catalogue, String> {
 
     let mut matchers = Vec::with_capacity(raw.matcher.len());
     for entry in raw.matcher {
-        if entry.id.trim().is_empty() {
-            return Err("matcher id must be non-empty / non-whitespace".to_string());
-        }
-        if entry.cwe == 0 {
-            return Err(format!("matcher {:?} has cwe 0; cwe must be > 0", entry.id));
-        }
-        let sink_shape = parse_sink_shape(&entry.sink_shape).ok_or_else(|| {
-            format!(
-                "matcher {:?} has unknown sink_shape {:?}; expected one of \
-                 call | member-call | member-assign | tagged-template | jsx-attr | new-expression",
-                entry.id, entry.sink_shape
-            )
-        })?;
-        if entry.callee_patterns.is_empty() {
-            return Err(format!(
-                "matcher {:?} has no callee_patterns; at least one is required",
-                entry.id
-            ));
-        }
-        if entry.evidence_template.trim().is_empty() {
-            return Err(format!(
-                "matcher {:?} has an empty evidence_template",
-                entry.id
-            ));
-        }
-        let mut callee_patterns = Vec::with_capacity(entry.callee_patterns.len());
-        for pat in &entry.callee_patterns {
-            let parsed = parse_callee_pattern(pat).ok_or_else(|| {
-                format!(
-                    "matcher {:?} has an empty / whitespace callee_pattern {pat:?}",
-                    entry.id
-                )
-            })?;
-            callee_patterns.push(parsed);
-        }
-        let arg_kinds = match &entry.arg_kinds {
-            None => None,
-            Some(raw_kinds) => {
-                if raw_kinds.is_empty() {
-                    return Err(format!(
-                        "matcher {:?} has an empty arg_kinds list; omit the key to admit any shape",
-                        entry.id
-                    ));
-                }
-                let mut kinds = Vec::with_capacity(raw_kinds.len());
-                for raw in raw_kinds {
-                    let kind = parse_arg_kind(raw).ok_or_else(|| {
-                        format!(
-                            "matcher {:?} has unknown arg_kind {raw:?}; expected one of \
-                             template-with-subst | concat | object | call | literal | no-arg | other",
-                            entry.id
-                        )
-                    })?;
-                    kinds.push(kind);
-                }
-                Some(kinds)
-            }
-        };
-        let enabler = match entry.enabler {
-            Some(e) if e.trim().is_empty() => {
-                return Err(format!(
-                    "matcher {:?} has an empty / whitespace enabler; omit the key for a global row",
-                    entry.id
-                ));
-            }
-            other => other,
-        };
-        let object_properties =
-            parse_object_property_predicates(&entry.id, entry.object_properties)?;
-        matchers.push(Matcher {
-            id: entry.id,
-            cwe: entry.cwe,
-            title: entry.title,
-            effect: entry.effect,
-            sink_shape,
-            callee_patterns,
-            arg_index: entry.arg_index,
-            evidence_template: entry.evidence_template,
-            import_provenance: entry.import_provenance,
-            enabler,
-            arg_kinds,
-            requires_source: entry.requires_source,
-            requires_source_kinds: entry.requires_source_kinds,
-            literal_values: entry.literal_values.unwrap_or_default(),
-            literal_contains: entry.literal_contains.unwrap_or_default(),
-            literal_integers: entry.literal_integers.unwrap_or_default(),
-            object_properties,
-            object_missing_or_false: entry.object_missing_or_false.unwrap_or_default(),
-            object_missing: entry.object_missing.unwrap_or_default(),
-            context_keywords: entry.context_keywords.unwrap_or_default(),
-        });
+        matchers.push(parse_matcher_entry(entry)?);
     }
 
     if matchers.is_empty() {
@@ -828,6 +738,117 @@ fn parse_catalogue(src: &str) -> Result<Catalogue, String> {
     let sources = parse_source_catalogue(raw.source)?;
 
     Ok(Catalogue { matchers, sources })
+}
+
+/// Validate one raw matcher entry and convert it to a `Matcher`. Validates a
+/// non-empty id, cwe > 0, a resolvable sink_shape, non-empty callee_patterns /
+/// arg_kinds / evidence_template, and a non-empty enabler when present.
+fn parse_matcher_entry(entry: RawMatcher) -> Result<Matcher, String> {
+    let (sink_shape, callee_patterns) = validate_matcher_core(&entry)?;
+    let arg_kinds = parse_matcher_arg_kinds(&entry.id, entry.arg_kinds.as_deref())?;
+    let enabler = validate_matcher_enabler(&entry.id, entry.enabler)?;
+    let object_properties = parse_object_property_predicates(&entry.id, entry.object_properties)?;
+    Ok(Matcher {
+        id: entry.id,
+        cwe: entry.cwe,
+        title: entry.title,
+        effect: entry.effect,
+        sink_shape,
+        callee_patterns,
+        arg_index: entry.arg_index,
+        evidence_template: entry.evidence_template,
+        import_provenance: entry.import_provenance,
+        enabler,
+        arg_kinds,
+        requires_source: entry.requires_source,
+        requires_source_kinds: entry.requires_source_kinds,
+        literal_values: entry.literal_values.unwrap_or_default(),
+        literal_contains: entry.literal_contains.unwrap_or_default(),
+        literal_integers: entry.literal_integers.unwrap_or_default(),
+        object_properties,
+        object_missing_or_false: entry.object_missing_or_false.unwrap_or_default(),
+        object_missing: entry.object_missing.unwrap_or_default(),
+        context_keywords: entry.context_keywords.unwrap_or_default(),
+    })
+}
+
+/// Validate a matcher's scalar fields (id, cwe, evidence_template) and parse its
+/// sink_shape plus non-empty callee_patterns.
+fn validate_matcher_core(entry: &RawMatcher) -> Result<(SinkShape, Vec<CalleePattern>), String> {
+    if entry.id.trim().is_empty() {
+        return Err("matcher id must be non-empty / non-whitespace".to_string());
+    }
+    if entry.cwe == 0 {
+        return Err(format!("matcher {:?} has cwe 0; cwe must be > 0", entry.id));
+    }
+    let sink_shape = parse_sink_shape(&entry.sink_shape).ok_or_else(|| {
+        format!(
+            "matcher {:?} has unknown sink_shape {:?}; expected one of \
+             call | member-call | member-assign | tagged-template | jsx-attr | new-expression",
+            entry.id, entry.sink_shape
+        )
+    })?;
+    if entry.callee_patterns.is_empty() {
+        return Err(format!(
+            "matcher {:?} has no callee_patterns; at least one is required",
+            entry.id
+        ));
+    }
+    if entry.evidence_template.trim().is_empty() {
+        return Err(format!(
+            "matcher {:?} has an empty evidence_template",
+            entry.id
+        ));
+    }
+    let mut callee_patterns = Vec::with_capacity(entry.callee_patterns.len());
+    for pat in &entry.callee_patterns {
+        let parsed = parse_callee_pattern(pat).ok_or_else(|| {
+            format!(
+                "matcher {:?} has an empty / whitespace callee_pattern {pat:?}",
+                entry.id
+            )
+        })?;
+        callee_patterns.push(parsed);
+    }
+    Ok((sink_shape, callee_patterns))
+}
+
+/// Validate the optional `enabler`: present but empty / whitespace is rejected;
+/// absent or non-empty passes through unchanged.
+fn validate_matcher_enabler(id: &str, enabler: Option<String>) -> Result<Option<String>, String> {
+    match enabler {
+        Some(e) if e.trim().is_empty() => Err(format!(
+            "matcher {id:?} has an empty / whitespace enabler; omit the key for a global row"
+        )),
+        other => Ok(other),
+    }
+}
+
+/// Parse the optional `arg_kinds` list: `None` admits any shape, an empty list
+/// is rejected, and each entry must resolve to a known `ArgKind`.
+fn parse_matcher_arg_kinds(
+    id: &str,
+    raw_kinds: Option<&[String]>,
+) -> Result<Option<Vec<SinkArgKind>>, String> {
+    let Some(raw_kinds) = raw_kinds else {
+        return Ok(None);
+    };
+    if raw_kinds.is_empty() {
+        return Err(format!(
+            "matcher {id:?} has an empty arg_kinds list; omit the key to admit any shape"
+        ));
+    }
+    let mut kinds = Vec::with_capacity(raw_kinds.len());
+    for raw in raw_kinds {
+        let kind = parse_arg_kind(raw).ok_or_else(|| {
+            format!(
+                "matcher {id:?} has unknown arg_kind {raw:?}; expected one of \
+                 template-with-subst | concat | object | call | literal | no-arg | other"
+            )
+        })?;
+        kinds.push(kind);
+    }
+    Ok(Some(kinds))
 }
 
 fn parse_source_catalogue(raw_sources: Vec<RawSource>) -> Result<Vec<SourceMatcher>, String> {

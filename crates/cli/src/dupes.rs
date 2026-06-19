@@ -276,13 +276,10 @@ pub fn execute_dupes_with_files(
     execute_dupes_inner(opts, Some(files))
 }
 
-fn execute_dupes_inner(
-    opts: &DupesOptions<'_>,
-    pre_discovered: Option<Vec<fallow_types::discover::DiscoveredFile>>,
-) -> Result<DupesResult, ExitCode> {
-    let start = Instant::now();
-
-    let config = load_config_for_analysis(
+/// Load the resolved config for a duplication run, folding the CLI/config
+/// production precedence into the `production_override`.
+fn load_dupes_config_for_analysis(opts: &DupesOptions<'_>) -> Result<ResolvedConfig, ExitCode> {
+    load_config_for_analysis(
         opts.root,
         opts.config_path,
         crate::ConfigLoadOptions {
@@ -295,7 +292,53 @@ fn execute_dupes_inner(
             quiet: opts.quiet,
         },
         fallow_config::ProductionAnalysis::Dupes,
-    )?;
+    )
+}
+
+/// Apply the changed-files, diff-index, workspace-scope, and top-N filters to
+/// the duplication report in order. Mirrors the standalone scoping pipeline.
+fn filter_dupes_report(
+    report: &mut DuplicationReport,
+    opts: &DupesOptions<'_>,
+    config: &ResolvedConfig,
+    effective_changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
+) -> Result<(), ExitCode> {
+    if let Some(changed) = effective_changed_files {
+        filter_by_changed_files(report, changed, &config.root);
+    }
+
+    if let Some(diff_index) = match opts.diff_index {
+        Some(index) => Some(index),
+        None if opts.use_shared_diff_index => crate::report::ci::diff_filter::shared_diff_index(),
+        None => None,
+    } {
+        filter_by_diff(report, diff_index, &config.root);
+    }
+
+    if let Some(ws_roots) = resolve_workspace_scope(
+        opts.root,
+        opts.workspace,
+        opts.changed_workspaces,
+        opts.output,
+    )? {
+        filter_by_workspaces(report, &ws_roots, &config.root);
+    }
+
+    if let Some(n) = opts.top
+        && opts.group_by.is_none()
+    {
+        apply_top(report, n, &config.root);
+    }
+    Ok(())
+}
+
+fn execute_dupes_inner(
+    opts: &DupesOptions<'_>,
+    pre_discovered: Option<Vec<fallow_types::discover::DiscoveredFile>>,
+) -> Result<DupesResult, ExitCode> {
+    let start = Instant::now();
+
+    let config = load_dupes_config_for_analysis(opts)?;
 
     let dupes_config = build_dupes_config(opts, &config.duplicates);
     let files = pre_discovered
@@ -324,33 +367,7 @@ fn execute_dupes_inner(
 
     save_duplication_baseline(&report, &config, opts)?;
     apply_duplication_baseline(&mut report, &config, opts)?;
-
-    if let Some(changed) = effective_changed_files {
-        filter_by_changed_files(&mut report, changed, &config.root);
-    }
-
-    if let Some(diff_index) = match opts.diff_index {
-        Some(index) => Some(index),
-        None if opts.use_shared_diff_index => crate::report::ci::diff_filter::shared_diff_index(),
-        None => None,
-    } {
-        filter_by_diff(&mut report, diff_index, &config.root);
-    }
-
-    if let Some(ws_roots) = resolve_workspace_scope(
-        opts.root,
-        opts.workspace,
-        opts.changed_workspaces,
-        opts.output,
-    )? {
-        filter_by_workspaces(&mut report, &ws_roots, &config.root);
-    }
-
-    if let Some(n) = opts.top
-        && opts.group_by.is_none()
-    {
-        apply_top(&mut report, n, &config.root);
-    }
+    filter_dupes_report(&mut report, opts, &config, effective_changed_files)?;
 
     let elapsed = start.elapsed();
 

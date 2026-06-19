@@ -116,101 +116,114 @@ pub fn push_circular_dep_diagnostics(
             continue;
         }
 
-        // Names are derived from the EDGES (not `files`) so all the rotated
-        // message and related-info index math below stays in bounds even if a
-        // caller ever passes `edges.len() != files.len()`. Core enforces the
-        // invariant; the LSP renders without depending on it.
-        let names: Vec<String> = cycle
-            .cycle
-            .edges
-            .iter()
-            .map(|edge| cycle_file_name(&edge.path))
-            .collect();
-        let n = names.len();
-        let cycle_id = cycle_fingerprint(files);
-        let suffix = if n == 1 { "" } else { "s" };
-
-        for (i, edge) in cycle.cycle.edges.iter().enumerate() {
-            let Some(uri) = Uri::from_file_path(&edge.path) else {
-                // Render-only drop: an unopenable URL (e.g. a relative or
-                // malformed path) is skipped here, but the `edges` data still
-                // carries every hop. Never let this filter touch the data.
-                continue;
-            };
-            let line = edge.line.saturating_sub(1);
-            // Rotate the chain so the message reads from the file the user is
-            // standing in: on `b` of a -> b -> c -> a it reads
-            // "Circular dependency (3 files): b -> c -> a -> b".
-            let rotated: Vec<&str> = (0..=n).map(|k| names[(i + k) % n].as_str()).collect();
-            let message = format!(
-                "Circular dependency ({n} file{suffix}): {}",
-                rotated.join(" \u{2192} "),
-            );
-
-            let related_info: Vec<DiagnosticRelatedInformation> =
-                cycle
-                    .cycle
-                    .edges
-                    .iter()
-                    .enumerate()
-                    .filter(|(j, _)| *j != i)
-                    .filter_map(|(j, other)| {
-                        let other_uri = Uri::from_file_path(&other.path)?;
-                        let other_line = other.line.saturating_sub(1);
-                        Some(DiagnosticRelatedInformation {
-                            location: Location {
-                                uri: other_uri,
-                                range: Range {
-                                    start: Position {
-                                        line: other_line,
-                                        character: other.col,
-                                    },
-                                    end: Position {
-                                        line: other_line,
-                                        character: u32::MAX,
-                                    },
-                                },
-                            },
-                            message: format!(
-                                "Cycle hop: {} \u{2192} {}",
-                                names[j],
-                                names[(j + 1) % n],
-                            ),
-                        })
-                    })
-                    .collect();
-
-            map.entry(uri).or_default().push(Diagnostic {
-                range: Range {
-                    start: Position {
-                        line,
-                        character: edge.col,
-                    },
-                    end: Position {
-                        line,
-                        character: u32::MAX,
-                    },
-                },
-                severity: Some(DiagnosticSeverity::WARNING),
-                source: Some("fallow".to_string()),
-                code: Some(NumberOrString::String("circular-dependency".to_string())),
-                code_description: doc_link("circular-dependencies"),
-                message,
-                related_information: if related_info.is_empty() {
-                    None
-                } else {
-                    Some(related_info)
-                },
-                // Shared cycle identity so editors / agents can correlate the
-                // N per-file squigglies into one cycle. `attach_changed_since_data`
-                // merges `changedSince` into this object without clobbering it.
-                data: Some(serde_json::json!({
-                    "circularDependency": { "cycleId": cycle_id, "fileCount": n }
-                })),
-                ..Default::default()
-            });
-        }
+        push_circular_cycle_edge_diagnostics(map, &cycle.cycle);
     }
+}
+
+/// Emit one per-edge `WARNING` diagnostic for a cycle that carries per-file
+/// `edges` anchors, anchored at the import edge pointing to the next file.
+fn push_circular_cycle_edge_diagnostics(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    cycle: &fallow_core::results::CircularDependency,
+) {
+    // Names are derived from the EDGES (not `files`) so all the rotated
+    // message and related-info index math below stays in bounds even if a
+    // caller ever passes `edges.len() != files.len()`. Core enforces the
+    // invariant; the LSP renders without depending on it.
+    let names: Vec<String> = cycle
+        .edges
+        .iter()
+        .map(|edge| cycle_file_name(&edge.path))
+        .collect();
+    let n = names.len();
+    let cycle_id = cycle_fingerprint(&cycle.files);
+    let suffix = if n == 1 { "" } else { "s" };
+
+    for (i, edge) in cycle.edges.iter().enumerate() {
+        let Some(uri) = Uri::from_file_path(&edge.path) else {
+            // Render-only drop: an unopenable URL (e.g. a relative or
+            // malformed path) is skipped here, but the `edges` data still
+            // carries every hop. Never let this filter touch the data.
+            continue;
+        };
+        let line = edge.line.saturating_sub(1);
+        // Rotate the chain so the message reads from the file the user is
+        // standing in: on `b` of a -> b -> c -> a it reads
+        // "Circular dependency (3 files): b -> c -> a -> b".
+        let rotated: Vec<&str> = (0..=n).map(|k| names[(i + k) % n].as_str()).collect();
+        let message = format!(
+            "Circular dependency ({n} file{suffix}): {}",
+            rotated.join(" \u{2192} "),
+        );
+
+        let related_info = circular_cycle_related_info(cycle, &names, i, n);
+
+        map.entry(uri).or_default().push(Diagnostic {
+            range: Range {
+                start: Position {
+                    line,
+                    character: edge.col,
+                },
+                end: Position {
+                    line,
+                    character: u32::MAX,
+                },
+            },
+            severity: Some(DiagnosticSeverity::WARNING),
+            source: Some("fallow".to_string()),
+            code: Some(NumberOrString::String("circular-dependency".to_string())),
+            code_description: doc_link("circular-dependencies"),
+            message,
+            related_information: if related_info.is_empty() {
+                None
+            } else {
+                Some(related_info)
+            },
+            // Shared cycle identity so editors / agents can correlate the
+            // N per-file squigglies into one cycle. `attach_changed_since_data`
+            // merges `changedSince` into this object without clobbering it.
+            data: Some(serde_json::json!({
+                "circularDependency": { "cycleId": cycle_id, "fileCount": n }
+            })),
+            ..Default::default()
+        });
+    }
+}
+
+/// Build the related-information hops for the edge at index `i`, pointing at
+/// every OTHER hop's real location.
+fn circular_cycle_related_info(
+    cycle: &fallow_core::results::CircularDependency,
+    names: &[String],
+    i: usize,
+    n: usize,
+) -> Vec<DiagnosticRelatedInformation> {
+    cycle
+        .edges
+        .iter()
+        .enumerate()
+        .filter(|(j, _)| *j != i)
+        .filter_map(|(j, other)| {
+            let other_uri = Uri::from_file_path(&other.path)?;
+            let other_line = other.line.saturating_sub(1);
+            Some(DiagnosticRelatedInformation {
+                location: Location {
+                    uri: other_uri,
+                    range: Range {
+                        start: Position {
+                            line: other_line,
+                            character: other.col,
+                        },
+                        end: Position {
+                            line: other_line,
+                            character: u32::MAX,
+                        },
+                    },
+                },
+                message: format!("Cycle hop: {} \u{2192} {}", names[j], names[(j + 1) % n]),
+            })
+        })
+        .collect()
 }
 
 pub fn push_re_export_cycle_diagnostics(
@@ -218,85 +231,95 @@ pub fn push_re_export_cycle_diagnostics(
     results: &AnalysisResults,
 ) {
     for cycle in &results.re_export_cycles {
-        let chain: Vec<String> = cycle
-            .cycle
-            .files
-            .iter()
-            .map(|f| {
-                f.file_name().map_or_else(
-                    || f.display().to_string(),
-                    |n| n.to_string_lossy().into_owned(),
-                )
-            })
-            .collect();
-        let (kind_label, fix_hint) = match cycle.cycle.kind {
-            fallow_core::results::ReExportCycleKind::SelfLoop => (
-                "Self-loop",
-                "Remove the `export * from './'` (or equivalent) inside this file.",
-            ),
-            fallow_core::results::ReExportCycleKind::MultiNode => (
-                "Cycle",
-                "Remove one `export * from` statement on any one member to break the cycle.",
-            ),
-        };
-        let message = format!(
-            "Re-export {} ({} file{}): {}. {}",
-            kind_label.to_ascii_lowercase(),
-            cycle.cycle.files.len(),
-            if cycle.cycle.files.len() == 1 {
-                ""
-            } else {
-                "s"
-            },
-            chain.join(" <-> "),
-            fix_hint
-        );
-
+        let message = re_export_cycle_message(&cycle.cycle);
         for (idx, member_path) in cycle.cycle.files.iter().enumerate() {
-            let Some(uri) = Uri::from_file_path(member_path) else {
-                continue;
-            };
-            let related_info: Vec<DiagnosticRelatedInformation> = cycle
-                .cycle
-                .files
-                .iter()
-                .enumerate()
-                .filter(|(i, _)| *i != idx)
-                .filter_map(|(_, other)| {
-                    let other_uri = Uri::from_file_path(other)?;
-                    let name = other.file_name().map_or_else(
-                        || other.display().to_string(),
-                        |n| n.to_string_lossy().into_owned(),
-                    );
-                    Some(DiagnosticRelatedInformation {
-                        location: Location {
-                            uri: other_uri,
-                            range: FIRST_LINE_RANGE,
-                        },
-                        message: format!("Other member: {name}"),
-                    })
-                })
-                .collect();
-
-            map.entry(uri).or_default().push(Diagnostic {
-                range: FIRST_LINE_RANGE,
-                severity: Some(DiagnosticSeverity::WARNING),
-                source: Some("fallow".to_string()),
-                code: Some(NumberOrString::String("re-export-cycle".to_string())),
-                code_description: doc_link("re-export-cycles"),
-                message: message.clone(),
-                related_information: if related_info.is_empty() {
-                    None
-                } else {
-                    Some(related_info)
-                },
-                ..Default::default()
-            });
+            push_re_export_member_diagnostic(map, &cycle.cycle, member_path, idx, &message);
         }
     }
 }
 
+/// Format the shared `re-export-cycle` message: kind, file count, the chain,
+/// and the kind-appropriate fix hint.
+fn re_export_cycle_message(cycle: &fallow_core::results::ReExportCycle) -> String {
+    let chain: Vec<String> = cycle.files.iter().map(|f| cycle_file_name(f)).collect();
+    let (kind_label, fix_hint) = match cycle.kind {
+        fallow_core::results::ReExportCycleKind::SelfLoop => (
+            "Self-loop",
+            "Remove the `export * from './'` (or equivalent) inside this file.",
+        ),
+        fallow_core::results::ReExportCycleKind::MultiNode => (
+            "Cycle",
+            "Remove one `export * from` statement on any one member to break the cycle.",
+        ),
+    };
+    format!(
+        "Re-export {} ({} file{}): {}. {}",
+        kind_label.to_ascii_lowercase(),
+        cycle.files.len(),
+        if cycle.files.len() == 1 { "" } else { "s" },
+        chain.join(" <-> "),
+        fix_hint
+    )
+}
+
+/// Push one `WARNING` re-export-cycle diagnostic for the member at `idx`, with
+/// the other members linked as related info.
+fn push_re_export_member_diagnostic(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    cycle: &fallow_core::results::ReExportCycle,
+    member_path: &std::path::Path,
+    idx: usize,
+    message: &str,
+) {
+    let Some(uri) = Uri::from_file_path(member_path) else {
+        return;
+    };
+    let related_info: Vec<DiagnosticRelatedInformation> = cycle
+        .files
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| *i != idx)
+        .filter_map(|(_, other)| {
+            let other_uri = Uri::from_file_path(other)?;
+            let name = cycle_file_name(other);
+            Some(DiagnosticRelatedInformation {
+                location: Location {
+                    uri: other_uri,
+                    range: FIRST_LINE_RANGE,
+                },
+                message: format!("Other member: {name}"),
+            })
+        })
+        .collect();
+
+    map.entry(uri).or_default().push(Diagnostic {
+        range: FIRST_LINE_RANGE,
+        severity: Some(DiagnosticSeverity::WARNING),
+        source: Some("fallow".to_string()),
+        code: Some(NumberOrString::String("re-export-cycle".to_string())),
+        code_description: doc_link("re-export-cycles"),
+        message: message.to_string(),
+        related_information: if related_info.is_empty() {
+            None
+        } else {
+            Some(related_info)
+        },
+        ..Default::default()
+    });
+}
+
 pub fn push_boundary_violation_diagnostics(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+) {
+    push_boundary_import_violation_diagnostics(map, results);
+    push_boundary_coverage_violation_diagnostics(map, results);
+    push_boundary_call_violation_diagnostics(map, results);
+}
+
+/// Push WARNING diagnostics for cross-zone import boundary violations, each
+/// linking the target file as related info.
+fn push_boundary_import_violation_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
 ) {
@@ -344,7 +367,13 @@ pub fn push_boundary_violation_diagnostics(
             ..Default::default()
         });
     }
+}
 
+/// Push WARNING diagnostics for files that match no configured boundary zone.
+fn push_boundary_coverage_violation_diagnostics(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+) {
     for v in &results.boundary_coverage_violations {
         let Some(uri) = Uri::from_file_path(&v.violation.path) else {
             continue;
@@ -370,7 +399,13 @@ pub fn push_boundary_violation_diagnostics(
             ..Default::default()
         });
     }
+}
 
+/// Push WARNING diagnostics for calls matching a forbidden boundary pattern.
+fn push_boundary_call_violation_diagnostics(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+) {
     for v in &results.boundary_call_violations {
         let Some(uri) = Uri::from_file_path(&v.violation.path) else {
             continue;

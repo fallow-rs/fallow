@@ -188,65 +188,76 @@ fn build_component_states<'a>(
     for func in &module.component_functions {
         let name = func.name.as_str();
         let edges = edges_by_parent.get(name).cloned().unwrap_or_default();
-        let component_abstain = component_has_abstain(func, &edges);
-
-        let mut prop_roles = FxHashMap::default();
-        let mut prop_decls = FxHashMap::default();
-        let mut forwards: FxHashMap<String, Vec<ForwardTarget>> = FxHashMap::default();
-
-        if let Some(props) = props_by_comp.get(name) {
-            for prop in props {
-                if !prop.used_in_script {
-                    // Unused props are not chain links (they are the
-                    // `unused-component-prop` finding's concern, Phase 1).
-                    continue;
-                }
-                let role = if prop.used_outside_forward {
-                    PropRole::Consumer
-                } else {
-                    PropRole::PassThrough
-                };
-                prop_roles.insert(prop.local.clone(), role);
-                prop_decls.insert(
-                    prop.local.clone(),
-                    PropDecl {
-                        name: prop.name.clone(),
-                        span_start: prop.span_start,
-                    },
-                );
-            }
-        }
-
-        // Forward targets: each render edge's `forward_attrs` whose root is one of
-        // this component's prop locals.
-        for edge in &edges {
-            for fa in &edge.forward_attrs {
-                if prop_roles.contains_key(&fa.root) {
-                    forwards
-                        .entry(fa.root.clone())
-                        .or_default()
-                        .push(ForwardTarget {
-                            child_name: edge.child_component_name.clone(),
-                            child_attr: fa.attr.clone(),
-                        });
-                }
-            }
-        }
-
+        let props = props_by_comp.get(name).cloned().unwrap_or_default();
+        let state = build_single_component_state(path, func, &edges, &props);
         states.insert(
             CompKey {
                 file,
                 name: name.to_string(),
             },
-            CompState {
-                path,
-                span_start: func.span_start,
-                abstain: component_abstain,
-                prop_roles,
-                prop_decls,
-                forwards,
+            state,
+        );
+    }
+}
+
+/// Build one component's [`CompState`]: classify each used prop as consumer or
+/// pass-through, and record the forward targets carried by its render edges.
+fn build_single_component_state<'a>(
+    path: &'a Path,
+    func: &ComponentFunction,
+    edges: &[&RenderEdge],
+    props: &[&ComponentProp],
+) -> CompState<'a> {
+    let component_abstain = component_has_abstain(func, edges);
+
+    let mut prop_roles = FxHashMap::default();
+    let mut prop_decls = FxHashMap::default();
+    let mut forwards: FxHashMap<String, Vec<ForwardTarget>> = FxHashMap::default();
+
+    for prop in props {
+        if !prop.used_in_script {
+            // Unused props are not chain links (they are the
+            // `unused-component-prop` finding's concern, Phase 1).
+            continue;
+        }
+        let role = if prop.used_outside_forward {
+            PropRole::Consumer
+        } else {
+            PropRole::PassThrough
+        };
+        prop_roles.insert(prop.local.clone(), role);
+        prop_decls.insert(
+            prop.local.clone(),
+            PropDecl {
+                name: prop.name.clone(),
+                span_start: prop.span_start,
             },
         );
+    }
+
+    // Forward targets: each render edge's `forward_attrs` whose root is one of
+    // this component's prop locals.
+    for edge in edges {
+        for fa in &edge.forward_attrs {
+            if prop_roles.contains_key(&fa.root) {
+                forwards
+                    .entry(fa.root.clone())
+                    .or_default()
+                    .push(ForwardTarget {
+                        child_name: edge.child_component_name.clone(),
+                        child_attr: fa.attr.clone(),
+                    });
+            }
+        }
+    }
+
+    CompState {
+        path,
+        span_start: func.span_start,
+        abstain: component_abstain,
+        prop_roles,
+        prop_decls,
+        forwards,
     }
 }
 
@@ -396,55 +407,93 @@ fn follow_chain(
             // Pathological depth: stop (still a valid drilled chain, capped).
             return Some(hops);
         }
-        let state = states.get(&current_key)?;
-        // The current component must FORWARD this prop to exactly one child the
-        // chain can follow. A forward to >= 2 distinct children is a fan-out (not
-        // a single drilling line); abstain to stay high-confidence.
-        let targets = state.forwards.get(&current_local)?;
-        let resolved: Vec<(CompKey, &ForwardTarget)> = targets
-            .iter()
-            .filter_map(|t| {
-                resolver
-                    .resolve(current_key.file, &t.child_name)
-                    .map(|k| (k, t))
-            })
-            .collect();
-        // Every written target must resolve (an unresolvable hop abstains), and
-        // they must all point at the SAME child receiving the SAME attr (a
-        // genuine single-line forward, possibly written twice).
-        if resolved.len() != targets.len() {
-            return None;
-        }
-        let (child_key, target) = single_child(&resolved)?;
-        if !visited.insert(child_key.clone()) {
-            // Cycle: abstain.
-            return None;
-        }
-        let child_state = states.get(&child_key)?;
-        if child_state.abstain {
-            return None;
-        }
-        // The child's prop LOCAL receiving this forward = the local whose declared
-        // NAME equals the forwarded attribute name.
-        let Some(child_local) = local_for_attr(child_state, &target.child_attr) else {
-            // The child does not declare a harvestable prop for this attr (it may
-            // spread, rest, or take an unharvestable signature). Abstain.
-            return None;
-        };
-        let role = *child_state.prop_roles.get(&child_local)?;
-        hops.push(hop_at(
-            &child_key,
-            child_state.path,
-            child_state.span_start,
+        match advance_chain_step(
+            &current_key,
+            &current_local,
+            states,
+            resolver,
             line_offsets_by_file,
-        ));
-        match role {
-            PropRole::Consumer => return Some(hops),
-            PropRole::PassThrough => {
-                current_key = child_key;
-                current_local = child_local;
+            &mut hops,
+            &mut visited,
+        )? {
+            ChainStep::Done => return Some(hops),
+            ChainStep::Continue { key, local } => {
+                current_key = key;
+                current_local = local;
             }
         }
+    }
+}
+
+/// One hop of a prop-drilling chain: terminate at a consumer, or continue at the
+/// next pass-through `(component, local)`.
+enum ChainStep {
+    Done,
+    Continue { key: CompKey, local: String },
+}
+
+/// Advance the chain one hop from `(current_key, current_local)`: resolve the
+/// single forwarded child, push its located hop, and report whether the chain
+/// terminates (consumer) or continues (pass-through). `None` abstains on a
+/// fan-out, unresolvable / ambiguous child, cycle, abstaining child, or a child
+/// that does not receive the prop.
+fn advance_chain_step(
+    current_key: &CompKey,
+    current_local: &str,
+    states: &FxHashMap<CompKey, CompState<'_>>,
+    resolver: &ChildResolver<'_>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+    hops: &mut Vec<PropDrillHop>,
+    visited: &mut FxHashSet<CompKey>,
+) -> Option<ChainStep> {
+    let state = states.get(current_key)?;
+    // The current component must FORWARD this prop to exactly one child the
+    // chain can follow. A forward to >= 2 distinct children is a fan-out (not
+    // a single drilling line); abstain to stay high-confidence.
+    let targets = state.forwards.get(current_local)?;
+    let resolved: Vec<(CompKey, &ForwardTarget)> = targets
+        .iter()
+        .filter_map(|t| {
+            resolver
+                .resolve(current_key.file, &t.child_name)
+                .map(|k| (k, t))
+        })
+        .collect();
+    // Every written target must resolve (an unresolvable hop abstains), and
+    // they must all point at the SAME child receiving the SAME attr (a
+    // genuine single-line forward, possibly written twice).
+    if resolved.len() != targets.len() {
+        return None;
+    }
+    let (child_key, target) = single_child(&resolved)?;
+    if !visited.insert(child_key.clone()) {
+        // Cycle: abstain.
+        return None;
+    }
+    let child_state = states.get(&child_key)?;
+    if child_state.abstain {
+        return None;
+    }
+    // The child's prop LOCAL receiving this forward = the local whose declared
+    // NAME equals the forwarded attribute name.
+    let Some(child_local) = local_for_attr(child_state, &target.child_attr) else {
+        // The child does not declare a harvestable prop for this attr (it may
+        // spread, rest, or take an unharvestable signature). Abstain.
+        return None;
+    };
+    let role = *child_state.prop_roles.get(&child_local)?;
+    hops.push(hop_at(
+        &child_key,
+        child_state.path,
+        child_state.span_start,
+        line_offsets_by_file,
+    ));
+    match role {
+        PropRole::Consumer => Some(ChainStep::Done),
+        PropRole::PassThrough => Some(ChainStep::Continue {
+            key: child_key,
+            local: child_local,
+        }),
     }
 }
 

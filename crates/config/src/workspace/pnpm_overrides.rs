@@ -330,93 +330,119 @@ fn build_yaml_line_index(source: &str) -> YamlLineIndex {
 /// key to its 1-based line number. The scan tracks brace depth so nested
 /// objects under unrelated keys (e.g., `dependenciesMeta`) cannot be misread
 /// as override entries.
+/// Char-by-char brace-depth scanner state for the `pnpm.overrides` line index.
+#[derive(Default)]
+struct OverridesJsonScan {
+    entries: Vec<(String, u32)>,
+    depth: i32,
+    pnpm_depth: Option<i32>,
+    in_overrides_depth: Option<i32>,
+    in_string: bool,
+    escape: bool,
+    last_key: Option<String>,
+    key_buf: String,
+    collecting_key: bool,
+}
+
+impl OverridesJsonScan {
+    /// Handle one character while inside a quoted string, buffering key text and
+    /// closing the string on an unescaped quote.
+    fn consume_in_string_char(&mut self, ch: char) {
+        if self.escape {
+            if self.collecting_key {
+                self.key_buf.push(ch);
+            }
+            self.escape = false;
+            return;
+        }
+        if ch == '\\' {
+            self.escape = true;
+            if self.collecting_key {
+                self.key_buf.push(ch);
+            }
+            return;
+        }
+        if ch == '"' {
+            self.in_string = false;
+            if self.collecting_key {
+                self.last_key = Some(std::mem::take(&mut self.key_buf));
+                self.collecting_key = false;
+            }
+            return;
+        }
+        if self.collecting_key {
+            self.key_buf.push(ch);
+        }
+    }
+
+    /// Handle one structural character outside any string: brace depth, the
+    /// `pnpm`/`overrides` section transitions, and entry recording on `:`.
+    fn consume_structural_char(&mut self, ch: char, current_line: u32) {
+        match ch {
+            '"' => {
+                self.in_string = true;
+                self.collecting_key = true;
+                self.key_buf.clear();
+            }
+            '{' => self.depth += 1,
+            '}' => {
+                if Some(self.depth) == self.in_overrides_depth {
+                    self.in_overrides_depth = None;
+                }
+                if Some(self.depth) == self.pnpm_depth {
+                    self.pnpm_depth = None;
+                }
+                self.depth -= 1;
+            }
+            ':' => self.record_key_after_colon(current_line),
+            ',' => {
+                self.last_key = None;
+            }
+            _ => {}
+        }
+    }
+
+    /// On a `:`, enter the `pnpm` or `overrides` section, or record an override
+    /// entry when the depth places the key inside `pnpm.overrides`.
+    fn record_key_after_colon(&mut self, current_line: u32) {
+        let Some(key) = self.last_key.take() else {
+            return;
+        };
+        if self.pnpm_depth.is_none() && self.depth == 1 && key == "pnpm" {
+            self.pnpm_depth = Some(self.depth);
+        } else if self.in_overrides_depth.is_none()
+            && self.pnpm_depth.is_some()
+            && self.depth == self.pnpm_depth.unwrap_or(0) + 1
+            && key == "overrides"
+        {
+            self.in_overrides_depth = Some(self.depth);
+        } else if let Some(d) = self.in_overrides_depth
+            && self.depth == d + 1
+        {
+            self.entries.push((key, current_line));
+        }
+    }
+}
+
 fn build_package_json_line_index(source: &str) -> YamlLineIndex {
-    let mut entries = Vec::new();
-    let mut depth: i32 = 0;
-    let mut pnpm_depth: Option<i32> = None;
-    let mut in_overrides_depth: Option<i32> = None;
-    let mut in_string = false;
-    let mut escape = false;
+    let mut scan = OverridesJsonScan::default();
     let mut current_line = 1u32;
-    let mut last_key: Option<String> = None;
-    let mut key_buf = String::new();
-    let mut collecting_key = false;
 
     for ch in source.chars() {
         if ch == '\n' {
             current_line += 1;
         }
 
-        if in_string {
-            if escape {
-                if collecting_key {
-                    key_buf.push(ch);
-                }
-                escape = false;
-                continue;
-            }
-            if ch == '\\' {
-                escape = true;
-                if collecting_key {
-                    key_buf.push(ch);
-                }
-                continue;
-            }
-            if ch == '"' {
-                in_string = false;
-                if collecting_key {
-                    last_key = Some(std::mem::take(&mut key_buf));
-                    collecting_key = false;
-                }
-                continue;
-            }
-            if collecting_key {
-                key_buf.push(ch);
-            }
-            continue;
-        }
-
-        match ch {
-            '"' => {
-                in_string = true;
-                collecting_key = true;
-                key_buf.clear();
-            }
-            '{' => depth += 1,
-            '}' => {
-                if Some(depth) == in_overrides_depth {
-                    in_overrides_depth = None;
-                }
-                if Some(depth) == pnpm_depth {
-                    pnpm_depth = None;
-                }
-                depth -= 1;
-            }
-            ':' => {
-                if let Some(key) = last_key.take() {
-                    if pnpm_depth.is_none() && depth == 1 && key == "pnpm" {
-                        pnpm_depth = Some(depth);
-                    } else if in_overrides_depth.is_none()
-                        && pnpm_depth.is_some()
-                        && depth == pnpm_depth.unwrap_or(0) + 1
-                        && key == "overrides"
-                    {
-                        in_overrides_depth = Some(depth);
-                    } else if let Some(d) = in_overrides_depth
-                        && depth == d + 1
-                    {
-                        entries.push((key, current_line));
-                    }
-                }
-            }
-            ',' => {
-                last_key = None;
-            }
-            _ => {}
+        if scan.in_string {
+            scan.consume_in_string_char(ch);
+        } else {
+            scan.consume_structural_char(ch, current_line);
         }
     }
 
-    YamlLineIndex { entries }
+    YamlLineIndex {
+        entries: scan.entries,
+    }
 }
 
 fn yaml_value_to_string(value: &serde_yaml_ng::Value) -> String {

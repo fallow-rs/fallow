@@ -733,8 +733,7 @@ fn build_setup_json(root: &Path, explain: bool) -> serde_json::Value {
 
 fn build_setup_envelope(root: &Path, explain: bool) -> crate::output_envelope::CoverageSetupOutput {
     use crate::output_envelope::{
-        CoverageSetupFramework, CoverageSetupOutput, CoverageSetupRuntimeTarget,
-        CoverageSetupSchemaVersion,
+        CoverageSetupFramework, CoverageSetupOutput, CoverageSetupSchemaVersion,
     };
 
     let members = detect_setup_members(root);
@@ -748,11 +747,7 @@ fn build_setup_envelope(root: &Path, explain: bool) -> crate::output_envelope::C
     let snippets = primary_member.map_or_else(Vec::new, |_| setup_snippets(&primary));
     let files_to_edit = snippets_to_files(&snippets, &primary_prefix);
     let snippet_values = snippets_to_typed(&snippets, &primary_prefix);
-    let runtime_targets: Vec<CoverageSetupRuntimeTarget> =
-        union_runtime_targets(members.iter().map(|member| &member.context))
-            .into_iter()
-            .map(runtime_target_from_str)
-            .collect();
+    let runtime_targets = union_setup_runtime_targets(&members);
     let member_values: Vec<crate::output_envelope::CoverageSetupMember> = members
         .iter()
         .map(|member| setup_member_typed(root, member))
@@ -761,15 +756,7 @@ fn build_setup_envelope(root: &Path, explain: bool) -> crate::output_envelope::C
         framework_to_typed(primary.framework)
     });
     let dockerfile = primary_member.and_then(|_| dockerfile_snippet_string(&primary));
-    let mut warnings = primary_member.map_or_else(
-        || setup_json_warnings(root, &fallback),
-        |_| setup_json_warnings(root, &primary),
-    );
-    if primary_member.is_none() {
-        warnings.push(
-            "No runtime workspace members were detected; emitted install commands only.".to_owned(),
-        );
-    }
+    let warnings = build_setup_envelope_warnings(root, primary_member, &fallback, &primary);
 
     CoverageSetupOutput {
         schema_version: CoverageSetupSchemaVersion::V1,
@@ -798,6 +785,36 @@ fn build_setup_envelope(root: &Path, explain: bool) -> crate::output_envelope::C
             None
         },
     }
+}
+
+/// Collect the union of runtime targets across all detected setup members.
+fn union_setup_runtime_targets(
+    members: &[CoverageSetupMember],
+) -> Vec<crate::output_envelope::CoverageSetupRuntimeTarget> {
+    union_runtime_targets(members.iter().map(|member| &member.context))
+        .into_iter()
+        .map(runtime_target_from_str)
+        .collect()
+}
+
+/// Derive the setup-envelope warnings, appending a no-members notice when no
+/// runtime workspace member was detected.
+fn build_setup_envelope_warnings(
+    root: &Path,
+    primary_member: Option<&CoverageSetupMember>,
+    fallback: &CoverageSetupContext,
+    primary: &CoverageSetupContext,
+) -> Vec<String> {
+    let mut warnings = primary_member.map_or_else(
+        || setup_json_warnings(root, fallback),
+        |_| setup_json_warnings(root, primary),
+    );
+    if primary_member.is_none() {
+        warnings.push(
+            "No runtime workspace members were detected; emitted install commands only.".to_owned(),
+        );
+    }
+    warnings
 }
 
 fn framework_to_typed(kind: FrameworkKind) -> crate::output_envelope::CoverageSetupFramework {

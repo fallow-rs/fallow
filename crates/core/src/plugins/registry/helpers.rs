@@ -61,25 +61,38 @@ pub fn process_static_patterns(
     root: &Path,
     result: &mut AggregatedPluginResult,
 ) {
-    result.active_plugins.push(plugin.name().to_string());
-
     let pname = plugin.name().to_string();
+    result.active_plugins.push(pname.clone());
     result
         .entry_point_roles
         .insert(pname.clone(), plugin.entry_point_role());
+
+    collect_static_plugin_rules(plugin, &pname, result);
+    collect_static_plugin_metadata(plugin, root, result);
+}
+
+/// Collect a plugin's entry/used-export/class-member/config/always-used rules
+/// into the aggregate, all scoped under `pname`.
+fn collect_static_plugin_rules(
+    plugin: &dyn Plugin,
+    pname: &str,
+    result: &mut AggregatedPluginResult,
+) {
     for rule in plugin.entry_pattern_rules() {
-        result.entry_patterns.push((rule, pname.clone()));
+        result.entry_patterns.push((rule, pname.to_string()));
     }
     for pat in plugin.config_patterns() {
         result.config_patterns.push((*pat).to_string());
     }
     for pat in plugin.always_used() {
-        result.always_used.push(((*pat).to_string(), pname.clone()));
+        result
+            .always_used
+            .push(((*pat).to_string(), pname.to_string()));
     }
     for rule in plugin.used_export_rules() {
         result
             .used_exports
-            .push(PluginUsedExportRule::new(pname.clone(), rule));
+            .push(PluginUsedExportRule::new(pname.to_string(), rule));
     }
     for member in plugin.used_class_members() {
         result
@@ -89,6 +102,20 @@ pub fn process_static_patterns(
     for rule in plugin.used_class_member_rules() {
         result.used_class_members.push(rule);
     }
+    for pat in plugin.fixture_glob_patterns() {
+        result
+            .fixture_patterns
+            .push(((*pat).to_string(), pname.to_string()));
+    }
+}
+
+/// Collect a plugin's dependency/virtual-module/alias/auto-import metadata into
+/// the aggregate.
+fn collect_static_plugin_metadata(
+    plugin: &dyn Plugin,
+    root: &Path,
+    result: &mut AggregatedPluginResult,
+) {
     for dep in plugin.tooling_dependencies() {
         result.tooling_dependencies.push((*dep).to_string());
     }
@@ -115,11 +142,6 @@ pub fn process_static_patterns(
     result
         .provided_dependencies
         .extend(plugin.provided_dependencies());
-    for pat in plugin.fixture_glob_patterns() {
-        result
-            .fixture_patterns
-            .push(((*pat).to_string(), pname.clone()));
-    }
 }
 
 /// Resolve package.json metadata hooks for active plugins.
@@ -404,7 +426,6 @@ pub fn process_config_result(
     result: &mut AggregatedPluginResult,
     config_path: Option<&Path>,
 ) -> Result<(), Vec<PluginRegexValidationError>> {
-    let pname = plugin_name.to_string();
     let mut regex_errors = Vec::new();
 
     for rule in &plugin_result.entry_patterns {
@@ -428,8 +449,20 @@ pub fn process_config_result(
     if !regex_errors.is_empty() {
         return Err(regex_errors);
     }
+    merge_plugin_result_fields(plugin_name, plugin_result, result);
+    Ok(())
+}
+
+/// Merge a validated `PluginResult`'s payload fields into the aggregate, applying
+/// the per-plugin `replace_*` semantics for entry patterns, used-export rules,
+/// and path aliases.
+fn merge_plugin_result_fields(
+    pname: &str,
+    plugin_result: PluginResult,
+    result: &mut AggregatedPluginResult,
+) {
     if plugin_result.replace_entry_patterns && !plugin_result.entry_patterns.is_empty() {
-        result.entry_patterns.retain(|(_, name)| name != &pname);
+        result.entry_patterns.retain(|(_, name)| name != pname);
     }
     if plugin_result.replace_used_export_rules && !plugin_result.used_exports.is_empty() {
         result.used_exports.retain(|rule| rule.plugin_name != pname);
@@ -438,13 +471,13 @@ pub fn process_config_result(
         plugin_result
             .entry_patterns
             .into_iter()
-            .map(|rule| (rule, pname.clone())),
+            .map(|rule| (rule, pname.to_string())),
     );
     result.used_exports.extend(
         plugin_result
             .used_exports
             .into_iter()
-            .map(|rule| PluginUsedExportRule::new(pname.clone(), rule)),
+            .map(|rule| PluginUsedExportRule::new(pname.to_string(), rule)),
     );
     result
         .used_class_members
@@ -456,7 +489,7 @@ pub fn process_config_result(
         plugin_result
             .always_used_files
             .into_iter()
-            .map(|p| (p, pname.clone())),
+            .map(|p| (p, pname.to_string())),
     );
     for (prefix, replacement) in plugin_result.path_aliases {
         result
@@ -468,13 +501,13 @@ pub fn process_config_result(
         plugin_result
             .setup_files
             .into_iter()
-            .map(|p| (p, pname.clone())),
+            .map(|p| (p, pname.to_string())),
     );
     result.fixture_patterns.extend(
         plugin_result
             .fixture_patterns
             .into_iter()
-            .map(|p| (p, pname.clone())),
+            .map(|p| (p, pname.to_string())),
     );
     result
         .scss_include_paths
@@ -485,7 +518,6 @@ pub fn process_config_result(
     result
         .provided_dependencies
         .extend(plugin_result.provided_dependencies);
-    Ok(())
 }
 
 /// Check if a plugin already has a config file matched against discovered files.

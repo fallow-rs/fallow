@@ -291,75 +291,22 @@ impl<'a> SuppressionContext<'a> {
                 if used[i].load(Ordering::Relaxed) {
                     continue;
                 }
-
-                if let Some(kind) = s.issue_kind_target()
-                    && NON_CORE_KINDS.contains(&kind)
-                {
-                    continue;
+                if let Some(entry) = stale_entry_for_suppression(
+                    config,
+                    &file_rules,
+                    path,
+                    s,
+                    &mut warned_unknown_policy_targets,
+                ) {
+                    stale.push(entry);
                 }
-
-                if let Some(kind) = s.issue_kind_target()
-                    && severity_for_kind(&file_rules, kind) == Severity::Off
-                {
-                    continue;
-                }
-
-                if let Some(target) = s.policy_rule_target() {
-                    if file_rules.policy_violation == Severity::Off
-                        || policy_rule_is_disabled(config, target)
-                    {
-                        continue;
-                    }
-
-                    if !policy_rule_exists(config, target) {
-                        let token = target.token();
-                        let key = (path.to_string_lossy().to_string(), token.clone());
-                        if warned_unknown_policy_targets.insert(key) {
-                            tracing::warn!(
-                                "{}:{}: suppression '{}' names no loaded rule-pack rule",
-                                path.display(),
-                                s.comment_line,
-                                token
-                            );
-                        }
-                    }
-                }
-
-                let is_file_level = s.line == 0;
-                let issue_kind_str = s.target_token();
-
-                stale.push(StaleSuppression {
-                    path: path.clone(),
-                    line: s.comment_line,
-                    col: 0,
-                    origin: SuppressionOrigin::Comment {
-                        issue_kind: issue_kind_str,
-                        reason: s.reason.clone(),
-                        is_file_level,
-                        kind_known: true,
-                    },
-                    missing_reason: false,
-                    actions: StaleSuppression::actions_for(false),
-                });
             }
         }
 
         for (&file_id, unknowns) in &self.unknown_kinds {
             let path = &graph.modules[file_id.0 as usize].path;
             for u in *unknowns {
-                stale.push(StaleSuppression {
-                    path: path.clone(),
-                    line: u.comment_line,
-                    col: 0,
-                    origin: SuppressionOrigin::Comment {
-                        issue_kind: Some(u.token.clone()),
-                        reason: u.reason.clone(),
-                        is_file_level: u.is_file_level,
-                        kind_known: false,
-                    },
-                    missing_reason: false,
-                    actions: StaleSuppression::actions_for(false),
-                });
+                stale.push(unknown_kind_stale_entry(path, u, false));
             }
         }
 
@@ -477,6 +424,89 @@ pub fn is_file_suppressed(suppressions: &[Suppression], kind: IssueKind) -> bool
     suppressions
         .iter()
         .any(|s| s.line == 0 && s.matches_issue_kind(0, kind))
+}
+
+/// Build the [`StaleSuppression`] entry for an unconsumed suppression, or `None`
+/// if the suppression is exempt (non-core kind, disabled rule, disabled policy).
+///
+/// Records unknown policy-rule targets in `warned` and emits a one-time warning.
+fn stale_entry_for_suppression(
+    config: &ResolvedConfig,
+    file_rules: &RulesConfig,
+    path: &std::path::Path,
+    s: &Suppression,
+    warned: &mut FxHashSet<(String, String)>,
+) -> Option<StaleSuppression> {
+    if let Some(kind) = s.issue_kind_target()
+        && NON_CORE_KINDS.contains(&kind)
+    {
+        return None;
+    }
+
+    if let Some(kind) = s.issue_kind_target()
+        && severity_for_kind(file_rules, kind) == Severity::Off
+    {
+        return None;
+    }
+
+    if let Some(target) = s.policy_rule_target() {
+        if file_rules.policy_violation == Severity::Off || policy_rule_is_disabled(config, target) {
+            return None;
+        }
+
+        if !policy_rule_exists(config, target) {
+            let token = target.token();
+            let key = (path.to_string_lossy().to_string(), token.clone());
+            if warned.insert(key) {
+                tracing::warn!(
+                    "{}:{}: suppression '{}' names no loaded rule-pack rule",
+                    path.display(),
+                    s.comment_line,
+                    token
+                );
+            }
+        }
+    }
+
+    Some(StaleSuppression {
+        path: path.to_path_buf(),
+        line: s.comment_line,
+        col: 0,
+        origin: SuppressionOrigin::Comment {
+            issue_kind: s.target_token(),
+            reason: s.reason.clone(),
+            is_file_level: s.line == 0,
+            kind_known: true,
+        },
+        missing_reason: false,
+        actions: StaleSuppression::actions_for(false),
+    })
+}
+
+/// Build a [`StaleSuppression`] entry for a suppression token that parsed to no
+/// known [`IssueKind`]. `missing_reason` controls the corresponding flags.
+fn unknown_kind_stale_entry(
+    path: &std::path::Path,
+    u: &UnknownSuppressionKind,
+    missing_reason: bool,
+) -> StaleSuppression {
+    StaleSuppression {
+        path: path.to_path_buf(),
+        line: u.comment_line,
+        col: 0,
+        origin: SuppressionOrigin::Comment {
+            issue_kind: Some(u.token.clone()),
+            reason: if missing_reason {
+                None
+            } else {
+                u.reason.clone()
+            },
+            is_file_level: u.is_file_level,
+            kind_known: false,
+        },
+        missing_reason,
+        actions: StaleSuppression::actions_for(missing_reason),
+    }
 }
 
 fn policy_rule_exists(config: &ResolvedConfig, target: &PolicyRuleSuppression) -> bool {

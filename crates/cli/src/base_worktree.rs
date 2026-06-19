@@ -341,63 +341,7 @@ pub fn sweep_old_reusable_caches(repo_root: &Path, max_age: Option<Duration>, qu
         if !is_reusable_audit_worktree_path(&path) {
             continue;
         }
-        // Prunable orphan: an external temp-reaper (macOS `$TMPDIR` cleanup,
-        // container restart, CI cache eviction) removed the cache directory but
-        // git's admin entry survives. The sidecar lives next to the dir and is
-        // not deleted by such a reaper, so the age branch below would re-touch a
-        // fresh sidecar and never reclaim the dead entry. Reclaim eagerly,
-        // independent of `max_age`, so orphans do not accumulate even when
-        // age-based GC is disabled (`cacheMaxAgeDays = 0`).
-        if !path.exists() {
-            let Some(_lock) = ReusableWorktreeLock::try_acquire(&path) else {
-                continue;
-            };
-            // Re-check under the lock: a concurrent `reuse_or_create` rebuild may
-            // have recreated the directory between the existence check and the
-            // lock acquisition.
-            if path.exists() {
-                continue;
-            }
-            remove_audit_worktree(repo_root, &path);
-            let _ = std::fs::remove_file(reusable_worktree_last_used_path(&path));
-            removed += 1;
-            continue;
-        }
-        let Some(max_age) = max_age else {
-            continue;
-        };
-        let sidecar = reusable_worktree_last_used_path(&path);
-        let sidecar_mtime = std::fs::metadata(&sidecar)
-            .ok()
-            .and_then(|m| m.modified().ok());
-        let Some(mtime) = sidecar_mtime else {
-            touch_last_used(&path);
-            continue;
-        };
-        let Ok(age) = now.duration_since(mtime) else {
-            continue;
-        };
-        if age < max_age {
-            continue;
-        }
-        let Some(_lock) = ReusableWorktreeLock::try_acquire(&path) else {
-            continue;
-        };
-        remove_audit_worktree(repo_root, &path);
-        let dir_removed = match std::fs::remove_dir_all(&path) {
-            Ok(()) => true,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => true,
-            Err(err) => {
-                tracing::warn!(
-                    path = %path.display(),
-                    error = %err,
-                    "failed to remove stale reusable audit worktree directory; entry may leak",
-                );
-                false
-            }
-        };
-        let _ = std::fs::remove_file(&sidecar);
-        if dir_removed {
+        if reclaim_reusable_cache_entry(repo_root, &path, max_age, now) {
             removed += 1;
         }
     }
@@ -421,6 +365,90 @@ pub fn sweep_old_reusable_caches(repo_root: &Path, max_age: Option<Duration>, qu
             "fallow: reclaimed {removed} stale base-snapshot cache{s}",
         );
     }
+}
+
+/// Reclaim a single reusable-cache entry. Returns `true` when the entry was
+/// removed (either as a prunable orphan or as aged-out past `max_age`).
+fn reclaim_reusable_cache_entry(
+    repo_root: &Path,
+    path: &Path,
+    max_age: Option<Duration>,
+    now: SystemTime,
+) -> bool {
+    // Prunable orphan: an external temp-reaper (macOS `$TMPDIR` cleanup,
+    // container restart, CI cache eviction) removed the cache directory but
+    // git's admin entry survives. The sidecar lives next to the dir and is
+    // not deleted by such a reaper, so the age branch would re-touch a fresh
+    // sidecar and never reclaim the dead entry. Reclaim eagerly, independent
+    // of `max_age`, so orphans do not accumulate even when age-based GC is
+    // disabled (`cacheMaxAgeDays = 0`).
+    if !path.exists() {
+        return reclaim_orphan_cache_entry(repo_root, path);
+    }
+    let Some(max_age) = max_age else {
+        return false;
+    };
+    reclaim_aged_cache_entry(repo_root, path, max_age, now)
+}
+
+/// Reclaim a cache entry whose directory was deleted out from under git's
+/// admin record. Lock-guarded with a re-check so a concurrent rebuild that
+/// recreated the directory is preserved.
+fn reclaim_orphan_cache_entry(repo_root: &Path, path: &Path) -> bool {
+    let Some(_lock) = ReusableWorktreeLock::try_acquire(path) else {
+        return false;
+    };
+    // Re-check under the lock: a concurrent `reuse_or_create` rebuild may
+    // have recreated the directory between the existence check and the lock.
+    if path.exists() {
+        return false;
+    }
+    remove_audit_worktree(repo_root, path);
+    let _ = std::fs::remove_file(reusable_worktree_last_used_path(path));
+    true
+}
+
+/// Reclaim a cache entry whose `.last-used` sidecar is older than `max_age`.
+/// Seeds a fresh sidecar for pre-upgrade entries that lack one (returns
+/// `false` so they age from real last-use on the next run).
+fn reclaim_aged_cache_entry(
+    repo_root: &Path,
+    path: &Path,
+    max_age: Duration,
+    now: SystemTime,
+) -> bool {
+    let sidecar = reusable_worktree_last_used_path(path);
+    let sidecar_mtime = std::fs::metadata(&sidecar)
+        .ok()
+        .and_then(|m| m.modified().ok());
+    let Some(mtime) = sidecar_mtime else {
+        touch_last_used(path);
+        return false;
+    };
+    let Ok(age) = now.duration_since(mtime) else {
+        return false;
+    };
+    if age < max_age {
+        return false;
+    }
+    let Some(_lock) = ReusableWorktreeLock::try_acquire(path) else {
+        return false;
+    };
+    remove_audit_worktree(repo_root, path);
+    let dir_removed = match std::fs::remove_dir_all(path) {
+        Ok(()) => true,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => true,
+        Err(err) => {
+            tracing::warn!(
+                path = %path.display(),
+                error = %err,
+                "failed to remove stale reusable audit worktree directory; entry may leak",
+            );
+            false
+        }
+    };
+    let _ = std::fs::remove_file(&sidecar);
+    dir_removed
 }
 
 fn reusable_audit_worktree_path(repo_root: &Path, base_sha: &str) -> PathBuf {

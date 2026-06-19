@@ -131,9 +131,33 @@ fn extract_jest_config(
         return;
     }
     extract_jest_inline_projects(&parse_source, parse_path, root, result);
+    extract_jest_string_projects(
+        &parse_source,
+        parse_path,
+        config_path,
+        root,
+        result,
+        visited,
+        depth,
+    );
+}
 
+/// Resolve string-shaped `projects:` entries to concrete child configs, parse
+/// each recursively, and merge only their deps and setup files into `result`.
+///
+/// Child `replace_entry_patterns` / `testMatch` flags are intentionally not
+/// merged: Jest scopes those per-project. See the leak-guard test.
+fn extract_jest_string_projects(
+    parse_source: &str,
+    parse_path: &Path,
+    config_path: &Path,
+    root: &Path,
+    result: &mut PluginResult,
+    visited: &mut FxHashSet<PathBuf>,
+    depth: usize,
+) {
     let project_entries =
-        config_parser::extract_config_string_array(&parse_source, parse_path, &["projects"]);
+        config_parser::extract_config_string_array(parse_source, parse_path, &["projects"]);
     for entry in &project_entries {
         for child_config in expand_project_entry(entry, config_path, root) {
             let Ok(child_source) = std::fs::read_to_string(&child_config) else {
@@ -204,6 +228,18 @@ fn extract_jest_inline_projects(
         )
     };
 
+    credit_inline_project_runner_fields(&read, result);
+    credit_inline_project_setup_files(&read, root, result);
+    credit_inline_project_plugin_fields(&read, result);
+}
+
+/// Credit preset / resolver / testRunner / runner / testEnvironment fields of
+/// an inline `ProjectConfig`, applying the same built-in filtering as the
+/// top-level extraction.
+fn credit_inline_project_runner_fields(
+    read: &impl Fn(&str) -> Vec<String>,
+    result: &mut PluginResult,
+) {
     for value in read("preset") {
         result
             .referenced_dependencies
@@ -245,7 +281,15 @@ fn extract_jest_inline_projects(
                 .push(crate::resolve::extract_package_name(&value));
         }
     }
+}
 
+/// Credit setup / global setup-teardown files of an inline `ProjectConfig` as
+/// root-relative setup entry points.
+fn credit_inline_project_setup_files(
+    read: &impl Fn(&str) -> Vec<String>,
+    root: &Path,
+    result: &mut PluginResult,
+) {
     for key in [
         "setupFiles",
         "setupFilesAfterEnv",
@@ -258,7 +302,14 @@ fn extract_jest_inline_projects(
                 .push(root.join(value.trim_start_matches("./")));
         }
     }
+}
 
+/// Credit snapshotSerializers / watchPlugins / reporters package fields of an
+/// inline `ProjectConfig`, filtering built-in reporters.
+fn credit_inline_project_plugin_fields(
+    read: &impl Fn(&str) -> Vec<String>,
+    result: &mut PluginResult,
+) {
     for value in read("snapshotSerializers") {
         result
             .referenced_dependencies
@@ -458,6 +509,17 @@ fn test_regex_to_glob(regex: &str) -> Option<String> {
 
 /// Extract referenced dependencies from Jest config (transform, reporters, environment, etc.).
 fn extract_jest_dependencies(parse_source: &str, parse_path: &Path, result: &mut PluginResult) {
+    extract_jest_array_dependencies(parse_source, parse_path, result);
+    extract_jest_scalar_dependencies(parse_source, parse_path, result);
+}
+
+/// Credit dependencies from Jest's array/object config fields (transform,
+/// reporters, watchPlugins, snapshotSerializers).
+fn extract_jest_array_dependencies(
+    parse_source: &str,
+    parse_path: &Path,
+    result: &mut PluginResult,
+) {
     let transform_values =
         config_parser::extract_config_shallow_strings(parse_source, parse_path, "transform");
     for val in &transform_values {
@@ -476,32 +538,12 @@ fn extract_jest_dependencies(parse_source: &str, parse_path: &Path, result: &mut
         }
     }
 
-    if let Some(env) =
-        config_parser::extract_config_string(parse_source, parse_path, &["testEnvironment"])
-        && !matches!(env.as_str(), "node" | "jsdom")
-    {
-        result
-            .referenced_dependencies
-            .push(format!("jest-environment-{env}"));
-        result.referenced_dependencies.push(env);
-    }
-
     let watch_plugins =
         config_parser::extract_config_shallow_strings(parse_source, parse_path, "watchPlugins");
     for plugin in &watch_plugins {
         result
             .referenced_dependencies
             .push(crate::resolve::extract_package_name(plugin));
-    }
-
-    if let Some(resolver) =
-        config_parser::extract_config_string(parse_source, parse_path, &["resolver"])
-        && !resolver.starts_with('.')
-        && !resolver.starts_with('/')
-    {
-        result
-            .referenced_dependencies
-            .push(crate::resolve::extract_package_name(&resolver));
     }
 
     let serializers = config_parser::extract_config_string_array(
@@ -513,6 +555,34 @@ fn extract_jest_dependencies(parse_source: &str, parse_path: &Path, result: &mut
         result
             .referenced_dependencies
             .push(crate::resolve::extract_package_name(s));
+    }
+}
+
+/// Credit dependencies from Jest's scalar config fields (testEnvironment,
+/// resolver, testRunner, runner), applying built-in filtering.
+fn extract_jest_scalar_dependencies(
+    parse_source: &str,
+    parse_path: &Path,
+    result: &mut PluginResult,
+) {
+    if let Some(env) =
+        config_parser::extract_config_string(parse_source, parse_path, &["testEnvironment"])
+        && !matches!(env.as_str(), "node" | "jsdom")
+    {
+        result
+            .referenced_dependencies
+            .push(format!("jest-environment-{env}"));
+        result.referenced_dependencies.push(env);
+    }
+
+    if let Some(resolver) =
+        config_parser::extract_config_string(parse_source, parse_path, &["resolver"])
+        && !resolver.starts_with('.')
+        && !resolver.starts_with('/')
+    {
+        result
+            .referenced_dependencies
+            .push(crate::resolve::extract_package_name(&resolver));
     }
 
     if let Some(runner) =

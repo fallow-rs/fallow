@@ -24,37 +24,28 @@ impl ModuleGraph {
     ///
     /// Panics if the internal file-to-path lookup is inconsistent with the module list.
     #[must_use]
-    #[expect(
-        clippy::excessive_nesting,
-        reason = "Tarjan's SCC requires deep nesting"
-    )]
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "file count is bounded by project size, well under u32::MAX"
-    )]
-    #[expect(
-        clippy::expect_used,
-        reason = "Tarjan traversal only pops nodes that were pushed onto the SCC stack"
-    )]
     pub fn find_cycles(&self) -> Vec<Vec<FileId>> {
         let n = self.modules.len();
         if n == 0 {
             return Vec::new();
         }
 
-        let mut index_counter: u32 = 0;
-        let mut indices: Vec<u32> = vec![u32::MAX; n];
-        let mut lowlinks: Vec<u32> = vec![0; n];
-        let mut on_stack = FixedBitSet::with_capacity(n);
-        let mut stack: Vec<usize> = Vec::new();
-        let mut sccs: Vec<Vec<FileId>> = Vec::new();
+        let (all_succs, succ_ranges) = self.build_runtime_successors(n);
 
-        struct Frame {
-            node: usize,
-            succ_pos: usize,
-            succ_end: usize,
+        let mut state = SccState::new(n);
+        for start_node in 0..n {
+            if state.indices[start_node] != u32::MAX {
+                continue;
+            }
+            state.run_dfs_from(start_node, &all_succs, &succ_ranges);
         }
 
+        self.enumerate_cycles_from_sccs(&state.sccs, &all_succs, &succ_ranges)
+    }
+
+    /// Build the flattened runtime-successor adjacency (type-only edges and
+    /// duplicate targets excluded) plus the per-node range index into it.
+    fn build_runtime_successors(&self, n: usize) -> (Vec<usize>, Vec<Range<usize>>) {
         let mut all_succs: Vec<usize> = Vec::with_capacity(self.edges.len());
         let mut succ_ranges: Vec<Range<usize>> = Vec::with_capacity(n);
         let mut seen_set = FxHashSet::default();
@@ -73,78 +64,7 @@ impl ModuleGraph {
             let end = all_succs.len();
             succ_ranges.push(start..end);
         }
-
-        let mut dfs_stack: Vec<Frame> = Vec::new();
-
-        for start_node in 0..n {
-            if indices[start_node] != u32::MAX {
-                continue;
-            }
-
-            indices[start_node] = index_counter;
-            lowlinks[start_node] = index_counter;
-            index_counter += 1;
-            on_stack.insert(start_node);
-            stack.push(start_node);
-
-            let range = &succ_ranges[start_node];
-            dfs_stack.push(Frame {
-                node: start_node,
-                succ_pos: range.start,
-                succ_end: range.end,
-            });
-
-            while let Some(frame) = dfs_stack.last_mut() {
-                if frame.succ_pos < frame.succ_end {
-                    let w = all_succs[frame.succ_pos];
-                    frame.succ_pos += 1;
-
-                    if indices[w] == u32::MAX {
-                        indices[w] = index_counter;
-                        lowlinks[w] = index_counter;
-                        index_counter += 1;
-                        on_stack.insert(w);
-                        stack.push(w);
-
-                        let range = &succ_ranges[w];
-                        dfs_stack.push(Frame {
-                            node: w,
-                            succ_pos: range.start,
-                            succ_end: range.end,
-                        });
-                    } else if on_stack.contains(w) {
-                        let v = frame.node;
-                        lowlinks[v] = lowlinks[v].min(indices[w]);
-                    }
-                } else {
-                    let v = frame.node;
-                    let v_lowlink = lowlinks[v];
-                    let v_index = indices[v];
-                    dfs_stack.pop();
-
-                    if let Some(parent) = dfs_stack.last_mut() {
-                        lowlinks[parent.node] = lowlinks[parent.node].min(v_lowlink);
-                    }
-
-                    if v_lowlink == v_index {
-                        let mut scc = Vec::new();
-                        loop {
-                            let w = stack.pop().expect("SCC stack should not be empty");
-                            on_stack.set(w, false);
-                            scc.push(FileId(w as u32));
-                            if w == v {
-                                break;
-                            }
-                        }
-                        if scc.len() >= 2 {
-                            sccs.push(scc);
-                        }
-                    }
-                }
-            }
-        }
-
-        self.enumerate_cycles_from_sccs(&sccs, &all_succs, &succ_ranges)
+        (all_succs, succ_ranges)
     }
 
     /// Enumerate individual elementary cycles from SCCs and return sorted results.
@@ -202,6 +122,124 @@ impl ModuleGraph {
         });
 
         result
+    }
+}
+
+/// One iterative-DFS frame for the Tarjan SCC pass over runtime successors.
+struct SccFrame {
+    node: usize,
+    succ_pos: usize,
+    succ_end: usize,
+}
+
+/// Mutable Tarjan SCC state for `find_cycles`, collecting SCCs of size >= 2.
+struct SccState {
+    index_counter: u32,
+    indices: Vec<u32>,
+    lowlinks: Vec<u32>,
+    on_stack: FixedBitSet,
+    stack: Vec<usize>,
+    sccs: Vec<Vec<FileId>>,
+}
+
+impl SccState {
+    fn new(n: usize) -> Self {
+        Self {
+            index_counter: 0,
+            indices: vec![u32::MAX; n],
+            lowlinks: vec![0; n],
+            on_stack: FixedBitSet::with_capacity(n),
+            stack: Vec::new(),
+            sccs: Vec::new(),
+        }
+    }
+
+    /// Assign the next DFS index to `node` and push it onto the SCC stack.
+    fn discover(&mut self, node: usize) {
+        self.indices[node] = self.index_counter;
+        self.lowlinks[node] = self.index_counter;
+        self.index_counter += 1;
+        self.on_stack.insert(node);
+        self.stack.push(node);
+    }
+
+    /// Build a frame spanning the successor range of `node`.
+    fn frame_for(node: usize, succ_ranges: &[Range<usize>]) -> SccFrame {
+        let range = &succ_ranges[node];
+        SccFrame {
+            node,
+            succ_pos: range.start,
+            succ_end: range.end,
+        }
+    }
+
+    /// Run the iterative Tarjan DFS rooted at `start`, appending discovered
+    /// SCCs of size >= 2 to `self.sccs`.
+    fn run_dfs_from(&mut self, start: usize, all_succs: &[usize], succ_ranges: &[Range<usize>]) {
+        self.discover(start);
+        let mut dfs_stack: Vec<SccFrame> = vec![Self::frame_for(start, succ_ranges)];
+
+        while let Some(frame) = dfs_stack.last_mut() {
+            if frame.succ_pos < frame.succ_end {
+                if let Some(child) = self.advance_frame(frame, all_succs) {
+                    dfs_stack.push(Self::frame_for(child, succ_ranges));
+                }
+            } else {
+                let v = frame.node;
+                let v_lowlink = self.lowlinks[v];
+                dfs_stack.pop();
+                if let Some(parent) = dfs_stack.last() {
+                    let pv = parent.node;
+                    self.lowlinks[pv] = self.lowlinks[pv].min(v_lowlink);
+                }
+                self.collect_root_scc(v);
+            }
+        }
+    }
+
+    /// Advance one successor of `frame`, discovering a new child (returned for
+    /// descent) or updating the lowlink for an on-stack back edge.
+    fn advance_frame(&mut self, frame: &mut SccFrame, all_succs: &[usize]) -> Option<usize> {
+        let w = all_succs[frame.succ_pos];
+        frame.succ_pos += 1;
+        if self.indices[w] == u32::MAX {
+            self.discover(w);
+            Some(w)
+        } else {
+            if self.on_stack.contains(w) {
+                let v = frame.node;
+                self.lowlinks[v] = self.lowlinks[v].min(self.indices[w]);
+            }
+            None
+        }
+    }
+
+    /// When `v` is an SCC root, pop its members off the stack and record the
+    /// SCC if it has at least two nodes.
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "file count is bounded by project size, well under u32::MAX"
+    )]
+    #[expect(
+        clippy::expect_used,
+        reason = "Tarjan traversal only pops nodes that were pushed onto the SCC stack"
+    )]
+    fn collect_root_scc(&mut self, v: usize) {
+        if self.lowlinks[v] != self.indices[v] {
+            return;
+        }
+        let mut scc = Vec::new();
+        loop {
+            let w = self.stack.pop().expect("SCC stack should not be empty");
+            self.on_stack.set(w, false);
+            scc.push(FileId(w as u32));
+            if w == v {
+                break;
+            }
+        }
+        if scc.len() >= 2 {
+            self.sccs.push(scc);
+        }
     }
 }
 

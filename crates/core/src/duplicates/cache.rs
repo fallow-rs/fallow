@@ -241,44 +241,16 @@ impl CachedTokenFile {
             token_spans: file_tokens
                 .tokens
                 .iter()
-                .map(|token| CachedSpan {
-                    start: token.span.start,
-                    end: token.span.end,
-                })
+                .map(|token| cached_span(token.span))
                 .collect(),
             atomic_invocation_spans: file_tokens
                 .atomic_invocation_spans
                 .iter()
-                .map(|span| CachedSpan {
-                    start: span.start,
-                    end: span.end,
-                })
+                .map(|span| cached_span(*span))
                 .collect(),
             source: file_tokens.source.clone(),
             line_count: file_tokens.line_count as u64,
-            suppressions: suppressions
-                .iter()
-                .map(|suppression| {
-                    let (kind, policy_pack, policy_rule_id) = match &suppression.target {
-                        None => (0, String::new(), String::new()),
-                        Some(SuppressionTarget::Issue(kind)) => {
-                            (kind.to_discriminant(), String::new(), String::new())
-                        }
-                        Some(SuppressionTarget::PolicyRule(target)) => (
-                            IssueKind::PolicyViolation.to_discriminant(),
-                            target.pack.clone(),
-                            target.rule_id.clone(),
-                        ),
-                    };
-                    CachedSuppression {
-                        line: suppression.line,
-                        comment_line: suppression.comment_line,
-                        kind,
-                        policy_pack,
-                        policy_rule_id,
-                    }
-                })
-                .collect(),
+            suppressions: suppressions.iter().map(cached_suppression).collect(),
         }
     }
 
@@ -339,6 +311,37 @@ impl CachedTokenFile {
             file_tokens,
             suppressions,
         }
+    }
+}
+
+/// Convert an oxc [`Span`] into its cache-serializable form.
+const fn cached_span(span: Span) -> CachedSpan {
+    CachedSpan {
+        start: span.start,
+        end: span.end,
+    }
+}
+
+/// Convert a [`Suppression`] into its cache-serializable form, flattening the
+/// target into a discriminant plus optional policy pack/rule strings.
+fn cached_suppression(suppression: &Suppression) -> CachedSuppression {
+    let (kind, policy_pack, policy_rule_id) = match &suppression.target {
+        None => (0, String::new(), String::new()),
+        Some(SuppressionTarget::Issue(kind)) => {
+            (kind.to_discriminant(), String::new(), String::new())
+        }
+        Some(SuppressionTarget::PolicyRule(target)) => (
+            IssueKind::PolicyViolation.to_discriminant(),
+            target.pack.clone(),
+            target.rule_id.clone(),
+        ),
+    };
+    CachedSuppression {
+        line: suppression.line,
+        comment_line: suppression.comment_line,
+        kind,
+        policy_pack,
+        policy_rule_id,
     }
 }
 

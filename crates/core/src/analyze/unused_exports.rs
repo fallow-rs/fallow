@@ -315,6 +315,41 @@ fn stale_expected_unused_suppression(
     }
 }
 
+/// Record stale-suppression entries for an `@expected-unused` export: a missing
+/// reason (when required) and/or the export turning out to be referenced.
+fn record_expected_unused_stale(
+    module: &ModuleNode,
+    export: &ExportSymbol,
+    ctx: &UnusedExportModuleContext<'_>,
+    is_referenced: bool,
+    stale_expected_unused: &mut Vec<StaleSuppression>,
+) {
+    if ctx.config.rules.require_suppression_reason != Severity::Off
+        && export.expected_unused_reason.is_none()
+    {
+        let (line, col) =
+            byte_offset_to_line_col(ctx.line_offsets_by_file, module.file_id, export.span.start);
+        stale_expected_unused.push(StaleSuppression {
+            path: module.path.clone(),
+            line,
+            col,
+            origin: SuppressionOrigin::JsdocTag {
+                export_name: export.name.to_string(),
+                reason: None,
+            },
+            missing_reason: true,
+            actions: StaleSuppression::actions_for(true),
+        });
+    }
+    if is_referenced {
+        stale_expected_unused.push(stale_expected_unused_suppression(
+            module,
+            export,
+            ctx.line_offsets_by_file,
+        ));
+    }
+}
+
 /// Find exports that are never imported by other files.
 #[deprecated(
     since = "2.76.0",
@@ -465,33 +500,7 @@ fn unused_export_for_module(
         export.visibility,
         fallow_types::extract::VisibilityTag::ExpectedUnused
     ) {
-        if ctx.config.rules.require_suppression_reason != Severity::Off
-            && export.expected_unused_reason.is_none()
-        {
-            let (line, col) = byte_offset_to_line_col(
-                ctx.line_offsets_by_file,
-                module.file_id,
-                export.span.start,
-            );
-            stale_expected_unused.push(StaleSuppression {
-                path: module.path.clone(),
-                line,
-                col,
-                origin: SuppressionOrigin::JsdocTag {
-                    export_name: export.name.to_string(),
-                    reason: None,
-                },
-                missing_reason: true,
-                actions: StaleSuppression::actions_for(true),
-            });
-        }
-        if is_referenced {
-            stale_expected_unused.push(stale_expected_unused_suppression(
-                module,
-                export,
-                ctx.line_offsets_by_file,
-            ));
-        }
+        record_expected_unused_stale(module, export, ctx, is_referenced, stale_expected_unused);
         return None;
     }
 
@@ -694,47 +703,65 @@ pub fn find_private_type_leaks(
         if is_storybook_file(&module.path) || is_route_convention_file(&module.path, &config.root) {
             continue;
         }
-        let local_types: FxHashSet<&str> = module_info
-            .local_type_declarations
-            .iter()
-            .map(|decl| decl.name.as_str())
-            .collect();
-        let exported_names: FxHashSet<String> = module
-            .exports
-            .iter()
-            .map(|export| export.name.to_string())
-            .collect();
-
-        let mut seen: FxHashSet<(String, String)> = FxHashSet::default();
-        for reference in &module_info.public_signature_type_references {
-            if !local_types.contains(reference.type_name.as_str())
-                || exported_names.contains(&reference.type_name)
-            {
-                continue;
-            }
-            if !seen.insert((reference.export_name.clone(), reference.type_name.clone())) {
-                continue;
-            }
-            let (line, col) = byte_offset_to_line_col(
-                line_offsets_by_file,
-                module_info.file_id,
-                reference.span.start,
-            );
-            if suppressions.is_suppressed(module_info.file_id, line, IssueKind::PrivateTypeLeak) {
-                continue;
-            }
-            leaks.push(PrivateTypeLeak {
-                path: module.path.clone(),
-                export_name: reference.export_name.clone(),
-                type_name: reference.type_name.clone(),
-                line,
-                col,
-                span_start: reference.span.start,
-            });
-        }
+        collect_module_private_type_leaks(
+            module,
+            module_info,
+            suppressions,
+            line_offsets_by_file,
+            &mut leaks,
+        );
     }
 
     leaks
+}
+
+/// Collect private-type-leak findings for a single module: every public
+/// signature reference to a same-file type declaration not exported by name.
+fn collect_module_private_type_leaks(
+    module: &ModuleNode,
+    module_info: &fallow_types::extract::ModuleInfo,
+    suppressions: &SuppressionContext<'_>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+    leaks: &mut Vec<PrivateTypeLeak>,
+) {
+    let local_types: FxHashSet<&str> = module_info
+        .local_type_declarations
+        .iter()
+        .map(|decl| decl.name.as_str())
+        .collect();
+    let exported_names: FxHashSet<String> = module
+        .exports
+        .iter()
+        .map(|export| export.name.to_string())
+        .collect();
+
+    let mut seen: FxHashSet<(String, String)> = FxHashSet::default();
+    for reference in &module_info.public_signature_type_references {
+        if !local_types.contains(reference.type_name.as_str())
+            || exported_names.contains(&reference.type_name)
+        {
+            continue;
+        }
+        if !seen.insert((reference.export_name.clone(), reference.type_name.clone())) {
+            continue;
+        }
+        let (line, col) = byte_offset_to_line_col(
+            line_offsets_by_file,
+            module_info.file_id,
+            reference.span.start,
+        );
+        if suppressions.is_suppressed(module_info.file_id, line, IssueKind::PrivateTypeLeak) {
+            continue;
+        }
+        leaks.push(PrivateTypeLeak {
+            path: module.path.clone(),
+            export_name: reference.export_name.clone(),
+            type_name: reference.type_name.clone(),
+            line,
+            col,
+            span_start: reference.span.start,
+        });
+    }
 }
 
 /// Add dynamic-import edges that act as re-exports to the existing
@@ -1167,35 +1194,12 @@ pub fn collect_export_usages(
             let (line, col) =
                 byte_offset_to_line_col(line_offsets_by_file, module.file_id, export.span.start);
 
-            let reference_locations: Vec<ReferenceLocation> = export
-                .references
-                .iter()
-                .filter_map(|r| {
-                    if r.import_span.start == 0 && r.import_span.end == 0 {
-                        return None;
-                    }
-                    let ref_path = file_paths.get(&r.from_file)?;
-                    let (ref_line, ref_col) = if line_offsets_by_file.contains_key(&r.from_file) {
-                        byte_offset_to_line_col(
-                            line_offsets_by_file,
-                            r.from_file,
-                            r.import_span.start,
-                        )
-                    } else {
-                        let (_, offsets) = source_cache.entry(r.from_file).or_insert_with(|| {
-                            let src = read_source(ref_path);
-                            let ofs = fallow_types::extract::compute_line_offsets(&src);
-                            (src, ofs)
-                        });
-                        fallow_types::extract::byte_offset_to_line_col(offsets, r.import_span.start)
-                    };
-                    Some(ReferenceLocation {
-                        path: ref_path.to_path_buf(),
-                        line: ref_line,
-                        col: ref_col,
-                    })
-                })
-                .collect();
+            let reference_locations = export_reference_locations(
+                export,
+                &file_paths,
+                line_offsets_by_file,
+                &mut source_cache,
+            );
 
             usages.push(ExportUsage {
                 path: module.path.clone(),
@@ -1209,6 +1213,42 @@ pub fn collect_export_usages(
     }
 
     usages
+}
+
+/// Resolve each reference on `export` to a `(path, line, col)` location,
+/// falling back to an on-disk source read (cached) for files without
+/// precomputed line offsets.
+fn export_reference_locations(
+    export: &ExportSymbol,
+    file_paths: &FxHashMap<FileId, &std::path::Path>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+    source_cache: &mut FxHashMap<FileId, (String, Vec<u32>)>,
+) -> Vec<ReferenceLocation> {
+    export
+        .references
+        .iter()
+        .filter_map(|r| {
+            if r.import_span.start == 0 && r.import_span.end == 0 {
+                return None;
+            }
+            let ref_path = file_paths.get(&r.from_file)?;
+            let (ref_line, ref_col) = if line_offsets_by_file.contains_key(&r.from_file) {
+                byte_offset_to_line_col(line_offsets_by_file, r.from_file, r.import_span.start)
+            } else {
+                let (_, offsets) = source_cache.entry(r.from_file).or_insert_with(|| {
+                    let src = read_source(ref_path);
+                    let ofs = fallow_types::extract::compute_line_offsets(&src);
+                    (src, ofs)
+                });
+                fallow_types::extract::byte_offset_to_line_col(offsets, r.import_span.start)
+            };
+            Some(ReferenceLocation {
+                path: ref_path.to_path_buf(),
+                line: ref_line,
+                col: ref_col,
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]

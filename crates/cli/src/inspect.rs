@@ -86,14 +86,9 @@ pub fn run_inspect(opts: &InspectOptions<'_>) -> ExitCode {
         Ok(value) => value,
         Err(message) => return emit_error(&message, 2, opts.output),
     };
-    let trace_export = match target.export_name.as_deref() {
-        Some(export_name) => {
-            match run_required_json(opts, trace_export_args(target_file, export_name)) {
-                Ok(value) => Some(value),
-                Err(message) => return emit_error(&message, 2, opts.output),
-            }
-        }
-        None => None,
+    let trace_export = match collect_trace_export(opts, &target) {
+        Ok(value) => value,
+        Err(message) => return emit_error(&message, 2, opts.output),
     };
 
     let mut warnings = Vec::new();
@@ -104,10 +99,43 @@ pub fn run_inspect(opts: &InspectOptions<'_>) -> ExitCode {
         );
     }
 
-    let evidence = InspectEvidence {
+    let evidence = build_inspect_evidence(opts, target_file, &trace_file, trace_export.clone());
+    push_inspect_warnings(&mut warnings, &evidence);
+
+    let identity = build_inspect_identity(&target, &trace_file, trace_export.as_ref());
+
+    let bundle = InspectOutput {
+        target: target.target_descriptor(),
+        identity,
+        evidence,
+        warnings,
+    };
+
+    emit_inspect_bundle(bundle, opts)
+}
+
+/// Run the `trace_export` child when the target is a symbol, else `Ok(None)`.
+fn collect_trace_export(
+    opts: &InspectOptions<'_>,
+    target: &NormalizedTarget,
+) -> Result<Option<Value>, String> {
+    let Some(export_name) = target.export_name.as_deref() else {
+        return Ok(None);
+    };
+    run_required_json(opts, trace_export_args(&target.file, export_name)).map(Some)
+}
+
+/// Compose the five evidence sections (trace, dead-code, duplication,
+/// complexity, security) for the inspect bundle.
+fn build_inspect_evidence(
+    opts: &InspectOptions<'_>,
+    target_file: &str,
+    trace_file: &Value,
+    trace_export: Option<Value>,
+) -> InspectEvidence {
+    InspectEvidence {
         trace_file: InspectEvidenceSection::ok(InspectEvidenceScope::File, trace_file.clone()),
         trace_export: trace_export
-            .clone()
             .map(|value| InspectEvidenceSection::ok(InspectEvidenceScope::Symbol, value)),
         dead_code: optional_section(
             opts,
@@ -133,10 +161,17 @@ pub fn run_inspect(opts: &InspectOptions<'_>) -> ExitCode {
             InspectEvidenceScope::File,
             |value| value,
         ),
-    };
-    push_inspect_warnings(&mut warnings, &evidence);
+    }
+}
 
-    let identity = match trace_export.as_ref() {
+/// Derive the identity summary from the trace evidence (symbol when an export
+/// trace is present, file otherwise).
+fn build_inspect_identity(
+    target: &NormalizedTarget,
+    trace_file: &Value,
+    trace_export: Option<&Value>,
+) -> InspectIdentity {
+    match trace_export {
         Some(export) => InspectIdentity::Symbol(InspectSymbolIdentity {
             file: target.file.clone(),
             export_name: target.export_name.clone().unwrap_or_default(),
@@ -162,15 +197,11 @@ pub fn run_inspect(opts: &InspectOptions<'_>) -> ExitCode {
                 .and_then(Value::as_array)
                 .map(Vec::len),
         }),
-    };
+    }
+}
 
-    let bundle = InspectOutput {
-        target: target.target_descriptor(),
-        identity,
-        evidence,
-        warnings,
-    };
-
+/// Serialize and emit the inspect bundle in the requested output format.
+fn emit_inspect_bundle(bundle: InspectOutput, opts: &InspectOptions<'_>) -> ExitCode {
     match opts.output {
         OutputFormat::Json => {
             let value = match serialize_root_output(FallowOutput::Inspect(bundle)) {

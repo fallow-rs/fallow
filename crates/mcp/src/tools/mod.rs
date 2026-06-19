@@ -216,38 +216,11 @@ async fn spawn_fallow(
     let stderr = String::from_utf8_lossy(&output.stderr);
 
     if !output.status.success() {
-        let exit_code = output.status.code().unwrap_or(-1);
-
-        if exit_code == 1 {
-            let text = if stdout.is_empty() {
-                "{}".to_string()
-            } else {
-                stdout.to_string()
-            };
-            return Ok(CallToolResult::success(vec![Content::text(text)]));
-        }
-
-        if !stdout.is_empty() && serde_json::from_str::<serde_json::Value>(&stdout).is_ok() {
-            return Ok(CallToolResult::error(vec![Content::text(
-                stdout.to_string(),
-            )]));
-        }
-
-        let message = if stderr.is_empty() {
-            format!("fallow exited with code {exit_code}")
-        } else {
-            stderr.trim().to_string()
-        };
-
-        let error_json = serde_json::json!({
-            "error": true,
-            "message": message,
-            "exit_code": exit_code,
-        });
-
-        return Ok(CallToolResult::error(vec![Content::text(
-            error_json.to_string(),
-        )]));
+        return Ok(non_success_result(
+            output.status.code().unwrap_or(-1),
+            &stdout,
+            &stderr,
+        ));
     }
 
     if stdout.is_empty() {
@@ -259,6 +232,38 @@ async fn spawn_fallow(
     Ok(CallToolResult::success(vec![Content::text(
         stdout.to_string(),
     )]))
+}
+
+/// Translate a non-zero CLI exit into the MCP result envelope. Exit 1 (issues
+/// found) is a success carrying the JSON; structured stdout passes through as an
+/// error; otherwise an error JSON is synthesized from stderr.
+fn non_success_result(exit_code: i32, stdout: &str, stderr: &str) -> CallToolResult {
+    if exit_code == 1 {
+        let text = if stdout.is_empty() {
+            "{}".to_string()
+        } else {
+            stdout.to_string()
+        };
+        return CallToolResult::success(vec![Content::text(text)]);
+    }
+
+    if !stdout.is_empty() && serde_json::from_str::<serde_json::Value>(stdout).is_ok() {
+        return CallToolResult::error(vec![Content::text(stdout.to_string())]);
+    }
+
+    let message = if stderr.is_empty() {
+        format!("fallow exited with code {exit_code}")
+    } else {
+        stderr.trim().to_string()
+    };
+
+    let error_json = serde_json::json!({
+        "error": true,
+        "message": message,
+        "exit_code": exit_code,
+    });
+
+    CallToolResult::error(vec![Content::text(error_json.to_string())])
 }
 
 /// Execute fallow and ensure successful JSON responses have a top-level

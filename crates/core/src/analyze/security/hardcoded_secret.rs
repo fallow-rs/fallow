@@ -211,6 +211,13 @@ fn redacted_evidence(signal: SecretSignal, context_name: &str) -> String {
 }
 
 fn provider_secret_family(value: &str) -> Option<&'static str> {
+    well_known_provider_family(value).or_else(|| prefixed_provider_family(value))
+}
+
+/// First-tier provider checks that rely on bespoke structural predicates
+/// (AWS, GitHub, Slack, SendGrid, DigitalOcean, Telegram, PEM) plus the
+/// highest-priority key prefixes. Checked before [`prefixed_provider_family`].
+fn well_known_provider_family(value: &str) -> Option<&'static str> {
     if is_aws_access_key(value) {
         return Some("AWS access key");
     }
@@ -240,6 +247,13 @@ fn provider_secret_family(value: &str) -> Option<&'static str> {
     if is_sendgrid_key(value) {
         return Some("SendGrid key");
     }
+    None
+}
+
+/// Second-tier provider checks, predominantly fixed-prefix matches plus a few
+/// bespoke predicates. Only reached when [`well_known_provider_family`] misses,
+/// so first-match ordering across both tiers is preserved.
+fn prefixed_provider_family(value: &str) -> Option<&'static str> {
     if matches_prefixed_len(value, "npm_", 36) {
         return Some("npm token");
     }

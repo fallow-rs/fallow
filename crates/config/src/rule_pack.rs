@@ -230,60 +230,84 @@ pub fn load_rule_packs(
     let canonical_root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
 
     for path_str in pack_paths {
-        let path = root.join(path_str);
-        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-        if !RULE_PACK_EXTENSIONS.contains(&ext) {
-            errors.push(RulePackError {
-                path: path.clone(),
-                message: format!(
-                    "unsupported rule pack extension '.{ext}'; expected .json or .jsonc"
-                ),
-            });
-            continue;
-        }
-        let content = match std::fs::read_to_string(&path) {
-            Ok(content) => content,
-            Err(e) => {
-                errors.push(RulePackError {
-                    path: path.clone(),
-                    message: format!("failed to read rule pack: {e}"),
-                });
-                continue;
-            }
-        };
-        // Checked after the read so a missing file reports as missing even on
-        // platforms where the project root itself sits behind a symlink.
-        if !crate::external_plugin::is_within_root(&path, &canonical_root) {
-            errors.push(RulePackError {
-                path: path.clone(),
-                message: "resolves outside the project root".to_owned(),
-            });
-            continue;
-        }
-        let parsed: Result<RulePackDef, String> = if ext == "jsonc" {
-            crate::jsonc::parse_to_value::<RulePackDef>(&content).map_err(|e| e.to_string())
-        } else {
-            serde_json::from_str::<RulePackDef>(&content).map_err(|e| e.to_string())
-        };
-        match parsed {
-            Ok(pack) => {
-                let before = errors.len();
-                validate_pack(&pack, &path, &mut errors);
-                if errors.len() == before {
-                    packs.push(pack);
-                }
-            }
-            Err(message) => {
-                errors.push(RulePackError {
-                    path: path.clone(),
-                    message: format!("failed to parse rule pack: {message}"),
-                });
-            }
-        }
+        load_one_rule_pack(root, path_str, &canonical_root, &mut packs, &mut errors);
     }
 
+    push_duplicate_pack_name_errors(root, &packs, &mut errors);
+
+    if errors.is_empty() {
+        Ok(packs)
+    } else {
+        Err(errors)
+    }
+}
+
+/// Load, validate, and stage a single listed rule pack, collecting any failure.
+fn load_one_rule_pack(
+    root: &Path,
+    path_str: &str,
+    canonical_root: &Path,
+    packs: &mut Vec<RulePackDef>,
+    errors: &mut Vec<RulePackError>,
+) {
+    let path = root.join(path_str);
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    if !RULE_PACK_EXTENSIONS.contains(&ext) {
+        errors.push(RulePackError {
+            path: path.clone(),
+            message: format!("unsupported rule pack extension '.{ext}'; expected .json or .jsonc"),
+        });
+        return;
+    }
+    let content = match std::fs::read_to_string(&path) {
+        Ok(content) => content,
+        Err(e) => {
+            errors.push(RulePackError {
+                path,
+                message: format!("failed to read rule pack: {e}"),
+            });
+            return;
+        }
+    };
+    // Checked after the read so a missing file reports as missing even on
+    // platforms where the project root itself sits behind a symlink.
+    if !crate::external_plugin::is_within_root(&path, canonical_root) {
+        errors.push(RulePackError {
+            path,
+            message: "resolves outside the project root".to_owned(),
+        });
+        return;
+    }
+    let parsed: Result<RulePackDef, String> = if ext == "jsonc" {
+        crate::jsonc::parse_to_value::<RulePackDef>(&content).map_err(|e| e.to_string())
+    } else {
+        serde_json::from_str::<RulePackDef>(&content).map_err(|e| e.to_string())
+    };
+    match parsed {
+        Ok(pack) => {
+            let before = errors.len();
+            validate_pack(&pack, &path, errors);
+            if errors.len() == before {
+                packs.push(pack);
+            }
+        }
+        Err(message) => {
+            errors.push(RulePackError {
+                path,
+                message: format!("failed to parse rule pack: {message}"),
+            });
+        }
+    }
+}
+
+/// Push one error per pack name declared by more than one loaded pack.
+fn push_duplicate_pack_name_errors(
+    root: &Path,
+    packs: &[RulePackDef],
+    errors: &mut Vec<RulePackError>,
+) {
     let mut seen_names: FxHashSet<&str> = FxHashSet::default();
-    for pack in &packs {
+    for pack in packs {
         if !seen_names.insert(pack.name.as_str()) {
             errors.push(RulePackError {
                 path: root.to_path_buf(),
@@ -294,12 +318,6 @@ pub fn load_rule_packs(
                 ),
             });
         }
-    }
-
-    if errors.is_empty() {
-        Ok(packs)
-    } else {
-        Err(errors)
     }
 }
 
@@ -363,81 +381,111 @@ fn validate_rule(rule: &RulePackRule, path: &Path, errors: &mut Vec<RulePackErro
     };
 
     match rule.kind {
-        RulePackRuleKind::BannedCall => {
-            if rule.callees.is_empty() {
-                errors.push(err(
-                    "banned-call rules must list at least one `callees` pattern".to_owned(),
-                ));
-            }
-            if !rule.specifiers.is_empty() {
-                errors.push(err(
-                    "`specifiers` applies only to banned-import rules".to_owned()
-                ));
-            }
-            if !rule.effects.is_empty() {
-                errors.push(err(
-                    "`effects` applies only to banned-effect rules".to_owned()
-                ));
-            }
-            if rule.ignore_type_only {
-                errors.push(err(
-                    "`ignoreTypeOnly` applies only to banned-import rules".to_owned()
-                ));
-            }
-            for pattern in &rule.callees {
-                if let Some(reason) = callee_pattern_error(pattern) {
-                    errors.push(err(format!("callee pattern `{pattern}` {reason}")));
-                }
-            }
-        }
-        RulePackRuleKind::BannedImport => {
-            if rule.specifiers.is_empty() {
-                errors.push(err(
-                    "banned-import rules must list at least one `specifiers` entry".to_owned(),
-                ));
-            }
-            if !rule.callees.is_empty() {
-                errors.push(err("`callees` applies only to banned-call rules".to_owned()));
-            }
-            if !rule.effects.is_empty() {
-                errors.push(err(
-                    "`effects` applies only to banned-effect rules".to_owned()
-                ));
-            }
-            for specifier in &rule.specifiers {
-                if specifier.trim().is_empty() {
-                    errors.push(err("specifier must not be empty".to_owned()));
-                } else if specifier.contains('*') {
-                    errors.push(err(format!(
-                        "specifier `{specifier}` contains `*`; specifier matching is \
-                         segment-aware, not glob. List the package or path prefix; subpaths are \
-                         covered automatically"
-                    )));
-                }
-            }
-        }
-        RulePackRuleKind::BannedEffect => {
-            if rule.effects.is_empty() {
-                errors.push(err(
-                    "banned-effect rules must list at least one `effects` entry".to_owned(),
-                ));
-            }
-            if !rule.callees.is_empty() {
-                errors.push(err("`callees` applies only to banned-call rules".to_owned()));
-            }
-            if !rule.specifiers.is_empty() {
-                errors.push(err(
-                    "`specifiers` applies only to banned-import rules".to_owned()
-                ));
-            }
-            if rule.ignore_type_only {
-                errors.push(err(
-                    "`ignoreTypeOnly` applies only to banned-import rules".to_owned()
-                ));
-            }
-        }
+        RulePackRuleKind::BannedCall => validate_banned_call_rule(rule, &err, errors),
+        RulePackRuleKind::BannedImport => validate_banned_import_rule(rule, &err, errors),
+        RulePackRuleKind::BannedEffect => validate_banned_effect_rule(rule, &err, errors),
     }
 
+    validate_rule_file_globs(rule, &err, errors);
+}
+
+/// Validate a `banned-call` rule's required and cross-kind fields.
+fn validate_banned_call_rule(
+    rule: &RulePackRule,
+    err: &impl Fn(String) -> RulePackError,
+    errors: &mut Vec<RulePackError>,
+) {
+    if rule.callees.is_empty() {
+        errors.push(err(
+            "banned-call rules must list at least one `callees` pattern".to_owned(),
+        ));
+    }
+    if !rule.specifiers.is_empty() {
+        errors.push(err(
+            "`specifiers` applies only to banned-import rules".to_owned()
+        ));
+    }
+    if !rule.effects.is_empty() {
+        errors.push(err(
+            "`effects` applies only to banned-effect rules".to_owned()
+        ));
+    }
+    if rule.ignore_type_only {
+        errors.push(err(
+            "`ignoreTypeOnly` applies only to banned-import rules".to_owned()
+        ));
+    }
+    for pattern in &rule.callees {
+        if let Some(reason) = callee_pattern_error(pattern) {
+            errors.push(err(format!("callee pattern `{pattern}` {reason}")));
+        }
+    }
+}
+
+/// Validate a `banned-import` rule's required and cross-kind fields.
+fn validate_banned_import_rule(
+    rule: &RulePackRule,
+    err: &impl Fn(String) -> RulePackError,
+    errors: &mut Vec<RulePackError>,
+) {
+    if rule.specifiers.is_empty() {
+        errors.push(err(
+            "banned-import rules must list at least one `specifiers` entry".to_owned(),
+        ));
+    }
+    if !rule.callees.is_empty() {
+        errors.push(err("`callees` applies only to banned-call rules".to_owned()));
+    }
+    if !rule.effects.is_empty() {
+        errors.push(err(
+            "`effects` applies only to banned-effect rules".to_owned()
+        ));
+    }
+    for specifier in &rule.specifiers {
+        if specifier.trim().is_empty() {
+            errors.push(err("specifier must not be empty".to_owned()));
+        } else if specifier.contains('*') {
+            errors.push(err(format!(
+                "specifier `{specifier}` contains `*`; specifier matching is \
+                 segment-aware, not glob. List the package or path prefix; subpaths are \
+                 covered automatically"
+            )));
+        }
+    }
+}
+
+/// Validate a `banned-effect` rule's required and cross-kind fields.
+fn validate_banned_effect_rule(
+    rule: &RulePackRule,
+    err: &impl Fn(String) -> RulePackError,
+    errors: &mut Vec<RulePackError>,
+) {
+    if rule.effects.is_empty() {
+        errors.push(err(
+            "banned-effect rules must list at least one `effects` entry".to_owned(),
+        ));
+    }
+    if !rule.callees.is_empty() {
+        errors.push(err("`callees` applies only to banned-call rules".to_owned()));
+    }
+    if !rule.specifiers.is_empty() {
+        errors.push(err(
+            "`specifiers` applies only to banned-import rules".to_owned()
+        ));
+    }
+    if rule.ignore_type_only {
+        errors.push(err(
+            "`ignoreTypeOnly` applies only to banned-import rules".to_owned()
+        ));
+    }
+}
+
+/// Validate a rule's `files` and `exclude` include/exclude globs.
+fn validate_rule_file_globs(
+    rule: &RulePackRule,
+    err: &impl Fn(String) -> RulePackError,
+    errors: &mut Vec<RulePackError>,
+) {
     for (field, patterns) in [("files", &rule.files), ("exclude", &rule.exclude)] {
         for pattern in patterns {
             if let Err(e) = compile_user_glob(pattern, "rulePacks rules[].files/exclude") {

@@ -168,6 +168,90 @@ pub struct PipelineTimings {
     pub total_ms: f64,
 }
 
+/// Map a reference's `from_file` id to a root-relative [`ExportReference`].
+fn reference_to_export_reference(
+    graph: &ModuleGraph,
+    root: &Path,
+    r: &crate::graph::SymbolReference,
+) -> ExportReference {
+    let from_path = graph.modules.get(r.from_file.0 as usize).map_or_else(
+        || PathBuf::from(format!("<unknown:{}>", r.from_file.0)),
+        |m| m.path.strip_prefix(root).unwrap_or(&m.path).to_path_buf(),
+    );
+    ExportReference {
+        from_file: from_path,
+        kind: format_reference_kind(r.kind),
+    }
+}
+
+/// Collect every re-export chain across the graph that re-exports `export_name`
+/// from the module identified by `target_file_id`.
+fn collect_re_export_chains(
+    graph: &ModuleGraph,
+    root: &Path,
+    target_file_id: crate::discover::FileId,
+    export_name: &str,
+) -> Vec<ReExportChain> {
+    graph
+        .modules
+        .iter()
+        .flat_map(|m| {
+            m.re_exports
+                .iter()
+                .filter(move |re| {
+                    re.source_file == target_file_id
+                        && (re.imported_name == export_name || re.imported_name == "*")
+                })
+                .map(move |re| {
+                    let barrel_export = m.exports.iter().find(|e| {
+                        if re.exported_name == "*" {
+                            e.name.to_string() == export_name
+                        } else {
+                            e.name.to_string() == re.exported_name
+                        }
+                    });
+                    ReExportChain {
+                        barrel_file: m.path.strip_prefix(root).unwrap_or(&m.path).to_path_buf(),
+                        exported_as: re.exported_name.clone(),
+                        reference_count: barrel_export.map_or(0, |e| e.references.len()),
+                    }
+                })
+        })
+        .collect()
+}
+
+/// Build the human-readable reason string explaining an export's used/unused state.
+fn export_trace_reason(
+    module: &crate::graph::ModuleNode,
+    reference_count: usize,
+    is_used: bool,
+    re_export_chains: &[ReExportChain],
+) -> String {
+    if !module.is_reachable() {
+        "File is unreachable from any entry point".to_string()
+    } else if is_used {
+        format!(
+            "Used by {} file(s){}",
+            reference_count,
+            if re_export_chains.is_empty() {
+                String::new()
+            } else {
+                format!(", re-exported through {} barrel(s)", re_export_chains.len())
+            }
+        )
+    } else if module.is_entry_point() {
+        "No internal references, but file is an entry point (export is externally accessible)"
+            .to_string()
+    } else if !re_export_chains.is_empty() {
+        format!(
+            "Re-exported through {} barrel(s) but no consumer imports it through the barrel",
+            re_export_chains.len()
+        )
+    } else {
+        "No references found, export is unused".to_string()
+    }
+}
+
 /// Trace why an export is considered used or unused.
 #[must_use]
 pub fn trace_export(
@@ -189,69 +273,13 @@ pub fn trace_export(
     let direct_references: Vec<ExportReference> = export
         .references
         .iter()
-        .map(|r| {
-            let from_path = graph.modules.get(r.from_file.0 as usize).map_or_else(
-                || PathBuf::from(format!("<unknown:{}>", r.from_file.0)),
-                |m| m.path.strip_prefix(root).unwrap_or(&m.path).to_path_buf(),
-            );
-            ExportReference {
-                from_file: from_path,
-                kind: format_reference_kind(r.kind),
-            }
-        })
+        .map(|r| reference_to_export_reference(graph, root, r))
         .collect();
 
-    let re_export_chains: Vec<ReExportChain> = graph
-        .modules
-        .iter()
-        .flat_map(|m| {
-            m.re_exports
-                .iter()
-                .filter(|re| {
-                    re.source_file == module.file_id
-                        && (re.imported_name == export_name || re.imported_name == "*")
-                })
-                .map(|re| {
-                    let barrel_export = m.exports.iter().find(|e| {
-                        if re.exported_name == "*" {
-                            e.name.to_string() == export_name
-                        } else {
-                            e.name.to_string() == re.exported_name
-                        }
-                    });
-                    ReExportChain {
-                        barrel_file: m.path.strip_prefix(root).unwrap_or(&m.path).to_path_buf(),
-                        exported_as: re.exported_name.clone(),
-                        reference_count: barrel_export.map_or(0, |e| e.references.len()),
-                    }
-                })
-        })
-        .collect();
+    let re_export_chains = collect_re_export_chains(graph, root, module.file_id, export_name);
 
     let is_used = !export.references.is_empty();
-    let reason = if !module.is_reachable() {
-        "File is unreachable from any entry point".to_string()
-    } else if is_used {
-        format!(
-            "Used by {} file(s){}",
-            export.references.len(),
-            if re_export_chains.is_empty() {
-                String::new()
-            } else {
-                format!(", re-exported through {} barrel(s)", re_export_chains.len())
-            }
-        )
-    } else if module.is_entry_point() {
-        "No internal references, but file is an entry point (export is externally accessible)"
-            .to_string()
-    } else if !re_export_chains.is_empty() {
-        format!(
-            "Re-exported through {} barrel(s) but no consumer imports it through the barrel",
-            re_export_chains.len()
-        )
-    } else {
-        "No references found, export is unused".to_string()
-    };
+    let reason = export_trace_reason(module, export.references.len(), is_used, &re_export_chains);
 
     Some(ExportTrace {
         file: module
@@ -269,15 +297,13 @@ pub fn trace_export(
     })
 }
 
-/// Trace all edges for a file.
-#[must_use]
-pub fn trace_file(graph: &ModuleGraph, root: &Path, file_path: &str) -> Option<FileTrace> {
-    let module = graph
-        .modules
-        .iter()
-        .find(|m| path_matches(&m.path, root, file_path))?;
-
-    let exports: Vec<TracedExport> = module
+/// Map a module's exports to [`TracedExport`] entries with relativized references.
+fn traced_exports(
+    graph: &ModuleGraph,
+    root: &Path,
+    module: &crate::graph::ModuleNode,
+) -> Vec<TracedExport> {
+    module
         .exports
         .iter()
         .map(|e| TracedExport {
@@ -287,21 +313,19 @@ pub fn trace_file(graph: &ModuleGraph, root: &Path, file_path: &str) -> Option<F
             referenced_by: e
                 .references
                 .iter()
-                .map(|r| {
-                    let from_path = graph.modules.get(r.from_file.0 as usize).map_or_else(
-                        || PathBuf::from(format!("<unknown:{}>", r.from_file.0)),
-                        |m| m.path.strip_prefix(root).unwrap_or(&m.path).to_path_buf(),
-                    );
-                    ExportReference {
-                        from_file: from_path,
-                        kind: format_reference_kind(r.kind),
-                    }
-                })
+                .map(|r| reference_to_export_reference(graph, root, r))
                 .collect(),
         })
-        .collect();
+        .collect()
+}
 
-    let imports_from: Vec<PathBuf> = graph
+/// Collect the root-relative paths a file imports from (forward graph edges).
+fn traced_imports_from(
+    graph: &ModuleGraph,
+    root: &Path,
+    module: &crate::graph::ModuleNode,
+) -> Vec<PathBuf> {
+    graph
         .edges_for(module.file_id)
         .iter()
         .filter_map(|target_id| {
@@ -310,9 +334,16 @@ pub fn trace_file(graph: &ModuleGraph, root: &Path, file_path: &str) -> Option<F
                 .get(target_id.0 as usize)
                 .map(|m| m.path.strip_prefix(root).unwrap_or(&m.path).to_path_buf())
         })
-        .collect();
+        .collect()
+}
 
-    let imported_by: Vec<PathBuf> = graph
+/// Collect the root-relative paths that import a file (reverse graph edges).
+fn traced_imported_by(
+    graph: &ModuleGraph,
+    root: &Path,
+    module: &crate::graph::ModuleNode,
+) -> Vec<PathBuf> {
+    graph
         .reverse_deps
         .get(module.file_id.0 as usize)
         .map(|deps| {
@@ -325,9 +356,16 @@ pub fn trace_file(graph: &ModuleGraph, root: &Path, file_path: &str) -> Option<F
                 })
                 .collect()
         })
-        .unwrap_or_default();
+        .unwrap_or_default()
+}
 
-    let re_exports: Vec<TracedReExport> = module
+/// Map a module's re-exports to [`TracedReExport`] entries with relativized source paths.
+fn traced_re_exports(
+    graph: &ModuleGraph,
+    root: &Path,
+    module: &crate::graph::ModuleNode,
+) -> Vec<TracedReExport> {
+    module
         .re_exports
         .iter()
         .map(|re| {
@@ -341,7 +379,16 @@ pub fn trace_file(graph: &ModuleGraph, root: &Path, file_path: &str) -> Option<F
                 exported_name: re.exported_name.clone(),
             }
         })
-        .collect();
+        .collect()
+}
+
+/// Trace all edges for a file.
+#[must_use]
+pub fn trace_file(graph: &ModuleGraph, root: &Path, file_path: &str) -> Option<FileTrace> {
+    let module = graph
+        .modules
+        .iter()
+        .find(|m| path_matches(&m.path, root, file_path))?;
 
     Some(FileTrace {
         file: module
@@ -351,10 +398,10 @@ pub fn trace_file(graph: &ModuleGraph, root: &Path, file_path: &str) -> Option<F
             .to_path_buf(),
         is_reachable: module.is_reachable(),
         is_entry_point: module.is_entry_point(),
-        exports,
-        imports_from,
-        imported_by,
-        re_exports,
+        exports: traced_exports(graph, root, module),
+        imports_from: traced_imports_from(graph, root, module),
+        imported_by: traced_imported_by(graph, root, module),
+        re_exports: traced_re_exports(graph, root, module),
     })
 }
 

@@ -1618,64 +1618,87 @@ fn resolve_alias_pairs_kinded(
             resolve_alias_pairs_kinded(program, config_path, &ts_sat.expression, visited, depth)
         }
         Expression::ObjectExpression(obj) => {
-            let mut pairs = Vec::new();
-            for prop in &obj.properties {
-                match prop {
-                    ObjectPropertyKind::ObjectProperty(prop) => {
-                        if let Some(find) = property_key_to_string(&prop.key)
-                            && let Some((replacement, is_bare)) =
-                                alias_replacement_kinded(&prop.value)
-                        {
-                            pairs.push((find, replacement, is_bare));
-                        }
-                    }
-                    // `{ ...sharedAliases, '@': './src' }`
-                    ObjectPropertyKind::SpreadProperty(spread) => {
-                        pairs.extend(resolve_alias_pairs_kinded(
-                            program,
-                            config_path,
-                            &spread.argument,
-                            visited,
-                            depth,
-                        ));
-                    }
-                }
-            }
-            pairs
+            resolve_object_alias_pairs_kinded(program, config_path, obj, visited, depth)
         }
         Expression::ArrayExpression(arr) => {
-            let mut pairs = Vec::new();
-            for element in &arr.elements {
-                match element {
-                    // `[...sharedAliases, { find, replacement }]`
-                    ArrayExpressionElement::SpreadElement(spread) => {
-                        pairs.extend(resolve_alias_pairs_kinded(
-                            program,
-                            config_path,
-                            &spread.argument,
-                            visited,
-                            depth,
-                        ));
-                    }
-                    _ => {
-                        if let Some(Expression::ObjectExpression(obj)) = element.as_expression()
-                            && let Some(find) = find_property(obj, "find")
-                                .and_then(|prop| expression_to_string(&prop.value))
-                            && let Some((replacement, is_bare)) = find_property(obj, "replacement")
-                                .and_then(|prop| alias_replacement_kinded(&prop.value))
-                        {
-                            pairs.push((find, replacement, is_bare));
-                        }
-                    }
-                }
-            }
-            pairs
+            resolve_array_alias_pairs_kinded(program, config_path, arr, visited, depth)
         }
         Expression::Identifier(id) => {
             resolve_identifier_alias_pairs(program, config_path, id.name.as_str(), visited, depth)
         }
         _ => Vec::new(),
     }
+}
+
+/// Resolve object-form alias pairs (`{ '@': './src', ...spread }`), expanding
+/// spread properties recursively.
+fn resolve_object_alias_pairs_kinded(
+    program: &Program,
+    config_path: &Path,
+    obj: &ObjectExpression,
+    visited: &mut FxHashSet<PathBuf>,
+    depth: usize,
+) -> Vec<(String, String, bool)> {
+    let mut pairs = Vec::new();
+    for prop in &obj.properties {
+        match prop {
+            ObjectPropertyKind::ObjectProperty(prop) => {
+                if let Some(find) = property_key_to_string(&prop.key)
+                    && let Some((replacement, is_bare)) = alias_replacement_kinded(&prop.value)
+                {
+                    pairs.push((find, replacement, is_bare));
+                }
+            }
+            // `{ ...sharedAliases, '@': './src' }`
+            ObjectPropertyKind::SpreadProperty(spread) => {
+                pairs.extend(resolve_alias_pairs_kinded(
+                    program,
+                    config_path,
+                    &spread.argument,
+                    visited,
+                    depth,
+                ));
+            }
+        }
+    }
+    pairs
+}
+
+/// Resolve array-form alias pairs (`[{ find, replacement }, ...spread]`),
+/// expanding spread elements recursively.
+fn resolve_array_alias_pairs_kinded(
+    program: &Program,
+    config_path: &Path,
+    arr: &ArrayExpression,
+    visited: &mut FxHashSet<PathBuf>,
+    depth: usize,
+) -> Vec<(String, String, bool)> {
+    let mut pairs = Vec::new();
+    for element in &arr.elements {
+        match element {
+            // `[...sharedAliases, { find, replacement }]`
+            ArrayExpressionElement::SpreadElement(spread) => {
+                pairs.extend(resolve_alias_pairs_kinded(
+                    program,
+                    config_path,
+                    &spread.argument,
+                    visited,
+                    depth,
+                ));
+            }
+            _ => {
+                if let Some(Expression::ObjectExpression(obj)) = element.as_expression()
+                    && let Some(find) = find_property(obj, "find")
+                        .and_then(|prop| expression_to_string(&prop.value))
+                    && let Some((replacement, is_bare)) = find_property(obj, "replacement")
+                        .and_then(|prop| alias_replacement_kinded(&prop.value))
+                {
+                    pairs.push((find, replacement, is_bare));
+                }
+            }
+        }
+    }
+    pairs
 }
 
 /// Resolve an identifier used as an alias value to its literal pairs, first by

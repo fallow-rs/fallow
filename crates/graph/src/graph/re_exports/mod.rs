@@ -67,8 +67,25 @@ impl ModuleGraph {
     /// `ModuleGraph` so the `re-export-cycle` finding type can surface them
     /// to users instead of relying on `RUST_LOG=warn` (see issue #515).
     pub(super) fn resolve_re_export_chains(&mut self) -> Vec<GraphReExportCycle> {
-        let re_export_info: Vec<ReExportTuple> = self
-            .modules
+        let re_export_info = self.collect_re_export_tuples();
+
+        if re_export_info.is_empty() {
+            return Vec::new();
+        }
+
+        let cycles = find_re_export_cycles(&self.modules, &re_export_info);
+
+        let entry_star_targets = self.collect_entry_star_targets();
+        let edges_by_target = self.build_edges_by_target();
+
+        self.run_re_export_fixpoint(&re_export_info, &entry_star_targets, &edges_by_target);
+
+        cycles
+    }
+
+    /// Flatten every module's re-export edges into a single tuple list.
+    fn collect_re_export_tuples(&self) -> Vec<ReExportTuple> {
+        self.modules
             .iter()
             .flat_map(|m| {
                 m.re_exports.iter().map(move |re| ReExportTuple {
@@ -79,14 +96,12 @@ impl ModuleGraph {
                     is_type_only: re.is_type_only,
                 })
             })
-            .collect();
+            .collect()
+    }
 
-        if re_export_info.is_empty() {
-            return Vec::new();
-        }
-
-        let cycles = find_re_export_cycles(&self.modules, &re_export_info);
-
+    /// Compute the transitive closure of `export *` source files reachable from
+    /// entry-point barrels.
+    fn collect_entry_star_targets(&self) -> FxHashSet<FileId> {
         let mut entry_star_targets: FxHashSet<FileId> = self
             .modules
             .iter()
@@ -115,12 +130,25 @@ impl ModuleGraph {
                 }
             }
         }
+        entry_star_targets
+    }
 
+    /// Index every edge by its target file for fast star-propagation lookups.
+    fn build_edges_by_target(&self) -> FxHashMap<FileId, Vec<usize>> {
         let mut edges_by_target: FxHashMap<FileId, Vec<usize>> = FxHashMap::default();
         for (idx, edge) in self.edges.iter().enumerate() {
             edges_by_target.entry(edge.target).or_default().push(idx);
         }
+        edges_by_target
+    }
 
+    /// Run the monotone fixpoint that propagates references through every chain.
+    fn run_re_export_fixpoint(
+        &mut self,
+        re_export_info: &[ReExportTuple],
+        entry_star_targets: &FxHashSet<FileId>,
+        edges_by_target: &FxHashMap<FileId, Vec<usize>>,
+    ) {
         let safety_cap = re_export_info.len().saturating_add(1);
         let mut changed = true;
         let mut iteration: usize = 0;
@@ -131,38 +159,14 @@ impl ModuleGraph {
             changed = false;
             iteration += 1;
 
-            for entry in &re_export_info {
-                let barrel_idx = entry.barrel.0 as usize;
-                let source_idx = entry.source.0 as usize;
-
-                if barrel_idx >= self.modules.len() || source_idx >= self.modules.len() {
-                    continue;
-                }
-
-                if entry.exported_name == "*" {
-                    changed |= propagate_star_re_export(StarReExportPropagation {
-                        modules: &mut self.modules,
-                        edges: &self.edges,
-                        edges_by_target: &edges_by_target,
-                        barrel_id: entry.barrel,
-                        barrel_idx,
-                        source_id: entry.source,
-                        source_idx,
-                        entry_star_targets: &entry_star_targets,
-                        triggering_is_type_only: entry.is_type_only,
-                        synthetic_stubs: &mut synthetic_stubs,
-                    });
-                } else {
-                    changed |= propagate_named_re_export(NamedReExportPropagation {
-                        modules: &mut self.modules,
-                        barrel_id: entry.barrel,
-                        barrel_idx,
-                        source_idx,
-                        imported_name: &entry.imported_name,
-                        exported_name: &entry.exported_name,
-                        existing_refs: &mut existing_refs,
-                    });
-                }
+            for entry in re_export_info {
+                changed |= self.propagate_re_export_entry(
+                    entry,
+                    entry_star_targets,
+                    edges_by_target,
+                    &mut existing_refs,
+                    &mut synthetic_stubs,
+                );
             }
         }
 
@@ -176,8 +180,48 @@ impl ModuleGraph {
                  https://github.com/fallow-rs/fallow/issues with the repro."
             );
         }
+    }
 
-        cycles
+    /// Propagate references for one re-export edge, dispatching star vs named.
+    fn propagate_re_export_entry(
+        &mut self,
+        entry: &ReExportTuple,
+        entry_star_targets: &FxHashSet<FileId>,
+        edges_by_target: &FxHashMap<FileId, Vec<usize>>,
+        existing_refs: &mut FxHashSet<FileId>,
+        synthetic_stubs: &mut FxHashSet<(FileId, String)>,
+    ) -> bool {
+        let barrel_idx = entry.barrel.0 as usize;
+        let source_idx = entry.source.0 as usize;
+
+        if barrel_idx >= self.modules.len() || source_idx >= self.modules.len() {
+            return false;
+        }
+
+        if entry.exported_name == "*" {
+            propagate_star_re_export(StarReExportPropagation {
+                modules: &mut self.modules,
+                edges: &self.edges,
+                edges_by_target,
+                barrel_id: entry.barrel,
+                barrel_idx,
+                source_id: entry.source,
+                source_idx,
+                entry_star_targets,
+                triggering_is_type_only: entry.is_type_only,
+                synthetic_stubs,
+            })
+        } else {
+            propagate_named_re_export(NamedReExportPropagation {
+                modules: &mut self.modules,
+                barrel_id: entry.barrel,
+                barrel_idx,
+                source_idx,
+                imported_name: &entry.imported_name,
+                exported_name: &entry.exported_name,
+                existing_refs,
+            })
+        }
     }
 }
 
@@ -196,6 +240,30 @@ fn find_re_export_cycles(
 ) -> Vec<GraphReExportCycle> {
     let mut cycles: Vec<GraphReExportCycle> = Vec::new();
 
+    let (node_index, nodes) = build_re_export_node_index(re_export_info);
+    let n = nodes.len();
+    if n == 0 {
+        return cycles;
+    }
+
+    let adj = build_re_export_adjacency(re_export_info, &node_index, modules, &mut cycles);
+
+    let sccs = tarjan_scc(n, &adj);
+
+    for scc in &sccs {
+        if scc.len() < 2 {
+            continue;
+        }
+        cycles.push(build_multi_node_cycle(scc, &nodes, modules));
+    }
+
+    cycles
+}
+
+/// Assign a dense node index to every distinct barrel / source file id.
+fn build_re_export_node_index(
+    re_export_info: &[ReExportTuple],
+) -> (FxHashMap<FileId, usize>, Vec<FileId>) {
     let mut node_index: FxHashMap<FileId, usize> = FxHashMap::default();
     let mut nodes: Vec<FileId> = Vec::new();
     for entry in re_export_info {
@@ -207,13 +275,18 @@ fn find_re_export_cycles(
             });
         }
     }
+    (node_index, nodes)
+}
 
-    let n = nodes.len();
-    if n == 0 {
-        return cycles;
-    }
-
-    let mut adj: Vec<Vec<usize>> = vec![Vec::new(); n];
+/// Build the adjacency list for the re-export subgraph, emitting a self-loop
+/// `GraphReExportCycle` for any barrel that re-exports from itself.
+fn build_re_export_adjacency(
+    re_export_info: &[ReExportTuple],
+    node_index: &FxHashMap<FileId, usize>,
+    modules: &[super::types::ModuleNode],
+    cycles: &mut Vec<GraphReExportCycle>,
+) -> Vec<Vec<usize>> {
+    let mut adj: Vec<Vec<usize>> = vec![Vec::new(); node_index.len()];
     let mut seen_edge: FxHashSet<(usize, usize)> = FxHashSet::default();
     let mut seen_self_loop: FxHashSet<FileId> = FxHashSet::default();
     for entry in re_export_info {
@@ -221,29 +294,7 @@ fn find_re_export_cycles(
         let to = node_index[&entry.source];
         if from == to {
             if seen_self_loop.insert(entry.barrel) {
-                let i = entry.barrel.0 as usize;
-                let (path_buf, path_display) = if i < modules.len() {
-                    let p = modules[i].path.clone();
-                    let d = p.display().to_string();
-                    (p, d)
-                } else {
-                    (
-                        PathBuf::from(format!("<file id {i}>")),
-                        format!("<file id {i}>"),
-                    )
-                };
-                tracing::warn!(
-                    file = path_display.as_str(),
-                    "Re-export self-loop detected: this file re-exports from \
-                     itself. Chain propagation is structurally a no-op for \
-                     these edges. Inspect the barrel for an accidental \
-                     `export * from './<this-file>'` after a rename or move."
-                );
-                cycles.push(GraphReExportCycle {
-                    files: vec![path_buf],
-                    file_ids: vec![entry.barrel],
-                    is_self_loop: true,
-                });
+                cycles.push(build_self_loop_cycle(entry.barrel, modules));
             }
             continue;
         }
@@ -251,129 +302,192 @@ fn find_re_export_cycles(
             adj[from].push(to);
         }
     }
+    adj
+}
 
-    let sccs = tarjan_scc(n, &adj);
+/// Emit the `tracing::warn!` and structured cycle for a self-re-export edge.
+fn build_self_loop_cycle(
+    barrel: FileId,
+    modules: &[super::types::ModuleNode],
+) -> GraphReExportCycle {
+    let (path_buf, path_display) = module_path_and_display(barrel, modules);
+    tracing::warn!(
+        file = path_display.as_str(),
+        "Re-export self-loop detected: this file re-exports from \
+         itself. Chain propagation is structurally a no-op for \
+         these edges. Inspect the barrel for an accidental \
+         `export * from './<this-file>'` after a rename or move."
+    );
+    GraphReExportCycle {
+        files: vec![path_buf],
+        file_ids: vec![barrel],
+        is_self_loop: true,
+    }
+}
 
-    for scc in &sccs {
-        if scc.len() < 2 {
-            continue;
+/// Emit the `tracing::warn!` and structured cycle for a multi-node SCC.
+fn build_multi_node_cycle(
+    scc: &[usize],
+    nodes: &[FileId],
+    modules: &[super::types::ModuleNode],
+) -> GraphReExportCycle {
+    let mut triples: Vec<(PathBuf, String, FileId)> = scc
+        .iter()
+        .map(|&idx| {
+            let file_id = nodes[idx];
+            let (path, display) = module_path_and_display(file_id, modules);
+            (path, display, file_id)
+        })
+        .collect();
+    triples.sort_by(|a, b| a.1.cmp(&b.1));
+    let members = triples
+        .iter()
+        .map(|(_, d, _)| d.as_str())
+        .collect::<Vec<_>>()
+        .join(" <-> ");
+    tracing::warn!(
+        cycle_size = scc.len(),
+        members = members.as_str(),
+        "Re-export cycle detected: chain propagation may be incomplete \
+         for symbols on this barrel loop. Break the cycle to restore \
+         full reachability analysis."
+    );
+    let (files, file_ids) = triples.into_iter().fold(
+        (Vec::new(), Vec::new()),
+        |(mut paths, mut ids), (p, _, id)| {
+            paths.push(p);
+            ids.push(id);
+            (paths, ids)
+        },
+    );
+    GraphReExportCycle {
+        files,
+        file_ids,
+        is_self_loop: false,
+    }
+}
+
+/// Resolve a `FileId` to its `(PathBuf, display string)`, falling back to a
+/// placeholder when the id is outside the module list.
+fn module_path_and_display(
+    file_id: FileId,
+    modules: &[super::types::ModuleNode],
+) -> (PathBuf, String) {
+    let i = file_id.0 as usize;
+    if i < modules.len() {
+        let p = modules[i].path.clone();
+        let d = p.display().to_string();
+        (p, d)
+    } else {
+        let placeholder = format!("<file id {i}>");
+        (PathBuf::from(&placeholder), placeholder)
+    }
+}
+
+struct TarjanFrame {
+    node: usize,
+    next_succ: usize,
+}
+
+/// Mutable Tarjan SCC state shared across the iterative DFS.
+struct TarjanState {
+    index_counter: u32,
+    indices: Vec<u32>,
+    lowlinks: Vec<u32>,
+    on_stack: fixedbitset::FixedBitSet,
+    stack: Vec<usize>,
+    sccs: Vec<Vec<usize>>,
+}
+
+impl TarjanState {
+    fn new(n: usize) -> Self {
+        Self {
+            index_counter: 0,
+            indices: vec![u32::MAX; n],
+            lowlinks: vec![0; n],
+            on_stack: fixedbitset::FixedBitSet::with_capacity(n),
+            stack: Vec::new(),
+            sccs: Vec::new(),
         }
-        let mut triples: Vec<(PathBuf, String, FileId)> = scc
-            .iter()
-            .map(|&idx| {
-                let file_id = nodes[idx];
-                let i = file_id.0 as usize;
-                if i < modules.len() {
-                    let p = modules[i].path.clone();
-                    let d = p.display().to_string();
-                    (p, d, file_id)
-                } else {
-                    let placeholder = format!("<file id {i}>");
-                    (PathBuf::from(&placeholder), placeholder, file_id)
-                }
-            })
-            .collect();
-        triples.sort_by(|a, b| a.1.cmp(&b.1));
-        let members = triples
-            .iter()
-            .map(|(_, d, _)| d.as_str())
-            .collect::<Vec<_>>()
-            .join(" <-> ");
-        tracing::warn!(
-            cycle_size = scc.len(),
-            members = members.as_str(),
-            "Re-export cycle detected: chain propagation may be incomplete \
-             for symbols on this barrel loop. Break the cycle to restore \
-             full reachability analysis."
-        );
-        let (files, file_ids) = triples.into_iter().fold(
-            (Vec::new(), Vec::new()),
-            |(mut paths, mut ids), (p, _, id)| {
-                paths.push(p);
-                ids.push(id);
-                (paths, ids)
-            },
-        );
-        cycles.push(GraphReExportCycle {
-            files,
-            file_ids,
-            is_self_loop: false,
-        });
     }
 
-    cycles
+    /// Assign the next DFS index to `node` and push it onto the SCC stack.
+    fn discover(&mut self, node: usize) {
+        self.indices[node] = self.index_counter;
+        self.lowlinks[node] = self.index_counter;
+        self.index_counter = self.index_counter.saturating_add(1);
+        self.stack.push(node);
+        self.on_stack.insert(node);
+    }
+
+    /// Advance one successor of the current frame, pushing a child frame when a
+    /// new node is discovered. Returns the child node to descend into, if any.
+    fn step_successor(&mut self, frame: &mut TarjanFrame, adj: &[Vec<usize>]) -> Option<usize> {
+        let v = frame.node;
+        let w = adj[v][frame.next_succ];
+        frame.next_succ = frame.next_succ.saturating_add(1);
+        if self.indices[w] == u32::MAX {
+            self.discover(w);
+            Some(w)
+        } else {
+            if self.on_stack.contains(w) {
+                self.lowlinks[v] = self.lowlinks[v].min(self.indices[w]);
+            }
+            None
+        }
+    }
+
+    /// Finish the current frame: emit its SCC if it is a root, then propagate
+    /// its lowlink to the parent frame.
+    fn finish_frame(&mut self, v: usize, parent: Option<usize>) {
+        if self.lowlinks[v] == self.indices[v] {
+            let mut scc = Vec::new();
+            while let Some(w) = self.stack.pop() {
+                self.on_stack.remove(w);
+                scc.push(w);
+                if w == v {
+                    break;
+                }
+            }
+            self.sccs.push(scc);
+        }
+        if let Some(pv) = parent {
+            self.lowlinks[pv] = self.lowlinks[pv].min(self.lowlinks[v]);
+        }
+    }
 }
 
 /// Iterative Tarjan's strongly connected components, returns SCCs that
 /// contain at least one node. The graph is given as adjacency-by-index;
 /// the caller maps node indices back to FileIds.
 fn tarjan_scc(n: usize, adj: &[Vec<usize>]) -> Vec<Vec<usize>> {
-    use fixedbitset::FixedBitSet;
-
-    let mut index_counter: u32 = 0;
-    let mut indices: Vec<u32> = vec![u32::MAX; n];
-    let mut lowlinks: Vec<u32> = vec![0; n];
-    let mut on_stack = FixedBitSet::with_capacity(n);
-    let mut stack: Vec<usize> = Vec::new();
-    let mut sccs: Vec<Vec<usize>> = Vec::new();
-
-    struct Frame {
-        node: usize,
-        next_succ: usize,
-    }
+    let mut state = TarjanState::new(n);
 
     for start in 0..n {
-        if indices[start] != u32::MAX {
+        if state.indices[start] != u32::MAX {
             continue;
         }
-        let mut dfs: Vec<Frame> = vec![Frame {
+        state.discover(start);
+        let mut dfs: Vec<TarjanFrame> = vec![TarjanFrame {
             node: start,
             next_succ: 0,
         }];
-        indices[start] = index_counter;
-        lowlinks[start] = index_counter;
-        index_counter = index_counter.saturating_add(1);
-        stack.push(start);
-        on_stack.insert(start);
 
         while let Some(frame) = dfs.last_mut() {
             let v = frame.node;
             if frame.next_succ < adj[v].len() {
-                let w = adj[v][frame.next_succ];
-                frame.next_succ = frame.next_succ.saturating_add(1);
-                if indices[w] == u32::MAX {
-                    indices[w] = index_counter;
-                    lowlinks[w] = index_counter;
-                    index_counter = index_counter.saturating_add(1);
-                    stack.push(w);
-                    on_stack.insert(w);
-                    dfs.push(Frame {
-                        node: w,
+                if let Some(child) = state.step_successor(frame, adj) {
+                    dfs.push(TarjanFrame {
+                        node: child,
                         next_succ: 0,
                     });
-                } else if on_stack.contains(w) {
-                    lowlinks[v] = lowlinks[v].min(indices[w]);
                 }
             } else {
-                if lowlinks[v] == indices[v] {
-                    let mut scc = Vec::new();
-                    while let Some(w) = stack.pop() {
-                        on_stack.remove(w);
-                        scc.push(w);
-                        if w == v {
-                            break;
-                        }
-                    }
-                    sccs.push(scc);
-                }
                 dfs.pop();
-                if let Some(parent) = dfs.last_mut() {
-                    let pv = parent.node;
-                    lowlinks[pv] = lowlinks[pv].min(lowlinks[v]);
-                }
+                state.finish_frame(v, dfs.last().map(|parent| parent.node));
             }
         }
     }
 
-    sccs
+    state.sccs
 }

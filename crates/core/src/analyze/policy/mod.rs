@@ -118,63 +118,15 @@ pub fn find_policy_violations(
 
     let mut violations = Vec::new();
     for node in &graph.modules {
-        if !node.is_reachable() && !node.is_entry_point() {
-            continue;
-        }
-        let Ok(relative) = node.path.strip_prefix(&config.root) else {
-            continue;
-        };
-        let relative = relative.to_string_lossy().replace('\\', "/");
-
-        let master = config.resolve_rules_for_path(&node.path).policy_violation;
-        if master == Severity::Off {
-            continue;
-        }
-
-        let in_scope: Vec<(usize, &CompiledRule<'_>)> = rules
-            .iter()
-            .enumerate()
-            .filter(|(_, rule)| rule.applies_to(&relative))
-            .collect();
-        if in_scope.is_empty() {
-            continue;
-        }
-        for (index, _) in &in_scope {
-            scoped_file_counts[*index] += 1;
-        }
-
-        let Some(module) = modules_by_id.get(&node.file_id) else {
-            continue;
-        };
-
-        collect_banned_imports(&mut PolicyCollectionInput {
-            in_scope: &in_scope,
-            module,
+        collect_node_policy_violations(&mut PolicyNodeInput {
             node,
-            master,
+            config,
+            rules: &rules,
+            modules_by_id: &modules_by_id,
             declared_deps,
             suppressions,
             line_offsets_by_file,
-            violations: &mut violations,
-        });
-        collect_banned_effects(&mut PolicyCollectionInput {
-            in_scope: &in_scope,
-            module,
-            node,
-            master,
-            declared_deps,
-            suppressions,
-            line_offsets_by_file,
-            violations: &mut violations,
-        });
-        collect_banned_calls(&mut PolicyCollectionInput {
-            in_scope: &in_scope,
-            module,
-            node,
-            master,
-            declared_deps,
-            suppressions,
-            line_offsets_by_file,
+            scoped_file_counts: &mut scoped_file_counts,
             violations: &mut violations,
         });
     }
@@ -191,6 +143,90 @@ pub fn find_policy_violations(
     }
 
     violations
+}
+
+/// Inputs threaded into the per-node policy scan: the node, the compiled rules,
+/// the module lookup, the shared analysis context, and the mutable accumulators.
+struct PolicyNodeInput<'a> {
+    node: &'a crate::graph::ModuleNode,
+    config: &'a ResolvedConfig,
+    rules: &'a [CompiledRule<'a>],
+    modules_by_id: &'a FxHashMap<FileId, &'a ModuleInfo>,
+    declared_deps: &'a FxHashSet<String>,
+    suppressions: &'a SuppressionContext<'a>,
+    line_offsets_by_file: &'a LineOffsetsMap<'a>,
+    scoped_file_counts: &'a mut [usize],
+    violations: &'a mut Vec<PolicyViolation>,
+}
+
+/// Evaluate every banned-import / banned-effect / banned-call rule against one
+/// reachable-or-entry module, bumping per-rule scope counts and appending
+/// findings. Off-master and out-of-scope nodes are skipped.
+fn collect_node_policy_violations(input: &mut PolicyNodeInput<'_>) {
+    let node = input.node;
+    if !node.is_reachable() && !node.is_entry_point() {
+        return;
+    }
+    let Ok(relative) = node.path.strip_prefix(&input.config.root) else {
+        return;
+    };
+    let relative = relative.to_string_lossy().replace('\\', "/");
+
+    let master = input
+        .config
+        .resolve_rules_for_path(&node.path)
+        .policy_violation;
+    if master == Severity::Off {
+        return;
+    }
+
+    let in_scope: Vec<(usize, &CompiledRule<'_>)> = input
+        .rules
+        .iter()
+        .enumerate()
+        .filter(|(_, rule)| rule.applies_to(&relative))
+        .collect();
+    if in_scope.is_empty() {
+        return;
+    }
+    for (index, _) in &in_scope {
+        input.scoped_file_counts[*index] += 1;
+    }
+
+    let Some(module) = input.modules_by_id.get(&node.file_id) else {
+        return;
+    };
+
+    collect_banned_imports(&mut PolicyCollectionInput {
+        in_scope: &in_scope,
+        module,
+        node,
+        master,
+        declared_deps: input.declared_deps,
+        suppressions: input.suppressions,
+        line_offsets_by_file: input.line_offsets_by_file,
+        violations: input.violations,
+    });
+    collect_banned_effects(&mut PolicyCollectionInput {
+        in_scope: &in_scope,
+        module,
+        node,
+        master,
+        declared_deps: input.declared_deps,
+        suppressions: input.suppressions,
+        line_offsets_by_file: input.line_offsets_by_file,
+        violations: input.violations,
+    });
+    collect_banned_calls(&mut PolicyCollectionInput {
+        in_scope: &in_scope,
+        module,
+        node,
+        master,
+        declared_deps: input.declared_deps,
+        suppressions: input.suppressions,
+        line_offsets_by_file: input.line_offsets_by_file,
+        violations: input.violations,
+    });
 }
 
 /// Compile every loaded pack rule. Rules pinned to `severity: "off"` are
@@ -270,40 +306,67 @@ fn collect_banned_imports(input: &mut PolicyCollectionInput<'_>) {
                 )
             }));
         for (source, is_type_only, span_start) in sites {
-            if rule.rule.ignore_type_only && is_type_only {
-                continue;
-            }
-            if !rule
-                .rule
-                .specifiers
-                .iter()
-                .any(|specifier| specifier_matches(source, specifier))
-            {
-                continue;
-            }
-            let (line, col) =
-                byte_offset_to_line_col(input.line_offsets_by_file, input.node.file_id, span_start);
-            if input.suppressions.is_policy_suppressed(
-                input.node.file_id,
-                line,
-                rule.pack,
-                &rule.rule.id,
-            ) {
-                continue;
-            }
-            input.violations.push(PolicyViolation {
-                path: input.node.path.clone(),
-                line,
-                col,
-                pack: rule.pack.to_owned(),
-                rule_id: rule.rule.id.clone(),
-                kind: PolicyRuleKind::BannedImport,
-                matched: source.to_owned(),
+            push_banned_import_if_matched(
+                input.node,
+                rule,
                 severity,
-                message: rule.rule.message.clone(),
-            });
+                &BannedImportSite {
+                    source,
+                    is_type_only,
+                    span_start,
+                },
+                input.suppressions,
+                input.line_offsets_by_file,
+                input.violations,
+            );
         }
     }
+}
+
+/// A single import / re-export specifier site evaluated by `banned-import`.
+struct BannedImportSite<'a> {
+    source: &'a str,
+    is_type_only: bool,
+    span_start: u32,
+}
+
+/// Push a `banned-import` violation when `site`'s specifier matches the rule and
+/// is neither type-only-skipped nor suppressed.
+fn push_banned_import_if_matched(
+    node: &crate::graph::ModuleNode,
+    rule: &CompiledRule<'_>,
+    severity: PolicyViolationSeverity,
+    site: &BannedImportSite<'_>,
+    suppressions: &SuppressionContext<'_>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+    violations: &mut Vec<PolicyViolation>,
+) {
+    if rule.rule.ignore_type_only && site.is_type_only {
+        return;
+    }
+    if !rule
+        .rule
+        .specifiers
+        .iter()
+        .any(|specifier| specifier_matches(site.source, specifier))
+    {
+        return;
+    }
+    let (line, col) = byte_offset_to_line_col(line_offsets_by_file, node.file_id, site.span_start);
+    if suppressions.is_policy_suppressed(node.file_id, line, rule.pack, &rule.rule.id) {
+        return;
+    }
+    violations.push(PolicyViolation {
+        path: node.path.clone(),
+        line,
+        col,
+        pack: rule.pack.to_owned(),
+        rule_id: rule.rule.id.clone(),
+        kind: PolicyRuleKind::BannedImport,
+        matched: site.source.to_owned(),
+        severity,
+        message: rule.rule.message.clone(),
+    });
 }
 
 fn collect_banned_effects(input: &mut PolicyCollectionInput<'_>) {

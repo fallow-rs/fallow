@@ -365,21 +365,8 @@ pub fn run_watch(opts: &WatchOptions<'_>) -> ExitCode {
     let _ = crate::signal::install_handlers();
     let _graceful = crate::signal::GracefulModeGuard::new();
 
-    let mut config = match load_config(
-        opts.root,
-        opts.config_path,
-        opts.output,
-        opts.no_cache,
-        opts.threads,
-        opts.production,
-        opts.quiet,
-    ) {
-        Ok(mut c) => {
-            if opts.include_entry_exports {
-                c.include_entry_exports = true;
-            }
-            c
-        }
+    let mut config = match load_watch_config(opts) {
+        Ok(config) => config,
         Err(code) => return code,
     };
 
@@ -426,47 +413,105 @@ pub fn run_watch(opts: &WatchOptions<'_>) -> ExitCode {
             );
         }
 
-        match rx.recv_timeout(Duration::from_millis(200)) {
-            Ok(Ok(paths)) => {
-                if detached {
-                    continue;
-                }
-                debouncer.push_paths(paths, Instant::now());
-            }
-            Ok(Err(e)) => {
-                eprintln!("Watch error: {e:?}");
-            }
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
+        match receive_watch_event(&rx, &mut debouncer, detached) {
+            WatchPoll::Continue => continue,
+            WatchPoll::Disconnected => {
                 eprintln!("Channel error: notify sender disconnected");
                 return ExitCode::from(2);
             }
+            WatchPoll::Idle => {}
         }
 
-        if !detached && let Some(paths) = debouncer.drain_ready(Instant::now(), DEBOUNCE_WINDOW) {
-            let changed = display_changed_paths(paths, opts.root);
-            if changed.is_empty() {
-                continue;
-            }
-
-            if opts.clear_screen && std::io::stderr().is_terminal() {
-                eprint!("{CLEAR_SCREEN}");
-            }
-
-            for path in &changed {
-                eprintln!("{} {path}", "Changed:".dimmed());
-            }
-            eprintln!();
-
-            reload_config_or_keep_previous(&mut config, opts, load_config);
-
-            let status = analyze_and_report(&config, opts);
-            if status != ExitCode::SUCCESS {
-                eprintln!("Watch analysis failed; continuing to watch for changes");
-            }
-            print_waiting(opts);
+        if !detached {
+            run_ready_reanalysis(&mut config, opts, &mut debouncer);
         }
     }
+}
+
+/// Outcome of polling the watch channel for one debounce window.
+enum WatchPoll {
+    /// Skip the rest of this loop iteration (event arrived while detached).
+    Continue,
+    /// The notify sender hung up; the caller should exit.
+    Disconnected,
+    /// Nothing actionable; fall through to the debounce drain.
+    Idle,
+}
+
+/// Poll the watch channel for up to 200ms, pushing any allowed paths into the
+/// debouncer. Mirrors the original inline recv handling.
+fn receive_watch_event(
+    rx: &std::sync::mpsc::Receiver<WatchEvent>,
+    debouncer: &mut PathDebouncer,
+    detached: bool,
+) -> WatchPoll {
+    use std::sync::mpsc::RecvTimeoutError;
+
+    match rx.recv_timeout(Duration::from_millis(200)) {
+        Ok(Ok(paths)) => {
+            if detached {
+                return WatchPoll::Continue;
+            }
+            debouncer.push_paths(paths, Instant::now());
+            WatchPoll::Idle
+        }
+        Ok(Err(e)) => {
+            eprintln!("Watch error: {e:?}");
+            WatchPoll::Idle
+        }
+        Err(RecvTimeoutError::Timeout) => WatchPoll::Idle,
+        Err(RecvTimeoutError::Disconnected) => WatchPoll::Disconnected,
+    }
+}
+
+/// Load the watch config, applying the `--include-entry-exports` override.
+fn load_watch_config(opts: &WatchOptions<'_>) -> Result<fallow_config::ResolvedConfig, ExitCode> {
+    let mut config = load_config(
+        opts.root,
+        opts.config_path,
+        opts.output,
+        opts.no_cache,
+        opts.threads,
+        opts.production,
+        opts.quiet,
+    )?;
+    if opts.include_entry_exports {
+        config.include_entry_exports = true;
+    }
+    Ok(config)
+}
+
+/// Drain the debouncer; if a non-empty batch is ready, reload config and
+/// re-run the analysis. No-op when no batch is ready or all paths dedupe away.
+fn run_ready_reanalysis(
+    config: &mut fallow_config::ResolvedConfig,
+    opts: &WatchOptions<'_>,
+    debouncer: &mut PathDebouncer,
+) {
+    let Some(paths) = debouncer.drain_ready(Instant::now(), DEBOUNCE_WINDOW) else {
+        return;
+    };
+    let changed = display_changed_paths(paths, opts.root);
+    if changed.is_empty() {
+        return;
+    }
+
+    if opts.clear_screen && std::io::stderr().is_terminal() {
+        eprint!("{CLEAR_SCREEN}");
+    }
+
+    for path in &changed {
+        eprintln!("{} {path}", "Changed:".dimmed());
+    }
+    eprintln!();
+
+    reload_config_or_keep_previous(config, opts, load_config);
+
+    let status = analyze_and_report(config, opts);
+    if status != ExitCode::SUCCESS {
+        eprintln!("Watch analysis failed; continuing to watch for changes");
+    }
+    print_waiting(opts);
 }
 
 type WatchEvent = Result<Vec<PathBuf>, notify::Error>;

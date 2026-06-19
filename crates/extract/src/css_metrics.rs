@@ -12,7 +12,9 @@
 use lightningcss::printer::PrinterOptions;
 use lightningcss::properties::Property;
 use lightningcss::properties::animation::AnimationName;
-use lightningcss::properties::custom::{CustomPropertyName, Token, TokenOrValue, Variable};
+use lightningcss::properties::custom::{
+    CustomProperty, CustomPropertyName, Token, TokenOrValue, Variable,
+};
 use lightningcss::properties::font::FontFamily;
 use lightningcss::rules::CssRule;
 use lightningcss::rules::font_face::FontFaceProperty;
@@ -302,94 +304,109 @@ fn record_style_rule(style: &StyleRule<'_>, depth: u8, acc: &mut Accumulator) {
         });
     }
 
-    // Design-token values (font-size / z-index, authored form), custom-property
-    // definitions, and animation-name references to @keyframes. Colors and
-    // `var()` references are collected separately by the value visitor.
+    collect_rule_property_tokens(style, acc);
+}
+
+/// Scan a rule's declarations (normal + `!important`) for design-token values,
+/// custom-property definitions, and `@keyframes` / font-family references,
+/// folding them into `acc`. Colors and `var()` references are collected
+/// separately by the value visitor.
+fn collect_rule_property_tokens(style: &StyleRule<'_>, acc: &mut Accumulator) {
     for property in style
         .declarations
         .declarations
         .iter()
         .chain(style.declarations.important_declarations.iter())
     {
-        match property {
-            Property::FontSize(font_size) => {
-                if let Ok(rendered) = font_size.to_css_string(PrinterOptions::default()) {
-                    acc.font_sizes.insert(rendered);
+        collect_property_tokens(property, acc);
+    }
+}
+
+/// Fold a single declaration's design-token value, custom-property definition,
+/// `@keyframes` reference, or font-family reference into `acc`.
+fn collect_property_tokens(property: &Property<'_>, acc: &mut Accumulator) {
+    match property {
+        Property::FontSize(font_size) => {
+            if let Ok(rendered) = font_size.to_css_string(PrinterOptions::default()) {
+                acc.font_sizes.insert(rendered);
+            }
+        }
+        Property::ZIndex(z_index) => {
+            if let Ok(rendered) = z_index.to_css_string(PrinterOptions::default()) {
+                acc.z_indexes.insert(rendered);
+            }
+        }
+        // Shadow / radius / line-height tokens (design-token-sprawl axes).
+        // The INNER value is serialized (not the property), so the vendor
+        // prefix is dropped and `-webkit-box-shadow: X` collapses to the same
+        // distinct value as `box-shadow: X` rather than inflating the count.
+        Property::BoxShadow(shadows, _) => {
+            let rendered: Vec<String> = shadows
+                .iter()
+                .filter_map(|shadow| shadow.to_css_string(PrinterOptions::default()).ok())
+                .collect();
+            if !rendered.is_empty() && rendered.len() == shadows.len() {
+                acc.box_shadows.insert(rendered.join(", "));
+            }
+        }
+        Property::BorderRadius(radius, _) => {
+            if let Ok(rendered) = radius.to_css_string(PrinterOptions::default()) {
+                acc.border_radii.insert(rendered);
+            }
+        }
+        Property::LineHeight(line_height) => {
+            if let Ok(rendered) = line_height.to_css_string(PrinterOptions::default()) {
+                acc.line_heights.insert(rendered);
+            }
+        }
+        Property::Custom(custom) => collect_custom_property_tokens(custom, acc),
+        Property::AnimationName(names, _) => {
+            for name in names {
+                collect_animation_name(name, &mut acc.referenced_keyframes);
+            }
+        }
+        Property::Animation(animations, _) => {
+            for animation in animations {
+                collect_animation_name(&animation.name, &mut acc.referenced_keyframes);
+            }
+        }
+        Property::FontFamily(families) => {
+            for family in families {
+                if let Some(name) = font_family_name(family) {
+                    acc.referenced_font_families.insert(name);
                 }
             }
-            Property::ZIndex(z_index) => {
-                if let Ok(rendered) = z_index.to_css_string(PrinterOptions::default()) {
-                    acc.z_indexes.insert(rendered);
+        }
+        Property::Font(font) => {
+            for family in &font.family {
+                if let Some(name) = font_family_name(family) {
+                    acc.referenced_font_families.insert(name);
                 }
             }
-            // Shadow / radius / line-height tokens (design-token-sprawl axes).
-            // The INNER value is serialized (not the property), so the vendor
-            // prefix is dropped and `-webkit-box-shadow: X` collapses to the same
-            // distinct value as `box-shadow: X` rather than inflating the count.
-            Property::BoxShadow(shadows, _) => {
-                let rendered: Vec<String> = shadows
-                    .iter()
-                    .filter_map(|shadow| shadow.to_css_string(PrinterOptions::default()).ok())
-                    .collect();
-                if !rendered.is_empty() && rendered.len() == shadows.len() {
-                    acc.box_shadows.insert(rendered.join(", "));
-                }
-            }
-            Property::BorderRadius(radius, _) => {
-                if let Ok(rendered) = radius.to_css_string(PrinterOptions::default()) {
-                    acc.border_radii.insert(rendered);
-                }
-            }
-            Property::LineHeight(line_height) => {
-                if let Ok(rendered) = line_height.to_css_string(PrinterOptions::default()) {
-                    acc.line_heights.insert(rendered);
-                }
-            }
-            Property::Custom(custom) => {
-                if let CustomPropertyName::Custom(name) = &custom.name {
-                    acc.defined_custom_properties.insert(name.0.to_string());
-                }
-                // A custom-property value can REFERENCE a font family without a
-                // `font-family:` declaration: a Tailwind v4 `--font-*` theme token
-                // (`--font-display: "Departure Mono", monospace`) is the canonical
-                // case. lightningcss's `Property::FontFamily` / `Property::Font`
-                // arms above never see this (a `--*:` declaration is an opaque
-                // token stream), so scan the raw tokens for string / ident values
-                // and credit them as referenced families. Generic keywords
-                // (`serif`, `monospace`) never appear in `defined_font_faces`, so
-                // crediting them here is inert; the `unused_font_faces`
-                // set-difference only ever drops a genuinely-declared family.
-                for token in &custom.value.0 {
-                    if let TokenOrValue::Token(Token::String(value) | Token::Ident(value)) = token {
-                        acc.referenced_font_families.insert(value.to_string());
-                    }
-                }
-            }
-            Property::AnimationName(names, _) => {
-                for name in names {
-                    collect_animation_name(name, &mut acc.referenced_keyframes);
-                }
-            }
-            Property::Animation(animations, _) => {
-                for animation in animations {
-                    collect_animation_name(&animation.name, &mut acc.referenced_keyframes);
-                }
-            }
-            Property::FontFamily(families) => {
-                for family in families {
-                    if let Some(name) = font_family_name(family) {
-                        acc.referenced_font_families.insert(name);
-                    }
-                }
-            }
-            Property::Font(font) => {
-                for family in &font.family {
-                    if let Some(name) = font_family_name(family) {
-                        acc.referenced_font_families.insert(name);
-                    }
-                }
-            }
-            _ => {}
+        }
+        _ => {}
+    }
+}
+
+/// Record a custom-property definition and credit any font-family string / ident
+/// values referenced inside its raw token stream.
+fn collect_custom_property_tokens(custom: &CustomProperty<'_>, acc: &mut Accumulator) {
+    if let CustomPropertyName::Custom(name) = &custom.name {
+        acc.defined_custom_properties.insert(name.0.to_string());
+    }
+    // A custom-property value can REFERENCE a font family without a
+    // `font-family:` declaration: a Tailwind v4 `--font-*` theme token
+    // (`--font-display: "Departure Mono", monospace`) is the canonical
+    // case. lightningcss's `Property::FontFamily` / `Property::Font`
+    // arms above never see this (a `--*:` declaration is an opaque
+    // token stream), so scan the raw tokens for string / ident values
+    // and credit them as referenced families. Generic keywords
+    // (`serif`, `monospace`) never appear in `defined_font_faces`, so
+    // crediting them here is inert; the `unused_font_faces`
+    // set-difference only ever drops a genuinely-declared family.
+    for token in &custom.value.0 {
+        if let TokenOrValue::Token(Token::String(value) | Token::Ident(value)) = token {
+            acc.referenced_font_families.insert(value.to_string());
         }
     }
 }

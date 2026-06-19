@@ -978,40 +978,7 @@ pub(super) fn collect_fixture_type_bindings_from_type(
     match ty {
         TSType::TSTypeLiteral(type_lit) => {
             for member in &type_lit.members {
-                let TSSignature::TSPropertySignature(prop) = member else {
-                    continue;
-                };
-                let Some(fixture_name) = prop.key.static_name() else {
-                    continue;
-                };
-                let Some(type_annotation) = prop.type_annotation.as_deref() else {
-                    continue;
-                };
-                let next_path = if path_prefix.is_empty() {
-                    fixture_name.to_string()
-                } else {
-                    format!("{path_prefix}.{fixture_name}")
-                };
-                if let Some((alias_name, _)) =
-                    fixture_type_reference_name(&type_annotation.type_annotation)
-                    && aliases.contains_key(alias_name.as_str())
-                {
-                    collect_fixture_type_bindings_from_type(
-                        &type_annotation.type_annotation,
-                        &next_path,
-                        aliases,
-                        bindings,
-                    );
-                } else if let Some(type_name) = extract_type_annotation_name(type_annotation) {
-                    bindings.push((next_path, type_name));
-                } else {
-                    collect_fixture_type_bindings_from_type(
-                        &type_annotation.type_annotation,
-                        &next_path,
-                        aliases,
-                        bindings,
-                    );
-                }
+                collect_fixture_type_binding_from_member(member, path_prefix, aliases, bindings);
             }
         }
         TSType::TSTypeReference(type_ref) => {
@@ -1043,6 +1010,49 @@ pub(super) fn collect_fixture_type_bindings_from_type(
             );
         }
         _ => {}
+    }
+}
+
+/// Process one type-literal member: resolve its `<path_prefix>.<fixture>` key and
+/// either record the concrete fixture type or recurse into an alias / nested type.
+fn collect_fixture_type_binding_from_member(
+    member: &TSSignature<'_>,
+    path_prefix: &str,
+    aliases: &FxHashMap<String, Vec<(String, String)>>,
+    bindings: &mut Vec<(String, String)>,
+) {
+    let TSSignature::TSPropertySignature(prop) = member else {
+        return;
+    };
+    let Some(fixture_name) = prop.key.static_name() else {
+        return;
+    };
+    let Some(type_annotation) = prop.type_annotation.as_deref() else {
+        return;
+    };
+    let next_path = if path_prefix.is_empty() {
+        fixture_name.to_string()
+    } else {
+        format!("{path_prefix}.{fixture_name}")
+    };
+    if let Some((alias_name, _)) = fixture_type_reference_name(&type_annotation.type_annotation)
+        && aliases.contains_key(alias_name.as_str())
+    {
+        collect_fixture_type_bindings_from_type(
+            &type_annotation.type_annotation,
+            &next_path,
+            aliases,
+            bindings,
+        );
+    } else if let Some(type_name) = extract_type_annotation_name(type_annotation) {
+        bindings.push((next_path, type_name));
+    } else {
+        collect_fixture_type_bindings_from_type(
+            &type_annotation.type_annotation,
+            &next_path,
+            aliases,
+            bindings,
+        );
     }
 }
 

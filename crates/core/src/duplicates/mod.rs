@@ -217,25 +217,17 @@ pub fn find_duplicates_touching_files_cached_with_default_ignore_skips(
     (run.report, run.default_ignore_skips)
 }
 
-fn find_duplicates_inner(
+/// Tokenize the corpus for duplication detection: resolves normalization and
+/// cache config, tokenizes files (writing the token cache when enabled), and
+/// returns the per-file token data alongside the corpus totals.
+fn tokenize_corpus_for_duplicates(
     root: &Path,
     files: &[DiscoveredFile],
     config: &DuplicatesConfig,
-    focus_files: Option<&FxHashSet<PathBuf>>,
+    extra_ignores: Option<&IgnoreSet>,
+    default_skip_counts: &[AtomicUsize],
     cache_root: Option<&Path>,
-) -> DuplicationRun {
-    let _span = tracing::info_span!("find_duplicates").entered();
-
-    let extra_ignores = build_ignore_set(config);
-    let default_skip_counts = extra_ignores
-        .as_ref()
-        .map(|ignores| {
-            std::iter::repeat_with(|| AtomicUsize::new(0))
-                .take(ignores.defaults.len())
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-
+) -> (Vec<TokenizedFile>, detect::CorpusTotals) {
     let normalization =
         fallow_config::ResolvedNormalization::resolve(config.mode, &config.normalization);
 
@@ -251,13 +243,13 @@ fn find_duplicates_inner(
     let cache_root = cache_root.filter(|_| files.len() >= config.min_corpus_size_for_token_cache);
     let token_cache = cache_root.map(TokenCache::load);
 
-    let mut file_data = tokenize_duplication_files(
+    let file_data = tokenize_duplication_files(
         files,
         &DuplicationTokenizeContext {
             root,
             config,
-            extra_ignores: extra_ignores.as_ref(),
-            default_skip_counts: &default_skip_counts,
+            extra_ignores,
+            default_skip_counts,
             token_cache: token_cache.as_ref(),
             token_cache_mode,
             normalization,
@@ -283,7 +275,19 @@ fn find_duplicates_inner(
             .sum(),
         tokens: file_data.iter().map(|file| file.hashed_tokens.len()).sum(),
     };
+    (file_data, corpus_totals)
+}
 
+/// Run clone detection over tokenized files, then apply suppression and
+/// min-occurrence filters, family grouping, mirrored-directory detection, and
+/// final sorting.
+fn detect_and_postprocess(
+    root: &Path,
+    config: &DuplicatesConfig,
+    mut file_data: Vec<TokenizedFile>,
+    corpus_totals: detect::CorpusTotals,
+    focus_files: Option<&FxHashSet<PathBuf>>,
+) -> DuplicationReport {
     if file_data.len() >= config.min_corpus_size_for_shingle_filter {
         if let Some(focus_files) = focus_files {
             shingle_filter::filter_to_focus_candidates(
@@ -321,15 +325,45 @@ fn find_duplicates_inner(
 
     apply_min_occurrences_filter(&mut report, config.min_occurrences);
 
-    let default_ignore_skips =
-        build_default_ignore_skips(extra_ignores.as_ref(), &default_skip_counts);
-
     report.clone_families = families::group_into_families(&report.clone_groups, root);
-
     report.mirrored_directories =
         families::detect_mirrored_directories(&report.clone_families, root);
-
     report.sort();
+    report
+}
+
+fn find_duplicates_inner(
+    root: &Path,
+    files: &[DiscoveredFile],
+    config: &DuplicatesConfig,
+    focus_files: Option<&FxHashSet<PathBuf>>,
+    cache_root: Option<&Path>,
+) -> DuplicationRun {
+    let _span = tracing::info_span!("find_duplicates").entered();
+
+    let extra_ignores = build_ignore_set(config);
+    let default_skip_counts = extra_ignores
+        .as_ref()
+        .map(|ignores| {
+            std::iter::repeat_with(|| AtomicUsize::new(0))
+                .take(ignores.defaults.len())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    let (file_data, corpus_totals) = tokenize_corpus_for_duplicates(
+        root,
+        files,
+        config,
+        extra_ignores.as_ref(),
+        &default_skip_counts,
+        cache_root,
+    );
+
+    let report = detect_and_postprocess(root, config, file_data, corpus_totals, focus_files);
+
+    let default_ignore_skips =
+        build_default_ignore_skips(extra_ignores.as_ref(), &default_skip_counts);
 
     DuplicationRun {
         report,

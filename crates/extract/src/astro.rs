@@ -221,14 +221,29 @@ fn extend_imports_from_template(
         .map(|m| (m.start(), m.end()))
         .collect();
 
+    extend_processed_script_src_imports(imports, template, template_offset, &comment_ranges);
+    extend_inline_script_imports(imports, template, template_offset, &comment_ranges);
+}
+
+/// Whether `pos` falls inside any HTML comment range.
+fn pos_in_comment(comment_ranges: &[(usize, usize)], pos: usize) -> bool {
+    comment_ranges
+        .iter()
+        .any(|&(start, end)| pos >= start && pos < end)
+}
+
+/// Append `<script src="...">` processed-script references from the template.
+fn extend_processed_script_src_imports(
+    imports: &mut Vec<ImportInfo>,
+    template: &str,
+    template_offset: usize,
+    comment_ranges: &[(usize, usize)],
+) {
     for cap in SCRIPT_OPEN_RE.captures_iter(template) {
         let Some(open) = cap.get(0) else {
             continue;
         };
-        if comment_ranges
-            .iter()
-            .any(|&(start, end)| open.start() >= start && open.start() < end)
-        {
+        if pos_in_comment(comment_ranges, open.start()) {
             continue;
         }
         let attrs = cap.name("attrs").map_or("", |m| m.as_str());
@@ -251,15 +266,21 @@ fn extend_imports_from_template(
             });
         }
     }
+}
 
+/// Append ESM `import` statements found in attribute-free inline `<script>`
+/// blocks of the template, remapping spans onto the SFC source.
+fn extend_inline_script_imports(
+    imports: &mut Vec<ImportInfo>,
+    template: &str,
+    template_offset: usize,
+    comment_ranges: &[(usize, usize)],
+) {
     for cap in SCRIPT_BLOCK_RE.captures_iter(template) {
         let Some(open) = cap.get(0) else {
             continue;
         };
-        if comment_ranges
-            .iter()
-            .any(|&(start, end)| open.start() >= start && open.start() < end)
-        {
+        if pos_in_comment(comment_ranges, open.start()) {
             continue;
         }
         let attrs = cap.name("attrs").map_or("", |m| m.as_str());

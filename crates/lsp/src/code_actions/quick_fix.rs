@@ -402,26 +402,34 @@ fn remove_catalog_entry_action(
             changes: Some(changes),
             ..Default::default()
         }),
-        diagnostics: Some(vec![Diagnostic {
-            range: Range {
-                start: Position {
-                    line: entry_line,
-                    character: 0,
-                },
-                end: Position {
-                    line: entry_line,
-                    character: u32::MAX,
-                },
-            },
-            severity: Some(DiagnosticSeverity::WARNING),
-            source: Some("fallow".to_string()),
-            code: Some(NumberOrString::String("unused-catalog-entry".to_string())),
-            message: catalog_entry_diagnostic_message(entry),
-            tags: Some(vec![DiagnosticTag::UNNECESSARY]),
-            ..Default::default()
-        }]),
+        diagnostics: Some(vec![catalog_entry_diagnostic(entry, entry_line)]),
         ..Default::default()
     })
+}
+
+/// Build the `unused-catalog-entry` diagnostic linked to the removal action.
+fn catalog_entry_diagnostic(
+    entry: &fallow_core::results::UnusedCatalogEntry,
+    entry_line: u32,
+) -> Diagnostic {
+    Diagnostic {
+        range: Range {
+            start: Position {
+                line: entry_line,
+                character: 0,
+            },
+            end: Position {
+                line: entry_line,
+                character: u32::MAX,
+            },
+        },
+        severity: Some(DiagnosticSeverity::WARNING),
+        source: Some("fallow".to_string()),
+        code: Some(NumberOrString::String("unused-catalog-entry".to_string())),
+        message: catalog_entry_diagnostic_message(entry),
+        tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+        ..Default::default()
+    }
 }
 
 fn catalog_entry_action_title(entry: &fallow_core::results::UnusedCatalogEntry) -> String {
@@ -467,10 +475,6 @@ fn catalog_entry_diagnostic_message(entry: &fallow_core::results::UnusedCatalogE
 /// passing the buffer in mirrors the sibling so the deletion range
 /// matches what the user sees in their editor when there are unsaved
 /// edits.
-#[expect(
-    clippy::disallowed_types,
-    reason = "WorkspaceEdit.changes is typed as std::collections::HashMap by ls-types"
-)]
 pub fn build_remove_empty_catalog_group_actions(
     results: &AnalysisResults,
     root: &Path,
@@ -486,90 +490,110 @@ pub fn build_remove_empty_catalog_group_actions(
 
     for group in &results.empty_catalog_groups {
         let group = &group.group;
-        if !is_pnpm_catalog_source(&group.path) {
-            continue;
-        }
-        let Some(group_uri) = Uri::from_file_path(root.join(&group.path)) else {
+        let Some(group_line) =
+            empty_catalog_group_delete_line(group, root, uri, cursor_range, file_lines)
+        else {
             continue;
         };
-        if group_uri != *uri {
-            continue;
-        }
-
-        let group_line = group.line.saturating_sub(1);
-        if group_line < cursor_range.start.line || group_line > cursor_range.end.line {
-            continue;
-        }
-
-        let start_idx = group_line as usize;
-        if start_idx >= file_lines.len() {
-            continue;
-        }
-        if !line_matches_catalog_key(file_lines[start_idx], &group.catalog_name) {
-            continue;
-        }
-
-        let title = format!("Remove empty catalog group `{}`", group.catalog_name);
-
-        let mut changes = HashMap::new();
-        let edits = vec![TextEdit {
-            range: Range {
-                start: Position {
-                    #[expect(
-                        clippy::cast_possible_truncation,
-                        reason = "line index is bounded by source size"
-                    )]
-                    line: start_idx as u32,
-                    character: 0,
-                },
-                end: Position {
-                    #[expect(
-                        clippy::cast_possible_truncation,
-                        reason = "line index is bounded by source size"
-                    )]
-                    line: (start_idx + 1) as u32,
-                    character: 0,
-                },
-            },
-            new_text: String::new(),
-        }];
-        changes.insert(uri.clone(), edits);
-
-        let diagnostic_message = format!(
-            "Empty catalog group: '{}' has no entries",
-            group.catalog_name
-        );
-
-        actions.push(CodeActionOrCommand::CodeAction(CodeAction {
-            title,
-            kind: Some(CodeActionKind::QUICKFIX),
-            edit: Some(WorkspaceEdit {
-                changes: Some(changes),
-                ..Default::default()
-            }),
-            diagnostics: Some(vec![Diagnostic {
-                range: Range {
-                    start: Position {
-                        line: group_line,
-                        character: 0,
-                    },
-                    end: Position {
-                        line: group_line,
-                        character: u32::MAX,
-                    },
-                },
-                severity: Some(DiagnosticSeverity::WARNING),
-                source: Some("fallow".to_string()),
-                code: Some(NumberOrString::String("empty-catalog-group".to_string())),
-                message: diagnostic_message,
-                tags: Some(vec![DiagnosticTag::UNNECESSARY]),
-                ..Default::default()
-            }]),
-            ..Default::default()
-        }));
+        actions.push(remove_empty_catalog_group_action(group, uri, group_line));
     }
 
     actions
+}
+
+/// Validate that an empty-catalog-group finding still anchors to a matching
+/// header line within the cursor range, returning the 0-based line to delete.
+fn empty_catalog_group_delete_line(
+    group: &fallow_core::results::EmptyCatalogGroup,
+    root: &Path,
+    uri: &Uri,
+    cursor_range: &Range,
+    file_lines: &[&str],
+) -> Option<u32> {
+    if !is_pnpm_catalog_source(&group.path) {
+        return None;
+    }
+    let group_uri = Uri::from_file_path(root.join(&group.path))?;
+    if group_uri != *uri {
+        return None;
+    }
+
+    let group_line = group.line.saturating_sub(1);
+    if group_line < cursor_range.start.line || group_line > cursor_range.end.line {
+        return None;
+    }
+
+    let start_idx = group_line as usize;
+    if start_idx >= file_lines.len() {
+        return None;
+    }
+    if !line_matches_catalog_key(file_lines[start_idx], &group.catalog_name) {
+        return None;
+    }
+
+    Some(group_line)
+}
+
+/// Build the single-line deletion code action for an empty catalog group.
+#[expect(
+    clippy::disallowed_types,
+    reason = "WorkspaceEdit.changes is typed as std::collections::HashMap by ls-types"
+)]
+fn remove_empty_catalog_group_action(
+    group: &fallow_core::results::EmptyCatalogGroup,
+    uri: &Uri,
+    group_line: u32,
+) -> CodeActionOrCommand {
+    let title = format!("Remove empty catalog group `{}`", group.catalog_name);
+
+    let mut changes = HashMap::new();
+    let edits = vec![TextEdit {
+        range: Range {
+            start: Position {
+                line: group_line,
+                character: 0,
+            },
+            end: Position {
+                line: group_line + 1,
+                character: 0,
+            },
+        },
+        new_text: String::new(),
+    }];
+    changes.insert(uri.clone(), edits);
+
+    let diagnostic_message = format!(
+        "Empty catalog group: '{}' has no entries",
+        group.catalog_name
+    );
+
+    CodeActionOrCommand::CodeAction(CodeAction {
+        title,
+        kind: Some(CodeActionKind::QUICKFIX),
+        edit: Some(WorkspaceEdit {
+            changes: Some(changes),
+            ..Default::default()
+        }),
+        diagnostics: Some(vec![Diagnostic {
+            range: Range {
+                start: Position {
+                    line: group_line,
+                    character: 0,
+                },
+                end: Position {
+                    line: group_line,
+                    character: u32::MAX,
+                },
+            },
+            severity: Some(DiagnosticSeverity::WARNING),
+            source: Some("fallow".to_string()),
+            code: Some(NumberOrString::String("empty-catalog-group".to_string())),
+            message: diagnostic_message,
+            tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+            ..Default::default()
+        }]),
+        ..Default::default()
+    })
 }
 
 fn is_pnpm_catalog_source(path: &Path) -> bool {

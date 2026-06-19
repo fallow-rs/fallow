@@ -281,89 +281,114 @@ impl Plugin for NuxtPlugin {
         let mut result = PluginResult::default();
 
         if config_path.file_stem().is_some_and(|stem| stem == "module") {
-            add_module_runtime_patterns(&mut result, root);
-
-            let imports = config_parser::extract_imports(source, config_path);
-            for imp in &imports {
-                let dep = crate::resolve::extract_package_name(imp);
-                result.referenced_dependencies.push(dep);
-            }
-
+            resolve_nuxt_module_file(&mut result, source, config_path, root);
             return result;
         }
 
-        let default_src_dir = default_nuxt_src_dir(root);
-        let configured_src_dir = extract_nuxt_src_dir(source, config_path, root);
-        let src_dir = configured_src_dir
-            .clone()
-            .unwrap_or_else(|| default_src_dir.clone());
-
-        if let Some(configured_src_dir) = configured_src_dir.as_deref()
-            && configured_src_dir != default_src_dir.as_path()
-        {
-            add_src_dir_support(&mut result, configured_src_dir);
-        }
-
-        let imports = config_parser::extract_imports(source, config_path);
-        add_referenced_packages(&mut result, &imports);
-
-        let modules = config_parser::extract_config_string_array(source, config_path, &["modules"]);
-        let content_module_registered = add_nuxt_module_dependencies(&mut result, &modules);
-
-        if content_module_registered
-            && let Some(pattern) = content_config_entry_pattern(config_path, root)
-        {
-            add_default_used_export(&mut result, &pattern);
-            result.push_entry_pattern(pattern);
-        }
-
-        let css = config_parser::extract_config_string_array(source, config_path, &["css"]);
-        add_nuxt_css_entries(&mut result, &css, config_path, root, &src_dir);
-
-        let postcss_plugins =
-            config_parser::extract_config_object_keys(source, config_path, &["postcss", "plugins"]);
-        add_referenced_packages(&mut result, &postcss_plugins);
-
-        let mut plugins =
-            config_parser::extract_config_string_array(source, config_path, &["plugins"]);
-        plugins.extend(config_parser::extract_config_array_object_strings(
-            source,
-            config_path,
-            &["plugins"],
-            "src",
-        ));
-        add_nuxt_plugin_entries(&mut result, plugins, config_path, root, &src_dir);
-
-        add_nuxt_aliases(&mut result, source, config_path, root, &src_dir);
-
-        add_nuxt_import_dirs(&mut result, source, config_path, root, &src_dir);
-
-        let mut component_dirs =
-            config_parser::extract_config_string_array(source, config_path, &["components"]);
-        component_dirs.extend(config_parser::extract_config_array_object_strings(
-            source,
-            config_path,
-            &["components"],
-            "path",
-        ));
-        component_dirs.extend(config_parser::extract_config_array_object_strings(
-            source,
-            config_path,
-            &["components", "dirs"],
-            "path",
-        ));
-        component_dirs.extend(config_parser::extract_config_string_array(
-            source,
-            config_path,
-            &["components", "dirs"],
-        ));
-        add_nuxt_component_dirs(&mut result, component_dirs, config_path, root, &src_dir);
-
-        let extends = config_parser::extract_config_string_array(source, config_path, &["extends"]);
-        add_referenced_packages(&mut result, &extends);
-
+        resolve_nuxt_main_config(&mut result, source, config_path, root);
         result
     }
+}
+
+/// Handle a Nuxt `module.{ts,js}` config file: seed runtime patterns and credit
+/// the packages it imports.
+fn resolve_nuxt_module_file(
+    result: &mut PluginResult,
+    source: &str,
+    config_path: &Path,
+    root: &Path,
+) {
+    add_module_runtime_patterns(result, root);
+
+    let imports = config_parser::extract_imports(source, config_path);
+    for imp in &imports {
+        let dep = crate::resolve::extract_package_name(imp);
+        result.referenced_dependencies.push(dep);
+    }
+}
+
+/// Handle a Nuxt `nuxt.config.*` file: resolve the src dir, then credit modules,
+/// css, plugins, aliases, import dirs, component dirs, and extends.
+fn resolve_nuxt_main_config(
+    result: &mut PluginResult,
+    source: &str,
+    config_path: &Path,
+    root: &Path,
+) {
+    let default_src_dir = default_nuxt_src_dir(root);
+    let configured_src_dir = extract_nuxt_src_dir(source, config_path, root);
+    let src_dir = configured_src_dir
+        .clone()
+        .unwrap_or_else(|| default_src_dir.clone());
+
+    if let Some(configured_src_dir) = configured_src_dir.as_deref()
+        && configured_src_dir != default_src_dir.as_path()
+    {
+        add_src_dir_support(result, configured_src_dir);
+    }
+
+    let imports = config_parser::extract_imports(source, config_path);
+    add_referenced_packages(result, &imports);
+
+    let modules = config_parser::extract_config_string_array(source, config_path, &["modules"]);
+    let content_module_registered = add_nuxt_module_dependencies(result, &modules);
+
+    if content_module_registered
+        && let Some(pattern) = content_config_entry_pattern(config_path, root)
+    {
+        add_default_used_export(result, &pattern);
+        result.push_entry_pattern(pattern);
+    }
+
+    let css = config_parser::extract_config_string_array(source, config_path, &["css"]);
+    add_nuxt_css_entries(result, &css, config_path, root, &src_dir);
+
+    let postcss_plugins =
+        config_parser::extract_config_object_keys(source, config_path, &["postcss", "plugins"]);
+    add_referenced_packages(result, &postcss_plugins);
+
+    let mut plugins = config_parser::extract_config_string_array(source, config_path, &["plugins"]);
+    plugins.extend(config_parser::extract_config_array_object_strings(
+        source,
+        config_path,
+        &["plugins"],
+        "src",
+    ));
+    add_nuxt_plugin_entries(result, plugins, config_path, root, &src_dir);
+
+    add_nuxt_aliases(result, source, config_path, root, &src_dir);
+    add_nuxt_import_dirs(result, source, config_path, root, &src_dir);
+
+    let component_dirs = collect_nuxt_component_dirs(source, config_path);
+    add_nuxt_component_dirs(result, component_dirs, config_path, root, &src_dir);
+
+    let extends = config_parser::extract_config_string_array(source, config_path, &["extends"]);
+    add_referenced_packages(result, &extends);
+}
+
+/// Collect Nuxt component directory entries from `components`, its object `path`
+/// form, and the nested `components.dirs` array/object forms.
+fn collect_nuxt_component_dirs(source: &str, config_path: &Path) -> Vec<String> {
+    let mut component_dirs =
+        config_parser::extract_config_string_array(source, config_path, &["components"]);
+    component_dirs.extend(config_parser::extract_config_array_object_strings(
+        source,
+        config_path,
+        &["components"],
+        "path",
+    ));
+    component_dirs.extend(config_parser::extract_config_array_object_strings(
+        source,
+        config_path,
+        &["components", "dirs"],
+        "path",
+    ));
+    component_dirs.extend(config_parser::extract_config_string_array(
+        source,
+        config_path,
+        &["components", "dirs"],
+    ));
+    component_dirs
 }
 
 fn add_referenced_packages(result: &mut PluginResult, entries: &[String]) {

@@ -258,104 +258,54 @@ impl ModuleInfoExtractor {
         match decl {
             Declaration::FunctionDeclaration(func) => {
                 if let Some(id) = func.id.as_ref() {
-                    self.pending_namespace_members.push(MemberInfo {
-                        name: id.name.to_string(),
-                        kind: MemberKind::NamespaceMember,
-                        span: id.span,
-                        has_decorator: false,
-                        decorator_names: Vec::new(),
-                        is_instance_returning_static: false,
-                        is_self_returning: false,
-                    });
+                    self.push_namespace_member(id.name.to_string(), id.span);
                 }
             }
             Declaration::VariableDeclaration(var) => {
                 for declarator in &var.declarations {
                     for id in declarator.id.get_binding_identifiers() {
-                        self.pending_namespace_members.push(MemberInfo {
-                            name: id.name.to_string(),
-                            kind: MemberKind::NamespaceMember,
-                            span: id.span,
-                            has_decorator: false,
-                            decorator_names: Vec::new(),
-                            is_instance_returning_static: false,
-                            is_self_returning: false,
-                        });
+                        self.push_namespace_member(id.name.to_string(), id.span);
                     }
                 }
             }
             Declaration::ClassDeclaration(class) => {
                 if let Some(id) = class.id.as_ref() {
-                    self.pending_namespace_members.push(MemberInfo {
-                        name: id.name.to_string(),
-                        kind: MemberKind::NamespaceMember,
-                        span: id.span,
-                        has_decorator: false,
-                        decorator_names: Vec::new(),
-                        is_instance_returning_static: false,
-                        is_self_returning: false,
-                    });
+                    self.push_namespace_member(id.name.to_string(), id.span);
                 }
             }
             Declaration::TSEnumDeclaration(enumd) => {
-                self.pending_namespace_members.push(MemberInfo {
-                    name: enumd.id.name.to_string(),
-                    kind: MemberKind::NamespaceMember,
-                    span: enumd.id.span,
-                    has_decorator: false,
-                    decorator_names: Vec::new(),
-                    is_instance_returning_static: false,
-                    is_self_returning: false,
-                });
+                self.push_namespace_member(enumd.id.name.to_string(), enumd.id.span);
             }
             Declaration::TSInterfaceDeclaration(iface) => {
-                self.pending_namespace_members.push(MemberInfo {
-                    name: iface.id.name.to_string(),
-                    kind: MemberKind::NamespaceMember,
-                    span: iface.id.span,
-                    has_decorator: false,
-                    decorator_names: Vec::new(),
-                    is_instance_returning_static: false,
-                    is_self_returning: false,
-                });
+                self.push_namespace_member(iface.id.name.to_string(), iface.id.span);
             }
             Declaration::TSTypeAliasDeclaration(alias) => {
-                self.pending_namespace_members.push(MemberInfo {
-                    name: alias.id.name.to_string(),
-                    kind: MemberKind::NamespaceMember,
-                    span: alias.id.span,
-                    has_decorator: false,
-                    decorator_names: Vec::new(),
-                    is_instance_returning_static: false,
-                    is_self_returning: false,
-                });
+                self.push_namespace_member(alias.id.name.to_string(), alias.id.span);
             }
             Declaration::TSModuleDeclaration(module) => match &module.id {
                 TSModuleDeclarationName::Identifier(id) => {
-                    self.pending_namespace_members.push(MemberInfo {
-                        name: id.name.to_string(),
-                        kind: MemberKind::NamespaceMember,
-                        span: id.span,
-                        has_decorator: false,
-                        decorator_names: Vec::new(),
-                        is_instance_returning_static: false,
-                        is_self_returning: false,
-                    });
+                    self.push_namespace_member(id.name.to_string(), id.span);
                 }
                 TSModuleDeclarationName::StringLiteral(lit) => {
-                    self.pending_namespace_members.push(MemberInfo {
-                        name: lit.value.to_string(),
-                        kind: MemberKind::NamespaceMember,
-                        span: lit.span,
-                        has_decorator: false,
-                        decorator_names: Vec::new(),
-                        is_instance_returning_static: false,
-                        is_self_returning: false,
-                    });
+                    self.push_namespace_member(lit.value.to_string(), lit.span);
                 }
             },
             _ => {}
         }
+    }
+
+    /// Push a single namespace-member entry with the shared `NamespaceMember`
+    /// defaults (no decorator / static / self-return signals).
+    fn push_namespace_member(&mut self, name: String, span: oxc_span::Span) {
+        self.pending_namespace_members.push(MemberInfo {
+            name,
+            kind: MemberKind::NamespaceMember,
+            span,
+            has_decorator: false,
+            decorator_names: Vec::new(),
+            is_instance_returning_static: false,
+            is_self_returning: false,
+        });
     }
 
     /// Handle `const x = require('./y')` patterns, recording the require call

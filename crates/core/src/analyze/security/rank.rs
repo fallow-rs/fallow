@@ -239,41 +239,46 @@ pub fn rank_security_findings(
         finding.severity = derive_security_severity(finding);
     }
 
-    findings.sort_by(|a, b| {
-        let (ra, rb) = (a.reachability.as_ref(), b.reachability.as_ref());
-        // Reachable-from-entry findings sort first.
-        let reach_a = ra.is_some_and(|r| r.reachable_from_entry);
-        let reach_b = rb.is_some_and(|r| r.reachable_from_entry);
-        reach_b
-            .cmp(&reach_a)
-            // Then same-module source-backed sinks first.
-            .then_with(|| b.source_backed.cmp(&a.source_backed))
-            // Then module-level source-reachable sinks first.
-            .then_with(|| {
-                let source_a = ra.is_some_and(|r| r.reachable_from_untrusted_source);
-                let source_b = rb.is_some_and(|r| r.reachable_from_untrusted_source);
-                source_b.cmp(&source_a)
-            })
-            // Then larger blast radius first.
-            .then_with(|| {
-                let ba = ra.map_or(0, |r| r.blast_radius);
-                let bb = rb.map_or(0, |r| r.blast_radius);
-                bb.cmp(&ba)
-            })
-            // Then boundary-crossing candidates first.
-            .then_with(|| {
-                let ca = ra.is_some_and(|r| r.crosses_boundary);
-                let cb = rb.is_some_and(|r| r.crosses_boundary);
-                cb.cmp(&ca)
-            })
-            // Then active-code candidates before dead-code candidates.
-            .then_with(|| a.dead_code.is_some().cmp(&b.dead_code.is_some()))
-            // Deterministic tiebreak (matches the detectors' own ordering).
-            .then_with(|| a.path.cmp(&b.path))
-            .then_with(|| a.line.cmp(&b.line))
-            .then_with(|| a.col.cmp(&b.col))
-            .then_with(|| a.category.cmp(&b.category))
-    });
+    findings.sort_by(compare_ranked_findings);
+}
+
+/// Rank ordering for two enriched security findings: entry-reachable, then
+/// source-backed, then source-reachable, blast radius, boundary crossing, active
+/// before dead, then a deterministic path/line/col/category tiebreak.
+fn compare_ranked_findings(a: &SecurityFinding, b: &SecurityFinding) -> std::cmp::Ordering {
+    let (ra, rb) = (a.reachability.as_ref(), b.reachability.as_ref());
+    // Reachable-from-entry findings sort first.
+    let reach_a = ra.is_some_and(|r| r.reachable_from_entry);
+    let reach_b = rb.is_some_and(|r| r.reachable_from_entry);
+    reach_b
+        .cmp(&reach_a)
+        // Then same-module source-backed sinks first.
+        .then_with(|| b.source_backed.cmp(&a.source_backed))
+        // Then module-level source-reachable sinks first.
+        .then_with(|| {
+            let source_a = ra.is_some_and(|r| r.reachable_from_untrusted_source);
+            let source_b = rb.is_some_and(|r| r.reachable_from_untrusted_source);
+            source_b.cmp(&source_a)
+        })
+        // Then larger blast radius first.
+        .then_with(|| {
+            let ba = ra.map_or(0, |r| r.blast_radius);
+            let bb = rb.map_or(0, |r| r.blast_radius);
+            bb.cmp(&ba)
+        })
+        // Then boundary-crossing candidates first.
+        .then_with(|| {
+            let ca = ra.is_some_and(|r| r.crosses_boundary);
+            let cb = rb.is_some_and(|r| r.crosses_boundary);
+            cb.cmp(&ca)
+        })
+        // Then active-code candidates before dead-code candidates.
+        .then_with(|| a.dead_code.is_some().cmp(&b.dead_code.is_some()))
+        // Deterministic tiebreak (matches the detectors' own ordering).
+        .then_with(|| a.path.cmp(&b.path))
+        .then_with(|| a.line.cmp(&b.line))
+        .then_with(|| a.col.cmp(&b.col))
+        .then_with(|| a.category.cmp(&b.category))
 }
 
 /// Derive the verification-priority tier from existing security signals. This is
@@ -572,36 +577,54 @@ impl UntrustedSourceIndex {
         let hop_count = u32::try_from(ids.len().saturating_sub(1)).unwrap_or(u32::MAX);
 
         if source_id == sink_id {
-            // Arg-level (source_backed): anchor the source node at the real
-            // source read and label it `UntrustedSource` (a specific read is
-            // implicated). Module-level (source elsewhere in the same file, no
-            // arg trace): keep line 1 and label `ModuleSource` so the node is
-            // never read as a proven value path (issue #1093). `source_read` is
-            // Some exactly when `source_backed`.
-            let (source_line, source_col, source_role) = finding
-                .source_read
-                .map_or((1, 0, TraceHopRole::ModuleSource), |(line, col)| {
-                    (line, col, TraceHopRole::UntrustedSource)
-                });
-            return Some(UntrustedSourceTrace {
-                hop_count,
-                trace: vec![
-                    TraceHop {
-                        path: finding.path.clone(),
-                        line: source_line,
-                        col: source_col,
-                        role: source_role,
-                    },
-                    TraceHop {
-                        path: finding.path.clone(),
-                        line: finding.line,
-                        col: finding.col,
-                        role: TraceHopRole::Sink,
-                    },
-                ],
-            });
+            return Some(Self::same_module_trace(finding, hop_count));
         }
 
+        let trace = self.multi_hop_trace(graph, &ids, finding, line_offsets_by_file)?;
+        Some(UntrustedSourceTrace { hop_count, trace })
+    }
+
+    /// Build the two-hop arg-level / module-level trace for a sink whose source
+    /// read is in the same module (issue #1093).
+    fn same_module_trace(finding: &SecurityFinding, hop_count: u32) -> UntrustedSourceTrace {
+        // Arg-level (source_backed): anchor the source node at the real
+        // source read and label it `UntrustedSource` (a specific read is
+        // implicated). Module-level (source elsewhere in the same file, no
+        // arg trace): keep line 1 and label `ModuleSource` so the node is
+        // never read as a proven value path (issue #1093). `source_read` is
+        // Some exactly when `source_backed`.
+        let (source_line, source_col, source_role) = finding
+            .source_read
+            .map_or((1, 0, TraceHopRole::ModuleSource), |(line, col)| {
+                (line, col, TraceHopRole::UntrustedSource)
+            });
+        UntrustedSourceTrace {
+            hop_count,
+            trace: vec![
+                TraceHop {
+                    path: finding.path.clone(),
+                    line: source_line,
+                    col: source_col,
+                    role: source_role,
+                },
+                TraceHop {
+                    path: finding.path.clone(),
+                    line: finding.line,
+                    col: finding.col,
+                    role: TraceHopRole::Sink,
+                },
+            ],
+        }
+    }
+
+    /// Build the cross-module trace from the resolved source -> sink id chain.
+    fn multi_hop_trace(
+        &self,
+        graph: &ModuleGraph,
+        ids: &[FileId],
+        finding: &SecurityFinding,
+        line_offsets_by_file: &LineOffsetsMap<'_>,
+    ) -> Option<Vec<TraceHop>> {
         let mut trace = Vec::with_capacity(ids.len().saturating_add(1));
         for (idx, &file_id) in ids.iter().enumerate() {
             let path = graph.modules.get(file_id.0 as usize)?.path.clone();
@@ -638,8 +661,7 @@ impl UntrustedSourceIndex {
                 },
             });
         }
-
-        Some(UntrustedSourceTrace { hop_count, trace })
+        Some(trace)
     }
 }
 

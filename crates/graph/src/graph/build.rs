@@ -172,8 +172,30 @@ fn build_module_node(
     entry_point_ids: &FxHashSet<FileId>,
     edge_range: std::ops::Range<usize>,
 ) -> ModuleNode {
-    let mut exports: Vec<ExportSymbol> = module_by_id
-        .get(&file.id)
+    let resolved = module_by_id.get(&file.id).copied();
+
+    let mut exports = build_export_symbols(resolved);
+    if let Some(resolved) = resolved {
+        append_named_re_export_stubs(&mut exports, resolved);
+    }
+
+    let has_cjs_exports = resolved.is_some_and(|m| m.has_cjs_exports);
+    let re_export_edges = build_re_export_edges(resolved);
+
+    ModuleNode {
+        file_id: file.id,
+        path: file.path.clone(),
+        edge_range,
+        exports,
+        re_exports: re_export_edges,
+        flags: ModuleNode::flags_from(entry_point_ids.contains(&file.id), false, has_cjs_exports),
+    }
+}
+
+/// Copy a resolved module's own exports into fresh `ExportSymbol` entries
+/// (references start empty; they are populated in Phase 2).
+fn build_export_symbols(resolved: Option<&ResolvedModule>) -> Vec<ExportSymbol> {
+    resolved
         .map(|m| {
             m.exports
                 .iter()
@@ -189,43 +211,43 @@ fn build_module_node(
                 })
                 .collect()
         })
-        .unwrap_or_default();
+        .unwrap_or_default()
+}
 
-    if let Some(resolved) = module_by_id.get(&file.id) {
-        for re in &resolved.re_exports {
-            if re.info.exported_name == "*" {
-                continue;
-            }
-
-            let export_name = if re.info.exported_name == "default" {
-                ExportName::Default
-            } else {
-                ExportName::Named(re.info.exported_name.clone())
-            };
-            let already_exists = exports.iter().any(|e| e.name == export_name);
-            if already_exists {
-                continue;
-            }
-
-            exports.push(ExportSymbol {
-                name: export_name,
-                is_type_only: re.info.is_type_only,
-                is_side_effect_used: false,
-                visibility: VisibilityTag::None,
-                expected_unused_reason: None,
-                span: re.info.span,
-                references: Vec::new(),
-                members: Vec::new(),
-            });
+/// Add a synthetic `ExportSymbol` for each named re-export that does not already
+/// have a same-named local export. Star re-exports are skipped.
+fn append_named_re_export_stubs(exports: &mut Vec<ExportSymbol>, resolved: &ResolvedModule) {
+    for re in &resolved.re_exports {
+        if re.info.exported_name == "*" {
+            continue;
         }
+
+        let export_name = if re.info.exported_name == "default" {
+            ExportName::Default
+        } else {
+            ExportName::Named(re.info.exported_name.clone())
+        };
+        if exports.iter().any(|e| e.name == export_name) {
+            continue;
+        }
+
+        exports.push(ExportSymbol {
+            name: export_name,
+            is_type_only: re.info.is_type_only,
+            is_side_effect_used: false,
+            visibility: VisibilityTag::None,
+            expected_unused_reason: None,
+            span: re.info.span,
+            references: Vec::new(),
+            members: Vec::new(),
+        });
     }
+}
 
-    let has_cjs_exports = module_by_id
-        .get(&file.id)
-        .is_some_and(|m| m.has_cjs_exports);
-
-    let re_export_edges: Vec<ReExportEdge> = module_by_id
-        .get(&file.id)
+/// Build the internal re-export edge list for a module (external re-export
+/// targets are dropped here; they are handled via package usage).
+fn build_re_export_edges(resolved: Option<&ResolvedModule>) -> Vec<ReExportEdge> {
+    resolved
         .map(|m| {
             m.re_exports
                 .iter()
@@ -240,16 +262,7 @@ fn build_module_node(
                 })
                 .collect()
         })
-        .unwrap_or_default();
-
-    ModuleNode {
-        file_id: file.id,
-        path: file.path.clone(),
-        edge_range,
-        exports,
-        re_exports: re_export_edges,
-        flags: ModuleNode::flags_from(entry_point_ids.contains(&file.id), false, has_cjs_exports),
-    }
+        .unwrap_or_default()
 }
 
 impl ModuleGraph {

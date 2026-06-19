@@ -25,29 +25,7 @@ pub fn build_analyze_args(params: &AnalyzeParams) -> Result<Vec<String>, String>
     );
     push_scope(&mut args, params.production, params.workspace.as_deref());
 
-    let types_has_boundaries = params
-        .issue_types
-        .as_ref()
-        .is_some_and(|types| types.iter().any(|t| t == "boundary-violations"));
-    if params.boundary_violations == Some(true) && !types_has_boundaries {
-        args.push("--boundary-violations".to_string());
-    }
-    if let Some(ref types) = params.issue_types {
-        for t in types {
-            if let Some(&(_, flag)) = ISSUE_TYPE_FLAGS.iter().find(|&&(name, _)| name == t) {
-                args.push(flag.to_string());
-            } else {
-                let valid = ISSUE_TYPE_FLAGS
-                    .iter()
-                    .map(|&(n, _)| n)
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                return Err(validation_error_body(format!(
-                    "Unknown issue type '{t}'. Valid values: {valid}"
-                )));
-            }
-        }
-    }
+    push_analyze_issue_type_flags(&mut args, params)?;
     push_baseline(
         &mut args,
         params.baseline.as_deref(),
@@ -73,4 +51,37 @@ pub fn build_analyze_args(params: &AnalyzeParams) -> Result<Vec<String>, String>
     }
 
     Ok(args)
+}
+
+/// Push the `--boundary-violations` convenience flag and validated
+/// per-issue-type flags for the `analyze` tool.
+fn push_analyze_issue_type_flags(
+    args: &mut Vec<String>,
+    params: &AnalyzeParams,
+) -> Result<(), String> {
+    let types_has_boundaries = params
+        .issue_types
+        .as_ref()
+        .is_some_and(|types| types.iter().any(|t| t == "boundary-violations"));
+    if params.boundary_violations == Some(true) && !types_has_boundaries {
+        args.push("--boundary-violations".to_string());
+    }
+    let Some(ref types) = params.issue_types else {
+        return Ok(());
+    };
+    for t in types {
+        if let Some(&(_, flag)) = ISSUE_TYPE_FLAGS.iter().find(|&&(name, _)| name == t) {
+            args.push(flag.to_string());
+        } else {
+            let valid = ISSUE_TYPE_FLAGS
+                .iter()
+                .map(|&(n, _)| n)
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(validation_error_body(format!(
+                "Unknown issue type '{t}'. Valid values: {valid}"
+            )));
+        }
+    }
+    Ok(())
 }

@@ -206,53 +206,65 @@ pub fn find_undeclared_workspaces_with_ignores(
 
     for entry in top_entries.filter_map(Result::ok) {
         let path = entry.path();
-        if !path.is_dir() {
+        if !path.is_dir() || is_undeclared_scan_skip_dir(&entry.file_name().to_string_lossy()) {
             continue;
         }
 
-        let name = entry.file_name();
-        let name_str = name.to_string_lossy();
-        if name_str.starts_with('.') || name_str == "node_modules" || name_str == "build" {
-            continue;
-        }
-
+        let mut input = UndeclaredScanInput {
+            root,
+            canonical_root: &canonical_root,
+            declared_roots: &declared_roots,
+            ignore_patterns,
+            undeclared: &mut undeclared,
+        };
         check_undeclared(
             &path,
-            root,
-            &canonical_root,
-            &declared_roots,
-            ignore_patterns,
-            &mut undeclared,
+            input.root,
+            input.canonical_root,
+            input.declared_roots,
+            input.ignore_patterns,
+            input.undeclared,
         );
-
-        let Ok(child_entries) = std::fs::read_dir(&path) else {
-            continue;
-        };
-        for child in child_entries.filter_map(Result::ok) {
-            let child_path = child.path();
-            if !child_path.is_dir() {
-                continue;
-            }
-            let child_name = child.file_name();
-            let child_name_str = child_name.to_string_lossy();
-            if child_name_str.starts_with('.')
-                || child_name_str == "node_modules"
-                || child_name_str == "build"
-            {
-                continue;
-            }
-            check_undeclared(
-                &child_path,
-                root,
-                &canonical_root,
-                &declared_roots,
-                ignore_patterns,
-                &mut undeclared,
-            );
-        }
+        scan_child_dirs_for_undeclared(&path, &mut input);
     }
 
     undeclared
+}
+
+/// Whether an undeclared-workspace scan should skip a directory by leaf name.
+fn is_undeclared_scan_skip_dir(name: &str) -> bool {
+    name.starts_with('.') || name == "node_modules" || name == "build"
+}
+
+/// Borrowed inputs threaded through the second-level undeclared-workspace scan.
+struct UndeclaredScanInput<'a> {
+    root: &'a Path,
+    canonical_root: &'a Path,
+    declared_roots: &'a rustc_hash::FxHashSet<PathBuf>,
+    ignore_patterns: &'a globset::GlobSet,
+    undeclared: &'a mut Vec<WorkspaceDiagnostic>,
+}
+
+/// Check each immediate child of `parent` for an undeclared workspace.
+fn scan_child_dirs_for_undeclared(parent: &Path, input: &mut UndeclaredScanInput<'_>) {
+    let Ok(child_entries) = std::fs::read_dir(parent) else {
+        return;
+    };
+    for child in child_entries.filter_map(Result::ok) {
+        let child_path = child.path();
+        if !child_path.is_dir() || is_undeclared_scan_skip_dir(&child.file_name().to_string_lossy())
+        {
+            continue;
+        }
+        check_undeclared(
+            &child_path,
+            input.root,
+            input.canonical_root,
+            input.declared_roots,
+            input.ignore_patterns,
+            input.undeclared,
+        );
+    }
 }
 
 /// Check a single directory for an undeclared workspace.
@@ -363,47 +375,56 @@ fn expand_patterns_to_workspaces(
             if canonical_dir == *canonical_root {
                 continue;
             }
-
-            let relative = dir.strip_prefix(root).unwrap_or(&dir);
-            let relative_str = relative.to_string_lossy();
-            if negation_matchers
-                .iter()
-                .any(|m| m.is_match(relative_str.as_ref()))
-            {
+            if matches_negation(root, &dir, &negation_matchers) {
                 continue;
             }
-
-            let ws_pkg_path = dir.join("package.json");
-            match PackageJson::load(&ws_pkg_path) {
-                Ok(pkg) => {
-                    let dep_names = pkg.all_dependency_names();
-                    let name = pkg.name.unwrap_or_else(|| {
-                        dir.file_name()
-                            .map(|n| n.to_string_lossy().to_string())
-                            .unwrap_or_default()
-                    });
-                    workspaces.push((
-                        WorkspaceInfo {
-                            root: dir,
-                            name,
-                            is_internal_dependency: false,
-                        },
-                        dep_names,
-                    ));
-                }
-                Err(error) => {
-                    let diag = WorkspaceDiagnostic::new(
-                        root,
-                        dir.clone(),
-                        WorkspaceDiagnosticKind::MalformedPackageJson { error },
-                    );
-                    diagnostics.push(diag);
-                }
-            }
+            register_matched_workspace(root, dir, &mut workspaces, diagnostics);
         }
     }
 
     workspaces
+}
+
+/// Whether a matched directory is excluded by a negated workspace pattern.
+fn matches_negation(root: &Path, dir: &Path, negation_matchers: &[globset::GlobMatcher]) -> bool {
+    let relative = dir.strip_prefix(root).unwrap_or(dir);
+    let relative_str = relative.to_string_lossy();
+    negation_matchers
+        .iter()
+        .any(|m| m.is_match(relative_str.as_ref()))
+}
+
+/// Load a matched directory's `package.json` and push a workspace, or a
+/// malformed-package diagnostic on parse failure.
+fn register_matched_workspace(
+    root: &Path,
+    dir: PathBuf,
+    workspaces: &mut Vec<(WorkspaceInfo, Vec<String>)>,
+    diagnostics: &mut Vec<WorkspaceDiagnostic>,
+) {
+    let ws_pkg_path = dir.join("package.json");
+    match PackageJson::load(&ws_pkg_path) {
+        Ok(pkg) => {
+            let dep_names = pkg.all_dependency_names();
+            let name = pkg.name.unwrap_or_else(|| dir_name(&dir));
+            workspaces.push((
+                WorkspaceInfo {
+                    root: dir,
+                    name,
+                    is_internal_dependency: false,
+                },
+                dep_names,
+            ));
+        }
+        Err(error) => {
+            let diag = WorkspaceDiagnostic::new(
+                root,
+                dir,
+                WorkspaceDiagnosticKind::MalformedPackageJson { error },
+            );
+            diagnostics.push(diag);
+        }
+    }
 }
 
 /// Discover workspaces from TypeScript project references in `tsconfig.json`.

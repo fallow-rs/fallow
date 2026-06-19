@@ -50,58 +50,65 @@ pub(super) fn resolve_single_dynamic_import(
     }
 
     if !imp.destructured_names.is_empty() {
-        return imp
-            .destructured_names
-            .iter()
-            .map(|name| {
-                let imported_name = if name == "default" {
-                    ImportedName::Default
-                } else {
-                    ImportedName::Named(name.clone())
-                };
-                ResolvedImport {
-                    info: ImportInfo {
-                        source: imp.source.clone(),
-                        imported_name,
-                        local_name: name.clone(),
-                        is_type_only: false,
-                        from_style: false,
-                        span: imp.span,
-                        source_span: Span::default(),
-                    },
-                    target: target.clone(),
-                }
-            })
-            .collect();
+        return resolve_destructured_dynamic_import(imp, &target);
     }
 
     if imp.local_name.is_some() {
-        return vec![ResolvedImport {
-            info: ImportInfo {
-                source: imp.source.clone(),
-                imported_name: ImportedName::Namespace,
-                local_name: imp.local_name.clone().unwrap_or_default(),
-                is_type_only: false,
-                from_style: false,
-                span: imp.span,
-                source_span: Span::default(),
-            },
+        return vec![dynamic_import_with(
+            imp,
+            ImportedName::Namespace,
+            imp.local_name.clone().unwrap_or_default(),
             target,
-        }];
+        )];
     }
 
-    vec![ResolvedImport {
+    vec![dynamic_import_with(
+        imp,
+        ImportedName::SideEffect,
+        String::new(),
+        target,
+    )]
+}
+
+/// Expand a destructured-await dynamic import into one named/default import per
+/// destructured binding.
+fn resolve_destructured_dynamic_import(
+    imp: &DynamicImportInfo,
+    target: &ResolveResult,
+) -> Vec<ResolvedImport> {
+    imp.destructured_names
+        .iter()
+        .map(|name| {
+            let imported_name = if name == "default" {
+                ImportedName::Default
+            } else {
+                ImportedName::Named(name.clone())
+            };
+            dynamic_import_with(imp, imported_name, name.clone(), target.clone())
+        })
+        .collect()
+}
+
+/// Build a single `ResolvedImport` from a dynamic import, its imported-name
+/// shape, local binding, and resolved target.
+fn dynamic_import_with(
+    imp: &DynamicImportInfo,
+    imported_name: ImportedName,
+    local_name: String,
+    target: ResolveResult,
+) -> ResolvedImport {
+    ResolvedImport {
         info: ImportInfo {
             source: imp.source.clone(),
-            imported_name: ImportedName::SideEffect,
-            local_name: String::new(),
+            imported_name,
+            local_name,
             is_type_only: false,
             from_style: false,
             span: imp.span,
             source_span: Span::default(),
         },
         target,
-    }]
+    }
 }
 
 /// Resolve dynamic import patterns via glob matching against discovered files.

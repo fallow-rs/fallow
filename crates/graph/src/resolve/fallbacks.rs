@@ -974,44 +974,88 @@ pub(super) fn try_workspace_package_fallback(
         .unwrap_or("");
     let source_subpath = PathBuf::from(subpath);
 
-    if let Some(manifest) = find_package_manifest(ctx.package_manifests, pkg_name.as_str()) {
+    match try_manifest_workspace_resolution(ctx, &pkg_name, subpath, &source_subpath) {
+        ManifestWorkspaceResolution::Resolved(result) => return Some(result),
+        ManifestWorkspaceResolution::Blocked => return None,
+        ManifestWorkspaceResolution::Continue => {}
+    }
+
+    let ws_root =
+        if let Some(manifest) = find_package_manifest(ctx.package_manifests, pkg_name.as_str()) {
+            manifest.root.as_path()
+        } else {
+            *ctx.workspace_roots.get(pkg_name.as_str())?
+        };
+
+    resolve_workspace_self_reference(ctx, ws_root, subpath, pkg_name)
+}
+
+/// Outcome of attempting workspace resolution through a matching package
+/// manifest's `exports` map or source layout.
+enum ManifestWorkspaceResolution {
+    /// A target was resolved.
+    Resolved(ResolveResult),
+    /// An `exports` map exists but the subpath is unmatched or null-blocked.
+    Blocked,
+    /// No manifest matched, or it had no usable resolution; keep trying.
+    Continue,
+}
+
+/// Try resolving via the package manifest: `exports` map first, then the source
+/// layout for manifests without an `exports` map.
+fn try_manifest_workspace_resolution(
+    ctx: &ResolveContext<'_>,
+    pkg_name: &str,
+    subpath: &str,
+    source_subpath: &Path,
+) -> ManifestWorkspaceResolution {
+    let Some(manifest) = find_package_manifest(ctx.package_manifests, pkg_name) else {
+        return ManifestWorkspaceResolution::Continue;
+    };
+
+    if let Some(exports) = manifest.package_json.exports.as_ref() {
         let export_key = if subpath.is_empty() {
             ".".to_string()
         } else {
             format!("./{subpath}")
         };
-        if let Some(exports) = manifest.package_json.exports.as_ref() {
-            match package_map_target(exports, &export_key, ctx.condition_names) {
-                PackageMapTarget::Targets(targets) => {
-                    if let Some(file_id) = resolve_package_map_targets(
-                        ctx,
-                        manifest,
-                        &targets,
-                        Some(source_subpath.as_path()),
-                    ) {
-                        return Some(ResolveResult::InternalPackageModule {
+        return match package_map_target(exports, &export_key, ctx.condition_names) {
+            PackageMapTarget::Targets(targets) => {
+                match resolve_package_map_targets(ctx, manifest, &targets, Some(source_subpath)) {
+                    Some(file_id) => ManifestWorkspaceResolution::Resolved(
+                        ResolveResult::InternalPackageModule {
                             file_id,
-                            package_name: pkg_name,
-                        });
-                    }
+                            package_name: pkg_name.to_string(),
+                        },
+                    ),
+                    None => ManifestWorkspaceResolution::Continue,
                 }
-                PackageMapTarget::NoMatch | PackageMapTarget::Blocked => return None,
             }
-        } else if let Some(file_id) = try_source_subpath(ctx, manifest, source_subpath.as_path()) {
-            return Some(ResolveResult::InternalPackageModule {
-                file_id,
-                package_name: pkg_name,
-            });
-        }
+            PackageMapTarget::NoMatch | PackageMapTarget::Blocked => {
+                ManifestWorkspaceResolution::Blocked
+            }
+        };
     }
 
-    let (ws_root, package_name) =
-        if let Some(manifest) = find_package_manifest(ctx.package_manifests, pkg_name.as_str()) {
-            (manifest.root.as_path(), pkg_name)
-        } else {
-            (*ctx.workspace_roots.get(pkg_name.as_str())?, pkg_name)
-        };
+    if let Some(file_id) = try_source_subpath(ctx, manifest, source_subpath) {
+        return ManifestWorkspaceResolution::Resolved(ResolveResult::InternalPackageModule {
+            file_id,
+            package_name: pkg_name.to_string(),
+        });
+    }
 
+    ManifestWorkspaceResolution::Continue
+}
+
+/// Resolve the stripped subpath as a relative import from inside the package
+/// root, mapping the resolved path back to an internal module via the id maps
+/// and source fallback.
+fn resolve_workspace_self_reference(
+    ctx: &ResolveContext<'_>,
+    ws_root: &Path,
+    subpath: &str,
+    package_name: String,
+) -> Option<ResolveResult> {
     let root_file = ws_root.join("__fallow_ws_self_resolve__");
     let rel_spec = if subpath.is_empty() {
         "./".to_string()

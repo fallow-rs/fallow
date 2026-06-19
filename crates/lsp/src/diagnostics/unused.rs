@@ -8,10 +8,6 @@ use fallow_core::results::AnalysisResults;
 
 use super::{FIRST_LINE_RANGE, doc_link};
 
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "identifier lengths are bounded by source size"
-)]
 pub fn push_export_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
@@ -33,31 +29,59 @@ pub fn push_export_diagnostics(
         ),
     ] {
         for export in exports {
-            if let Some(uri) = Uri::from_file_path(&export.path) {
-                let line = export.line.saturating_sub(1);
-                map.entry(uri).or_default().push(Diagnostic {
-                    range: Range {
-                        start: Position {
-                            line,
-                            character: export.col,
-                        },
-                        end: Position {
-                            line,
-                            character: export.col + export.export_name.len() as u32,
-                        },
-                    },
-                    severity: Some(DiagnosticSeverity::HINT),
-                    source: Some("fallow".to_string()),
-                    code: Some(NumberOrString::String(code.to_string())),
-                    code_description: doc_link(anchor),
-                    message: format!("{msg_prefix} '{}' is unused", export.export_name),
-                    tags: Some(vec![DiagnosticTag::UNNECESSARY]),
-                    ..Default::default()
-                });
-            }
+            push_unused_export_diagnostic(map, export, code, anchor, msg_prefix);
         }
     }
 
+    push_private_type_leak_diagnostics(map, results);
+}
+
+/// Push one HINT diagnostic for an unused export or type export.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "identifier lengths are bounded by source size"
+)]
+fn push_unused_export_diagnostic(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    export: &fallow_core::results::UnusedExport,
+    code: &str,
+    anchor: &str,
+    msg_prefix: &str,
+) {
+    let Some(uri) = Uri::from_file_path(&export.path) else {
+        return;
+    };
+    let line = export.line.saturating_sub(1);
+    map.entry(uri).or_default().push(Diagnostic {
+        range: Range {
+            start: Position {
+                line,
+                character: export.col,
+            },
+            end: Position {
+                line,
+                character: export.col + export.export_name.len() as u32,
+            },
+        },
+        severity: Some(DiagnosticSeverity::HINT),
+        source: Some("fallow".to_string()),
+        code: Some(NumberOrString::String(code.to_string())),
+        code_description: doc_link(anchor),
+        message: format!("{msg_prefix} '{}' is unused", export.export_name),
+        tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+        ..Default::default()
+    });
+}
+
+/// Push WARNING diagnostics for exports that reference a private type.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "identifier lengths are bounded by source size"
+)]
+fn push_private_type_leak_diagnostics(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+) {
     for leak in &results.private_type_leaks {
         if let Some(uri) = Uri::from_file_path(&leak.leak.path) {
             let line = leak.leak.line.saturating_sub(1);
@@ -167,43 +191,11 @@ pub fn push_dep_diagnostics(
     ];
     for (deps, code, anchor, msg_prefix) in groups {
         for dep in deps {
-            if let Some(dep_uri) = Uri::from_file_path(&dep.path) {
-                let line = dep.line.saturating_sub(1);
-                map.entry(dep_uri).or_default().push(Diagnostic {
-                    range: Range {
-                        start: Position { line, character: 0 },
-                        end: Position {
-                            line,
-                            character: u32::MAX,
-                        },
-                    },
-                    severity: Some(DiagnosticSeverity::WARNING),
-                    source: Some("fallow".to_string()),
-                    code: Some(NumberOrString::String(code.to_string())),
-                    code_description: doc_link(anchor),
-                    message: format!("{msg_prefix}: {}", dep.package_name),
-                    ..Default::default()
-                });
-            }
+            push_unused_dependency_diagnostic(map, dep, code, anchor, msg_prefix);
         }
     }
 
-    if let Some(uri) = package_json_uri {
-        for dep in &results.unlisted_dependencies {
-            map.entry(uri.clone()).or_default().push(Diagnostic {
-                range: FIRST_LINE_RANGE,
-                severity: Some(DiagnosticSeverity::WARNING),
-                source: Some("fallow".to_string()),
-                code: Some(NumberOrString::String("unlisted-dependency".to_string())),
-                code_description: doc_link("unlisted-dependencies"),
-                message: format!(
-                    "Unlisted dependency: {} (used but not in package.json)",
-                    dep.dep.package_name
-                ),
-                ..Default::default()
-            });
-        }
-    }
+    push_unlisted_dependency_diagnostics(map, results, package_json_uri);
 
     push_type_only_dependency_diagnostics(map, results);
     push_test_only_dependency_diagnostics(map, results);
@@ -213,6 +205,55 @@ pub fn push_dep_diagnostics(
 
     push_unresolved_catalog_reference_diagnostics(map, results);
     push_dependency_override_diagnostics(map, results);
+}
+
+/// Push one full-line WARNING diagnostic for an unused dependency group entry.
+fn push_unused_dependency_diagnostic(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    dep: &fallow_core::results::UnusedDependency,
+    code: &str,
+    anchor: &str,
+    msg_prefix: &str,
+) {
+    let Some(dep_uri) = Uri::from_file_path(&dep.path) else {
+        return;
+    };
+    let line = dep.line.saturating_sub(1);
+    map.entry(dep_uri).or_default().push(Diagnostic {
+        range: full_line_range(line),
+        severity: Some(DiagnosticSeverity::WARNING),
+        source: Some("fallow".to_string()),
+        code: Some(NumberOrString::String(code.to_string())),
+        code_description: doc_link(anchor),
+        message: format!("{msg_prefix}: {}", dep.package_name),
+        ..Default::default()
+    });
+}
+
+/// Push WARNING diagnostics for unlisted dependencies, anchored at the root
+/// `package.json` (when one is known).
+fn push_unlisted_dependency_diagnostics(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+    package_json_uri: Option<&Uri>,
+) {
+    let Some(uri) = package_json_uri else {
+        return;
+    };
+    for dep in &results.unlisted_dependencies {
+        map.entry(uri.clone()).or_default().push(Diagnostic {
+            range: FIRST_LINE_RANGE,
+            severity: Some(DiagnosticSeverity::WARNING),
+            source: Some("fallow".to_string()),
+            code: Some(NumberOrString::String("unlisted-dependency".to_string())),
+            code_description: doc_link("unlisted-dependencies"),
+            message: format!(
+                "Unlisted dependency: {} (used but not in package.json)",
+                dep.dep.package_name
+            ),
+            ..Default::default()
+        });
+    }
 }
 
 fn push_type_only_dependency_diagnostics(
@@ -400,6 +441,15 @@ fn push_dependency_override_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
 ) {
+    push_unused_dependency_override_diagnostics(map, results);
+    push_misconfigured_dependency_override_diagnostics(map, results);
+}
+
+/// Push WARNING diagnostics for unused pnpm dependency overrides.
+fn push_unused_dependency_override_diagnostics(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+) {
     use std::fmt::Write as _;
     for finding in &results.unused_dependency_overrides {
         let finding = &finding.entry;
@@ -415,13 +465,7 @@ fn push_dependency_override_diagnostics(
             let _ = write!(message, " ({hint})");
         }
         map.entry(uri).or_default().push(Diagnostic {
-            range: Range {
-                start: Position { line, character: 0 },
-                end: Position {
-                    line,
-                    character: u32::MAX,
-                },
-            },
+            range: full_line_range(line),
             severity: Some(DiagnosticSeverity::WARNING),
             source: Some("fallow".to_string()),
             code: Some(NumberOrString::String(
@@ -432,6 +476,13 @@ fn push_dependency_override_diagnostics(
             ..Default::default()
         });
     }
+}
+
+/// Push ERROR diagnostics for misconfigured pnpm dependency overrides.
+fn push_misconfigured_dependency_override_diagnostics(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+) {
     for finding in &results.misconfigured_dependency_overrides {
         let finding = &finding.entry;
         let Some(uri) = Uri::from_file_path(&finding.path) else {
@@ -445,13 +496,7 @@ fn push_dependency_override_diagnostics(
             finding.reason.describe(),
         );
         map.entry(uri).or_default().push(Diagnostic {
-            range: Range {
-                start: Position { line, character: 0 },
-                end: Position {
-                    line,
-                    character: u32::MAX,
-                },
-            },
+            range: full_line_range(line),
             severity: Some(DiagnosticSeverity::ERROR),
             source: Some("fallow".to_string()),
             code: Some(NumberOrString::String(
@@ -492,31 +537,7 @@ pub fn push_member_diagnostics(
         ),
     ] {
         for member in members {
-            if let Some(uri) = Uri::from_file_path(&member.path) {
-                let line = member.line.saturating_sub(1);
-                map.entry(uri).or_default().push(Diagnostic {
-                    range: Range {
-                        start: Position {
-                            line,
-                            character: member.col,
-                        },
-                        end: Position {
-                            line,
-                            character: diagnostic_end_col(member.col, &member.member_name),
-                        },
-                    },
-                    severity: Some(DiagnosticSeverity::HINT),
-                    source: Some("fallow".to_string()),
-                    code: Some(NumberOrString::String(code.to_string())),
-                    code_description: doc_link(anchor),
-                    message: format!(
-                        "{kind_label} '{}.{}' is unused",
-                        member.parent_name, member.member_name
-                    ),
-                    tags: Some(vec![DiagnosticTag::UNNECESSARY]),
-                    ..Default::default()
-                });
-            }
+            push_unused_member_diagnostic(map, member, code, anchor, kind_label);
         }
     }
 
@@ -528,6 +549,42 @@ pub fn push_member_diagnostics(
     push_unused_svelte_event_diagnostics(map, results);
     push_unused_server_action_diagnostics(map, results);
     push_unused_load_data_key_diagnostics(map, results);
+}
+
+/// Push one HINT diagnostic for an unused enum / class / store member.
+fn push_unused_member_diagnostic(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    member: &fallow_core::results::UnusedMember,
+    code: &str,
+    anchor: &str,
+    kind_label: &str,
+) {
+    let Some(uri) = Uri::from_file_path(&member.path) else {
+        return;
+    };
+    let line = member.line.saturating_sub(1);
+    map.entry(uri).or_default().push(Diagnostic {
+        range: Range {
+            start: Position {
+                line,
+                character: member.col,
+            },
+            end: Position {
+                line,
+                character: diagnostic_end_col(member.col, &member.member_name),
+            },
+        },
+        severity: Some(DiagnosticSeverity::HINT),
+        source: Some("fallow".to_string()),
+        code: Some(NumberOrString::String(code.to_string())),
+        code_description: doc_link(anchor),
+        message: format!(
+            "{kind_label} '{}.{}' is unused",
+            member.parent_name, member.member_name
+        ),
+        tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+        ..Default::default()
+    });
 }
 
 fn diagnostic_end_col(start: u32, text: &str) -> u32 {

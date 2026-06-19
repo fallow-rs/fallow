@@ -21,6 +21,29 @@ pub fn build_find_dupes_args(params: &FindDupesParams) -> Result<Vec<String>, St
         params.threads,
     );
     push_str_flag(&mut args, "--workspace", params.workspace.as_deref());
+    push_dupes_detection_flags(&mut args, params)?;
+    push_dupes_toggle_flags(&mut args, params);
+    push_baseline(
+        &mut args,
+        params.baseline.as_deref(),
+        params.save_baseline.as_deref(),
+    );
+    push_str_flag(
+        &mut args,
+        "--changed-since",
+        params.changed_since.as_deref(),
+    );
+    push_str_flag(&mut args, "--group-by", params.group_by.as_deref());
+
+    Ok(args)
+}
+
+/// Push the validated detection-tuning flags (`--mode`, `--min-tokens`,
+/// `--min-lines`, `--min-occurrences`, `--threshold`) for `find_dupes`.
+fn push_dupes_detection_flags(
+    args: &mut Vec<String>,
+    params: &FindDupesParams,
+) -> Result<(), String> {
     if let Some(ref mode) = params.mode
         && !mode.is_empty()
     {
@@ -48,6 +71,12 @@ pub fn build_find_dupes_args(params: &FindDupesParams) -> Result<Vec<String>, St
     if let Some(threshold) = params.threshold {
         args.extend(["--threshold".to_string(), threshold.to_string()]);
     }
+    Ok(())
+}
+
+/// Push the boolean toggle flags (`--skip-local`, `--cross-language`,
+/// ignore-imports, `--explain-skipped`, `--top`) for `find_dupes`.
+fn push_dupes_toggle_flags(args: &mut Vec<String>, params: &FindDupesParams) {
     if params.skip_local == Some(true) {
         args.push("--skip-local".to_string());
     }
@@ -65,17 +94,4 @@ pub fn build_find_dupes_args(params: &FindDupesParams) -> Result<Vec<String>, St
     if let Some(top) = params.top {
         args.extend(["--top".to_string(), top.to_string()]);
     }
-    push_baseline(
-        &mut args,
-        params.baseline.as_deref(),
-        params.save_baseline.as_deref(),
-    );
-    push_str_flag(
-        &mut args,
-        "--changed-since",
-        params.changed_since.as_deref(),
-    );
-    push_str_flag(&mut args, "--group-by", params.group_by.as_deref());
-
-    Ok(args)
 }

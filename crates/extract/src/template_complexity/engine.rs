@@ -107,13 +107,23 @@ fn compute_expression_metrics(source: &str, nesting: u16) -> Result<ExpressionMe
     scan_expression_without_ternary(source, nesting)
 }
 
+/// Mutable scanning state shared across the [`scan_expression_without_ternary`]
+/// match arms.
+struct ScanState {
+    metrics: ExpressionMetrics,
+    last_logical_operator: Option<LogicalOperator>,
+    needs_rhs: bool,
+}
+
 fn scan_expression_without_ternary(
     source: &str,
     nesting: u16,
 ) -> Result<ExpressionMetrics, ScanError> {
-    let mut metrics = ExpressionMetrics::default();
-    let mut last_logical_operator: Option<LogicalOperator> = None;
-    let mut needs_rhs = false;
+    let mut state = ScanState {
+        metrics: ExpressionMetrics::default(),
+        last_logical_operator: None,
+        needs_rhs: false,
+    };
     let mut offset = 0;
 
     while offset < source.len() {
@@ -121,75 +131,94 @@ fn scan_expression_without_ternary(
             byte if byte.is_ascii_whitespace() => offset += 1,
             b'\'' | b'"' | b'`' => {
                 offset = skip_quoted(source, offset)?;
-                needs_rhs = false;
+                state.needs_rhs = false;
             }
-            b'(' | b'[' | b'{' => {
-                let close = matching_close_byte(source.as_bytes()[offset]).ok_or(ScanError)?;
-                let end =
-                    find_matching_delimiter(source, offset, source.as_bytes()[offset], close)?;
-                metrics.add(compute_expression_metrics(
-                    &source[offset + 1..end],
-                    nesting,
-                )?);
-                last_logical_operator = None;
-                needs_rhs = false;
-                offset = end + 1;
-            }
+            b'(' | b'[' | b'{' => offset = scan_bracket_group(source, offset, nesting, &mut state)?,
             b')' | b']' | b'}' => return Err(ScanError),
             _ if source[offset..].starts_with("?.") => {
-                metrics.cyclomatic = metrics.cyclomatic.saturating_add(1);
+                state.metrics.cyclomatic = state.metrics.cyclomatic.saturating_add(1);
                 offset += 2;
             }
             _ if source[offset..].starts_with("&&=")
                 || source[offset..].starts_with("||=")
                 || source[offset..].starts_with("??=") =>
             {
-                metrics.cyclomatic = metrics.cyclomatic.saturating_add(1);
-                last_logical_operator = None;
-                needs_rhs = true;
+                state.metrics.cyclomatic = state.metrics.cyclomatic.saturating_add(1);
+                state.last_logical_operator = None;
+                state.needs_rhs = true;
                 offset += 3;
             }
             _ if source[offset..].starts_with("&&")
                 || source[offset..].starts_with("||")
                 || source[offset..].starts_with("??") =>
             {
-                if needs_rhs {
-                    return Err(ScanError);
-                }
-                let operator = if source[offset..].starts_with("&&") {
-                    LogicalOperator::And
-                } else if source[offset..].starts_with("||") {
-                    LogicalOperator::Or
-                } else {
-                    LogicalOperator::Nullish
-                };
-                metrics.cyclomatic = metrics.cyclomatic.saturating_add(1);
-                if last_logical_operator != Some(operator) {
-                    metrics.cognitive = metrics.cognitive.saturating_add(1);
-                    last_logical_operator = Some(operator);
-                }
-                needs_rhs = true;
-                offset += 2;
+                offset = scan_logical_operator(source, offset, &mut state)?;
             }
             b',' | b';' => {
-                if needs_rhs {
+                if state.needs_rhs {
                     return Err(ScanError);
                 }
-                last_logical_operator = None;
+                state.last_logical_operator = None;
                 offset += 1;
             }
             _ => {
-                needs_rhs = false;
+                state.needs_rhs = false;
                 offset += source[offset..].chars().next().map_or(1, char::len_utf8);
             }
         }
     }
 
-    if needs_rhs {
+    if state.needs_rhs {
         Err(ScanError)
     } else {
-        Ok(metrics)
+        Ok(state.metrics)
     }
+}
+
+/// Recurse into a bracketed sub-expression `( [ {` at `offset`, folding its
+/// metrics into `state` and returning the offset just past the closing bracket.
+fn scan_bracket_group(
+    source: &str,
+    offset: usize,
+    nesting: u16,
+    state: &mut ScanState,
+) -> Result<usize, ScanError> {
+    let close = matching_close_byte(source.as_bytes()[offset]).ok_or(ScanError)?;
+    let end = find_matching_delimiter(source, offset, source.as_bytes()[offset], close)?;
+    state.metrics.add(compute_expression_metrics(
+        &source[offset + 1..end],
+        nesting,
+    )?);
+    state.last_logical_operator = None;
+    state.needs_rhs = false;
+    Ok(end + 1)
+}
+
+/// Score a 2-char logical operator (`&& || ??`) at `offset`, updating cyclomatic
+/// / cognitive counts and the logical-operator run state, and return the offset
+/// past the operator.
+fn scan_logical_operator(
+    source: &str,
+    offset: usize,
+    state: &mut ScanState,
+) -> Result<usize, ScanError> {
+    if state.needs_rhs {
+        return Err(ScanError);
+    }
+    let operator = if source[offset..].starts_with("&&") {
+        LogicalOperator::And
+    } else if source[offset..].starts_with("||") {
+        LogicalOperator::Or
+    } else {
+        LogicalOperator::Nullish
+    };
+    state.metrics.cyclomatic = state.metrics.cyclomatic.saturating_add(1);
+    if state.last_logical_operator != Some(operator) {
+        state.metrics.cognitive = state.metrics.cognitive.saturating_add(1);
+        state.last_logical_operator = Some(operator);
+    }
+    state.needs_rhs = true;
+    Ok(offset + 2)
 }
 
 fn find_top_level_ternary(source: &str) -> Result<Option<(usize, usize)>, ScanError> {

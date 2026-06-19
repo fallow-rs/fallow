@@ -359,8 +359,6 @@ fn print_file_path(display: &str) {
 /// terse acknowledgement so users who already found the surface are not nagged.
 /// All lines go to stderr, mirroring the empty-result line they follow.
 fn print_empty_flags_hint(config: &ResolvedConfig, files_scanned: usize) {
-    use colored::Colorize;
-
     let custom_sdk = config.flags.sdk_patterns.len();
     let custom_env = config.flags.env_prefixes.len();
     let heuristics = config.flags.config_object_heuristics;
@@ -369,32 +367,59 @@ fn print_empty_flags_hint(config: &ResolvedConfig, files_scanned: usize) {
     let files_label = if files_scanned == 1 { "file" } else { "files" };
 
     if has_custom {
-        let mut parts: Vec<String> = Vec::new();
-        if custom_sdk > 0 {
-            parts.push(format!(
-                "{custom_sdk} custom SDK pattern{}",
-                if custom_sdk == 1 { "" } else { "s" }
-            ));
-        }
-        if custom_env > 0 {
-            parts.push(format!(
-                "{custom_env} custom env prefix{}",
-                if custom_env == 1 { "" } else { "es" }
-            ));
-        }
-        if heuristics {
-            parts.push("config-object heuristics enabled".to_string());
-        }
-        eprintln!(
-            "  {}",
-            format!(
-                "Scanned {files_scanned} {files_label} with your custom flag config: {}.",
-                parts.join(", ")
-            )
-            .dimmed()
+        print_empty_flags_custom_hint(
+            custom_sdk,
+            custom_env,
+            heuristics,
+            files_scanned,
+            files_label,
         );
-        return;
+    } else {
+        print_empty_flags_default_hint(files_scanned, files_label);
     }
+}
+
+/// Terse one-line acknowledgement of an empty result when custom `flags.*`
+/// config is present.
+fn print_empty_flags_custom_hint(
+    custom_sdk: usize,
+    custom_env: usize,
+    heuristics: bool,
+    files_scanned: usize,
+    files_label: &str,
+) {
+    use colored::Colorize;
+
+    let mut parts: Vec<String> = Vec::new();
+    if custom_sdk > 0 {
+        parts.push(format!(
+            "{custom_sdk} custom SDK pattern{}",
+            if custom_sdk == 1 { "" } else { "s" }
+        ));
+    }
+    if custom_env > 0 {
+        parts.push(format!(
+            "{custom_env} custom env prefix{}",
+            if custom_env == 1 { "" } else { "es" }
+        ));
+    }
+    if heuristics {
+        parts.push("config-object heuristics enabled".to_string());
+    }
+    eprintln!(
+        "  {}",
+        format!(
+            "Scanned {files_scanned} {files_label} with your custom flag config: {}.",
+            parts.join(", ")
+        )
+        .dimmed()
+    );
+}
+
+/// Enumerate the built-in detectors and config knobs on an empty result with a
+/// full-defaults configuration.
+fn print_empty_flags_default_hint(files_scanned: usize, files_label: &str) {
+    use colored::Colorize;
 
     let env_prefixes = fallow_core::extract::flags::builtin_env_prefixes()
         .iter()
@@ -428,68 +453,58 @@ fn print_empty_flags_hint(config: &ResolvedConfig, files_scanned: usize) {
     );
 }
 
-/// Human-readable output for `fallow flags`.
-fn print_flags_human(
-    flags: &[FeatureFlag],
-    config: &ResolvedConfig,
-    elapsed: std::time::Duration,
-    quiet: bool,
-    files_scanned: usize,
-) {
+/// Print the "Flags guarding dead code" section (human format). No-op when no
+/// flag guards a statically dead export.
+fn print_dead_code_flags_section(flags: &[FeatureFlag], config: &ResolvedConfig) {
     use colored::Colorize;
-
-    if flags.is_empty() {
-        if !quiet {
-            eprintln!(
-                "{} No feature flags detected ({:.2}s)",
-                "\u{2713}".green().bold(),
-                elapsed.as_secs_f64()
-            );
-            print_empty_flags_hint(config, files_scanned);
-        }
-        return;
-    }
 
     let dead_code_flags: Vec<&FeatureFlag> = flags
         .iter()
         .filter(|f| !f.guarded_dead_exports.is_empty())
         .collect();
-
-    if !dead_code_flags.is_empty() {
-        let label = format!("Flags guarding dead code ({})", dead_code_flags.len());
-        println!("{} {}", "\u{25cf}".yellow(), label.yellow().bold());
-
-        for flag in &dead_code_flags {
-            let relative = flag
-                .path
-                .strip_prefix(&config.root)
-                .unwrap_or(&flag.path)
-                .to_string_lossy()
-                .replace('\\', "/");
-            print_file_path(&relative);
-
-            let dead_count = flag.guarded_dead_exports.len();
-            let guard_lines = flag
-                .guard_line_start
-                .and_then(|s| flag.guard_line_end.map(|e| e.saturating_sub(s) + 1))
-                .unwrap_or(0);
-
-            let detail = if guard_lines > 0 {
-                format!("guards {guard_lines} lines, {dead_count} statically dead")
-            } else {
-                format!("{dead_count} dead exports in guarded block")
-            };
-
-            println!(
-                "    {} {} {} {}",
-                format!(":{}", flag.line).dimmed(),
-                flag.flag_name.bold(),
-                kind_tag(flag),
-                format!("({detail})").dimmed(),
-            );
-        }
-        println!();
+    if dead_code_flags.is_empty() {
+        return;
     }
+
+    let label = format!("Flags guarding dead code ({})", dead_code_flags.len());
+    println!("{} {}", "\u{25cf}".yellow(), label.yellow().bold());
+
+    for flag in &dead_code_flags {
+        let relative = flag
+            .path
+            .strip_prefix(&config.root)
+            .unwrap_or(&flag.path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        print_file_path(&relative);
+
+        let dead_count = flag.guarded_dead_exports.len();
+        let guard_lines = flag
+            .guard_line_start
+            .and_then(|s| flag.guard_line_end.map(|e| e.saturating_sub(s) + 1))
+            .unwrap_or(0);
+
+        let detail = if guard_lines > 0 {
+            format!("guards {guard_lines} lines, {dead_count} statically dead")
+        } else {
+            format!("{dead_count} dead exports in guarded block")
+        };
+
+        println!(
+            "    {} {} {} {}",
+            format!(":{}", flag.line).dimmed(),
+            flag.flag_name.bold(),
+            kind_tag(flag),
+            format!("({detail})").dimmed(),
+        );
+    }
+    println!();
+}
+
+/// Print the per-file "Feature flags" listing (human format), preserving the
+/// order in which files first appear in `flags`.
+fn print_flags_by_file_section(flags: &[FeatureFlag], config: &ResolvedConfig) {
+    use colored::Colorize;
 
     let mut by_file: Vec<(&std::path::Path, Vec<&FeatureFlag>)> = Vec::new();
     for flag in flags {
@@ -517,6 +532,32 @@ fn print_flags_human(
             );
         }
     }
+}
+
+/// Human-readable output for `fallow flags`.
+fn print_flags_human(
+    flags: &[FeatureFlag],
+    config: &ResolvedConfig,
+    elapsed: std::time::Duration,
+    quiet: bool,
+    files_scanned: usize,
+) {
+    use colored::Colorize;
+
+    if flags.is_empty() {
+        if !quiet {
+            eprintln!(
+                "{} No feature flags detected ({:.2}s)",
+                "\u{2713}".green().bold(),
+                elapsed.as_secs_f64()
+            );
+            print_empty_flags_hint(config, files_scanned);
+        }
+        return;
+    }
+
+    print_dead_code_flags_section(flags, config);
+    print_flags_by_file_section(flags, config);
 
     if !quiet {
         let elapsed_str = format!("{:.2}s", elapsed.as_secs_f64());

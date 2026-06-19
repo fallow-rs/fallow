@@ -47,27 +47,20 @@ pub fn execute_code_mode(binary: String, params: CodeExecuteParams) -> Result<St
         .max_output_bytes
         .unwrap_or(DEFAULT_MAX_OUTPUT_BYTES)
         .min(MAX_OUTPUT_BYTES);
+    let limits = code_mode_limits(timeout_ms, max_output_bytes);
     if params.code.len() > MAX_CODE_BYTES {
         return Err(json!({
             "schema_version": "mcp-code-execute/v1",
             "ok": false,
             "error": format!("code mode snippet exceeded {MAX_CODE_BYTES} bytes"),
             "calls": [],
-            "limits": {
-                "timeout_ms": timeout_ms,
-                "max_output_bytes": max_output_bytes,
-                "max_host_calls": MAX_HOST_CALLS
-            }
+            "limits": limits
         })
         .to_string());
     }
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
 
-    let runtime = Runtime::new().map_err(|err| format!("failed to create JS runtime: {err}"))?;
-    runtime.set_memory_limit(MEMORY_LIMIT_BYTES);
-    runtime.set_max_stack_size(MAX_STACK_BYTES);
-    runtime.set_interrupt_handler(Some(Box::new(move || Instant::now() >= deadline)));
-
+    let runtime = build_code_mode_runtime(deadline)?;
     let context =
         Context::full(&runtime).map_err(|err| format!("failed to create JS context: {err}"))?;
     let state = Rc::new(RefCell::new(CodeModeState {
@@ -79,48 +72,62 @@ pub fn execute_code_mode(binary: String, params: CodeExecuteParams) -> Result<St
         calls: Vec::new(),
     }));
 
-    let result = context.with(|ctx| -> Result<String, String> {
-        install_globals(&ctx, &state).map_err(|err| js_error_message(&ctx, &err))?;
-        let source = user_source(&params.code);
+    let result = run_code_mode_eval(&context, &state, &params.code);
+
+    let calls = &state.borrow().calls;
+    match result {
+        Ok(result_json) => Ok(json!({
+            "schema_version": "mcp-code-execute/v1",
+            "ok": true,
+            "result": serde_json::from_str::<serde_json::Value>(&result_json)
+                .unwrap_or(serde_json::Value::Null),
+            "calls": calls,
+            "limits": limits
+        })
+        .to_string()),
+        Err(err) => Err(json!({
+            "schema_version": "mcp-code-execute/v1",
+            "ok": false,
+            "error": normalize_code_mode_error(&err, deadline),
+            "calls": calls,
+            "limits": limits
+        })
+        .to_string()),
+    }
+}
+
+/// Build the `limits` JSON block echoed on every code-mode response.
+fn code_mode_limits(timeout_ms: u64, max_output_bytes: usize) -> serde_json::Value {
+    json!({
+        "timeout_ms": timeout_ms,
+        "max_output_bytes": max_output_bytes,
+        "max_host_calls": MAX_HOST_CALLS
+    })
+}
+
+/// Install the host API into `context` and evaluate the user snippet, returning
+/// the JSON-stringified result or a normalized error message.
+fn run_code_mode_eval(
+    context: &Context,
+    state: &Rc<RefCell<CodeModeState>>,
+    code: &str,
+) -> Result<String, String> {
+    context.with(|ctx| -> Result<String, String> {
+        install_globals(&ctx, state).map_err(|err| js_error_message(&ctx, &err))?;
+        let source = user_source(code);
         ctx.eval::<Value, _>(source)
             .and_then(|value| stringify_json(&ctx, value))
             .map_err(|err| js_error_message(&ctx, &err))
-    });
+    })
+}
 
-    match result {
-        Ok(result_json) => {
-            let state = state.borrow();
-            let output = json!({
-                "schema_version": "mcp-code-execute/v1",
-                "ok": true,
-                "result": serde_json::from_str::<serde_json::Value>(&result_json)
-                    .unwrap_or(serde_json::Value::Null),
-                "calls": state.calls,
-                "limits": {
-                    "timeout_ms": timeout_ms,
-                    "max_output_bytes": max_output_bytes,
-                    "max_host_calls": MAX_HOST_CALLS
-                }
-            });
-            Ok(output.to_string())
-        }
-        Err(err) => {
-            let err = normalize_code_mode_error(&err, deadline);
-            let state = state.borrow();
-            let output = json!({
-                "schema_version": "mcp-code-execute/v1",
-                "ok": false,
-                "error": err,
-                "calls": state.calls,
-                "limits": {
-                    "timeout_ms": timeout_ms,
-                    "max_output_bytes": max_output_bytes,
-                    "max_host_calls": MAX_HOST_CALLS
-                }
-            });
-            Err(output.to_string())
-        }
-    }
+/// Build the sandboxed QuickJS runtime with memory, stack, and deadline limits.
+fn build_code_mode_runtime(deadline: Instant) -> Result<Runtime, String> {
+    let runtime = Runtime::new().map_err(|err| format!("failed to create JS runtime: {err}"))?;
+    runtime.set_memory_limit(MEMORY_LIMIT_BYTES);
+    runtime.set_max_stack_size(MAX_STACK_BYTES);
+    runtime.set_interrupt_handler(Some(Box::new(move || Instant::now() >= deadline)));
+    Ok(runtime)
 }
 
 fn normalize_code_mode_error(err: &str, deadline: Instant) -> String {

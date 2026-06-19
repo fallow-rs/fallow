@@ -382,12 +382,60 @@ fn compile_overrides(overrides: Vec<ConfigOverride>) -> Vec<ResolvedOverride> {
         .collect()
 }
 
+/// Compile `ignoreExports` file globs into matchers paired with export names.
+#[expect(
+    clippy::expect_used,
+    reason = "user glob patterns are validated before config resolution"
+)]
+fn compile_ignore_export_rules(rules: &[IgnoreExportRule]) -> Vec<CompiledIgnoreExportRule> {
+    rules
+        .iter()
+        .map(|rule| CompiledIgnoreExportRule {
+            matcher: Glob::new(&rule.file)
+                .expect("ignoreExports[].file was validated at config load time")
+                .compile_matcher(),
+            exports: rule.exports.clone(),
+        })
+        .collect()
+}
+
+/// Compile `ignoreCatalogReferences` rules, pre-compiling the consumer glob.
+#[expect(
+    clippy::expect_used,
+    reason = "user glob patterns are validated before config resolution"
+)]
+fn compile_ignore_catalog_reference_rules(
+    rules: &[IgnoreCatalogReferenceRule],
+) -> Vec<CompiledIgnoreCatalogReferenceRule> {
+    rules
+        .iter()
+        .map(|rule| CompiledIgnoreCatalogReferenceRule {
+            package: rule.package.clone(),
+            catalog: rule.catalog.clone(),
+            consumer_matcher: rule.consumer.as_ref().map(|pattern| {
+                Glob::new(pattern)
+                    .expect("ignoreCatalogReferences[].consumer was validated at config load time")
+                    .compile_matcher()
+            }),
+        })
+        .collect()
+}
+
+/// Convert `ignoreDependencyOverrides` rules into their match-ready form.
+fn compile_ignore_dependency_override_rules(
+    rules: &[IgnoreDependencyOverrideRule],
+) -> Vec<CompiledIgnoreDependencyOverrideRule> {
+    rules
+        .iter()
+        .map(|rule| CompiledIgnoreDependencyOverrideRule {
+            package: rule.package.clone(),
+            source: rule.source.clone(),
+        })
+        .collect()
+}
+
 impl FallowConfig {
     /// Resolve into a fully resolved config with compiled globs.
-    #[expect(
-        clippy::expect_used,
-        reason = "user glob patterns are validated before config resolution"
-    )]
     pub fn resolve(
         self,
         root: PathBuf,
@@ -420,41 +468,11 @@ impl FallowConfig {
 
         let overrides = compile_overrides(self.overrides);
 
-        let compiled_ignore_exports: Vec<CompiledIgnoreExportRule> = self
-            .ignore_exports
-            .iter()
-            .map(|rule| CompiledIgnoreExportRule {
-                matcher: Glob::new(&rule.file)
-                    .expect("ignoreExports[].file was validated at config load time")
-                    .compile_matcher(),
-                exports: rule.exports.clone(),
-            })
-            .collect();
-
-        let compiled_ignore_catalog_references: Vec<CompiledIgnoreCatalogReferenceRule> = self
-            .ignore_catalog_references
-            .iter()
-            .map(|rule| CompiledIgnoreCatalogReferenceRule {
-                package: rule.package.clone(),
-                catalog: rule.catalog.clone(),
-                consumer_matcher: rule.consumer.as_ref().map(|pattern| {
-                    Glob::new(pattern)
-                        .expect(
-                            "ignoreCatalogReferences[].consumer was validated at config load time",
-                        )
-                        .compile_matcher()
-                }),
-            })
-            .collect();
-
-        let compiled_ignore_dependency_overrides: Vec<CompiledIgnoreDependencyOverrideRule> = self
-            .ignore_dependency_overrides
-            .iter()
-            .map(|rule| CompiledIgnoreDependencyOverrideRule {
-                package: rule.package.clone(),
-                source: rule.source.clone(),
-            })
-            .collect();
+        let compiled_ignore_exports = compile_ignore_export_rules(&self.ignore_exports);
+        let compiled_ignore_catalog_references =
+            compile_ignore_catalog_reference_rules(&self.ignore_catalog_references);
+        let compiled_ignore_dependency_overrides =
+            compile_ignore_dependency_override_rules(&self.ignore_dependency_overrides);
 
         let cache_max_size_mb = cache_max_size_mb.or(self.cache.max_size_mb);
 

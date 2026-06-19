@@ -125,7 +125,7 @@ fn normalize_tsconfig_path_alias(
 /// Extract `compilerOptions.plugins[].name` from a tsconfig as referenced dependencies.
 fn parse_tsconfig_plugins(source: &str, path: &Path, result: &mut PluginResult) {
     use oxc_allocator::Allocator;
-    use oxc_ast::ast::{Expression, ObjectPropertyKind, PropertyKey};
+    use oxc_ast::ast::Expression;
     use oxc_parser::Parser;
     use oxc_span::SourceType;
 
@@ -137,33 +137,17 @@ fn parse_tsconfig_plugins(source: &str, path: &Path, result: &mut PluginResult) 
         return;
     };
 
-    let compiler_opts = obj.properties.iter().find_map(|prop| {
-        if let ObjectPropertyKind::ObjectProperty(p) = prop {
-            let is_compiler_opts = match &p.key {
-                PropertyKey::StaticIdentifier(id) => id.name == "compilerOptions",
-                PropertyKey::StringLiteral(s) => s.value == "compilerOptions",
-                _ => false,
-            };
-            if is_compiler_opts && let Expression::ObjectExpression(obj) = &p.value {
-                return Some(obj);
-            }
-        }
-        None
-    });
-    let Some(compiler_opts) = compiler_opts else {
+    let Some(compiler_opts) = find_object_property_object(obj, "compilerOptions") else {
         return;
     };
 
     let plugins_arr = compiler_opts.properties.iter().find_map(|prop| {
-        if let ObjectPropertyKind::ObjectProperty(p) = prop {
-            let is_plugins = match &p.key {
-                PropertyKey::StaticIdentifier(id) => id.name == "plugins",
-                PropertyKey::StringLiteral(s) => s.value == "plugins",
-                _ => false,
-            };
-            if is_plugins && let Expression::ArrayExpression(arr) = &p.value {
-                return Some(arr);
-            }
+        use oxc_ast::ast::ObjectPropertyKind;
+        if let ObjectPropertyKind::ObjectProperty(p) = prop
+            && object_property_key_is(&p.key, "plugins")
+            && let Expression::ArrayExpression(arr) = &p.value
+        {
+            return Some(arr);
         }
         None
     });
@@ -173,19 +157,51 @@ fn parse_tsconfig_plugins(source: &str, path: &Path, result: &mut PluginResult) 
 
     for el in &plugins_arr.elements {
         if let Some(Expression::ObjectExpression(plugin_obj)) = el.as_expression() {
-            for prop in &plugin_obj.properties {
-                if let ObjectPropertyKind::ObjectProperty(p) = prop {
-                    let is_name = match &p.key {
-                        PropertyKey::StaticIdentifier(id) => id.name == "name",
-                        PropertyKey::StringLiteral(s) => s.value == "name",
-                        _ => false,
-                    };
-                    if is_name && let Expression::StringLiteral(s) = &p.value {
-                        let dep = crate::resolve::extract_package_name(&s.value);
-                        result.referenced_dependencies.push(dep);
-                    }
-                }
-            }
+            collect_tsconfig_plugin_name(plugin_obj, result);
+        }
+    }
+}
+
+/// True when an object-property key is the static identifier or string literal `name`.
+fn object_property_key_is(key: &oxc_ast::ast::PropertyKey, name: &str) -> bool {
+    use oxc_ast::ast::PropertyKey;
+    match key {
+        PropertyKey::StaticIdentifier(id) => id.name == name,
+        PropertyKey::StringLiteral(s) => s.value == name,
+        _ => false,
+    }
+}
+
+/// Find a named object-valued property inside `obj`.
+fn find_object_property_object<'a>(
+    obj: &'a oxc_ast::ast::ObjectExpression<'a>,
+    name: &str,
+) -> Option<&'a oxc_ast::ast::ObjectExpression<'a>> {
+    use oxc_ast::ast::{Expression, ObjectPropertyKind};
+    obj.properties.iter().find_map(|prop| {
+        if let ObjectPropertyKind::ObjectProperty(p) = prop
+            && object_property_key_is(&p.key, name)
+            && let Expression::ObjectExpression(inner) = &p.value
+        {
+            return Some(&**inner);
+        }
+        None
+    })
+}
+
+/// Push the `name` field of a single tsconfig plugin object as a referenced dependency.
+fn collect_tsconfig_plugin_name(
+    plugin_obj: &oxc_ast::ast::ObjectExpression,
+    result: &mut PluginResult,
+) {
+    use oxc_ast::ast::{Expression, ObjectPropertyKind};
+    for prop in &plugin_obj.properties {
+        if let ObjectPropertyKind::ObjectProperty(p) = prop
+            && object_property_key_is(&p.key, "name")
+            && let Expression::StringLiteral(s) = &p.value
+        {
+            let dep = crate::resolve::extract_package_name(&s.value);
+            result.referenced_dependencies.push(dep);
         }
     }
 }

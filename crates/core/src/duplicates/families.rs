@@ -69,75 +69,91 @@ fn generate_suggestions(
     total_duplicated_lines: usize,
     root: &Path,
 ) -> Vec<RefactoringSuggestion> {
-    let mut suggestions = Vec::new();
-
     let directories: BTreeSet<_> = file_set
         .iter()
         .filter_map(|p| p.parent().map(Path::to_path_buf))
         .collect();
-    let is_cross_directory = directories.len() > 1;
 
     if total_duplicated_lines >= MODULE_EXTRACTION_THRESHOLD {
-        let file_names: Vec<_> = file_set
-            .iter()
-            .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
-            .collect();
-
-        let location_hint = if is_cross_directory {
-            "a shared directory".to_string()
-        } else {
-            directories.iter().next().map_or_else(
-                || "the same directory".to_string(),
-                |d| {
-                    let rel = d.strip_prefix(root).unwrap_or(d);
-                    if rel.as_os_str().is_empty() {
-                        "the project root".to_string()
-                    } else {
-                        format!("{}", rel.display())
-                    }
-                },
-            )
-        };
-
-        let estimated_savings: usize = groups
-            .iter()
-            .map(|g| g.line_count * (g.instances.len().saturating_sub(1)))
-            .sum();
-
-        suggestions.push(RefactoringSuggestion {
-            kind: RefactoringKind::ExtractModule,
-            description: format!(
-                "Extract {} shared clone group{} ({} lines) from {} into {}",
-                groups.len(),
-                if groups.len() == 1 { "" } else { "s" },
-                total_duplicated_lines,
-                file_names.join(", "),
-                location_hint,
-            ),
-            estimated_savings,
-        });
+        vec![extract_module_suggestion(
+            file_set,
+            groups,
+            total_duplicated_lines,
+            &directories,
+            root,
+        )]
     } else {
-        for group in groups {
-            let estimated_savings = group.line_count * (group.instances.len().saturating_sub(1));
-            let file_names: Vec<_> = group
-                .instances
-                .iter()
-                .filter_map(|i| i.file.file_name().map(|n| n.to_string_lossy().to_string()))
-                .collect();
-
-            suggestions.push(RefactoringSuggestion {
-                kind: RefactoringKind::ExtractFunction,
-                description: format!(
-                    "Extract shared function ({} lines) from {}",
-                    group.line_count,
-                    file_names.join(", "),
-                ),
-                estimated_savings,
-            });
-        }
+        groups.iter().map(extract_function_suggestion).collect()
     }
+}
 
-    suggestions
+/// Build the family-level extract-module suggestion, computing the location
+/// hint from the family's directory set.
+fn extract_module_suggestion(
+    file_set: &BTreeSet<PathBuf>,
+    groups: &[CloneGroup],
+    total_duplicated_lines: usize,
+    directories: &BTreeSet<PathBuf>,
+    root: &Path,
+) -> RefactoringSuggestion {
+    let file_names: Vec<_> = file_set
+        .iter()
+        .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+        .collect();
+
+    let location_hint = if directories.len() > 1 {
+        "a shared directory".to_string()
+    } else {
+        directories.iter().next().map_or_else(
+            || "the same directory".to_string(),
+            |d| {
+                let rel = d.strip_prefix(root).unwrap_or(d);
+                if rel.as_os_str().is_empty() {
+                    "the project root".to_string()
+                } else {
+                    format!("{}", rel.display())
+                }
+            },
+        )
+    };
+
+    let estimated_savings: usize = groups
+        .iter()
+        .map(|g| g.line_count * (g.instances.len().saturating_sub(1)))
+        .sum();
+
+    RefactoringSuggestion {
+        kind: RefactoringKind::ExtractModule,
+        description: format!(
+            "Extract {} shared clone group{} ({} lines) from {} into {}",
+            groups.len(),
+            if groups.len() == 1 { "" } else { "s" },
+            total_duplicated_lines,
+            file_names.join(", "),
+            location_hint,
+        ),
+        estimated_savings,
+    }
+}
+
+/// Build a per-group extract-function suggestion.
+fn extract_function_suggestion(group: &CloneGroup) -> RefactoringSuggestion {
+    let estimated_savings = group.line_count * (group.instances.len().saturating_sub(1));
+    let file_names: Vec<_> = group
+        .instances
+        .iter()
+        .filter_map(|i| i.file.file_name().map(|n| n.to_string_lossy().to_string()))
+        .collect();
+
+    RefactoringSuggestion {
+        kind: RefactoringKind::ExtractFunction,
+        description: format!(
+            "Extract shared function ({} lines) from {}",
+            group.line_count,
+            file_names.join(", "),
+        ),
+        estimated_savings,
+    }
 }
 
 /// Split a path string into (directory, filename).

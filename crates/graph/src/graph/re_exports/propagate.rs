@@ -52,6 +52,42 @@ pub(in crate::graph) fn propagate_star_re_export(input: StarReExportPropagation<
     }
 
     let barrel_file_id = modules[barrel_idx].file_id;
+    let refs_by_name =
+        collect_star_refs_by_name(modules, edges, edges_by_target, barrel_file_id, barrel_idx);
+
+    let source_has_star_re_exports = modules[source_idx]
+        .re_exports
+        .iter()
+        .any(|re| re.exported_name == "*");
+
+    let mut changed = false;
+    let mut existing_files: FxHashSet<FileId> = FxHashSet::default();
+    let source = &mut modules[source_idx];
+    for (name, refs) in &refs_by_name {
+        changed |= apply_star_refs_to_source(ApplyStarRefs {
+            source: &mut *source,
+            name,
+            refs,
+            source_id,
+            triggering_is_type_only,
+            source_has_star_re_exports,
+            existing_files: &mut existing_files,
+            synthetic_stubs: &mut *synthetic_stubs,
+        });
+    }
+    changed
+}
+
+/// Collect the per-name references that must propagate through a star
+/// re-export: named imports made directly from the barrel plus any references
+/// already attached to the barrel's own exports.
+fn collect_star_refs_by_name(
+    modules: &[ModuleNode],
+    edges: &[Edge],
+    edges_by_target: &FxHashMap<FileId, Vec<usize>>,
+    barrel_file_id: FileId,
+    barrel_idx: usize,
+) -> FxHashMap<String, Vec<SymbolReference>> {
     let named_refs: Vec<(String, SymbolReference)> = edges_by_target
         .get(&barrel_file_id)
         .map(|indices| {
@@ -85,11 +121,6 @@ pub(in crate::graph) fn propagate_star_re_export(input: StarReExportPropagation<
         .map(|e| (e.name.to_string(), e.references.clone()))
         .collect();
 
-    let source_has_star_re_exports = modules[source_idx]
-        .re_exports
-        .iter()
-        .any(|re| re.exported_name == "*");
-
     let mut refs_by_name: FxHashMap<String, Vec<SymbolReference>> = FxHashMap::default();
     for (name, ref_item) in named_refs {
         refs_by_name.entry(name).or_default().push(ref_item);
@@ -97,48 +128,76 @@ pub(in crate::graph) fn propagate_star_re_export(input: StarReExportPropagation<
     for (name, refs) in barrel_refs {
         refs_by_name.entry(name).or_default().extend(refs);
     }
+    refs_by_name
+}
 
-    let mut changed = false;
-    let mut existing_files: FxHashSet<FileId> = FxHashSet::default();
-    let source = &mut modules[source_idx];
-    for (name, refs) in &refs_by_name {
-        let export_name = if name == "default" {
-            ExportName::Default
+struct ApplyStarRefs<'a> {
+    source: &'a mut ModuleNode,
+    name: &'a str,
+    refs: &'a [SymbolReference],
+    source_id: FileId,
+    triggering_is_type_only: bool,
+    source_has_star_re_exports: bool,
+    existing_files: &'a mut FxHashSet<FileId>,
+    synthetic_stubs: &'a mut FxHashSet<(FileId, String)>,
+}
+
+/// Attach the collected references for one re-exported name to the source
+/// module, creating a synthetic stub when the source forwards via its own
+/// `export *`. Returns `true` if any reference or stub was added.
+fn apply_star_refs_to_source(input: ApplyStarRefs<'_>) -> bool {
+    let ApplyStarRefs {
+        source,
+        name,
+        refs,
+        source_id,
+        triggering_is_type_only,
+        source_has_star_re_exports,
+        existing_files,
+        synthetic_stubs,
+    } = input;
+
+    let export_name = if name == "default" {
+        ExportName::Default
+    } else {
+        ExportName::Named(name.to_string())
+    };
+
+    if let Some(export) = source.exports.iter_mut().find(|e| e.name == export_name) {
+        let mut changed = if !triggering_is_type_only
+            && export.is_type_only
+            && synthetic_stubs.contains(&(source_id, name.to_string()))
+        {
+            export.is_type_only = false;
+            true
         } else {
-            ExportName::Named(name.clone())
+            false
         };
-        if let Some(export) = source.exports.iter_mut().find(|e| e.name == export_name) {
-            if !triggering_is_type_only
-                && export.is_type_only
-                && synthetic_stubs.contains(&(source_id, name.clone()))
-            {
-                export.is_type_only = false;
+        existing_files.clear();
+        existing_files.extend(export.references.iter().map(|r| r.from_file));
+        for ref_item in refs {
+            if existing_files.insert(ref_item.from_file) {
+                export.references.push(*ref_item);
                 changed = true;
             }
-            existing_files.clear();
-            existing_files.extend(export.references.iter().map(|r| r.from_file));
-            for ref_item in refs {
-                if existing_files.insert(ref_item.from_file) {
-                    export.references.push(*ref_item);
-                    changed = true;
-                }
-            }
-        } else if source_has_star_re_exports {
-            source.exports.push(ExportSymbol {
-                name: export_name,
-                is_type_only: triggering_is_type_only,
-                is_side_effect_used: false,
-                visibility: VisibilityTag::None,
-                expected_unused_reason: None,
-                span: oxc_span::Span::new(0, 0),
-                references: refs.clone(),
-                members: Vec::new(),
-            });
-            synthetic_stubs.insert((source_id, name.clone()));
-            changed = true;
         }
+        changed
+    } else if source_has_star_re_exports {
+        source.exports.push(ExportSymbol {
+            name: export_name,
+            is_type_only: triggering_is_type_only,
+            is_side_effect_used: false,
+            visibility: VisibilityTag::None,
+            expected_unused_reason: None,
+            span: oxc_span::Span::new(0, 0),
+            references: refs.to_vec(),
+            members: Vec::new(),
+        });
+        synthetic_stubs.insert((source_id, name.to_string()));
+        true
+    } else {
+        false
     }
-    changed
 }
 
 /// Entry point barrel with `export *` — mark all non-default source exports as used.

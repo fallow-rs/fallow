@@ -114,73 +114,10 @@ fn check_security(
             continue;
         }
 
-        let label = security_label(finding);
-        let mut value = format!(
-            "**fallow** security candidate: {} (unverified, verify before acting)",
-            format_inline_code(&label),
-        );
-
-        let source_backed = if finding.source_backed { "yes" } else { "no" };
-        let reachable = finding.reachability.as_ref().map_or("unknown", |r| {
-            if r.reachable_from_entry { "yes" } else { "no" }
-        });
-        let _ = write!(
-            value,
-            "\n\nconfidence: source-backed {source_backed}, reachable from a runtime entry point \
-             {reachable}",
-        );
-
-        let _ = write!(value, "\n\n{}", format_inline_code(&finding.evidence));
-
-        if let Some(context) = finding.dead_code.as_ref() {
-            // `guidance` is a trusted static constant from the analyzer
-            // (`UNUSED_FILE_GUIDANCE` / `UNUSED_EXPORT_GUIDANCE` in
-            // `analyze/security/rank.rs`), never user-derived, so it is rendered
-            // as prose. If it ever becomes dynamic, route it through
-            // `format_inline_code` or split out the user-controlled part.
-            let _ = write!(value, "\n\ndead-code: {}", context.guidance);
-        }
-
-        if let Some(reach) = finding.reachability.as_ref() {
-            let boundary = if reach.crosses_boundary {
-                "; crosses an architecture boundary"
-            } else {
-                ""
-            };
-            let _ = write!(value, "\n\nblast radius {}{boundary}", reach.blast_radius);
-        }
-
-        let next = match finding.kind {
-            SecurityFindingKind::ClientServerLeak => {
-                "Next: check whether the import is type-only, server-only, or behind a build-time \
-                 guard; if the value never ships to the client bundle, this candidate is a false \
-                 positive."
-            }
-            SecurityFindingKind::TaintedSink if finding.dead_code.is_some() => {
-                "Next: verify the dead-code finding and delete the code if safe; otherwise verify \
-                 and harden the sink."
-            }
-            SecurityFindingKind::TaintedSink => {
-                "Next: verify whether untrusted input can reach this sink; harden it or dismiss the \
-                 candidate if it cannot."
-            }
-        };
-        let _ = write!(value, "\n\n{next}");
-
-        let basename = file_path.file_name().map_or_else(
-            || file_path.display().to_string(),
-            |name| name.to_string_lossy().into_owned(),
-        );
-        let _ = write!(
-            value,
-            "\n\nFull trace: run {} or see the security docs.",
-            format_inline_code(&format!("fallow security --file {basename}")),
-        );
-
         return Some(Hover {
             contents: HoverContents::Markup(MarkupContent {
                 kind: MarkupKind::Markdown,
-                value,
+                value: security_hover_markdown(finding, file_path),
             }),
             range: Some(Range {
                 start: Position {
@@ -196,6 +133,81 @@ fn check_security(
     }
 
     None
+}
+
+/// Build the confidence-first triage markdown body for a security candidate.
+fn security_hover_markdown(
+    finding: &fallow_core::results::SecurityFinding,
+    file_path: &Path,
+) -> String {
+    let label = security_label(finding);
+    let mut value = format!(
+        "**fallow** security candidate: {} (unverified, verify before acting)",
+        format_inline_code(&label),
+    );
+
+    let source_backed = if finding.source_backed { "yes" } else { "no" };
+    let reachable = finding.reachability.as_ref().map_or("unknown", |r| {
+        if r.reachable_from_entry { "yes" } else { "no" }
+    });
+    let _ = write!(
+        value,
+        "\n\nconfidence: source-backed {source_backed}, reachable from a runtime entry point \
+         {reachable}",
+    );
+
+    let _ = write!(value, "\n\n{}", format_inline_code(&finding.evidence));
+
+    if let Some(context) = finding.dead_code.as_ref() {
+        // `guidance` is a trusted static constant from the analyzer
+        // (`UNUSED_FILE_GUIDANCE` / `UNUSED_EXPORT_GUIDANCE` in
+        // `analyze/security/rank.rs`), never user-derived, so it is rendered
+        // as prose. If it ever becomes dynamic, route it through
+        // `format_inline_code` or split out the user-controlled part.
+        let _ = write!(value, "\n\ndead-code: {}", context.guidance);
+    }
+
+    if let Some(reach) = finding.reachability.as_ref() {
+        let boundary = if reach.crosses_boundary {
+            "; crosses an architecture boundary"
+        } else {
+            ""
+        };
+        let _ = write!(value, "\n\nblast radius {}{boundary}", reach.blast_radius);
+    }
+
+    let _ = write!(value, "\n\n{}", security_next_step(finding));
+
+    let basename = file_path.file_name().map_or_else(
+        || file_path.display().to_string(),
+        |name| name.to_string_lossy().into_owned(),
+    );
+    let _ = write!(
+        value,
+        "\n\nFull trace: run {} or see the security docs.",
+        format_inline_code(&format!("fallow security --file {basename}")),
+    );
+
+    value
+}
+
+/// Kind-appropriate "Next:" guidance line for a security candidate.
+fn security_next_step(finding: &fallow_core::results::SecurityFinding) -> &'static str {
+    match finding.kind {
+        SecurityFindingKind::ClientServerLeak => {
+            "Next: check whether the import is type-only, server-only, or behind a build-time \
+             guard; if the value never ships to the client bundle, this candidate is a false \
+             positive."
+        }
+        SecurityFindingKind::TaintedSink if finding.dead_code.is_some() => {
+            "Next: verify the dead-code finding and delete the code if safe; otherwise verify \
+             and harden the sink."
+        }
+        SecurityFindingKind::TaintedSink => {
+            "Next: verify whether untrusted input can reach this sink; harden it or dismiss the \
+             candidate if it cannot."
+        }
+    }
 }
 
 /// Check if the file is in the unused files list.
@@ -310,46 +322,10 @@ fn check_used_export(
             continue;
         }
 
-        let ref_word = if usage.reference_count == 1 {
-            "file"
-        } else {
-            "files"
-        };
-
-        let mut value = format!(
-            "**fallow**: Export {} is used by {} {ref_word}",
-            format_inline_code(&usage.export_name),
-            usage.reference_count,
-        );
-
-        if usage.reference_locations.is_empty() {
-            value.push('.');
-        } else {
-            value.push_str(":\n");
-            for (i, loc) in usage.reference_locations.iter().take(10).enumerate() {
-                let display_path = loc.path.file_name().map_or_else(
-                    || loc.path.display().to_string(),
-                    |name| name.to_string_lossy().into_owned(),
-                );
-                let display_path = format_inline_code(&display_path);
-                let _ = write!(value, "- {display_path} line {}", loc.line);
-                if i < usage.reference_locations.len().min(10) - 1 {
-                    value.push('\n');
-                }
-            }
-            if usage.reference_locations.len() > 10 {
-                let _ = write!(
-                    value,
-                    "\n- ... and {} more",
-                    usage.reference_locations.len() - 10
-                );
-            }
-        }
-
         return Some(Hover {
             contents: HoverContents::Markup(MarkupContent {
                 kind: MarkupKind::Markdown,
-                value,
+                value: used_export_hover_markdown(usage),
             }),
             range: Some(Range {
                 start: Position {
@@ -365,6 +341,48 @@ fn check_used_export(
     }
 
     None
+}
+
+/// Build the reference-count markdown body for a used export, listing up to
+/// ten reference locations and a "... and N more" overflow line.
+fn used_export_hover_markdown(usage: &fallow_core::results::ExportUsage) -> String {
+    let ref_word = if usage.reference_count == 1 {
+        "file"
+    } else {
+        "files"
+    };
+
+    let mut value = format!(
+        "**fallow**: Export {} is used by {} {ref_word}",
+        format_inline_code(&usage.export_name),
+        usage.reference_count,
+    );
+
+    if usage.reference_locations.is_empty() {
+        value.push('.');
+    } else {
+        value.push_str(":\n");
+        for (i, loc) in usage.reference_locations.iter().take(10).enumerate() {
+            let display_path = loc.path.file_name().map_or_else(
+                || loc.path.display().to_string(),
+                |name| name.to_string_lossy().into_owned(),
+            );
+            let display_path = format_inline_code(&display_path);
+            let _ = write!(value, "- {display_path} line {}", loc.line);
+            if i < usage.reference_locations.len().min(10) - 1 {
+                value.push('\n');
+            }
+        }
+        if usage.reference_locations.len() > 10 {
+            let _ = write!(
+                value,
+                "\n- ... and {} more",
+                usage.reference_locations.len() - 10
+            );
+        }
+    }
+
+    value
 }
 
 /// Check if the position is on an unused enum or class member.
@@ -908,55 +926,10 @@ fn check_duplication(
                 continue;
             }
 
-            let other_count = group.instances.len() - 1;
-            let instance_word = if other_count == 1 {
-                "instance"
-            } else {
-                "instances"
-            };
-
-            let mut value = format!(
-                "**fallow**: Duplicated code block ({} lines, {} tokens). \
-                 {other_count} other {instance_word}",
-                group.line_count, group.token_count,
-            );
-
-            let others: Vec<_> = group
-                .instances
-                .iter()
-                .filter(|other| {
-                    !(other.file == instance.file && other.start_line == instance.start_line)
-                })
-                .collect();
-
-            if others.is_empty() {
-                value.push('.');
-            } else {
-                value.push_str(":\n");
-                for (i, other) in others.iter().take(10).enumerate() {
-                    let display_path = other.file.file_name().map_or_else(
-                        || other.file.display().to_string(),
-                        |name| name.to_string_lossy().into_owned(),
-                    );
-                    let display_path = format_inline_code(&display_path);
-                    let _ = write!(
-                        value,
-                        "- {display_path} lines {}-{}",
-                        other.start_line, other.end_line
-                    );
-                    if i < others.len().min(10) - 1 {
-                        value.push('\n');
-                    }
-                }
-                if others.len() > 10 {
-                    let _ = write!(value, "\n- ... and {} more", others.len() - 10);
-                }
-            }
-
             return Some(Hover {
                 contents: HoverContents::Markup(MarkupContent {
                     kind: MarkupKind::Markdown,
-                    value,
+                    value: duplication_hover_markdown(group, instance),
                 }),
                 range: Some(Range {
                     start: Position {
@@ -973,6 +946,58 @@ fn check_duplication(
     }
 
     None
+}
+
+/// Build the markdown body for a duplication hover: the block size plus up to
+/// ten other instance locations and a "... and N more" overflow line.
+fn duplication_hover_markdown(
+    group: &fallow_core::duplicates::CloneGroup,
+    instance: &fallow_core::duplicates::CloneInstance,
+) -> String {
+    let other_count = group.instances.len() - 1;
+    let instance_word = if other_count == 1 {
+        "instance"
+    } else {
+        "instances"
+    };
+
+    let mut value = format!(
+        "**fallow**: Duplicated code block ({} lines, {} tokens). \
+         {other_count} other {instance_word}",
+        group.line_count, group.token_count,
+    );
+
+    let others: Vec<_> = group
+        .instances
+        .iter()
+        .filter(|other| !(other.file == instance.file && other.start_line == instance.start_line))
+        .collect();
+
+    if others.is_empty() {
+        value.push('.');
+    } else {
+        value.push_str(":\n");
+        for (i, other) in others.iter().take(10).enumerate() {
+            let display_path = other.file.file_name().map_or_else(
+                || other.file.display().to_string(),
+                |name| name.to_string_lossy().into_owned(),
+            );
+            let display_path = format_inline_code(&display_path);
+            let _ = write!(
+                value,
+                "- {display_path} lines {}-{}",
+                other.start_line, other.end_line
+            );
+            if i < others.len().min(10) - 1 {
+                value.push('\n');
+            }
+        }
+        if others.len() > 10 {
+            let _ = write!(value, "\n- ... and {} more", others.len() - 10);
+        }
+    }
+
+    value
 }
 
 #[cfg(test)]

@@ -192,49 +192,72 @@ fn collect_credits_for_alias(input: NamespaceCreditInput<'_>) {
             continue;
         }
         for import in &consumer.resolved_imports {
-            let Some(target_file_id) = import.target.internal_file_id() else {
-                continue;
-            };
-            let imported_name = match &import.info.imported_name {
-                ImportedName::Named(n) => n.as_str(),
-                ImportedName::Default => "default",
-                _ => continue,
-            };
-            if !reachable.contains(&(target_file_id, imported_name.to_string())) {
-                continue;
-            }
-            let consumer_local = import.info.local_name.as_str();
-            if consumer_local.is_empty() {
-                continue;
-            }
-            let expected_object = format!("{consumer_local}{prefix_match}");
-            for access in &consumer.member_accesses {
-                if access.object != expected_object {
-                    continue;
-                }
-                pending.push(PendingCredit {
-                    target_module_idx,
-                    member: access.member.clone(),
-                    consumer_file_id: consumer.file_id,
-                    import_span: import.info.span,
-                });
-                let mut visited: FxHashSet<usize> = FxHashSet::default();
-                visited.insert(target_module_idx);
-                let ctx = ChainWalkCtx {
-                    graph,
-                    consumer,
-                    import_span: import.info.span,
-                };
-                collect_chained_re_export_credits(
-                    &ctx,
-                    target_module_idx,
-                    &access.member,
-                    &format!("{expected_object}.{}", access.member),
-                    &mut visited,
-                    pending,
-                );
-            }
+            collect_credits_for_consumer_import(
+                graph,
+                consumer,
+                import,
+                reachable,
+                &prefix_match,
+                target_module_idx,
+                pending,
+            );
         }
+    }
+}
+
+/// Collect credits for one consumer import that resolves to a reachable alias
+/// barrel: match `<local>.<suffix>` member accesses and walk chained
+/// `export * as N` re-exports on the alias target side.
+fn collect_credits_for_consumer_import(
+    graph: &ModuleGraph,
+    consumer: &ResolvedModule,
+    import: &crate::resolve::ResolvedImport,
+    reachable: &FxHashSet<(FileId, String)>,
+    prefix_match: &str,
+    target_module_idx: usize,
+    pending: &mut Vec<PendingCredit>,
+) {
+    let Some(target_file_id) = import.target.internal_file_id() else {
+        return;
+    };
+    let imported_name = match &import.info.imported_name {
+        ImportedName::Named(n) => n.as_str(),
+        ImportedName::Default => "default",
+        _ => return,
+    };
+    if !reachable.contains(&(target_file_id, imported_name.to_string())) {
+        return;
+    }
+    let consumer_local = import.info.local_name.as_str();
+    if consumer_local.is_empty() {
+        return;
+    }
+    let expected_object = format!("{consumer_local}{prefix_match}");
+    for access in &consumer.member_accesses {
+        if access.object != expected_object {
+            continue;
+        }
+        pending.push(PendingCredit {
+            target_module_idx,
+            member: access.member.clone(),
+            consumer_file_id: consumer.file_id,
+            import_span: import.info.span,
+        });
+        let mut visited: FxHashSet<usize> = FxHashSet::default();
+        visited.insert(target_module_idx);
+        let ctx = ChainWalkCtx {
+            graph,
+            consumer,
+            import_span: import.info.span,
+        };
+        collect_chained_re_export_credits(
+            &ctx,
+            target_module_idx,
+            &access.member,
+            &format!("{expected_object}.{}", access.member),
+            &mut visited,
+            pending,
+        );
     }
 }
 

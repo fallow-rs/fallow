@@ -123,15 +123,21 @@ pub(crate) fn parse_html_to_module(file_id: FileId, source: &str, content_hash: 
     parse_html_to_module_with_complexity(file_id, source, content_hash, false)
 }
 
-/// Parse an HTML file and optionally compute Angular template complexity.
-pub(crate) fn parse_html_to_module_with_complexity(
-    file_id: FileId,
-    source: &str,
-    content_hash: u64,
-    need_complexity: bool,
-) -> ModuleInfo {
-    let parsed_suppressions = crate::suppress::parse_suppressions_from_source(source);
+/// Computed building blocks for an HTML [`ModuleInfo`], gathered before the
+/// (irreducible) struct literal is assembled.
+struct HtmlModuleParts {
+    imports: Vec<ImportInfo>,
+    member_accesses: Vec<MemberAccess>,
+    security_sinks: Vec<fallow_types::extract::SinkSite>,
+    angular_used_selectors: Vec<String>,
+    has_dynamic_component_render: bool,
+    complexity: Vec<fallow_types::extract::FunctionComplexity>,
+}
 
+/// Collect the asset-reference imports, Angular template member accesses /
+/// security sinks / used selectors, and (optionally) template complexity for an
+/// HTML source.
+fn collect_html_module_parts(source: &str, need_complexity: bool) -> HtmlModuleParts {
     let mut imports: Vec<ImportInfo> = collect_asset_refs(source)
         .into_iter()
         .map(|raw| ImportInfo {
@@ -176,6 +182,47 @@ pub(crate) fn parse_html_to_module_with_complexity(
     } else {
         Vec::new()
     };
+
+    HtmlModuleParts {
+        imports,
+        member_accesses,
+        security_sinks,
+        angular_used_selectors,
+        has_dynamic_component_render,
+        complexity,
+    }
+}
+
+/// Parse an HTML file and optionally compute Angular template complexity.
+pub(crate) fn parse_html_to_module_with_complexity(
+    file_id: FileId,
+    source: &str,
+    content_hash: u64,
+    need_complexity: bool,
+) -> ModuleInfo {
+    let parsed_suppressions = crate::suppress::parse_suppressions_from_source(source);
+    let parts = collect_html_module_parts(source, need_complexity);
+    html_module_info(file_id, content_hash, source, parsed_suppressions, parts)
+}
+
+/// Assemble the `ModuleInfo` for an HTML file from its computed parts; all
+/// JS-level fields stay empty since HTML carries no module structure. Pure
+/// plumbing struct literal.
+fn html_module_info(
+    file_id: FileId,
+    content_hash: u64,
+    source: &str,
+    parsed_suppressions: crate::suppress::ParsedSuppressions,
+    parts: HtmlModuleParts,
+) -> ModuleInfo {
+    let HtmlModuleParts {
+        imports,
+        member_accesses,
+        security_sinks,
+        angular_used_selectors,
+        has_dynamic_component_render,
+        complexity,
+    } = parts;
 
     ModuleInfo {
         file_id,

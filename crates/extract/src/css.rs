@@ -418,44 +418,59 @@ fn collect_theme_declarations(
             _ => {
                 if depth == 0 && expect_decl {
                     expect_decl = false;
-                    if b == b'-' && bytes.get(i + 1) == Some(&b'-') {
-                        let id_start = i;
-                        let mut j = i;
-                        while j < end {
-                            let c = bytes[j];
-                            if c == b'-' || c == b'_' || c.is_ascii_alphanumeric() {
-                                j += 1;
-                            } else {
-                                break;
-                            }
-                        }
-                        let mut k = j;
-                        while k < end && bytes[k].is_ascii_whitespace() {
-                            k += 1;
-                        }
-                        // Only a `--ident:` (no `*` before the colon) is a token.
-                        if k < end && bytes[k] == b':' {
-                            let name = &masked[id_start + 2..j];
-                            if !name.is_empty() && seen.insert(name.to_owned()) {
-                                let line = 1 + source
-                                    .get(..id_start)
-                                    .map_or(0, |s| s.bytes().filter(|&x| x == b'\n').count());
-                                out.push(ThemeTokenDef {
-                                    name: name.to_owned(),
-                                    line: u32::try_from(line).unwrap_or(u32::MAX),
-                                });
-                            }
-                        }
-                        i = j;
-                    } else {
-                        i += 1;
-                    }
+                    i = scan_theme_declaration(source, masked, b, i, end, out, seen);
                 } else {
                     i += 1;
                 }
             }
         }
     }
+}
+
+/// At a declaration start, harvest a `--ident:` custom-property name (recording
+/// it in `out`/`seen`) and return the cursor advanced past the scanned ident.
+/// Returns `i + 1` for any non-`--` declaration start.
+fn scan_theme_declaration(
+    source: &str,
+    masked: &str,
+    b: u8,
+    i: usize,
+    end: usize,
+    out: &mut Vec<ThemeTokenDef>,
+    seen: &mut FxHashSet<String>,
+) -> usize {
+    let bytes = masked.as_bytes();
+    if !(b == b'-' && bytes.get(i + 1) == Some(&b'-')) {
+        return i + 1;
+    }
+    let id_start = i;
+    let mut j = i;
+    while j < end {
+        let c = bytes[j];
+        if c == b'-' || c == b'_' || c.is_ascii_alphanumeric() {
+            j += 1;
+        } else {
+            break;
+        }
+    }
+    let mut k = j;
+    while k < end && bytes[k].is_ascii_whitespace() {
+        k += 1;
+    }
+    // Only a `--ident:` (no `*` before the colon) is a token.
+    if k < end && bytes[k] == b':' {
+        let name = &masked[id_start + 2..j];
+        if !name.is_empty() && seen.insert(name.to_owned()) {
+            let line = 1 + source
+                .get(..id_start)
+                .map_or(0, |s| s.bytes().filter(|&x| x == b'\n').count());
+            out.push(ThemeTokenDef {
+                name: name.to_owned(),
+                line: u32::try_from(line).unwrap_or(u32::MAX),
+            });
+        }
+    }
+    j
 }
 
 /// Extract the utility tokens referenced in `@apply` directive bodies across a
@@ -685,6 +700,45 @@ fn scan_css_module_exports(
     exports
 }
 
+/// Build the import edges for a CSS/SCSS source: every `@import`/`@use`/etc.
+/// directive plus a synthetic `tailwindcss` side-effect import when `@apply` or
+/// `@tailwind` is present.
+fn build_css_imports(source: &str, stripped: &str, is_scss: bool) -> Vec<ImportInfo> {
+    let mut imports = Vec::new();
+
+    for css_source in extract_css_import_sources(source, is_scss) {
+        imports.push(ImportInfo {
+            source: css_source.normalized,
+            imported_name: if css_source.is_plugin {
+                ImportedName::Default
+            } else {
+                ImportedName::SideEffect
+            },
+            local_name: String::new(),
+            is_type_only: false,
+            from_style: false,
+            span: css_source.span,
+            source_span: css_source.span,
+        });
+    }
+
+    let has_apply = CSS_APPLY_RE.is_match(stripped);
+    let has_tailwind = CSS_TAILWIND_RE.is_match(stripped);
+    if has_apply || has_tailwind {
+        imports.push(ImportInfo {
+            source: "tailwindcss".to_string(),
+            imported_name: ImportedName::SideEffect,
+            local_name: String::new(),
+            is_type_only: false,
+            from_style: false,
+            span: Span::default(),
+            source_span: Span::default(),
+        });
+    }
+
+    imports
+}
+
 /// Parse a CSS/SCSS file, extracting @import, @use, @forward, @plugin, @apply, and @tailwind directives.
 pub(crate) fn parse_css_to_module(
     file_id: FileId,
@@ -699,38 +753,7 @@ pub(crate) fn parse_css_to_module(
         .is_some_and(|ext| matches!(ext, "scss" | "sass" | "less"));
 
     let stripped = mask_css_comments(source, is_scss);
-
-    let mut imports = Vec::new();
-
-    for source in extract_css_import_sources(source, is_scss) {
-        imports.push(ImportInfo {
-            source: source.normalized,
-            imported_name: if source.is_plugin {
-                ImportedName::Default
-            } else {
-                ImportedName::SideEffect
-            },
-            local_name: String::new(),
-            is_type_only: false,
-            from_style: false,
-            span: source.span,
-            source_span: source.span,
-        });
-    }
-
-    let has_apply = CSS_APPLY_RE.is_match(&stripped);
-    let has_tailwind = CSS_TAILWIND_RE.is_match(&stripped);
-    if has_apply || has_tailwind {
-        imports.push(ImportInfo {
-            source: "tailwindcss".to_string(),
-            imported_name: ImportedName::SideEffect,
-            local_name: String::new(),
-            is_type_only: false,
-            from_style: false,
-            span: Span::default(),
-            source_span: Span::default(),
-        });
-    }
+    let imports = build_css_imports(source, &stripped, is_scss);
 
     let exports = if is_css_module_file(path) {
         extract_css_module_exports(source, is_scss)
@@ -738,6 +761,27 @@ pub(crate) fn parse_css_to_module(
         Vec::new()
     };
 
+    css_module_info(
+        file_id,
+        content_hash,
+        source,
+        parsed_suppressions,
+        imports,
+        exports,
+    )
+}
+
+/// Assemble the `ModuleInfo` for a CSS/SCSS file: the import/export edges plus
+/// the line offsets and suppressions; all AST-derived fields stay empty since
+/// CSS carries no JS-level structure. Pure plumbing struct literal.
+fn css_module_info(
+    file_id: FileId,
+    content_hash: u64,
+    source: &str,
+    parsed_suppressions: crate::suppress::ParsedSuppressions,
+    imports: Vec<ImportInfo>,
+    exports: Vec<ExportInfo>,
+) -> ModuleInfo {
     ModuleInfo {
         file_id,
         exports,

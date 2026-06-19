@@ -1080,39 +1080,54 @@ fn try_style_condition_package_resolution(
     }
 
     if let Ok(canonical) = dunce::canonicalize(resolved_path) {
-        if let Some(&file_id) = ctx.path_to_id.get(canonical.as_path()) {
-            return Some(ResolveResult::InternalModule(file_id));
-        }
-        if let Some(fallback) = ctx.canonical_fallback
-            && let Some(file_id) = fallback.get(&canonical)
-        {
-            return Some(ResolveResult::InternalModule(file_id));
-        }
-        if let Some(file_id) = try_source_fallback(&canonical, ctx.path_to_id) {
-            return Some(ResolveResult::InternalModule(file_id));
-        }
-        if let Some(file_id) =
-            try_pnpm_workspace_fallback(&canonical, ctx.path_to_id, ctx.workspace_roots)
-        {
-            return Some(ResolveResult::InternalModule(file_id));
-        }
-        if should_preserve_node_modules_style_file(specifier, from_file, &canonical, from_style) {
-            return Some(ResolveResult::ExternalFile(canonical));
-        }
-        if let Some(pkg_name) = package_usage_name_for_resolved_package(specifier, &canonical)
-            && !ctx.workspace_roots.contains_key(pkg_name.as_str())
-        {
-            return Some(ResolveResult::NpmPackage(pkg_name));
-        }
-        if let Some(pkg_name) = package_usage_name_for_external_bare_specifier(specifier) {
-            return Some(ResolveResult::NpmPackage(pkg_name));
-        }
-        return Some(ResolveResult::ExternalFile(canonical));
+        return Some(resolve_style_canonical_path(
+            ctx, from_file, specifier, from_style, canonical,
+        ));
     }
 
     package_usage_name_for_resolved_package(specifier, resolved_path)
         .map(ResolveResult::NpmPackage)
         .or_else(|| Some(ResolveResult::ExternalFile(resolved_path.to_path_buf())))
+}
+
+/// Classify the canonicalized style-resolver target: internal module via the
+/// id maps and fallbacks, preserved external `node_modules` style file, npm
+/// package, or external file.
+fn resolve_style_canonical_path(
+    ctx: &ResolveContext<'_>,
+    from_file: &Path,
+    specifier: &str,
+    from_style: bool,
+    canonical: PathBuf,
+) -> ResolveResult {
+    if let Some(&file_id) = ctx.path_to_id.get(canonical.as_path()) {
+        return ResolveResult::InternalModule(file_id);
+    }
+    if let Some(fallback) = ctx.canonical_fallback
+        && let Some(file_id) = fallback.get(&canonical)
+    {
+        return ResolveResult::InternalModule(file_id);
+    }
+    if let Some(file_id) = try_source_fallback(&canonical, ctx.path_to_id) {
+        return ResolveResult::InternalModule(file_id);
+    }
+    if let Some(file_id) =
+        try_pnpm_workspace_fallback(&canonical, ctx.path_to_id, ctx.workspace_roots)
+    {
+        return ResolveResult::InternalModule(file_id);
+    }
+    if should_preserve_node_modules_style_file(specifier, from_file, &canonical, from_style) {
+        return ResolveResult::ExternalFile(canonical);
+    }
+    if let Some(pkg_name) = package_usage_name_for_resolved_package(specifier, &canonical)
+        && !ctx.workspace_roots.contains_key(pkg_name.as_str())
+    {
+        return ResolveResult::NpmPackage(pkg_name);
+    }
+    if let Some(pkg_name) = package_usage_name_for_external_bare_specifier(specifier) {
+        return ResolveResult::NpmPackage(pkg_name);
+    }
+    ResolveResult::ExternalFile(canonical)
 }
 
 /// Package-usage key for an import that resolved into `node_modules`.
@@ -1257,6 +1272,42 @@ impl ResolvedPathContext<'_, '_> {
     }
 }
 
+/// Outcome of normalizing a specifier's scheme prefix.
+enum SpecifierNormalization {
+    /// The specifier is an external scheme (`jsr:`, URL, `data:`, empty `npm:`).
+    External(ResolveResult),
+    /// The specifier is resolvable; carries the scheme-stripped form.
+    Resolvable(String),
+}
+
+/// Strip `jsr:` / `npm:` / URL / `data:` schemes, short-circuiting to an
+/// external result when the scheme is not internally resolvable.
+fn normalize_resolve_specifier(specifier: &str) -> SpecifierNormalization {
+    if specifier.starts_with("jsr:") {
+        return SpecifierNormalization::External(ResolveResult::ExternalFile(PathBuf::from(
+            specifier,
+        )));
+    }
+    let resolvable = if let Some(rest) = specifier.strip_prefix("npm:") {
+        let normalized = normalize_npm_specifier(rest);
+        if normalized.is_empty() {
+            return SpecifierNormalization::External(ResolveResult::ExternalFile(PathBuf::from(
+                specifier,
+            )));
+        }
+        normalized
+    } else {
+        specifier.to_string()
+    };
+
+    if resolvable.contains("://") || resolvable.starts_with("data:") {
+        return SpecifierNormalization::External(ResolveResult::ExternalFile(PathBuf::from(
+            resolvable,
+        )));
+    }
+    SpecifierNormalization::Resolvable(resolvable)
+}
+
 /// Resolve a single import specifier to a target.
 ///
 /// `from_style` is `true` for imports extracted from CSS contexts (currently
@@ -1269,23 +1320,14 @@ pub(super) fn resolve_specifier(
     specifier: &str,
     from_style: bool,
 ) -> ResolveResult {
-    if specifier.starts_with("jsr:") {
-        return ResolveResult::ExternalFile(PathBuf::from(specifier));
-    }
-    let npm_normalized;
-    let specifier = if let Some(rest) = specifier.strip_prefix("npm:") {
-        npm_normalized = normalize_npm_specifier(rest);
-        if npm_normalized.is_empty() {
-            return ResolveResult::ExternalFile(PathBuf::from(specifier));
+    let normalized;
+    let specifier = match normalize_resolve_specifier(specifier) {
+        SpecifierNormalization::External(result) => return result,
+        SpecifierNormalization::Resolvable(spec) => {
+            normalized = spec;
+            normalized.as_str()
         }
-        npm_normalized.as_str()
-    } else {
-        specifier
     };
-
-    if specifier.contains("://") || specifier.starts_with("data:") {
-        return ResolveResult::ExternalFile(PathBuf::from(specifier));
-    }
 
     if let Some(result) = try_storybook_static_dir_mapping(ctx, from_file, specifier) {
         return result;
@@ -1299,12 +1341,15 @@ pub(super) fn resolve_specifier(
         return result;
     }
 
-    let is_bare = is_bare_specifier(specifier);
-    let is_alias = is_path_alias(specifier);
-    let matches_plugin_alias = ctx
-        .path_aliases
-        .iter()
-        .any(|(prefix, _)| specifier_matches_alias_prefix(specifier, prefix));
+    let flags = FailedSpecifierFlags {
+        used_tsconfig_fallback: false,
+        is_bare: is_bare_specifier(specifier),
+        is_alias: is_path_alias(specifier),
+        matches_plugin_alias: ctx
+            .path_aliases
+            .iter()
+            .any(|(prefix, _)| specifier_matches_alias_prefix(specifier, prefix)),
+    };
 
     if let Some(result) =
         try_style_condition_package_resolution(ctx, from_file, specifier, from_style)
@@ -1316,38 +1361,17 @@ pub(super) fn resolve_specifier(
         ResolveFileAttempt::Resolved {
             resolution: resolved,
             used_tsconfig_fallback,
-        } => {
-            let resolved_path = resolved.path();
-            let is_scss_importer = from_file
-                .extension()
-                .is_some_and(|e| e == "scss" || e == "sass");
-            if is_scss_importer && is_js_ts_extension(resolved_path) {
-                if let Some(result) = try_scss_fallbacks(ctx, from_file, specifier, from_style) {
-                    return result;
-                }
-                return ResolveResult::Unresolvable(specifier.to_string());
-            }
-            if used_tsconfig_fallback {
-                if let Some(result) = try_tsconfig_root_dirs(ctx, from_file, specifier) {
-                    return result;
-                }
-                if (is_bare || is_alias || matches_plugin_alias)
-                    && let Some(result) = try_nearest_tsconfig_path_alias(ctx, from_file, specifier)
-                {
-                    return result;
-                }
-                if matches_nearest_tsconfig_path_alias(ctx.root, from_file, specifier) {
-                    return ResolveResult::Unresolvable(specifier.to_string());
-                }
-            }
-            ResolvedPathContext {
-                ctx,
-                from_file,
-                specifier,
-                from_style,
-            }
-            .resolve(resolved_path)
-        }
+        } => resolve_resolved_specifier(
+            ctx,
+            from_file,
+            specifier,
+            from_style,
+            resolved.path(),
+            FailedSpecifierFlags {
+                used_tsconfig_fallback,
+                ..flags
+            },
+        ),
         ResolveFileAttempt::Failed {
             used_tsconfig_fallback,
         } => resolve_failed_specifier(
@@ -1357,12 +1381,52 @@ pub(super) fn resolve_specifier(
             from_style,
             FailedSpecifierFlags {
                 used_tsconfig_fallback,
-                is_bare,
-                is_alias,
-                matches_plugin_alias,
+                ..flags
             },
         ),
     }
+}
+
+/// Map a successfully resolved file to a `ResolveResult`, applying the
+/// SCSS-importer JS/TS rejection and tsconfig-fallback alias retries before
+/// classifying the resolved path.
+fn resolve_resolved_specifier(
+    ctx: &ResolveContext<'_>,
+    from_file: &Path,
+    specifier: &str,
+    from_style: bool,
+    resolved_path: &Path,
+    flags: FailedSpecifierFlags,
+) -> ResolveResult {
+    let is_scss_importer = from_file
+        .extension()
+        .is_some_and(|e| e == "scss" || e == "sass");
+    if is_scss_importer && is_js_ts_extension(resolved_path) {
+        if let Some(result) = try_scss_fallbacks(ctx, from_file, specifier, from_style) {
+            return result;
+        }
+        return ResolveResult::Unresolvable(specifier.to_string());
+    }
+    if flags.used_tsconfig_fallback {
+        if let Some(result) = try_tsconfig_root_dirs(ctx, from_file, specifier) {
+            return result;
+        }
+        if (flags.is_bare || flags.is_alias || flags.matches_plugin_alias)
+            && let Some(result) = try_nearest_tsconfig_path_alias(ctx, from_file, specifier)
+        {
+            return result;
+        }
+        if matches_nearest_tsconfig_path_alias(ctx.root, from_file, specifier) {
+            return ResolveResult::Unresolvable(specifier.to_string());
+        }
+    }
+    ResolvedPathContext {
+        ctx,
+        from_file,
+        specifier,
+        from_style,
+    }
+    .resolve(resolved_path)
 }
 
 #[derive(Clone, Copy)]

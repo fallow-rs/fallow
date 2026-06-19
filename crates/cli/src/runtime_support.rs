@@ -177,29 +177,7 @@ pub fn load_config_for_analysis(
     options: ConfigLoadOptions,
     analysis: ProductionAnalysis,
 ) -> Result<ResolvedConfig, ExitCode> {
-    let user_config = if let Some(path) = config_path {
-        match FallowConfig::load(path) {
-            Ok(c) => {
-                log_config_loaded(path, options.output, options.quiet);
-                Some(c)
-            }
-            Err(e) => {
-                let msg = format!("failed to load config '{}': {e}", path.display());
-                return Err(crate::error::emit_error(&msg, 2, options.output));
-            }
-        }
-    } else {
-        match FallowConfig::find_and_load(root) {
-            Ok(Some((config, found_path))) => {
-                log_config_loaded(&found_path, options.output, options.quiet);
-                Some(config)
-            }
-            Ok(None) => None,
-            Err(e) => {
-                return Err(crate::error::emit_error(&e, 2, options.output));
-            }
-        }
-    };
+    let user_config = load_user_config(root, config_path, &options)?;
 
     let loaded_user_config = user_config.is_some();
     let final_config = match user_config {
@@ -217,39 +195,7 @@ pub fn load_config_for_analysis(
     };
     crate::telemetry::note_config_shape(config_shape_for(&final_config, loaded_user_config));
 
-    if let Err(errors) =
-        fallow_config::discover_and_validate_external_plugins(root, &final_config.plugins)
-    {
-        let joined = errors
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join("\n  - ");
-        let msg = format!("invalid external plugin definition:\n  - {joined}");
-        return Err(crate::error::emit_error(&msg, 2, options.output));
-    }
-
-    if let Err(errors) = final_config.validate_resolved_boundaries(root) {
-        let joined = errors
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join("\n  - ");
-        let msg = format!("invalid boundary configuration:\n  - {joined}");
-        return Err(crate::error::emit_error(&msg, 2, options.output));
-    }
-
-    // A pack that fails to load must fail the run: silently skipping policy
-    // is the exact failure mode rule packs document themselves as preventing.
-    if let Err(errors) = fallow_config::load_rule_packs(root, &final_config.rule_packs) {
-        let joined = errors
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join("\n  - ");
-        let msg = format!("invalid rule pack:\n  - {joined}");
-        return Err(crate::error::emit_error(&msg, 2, options.output));
-    }
+    validate_config_extensions(root, &final_config, &options)?;
 
     let cache_max_size_mb = resolve_cache_max_size_env();
     let mut resolved = final_config.resolve(
@@ -272,6 +218,96 @@ pub fn load_config_for_analysis(
         resolved.no_cache,
     );
 
+    report_workspace_diagnostics(root, &resolved, &options)?;
+
+    Ok(resolved)
+}
+
+/// Load the user config from an explicit `--config` path or via auto-discovery,
+/// logging the resolved path. Returns `None` when no config file is found.
+#[expect(clippy::ref_option, reason = "&Option matches clap's field type")]
+fn load_user_config(
+    root: &Path,
+    config_path: &Option<PathBuf>,
+    options: &ConfigLoadOptions,
+) -> Result<Option<FallowConfig>, ExitCode> {
+    if let Some(path) = config_path {
+        return match FallowConfig::load(path) {
+            Ok(c) => {
+                log_config_loaded(path, options.output, options.quiet);
+                Ok(Some(c))
+            }
+            Err(e) => {
+                let msg = format!("failed to load config '{}': {e}", path.display());
+                Err(crate::error::emit_error(&msg, 2, options.output))
+            }
+        };
+    }
+    match FallowConfig::find_and_load(root) {
+        Ok(Some((config, found_path))) => {
+            log_config_loaded(&found_path, options.output, options.quiet);
+            Ok(Some(config))
+        }
+        Ok(None) => Ok(None),
+        Err(e) => Err(crate::error::emit_error(&e, 2, options.output)),
+    }
+}
+
+/// Join a list of validation errors into one indented `emit_error` exit code.
+fn emit_joined_config_errors<E: ToString>(
+    label: &str,
+    errors: &[E],
+    output: OutputFormat,
+) -> ExitCode {
+    let joined = errors
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n  - ");
+    crate::error::emit_error(&format!("{label}:\n  - {joined}"), 2, output)
+}
+
+/// Validate external plugins, resolved boundaries, and rule packs. A rule pack
+/// that fails to load must fail the run: silently skipping policy is the exact
+/// failure mode rule packs document themselves as preventing.
+fn validate_config_extensions(
+    root: &Path,
+    config: &FallowConfig,
+    options: &ConfigLoadOptions,
+) -> Result<(), ExitCode> {
+    if let Err(errors) =
+        fallow_config::discover_and_validate_external_plugins(root, &config.plugins)
+    {
+        return Err(emit_joined_config_errors(
+            "invalid external plugin definition",
+            &errors,
+            options.output,
+        ));
+    }
+    if let Err(errors) = config.validate_resolved_boundaries(root) {
+        return Err(emit_joined_config_errors(
+            "invalid boundary configuration",
+            &errors,
+            options.output,
+        ));
+    }
+    if let Err(errors) = fallow_config::load_rule_packs(root, &config.rule_packs) {
+        return Err(emit_joined_config_errors(
+            "invalid rule pack",
+            &errors,
+            options.output,
+        ));
+    }
+    Ok(())
+}
+
+/// Discover and stash workspace diagnostics, surfacing a one-line stderr notice
+/// in human mode when any are present.
+fn report_workspace_diagnostics(
+    root: &Path,
+    resolved: &ResolvedConfig,
+    options: &ConfigLoadOptions,
+) -> Result<(), ExitCode> {
     match fallow_config::discover_workspaces_with_diagnostics(root, &resolved.ignore_patterns) {
         Ok((_, diagnostics)) => {
             fallow_config::stash_workspace_diagnostics(root, diagnostics.clone());
@@ -286,17 +322,14 @@ pub fn load_config_for_analysis(
                     if diagnostics.len() == 1 { "" } else { "s" }
                 );
             }
+            Ok(())
         }
-        Err(err) => {
-            return Err(crate::error::emit_error(
-                &err.to_string(),
-                2,
-                options.output,
-            ));
-        }
+        Err(err) => Err(crate::error::emit_error(
+            &err.to_string(),
+            2,
+            options.output,
+        )),
     }
-
-    Ok(resolved)
 }
 
 fn config_shape_for(

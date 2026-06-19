@@ -97,6 +97,38 @@ pub fn analyze_template_snippet_with_bound_targets(
     let parser_return = Parser::new(&allocator, &wrapped, SourceType::ts()).parse();
 
     let semantic_ret = SemanticBuilder::new().build(&parser_return.program);
+    let (used_bindings, unresolved_targets) = classify_unresolved_references(
+        &semantic_ret,
+        imported_bindings,
+        bound_targets,
+        allow_dollar_prefixed_refs,
+    );
+
+    if unresolved_targets.is_empty() {
+        return TemplateUsage::default();
+    }
+
+    let mut extractor = ModuleInfoExtractor::new();
+    extractor.visit_program(&parser_return.program);
+
+    build_template_usage(
+        used_bindings,
+        &unresolved_targets,
+        bound_targets,
+        allow_dollar_prefixed_refs,
+        extractor,
+    )
+}
+
+/// Split a parsed snippet's root unresolved references into the imported
+/// bindings actually used and the full set of remappable target names
+/// (imported bindings + bound targets, with optional `$`-prefix stripping).
+fn classify_unresolved_references(
+    semantic_ret: &oxc_semantic::SemanticBuilderReturn<'_>,
+    imported_bindings: &FxHashSet<String>,
+    bound_targets: &FxHashMap<String, String>,
+    allow_dollar_prefixed_refs: bool,
+) -> (FxHashSet<String>, FxHashSet<String>) {
     let mut used_bindings = FxHashSet::default();
     let mut unresolved_targets = FxHashSet::default();
     for name in semantic_ret
@@ -124,14 +156,18 @@ pub fn analyze_template_snippet_with_bound_targets(
             }
         }
     }
+    (used_bindings, unresolved_targets)
+}
 
-    if unresolved_targets.is_empty() {
-        return TemplateUsage::default();
-    }
-
-    let mut extractor = ModuleInfoExtractor::new();
-    extractor.visit_program(&parser_return.program);
-
+/// Build the [`TemplateUsage`] from the extracted member accesses / whole-object
+/// uses, remapping each object name through the resolved target set.
+fn build_template_usage(
+    used_bindings: FxHashSet<String>,
+    unresolved_targets: &FxHashSet<String>,
+    bound_targets: &FxHashMap<String, String>,
+    allow_dollar_prefixed_refs: bool,
+    extractor: ModuleInfoExtractor,
+) -> TemplateUsage {
     TemplateUsage {
         used_bindings,
         member_accesses: dedup_member_accesses(
@@ -141,7 +177,7 @@ pub fn analyze_template_snippet_with_bound_targets(
                 .filter_map(|access| {
                     remap_object_name(
                         &access.object,
-                        &unresolved_targets,
+                        unresolved_targets,
                         bound_targets,
                         allow_dollar_prefixed_refs,
                     )
@@ -159,7 +195,7 @@ pub fn analyze_template_snippet_with_bound_targets(
                 .filter_map(|name| {
                     remap_object_name(
                         &name,
-                        &unresolved_targets,
+                        unresolved_targets,
                         bound_targets,
                         allow_dollar_prefixed_refs,
                     )

@@ -134,7 +134,26 @@ fn run_local(path: &Path, args: &AnalyzeArgs, ctx: &RunContext<'_>) -> ExitCode 
         Ok(options) => options,
         Err(code) => return code,
     };
-    let result = match crate::health::execute_health(&HealthOptions {
+    let options = local_health_options(args, ctx, runtime_coverage);
+    let result = match crate::health::execute_health(&options) {
+        Ok(result) => result,
+        Err(code) => return code,
+    };
+    let Some(report) = result.report.runtime_coverage else {
+        return emit_error("runtime coverage report was not produced", 2, ctx.output);
+    };
+    print_runtime_report(&report, ctx, result.elapsed, args)
+}
+
+/// Build the `HealthOptions` for a local `coverage analyze` run: complexity,
+/// hotspot, and gating features are off so the run focuses on the supplied
+/// runtime-coverage artifact.
+fn local_health_options<'a>(
+    args: &AnalyzeArgs,
+    ctx: &RunContext<'a>,
+    runtime_coverage: crate::health::RuntimeCoverageOptions,
+) -> HealthOptions<'a> {
+    HealthOptions {
         root: ctx.root,
         config_path: ctx.config_path,
         output: ctx.output,
@@ -186,14 +205,7 @@ fn run_local(path: &Path, args: &AnalyzeArgs, ctx: &RunContext<'_>) -> ExitCode 
         runtime_coverage: Some(runtime_coverage),
         // coverage analyze focuses on runtime data, not churn hotspots.
         churn_file: None,
-    }) {
-        Ok(result) => result,
-        Err(code) => return code,
-    };
-    let Some(report) = result.report.runtime_coverage else {
-        return emit_error("runtime coverage report was not produced", 2, ctx.output);
-    };
-    print_runtime_report(&report, ctx, result.elapsed, args)
+    }
 }
 
 fn run_cloud(args: &AnalyzeArgs, ctx: &RunContext<'_>) -> ExitCode {
@@ -395,26 +407,7 @@ fn build_index_from_analysis(
     file_paths: &FxHashMap<fallow_types::discover::FileId, &PathBuf>,
     codeowners: Option<&crate::codeowners::CodeOwners>,
 ) -> StaticIndex {
-    let unused_files: FxHashSet<PathBuf> = analysis_output
-        .results
-        .unused_files
-        .iter()
-        .map(|file| file.file.path.clone())
-        .collect();
-    let mut unused_export_names: FxHashMap<PathBuf, FxHashSet<String>> = FxHashMap::default();
-    let mut unused_export_lines: FxHashMap<PathBuf, FxHashSet<u32>> = FxHashMap::default();
-    for finding in &analysis_output.results.unused_exports {
-        let export = &finding.export;
-        unused_export_names
-            .entry(export.path.clone())
-            .or_default()
-            .insert(export.export_name.clone());
-        unused_export_lines
-            .entry(export.path.clone())
-            .or_default()
-            .insert(export.line);
-    }
-
+    let unused = UnusedStaticSets::from_analysis(analysis_output);
     let mut out = StaticIndex::default();
     let graph = analysis_output.graph.as_ref();
     for module in modules {
@@ -428,40 +421,105 @@ fn build_index_from_analysis(
         let caller_count = u32::try_from(caller_count).unwrap_or(u32::MAX);
         let owner_count = codeowners.map(|co| co.owner_count_of(Path::new(&rel)).unwrap_or(0));
         for function in &module.complexity {
-            let end_line = function.line.saturating_add(function.line_count);
-            let static_used = !unused_files.contains(path.as_path())
-                && !unused_export_names
-                    .get(*path)
-                    .is_some_and(|names| names.contains(function.name.as_str()))
-                && !unused_export_lines
-                    .get(*path)
-                    .is_some_and(|lines| lines.contains(&function.line));
-            let stable_id = function_identity_id(&rel, &function.name, function.line);
-            let info = StaticFunctionInfo {
-                path: PathBuf::from(&rel),
-                name: function.name.clone(),
-                start_line: function.line,
-                end_line,
-                static_used,
-                test_covered: false,
-                cyclomatic: u32::from(function.cyclomatic),
+            let info = static_function_info(
+                function,
+                path.as_path(),
+                &rel,
+                &unused,
                 caller_count,
                 owner_count,
-                stable_id: stable_id.clone(),
-                source_hash: function.source_hash.clone(),
-            };
-            out.by_key.insert(
-                (rel.clone(), function.name.clone(), function.line),
-                info.clone(),
             );
-            out.by_stable_id.insert(stable_id, info.clone());
-            out.by_path_name
-                .entry((rel.clone(), function.name.clone()))
-                .or_default()
-                .push(info);
+            index_static_function(&mut out, &rel, info);
         }
     }
     out
+}
+
+/// Per-file sets of statically-unused files and exports, used to flag whether a
+/// function is reachable in the static graph.
+struct UnusedStaticSets {
+    files: FxHashSet<PathBuf>,
+    export_names: FxHashMap<PathBuf, FxHashSet<String>>,
+    export_lines: FxHashMap<PathBuf, FxHashSet<u32>>,
+}
+
+impl UnusedStaticSets {
+    fn from_analysis(analysis_output: &fallow_core::AnalysisOutput) -> Self {
+        let files: FxHashSet<PathBuf> = analysis_output
+            .results
+            .unused_files
+            .iter()
+            .map(|file| file.file.path.clone())
+            .collect();
+        let mut export_names: FxHashMap<PathBuf, FxHashSet<String>> = FxHashMap::default();
+        let mut export_lines: FxHashMap<PathBuf, FxHashSet<u32>> = FxHashMap::default();
+        for finding in &analysis_output.results.unused_exports {
+            let export = &finding.export;
+            export_names
+                .entry(export.path.clone())
+                .or_default()
+                .insert(export.export_name.clone());
+            export_lines
+                .entry(export.path.clone())
+                .or_default()
+                .insert(export.line);
+        }
+        Self {
+            files,
+            export_names,
+            export_lines,
+        }
+    }
+
+    fn function_is_used(&self, path: &Path, name: &str, line: u32) -> bool {
+        !self.files.contains(path)
+            && !self
+                .export_names
+                .get(path)
+                .is_some_and(|names| names.contains(name))
+            && !self
+                .export_lines
+                .get(path)
+                .is_some_and(|lines| lines.contains(&line))
+    }
+}
+
+/// Build a `StaticFunctionInfo` for one extracted function.
+fn static_function_info(
+    function: &fallow_types::extract::FunctionComplexity,
+    path: &Path,
+    rel: &str,
+    unused: &UnusedStaticSets,
+    caller_count: u32,
+    owner_count: Option<u32>,
+) -> StaticFunctionInfo {
+    StaticFunctionInfo {
+        path: PathBuf::from(rel),
+        name: function.name.clone(),
+        start_line: function.line,
+        end_line: function.line.saturating_add(function.line_count),
+        static_used: unused.function_is_used(path, function.name.as_str(), function.line),
+        test_covered: false,
+        cyclomatic: u32::from(function.cyclomatic),
+        caller_count,
+        owner_count,
+        stable_id: function_identity_id(rel, &function.name, function.line),
+        source_hash: function.source_hash.clone(),
+    }
+}
+
+/// Insert a function's static info into all three lookup tiers of the index.
+fn index_static_function(out: &mut StaticIndex, rel: &str, info: StaticFunctionInfo) {
+    out.by_key.insert(
+        (rel.to_string(), info.name.clone(), info.start_line),
+        info.clone(),
+    );
+    out.by_stable_id
+        .insert(info.stable_id.clone(), info.clone());
+    out.by_path_name
+        .entry((rel.to_string(), info.name.clone()))
+        .or_default()
+        .push(info);
 }
 
 fn merge_cloud_snapshot(
@@ -1172,41 +1230,57 @@ fn print_runtime_human(
             finding.verdict.human_label(),
         );
     }
-    if args.blast_radius && !report.blast_radius.is_empty() {
-        println!("  blast radius:");
-        for entry in report.blast_radius.iter().take(display_limit) {
-            println!(
-                "  {}:{} {} ({} callers, weighted {}, {})",
-                entry.file.display(),
-                entry.line,
-                entry.function,
-                entry.caller_count,
-                entry.caller_count_weighted_by_traffic,
-                entry.risk_band,
-            );
-        }
+    if args.blast_radius {
+        print_runtime_blast_radius(report, display_limit);
     }
-    if args.importance && !report.importance.is_empty() {
-        println!("  importance:");
-        for entry in report.importance.iter().take(display_limit) {
-            println!(
-                "  {}:{} {} ({:.1}, {} invocations, cyclomatic {}, owners {}) - {}",
-                entry.file.display(),
-                entry.line,
-                entry.function,
-                entry.importance_score,
-                entry.invocations,
-                entry.cyclomatic,
-                entry.owner_count,
-                entry.reason,
-            );
-        }
+    if args.importance {
+        print_runtime_importance(report, display_limit);
     }
     for warning in &report.warnings {
         println!("  warning [{}]: {}", warning.code, warning.message);
     }
     eprintln!("runtime coverage analyzed in {:.2}s", elapsed.as_secs_f64());
     ExitCode::SUCCESS
+}
+
+/// Print the human-format blast-radius section, capped at `display_limit`.
+fn print_runtime_blast_radius(report: &RuntimeCoverageReport, display_limit: usize) {
+    if report.blast_radius.is_empty() {
+        return;
+    }
+    println!("  blast radius:");
+    for entry in report.blast_radius.iter().take(display_limit) {
+        println!(
+            "  {}:{} {} ({} callers, weighted {}, {})",
+            entry.file.display(),
+            entry.line,
+            entry.function,
+            entry.caller_count,
+            entry.caller_count_weighted_by_traffic,
+            entry.risk_band,
+        );
+    }
+}
+
+/// Print the human-format importance section, capped at `display_limit`.
+fn print_runtime_importance(report: &RuntimeCoverageReport, display_limit: usize) {
+    if report.importance.is_empty() {
+        return;
+    }
+    println!("  importance:");
+    for entry in report.importance.iter().take(display_limit) {
+        println!(
+            "  {}:{} {} ({:.1}, {} invocations, cyclomatic {}, owners {}) - {}",
+            entry.file.display(),
+            entry.line,
+            entry.function,
+            entry.importance_score,
+            entry.invocations,
+            entry.cyclomatic,
+            entry.owner_count,
+            entry.reason,
+        );
+    }
 }
 
 #[cfg(test)]

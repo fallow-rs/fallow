@@ -528,46 +528,8 @@ fn merge_claude_settings(
     };
     let desired = desired_claude_settings(user)?;
 
-    let (serialized, outcome) = match existing_raw.as_deref() {
-        None | Some("") => (serialize_settings(&desired)?, SettingsOutcome::Created),
-        Some(raw) if raw.trim().is_empty() => {
-            (serialize_settings(&desired)?, SettingsOutcome::Created)
-        }
-        Some(raw) => {
-            let current: Option<serde_json::Value> = match serde_json::from_str(raw) {
-                Ok(v) => Some(v),
-                Err(e) => {
-                    if !force {
-                        return Err(format!(
-                            "{} is not valid JSON ({e}); re-run with --force to overwrite.",
-                            path.display()
-                        ));
-                    }
-                    None
-                }
-            };
-            match current {
-                None => (serialize_settings(&desired)?, SettingsOutcome::Created),
-                Some(current) => {
-                    let (value, added, removed, preserved) =
-                        merge_settings_value(&current, &desired)?;
-                    let serialized = serialize_settings(&value)?;
-                    let outcome = if raw == serialized {
-                        SettingsOutcome::Unchanged {
-                            handlers_preserved: preserved,
-                        }
-                    } else {
-                        SettingsOutcome::Updated {
-                            handlers_added: added,
-                            handlers_removed: removed,
-                            handlers_preserved: preserved,
-                        }
-                    };
-                    (serialized, outcome)
-                }
-            }
-        }
-    };
+    let (serialized, outcome) =
+        merge_claude_settings_content(path, existing_raw.as_deref(), &desired, force)?;
 
     if dry_run {
         return Ok(outcome);
@@ -580,6 +542,50 @@ fn merge_claude_settings(
     std::fs::write(path, serialized)
         .map_err(|e| format!("Failed to write {}: {e}", path.display()))?;
     Ok(outcome)
+}
+
+/// Compute the serialized settings text and the resulting [`SettingsOutcome`]
+/// from the existing on-disk content (if any) and the desired settings.
+fn merge_claude_settings_content(
+    path: &Path,
+    existing_raw: Option<&str>,
+    desired: &serde_json::Value,
+    force: bool,
+) -> Result<(String, SettingsOutcome), String> {
+    let Some(raw) = existing_raw.filter(|raw| !raw.trim().is_empty()) else {
+        return Ok((serialize_settings(desired)?, SettingsOutcome::Created));
+    };
+
+    let current: Option<serde_json::Value> = match serde_json::from_str(raw) {
+        Ok(v) => Some(v),
+        Err(e) => {
+            if !force {
+                return Err(format!(
+                    "{} is not valid JSON ({e}); re-run with --force to overwrite.",
+                    path.display()
+                ));
+            }
+            None
+        }
+    };
+    let Some(current) = current else {
+        return Ok((serialize_settings(desired)?, SettingsOutcome::Created));
+    };
+
+    let (value, added, removed, preserved) = merge_settings_value(&current, desired)?;
+    let serialized = serialize_settings(&value)?;
+    let outcome = if raw == serialized {
+        SettingsOutcome::Unchanged {
+            handlers_preserved: preserved,
+        }
+    } else {
+        SettingsOutcome::Updated {
+            handlers_added: added,
+            handlers_removed: removed,
+            handlers_preserved: preserved,
+        }
+    };
+    Ok((serialized, outcome))
 }
 
 fn serialize_settings(value: &serde_json::Value) -> Result<String, String> {

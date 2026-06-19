@@ -955,14 +955,34 @@ impl BoundaryConfig {
     }
 
     /// Resolve into compiled form with pre-built glob matchers.
+    #[must_use]
+    pub fn resolve(&self) -> ResolvedBoundaryConfig {
+        let rules = self
+            .rules
+            .iter()
+            .map(|rule| ResolvedBoundaryRule {
+                from_zone: rule.from.clone(),
+                allowed_zones: rule.allow.clone(),
+                allow_type_only_zones: rule.allow_type_only.clone(),
+            })
+            .collect();
+
+        ResolvedBoundaryConfig {
+            zones: self.resolve_zones(),
+            rules,
+            logical_groups: Vec::new(),
+            coverage: self.resolve_coverage(),
+            calls_forbidden_by_zone: self.resolve_calls_forbidden_by_zone(),
+        }
+    }
+
+    /// Compile each zone's membership patterns into glob matchers.
     #[expect(
         clippy::expect_used,
         reason = "boundary glob patterns are validated before config resolution"
     )]
-    #[must_use]
-    pub fn resolve(&self) -> ResolvedBoundaryConfig {
-        let zones = self
-            .zones
+    fn resolve_zones(&self) -> Vec<ResolvedZone> {
+        self.zones
             .iter()
             .map(|zone| {
                 let matchers = zone
@@ -981,19 +1001,16 @@ impl BoundaryConfig {
                     root,
                 }
             })
-            .collect();
+            .collect()
+    }
 
-        let rules = self
-            .rules
-            .iter()
-            .map(|rule| ResolvedBoundaryRule {
-                from_zone: rule.from.clone(),
-                allowed_zones: rule.allow.clone(),
-                allow_type_only_zones: rule.allow_type_only.clone(),
-            })
-            .collect();
-
-        let coverage = ResolvedBoundaryCoverageConfig {
+    /// Compile the coverage `allowUnmatched` patterns into glob matchers.
+    #[expect(
+        clippy::expect_used,
+        reason = "boundary glob patterns are validated before config resolution"
+    )]
+    fn resolve_coverage(&self) -> ResolvedBoundaryCoverageConfig {
+        ResolvedBoundaryCoverageConfig {
             require_all_files: self.coverage.require_all_files,
             allow_unmatched: self
                 .coverage
@@ -1007,8 +1024,11 @@ impl BoundaryConfig {
                         .compile_matcher()
                 })
                 .collect(),
-        };
+        }
+    }
 
+    /// Group trimmed forbidden-call patterns by their `from` zone, in config order.
+    fn resolve_calls_forbidden_by_zone(&self) -> rustc_hash::FxHashMap<String, Vec<String>> {
         let mut calls_forbidden_by_zone: rustc_hash::FxHashMap<String, Vec<String>> =
             rustc_hash::FxHashMap::default();
         for rule in &self.calls.forbidden {
@@ -1019,14 +1039,7 @@ impl BoundaryConfig {
                 patterns.push(pattern.trim().to_owned());
             }
         }
-
-        ResolvedBoundaryConfig {
-            zones,
-            rules,
-            logical_groups: Vec::new(),
-            coverage,
-            calls_forbidden_by_zone,
-        }
+        calls_forbidden_by_zone
     }
 }
 
@@ -1136,11 +1149,100 @@ const fn merge_status(existing: LogicalGroupStatus, new: LogicalGroupStatus) -> 
     }
 }
 
+/// Accumulator for child zones discovered across a zone's autoDiscover dirs.
+#[derive(Default)]
+struct ChildZoneAccumulator {
+    zones_by_name: rustc_hash::FxHashMap<String, BoundaryZone>,
+    first_source_index: rustc_hash::FxHashMap<String, usize>,
+}
+
+impl ChildZoneAccumulator {
+    /// Register one discovered child directory as a child zone, merging the
+    /// glob pattern into an existing entry and recording its first source index.
+    fn register_child(
+        &mut self,
+        zone: &BoundaryZone,
+        discover_dir: &str,
+        child_name: &str,
+        source_index: usize,
+    ) {
+        let zone_name = format!("{}/{}", zone.name, child_name);
+        let child_pattern = format!("{}/**", join_relative_path(discover_dir, child_name));
+        let entry = self
+            .zones_by_name
+            .entry(zone_name.clone())
+            .or_insert_with(|| BoundaryZone {
+                name: zone_name.clone(),
+                patterns: vec![],
+                auto_discover: vec![],
+                root: zone.root.clone(),
+            });
+        if !entry
+            .patterns
+            .iter()
+            .any(|pattern| pattern == &child_pattern)
+        {
+            entry.patterns.push(child_pattern);
+        }
+        self.first_source_index
+            .entry(zone_name)
+            .or_insert(source_index);
+    }
+}
+
+/// Read one normalized autoDiscover directory and register its immediate child
+/// directories as child zones. Returns `false` when the path was invalid or
+/// unreadable so the caller can flag the discovery as invalid.
+fn discover_child_zones_in_dir(
+    project_root: &Path,
+    zone: &BoundaryZone,
+    normalized_root: &str,
+    raw_dir: &str,
+    source_index: usize,
+    accumulator: &mut ChildZoneAccumulator,
+) -> bool {
+    let Some(discover_dir) = normalize_auto_discover_dir(raw_dir) else {
+        tracing::warn!(
+            "invalid boundary autoDiscover path '{}' in zone '{}': paths must be project-relative and must not contain '..'",
+            raw_dir,
+            zone.name
+        );
+        return false;
+    };
+
+    let fs_relative = join_relative_path(normalized_root, &discover_dir);
+    let absolute_dir = if fs_relative.is_empty() {
+        project_root.to_path_buf()
+    } else {
+        project_root.join(&fs_relative)
+    };
+    let Ok(entries) = std::fs::read_dir(&absolute_dir) else {
+        tracing::warn!(
+            "boundary zone '{}' autoDiscover path '{}' did not resolve to a readable directory",
+            zone.name,
+            raw_dir
+        );
+        return false;
+    };
+
+    let mut children: Vec<_> = entries
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_ok_and(|file_type| file_type.is_dir()))
+        .collect();
+    children.sort_by_key(std::fs::DirEntry::file_name);
+
+    for child in children {
+        let child_name = child.file_name().to_string_lossy().to_string();
+        if child_name.is_empty() {
+            continue;
+        }
+        accumulator.register_child(zone, &discover_dir, &child_name, source_index);
+    }
+    true
+}
+
 fn discover_child_zones(project_root: &Path, zone: &BoundaryZone) -> DiscoveryOutcome {
-    let mut zones_by_name: rustc_hash::FxHashMap<String, BoundaryZone> =
-        rustc_hash::FxHashMap::default();
-    let mut first_source_index: rustc_hash::FxHashMap<String, usize> =
-        rustc_hash::FxHashMap::default();
+    let mut accumulator = ChildZoneAccumulator::default();
     let normalized_root = zone
         .root
         .as_deref()
@@ -1149,71 +1251,25 @@ fn discover_child_zones(project_root: &Path, zone: &BoundaryZone) -> DiscoveryOu
     let mut had_invalid_path = false;
 
     for (source_index, raw_dir) in zone.auto_discover.iter().enumerate() {
-        let Some(discover_dir) = normalize_auto_discover_dir(raw_dir) else {
-            tracing::warn!(
-                "invalid boundary autoDiscover path '{}' in zone '{}': paths must be project-relative and must not contain '..'",
-                raw_dir,
-                zone.name
-            );
+        if !discover_child_zones_in_dir(
+            project_root,
+            zone,
+            &normalized_root,
+            raw_dir,
+            source_index,
+            &mut accumulator,
+        ) {
             had_invalid_path = true;
-            continue;
-        };
-
-        let fs_relative = join_relative_path(&normalized_root, &discover_dir);
-        let absolute_dir = if fs_relative.is_empty() {
-            project_root.to_path_buf()
-        } else {
-            project_root.join(&fs_relative)
-        };
-        let Ok(entries) = std::fs::read_dir(&absolute_dir) else {
-            tracing::warn!(
-                "boundary zone '{}' autoDiscover path '{}' did not resolve to a readable directory",
-                zone.name,
-                raw_dir
-            );
-            had_invalid_path = true;
-            continue;
-        };
-
-        let mut children: Vec<_> = entries
-            .filter_map(Result::ok)
-            .filter(|entry| entry.file_type().is_ok_and(|file_type| file_type.is_dir()))
-            .collect();
-        children.sort_by_key(|entry| entry.file_name());
-
-        for child in children {
-            let child_name = child.file_name().to_string_lossy().to_string();
-            if child_name.is_empty() {
-                continue;
-            }
-
-            let zone_name = format!("{}/{}", zone.name, child_name);
-            let child_pattern = format!("{}/**", join_relative_path(&discover_dir, &child_name));
-            let entry = zones_by_name
-                .entry(zone_name.clone())
-                .or_insert_with(|| BoundaryZone {
-                    name: zone_name.clone(),
-                    patterns: vec![],
-                    auto_discover: vec![],
-                    root: zone.root.clone(),
-                });
-            if !entry
-                .patterns
-                .iter()
-                .any(|pattern| pattern == &child_pattern)
-            {
-                entry.patterns.push(child_pattern);
-            }
-            first_source_index.entry(zone_name).or_insert(source_index);
         }
     }
 
-    let mut zones: Vec<_> = zones_by_name.into_values().collect();
+    let mut zones: Vec<_> = accumulator.zones_by_name.into_values().collect();
     zones.sort_by(|a, b| a.name.cmp(&b.name));
     let source_indices: Vec<usize> = zones
         .iter()
         .map(|z| {
-            first_source_index
+            accumulator
+                .first_source_index
                 .get(z.name.as_str())
                 .copied()
                 .unwrap_or(0)

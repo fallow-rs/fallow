@@ -75,82 +75,103 @@ pub fn push_duplicate_export_diagnostics(
     }
 }
 
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "line/col numbers are bounded by source size"
-)]
 pub fn push_duplication_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     duplication: &DuplicationReport,
 ) {
     for group in &duplication.clone_groups {
         for instance in &group.instances {
-            let Some(inst_uri) = Uri::from_file_path(&instance.file) else {
-                continue;
-            };
-
-            let start_line = (instance.start_line as u32).saturating_sub(1);
-            let end_line = (instance.end_line as u32).saturating_sub(1);
-
-            let related_info: Vec<DiagnosticRelatedInformation> = group
-                .instances
-                .iter()
-                .filter(|other| {
-                    !(other.file == instance.file && other.start_line == instance.start_line)
-                })
-                .filter_map(|other| {
-                    let other_uri = Uri::from_file_path(&other.file)?;
-                    Some(DiagnosticRelatedInformation {
-                        location: Location {
-                            uri: other_uri,
-                            range: Range {
-                                start: Position {
-                                    line: (other.start_line as u32).saturating_sub(1),
-                                    character: other.start_col as u32,
-                                },
-                                end: Position {
-                                    line: (other.end_line as u32).saturating_sub(1),
-                                    character: u32::MAX,
-                                },
-                            },
-                        },
-                        message: "Also duplicated here".to_string(),
-                    })
-                })
-                .collect();
-
-            map.entry(inst_uri).or_default().push(Diagnostic {
-                range: Range {
-                    start: Position {
-                        line: start_line,
-                        character: instance.start_col as u32,
-                    },
-                    end: Position {
-                        line: end_line,
-                        character: u32::MAX,
-                    },
-                },
-                severity: Some(DiagnosticSeverity::INFORMATION),
-                source: Some("fallow".to_string()),
-                code: Some(NumberOrString::String("code-duplication".to_string())),
-                code_description: "https://docs.fallow.tools/explanations/duplication"
-                    .parse::<Uri>()
-                    .ok()
-                    .map(|href| CodeDescription { href }),
-                message: format!(
-                    "Duplicated code block ({} lines, {} instances)",
-                    group.line_count,
-                    group.instances.len()
-                ),
-                related_information: if related_info.is_empty() {
-                    None
-                } else {
-                    Some(related_info)
-                },
-                ..Default::default()
-            });
+            push_duplication_instance_diagnostic(map, group, instance);
         }
     }
+}
+
+/// Push one INFORMATION diagnostic for a single clone instance, with the
+/// group's other instances linked as related info.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "line/col numbers are bounded by source size"
+)]
+fn push_duplication_instance_diagnostic(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    group: &fallow_core::duplicates::CloneGroup,
+    instance: &fallow_core::duplicates::CloneInstance,
+) {
+    let Some(inst_uri) = Uri::from_file_path(&instance.file) else {
+        return;
+    };
+
+    let start_line = (instance.start_line as u32).saturating_sub(1);
+    let end_line = (instance.end_line as u32).saturating_sub(1);
+
+    let related_info = duplication_related_info(group, instance);
+
+    map.entry(inst_uri).or_default().push(Diagnostic {
+        range: Range {
+            start: Position {
+                line: start_line,
+                character: instance.start_col as u32,
+            },
+            end: Position {
+                line: end_line,
+                character: u32::MAX,
+            },
+        },
+        severity: Some(DiagnosticSeverity::INFORMATION),
+        source: Some("fallow".to_string()),
+        code: Some(NumberOrString::String("code-duplication".to_string())),
+        code_description: "https://docs.fallow.tools/explanations/duplication"
+            .parse::<Uri>()
+            .ok()
+            .map(|href| CodeDescription { href }),
+        message: format!(
+            "Duplicated code block ({} lines, {} instances)",
+            group.line_count,
+            group.instances.len()
+        ),
+        related_information: if related_info.is_empty() {
+            None
+        } else {
+            Some(related_info)
+        },
+        ..Default::default()
+    });
+}
+
+/// Build the "Also duplicated here" related-info entries for every clone
+/// instance in `group` other than `instance` itself.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "line/col numbers are bounded by source size"
+)]
+fn duplication_related_info(
+    group: &fallow_core::duplicates::CloneGroup,
+    instance: &fallow_core::duplicates::CloneInstance,
+) -> Vec<DiagnosticRelatedInformation> {
+    group
+        .instances
+        .iter()
+        .filter(|other| !(other.file == instance.file && other.start_line == instance.start_line))
+        .filter_map(|other| {
+            let other_uri = Uri::from_file_path(&other.file)?;
+            Some(DiagnosticRelatedInformation {
+                location: Location {
+                    uri: other_uri,
+                    range: Range {
+                        start: Position {
+                            line: (other.start_line as u32).saturating_sub(1),
+                            character: other.start_col as u32,
+                        },
+                        end: Position {
+                            line: (other.end_line as u32).saturating_sub(1),
+                            character: u32::MAX,
+                        },
+                    },
+                },
+                message: "Also duplicated here".to_string(),
+            })
+        })
+        .collect()
 }
 
 pub fn push_stale_suppression_diagnostics(
