@@ -42,15 +42,7 @@ Codebase intelligence for JavaScript and TypeScript. The free static layer repor
 
 ## Prerequisites
 
-Fallow must be installed. If not available, install it:
-
-```bash
-npm install -g fallow          # prebuilt binaries (fastest)
-# or
-npx fallow dead-code               # run without installing
-# or
-cargo install fallow-cli        # build from source
-```
+Fallow must be installed. Use `npm install -g fallow`, `npx fallow dead-code`, or `cargo install fallow-cli`.
 
 ## Agent Rules
 
@@ -126,21 +118,7 @@ Route by intent before reaching for the big analysis commands. Same matrix as `f
 Run `fallow <command> --help` for the full flag list per command (see also references/cli-reference.md).
 <!-- generated:commands:end -->
 
-Security survivor verdict files may be either a bare array or a wrapper object with `verdicts`. Supported verdicts are `survivor`, `needs-human-review`, and `dismissed`:
-
-```json
-{
-  "schema_version": "fallow-security-verdicts/v1",
-  "verdicts": [
-    {
-      "schema_version": "fallow-security-verdict/v1",
-      "finding_id": "sec-a",
-      "verdict": "survivor",
-      "rationale": "validated reachable user input"
-    }
-  ]
-}
-```
+Security survivor verdict files may be either a bare array or a wrapper object with `verdicts`. Supported verdicts are `survivor`, `needs-human-review`, and `dismissed`. Example wrapper: `{"schema_version":"fallow-security-verdicts/v1","verdicts":[{"schema_version":"fallow-security-verdict/v1","finding_id":"sec-a","verdict":"survivor","rationale":"validated reachable user input"}]}`.
 
 ## Issue Types
 
