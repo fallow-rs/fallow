@@ -221,31 +221,7 @@ pub fn resolve_workspace_filters(
 
     let (positive, negative) = split_patterns(patterns);
 
-    let mut matched: FxHashSet<usize> = FxHashSet::default();
-    let mut unmatched: Vec<String> = Vec::new();
-
-    if positive.is_empty() {
-        matched.extend(0..workspaces.len());
-    } else {
-        for pat in &positive {
-            let hits = find_matches(pat, &workspaces, &rel_paths, output)?;
-            if hits.is_empty() {
-                unmatched.push(pat.to_string());
-            }
-            matched.extend(hits);
-        }
-    }
-
-    if !unmatched.is_empty() {
-        let quoted: Vec<String> = unmatched.iter().map(|p| format!("'{p}'")).collect();
-        let available = format_available_workspaces(&workspaces);
-        let msg = format!(
-            "--workspace: no workspaces matched pattern{}: {}. Available: {available}",
-            if unmatched.len() == 1 { "" } else { "s" },
-            quoted.join(", "),
-        );
-        return Err(emit_error(&msg, 2, output));
-    }
+    let mut matched = match_positive_patterns(&positive, &workspaces, &rel_paths, output)?;
 
     for pat in &negative {
         let hits = find_matches(pat, &workspaces, &rel_paths, output)?;
@@ -255,25 +231,7 @@ pub fn resolve_workspace_filters(
     }
 
     if matched.is_empty() {
-        let include_desc = if positive.is_empty() {
-            "<all>".to_owned()
-        } else {
-            positive
-                .iter()
-                .map(|p| format!("'{p}'"))
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
-        let exclude_desc = negative
-            .iter()
-            .map(|p| format!("'{p}'"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let msg = format!(
-            "--workspace: all workspaces were excluded by the filter. \
-             Included: {include_desc}. Excluded: {exclude_desc}."
-        );
-        return Err(emit_error(&msg, 2, output));
+        return Err(error_all_excluded(&positive, &negative, output));
     }
 
     let mut roots: Vec<PathBuf> = matched
@@ -282,6 +240,68 @@ pub fn resolve_workspace_filters(
         .collect();
     roots.sort();
     Ok(roots)
+}
+
+/// Resolve the positive `--workspace` patterns to a set of workspace indices.
+/// An empty positive set matches every workspace. Errors (exit 2) if any
+/// pattern matched nothing.
+fn match_positive_patterns(
+    positive: &[&str],
+    workspaces: &[WorkspaceInfo],
+    rel_paths: &[String],
+    output: OutputFormat,
+) -> Result<FxHashSet<usize>, ExitCode> {
+    let mut matched: FxHashSet<usize> = FxHashSet::default();
+    let mut unmatched: Vec<String> = Vec::new();
+
+    if positive.is_empty() {
+        matched.extend(0..workspaces.len());
+    } else {
+        for pat in positive {
+            let hits = find_matches(pat, workspaces, rel_paths, output)?;
+            if hits.is_empty() {
+                unmatched.push((*pat).to_string());
+            }
+            matched.extend(hits);
+        }
+    }
+
+    if !unmatched.is_empty() {
+        let quoted: Vec<String> = unmatched.iter().map(|p| format!("'{p}'")).collect();
+        let available = format_available_workspaces(workspaces);
+        let msg = format!(
+            "--workspace: no workspaces matched pattern{}: {}. Available: {available}",
+            if unmatched.len() == 1 { "" } else { "s" },
+            quoted.join(", "),
+        );
+        return Err(emit_error(&msg, 2, output));
+    }
+
+    Ok(matched)
+}
+
+/// Build the exit-2 error for when every workspace was removed by negation,
+/// describing both the included and excluded patterns.
+fn error_all_excluded(positive: &[&str], negative: &[&str], output: OutputFormat) -> ExitCode {
+    let include_desc = if positive.is_empty() {
+        "<all>".to_owned()
+    } else {
+        positive
+            .iter()
+            .map(|p| format!("'{p}'"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let exclude_desc = negative
+        .iter()
+        .map(|p| format!("'{p}'"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let msg = format!(
+        "--workspace: all workspaces were excluded by the filter. \
+         Included: {include_desc}. Excluded: {exclude_desc}."
+    );
+    emit_error(&msg, 2, output)
 }
 
 /// Format the workspace list for inclusion in error messages. Caps the

@@ -73,57 +73,57 @@ fn reconcile_review(
         }
     };
     let current = envelope_fingerprints(&envelope);
-    let state = match provider {
-        CiProvider::Github => match load_github_state(target, opts) {
-            Ok(state) => Some(state),
-            Err(e) if opts.dry_run => {
-                let plan = ReconcilePlan::without_provider(&current, e);
-                return emit_reconcile_result(
-                    provider,
-                    target,
-                    &envelope,
-                    opts,
-                    &plan,
-                    &ApplyResult::default(),
-                );
-            }
-            Err(e) => return emit_error(&e, crate::api::NETWORK_EXIT_CODE, output),
-        },
-        CiProvider::Gitlab => match load_gitlab_state(target, opts) {
-            Ok(state) => Some(state),
-            Err(e) if opts.dry_run => {
-                let plan = ReconcilePlan::without_provider(&current, e);
-                return emit_reconcile_result(
-                    provider,
-                    target,
-                    &envelope,
-                    opts,
-                    &plan,
-                    &ApplyResult::default(),
-                );
-            }
-            Err(e) => return emit_error(&e, crate::api::NETWORK_EXIT_CODE, output),
-        },
-    };
-    let Some(state) = state else {
-        return emit_error(
-            "internal error: provider state was not loaded for review reconciliation",
-            2,
-            output,
-        );
+    let state = match load_provider_state(provider, target, opts) {
+        Ok(state) => state,
+        Err(e) if opts.dry_run => {
+            let plan = ReconcilePlan::without_provider(&current, e);
+            return emit_reconcile_result(
+                provider,
+                target,
+                &envelope,
+                opts,
+                &plan,
+                &ApplyResult::default(),
+            );
+        }
+        Err(e) => return emit_error(&e, crate::api::NETWORK_EXIT_CODE, output),
     };
     let plan = PlannedReconcile::new(&current, &state);
 
     let applied = if opts.dry_run {
         ApplyResult::default()
     } else {
-        match provider {
-            CiProvider::Github => apply_github_reconcile(&plan, target, opts),
-            CiProvider::Gitlab => apply_gitlab_reconcile(&plan, target, opts),
-        }
+        apply_provider_reconcile(provider, &plan, target, opts)
     };
 
     emit_reconcile_result(provider, target, &envelope, opts, &plan.plan, &applied)
+}
+
+/// Load existing provider review state (comments + threads/discussions) for the
+/// reconcile plan, dispatching to the GitHub or GitLab loader.
+fn load_provider_state(
+    provider: CiProvider,
+    target: Option<&str>,
+    opts: ReconcileOptions<'_>,
+) -> Result<ProviderState, String> {
+    match provider {
+        CiProvider::Github => load_github_state(target, opts),
+        CiProvider::Gitlab => load_gitlab_state(target, opts),
+    }
+}
+
+/// Apply the reconcile plan against the live provider, dispatching to the
+/// GitHub or GitLab applier.
+fn apply_provider_reconcile(
+    provider: CiProvider,
+    plan: &PlannedReconcile<'_>,
+    target: Option<&str>,
+    opts: ReconcileOptions<'_>,
+) -> ApplyResult {
+    match provider {
+        CiProvider::Github => apply_github_reconcile(plan, target, opts),
+        CiProvider::Gitlab => apply_gitlab_reconcile(plan, target, opts),
+    }
 }
 
 #[expect(
@@ -353,23 +353,7 @@ fn load_github_state(
     Ok(state)
 }
 
-fn load_github_review_threads(
-    state: &mut ProviderState,
-    agent: &ureq::Agent,
-    repo: &str,
-    pr: &str,
-    token: &str,
-    api: &str,
-) -> Result<(), String> {
-    let (owner, name) = repo
-        .split_once('/')
-        .ok_or_else(|| format!("GitHub repo must be owner/name, got '{repo}'"))?;
-    let number = pr
-        .parse::<u64>()
-        .map_err(|_| format!("GitHub PR must be numeric, got '{pr}'"))?;
-    let mut cursor: Option<String> = None;
-    for _ in 0..100 {
-        let query = r"
+const GITHUB_REVIEW_THREADS_QUERY: &str = r"
 query($owner:String!, $name:String!, $number:Int!, $cursor:String) {
   repository(owner:$owner, name:$name) {
     pullRequest(number:$number) {
@@ -386,8 +370,25 @@ query($owner:String!, $name:String!, $number:Int!, $cursor:String) {
     }
   }
 }";
+
+fn load_github_review_threads(
+    state: &mut ProviderState,
+    agent: &ureq::Agent,
+    repo: &str,
+    pr: &str,
+    token: &str,
+    api: &str,
+) -> Result<(), String> {
+    let (owner, name) = repo
+        .split_once('/')
+        .ok_or_else(|| format!("GitHub repo must be owner/name, got '{repo}'"))?;
+    let number = pr
+        .parse::<u64>()
+        .map_err(|_| format!("GitHub PR must be numeric, got '{pr}'"))?;
+    let mut cursor: Option<String> = None;
+    for _ in 0..100 {
         let payload = serde_json::json!({
-            "query": query,
+            "query": GITHUB_REVIEW_THREADS_QUERY,
             "variables": {
                 "owner": owner,
                 "name": name,
@@ -406,32 +407,7 @@ query($owner:String!, $name:String!, $number:Int!, $cursor:String) {
             .and_then(Value::as_array)
             .ok_or_else(|| "GitHub reviewThreads response did not contain nodes".to_owned())?;
         for thread in threads {
-            if thread
-                .get("isResolved")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-            {
-                continue;
-            }
-            let Some(thread_id) = thread.get("id").and_then(Value::as_str) else {
-                continue;
-            };
-            let comments = thread
-                .pointer("/comments/nodes")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten();
-            for comment in comments {
-                let body = comment.get("body").and_then(Value::as_str).unwrap_or("");
-                if let Some(fingerprint) = extract_fallow_fingerprint(body) {
-                    state.fingerprints.insert(fingerprint.clone());
-                    state
-                        .github_threads_by_fingerprint
-                        .entry(fingerprint)
-                        .or_default()
-                        .push(thread_id.to_owned());
-                }
-            }
+            collect_github_thread_fingerprints(state, thread);
         }
         let page_info = value
             .pointer("/data/repository/pullRequest/reviewThreads/pageInfo")
@@ -449,6 +425,37 @@ query($owner:String!, $name:String!, $number:Int!, $cursor:String) {
             .map(str::to_owned);
     }
     Ok(())
+}
+
+/// Record fallow fingerprints found in an unresolved GitHub review thread's
+/// comment bodies, mapping each to the thread id for later resolution.
+fn collect_github_thread_fingerprints(state: &mut ProviderState, thread: &Value) {
+    if thread
+        .get("isResolved")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return;
+    }
+    let Some(thread_id) = thread.get("id").and_then(Value::as_str) else {
+        return;
+    };
+    let comments = thread
+        .pointer("/comments/nodes")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten();
+    for comment in comments {
+        let body = comment.get("body").and_then(Value::as_str).unwrap_or("");
+        if let Some(fingerprint) = extract_fallow_fingerprint(body) {
+            state.fingerprints.insert(fingerprint.clone());
+            state
+                .github_threads_by_fingerprint
+                .entry(fingerprint)
+                .or_default()
+                .push(thread_id.to_owned());
+        }
+    }
 }
 
 fn apply_github_reconcile(
@@ -497,15 +504,30 @@ fn apply_github_reconcile(
         return result;
     }
 
+    run_github_operations(&operations, &agent, &repo, pr, &token, api, &mut result);
+    result
+}
+
+/// Apply each staged GitHub operation in order, recording a failure (with the
+/// not-yet-applied suffix) and stopping at the first error.
+fn run_github_operations(
+    operations: &[GithubApplyOperation],
+    agent: &ureq::Agent,
+    repo: &str,
+    pr: &str,
+    token: &str,
+    api: &str,
+    result: &mut ApplyResult,
+) {
     for (index, operation) in operations.iter().enumerate() {
         if let Err(failure) = apply_github_operation(&mut GithubOperationInput {
             operation,
-            agent: &agent,
-            repo: &repo,
+            agent,
+            repo,
             pr,
-            token: &token,
+            token,
             api,
-            result: &mut result,
+            result,
         }) {
             result.record_failure(
                 failure,
@@ -513,10 +535,9 @@ fn apply_github_reconcile(
                     .iter()
                     .map(GithubApplyOperation::fingerprint_owned),
             );
-            return result;
+            return;
         }
     }
-    result
 }
 
 #[derive(Debug)]
@@ -747,36 +768,42 @@ fn load_gitlab_state(
             break;
         }
         for discussion in discussions {
-            let Some(discussion_id) = discussion.get("id").and_then(Value::as_str) else {
-                continue;
-            };
-            let notes = discussion
-                .get("notes")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten();
-            for note in notes {
-                let body = note.get("body").and_then(Value::as_str).unwrap_or("");
-                if let Some(fingerprint) = extract_fallow_fingerprint(body) {
-                    state.fingerprints.insert(fingerprint.clone());
-                    state
-                        .gitlab_discussions_by_fingerprint
-                        .entry(fingerprint)
-                        .or_default()
-                        .push(discussion_id.to_owned());
-                }
-                if is_gitlab_bot_note(note)
-                    && let Some(fingerprint) = extract_marker(body, "fallow-resolved-fingerprint:")
-                {
-                    state.gitlab_resolved_markers.insert(fingerprint);
-                }
-            }
+            collect_gitlab_discussion_fingerprints(&mut state, discussion);
         }
         if discussions.len() < 100 {
             break;
         }
     }
     Ok(state)
+}
+
+/// Record fallow fingerprints and resolved markers found in a GitLab
+/// discussion's note bodies, mapping each fingerprint to the discussion id.
+fn collect_gitlab_discussion_fingerprints(state: &mut ProviderState, discussion: &Value) {
+    let Some(discussion_id) = discussion.get("id").and_then(Value::as_str) else {
+        return;
+    };
+    let notes = discussion
+        .get("notes")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten();
+    for note in notes {
+        let body = note.get("body").and_then(Value::as_str).unwrap_or("");
+        if let Some(fingerprint) = extract_fallow_fingerprint(body) {
+            state.fingerprints.insert(fingerprint.clone());
+            state
+                .gitlab_discussions_by_fingerprint
+                .entry(fingerprint)
+                .or_default()
+                .push(discussion_id.to_owned());
+        }
+        if is_gitlab_bot_note(note)
+            && let Some(fingerprint) = extract_marker(body, "fallow-resolved-fingerprint:")
+        {
+            state.gitlab_resolved_markers.insert(fingerprint);
+        }
+    }
 }
 
 fn apply_gitlab_reconcile(
@@ -826,15 +853,38 @@ fn apply_gitlab_reconcile(
         return result;
     }
 
+    run_gitlab_operations(
+        &operations,
+        &agent,
+        &encoded_project,
+        mr,
+        &token,
+        &api,
+        &mut result,
+    );
+    result
+}
+
+/// Apply each staged GitLab operation in order, recording a failure (with the
+/// not-yet-applied suffix) and stopping at the first error.
+fn run_gitlab_operations(
+    operations: &[GitlabApplyOperation],
+    agent: &ureq::Agent,
+    encoded_project: &str,
+    mr: &str,
+    token: &str,
+    api: &str,
+    result: &mut ApplyResult,
+) {
     for (index, operation) in operations.iter().enumerate() {
         if let Err(failure) = apply_gitlab_operation(&mut GitlabOperationInput {
             operation,
-            agent: &agent,
-            encoded_project: &encoded_project,
+            agent,
+            encoded_project,
             mr,
-            token: &token,
-            api: &api,
-            result: &mut result,
+            token,
+            api,
+            result,
         }) {
             result.record_failure(
                 failure,
@@ -842,10 +892,9 @@ fn apply_gitlab_reconcile(
                     .iter()
                     .map(GitlabApplyOperation::fingerprint_owned),
             );
-            return result;
+            return;
         }
     }
-    result
 }
 
 #[derive(Debug)]

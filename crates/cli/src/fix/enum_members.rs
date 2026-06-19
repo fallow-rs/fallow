@@ -129,40 +129,10 @@ pub(super) fn apply_enum_member_fixes(
         };
         let lines: Vec<&str> = content.split(meta.line_ending).collect();
 
-        let mut member_fixes: Vec<EnumMemberFix> = Vec::new();
-        for member in file_members {
-            let line_idx = member.line.saturating_sub(1) as usize;
-            if line_idx >= lines.len() {
-                continue;
-            }
-
-            let line = lines[line_idx];
-            if !line.contains(&member.member_name) {
-                continue;
-            }
-
-            member_fixes.push(EnumMemberFix {
-                line_idx,
-                member_name: member.member_name.clone(),
-                parent_name: member.parent_name.clone(),
-            });
-        }
-
+        let member_fixes = collect_enum_member_fixes(&lines, file_members);
         if member_fixes.is_empty() {
             continue;
         }
-
-        member_fixes.sort_by(|a, b| {
-            b.line_idx
-                .cmp(&a.line_idx)
-                .then_with(|| a.parent_name.cmp(&b.parent_name))
-                .then_with(|| a.member_name.cmp(&b.member_name))
-        });
-        member_fixes.dedup_by(|a, b| {
-            a.line_idx == b.line_idx
-                && a.parent_name == b.parent_name
-                && a.member_name == b.member_name
-        });
 
         let relative = path.strip_prefix(root).unwrap_or(path);
 
@@ -197,6 +167,45 @@ pub(super) fn apply_enum_member_fixes(
             stage_fixed_content(plan, path, &new_lines, &meta, &content);
         }
     }
+}
+
+/// Build the sorted, deduped per-line enum-member fix list for one file from
+/// the unused-member findings whose reported line actually contains the
+/// member name. Sorted descending by line index so later in-place edits do
+/// not shift earlier indices.
+fn collect_enum_member_fixes(
+    lines: &[&str],
+    file_members: &[&fallow_core::results::UnusedMember],
+) -> Vec<EnumMemberFix> {
+    let mut member_fixes: Vec<EnumMemberFix> = Vec::new();
+    for member in file_members {
+        let line_idx = member.line.saturating_sub(1) as usize;
+        if line_idx >= lines.len() {
+            continue;
+        }
+
+        let line = lines[line_idx];
+        if !line.contains(&member.member_name) {
+            continue;
+        }
+
+        member_fixes.push(EnumMemberFix {
+            line_idx,
+            member_name: member.member_name.clone(),
+            parent_name: member.parent_name.clone(),
+        });
+    }
+
+    member_fixes.sort_by(|a, b| {
+        b.line_idx
+            .cmp(&a.line_idx)
+            .then_with(|| a.parent_name.cmp(&b.parent_name))
+            .then_with(|| a.member_name.cmp(&b.member_name))
+    });
+    member_fixes.dedup_by(|a, b| {
+        a.line_idx == b.line_idx && a.parent_name == b.parent_name && a.member_name == b.member_name
+    });
+    member_fixes
 }
 
 fn record_enum_member_dry_run(

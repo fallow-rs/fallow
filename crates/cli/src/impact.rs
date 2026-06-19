@@ -994,6 +994,11 @@ fn covered_by(present: &FxHashSet<String>, kind: &str) -> bool {
 type FlatFrontier = FxHashMap<String, FileFrontier>;
 /// A single worktree's flat clone baseline (fingerprint -> instance paths).
 type FlatCloneFrontier = FxHashMap<String, Vec<String>>;
+/// This run's per-file findings and present-suppression kinds, scoped to changed files.
+type CurrentState = (
+    FxHashMap<String, Vec<FrontierFinding>>,
+    FxHashMap<String, FxHashSet<String>>,
+);
 
 fn apply_attribution(
     store: &mut ImpactStore,
@@ -1018,6 +1023,68 @@ fn apply_attribution(
         Scope::WholeProject => whole_project_scope(&frontier, &clone_frontier, input, root),
     };
 
+    let (current_findings, current_supps) = collect_current_state(input, &changed, root);
+
+    let appeared_move_keys = compute_appeared_move_keys(&frontier, &current_findings);
+
+    uncredit_cross_run_moves(store, &appeared_move_keys);
+
+    let mut disappearance_input = FileDisappearancesInput {
+        store,
+        frontier: &frontier,
+        changed: &changed,
+        current_findings: &current_findings,
+        current_supps: &current_supps,
+        appeared_move_keys: &appeared_move_keys,
+        git_sha,
+        timestamp,
+    };
+    classify_file_disappearances(&mut disappearance_input);
+    update_file_frontier(&mut frontier, &changed, current_findings, current_supps);
+    classify_clone_disappearances(
+        store,
+        &frontier,
+        &mut clone_frontier,
+        input,
+        &changed,
+        git_sha,
+        timestamp,
+    );
+    prune_frontier(&mut frontier, &mut clone_frontier, root);
+    bound_recent_resolved(store);
+
+    store_worktree_baseline(store, worktree_key, frontier, clone_frontier);
+}
+
+/// Collect the move-keys of findings that newly appeared this run (no prior ID in
+/// the same file), so cross-file moves can be cancelled against disappearances.
+fn compute_appeared_move_keys(
+    frontier: &FlatFrontier,
+    current_findings: &FxHashMap<String, Vec<FrontierFinding>>,
+) -> FxHashSet<String> {
+    let mut appeared_move_keys: FxHashSet<String> = FxHashSet::default();
+    for (rel, findings) in current_findings {
+        let prior_ids: FxHashSet<&str> = frontier
+            .get(rel)
+            .map(|f| f.findings.iter().map(|x| x.id.as_str()).collect())
+            .unwrap_or_default();
+        for ff in findings {
+            if !prior_ids.contains(ff.id.as_str()) {
+                appeared_move_keys.insert(ff.move_key());
+            }
+        }
+    }
+    appeared_move_keys
+}
+
+/// Build this run's per-file findings + present-suppression maps, scoped to
+/// changed files. Findings carry a line-independent ID; suppressions collapse to
+/// kind keys (blanket when no kind is given).
+fn collect_current_state(
+    input: &AttributionInput<'_>,
+    changed: &FxHashSet<String>,
+    root: &Path,
+) -> CurrentState {
     let mut current_findings: FxHashMap<String, Vec<FrontierFinding>> = FxHashMap::default();
     for f in &input.findings {
         let rel = format_display_path(&f.path, root);
@@ -1046,48 +1113,17 @@ fn apply_attribution(
             .unwrap_or_else(|| BLANKET_SUPPRESSION.to_owned());
         current_supps.entry(rel).or_default().insert(key);
     }
+    (current_findings, current_supps)
+}
 
-    let mut appeared_move_keys: FxHashSet<String> = FxHashSet::default();
-    for (rel, findings) in &current_findings {
-        let prior_ids: FxHashSet<&str> = frontier
-            .get(rel)
-            .map(|f| f.findings.iter().map(|x| x.id.as_str()).collect())
-            .unwrap_or_default();
-        for ff in findings {
-            if !prior_ids.contains(ff.id.as_str()) {
-                appeared_move_keys.insert(ff.move_key());
-            }
-        }
-    }
-
-    uncredit_cross_run_moves(store, &appeared_move_keys);
-
-    let mut disappearance_input = FileDisappearancesInput {
-        store,
-        frontier: &frontier,
-        changed: &changed,
-        current_findings: &current_findings,
-        current_supps: &current_supps,
-        appeared_move_keys: &appeared_move_keys,
-        git_sha,
-        timestamp,
-    };
-    classify_file_disappearances(&mut disappearance_input);
-    update_file_frontier(&mut frontier, &changed, current_findings, current_supps);
-    classify_clone_disappearances(
-        store,
-        &frontier,
-        &mut clone_frontier,
-        input,
-        &changed,
-        git_sha,
-        timestamp,
-    );
-    prune_frontier(&mut frontier, &mut clone_frontier, root);
-    bound_recent_resolved(store);
-
-    // Store this worktree's baseline back; drop the worktree key entirely when
-    // empty so deleted/abandoned worktrees do not accumulate.
+/// Store this worktree's baseline back; drop the worktree key entirely when empty
+/// so deleted/abandoned worktrees do not accumulate.
+fn store_worktree_baseline(
+    store: &mut ImpactStore,
+    worktree_key: &str,
+    frontier: FlatFrontier,
+    clone_frontier: FlatCloneFrontier,
+) {
     if frontier.is_empty() {
         store.frontier.remove(worktree_key);
     } else {
@@ -1228,31 +1264,7 @@ fn classify_clone_disappearances(
     git_sha: Option<&str>,
     timestamp: &str,
 ) {
-    let root = input.root;
-    let mut current: FxHashMap<String, Vec<String>> = FxHashMap::default();
-    for c in &input.clones {
-        let mut paths: Vec<String> = c
-            .instance_paths
-            .iter()
-            .map(|p| format_display_path(p, root))
-            .collect();
-        paths.sort_unstable();
-        paths.dedup();
-        if paths.iter().any(|p| changed.contains(p)) {
-            current.insert(c.fingerprint.clone(), paths);
-        }
-    }
-
-    let dup_suppressed = |paths: &[String]| -> bool {
-        paths.iter().any(|p| {
-            changed.contains(p)
-                && frontier.get(p).is_some_and(|f| {
-                    f.suppressions
-                        .iter()
-                        .any(|k| k == CODE_DUPLICATION_KIND || k == BLANKET_SUPPRESSION)
-                })
-        })
-    };
+    let current = collect_changed_clone_groups(input, changed);
 
     let still_duplicated: FxHashSet<&String> = current.values().flatten().collect();
 
@@ -1269,23 +1281,75 @@ fn classify_clone_disappearances(
         if paths.iter().any(|p| still_duplicated.contains(p)) {
             continue;
         }
-        if dup_suppressed(&paths) {
-            store.suppressed_total += 1;
-        } else {
-            store.resolved_total += 1;
-            let path = paths.first().cloned().unwrap_or_default();
-            store.recent_resolved.push(ResolutionEvent {
-                kind: CODE_DUPLICATION_KIND.to_owned(),
-                path,
-                symbol: None,
-                git_sha: git_sha.map(ToOwned::to_owned),
-                timestamp: timestamp.to_owned(),
-            });
-        }
+        credit_clone_disappearance(store, frontier, changed, &paths, git_sha, timestamp);
     }
 
     for (fp, paths) in current {
         clone_frontier.insert(fp, paths);
+    }
+}
+
+/// Build this run's changed-touching clone groups (fingerprint -> sorted/deduped
+/// display paths), keeping only groups with at least one changed instance path.
+fn collect_changed_clone_groups(
+    input: &AttributionInput<'_>,
+    changed: &FxHashSet<String>,
+) -> FxHashMap<String, Vec<String>> {
+    let root = input.root;
+    let mut current: FxHashMap<String, Vec<String>> = FxHashMap::default();
+    for c in &input.clones {
+        let mut paths: Vec<String> = c
+            .instance_paths
+            .iter()
+            .map(|p| format_display_path(p, root))
+            .collect();
+        paths.sort_unstable();
+        paths.dedup();
+        if paths.iter().any(|p| changed.contains(p)) {
+            current.insert(c.fingerprint.clone(), paths);
+        }
+    }
+    current
+}
+
+/// True when a disappeared clone group's changed paths carry a fresh duplication
+/// or blanket suppression in the frontier (conservative: counts as suppressed).
+fn clone_dup_suppressed(
+    frontier: &FlatFrontier,
+    changed: &FxHashSet<String>,
+    paths: &[String],
+) -> bool {
+    paths.iter().any(|p| {
+        changed.contains(p)
+            && frontier.get(p).is_some_and(|f| {
+                f.suppressions
+                    .iter()
+                    .any(|k| k == CODE_DUPLICATION_KIND || k == BLANKET_SUPPRESSION)
+            })
+    })
+}
+
+/// Credit a fully-disappeared clone group as resolved or suppressed on `store`.
+fn credit_clone_disappearance(
+    store: &mut ImpactStore,
+    frontier: &FlatFrontier,
+    changed: &FxHashSet<String>,
+    paths: &[String],
+    git_sha: Option<&str>,
+    timestamp: &str,
+) {
+    if clone_dup_suppressed(frontier, changed, paths) {
+        store.suppressed_total += 1;
+    } else {
+        store.resolved_total += 1;
+        let path = paths.first().cloned().unwrap_or_default();
+        store.recent_resolved.push(ResolutionEvent {
+            kind: CODE_DUPLICATION_KIND.to_owned(),
+            path,
+            symbol: None,
+            git_sha: git_sha.map(ToOwned::to_owned),
+            timestamp: timestamp.to_owned(),
+        });
     }
 }
 
@@ -1346,6 +1410,17 @@ fn collect_unused_symbol_findings(
     results: &AnalysisResults,
     push: &mut impl FnMut(&Path, &'static str, Option<String>),
 ) {
+    collect_file_and_export_findings(results, push);
+    collect_member_findings(results, push);
+    collect_component_findings(results, push);
+    collect_import_boundary_findings(results, push);
+}
+
+/// Push unused-file, export, type, and private-type-leak findings.
+fn collect_file_and_export_findings(
+    results: &AnalysisResults,
+    push: &mut impl FnMut(&Path, &'static str, Option<String>),
+) {
     for f in &results.unused_files {
         push(&f.file.path, "unused-file", None);
     }
@@ -1373,6 +1448,13 @@ fn collect_unused_symbol_findings(
             )),
         );
     }
+}
+
+/// Push unused enum/class/store member and unprovided-inject findings.
+fn collect_member_findings(
+    results: &AnalysisResults,
+    push: &mut impl FnMut(&Path, &'static str, Option<String>),
+) {
     for f in &results.unused_enum_members {
         push(
             &f.member.path,
@@ -1410,6 +1492,13 @@ fn collect_unused_symbol_findings(
             Some(f.inject.key_name.clone()),
         );
     }
+}
+
+/// Push unrendered-component and component prop/emit/input/output findings.
+fn collect_component_findings(
+    results: &AnalysisResults,
+    push: &mut impl FnMut(&Path, &'static str, Option<String>),
+) {
     for f in &results.unrendered_components {
         push(
             &f.component.path,
@@ -1445,6 +1534,13 @@ fn collect_unused_symbol_findings(
             Some(f.output.output_name.clone()),
         );
     }
+}
+
+/// Push unresolved-import and boundary-violation findings.
+fn collect_import_boundary_findings(
+    results: &AnalysisResults,
+    push: &mut impl FnMut(&Path, &'static str, Option<String>),
+) {
     for f in &results.unresolved_imports {
         push(
             &f.import.path,
@@ -2078,6 +2174,28 @@ pub fn render_human(report: &ImpactReport) -> String {
         return out;
     }
 
+    render_human_changed_section(&mut out, report);
+
+    render_project_section(&mut out, report);
+
+    out.push_str(&format!(
+        "  CONTAINED AT COMMIT\n    {} time{} fallow blocked a commit until it was fixed\n",
+        report.containment_count,
+        plural(report.containment_count),
+    ));
+
+    render_human_resolved_section(&mut out, report);
+
+    render_human_footer(&mut out, report);
+    out
+}
+
+/// Render the changed-file LATEST RUN and TREND sections of the human report.
+#[expect(
+    clippy::format_push_string,
+    reason = "small report renderer; readability over avoiding the extra allocation"
+)]
+fn render_human_changed_section(out: &mut String, report: &ImpactReport) {
     if let Some(s) = &report.surfacing {
         out.push_str(&format!(
             "  LATEST RUN (changed files, act on these now)\n    {} issue{} flagged in your last `fallow audit` run\n",
@@ -2097,15 +2215,14 @@ pub fn render_human(report: &ImpactReport) -> String {
             t.previous_total, t.current_total, arrow,
         ));
     }
+}
 
-    render_project_section(&mut out, report);
-
-    out.push_str(&format!(
-        "  CONTAINED AT COMMIT\n    {} time{} fallow blocked a commit until it was fixed\n",
-        report.containment_count,
-        plural(report.containment_count),
-    ));
-
+/// Render the RESOLVED and marked-intentional sections of the human report.
+#[expect(
+    clippy::format_push_string,
+    reason = "small report renderer; readability over avoiding the extra allocation"
+)]
+fn render_human_resolved_section(out: &mut String, report: &ImpactReport) {
     if report.resolved_total > 0 {
         out.push_str(&format!(
             "\n  RESOLVED\n    {} finding{} you cleared since fallow started tracking\n",
@@ -2135,7 +2252,14 @@ pub fn render_human(report: &ImpactReport) -> String {
             plural(report.suppressed_total),
         ));
     }
+}
 
+/// Render the trailing provenance/footer lines of the human report.
+#[expect(
+    clippy::format_push_string,
+    reason = "small report renderer; readability over avoiding the extra allocation"
+)]
+fn render_human_footer(out: &mut String, report: &ImpactReport) {
     out.push('\n');
     let since = report
         .first_recorded
@@ -2158,7 +2282,6 @@ pub fn render_human(report: &ImpactReport) -> String {
         "Resolution tracking is a local-developer signal: it accrues on your\n\
          machine across runs, not in CI (fallow never records there).\n",
     );
-    out
 }
 
 /// Render the report as JSON.
@@ -2241,6 +2364,17 @@ pub fn render_markdown(report: &ImpactReport) -> String {
         report.containment_count,
         plural(report.containment_count),
     ));
+    render_markdown_resolved_section(&mut out, report);
+    render_markdown_footer(&mut out, report);
+    out
+}
+
+/// Render the Resolved and marked-intentional bullets of the markdown report.
+#[expect(
+    clippy::format_push_string,
+    reason = "small report renderer; readability over avoiding the extra allocation"
+)]
+fn render_markdown_resolved_section(out: &mut String, report: &ImpactReport) {
     if report.resolved_total > 0 {
         out.push_str(&format!(
             "- **Resolved:** {} finding{} cleared since tracking started\n",
@@ -2259,6 +2393,14 @@ pub fn render_markdown(report: &ImpactReport) -> String {
             plural(report.suppressed_total),
         ));
     }
+}
+
+/// Render the trailing provenance line of the markdown report.
+#[expect(
+    clippy::format_push_string,
+    reason = "small report renderer; readability over avoiding the extra allocation"
+)]
+fn render_markdown_footer(out: &mut String, report: &ImpactReport) {
     let since = report
         .first_recorded
         .as_deref()
@@ -2275,7 +2417,6 @@ pub fn render_markdown(report: &ImpactReport) -> String {
             "\n_Tracking since {since}. Local-only; resolution is a local-developer signal._\n",
         ));
     }
-    out
 }
 
 /// Render the cross-repo report as JSON via the typed `ImpactCrossRepo` envelope.
@@ -2346,43 +2487,64 @@ pub fn render_cross_repo_human(report: &CrossRepoImpactReport, limit: Option<usi
         report.tracked_count,
     ));
 
-    if !report.projects.is_empty() {
+    render_cross_repo_table(&mut out, report, limit);
+    render_cross_repo_skipped(&mut out, report);
+    render_cross_repo_totals(&mut out, report);
+    out.push_str("\nLocal-only; never uploaded; accrues on this machine, not CI.\n");
+    out
+}
+
+/// Render the per-project table (header, rows capped at `limit`, overflow line).
+#[expect(
+    clippy::format_push_string,
+    reason = "small report renderer; readability over avoiding the extra allocation"
+)]
+fn render_cross_repo_table(out: &mut String, report: &CrossRepoImpactReport, limit: Option<usize>) {
+    if report.projects.is_empty() {
+        return;
+    }
+    out.push_str(&format!(
+        "{:<24}{:>8}{:>10}{:>11}{:>10}{:>7}  {}\n",
+        "PROJECT", "LATEST", "REPO-WIDE", "CONTAINED", "RESOLVED", "TREND", "LAST RUN",
+    ));
+    let rows = limit.map_or(report.projects.len(), |n| n.min(report.projects.len()));
+    for entry in report.projects.iter().take(rows) {
+        let mut label = row_label(entry);
+        if label.chars().count() > 22 {
+            label = format!("{}...", label.chars().take(19).collect::<String>());
+        }
+        let last = entry
+            .last_recorded
+            .as_deref()
+            .map_or("-", date_only)
+            .to_owned();
         out.push_str(&format!(
             "{:<24}{:>8}{:>10}{:>11}{:>10}{:>7}  {}\n",
-            "PROJECT", "LATEST", "REPO-WIDE", "CONTAINED", "RESOLVED", "TREND", "LAST RUN",
+            label,
+            opt_count(entry.report.surfacing.as_ref()),
+            opt_count(entry.report.project_surfacing.as_ref()),
+            entry.report.containment_count,
+            entry.report.resolved_total,
+            row_trend(&entry.report),
+            last,
         ));
-        let rows = limit.map_or(report.projects.len(), |n| n.min(report.projects.len()));
-        for entry in report.projects.iter().take(rows) {
-            let mut label = row_label(entry);
-            if label.chars().count() > 22 {
-                label = format!("{}...", label.chars().take(19).collect::<String>());
-            }
-            let last = entry
-                .last_recorded
-                .as_deref()
-                .map_or("-", date_only)
-                .to_owned();
-            out.push_str(&format!(
-                "{:<24}{:>8}{:>10}{:>11}{:>10}{:>7}  {}\n",
-                label,
-                opt_count(entry.report.surfacing.as_ref()),
-                opt_count(entry.report.project_surfacing.as_ref()),
-                entry.report.containment_count,
-                entry.report.resolved_total,
-                row_trend(&entry.report),
-                last,
-            ));
-        }
-        if let Some(n) = limit
-            && report.projects.len() > n
-        {
-            out.push_str(&format!(
-                "  ... and {} more (raise --limit to show)\n",
-                report.projects.len() - n,
-            ));
-        }
     }
+    if let Some(n) = limit
+        && report.projects.len() > n
+    {
+        out.push_str(&format!(
+            "  ... and {} more (raise --limit to show)\n",
+            report.projects.len() - n,
+        ));
+    }
+}
 
+/// Render the no-history and skipped-unreadable summary lines.
+#[expect(
+    clippy::format_push_string,
+    reason = "small report renderer; readability over avoiding the extra allocation"
+)]
+fn render_cross_repo_skipped(out: &mut String, report: &CrossRepoImpactReport) {
     let no_history = report.project_count.saturating_sub(report.tracked_count);
     if no_history > 0 {
         out.push_str(&format!(
@@ -2397,7 +2559,14 @@ pub fn render_cross_repo_human(report: &CrossRepoImpactReport, limit: Option<usi
             plural(report.unreadable_count),
         ));
     }
+}
 
+/// Render the GRAND TOTALS block (resolved/contained/intentional + baseline line).
+#[expect(
+    clippy::format_push_string,
+    reason = "small report renderer; readability over avoiding the extra allocation"
+)]
+fn render_cross_repo_totals(out: &mut String, report: &CrossRepoImpactReport) {
     let t = &report.totals;
     out.push_str("\nGRAND TOTALS\n");
     out.push_str(&format!(
@@ -2419,8 +2588,6 @@ pub fn render_cross_repo_human(report: &CrossRepoImpactReport, limit: Option<usi
             plural(t.projects_with_baseline),
         ));
     }
-    out.push_str("\nLocal-only; never uploaded; accrues on this machine, not CI.\n");
-    out
 }
 
 /// Render the cross-repo roll-up as Markdown (paste-ready, path-free).

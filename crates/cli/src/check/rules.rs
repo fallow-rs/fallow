@@ -83,6 +83,15 @@ fn apply_dead_code_override_rules(
     results: &mut fallow_core::results::AnalysisResults,
     config: &ResolvedConfig,
 ) {
+    apply_core_dead_code_override_rules(results, config);
+    apply_component_dead_code_override_rules(results, config);
+}
+
+/// Retain core (non-component) dead-code findings whose per-file rule is not Off.
+fn apply_core_dead_code_override_rules(
+    results: &mut fallow_core::results::AnalysisResults,
+    config: &ResolvedConfig,
+) {
     results
         .unused_files
         .retain(|f| config.resolve_rules_for_path(&f.file.path).unused_files != Severity::Off);
@@ -122,6 +131,19 @@ fn apply_dead_code_override_rules(
             .unprovided_injects
             != Severity::Off
     });
+    results.unresolved_imports.retain(|i| {
+        config
+            .resolve_rules_for_path(&i.import.path)
+            .unresolved_imports
+            != Severity::Off
+    });
+}
+
+/// Retain component-shaped dead-code findings whose per-file rule is not Off.
+fn apply_component_dead_code_override_rules(
+    results: &mut fallow_core::results::AnalysisResults,
+    config: &ResolvedConfig,
+) {
     results.unrendered_components.retain(|c| {
         config
             .resolve_rules_for_path(&c.component.path)
@@ -168,12 +190,6 @@ fn apply_dead_code_override_rules(
         config
             .resolve_rules_for_path(&k.key.path)
             .unused_load_data_keys
-            != Severity::Off
-    });
-    results.unresolved_imports.retain(|i| {
-        config
-            .resolve_rules_for_path(&i.import.path)
-            .unresolved_imports
             != Severity::Off
     });
 }
@@ -265,6 +281,16 @@ fn apply_circular_override_rules(
 }
 
 fn apply_base_file_rules(results: &mut fallow_core::results::AnalysisResults, rules: &RulesConfig) {
+    clear_base_core_dead_code(results, rules);
+    clear_base_component_dead_code(results, rules);
+    clear_base_suppression_and_framework(results, rules);
+}
+
+/// Clear core (non-component) dead-code findings whose base rule is Off.
+fn clear_base_core_dead_code(
+    results: &mut fallow_core::results::AnalysisResults,
+    rules: &RulesConfig,
+) {
     if rules.unused_files == Severity::Off {
         results.unused_files.clear();
     }
@@ -289,6 +315,16 @@ fn apply_base_file_rules(results: &mut fallow_core::results::AnalysisResults, ru
     if rules.unprovided_injects == Severity::Off {
         results.unprovided_injects.clear();
     }
+    if rules.unresolved_imports == Severity::Off {
+        results.unresolved_imports.clear();
+    }
+}
+
+/// Clear component-shaped dead-code findings whose base rule is Off.
+fn clear_base_component_dead_code(
+    results: &mut fallow_core::results::AnalysisResults,
+    rules: &RulesConfig,
+) {
     if rules.unrendered_components == Severity::Off {
         results.unrendered_components.clear();
     }
@@ -313,9 +349,14 @@ fn apply_base_file_rules(results: &mut fallow_core::results::AnalysisResults, ru
     if rules.unused_load_data_keys == Severity::Off {
         results.unused_load_data_keys.clear();
     }
-    if rules.unresolved_imports == Severity::Off {
-        results.unresolved_imports.clear();
-    }
+}
+
+/// Apply base stale-suppression retention and clear framework findings whose
+/// base rule is Off.
+fn clear_base_suppression_and_framework(
+    results: &mut fallow_core::results::AnalysisResults,
+    rules: &RulesConfig,
+) {
     results.stale_suppressions.retain(|s| {
         if s.missing_reason {
             rules.require_suppression_reason != Severity::Off
@@ -404,6 +445,15 @@ fn has_override_dead_code_error(
     results: &fallow_core::results::AnalysisResults,
     config: &ResolvedConfig,
 ) -> bool {
+    has_override_core_dead_code_error(results, config)
+        || has_override_component_dead_code_error(results, config)
+}
+
+/// Per-file Error check for the core (non-component) dead-code issue types.
+fn has_override_core_dead_code_error(
+    results: &fallow_core::results::AnalysisResults,
+    config: &ResolvedConfig,
+) -> bool {
     results
         .unused_files
         .iter()
@@ -445,60 +495,60 @@ fn has_override_dead_code_error(
                 .unprovided_injects
                 == Severity::Error
         })
-        || results.unrendered_components.iter().any(|c| {
-            config
-                .resolve_rules_for_path(&c.component.path)
-                .unrendered_components
-                == Severity::Error
-        })
-        || results.unused_component_props.iter().any(|p| {
-            config
-                .resolve_rules_for_path(&p.prop.path)
-                .unused_component_props
-                == Severity::Error
-        })
-        || results.unused_component_emits.iter().any(|e| {
-            config
-                .resolve_rules_for_path(&e.emit.path)
-                .unused_component_emits
-                == Severity::Error
-        })
-        || results.unused_component_inputs.iter().any(|i| {
-            config
-                .resolve_rules_for_path(&i.input.path)
-                .unused_component_inputs
-                == Severity::Error
-        })
-        || results.unused_component_outputs.iter().any(|o| {
-            config
-                .resolve_rules_for_path(&o.output.path)
-                .unused_component_outputs
-                == Severity::Error
-        })
-        || results.unused_svelte_events.iter().any(|e| {
-            config
-                .resolve_rules_for_path(&e.event.path)
-                .unused_svelte_events
-                == Severity::Error
-        })
-        || results.unused_server_actions.iter().any(|a| {
-            config
-                .resolve_rules_for_path(&a.action.path)
-                .unused_server_actions
-                == Severity::Error
-        })
-        || results.unused_load_data_keys.iter().any(|k| {
-            config
-                .resolve_rules_for_path(&k.key.path)
-                .unused_load_data_keys
-                == Severity::Error
-        })
         || results.unresolved_imports.iter().any(|i| {
             config
                 .resolve_rules_for_path(&i.import.path)
                 .unresolved_imports
                 == Severity::Error
         })
+}
+
+/// Per-file Error check for the component-shaped dead-code issue types.
+fn has_override_component_dead_code_error(
+    results: &fallow_core::results::AnalysisResults,
+    config: &ResolvedConfig,
+) -> bool {
+    results.unrendered_components.iter().any(|c| {
+        config
+            .resolve_rules_for_path(&c.component.path)
+            .unrendered_components
+            == Severity::Error
+    }) || results.unused_component_props.iter().any(|p| {
+        config
+            .resolve_rules_for_path(&p.prop.path)
+            .unused_component_props
+            == Severity::Error
+    }) || results.unused_component_emits.iter().any(|e| {
+        config
+            .resolve_rules_for_path(&e.emit.path)
+            .unused_component_emits
+            == Severity::Error
+    }) || results.unused_component_inputs.iter().any(|i| {
+        config
+            .resolve_rules_for_path(&i.input.path)
+            .unused_component_inputs
+            == Severity::Error
+    }) || results.unused_component_outputs.iter().any(|o| {
+        config
+            .resolve_rules_for_path(&o.output.path)
+            .unused_component_outputs
+            == Severity::Error
+    }) || results.unused_svelte_events.iter().any(|e| {
+        config
+            .resolve_rules_for_path(&e.event.path)
+            .unused_svelte_events
+            == Severity::Error
+    }) || results.unused_server_actions.iter().any(|a| {
+        config
+            .resolve_rules_for_path(&a.action.path)
+            .unused_server_actions
+            == Severity::Error
+    }) || results.unused_load_data_keys.iter().any(|k| {
+        config
+            .resolve_rules_for_path(&k.key.path)
+            .unused_load_data_keys
+            == Severity::Error
+    })
 }
 
 fn has_override_catalog_boundary_error(

@@ -396,57 +396,17 @@ fn compute_introduced_verdict(
     let mut has_warnings = false;
 
     if let Some(result) = check {
-        let base_keys = base.map(|b| &b.dead_code);
-        let mut introduced = result.results.clone();
-        retain_introduced_dead_code(&mut introduced, &result.config.root, base_keys);
-        if crate::check::has_error_severity_issues(
-            &introduced,
-            &result.config.rules,
-            Some(&result.config),
-        ) {
-            has_errors = true;
-        } else if introduced.total_issues() > 0 {
-            has_warnings = true;
-        }
+        let (errors, warnings) = introduced_check_verdict(result, base);
+        has_errors |= errors;
+        has_warnings |= warnings;
     }
-
     if let Some(result) = health {
-        let base_keys = base.map(|b| &b.health);
-        let introduced = result
-            .report
-            .findings
-            .iter()
-            .filter(|finding| {
-                !base_keys.is_some_and(|keys| {
-                    keys.contains(&health_finding_key(finding, &result.config.root))
-                })
-            })
-            .count();
-        if introduced > 0 {
-            has_errors = true;
-        }
+        has_errors |= introduced_health_has_errors(result, base);
     }
-
     if let Some(result) = dupes {
-        let base_keys = base.map(|b| &b.dupes);
-        let introduced = result
-            .report
-            .clone_groups
-            .iter()
-            .filter(|group| {
-                !base_keys
-                    .is_some_and(|keys| keys.contains(&dupe_group_key(group, &result.config.root)))
-            })
-            .count();
-        if introduced > 0 {
-            if result.threshold > 0.0
-                && result.report.stats.duplication_percentage > result.threshold
-            {
-                has_errors = true;
-            } else {
-                has_warnings = true;
-            }
-        }
+        let (errors, warnings) = introduced_dupes_verdict(result, base);
+        has_errors |= errors;
+        has_warnings |= warnings;
     }
 
     if has_errors {
@@ -455,6 +415,55 @@ fn compute_introduced_verdict(
         AuditVerdict::Warn
     } else {
         AuditVerdict::Pass
+    }
+}
+
+/// Error/warning contribution from dead-code issues introduced since the base.
+fn introduced_check_verdict(result: &CheckResult, base: Option<&AuditKeySnapshot>) -> (bool, bool) {
+    let base_keys = base.map(|b| &b.dead_code);
+    let mut introduced = result.results.clone();
+    retain_introduced_dead_code(&mut introduced, &result.config.root, base_keys);
+    if crate::check::has_error_severity_issues(
+        &introduced,
+        &result.config.rules,
+        Some(&result.config),
+    ) {
+        (true, false)
+    } else if introduced.total_issues() > 0 {
+        (false, true)
+    } else {
+        (false, false)
+    }
+}
+
+/// True when complexity findings were introduced since the base (always an error).
+fn introduced_health_has_errors(result: &HealthResult, base: Option<&AuditKeySnapshot>) -> bool {
+    let base_keys = base.map(|b| &b.health);
+    result.report.findings.iter().any(|finding| {
+        !base_keys
+            .is_some_and(|keys| keys.contains(&health_finding_key(finding, &result.config.root)))
+    })
+}
+
+/// Error/warning contribution from clone groups introduced since the base.
+fn introduced_dupes_verdict(result: &DupesResult, base: Option<&AuditKeySnapshot>) -> (bool, bool) {
+    let base_keys = base.map(|b| &b.dupes);
+    let introduced = result
+        .report
+        .clone_groups
+        .iter()
+        .filter(|group| {
+            !base_keys
+                .is_some_and(|keys| keys.contains(&dupe_group_key(group, &result.config.root)))
+        })
+        .count();
+    if introduced == 0 {
+        return (false, false);
+    }
+    if result.threshold > 0.0 && result.report.stats.duplication_percentage > result.threshold {
+        (true, false)
+    } else {
+        (false, true)
     }
 }
 
@@ -743,10 +752,71 @@ fn compute_base_snapshot(
         .config_path
         .clone()
         .or_else(|| fallow_config::FallowConfig::find_config_path(opts.root));
-    let base_opts = AuditOptions {
-        root: &base_root,
-        config_path: &current_config_path,
-        cache_dir: &base_cache_dir,
+    let base_opts =
+        build_base_audit_options(opts, &base_root, &current_config_path, &base_cache_dir);
+
+    let base_changed_files = remap_focus_files(changed_files, opts.root, &base_root);
+    let check_production = opts.production_dead_code.unwrap_or(opts.production);
+    let health_production = opts.production_health.unwrap_or(opts.production);
+    let share_dead_code_parse_with_health = check_production == health_production;
+
+    let (check_res, dupes_res) = rayon::join(
+        || run_audit_check(&base_opts, None, share_dead_code_parse_with_health),
+        || run_audit_dupes(&base_opts, None, base_changed_files.as_ref(), None),
+    );
+    let mut check = check_res?;
+    let dupes = dupes_res?;
+    let shared_parse = if share_dead_code_parse_with_health {
+        check.as_mut().and_then(|r| r.shared_parse.take())
+    } else {
+        None
+    };
+    let health = run_audit_health(&base_opts, None, shared_parse)?;
+    if let Some(ref mut check) = check {
+        check.shared_parse = None;
+    }
+
+    Ok(snapshot_from_results(
+        check.as_ref(),
+        dupes.as_ref(),
+        health.as_ref(),
+    ))
+}
+
+/// Build an `AuditKeySnapshot` of dead-code/health/dupes keys from analysis results.
+fn snapshot_from_results(
+    check: Option<&CheckResult>,
+    dupes: Option<&DupesResult>,
+    health: Option<&HealthResult>,
+) -> AuditKeySnapshot {
+    AuditKeySnapshot {
+        dead_code: check.map_or_else(FxHashSet::default, |r| {
+            dead_code_keys(&r.results, &r.config.root)
+        }),
+        health: health.map_or_else(FxHashSet::default, |r| {
+            health_keys(&r.report, &r.config.root)
+        }),
+        dupes: dupes.map_or_else(FxHashSet::default, |r| {
+            dupes_keys(&r.report, &r.config.root)
+        }),
+    }
+}
+
+/// Build the `AuditOptions` for the isolated base-worktree analysis pass.
+#[expect(
+    clippy::ref_option,
+    reason = "AuditOptions.config_path is &Option<PathBuf>; the borrow is stored into the returned struct"
+)]
+fn build_base_audit_options<'a>(
+    opts: &AuditOptions<'a>,
+    base_root: &'a Path,
+    current_config_path: &'a Option<PathBuf>,
+    base_cache_dir: &'a Path,
+) -> AuditOptions<'a> {
+    AuditOptions {
+        root: base_root,
+        config_path: current_config_path,
+        cache_dir: base_cache_dir,
         output: opts.output,
         no_cache: opts.no_cache,
         threads: opts.threads,
@@ -772,40 +842,7 @@ fn compute_base_snapshot(
         include_entry_exports: opts.include_entry_exports,
         runtime_coverage: None,
         min_invocations_hot: opts.min_invocations_hot,
-    };
-
-    let base_changed_files = remap_focus_files(changed_files, opts.root, &base_root);
-    let check_production = opts.production_dead_code.unwrap_or(opts.production);
-    let health_production = opts.production_health.unwrap_or(opts.production);
-    let share_dead_code_parse_with_health = check_production == health_production;
-
-    let (check_res, dupes_res) = rayon::join(
-        || run_audit_check(&base_opts, None, share_dead_code_parse_with_health),
-        || run_audit_dupes(&base_opts, None, base_changed_files.as_ref(), None),
-    );
-    let mut check = check_res?;
-    let dupes = dupes_res?;
-    let shared_parse = if share_dead_code_parse_with_health {
-        check.as_mut().and_then(|r| r.shared_parse.take())
-    } else {
-        None
-    };
-    let health = run_audit_health(&base_opts, None, shared_parse)?;
-    if let Some(ref mut check) = check {
-        check.shared_parse = None;
     }
-
-    Ok(AuditKeySnapshot {
-        dead_code: check.as_ref().map_or_else(FxHashSet::default, |r| {
-            dead_code_keys(&r.results, &r.config.root)
-        }),
-        health: health.as_ref().map_or_else(FxHashSet::default, |r| {
-            health_keys(&r.report, &r.config.root)
-        }),
-        dupes: dupes.as_ref().map_or_else(FxHashSet::default, |r| {
-            dupes_keys(&r.report, &r.config.root)
-        }),
-    })
 }
 
 fn base_analysis_root(current_root: &Path, base_worktree_root: &Path) -> PathBuf {
@@ -1111,6 +1148,38 @@ struct HeadAnalyses {
     health: Option<HealthResult>,
 }
 
+/// HEAD analyses result paired with an optional freshly computed base snapshot
+/// (present only when a real base worktree was run in parallel).
+type HeadAndBaseResult = (
+    Result<HeadAnalyses, ExitCode>,
+    Option<Result<AuditKeySnapshot, ExitCode>>,
+);
+
+/// Run the HEAD analyses, optionally alongside a fresh base snapshot via
+/// `rayon::join` when `run_base` is set. Mirrors the previous inline branch.
+fn run_audit_head_and_base(
+    opts: &AuditOptions<'_>,
+    changed_since: Option<&str>,
+    changed_files: &FxHashSet<PathBuf>,
+    base_ref: &str,
+    base_cache_key: Option<&AuditBaseSnapshotCacheKey>,
+    run_base: bool,
+) -> HeadAndBaseResult {
+    if run_base {
+        let base_sha = base_cache_key.map(|key| key.base_sha.as_str());
+        let (h, b) = rayon::join(
+            || run_audit_head_analyses(opts, changed_since, changed_files),
+            || compute_base_snapshot(opts, base_ref, changed_files, base_sha),
+        );
+        (h, Some(b))
+    } else {
+        (
+            run_audit_head_analyses(opts, changed_since, changed_files),
+            None,
+        )
+    }
+}
+
 struct AuditResultParts {
     verdict: AuditVerdict,
     summary: AuditSummary,
@@ -1218,78 +1287,70 @@ pub fn execute_audit(opts: &AuditOptions<'_>) -> Result<AuditResult, ExitCode> {
         .as_ref()
         .and_then(|key| load_cached_base_snapshot(opts, key));
 
-    let (head_res, base_res) = if needs_real_base_snapshot && cached_base_snapshot.is_none() {
-        let base_sha = base_cache_key.as_ref().map(|key| key.base_sha.as_str());
-        let (h, b) = rayon::join(
-            || run_audit_head_analyses(opts, changed_since, &changed_files),
-            || compute_base_snapshot(opts, &base_ref, &changed_files, base_sha),
-        );
-        (h, Some(b))
-    } else {
-        (
-            run_audit_head_analyses(opts, changed_since, &changed_files),
-            None,
-        )
-    };
+    let (head_res, base_res) = run_audit_head_and_base(
+        opts,
+        changed_since,
+        &changed_files,
+        &base_ref,
+        base_cache_key.as_ref(),
+        needs_real_base_snapshot && cached_base_snapshot.is_none(),
+    );
 
-    let head = head_res?;
+    assemble_audit_result(AuditAssemblyInput {
+        opts,
+        head_res,
+        base_res,
+        cached_base_snapshot,
+        base_cache_key,
+        changed_files,
+        changed_files_count,
+        base_ref,
+        base_description,
+        start,
+    })
+}
+
+/// Inputs threaded from the audit prelude into [`assemble_audit_result`].
+struct AuditAssemblyInput<'a> {
+    opts: &'a AuditOptions<'a>,
+    head_res: Result<HeadAnalyses, ExitCode>,
+    base_res: Option<Result<AuditKeySnapshot, ExitCode>>,
+    cached_base_snapshot: Option<AuditKeySnapshot>,
+    base_cache_key: Option<AuditBaseSnapshotCacheKey>,
+    changed_files: FxHashSet<PathBuf>,
+    changed_files_count: usize,
+    base_ref: String,
+    base_description: Option<String>,
+    start: Instant,
+}
+
+/// Resolve the base snapshot, compute attribution/verdict/summary, and build the
+/// final `AuditResult` from the HEAD-side analyses.
+fn assemble_audit_result(input: AuditAssemblyInput<'_>) -> Result<AuditResult, ExitCode> {
+    let opts = input.opts;
+    let head = input.head_res?;
     let mut check_result = head.check;
     let dupes_result = head.dupes;
     let health_result = head.health;
 
-    let (base_snapshot, base_snapshot_skipped) = if matches!(opts.gate, AuditGate::NewOnly) {
-        if let Some(snapshot) = cached_base_snapshot {
-            (Some(snapshot), false)
-        } else if let Some(base_res) = base_res {
-            let snapshot = base_res?;
-            if let Some(ref key) = base_cache_key {
-                save_cached_base_snapshot(opts, key, &snapshot);
-            }
-            (Some(snapshot), false)
-        } else {
-            (
-                Some(current_keys_as_base_keys(
-                    check_result.as_ref(),
-                    dupes_result.as_ref(),
-                    health_result.as_ref(),
-                )),
-                true,
-            )
-        }
-    } else {
-        (None, false)
-    };
+    let (base_snapshot, base_snapshot_skipped) = resolve_base_snapshot(
+        opts,
+        input.cached_base_snapshot,
+        input.base_res,
+        input.base_cache_key.as_ref(),
+        check_result.as_ref(),
+        dupes_result.as_ref(),
+        health_result.as_ref(),
+    )?;
     if let Some(ref mut check) = check_result {
         check.shared_parse = None;
     }
-    let attribution = compute_audit_attribution(
+    let (attribution, verdict, summary) = compute_audit_outcome(
+        opts.gate,
         check_result.as_ref(),
         dupes_result.as_ref(),
         health_result.as_ref(),
         base_snapshot.as_ref(),
-        opts.gate,
-    );
-    let verdict = if matches!(opts.gate, AuditGate::NewOnly) {
-        compute_introduced_verdict(
-            check_result.as_ref(),
-            dupes_result.as_ref(),
-            health_result.as_ref(),
-            base_snapshot.as_ref(),
-        )
-    } else {
-        compute_verdict(
-            check_result.as_ref(),
-            dupes_result.as_ref(),
-            health_result.as_ref(),
-        )
-    };
-    let summary = build_summary(
-        check_result.as_ref(),
-        dupes_result.as_ref(),
-        health_result.as_ref(),
-    );
-    crate::telemetry::note_final_result_count(
-        summary.dead_code_issues + summary.complexity_findings + summary.duplication_clone_groups,
     );
 
     Ok(build_audit_result(AuditResultParts {
@@ -1298,18 +1359,80 @@ pub fn execute_audit(opts: &AuditOptions<'_>) -> Result<AuditResult, ExitCode> {
         attribution,
         base_snapshot,
         base_snapshot_skipped,
-        changed_files_count,
-        changed_files,
-        base_ref,
-        base_description,
+        changed_files_count: input.changed_files_count,
+        changed_files: input.changed_files,
+        base_ref: input.base_ref,
+        base_description: input.base_description,
         head_sha: get_head_sha(opts.root),
         output: opts.output,
         performance: opts.performance,
         check: check_result,
         dupes: dupes_result,
         health: health_result,
-        elapsed: start.elapsed(),
+        elapsed: input.start.elapsed(),
     }))
+}
+
+/// Attribution, verdict, and summary computed together from the HEAD analyses and
+/// base snapshot. Also records the final result count for telemetry.
+fn compute_audit_outcome(
+    gate: AuditGate,
+    check: Option<&CheckResult>,
+    dupes: Option<&DupesResult>,
+    health: Option<&HealthResult>,
+    base: Option<&AuditKeySnapshot>,
+) -> (AuditAttribution, AuditVerdict, AuditSummary) {
+    let attribution = compute_audit_attribution(check, dupes, health, base, gate);
+    let verdict = compute_audit_verdict(gate, check, dupes, health, base);
+    let summary = build_summary(check, dupes, health);
+    crate::telemetry::note_final_result_count(
+        summary.dead_code_issues + summary.complexity_findings + summary.duplication_clone_groups,
+    );
+    (attribution, verdict, summary)
+}
+
+/// Resolve the base key snapshot for the `new`-only gate: prefer the cache, then a
+/// freshly computed base worktree (persisting it), else fall back to current keys
+/// (marking the snapshot skipped). Returns `(None, false)` outside `new`-only mode.
+fn resolve_base_snapshot(
+    opts: &AuditOptions<'_>,
+    cached_base_snapshot: Option<AuditKeySnapshot>,
+    base_res: Option<Result<AuditKeySnapshot, ExitCode>>,
+    base_cache_key: Option<&AuditBaseSnapshotCacheKey>,
+    check: Option<&CheckResult>,
+    dupes: Option<&DupesResult>,
+    health: Option<&HealthResult>,
+) -> Result<(Option<AuditKeySnapshot>, bool), ExitCode> {
+    if !matches!(opts.gate, AuditGate::NewOnly) {
+        return Ok((None, false));
+    }
+    if let Some(snapshot) = cached_base_snapshot {
+        return Ok((Some(snapshot), false));
+    }
+    if let Some(base_res) = base_res {
+        let snapshot = base_res?;
+        if let Some(key) = base_cache_key {
+            save_cached_base_snapshot(opts, key, &snapshot);
+        }
+        return Ok((Some(snapshot), false));
+    }
+    Ok((Some(current_keys_as_base_keys(check, dupes, health)), true))
+}
+
+/// Pick the audit verdict: the introduced-only gate in `new`-only mode, otherwise
+/// the full backlog verdict.
+fn compute_audit_verdict(
+    gate: AuditGate,
+    check: Option<&CheckResult>,
+    dupes: Option<&DupesResult>,
+    health: Option<&HealthResult>,
+    base: Option<&AuditKeySnapshot>,
+) -> AuditVerdict {
+    if matches!(gate, AuditGate::NewOnly) {
+        compute_introduced_verdict(check, dupes, health, base)
+    } else {
+        compute_verdict(check, dupes, health)
+    }
 }
 
 fn build_audit_result(parts: AuditResultParts) -> AuditResult {
@@ -1512,7 +1635,26 @@ fn run_audit_dupes<'a>(
         Ok(c) => c.duplicates,
         Err(code) => return Err(code),
     };
-    let dupes_opts = DupesOptions {
+    let dupes_opts = build_audit_dupes_options(opts, changed_since, changed_files, &dupes_cfg);
+    let dupes_run = if let Some(files) = pre_discovered {
+        crate::dupes::execute_dupes_with_files(&dupes_opts, files)
+    } else {
+        crate::dupes::execute_dupes(&dupes_opts)
+    };
+    match dupes_run {
+        Ok(r) => Ok(Some(r)),
+        Err(code) => Err(code),
+    }
+}
+
+/// Build the `DupesOptions` for an audit run from project config + audit options.
+fn build_audit_dupes_options<'a>(
+    opts: &'a AuditOptions<'a>,
+    changed_since: Option<&'a str>,
+    changed_files: Option<&'a FxHashSet<PathBuf>>,
+    dupes_cfg: &fallow_config::DuplicatesConfig,
+) -> DupesOptions<'a> {
+    DupesOptions {
         root: opts.root,
         config_path: opts.config_path,
         output: opts.output,
@@ -1544,15 +1686,6 @@ fn run_audit_dupes<'a>(
         summary: false,
         group_by: opts.group_by,
         performance: false,
-    };
-    let dupes_run = if let Some(files) = pre_discovered {
-        crate::dupes::execute_dupes_with_files(&dupes_opts, files)
-    } else {
-        crate::dupes::execute_dupes(&dupes_opts)
-    };
-    match dupes_run {
-        Ok(r) => Ok(Some(r)),
-        Err(code) => Err(code),
     }
 }
 
@@ -1576,7 +1709,26 @@ fn run_audit_health<'a>(
         None => None,
     };
 
-    let health_opts = HealthOptions {
+    let health_opts = build_audit_health_options(opts, changed_since, runtime_coverage);
+    let health_run = if let Some(shared) = shared_parse {
+        crate::health::execute_health_with_shared_parse(&health_opts, shared)
+    } else {
+        crate::health::execute_health(&health_opts)
+    };
+    match health_run {
+        Ok(r) => Ok(Some(r)),
+        Err(code) => Err(code),
+    }
+}
+
+/// Build the findings-only `HealthOptions` for an audit run (no scores, hotspots,
+/// ownership, or targets; `--churn-file` is health-only).
+fn build_audit_health_options<'a>(
+    opts: &'a AuditOptions<'a>,
+    changed_since: Option<&'a str>,
+    runtime_coverage: Option<crate::health::RuntimeCoverageOptions>,
+) -> HealthOptions<'a> {
+    HealthOptions {
         root: opts.root,
         config_path: opts.config_path,
         output: opts.output,
@@ -1626,17 +1778,7 @@ fn run_audit_health<'a>(
         min_severity: None,
         report_only: false,
         runtime_coverage,
-        // audit runs no hotspot/ownership pass; --churn-file is health-only.
         churn_file: None,
-    };
-    let health_run = if let Some(shared) = shared_parse {
-        crate::health::execute_health_with_shared_parse(&health_opts, shared)
-    } else {
-        crate::health::execute_health(&health_opts)
-    };
-    match health_run {
-        Ok(r) => Ok(Some(r)),
-        Err(code) => Err(code),
     }
 }
 

@@ -1259,40 +1259,65 @@ fn compute_base_security_snapshot(
         remap_cache_dir_for_base_worktree(opts.root, &base_root, &config.cache_dir);
     force_security_rules(&mut base_config);
     let mut base_analysis = analyze_security_candidates(
-        &SecurityOptions {
-            root: &base_root,
-            config_path: &current_config_path,
-            output: opts.output,
-            no_cache: opts.no_cache,
-            threads: opts.threads,
-            quiet: true,
-            fail_on_issues: false,
-            sarif_file: None,
-            summary: false,
-            changed_since: None,
-            use_shared_diff_index: false,
-            workspace: opts.workspace,
-            changed_workspaces: None,
-            file: &[],
-            surface: false,
-            gate: None,
-            runtime_coverage: None,
-            min_invocations_hot: opts.min_invocations_hot,
-            explain: false,
-        },
+        &base_snapshot_security_options(opts, &base_root, &current_config_path),
         &base_config,
     )?;
+    scope_base_snapshot_to_workspaces(opts, &base_root, &mut base_analysis.results)?;
+    Ok(SecurityKeySnapshot {
+        reachable: security_reachable_keys(&base_analysis.results.security_findings, &base_root),
+    })
+}
+
+/// Build the quiet, non-gating `SecurityOptions` used to re-analyze the base
+/// worktree for the `--gate newly-reachable` snapshot.
+#[expect(
+    clippy::ref_option,
+    reason = "config_path mirrors the SecurityOptions.config_path field which is &Option<PathBuf>"
+)]
+fn base_snapshot_security_options<'a>(
+    opts: &SecurityOptions<'a>,
+    base_root: &'a Path,
+    config_path: &'a Option<PathBuf>,
+) -> SecurityOptions<'a> {
+    SecurityOptions {
+        root: base_root,
+        config_path,
+        output: opts.output,
+        no_cache: opts.no_cache,
+        threads: opts.threads,
+        quiet: true,
+        fail_on_issues: false,
+        sarif_file: None,
+        summary: false,
+        changed_since: None,
+        use_shared_diff_index: false,
+        workspace: opts.workspace,
+        changed_workspaces: None,
+        file: &[],
+        surface: false,
+        gate: None,
+        runtime_coverage: None,
+        min_invocations_hot: opts.min_invocations_hot,
+        explain: false,
+    }
+}
+
+/// Apply the run's `--workspace` scope to the base-snapshot results so the
+/// reachable-key set matches the head scope it is diffed against.
+fn scope_base_snapshot_to_workspaces(
+    opts: &SecurityOptions<'_>,
+    base_root: &Path,
+    results: &mut AnalysisResults,
+) -> Result<(), ExitCode> {
     if let Some(ref roots) = crate::check::filtering::resolve_workspace_scope(
-        &base_root,
+        base_root,
         opts.workspace,
         None,
         opts.output,
     )? {
-        crate::check::filtering::filter_to_workspaces(&mut base_analysis.results, roots);
+        crate::check::filtering::filter_to_workspaces(results, roots);
     }
-    Ok(SecurityKeySnapshot {
-        reachable: security_reachable_keys(&base_analysis.results.security_findings, &base_root),
-    })
+    Ok(())
 }
 
 fn security_reachable_keys(findings: &[SecurityFinding], root: &Path) -> FxHashSet<String> {
@@ -1527,58 +1552,7 @@ fn analyze_security_runtime(
         opts.output,
     )?;
     let result = crate::health::execute_health_with_shared_parse(
-        &HealthOptions {
-            root: opts.root,
-            config_path: opts.config_path,
-            output: opts.output,
-            no_cache: opts.no_cache,
-            threads: opts.threads,
-            quiet: opts.quiet,
-            max_cyclomatic: None,
-            max_cognitive: None,
-            max_crap: None,
-            top: None,
-            sort: SortBy::Cyclomatic,
-            production: true,
-            production_override: Some(true),
-            changed_since: opts.changed_since,
-            diff_index: None,
-            use_shared_diff_index: opts.use_shared_diff_index,
-            workspace: opts.workspace,
-            changed_workspaces: opts.changed_workspaces,
-            baseline: None,
-            save_baseline: None,
-            complexity: false,
-            complexity_breakdown: false,
-            file_scores: false,
-            coverage_gaps: false,
-            config_activates_coverage_gaps: false,
-            hotspots: false,
-            ownership: false,
-            ownership_emails: None,
-            targets: false,
-            css: false,
-            force_full: false,
-            score_only_output: false,
-            enforce_coverage_gap_gate: false,
-            effort: None,
-            score: false,
-            min_score: None,
-            since: None,
-            min_commits: None,
-            explain: false,
-            summary: false,
-            save_snapshot: None,
-            trend: false,
-            group_by: None,
-            coverage: None,
-            coverage_root: None,
-            performance: false,
-            min_severity: None,
-            report_only: false,
-            runtime_coverage: Some(runtime_coverage),
-            churn_file: None,
-        },
+        &security_runtime_health_options(opts, runtime_coverage),
         SharedParseData {
             files,
             modules,
@@ -1586,6 +1560,66 @@ fn analyze_security_runtime(
         },
     )?;
     Ok(result.report.runtime_coverage)
+}
+
+/// Build the production-forced `HealthOptions` used to compute runtime coverage
+/// context for security findings (complexity/hotspot/ownership all disabled).
+fn security_runtime_health_options<'a>(
+    opts: &SecurityOptions<'a>,
+    runtime_coverage: crate::health::RuntimeCoverageOptions,
+) -> HealthOptions<'a> {
+    HealthOptions {
+        root: opts.root,
+        config_path: opts.config_path,
+        output: opts.output,
+        no_cache: opts.no_cache,
+        threads: opts.threads,
+        quiet: opts.quiet,
+        max_cyclomatic: None,
+        max_cognitive: None,
+        max_crap: None,
+        top: None,
+        sort: SortBy::Cyclomatic,
+        production: true,
+        production_override: Some(true),
+        changed_since: opts.changed_since,
+        diff_index: None,
+        use_shared_diff_index: opts.use_shared_diff_index,
+        workspace: opts.workspace,
+        changed_workspaces: opts.changed_workspaces,
+        baseline: None,
+        save_baseline: None,
+        complexity: false,
+        complexity_breakdown: false,
+        file_scores: false,
+        coverage_gaps: false,
+        config_activates_coverage_gaps: false,
+        hotspots: false,
+        ownership: false,
+        ownership_emails: None,
+        targets: false,
+        css: false,
+        force_full: false,
+        score_only_output: false,
+        enforce_coverage_gap_gate: false,
+        effort: None,
+        score: false,
+        min_score: None,
+        since: None,
+        min_commits: None,
+        explain: false,
+        summary: false,
+        save_snapshot: None,
+        trend: false,
+        group_by: None,
+        coverage: None,
+        coverage_root: None,
+        performance: false,
+        min_severity: None,
+        report_only: false,
+        runtime_coverage: Some(runtime_coverage),
+        churn_file: None,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -2959,78 +2993,96 @@ fn sarif_rule_def(
 ) -> serde_json::Value {
     match finding.kind {
         SecurityFindingKind::ClientServerLeak if is_server_only_leak(finding) => {
-            let title = "Client imports server-only code";
-            serde_json::json!({
-                "id": rule_id,
-                "name": title,
-                "shortDescription": { "text": "Client imports server-only code candidate (unverified)" },
-                "fullDescription": { "text":
-                    "Unverified candidate, requires verification: a \"use client\" file \
-                     transitively imports a server-only module (one carrying a \"use server\" \
-                     directive or importing server-only code such as server-only, next/headers, \
-                     next/server, or node:fs / node:child_process). fallow does not prove this \
-                     code runs on the client; a module pulled in only through \
-                     next/dynamic(..., { ssr: false }) is a false positive." },
-                "help": {
-                    "text": security_help_text(title),
-                    "markdown": security_help_markdown(title)
-                },
-                "helpUri": "https://github.com/fallow-rs/fallow",
-                "defaultConfiguration": { "level": "note" }
-            })
+            sarif_rule_def_server_only_leak(rule_id)
         }
-        SecurityFindingKind::ClientServerLeak => {
-            let title = "Client-server secret leak";
-            serde_json::json!({
-                "id": rule_id,
-                "name": title,
-                "shortDescription": { "text": "Client-server secret leak candidate (unverified)" },
-                "fullDescription": { "text":
-                    "Unverified candidate, requires verification: a \"use client\" file \
-                     transitively imports a module that reads a non-public process.env \
-                     secret. fallow does not prove the secret reaches client-bundled code." },
-                "help": {
-                    "text": security_help_text(title),
-                    "markdown": security_help_markdown(title)
-                },
-                "helpUri": "https://github.com/fallow-rs/fallow",
-                "defaultConfiguration": { "level": "note" }
-            })
-        }
+        SecurityFindingKind::ClientServerLeak => sarif_rule_def_secret_leak(rule_id),
         SecurityFindingKind::TaintedSink => {
-            let title = finding
-                .category
-                .as_deref()
-                .and_then(fallow_core::analyze::security_catalogue_title)
-                .or(finding.category.as_deref())
-                .unwrap_or("tainted-sink");
-            let mut rule = serde_json::json!({
-                "id": rule_id,
-                "name": title,
-                "shortDescription": { "text": format!("{title} candidate (unverified)") },
-                "fullDescription": { "text": format!(
-                    "Unverified candidate, requires verification: {title}. fallow flags a \
-                     syntactic sink reached by a non-literal argument; it does not prove the \
-                     value is attacker-controlled or reaches the sink unsanitized."
-                ) },
-                "help": {
-                    "text": security_help_text(title),
-                    "markdown": security_help_markdown(title)
-                },
-                "helpUri": "https://github.com/fallow-rs/fallow",
-                "defaultConfiguration": { "level": "note" }
-            });
-            if let Some(cwe) = finding.cwe {
-                rule["properties"] = serde_json::json!({
-                    "tags": [format!("external/cwe/cwe-{cwe}")]
-                });
-                if let Some(taxon_index) = cwe_taxon_index {
-                    rule["relationships"] = serde_json::json!([cwe_relationship(cwe, taxon_index)]);
-                }
-            }
-            rule
+            sarif_rule_def_tainted_sink(rule_id, finding, cwe_taxon_index)
         }
     }
+}
+
+/// SARIF rule definition for the server-only-import flavor of `ClientServerLeak`.
+fn sarif_rule_def_server_only_leak(rule_id: &str) -> serde_json::Value {
+    let title = "Client imports server-only code";
+    serde_json::json!({
+        "id": rule_id,
+        "name": title,
+        "shortDescription": { "text": "Client imports server-only code candidate (unverified)" },
+        "fullDescription": { "text":
+            "Unverified candidate, requires verification: a \"use client\" file \
+             transitively imports a server-only module (one carrying a \"use server\" \
+             directive or importing server-only code such as server-only, next/headers, \
+             next/server, or node:fs / node:child_process). fallow does not prove this \
+             code runs on the client; a module pulled in only through \
+             next/dynamic(..., { ssr: false }) is a false positive." },
+        "help": {
+            "text": security_help_text(title),
+            "markdown": security_help_markdown(title)
+        },
+        "helpUri": "https://github.com/fallow-rs/fallow",
+        "defaultConfiguration": { "level": "note" }
+    })
+}
+
+/// SARIF rule definition for the secret-leak flavor of `ClientServerLeak`.
+fn sarif_rule_def_secret_leak(rule_id: &str) -> serde_json::Value {
+    let title = "Client-server secret leak";
+    serde_json::json!({
+        "id": rule_id,
+        "name": title,
+        "shortDescription": { "text": "Client-server secret leak candidate (unverified)" },
+        "fullDescription": { "text":
+            "Unverified candidate, requires verification: a \"use client\" file \
+             transitively imports a module that reads a non-public process.env \
+             secret. fallow does not prove the secret reaches client-bundled code." },
+        "help": {
+            "text": security_help_text(title),
+            "markdown": security_help_markdown(title)
+        },
+        "helpUri": "https://github.com/fallow-rs/fallow",
+        "defaultConfiguration": { "level": "note" }
+    })
+}
+
+/// SARIF rule definition for `TaintedSink` findings, attaching CWE tags and the
+/// CWE taxonomy relationship when the finding carries a CWE id.
+fn sarif_rule_def_tainted_sink(
+    rule_id: &str,
+    finding: &SecurityFinding,
+    cwe_taxon_index: Option<usize>,
+) -> serde_json::Value {
+    let title = finding
+        .category
+        .as_deref()
+        .and_then(fallow_core::analyze::security_catalogue_title)
+        .or(finding.category.as_deref())
+        .unwrap_or("tainted-sink");
+    let mut rule = serde_json::json!({
+        "id": rule_id,
+        "name": title,
+        "shortDescription": { "text": format!("{title} candidate (unverified)") },
+        "fullDescription": { "text": format!(
+            "Unverified candidate, requires verification: {title}. fallow flags a \
+             syntactic sink reached by a non-literal argument; it does not prove the \
+             value is attacker-controlled or reaches the sink unsanitized."
+        ) },
+        "help": {
+            "text": security_help_text(title),
+            "markdown": security_help_markdown(title)
+        },
+        "helpUri": "https://github.com/fallow-rs/fallow",
+        "defaultConfiguration": { "level": "note" }
+    });
+    if let Some(cwe) = finding.cwe {
+        rule["properties"] = serde_json::json!({
+            "tags": [format!("external/cwe/cwe-{cwe}")]
+        });
+        if let Some(taxon_index) = cwe_taxon_index {
+            rule["relationships"] = serde_json::json!([cwe_relationship(cwe, taxon_index)]);
+        }
+    }
+    rule
 }
 
 fn hop_role_token(role: TraceHopRole) -> &'static str {
@@ -3107,6 +3159,59 @@ const fn sarif_level(severity: SecuritySeverity) -> &'static str {
     }
 }
 
+/// Build the SARIF `result` object for a single finding, composing the
+/// candidate-framed message, related locations, fingerprint, and code flows.
+fn sarif_result_for_finding(finding: &SecurityFinding) -> serde_json::Value {
+    let rule_id = sarif_rule_id(finding);
+    let mut message = dead_code_hint(finding).map_or_else(
+        || finding.evidence.clone(),
+        |hint| format!("{} Dead-code cross-link: {hint}.", finding.evidence),
+    );
+    if let Some(hint) = source_reachability_hint(finding) {
+        message.push(' ');
+        message.push_str(hint);
+    }
+    if let Some(runtime) = finding.runtime.as_ref() {
+        message.push_str(" Runtime context: ");
+        message.push_str(&runtime_hint_text(runtime));
+        message.push('.');
+    }
+    let related = sarif_related_locations(finding);
+    // Stable dedup key for GHAS: rule + anchor path + line. Without
+    // partialFingerprints, every run re-opens previously triaged alerts.
+    // Same helper as the JSON `finding_id` field so the two never drift
+    // (issue #900).
+    let mut result = serde_json::json!({
+        "ruleId": rule_id,
+        "level": sarif_level(finding.severity),
+        "message": { "text": message },
+        "locations": [sarif_location(&finding.path, finding.line, finding.col)],
+        "relatedLocations": related,
+        "partialFingerprints": { "fallowSecurity/v1": security_finding_id(finding) },
+    });
+    if let Some(code_flows) = sarif_code_flows(finding) {
+        result["codeFlows"] = code_flows;
+    }
+    result
+}
+
+/// Collect one SARIF rule definition per distinct ruleId present in `findings`,
+/// in first-seen order, attaching the CWE taxonomy index when available.
+fn sarif_rule_defs(findings: &[SecurityFinding], cwes: &[u32]) -> Vec<serde_json::Value> {
+    let mut seen: Vec<String> = Vec::new();
+    let mut rules: Vec<serde_json::Value> = Vec::new();
+    for finding in findings {
+        let rule_id = sarif_rule_id(finding);
+        if seen.iter().any(|s| s == &rule_id) {
+            continue;
+        }
+        seen.push(rule_id.clone());
+        let cwe_taxon_index = finding.cwe.and_then(|cwe| cwe_index(cwes, cwe));
+        rules.push(sarif_rule_def(&rule_id, finding, cwe_taxon_index));
+    }
+    rules
+}
+
 /// SARIF output. Maps the candidate's verification-priority tier to SARIF
 /// `level` while keeping the message text candidate-framed. Each finding's ruleId is
 /// per-category (`security/<category>` for tainted-sink, `security/client-server-leak`
@@ -3119,53 +3224,9 @@ fn render_sarif(output: &SecurityOutput) -> String {
     let results: Vec<serde_json::Value> = output
         .security_findings
         .iter()
-        .map(|finding| {
-            let rule_id = sarif_rule_id(finding);
-            let mut message = dead_code_hint(finding).map_or_else(
-                || finding.evidence.clone(),
-                |hint| format!("{} Dead-code cross-link: {hint}.", finding.evidence),
-            );
-            if let Some(hint) = source_reachability_hint(finding) {
-                message.push(' ');
-                message.push_str(hint);
-            }
-            if let Some(runtime) = finding.runtime.as_ref() {
-                message.push_str(" Runtime context: ");
-                message.push_str(&runtime_hint_text(runtime));
-                message.push('.');
-            }
-            let related = sarif_related_locations(finding);
-            // Stable dedup key for GHAS: rule + anchor path + line. Without
-            // partialFingerprints, every run re-opens previously triaged alerts.
-            // Same helper as the JSON `finding_id` field so the two never drift
-            // (issue #900).
-            let mut result = serde_json::json!({
-                "ruleId": rule_id,
-                "level": sarif_level(finding.severity),
-                "message": { "text": message },
-                "locations": [sarif_location(&finding.path, finding.line, finding.col)],
-                "relatedLocations": related,
-                "partialFingerprints": { "fallowSecurity/v1": security_finding_id(finding) },
-            });
-            if let Some(code_flows) = sarif_code_flows(finding) {
-                result["codeFlows"] = code_flows;
-            }
-            result
-        })
+        .map(sarif_result_for_finding)
         .collect();
-
-    // One rule definition per distinct ruleId present in the findings.
-    let mut seen: Vec<String> = Vec::new();
-    let mut rules: Vec<serde_json::Value> = Vec::new();
-    for finding in &output.security_findings {
-        let rule_id = sarif_rule_id(finding);
-        if seen.iter().any(|s| s == &rule_id) {
-            continue;
-        }
-        seen.push(rule_id.clone());
-        let cwe_taxon_index = finding.cwe.and_then(|cwe| cwe_index(&cwes, cwe));
-        rules.push(sarif_rule_def(&rule_id, finding, cwe_taxon_index));
-    }
+    let rules = sarif_rule_defs(&output.security_findings, &cwes);
 
     let mut run = serde_json::json!({
         "tool": { "driver": {

@@ -81,28 +81,64 @@ pub struct ProjectInfo {
     pub test_framework_ambiguous: bool,
 }
 
+/// Detected workspace shape: monorepo flag, package patterns, and tool name.
+struct WorkspaceShape {
+    is_monorepo: bool,
+    patterns: Vec<String>,
+    tool: Option<String>,
+}
+
 /// Inspect the project root and detect frameworks, workspace setup, etc.
 pub fn detect_project(root: &Path) -> ProjectInfo {
-    let is_pnpm = root.join("pnpm-workspace.yaml").exists();
     let has_typescript = root.join("tsconfig.json").exists();
     let has_storybook = root.join(".storybook").is_dir();
 
     let pkg = PackageJson::load(&root.join("package.json")).ok();
 
-    let pkg_workspace_patterns = pkg
+    let workspace = detect_workspace_shape(root, pkg.as_ref());
+
+    let all_deps = pkg
         .as_ref()
-        .map(|p| p.workspace_patterns())
+        .map(PackageJson::all_dependency_names)
         .unwrap_or_default();
+
+    let (test_framework, test_framework_ambiguous) = detect_test_framework(&all_deps);
+    let ui_framework = detect_ui_framework(&all_deps);
+
+    // Extract just the manager name from `packageManager` (e.g. "pnpm@9.1.0" -> "pnpm").
+    let package_manager = pkg
+        .as_ref()
+        .and_then(|p| p.package_manager.as_deref())
+        .and_then(|pm| pm.split('@').next())
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned);
+
+    ProjectInfo {
+        is_monorepo: workspace.is_monorepo,
+        workspace_patterns: workspace.patterns,
+        workspace_tool: workspace.tool,
+        has_typescript,
+        test_framework,
+        ui_framework,
+        has_storybook,
+        package_manager,
+        test_framework_ambiguous,
+    }
+}
+
+/// Detect the monorepo flag, workspace package patterns, and workspace tool.
+fn detect_workspace_shape(root: &Path, pkg: Option<&PackageJson>) -> WorkspaceShape {
+    let is_pnpm = root.join("pnpm-workspace.yaml").exists();
+    let pkg_workspace_patterns = pkg.map(PackageJson::workspace_patterns).unwrap_or_default();
     let has_npm_workspaces = !pkg_workspace_patterns.is_empty();
 
-    let is_monorepo = is_pnpm || has_npm_workspaces;
-    let workspace_patterns = if is_pnpm && pkg_workspace_patterns.is_empty() {
+    let patterns = if is_pnpm && pkg_workspace_patterns.is_empty() {
         read_pnpm_workspace_patterns(root)
     } else {
         pkg_workspace_patterns
     };
 
-    let workspace_tool = if is_pnpm {
+    let tool = if is_pnpm {
         Some("pnpm".to_string())
     } else if has_npm_workspaces {
         if root.join("yarn.lock").exists() {
@@ -114,18 +150,22 @@ pub fn detect_project(root: &Path) -> ProjectInfo {
         None
     };
 
-    let all_deps = pkg
-        .as_ref()
-        .map(PackageJson::all_dependency_names)
-        .unwrap_or_default();
+    WorkspaceShape {
+        is_monorepo: is_pnpm || has_npm_workspaces,
+        patterns,
+        tool,
+    }
+}
 
+/// Detect the primary test framework label and whether the choice is ambiguous
+/// (more than one of vitest / jest / @playwright/test present).
+fn detect_test_framework(all_deps: &[String]) -> (Option<String>, bool) {
     let has_vitest = all_deps.iter().any(|d| d == "vitest");
     let has_jest = all_deps.iter().any(|d| d == "jest");
     let has_playwright = all_deps.iter().any(|d| d == "@playwright/test");
-    let test_framework_count = u8::from(has_vitest) + u8::from(has_jest) + u8::from(has_playwright);
-    let test_framework_ambiguous = test_framework_count > 1;
+    let count = u8::from(has_vitest) + u8::from(has_jest) + u8::from(has_playwright);
 
-    let test_framework = if has_vitest {
+    let framework = if has_vitest {
         Some("Vitest".to_string())
     } else if has_jest {
         Some("Jest".to_string())
@@ -134,8 +174,12 @@ pub fn detect_project(root: &Path) -> ProjectInfo {
     } else {
         None
     };
+    (framework, count > 1)
+}
 
-    let ui_framework = if all_deps.iter().any(|d| d == "react" || d == "react-dom") {
+/// Detect the primary UI framework label from the dependency name set.
+fn detect_ui_framework(all_deps: &[String]) -> Option<String> {
+    if all_deps.iter().any(|d| d == "react" || d == "react-dom") {
         Some("React".to_string())
     } else if all_deps.iter().any(|d| d == "vue") {
         Some("Vue".to_string())
@@ -145,26 +189,6 @@ pub fn detect_project(root: &Path) -> ProjectInfo {
         Some("Angular".to_string())
     } else {
         None
-    };
-
-    // Extract just the manager name from `packageManager` (e.g. "pnpm@9.1.0" -> "pnpm").
-    let package_manager = pkg
-        .as_ref()
-        .and_then(|p| p.package_manager.as_deref())
-        .and_then(|pm| pm.split('@').next())
-        .filter(|s| !s.is_empty())
-        .map(str::to_owned);
-
-    ProjectInfo {
-        is_monorepo,
-        workspace_patterns,
-        workspace_tool,
-        has_typescript,
-        test_framework,
-        ui_framework,
-        has_storybook,
-        package_manager,
-        test_framework_ambiguous,
     }
 }
 
@@ -357,28 +381,22 @@ This file gives coding agents project-specific context. Keep it short and update
 - Always ask before:
 - Preferred style:
 ",
-        module_boundaries_suffix = if module_boundaries.is_empty() {
-            String::new()
-        } else {
-            format!(" {module_boundaries}")
-        },
+        module_boundaries_suffix = space_prefixed(&module_boundaries),
         provenance_comment = provenance_comment,
-        install_suffix = if install_line.is_empty() {
-            String::new()
-        } else {
-            format!(" {install_line}")
-        },
-        test_suffix = if test_line.is_empty() {
-            String::new()
-        } else {
-            format!(" {test_line}")
-        },
-        typecheck_suffix = if typecheck_line.is_empty() {
-            String::new()
-        } else {
-            format!(" {typecheck_line}")
-        },
+        install_suffix = space_prefixed(&install_line),
+        test_suffix = space_prefixed(&test_line),
+        typecheck_suffix = space_prefixed(&typecheck_line),
     )
+}
+
+/// Return `""` for an empty value, otherwise `" {value}"`. Used to splice an
+/// optional prefilled value after a fixed `- Field:` label in AGENTS.md.
+fn space_prefixed(value: &str) -> String {
+    if value.is_empty() {
+        String::new()
+    } else {
+        format!(" {value}")
+    }
 }
 
 /// Compute the `Install:` value for the AGENTS.md Commands section.
@@ -809,7 +827,53 @@ pub fn run_git_hooks_install(opts: &GitHooksInstallOptions<'_>) -> ExitCode {
         .or_else(|| detect_default_branch(root))
         .unwrap_or_else(|| "main".to_string());
 
-    let hook_content = format!(
+    let hook_content = build_pre_commit_hook_content(&fallback_base_ref);
+
+    let target = match detect_hook_target(root) {
+        Ok(target) => target,
+        Err(code) => return code,
+    };
+
+    match target {
+        HookTarget::Husky(hook_path) => {
+            if let Err(code) = install_hook_file(
+                &hook_path,
+                ".husky/pre-commit",
+                &hook_content,
+                &fallback_base_ref,
+                opts,
+            ) {
+                return code;
+            }
+        }
+        HookTarget::Lefthook => {
+            eprintln!("{}", lefthook_hint(&fallback_base_ref));
+            return ExitCode::SUCCESS;
+        }
+        HookTarget::GitHooks(hook_path) => {
+            if let Err(code) = install_hook_file(
+                &hook_path,
+                ".git/hooks/pre-commit",
+                &hook_content,
+                &fallback_base_ref,
+                opts,
+            ) {
+                return code;
+            }
+        }
+    }
+
+    eprintln!(
+        "\nThe hook runs `fallow audit` against the merge-base with the current branch upstream, \
+         falling back to `{fallback_base_ref}` when no upstream is set (gate=new-only by default)."
+    );
+    eprintln!("To skip the hook on a single commit: git commit --no-verify");
+    ExitCode::SUCCESS
+}
+
+/// Render the managed pre-commit hook script body for the given fallback base ref.
+fn build_pre_commit_hook_content(fallback_base_ref: &str) -> String {
+    format!(
         r#"#!/bin/sh
 {GIT_HOOK_MARKER}
 # fallow pre-commit hook -- gate commits on dead code, complexity, and duplication.
@@ -831,76 +895,37 @@ else
 fi
 fallow audit --base "$BASE" --quiet --gate-marker pre-commit
 "#
-    );
+    )
+}
 
-    let target = match detect_hook_target(root) {
-        Ok(target) => target,
-        Err(code) => return code,
-    };
-
-    match target {
-        HookTarget::Husky(hook_path) => {
-            let existed = hook_path.exists();
-            if existed && !opts.force {
-                eprintln!(
-                    "{}",
-                    existing_hook_hint(".husky/pre-commit", &fallback_base_ref)
-                );
-                return ExitCode::from(2);
-            }
-            if opts.dry_run {
-                if existed {
-                    eprintln!("Would overwrite .husky/pre-commit");
-                } else {
-                    eprintln!("Would create .husky/pre-commit");
-                }
-            } else if let Err(e) = write_hook(&hook_path, &hook_content) {
-                eprintln!("Error: Failed to write .husky/pre-commit: {e}");
-                return ExitCode::from(2);
-            } else {
-                eprintln!(
-                    "{} .husky/pre-commit",
-                    if existed { "Updated" } else { "Created" }
-                );
-            }
-        }
-        HookTarget::Lefthook => {
-            eprintln!("{}", lefthook_hint(&fallback_base_ref));
-            return ExitCode::SUCCESS;
-        }
-        HookTarget::GitHooks(hook_path) => {
-            let existed = hook_path.exists();
-            if existed && !opts.force {
-                eprintln!(
-                    "{}",
-                    existing_hook_hint(".git/hooks/pre-commit", &fallback_base_ref)
-                );
-                return ExitCode::from(2);
-            }
-            if opts.dry_run {
-                if existed {
-                    eprintln!("Would overwrite .git/hooks/pre-commit");
-                } else {
-                    eprintln!("Would create .git/hooks/pre-commit");
-                }
-            } else if let Err(e) = write_hook(&hook_path, &hook_content) {
-                eprintln!("Error: Failed to write .git/hooks/pre-commit: {e}");
-                return ExitCode::from(2);
-            } else {
-                eprintln!(
-                    "{} .git/hooks/pre-commit",
-                    if existed { "Updated" } else { "Created" }
-                );
-            }
-        }
+/// Write (or preview) the managed hook at `hook_path`, refusing to clobber
+/// an existing hook unless `--force`. `label` is the user-facing path shown
+/// in messages. Returns `Err(exit_code)` on a conflict or write failure.
+fn install_hook_file(
+    hook_path: &Path,
+    label: &str,
+    hook_content: &str,
+    fallback_base_ref: &str,
+    opts: &GitHooksInstallOptions<'_>,
+) -> Result<(), ExitCode> {
+    let existed = hook_path.exists();
+    if existed && !opts.force {
+        eprintln!("{}", existing_hook_hint(label, fallback_base_ref));
+        return Err(ExitCode::from(2));
     }
-
-    eprintln!(
-        "\nThe hook runs `fallow audit` against the merge-base with the current branch upstream, \
-         falling back to `{fallback_base_ref}` when no upstream is set (gate=new-only by default)."
-    );
-    eprintln!("To skip the hook on a single commit: git commit --no-verify");
-    ExitCode::SUCCESS
+    if opts.dry_run {
+        if existed {
+            eprintln!("Would overwrite {label}");
+        } else {
+            eprintln!("Would create {label}");
+        }
+    } else if let Err(e) = write_hook(hook_path, hook_content) {
+        eprintln!("Error: Failed to write {label}: {e}");
+        return Err(ExitCode::from(2));
+    } else {
+        eprintln!("{} {label}", if existed { "Updated" } else { "Created" });
+    }
+    Ok(())
 }
 
 pub fn run_git_hooks_uninstall(opts: &GitHooksUninstallOptions<'_>) -> ExitCode {

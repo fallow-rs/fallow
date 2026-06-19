@@ -566,6 +566,27 @@ fn build_shared_parse_data(
     })
 }
 
+/// Warn on a scoped regression save, persist any configured regression
+/// baseline, then compare the current counts against the effective baseline
+/// (a just-saved baseline wins over the config baseline).
+fn resolve_check_regression(
+    opts: &CheckOptions<'_>,
+    config: &ResolvedConfig,
+    results: &AnalysisResults,
+) -> Result<Option<RegressionOutcome>, ExitCode> {
+    warn_scoped_regression_save(opts);
+
+    let just_saved_baseline = save_check_regression_baseline(opts, results)?;
+
+    let config_baseline_ref = just_saved_baseline
+        .as_ref()
+        .map(regression::CheckCounts::to_config_baseline);
+    let config_baseline = config_baseline_ref
+        .as_ref()
+        .or_else(|| config.regression.as_ref().and_then(|r| r.baseline.as_ref()));
+    regression::compare_check_regression(results, &opts.regression_opts, config_baseline)
+}
+
 /// Run analysis, filtering, and baseline handling. Returns results without printing.
 pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
     let start = Instant::now();
@@ -620,18 +641,7 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         opts.output,
     )?;
 
-    warn_scoped_regression_save(opts);
-
-    let just_saved_baseline = save_check_regression_baseline(opts, &results)?;
-
-    let config_baseline_ref = just_saved_baseline
-        .as_ref()
-        .map(regression::CheckCounts::to_config_baseline);
-    let config_baseline = config_baseline_ref
-        .as_ref()
-        .or_else(|| config.regression.as_ref().and_then(|r| r.baseline.as_ref()));
-    let regression_outcome =
-        regression::compare_check_regression(&results, &opts.regression_opts, config_baseline)?;
+    let regression_outcome = resolve_check_regression(opts, &config, &results)?;
 
     if let Some(sarif_path) = opts.sarif_file {
         output::write_sarif_file(&results, &config, sarif_path, opts.quiet);
@@ -798,82 +808,81 @@ fn handle_baseline(
     output: OutputFormat,
 ) -> Result<Option<(usize, usize)>, ExitCode> {
     if let Some(baseline_path) = save_path {
-        let baseline_data = BaselineData::from_results(results, root);
-        match serde_json::to_string_pretty(&baseline_data) {
-            Ok(mut json) => {
-                json.push('\n');
-                if let Some(parent) = baseline_path.parent()
-                    && !parent.as_os_str().is_empty()
-                    && let Err(e) = std::fs::create_dir_all(parent)
-                {
-                    return Err(emit_error(
-                        &format!("failed to create baseline directory: {e}"),
-                        2,
-                        output,
-                    ));
-                }
-                if let Err(e) = std::fs::write(baseline_path, json) {
-                    return Err(emit_error(
-                        &format!("failed to save baseline: {e}"),
-                        2,
-                        output,
-                    ));
-                }
-                if !quiet {
-                    eprintln!("Baseline saved to {}", baseline_path.display());
-                }
-            }
-            Err(e) => {
-                return Err(emit_error(
-                    &format!("failed to serialize baseline: {e}"),
-                    2,
-                    output,
-                ));
-            }
-        }
+        save_baseline_file(results, baseline_path, root, quiet, output)?;
     }
 
     if let Some(baseline_path) = load_path {
-        match std::fs::read_to_string(baseline_path) {
-            Ok(content) => match serde_json::from_str::<BaselineData>(&content) {
-                Ok(baseline_data) => {
-                    let baseline_entries = baseline_data.total_entries();
-                    let before = results.total_issues();
-                    *results = filter_new_issues(std::mem::take(results), &baseline_data, root);
-                    let matched = before.saturating_sub(results.total_issues());
-                    if !quiet {
-                        eprintln!("Comparing against baseline: {}", baseline_path.display());
-                    }
-                    if baseline_entries > 0 && matched == 0 && !quiet {
-                        eprintln!(
-                            "Warning: baseline has {baseline_entries} entries but matched \
-                             0 current issues. Your paths may have changed, or the baseline \
-                             was saved on a different machine. Re-save with: \
-                             --save-baseline {}",
-                            baseline_path.display(),
-                        );
-                    }
-                    return Ok(Some((baseline_entries, matched)));
-                }
-                Err(e) => {
-                    return Err(emit_error(
-                        &format!("failed to parse baseline: {e}"),
-                        2,
-                        output,
-                    ));
-                }
-            },
-            Err(e) => {
-                return Err(emit_error(
-                    &format!("failed to read baseline: {e}"),
-                    2,
-                    output,
-                ));
-            }
-        }
+        return load_and_compare_baseline(results, baseline_path, root, quiet, output).map(Some);
     }
 
     Ok(None)
+}
+
+/// Serialize the current results to a baseline file, creating parent dirs.
+fn save_baseline_file(
+    results: &fallow_core::results::AnalysisResults,
+    baseline_path: &std::path::Path,
+    root: &std::path::Path,
+    quiet: bool,
+    output: OutputFormat,
+) -> Result<(), ExitCode> {
+    let baseline_data = BaselineData::from_results(results, root);
+    let mut json = serde_json::to_string_pretty(&baseline_data)
+        .map_err(|e| emit_error(&format!("failed to serialize baseline: {e}"), 2, output))?;
+    json.push('\n');
+    if let Some(parent) = baseline_path.parent()
+        && !parent.as_os_str().is_empty()
+        && let Err(e) = std::fs::create_dir_all(parent)
+    {
+        return Err(emit_error(
+            &format!("failed to create baseline directory: {e}"),
+            2,
+            output,
+        ));
+    }
+    if let Err(e) = std::fs::write(baseline_path, json) {
+        return Err(emit_error(
+            &format!("failed to save baseline: {e}"),
+            2,
+            output,
+        ));
+    }
+    if !quiet {
+        eprintln!("Baseline saved to {}", baseline_path.display());
+    }
+    Ok(())
+}
+
+/// Load a baseline file, filter out matched issues, and return
+/// `(baseline_entries, matched)`.
+fn load_and_compare_baseline(
+    results: &mut fallow_core::results::AnalysisResults,
+    baseline_path: &std::path::Path,
+    root: &std::path::Path,
+    quiet: bool,
+    output: OutputFormat,
+) -> Result<(usize, usize), ExitCode> {
+    let content = std::fs::read_to_string(baseline_path)
+        .map_err(|e| emit_error(&format!("failed to read baseline: {e}"), 2, output))?;
+    let baseline_data = serde_json::from_str::<BaselineData>(&content)
+        .map_err(|e| emit_error(&format!("failed to parse baseline: {e}"), 2, output))?;
+    let baseline_entries = baseline_data.total_entries();
+    let before = results.total_issues();
+    *results = filter_new_issues(std::mem::take(results), &baseline_data, root);
+    let matched = before.saturating_sub(results.total_issues());
+    if !quiet {
+        eprintln!("Comparing against baseline: {}", baseline_path.display());
+    }
+    if baseline_entries > 0 && matched == 0 && !quiet {
+        eprintln!(
+            "Warning: baseline has {baseline_entries} entries but matched \
+             0 current issues. Your paths may have changed, or the baseline \
+             was saved on a different machine. Re-save with: \
+             --save-baseline {}",
+            baseline_path.display(),
+        );
+    }
+    Ok((baseline_entries, matched))
 }
 
 #[cfg(test)]

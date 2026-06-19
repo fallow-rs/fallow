@@ -80,59 +80,20 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
     let mut fixes: Vec<serde_json::Value> = Vec::new();
     let mut plan = FixPlan::new();
 
-    apply_unused_export_fixes(&mut FixApplicationInput {
-        root: opts.root,
-        results: &results,
-        file_hashes: &file_hashes,
-        plan: &mut plan,
-        output: opts.output,
-        dry_run: opts.dry_run,
-        fixes: &mut fixes,
-    });
+    let (had_write_error, catalog_totals) =
+        apply_all_fixes(opts, &config, &results, &file_hashes, &mut plan, &mut fixes);
 
-    deps::apply_dependency_fixes(&mut deps::DependencyFixInput {
-        root: opts.root,
-        results: &results,
-        hashes: &file_hashes,
-        plan: &mut plan,
-        output: opts.output,
-        dry_run: opts.dry_run,
-        fixes: &mut fixes,
-    });
+    finalize_fix_run(opts, plan, &mut fixes, had_write_error, &catalog_totals)
+}
 
-    let mut had_write_error = config::apply_config_fixes(
-        opts.root,
-        opts.config_path.as_ref(),
-        &results,
-        opts.output,
-        opts.dry_run,
-        opts.no_create_config,
-        &mut fixes,
-    );
-
-    apply_unused_enum_member_fixes(&mut FixApplicationInput {
-        root: opts.root,
-        results: &results,
-        file_hashes: &file_hashes,
-        plan: &mut plan,
-        output: opts.output,
-        dry_run: opts.dry_run,
-        fixes: &mut fixes,
-    });
-
-    let mut catalog_request = CatalogFixRequest {
-        root: opts.root,
-        results: &results,
-        file_hashes: &file_hashes,
-        plan: &mut plan,
-        delete_preceding_comments: config.fix.catalog.delete_preceding_comments,
-        output: opts.output,
-        dry_run: opts.dry_run,
-        fixes: &mut fixes,
-    };
-    let catalog_totals = apply_catalog_fixes(&mut catalog_request);
-    had_write_error |= catalog_totals.write_error;
-
+/// Commit the plan, emit output, and compute the exit code after every fixer ran.
+fn finalize_fix_run(
+    opts: &FixOptions<'_>,
+    plan: FixPlan,
+    fixes: &mut Vec<serde_json::Value>,
+    mut had_write_error: bool,
+    catalog_totals: &CatalogFixTotals,
+) -> ExitCode {
     let plan_skip_records = build_skipped_records(opts.root, plan.skipped(), opts.quiet);
     fixes.extend(plan_skip_records.iter().cloned());
 
@@ -141,9 +102,9 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
         .iter()
         .any(|skip| !skip.reason.is_intentional());
 
-    let commit_outcome = commit_fix_plan(opts, plan, &mut fixes);
+    let commit_outcome = commit_fix_plan(opts, plan, fixes);
 
-    strip_target_sidechannel(&mut fixes);
+    strip_target_sidechannel(fixes);
 
     let skip_counts = count_fix_skips(&plan_skip_records);
     if commit_outcome.had_failures() {
@@ -157,7 +118,7 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
         output: opts.output,
         quiet: opts.quiet,
         dry_run: opts.dry_run,
-        fixes: &fixes,
+        fixes,
         catalog_applied: catalog_totals.applied,
         catalog_skipped: catalog_totals.skipped,
         catalog_comment_lines_removed: catalog_totals.comment_lines_removed,
@@ -173,6 +134,70 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
     } else {
         ExitCode::SUCCESS
     }
+}
+
+/// Run every per-issue-type fixer, returning `(had_write_error, catalog_totals)`.
+fn apply_all_fixes(
+    opts: &FixOptions<'_>,
+    config: &fallow_config::ResolvedConfig,
+    results: &fallow_core::results::AnalysisResults,
+    file_hashes: &CapturedHashes,
+    plan: &mut FixPlan,
+    fixes: &mut Vec<serde_json::Value>,
+) -> (bool, CatalogFixTotals) {
+    apply_unused_export_fixes(&mut FixApplicationInput {
+        root: opts.root,
+        results,
+        file_hashes,
+        plan: &mut *plan,
+        output: opts.output,
+        dry_run: opts.dry_run,
+        fixes: &mut *fixes,
+    });
+
+    deps::apply_dependency_fixes(&mut deps::DependencyFixInput {
+        root: opts.root,
+        results,
+        hashes: file_hashes,
+        plan: &mut *plan,
+        output: opts.output,
+        dry_run: opts.dry_run,
+        fixes: &mut *fixes,
+    });
+
+    let mut had_write_error = config::apply_config_fixes(
+        opts.root,
+        opts.config_path.as_ref(),
+        results,
+        opts.output,
+        opts.dry_run,
+        opts.no_create_config,
+        fixes,
+    );
+
+    apply_unused_enum_member_fixes(&mut FixApplicationInput {
+        root: opts.root,
+        results,
+        file_hashes,
+        plan: &mut *plan,
+        output: opts.output,
+        dry_run: opts.dry_run,
+        fixes: &mut *fixes,
+    });
+
+    let catalog_totals = apply_catalog_fixes(&mut CatalogFixRequest {
+        root: opts.root,
+        results,
+        file_hashes,
+        plan,
+        delete_preceding_comments: config.fix.catalog.delete_preceding_comments,
+        output: opts.output,
+        dry_run: opts.dry_run,
+        fixes,
+    });
+    had_write_error |= catalog_totals.write_error;
+
+    (had_write_error, catalog_totals)
 }
 
 fn emit_empty_fix_output(opts: &FixOptions<'_>) -> ExitCode {
@@ -383,38 +408,46 @@ fn commit_fix_plan(
     outcome
 }
 
+/// Count fix entries whose `applied` flag is true.
+fn count_applied_fixes(fixes: &[serde_json::Value]) -> usize {
+    fixes
+        .iter()
+        .filter(|fix| {
+            fix.get("applied")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+        })
+        .count()
+}
+
+/// Count user-facing skipped entries, excluding plan-level (hash/EOL/low-confidence) skips.
+fn count_reported_skips(fixes: &[serde_json::Value]) -> usize {
+    fixes
+        .iter()
+        .filter(|fix| {
+            let is_skipped = fix
+                .get("skipped")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
+            let reason = fix.get("skip_reason").and_then(serde_json::Value::as_str);
+            let is_plan_skip = matches!(
+                reason,
+                Some(
+                    "content_changed"
+                        | "mixed_line_endings"
+                        | "low_confidence_off_graph"
+                        | "low_confidence_unresolved_imports"
+                )
+            );
+            is_skipped && !is_plan_skip
+        })
+        .count()
+}
+
 fn emit_fix_output(input: &FixOutputInput<'_>) -> Result<(), ExitCode> {
     if matches!(input.output, OutputFormat::Json) {
-        let applied_count = input
-            .fixes
-            .iter()
-            .filter(|fix| {
-                fix.get("applied")
-                    .and_then(serde_json::Value::as_bool)
-                    .unwrap_or(false)
-            })
-            .count();
-        let skipped_count = input
-            .fixes
-            .iter()
-            .filter(|fix| {
-                let is_skipped = fix
-                    .get("skipped")
-                    .and_then(serde_json::Value::as_bool)
-                    .unwrap_or(false);
-                let reason = fix.get("skip_reason").and_then(serde_json::Value::as_str);
-                let is_plan_skip = matches!(
-                    reason,
-                    Some(
-                        "content_changed"
-                            | "mixed_line_endings"
-                            | "low_confidence_off_graph"
-                            | "low_confidence_unresolved_imports"
-                    )
-                );
-                is_skipped && !is_plan_skip
-            })
-            .count();
+        let applied_count = count_applied_fixes(input.fixes);
+        let skipped_count = count_reported_skips(input.fixes);
         match serde_json::to_string_pretty(&serde_json::json!({
             "dry_run": input.dry_run,
             "fixes": input.fixes,
@@ -534,81 +567,89 @@ struct HumanSummaryInput<'a> {
 }
 
 fn emit_human_summary(input: &HumanSummaryInput<'_>) {
-    let dry_run = input.dry_run;
-    let fixes = input.fixes;
-    let catalog_applied = input.catalog_applied;
-    let catalog_skipped = input.catalog_skipped;
-    let catalog_comment_lines_removed = input.catalog_comment_lines_removed;
-    let content_changed_count = input.content_changed_count;
-    let mixed_line_endings_count = input.mixed_line_endings_count;
-    let low_confidence_count = input.low_confidence_count;
-    if dry_run {
-        eprintln!("Dry run complete. No files were modified.");
-    } else {
-        let fixed_count = fixes
-            .iter()
-            .filter(|f| {
-                f.get("applied")
-                    .and_then(serde_json::Value::as_bool)
-                    .unwrap_or(false)
-            })
-            .count();
-        if catalog_comment_lines_removed > 0 {
-            let line_word = if catalog_comment_lines_removed == 1 {
-                "line"
-            } else {
-                "lines"
-            };
-            eprintln!(
-                "Fixed {fixed_count} issue(s) (+{catalog_comment_lines_removed} catalog comment {line_word})."
-            );
-        } else {
-            eprintln!("Fixed {fixed_count} issue(s).");
-        }
-    }
-    if !dry_run && catalog_applied > 0 {
+    emit_fix_count_line(
+        input.dry_run,
+        input.fixes,
+        input.catalog_comment_lines_removed,
+    );
+    if !input.dry_run && input.catalog_applied > 0 {
         eprintln!(
             "Catalog entries were removed from pnpm-workspace.yaml. Run `pnpm install` to refresh pnpm-lock.yaml.",
         );
     }
-    if catalog_skipped > 0 {
-        let entries_word = if catalog_skipped == 1 {
+    emit_residual_skip_warnings(input);
+}
+
+/// Print the leading dry-run notice or `Fixed N issue(s)` count line.
+fn emit_fix_count_line(
+    dry_run: bool,
+    fixes: &[serde_json::Value],
+    catalog_comment_lines_removed: usize,
+) {
+    if dry_run {
+        eprintln!("Dry run complete. No files were modified.");
+        return;
+    }
+    let fixed_count = count_applied_fixes(fixes);
+    if catalog_comment_lines_removed > 0 {
+        let line_word = if catalog_comment_lines_removed == 1 {
+            "line"
+        } else {
+            "lines"
+        };
+        eprintln!(
+            "Fixed {fixed_count} issue(s) (+{catalog_comment_lines_removed} catalog comment {line_word})."
+        );
+    } else {
+        eprintln!("Fixed {fixed_count} issue(s).");
+    }
+}
+
+/// Print the trailing skipped-entry warning lines (catalog guards, hash
+/// mismatch, mixed line endings, low-confidence exports).
+fn emit_residual_skip_warnings(input: &HumanSummaryInput<'_>) {
+    if input.catalog_skipped > 0 {
+        let entries_word = if input.catalog_skipped == 1 {
             "entry"
         } else {
             "entries"
         };
         eprintln!(
-            "Skipped {catalog_skipped} catalog {entries_word} with hardcoded consumers or other guards (run with --format json for details).",
+            "Skipped {} catalog {entries_word} with hardcoded consumers or other guards (run with --format json for details).",
+            input.catalog_skipped,
         );
     }
-    if content_changed_count > 0 {
-        let files_word = if content_changed_count == 1 {
+    if input.content_changed_count > 0 {
+        let files_word = if input.content_changed_count == 1 {
             "file"
         } else {
             "files"
         };
         eprintln!(
-            "Skipped {content_changed_count} {files_word} that changed since `fallow dead-code` ran. Re-run `fallow fix` to refresh the analysis."
+            "Skipped {} {files_word} that changed since `fallow dead-code` ran. Re-run `fallow fix` to refresh the analysis.",
+            input.content_changed_count,
         );
     }
-    if mixed_line_endings_count > 0 {
-        let files_word = if mixed_line_endings_count == 1 {
+    if input.mixed_line_endings_count > 0 {
+        let files_word = if input.mixed_line_endings_count == 1 {
             "file"
         } else {
             "files"
         };
         eprintln!(
-            "Skipped {mixed_line_endings_count} {files_word} with mixed CRLF/LF line endings. Normalize each file (`dos2unix <path>` or `git config core.autocrlf input` + re-checkout) before re-running.",
+            "Skipped {} {files_word} with mixed CRLF/LF line endings. Normalize each file (`dos2unix <path>` or `git config core.autocrlf input` + re-checkout) before re-running.",
+            input.mixed_line_endings_count,
         );
     }
-    if low_confidence_count > 0 {
-        let files_word = if low_confidence_count == 1 {
+    if input.low_confidence_count > 0 {
+        let files_word = if input.low_confidence_count == 1 {
             "file"
         } else {
             "files"
         };
         eprintln!(
-            "Kept unused exports in {low_confidence_count} {files_word} where consumers may be invisible to fallow (test, mock, and fixture directories, or files with unresolved imports). Still listed by `fallow dead-code`; remove by hand if you have confirmed they are unused.",
+            "Kept unused exports in {} {files_word} where consumers may be invisible to fallow (test, mock, and fixture directories, or files with unresolved imports). Still listed by `fallow dead-code`; remove by hand if you have confirmed they are unused.",
+            input.low_confidence_count,
         );
     }
 }

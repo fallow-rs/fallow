@@ -1524,6 +1524,12 @@ impl DeadCodeJsonAnnotator<'_> {
     }
 
     fn annotate_component_keys(&mut self) {
+        self.annotate_component_render_keys();
+        self.annotate_component_io_keys();
+    }
+
+    /// Annotate rendered-component, prop, and emit issue arrays.
+    fn annotate_component_render_keys(&mut self) {
         annotate_issue_array(
             self.json,
             "unrendered_components",
@@ -1548,6 +1554,10 @@ impl DeadCodeJsonAnnotator<'_> {
                 issue_was_introduced(&unused_component_emit_key(&item.emit, self.root), self.base)
             }),
         );
+    }
+
+    /// Annotate component input/output, Svelte event, and server-action issue arrays.
+    fn annotate_component_io_keys(&mut self) {
         annotate_issue_array(
             self.json,
             "unused_component_inputs",
@@ -1828,6 +1838,17 @@ fn annotate_catalog_json(
     root: &Path,
     base: &FxHashSet<String>,
 ) {
+    annotate_catalog_entry_json(json, results, root, base);
+    annotate_dependency_override_json(json, results, root, base);
+}
+
+/// Annotate catalog-reference, catalog-entry, and empty-group issue arrays.
+fn annotate_catalog_entry_json(
+    json: &mut serde_json::Value,
+    results: &fallow_core::results::AnalysisResults,
+    root: &Path,
+    base: &FxHashSet<String>,
+) {
     annotate_issue_array(
         json,
         "unresolved_catalog_references",
@@ -1860,6 +1881,15 @@ fn annotate_catalog_json(
             .iter()
             .map(|item| issue_was_introduced(&empty_catalog_group_key(&item.group, root), base)),
     );
+}
+
+/// Annotate dependency-override issue arrays (unused and misconfigured).
+fn annotate_dependency_override_json(
+    json: &mut serde_json::Value,
+    results: &fallow_core::results::AnalysisResults,
+    root: &Path,
+    base: &FxHashSet<String>,
+) {
     annotate_issue_array(
         json,
         "unused_dependency_overrides",

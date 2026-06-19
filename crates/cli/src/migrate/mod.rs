@@ -98,22 +98,8 @@ pub fn run_migrate(
     dry_run: bool,
     from: Option<&Path>,
 ) -> ExitCode {
-    let existing_names = [
-        ".fallowrc.json",
-        ".fallowrc.jsonc",
-        "fallow.toml",
-        ".fallow.toml",
-    ];
-    if !dry_run {
-        for name in &existing_names {
-            let path = root.join(name);
-            if path.exists() {
-                eprintln!(
-                    "Error: {name} already exists. Remove it first or use --dry-run to preview."
-                );
-                return ExitCode::from(2);
-            }
-        }
+    if !dry_run && let Some(code) = reject_existing_fallow_config(root) {
+        return code;
     }
 
     let result = from.map_or_else(|| migrate_auto_detect(root), migrate_from_file);
@@ -150,6 +136,31 @@ pub fn run_migrate(
         eprintln!("Created {filename}");
     }
 
+    report_migration_outcome(&result);
+    ExitCode::SUCCESS
+}
+
+/// Reject the migration when a fallow config already exists at `root`.
+/// Returns `Some(exit_code)` to abort, `None` to proceed.
+fn reject_existing_fallow_config(root: &Path) -> Option<ExitCode> {
+    let existing_names = [
+        ".fallowrc.json",
+        ".fallowrc.jsonc",
+        "fallow.toml",
+        ".fallow.toml",
+    ];
+    for name in &existing_names {
+        if root.join(name).exists() {
+            eprintln!("Error: {name} already exists. Remove it first or use --dry-run to preview.");
+            return Some(ExitCode::from(2));
+        }
+    }
+    None
+}
+
+/// Print the migrated-sources list, skipped-field warnings, and the
+/// knip glob-engine caveat after a successful migration.
+fn report_migration_outcome(result: &MigrationResult) {
     for source in &result.sources {
         eprintln!("Migrated from: {}", source_head(source));
     }
@@ -165,26 +176,63 @@ pub fn run_migrate(
         }
     }
 
-    if should_emit_glob_caveat(&result) {
+    if should_emit_glob_caveat(result) {
         eprintln!();
         eprintln!(
             "Note: knip and fallow use different glob engines; verify migrated entry / ignorePatterns with `fallow dead-code` before relying on CI. See https://docs.fallow.tools/migration/from-knip"
         );
     }
-
-    ExitCode::SUCCESS
 }
 
 /// Auto-detect and migrate from knip and/or jscpd configs in the given root.
-#[expect(
-    clippy::case_sensitive_file_extension_comparisons,
-    reason = "JS/TS extensions are always lowercase"
-)]
 fn migrate_auto_detect(root: &Path) -> Result<MigrationResult, String> {
     let mut config = serde_json::Map::new();
     let mut warnings = Vec::new();
     let mut sources = Vec::new();
 
+    migrate_first_knip_file(root, &mut config, &mut warnings, &mut sources)?;
+
+    let mut found_jscpd_file = false;
+    let jscpd_path = root.join(".jscpd.json");
+    if jscpd_path.exists() {
+        let jscpd_value = load_json_or_jsonc(&jscpd_path)?;
+        migrate_jscpd(&jscpd_value, &mut config, &mut warnings);
+        sources.push(".jscpd.json".to_string());
+        found_jscpd_file = true;
+    }
+
+    let need_pkg_knip = sources.is_empty();
+    let need_pkg_jscpd = !found_jscpd_file;
+    if need_pkg_knip || need_pkg_jscpd {
+        migrate_package_json_keys(
+            root,
+            need_pkg_knip,
+            need_pkg_jscpd,
+            &mut config,
+            &mut warnings,
+            &mut sources,
+        )?;
+    }
+
+    Ok(MigrationResult {
+        config: serde_json::Value::Object(config),
+        warnings,
+        sources,
+    })
+}
+
+/// Find and migrate the first standalone knip config file under `root`.
+/// A `.ts` config is recorded as an unparseable warning and skipped.
+#[expect(
+    clippy::case_sensitive_file_extension_comparisons,
+    reason = "JS/TS extensions are always lowercase"
+)]
+fn migrate_first_knip_file(
+    root: &Path,
+    config: &mut serde_json::Map<String, serde_json::Value>,
+    warnings: &mut Vec<MigrationWarning>,
+    sources: &mut Vec<String>,
+) -> Result<(), String> {
     let knip_files = [
         "knip.json",
         "knip.jsonc",
@@ -210,46 +258,41 @@ fn migrate_auto_detect(root: &Path) -> Result<MigrationResult, String> {
                 continue;
             }
             let knip_value = load_json_or_jsonc(&path)?;
-            migrate_knip(&knip_value, &mut config, &mut warnings);
+            migrate_knip(&knip_value, config, warnings);
             sources.push(name.to_string());
             break; // Only use the first knip config found
         }
     }
+    Ok(())
+}
 
-    let mut found_jscpd_file = false;
-    let jscpd_path = root.join(".jscpd.json");
-    if jscpd_path.exists() {
-        let jscpd_value = load_json_or_jsonc(&jscpd_path)?;
-        migrate_jscpd(&jscpd_value, &mut config, &mut warnings);
-        sources.push(".jscpd.json".to_string());
-        found_jscpd_file = true;
+/// Migrate the `knip` / `jscpd` keys embedded in `package.json` when no
+/// standalone config supplied them.
+fn migrate_package_json_keys(
+    root: &Path,
+    need_pkg_knip: bool,
+    need_pkg_jscpd: bool,
+    config: &mut serde_json::Map<String, serde_json::Value>,
+    warnings: &mut Vec<MigrationWarning>,
+    sources: &mut Vec<String>,
+) -> Result<(), String> {
+    let pkg_path = root.join("package.json");
+    if !pkg_path.exists() {
+        return Ok(());
     }
-
-    let need_pkg_knip = sources.is_empty();
-    let need_pkg_jscpd = !found_jscpd_file;
-    if need_pkg_knip || need_pkg_jscpd {
-        let pkg_path = root.join("package.json");
-        if pkg_path.exists() {
-            let pkg_content = std::fs::read_to_string(&pkg_path)
-                .map_err(|e| format!("failed to read package.json: {e}"))?;
-            let pkg_value: serde_json::Value = serde_json::from_str(&pkg_content)
-                .map_err(|e| format!("failed to parse package.json: {e}"))?;
-            if need_pkg_knip && let Some(knip_config) = pkg_value.get("knip") {
-                migrate_knip(knip_config, &mut config, &mut warnings);
-                sources.push("package.json (knip key)".to_string());
-            }
-            if need_pkg_jscpd && let Some(jscpd_config) = pkg_value.get("jscpd") {
-                migrate_jscpd(jscpd_config, &mut config, &mut warnings);
-                sources.push("package.json (jscpd key)".to_string());
-            }
-        }
+    let pkg_content = std::fs::read_to_string(&pkg_path)
+        .map_err(|e| format!("failed to read package.json: {e}"))?;
+    let pkg_value: serde_json::Value = serde_json::from_str(&pkg_content)
+        .map_err(|e| format!("failed to parse package.json: {e}"))?;
+    if need_pkg_knip && let Some(knip_config) = pkg_value.get("knip") {
+        migrate_knip(knip_config, config, warnings);
+        sources.push("package.json (knip key)".to_string());
     }
-
-    Ok(MigrationResult {
-        config: serde_json::Value::Object(config),
-        warnings,
-        sources,
-    })
+    if need_pkg_jscpd && let Some(jscpd_config) = pkg_value.get("jscpd") {
+        migrate_jscpd(jscpd_config, config, warnings);
+        sources.push("package.json (jscpd key)".to_string());
+    }
+    Ok(())
 }
 
 /// Migrate from a specific config file.
@@ -286,48 +329,9 @@ fn migrate_from_file(path: &Path) -> Result<MigrationResult, String> {
         migrate_jscpd(&jscpd_value, &mut config, &mut warnings);
         sources.push(path.display().to_string());
     } else if filename == "package.json" {
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
-        let pkg_value: serde_json::Value = serde_json::from_str(&content)
-            .map_err(|e| format!("failed to parse {}: {e}", path.display()))?;
-        if let Some(knip_config) = pkg_value.get("knip") {
-            migrate_knip(knip_config, &mut config, &mut warnings);
-            sources.push(format!("{} (knip key)", path.display()));
-        }
-        if let Some(jscpd_config) = pkg_value.get("jscpd") {
-            migrate_jscpd(jscpd_config, &mut config, &mut warnings);
-            sources.push(format!("{} (jscpd key)", path.display()));
-        }
-        if sources.is_empty() {
-            return Err(format!(
-                "no knip or jscpd configuration found in {}",
-                path.display()
-            ));
-        }
+        migrate_package_json_file(path, &mut config, &mut warnings, &mut sources)?;
     } else {
-        let value = load_json_or_jsonc(path)?;
-        if value.get("entry").is_some()
-            || value.get("ignore").is_some()
-            || value.get("rules").is_some()
-            || value.get("project").is_some()
-            || value.get("ignoreDependencies").is_some()
-            || value.get("ignoreExportsUsedInFile").is_some()
-        {
-            migrate_knip(&value, &mut config, &mut warnings);
-            sources.push(format!("{} (knip config)", path.display()));
-        } else if value.get("minTokens").is_some()
-            || value.get("minLines").is_some()
-            || value.get("threshold").is_some()
-            || value.get("mode").is_some()
-        {
-            migrate_jscpd(&value, &mut config, &mut warnings);
-            sources.push(format!("{} (jscpd config)", path.display()));
-        } else {
-            return Err(format!(
-                "could not determine config format for {}",
-                path.display()
-            ));
-        }
+        migrate_unnamed_config_file(path, &mut config, &mut warnings, &mut sources)?;
     }
 
     Ok(MigrationResult {
@@ -335,6 +339,68 @@ fn migrate_from_file(path: &Path) -> Result<MigrationResult, String> {
         warnings,
         sources,
     })
+}
+
+/// Migrate the `knip` / `jscpd` keys from an explicitly named `package.json`.
+fn migrate_package_json_file(
+    path: &Path,
+    config: &mut serde_json::Map<String, serde_json::Value>,
+    warnings: &mut Vec<MigrationWarning>,
+    sources: &mut Vec<String>,
+) -> Result<(), String> {
+    let content = std::fs::read_to_string(path)
+        .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+    let pkg_value: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| format!("failed to parse {}: {e}", path.display()))?;
+    if let Some(knip_config) = pkg_value.get("knip") {
+        migrate_knip(knip_config, config, warnings);
+        sources.push(format!("{} (knip key)", path.display()));
+    }
+    if let Some(jscpd_config) = pkg_value.get("jscpd") {
+        migrate_jscpd(jscpd_config, config, warnings);
+        sources.push(format!("{} (jscpd key)", path.display()));
+    }
+    if sources.is_empty() {
+        return Err(format!(
+            "no knip or jscpd configuration found in {}",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
+/// Migrate a config file whose name does not reveal its tool by sniffing
+/// distinctive knip / jscpd keys in its contents.
+fn migrate_unnamed_config_file(
+    path: &Path,
+    config: &mut serde_json::Map<String, serde_json::Value>,
+    warnings: &mut Vec<MigrationWarning>,
+    sources: &mut Vec<String>,
+) -> Result<(), String> {
+    let value = load_json_or_jsonc(path)?;
+    if value.get("entry").is_some()
+        || value.get("ignore").is_some()
+        || value.get("rules").is_some()
+        || value.get("project").is_some()
+        || value.get("ignoreDependencies").is_some()
+        || value.get("ignoreExportsUsedInFile").is_some()
+    {
+        migrate_knip(&value, config, warnings);
+        sources.push(format!("{} (knip config)", path.display()));
+    } else if value.get("minTokens").is_some()
+        || value.get("minLines").is_some()
+        || value.get("threshold").is_some()
+        || value.get("mode").is_some()
+    {
+        migrate_jscpd(&value, config, warnings);
+        sources.push(format!("{} (jscpd config)", path.display()));
+    } else {
+        return Err(format!(
+            "could not determine config format for {}",
+            path.display()
+        ));
+    }
+    Ok(())
 }
 
 /// Load a JSON or JSONC file, accepting comments and trailing commas.

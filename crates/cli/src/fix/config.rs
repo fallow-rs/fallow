@@ -161,43 +161,7 @@ fn apply_edit(
     let config_file = display_path(root, config_path);
 
     if dry_run {
-        let current = match std::fs::read_to_string(config_path) {
-            Ok(content) => content,
-            Err(e) => {
-                eprintln!("Error: failed to read {config_file} for dry-run preview: {e}");
-                return true;
-            }
-        };
-        let proposed = match add_ignore_exports_rule_to_string(config_path, &current, &entries) {
-            Ok(content) => content,
-            Err(e) => {
-                eprintln!("Error: failed to compute proposed config edit for {config_file}: {e}");
-                return true;
-            }
-        };
-        if current == proposed {
-            return false;
-        }
-        let diff = render_unified_diff(&config_file, &current, &proposed);
-        let mut entry = serde_json::json!({
-            "type": "add_ignore_exports",
-            "config_key": "ignoreExports",
-            "file": config_file,
-            "entries": &entries,
-            "proposed_diff": diff,
-        });
-        if !matches!(output, OutputFormat::Json) {
-            eprintln!(
-                "Would append {} ignoreExports rule(s) to {config_file}:",
-                entries.len()
-            );
-            eprintln!("{diff}");
-        }
-        if let Some(obj) = entry.as_object_mut() {
-            obj.insert("dry_run".to_owned(), serde_json::Value::Bool(true));
-        }
-        fixes.push(entry);
-        return false;
+        return apply_edit_dry_run(config_path, &config_file, &entries, output, fixes);
     }
 
     match fallow_config::add_ignore_exports_rule(config_path, &entries) {
@@ -219,6 +183,54 @@ fn apply_edit(
             true
         }
     }
+}
+
+/// Render the dry-run preview (diff + JSON entry) for the config-edit path.
+/// Returns the orchestrator's `had_write_error` bool.
+fn apply_edit_dry_run(
+    config_path: &Path,
+    config_file: &str,
+    entries: &[IgnoreExportRule],
+    output: OutputFormat,
+    fixes: &mut Vec<serde_json::Value>,
+) -> bool {
+    let current = match std::fs::read_to_string(config_path) {
+        Ok(content) => content,
+        Err(e) => {
+            eprintln!("Error: failed to read {config_file} for dry-run preview: {e}");
+            return true;
+        }
+    };
+    let proposed = match add_ignore_exports_rule_to_string(config_path, &current, entries) {
+        Ok(content) => content,
+        Err(e) => {
+            eprintln!("Error: failed to compute proposed config edit for {config_file}: {e}");
+            return true;
+        }
+    };
+    if current == proposed {
+        return false;
+    }
+    let diff = render_unified_diff(config_file, &current, &proposed);
+    let mut entry = serde_json::json!({
+        "type": "add_ignore_exports",
+        "config_key": "ignoreExports",
+        "file": config_file,
+        "entries": entries,
+        "proposed_diff": diff,
+    });
+    if !matches!(output, OutputFormat::Json) {
+        eprintln!(
+            "Would append {} ignoreExports rule(s) to {config_file}:",
+            entries.len()
+        );
+        eprintln!("{diff}");
+    }
+    if let Some(obj) = entry.as_object_mut() {
+        obj.insert("dry_run".to_owned(), serde_json::Value::Bool(true));
+    }
+    fixes.push(entry);
+    false
 }
 
 fn apply_create(
@@ -246,23 +258,7 @@ fn apply_create(
     };
 
     if dry_run {
-        let diff = render_create_diff(&target_display, &proposed);
-        if !matches!(output, OutputFormat::Json) {
-            eprintln!(
-                "Would create {target_display} with {} ignoreExports rule(s):",
-                entries.len()
-            );
-            eprintln!("{diff}");
-        }
-        fixes.push(serde_json::json!({
-            "type": "add_ignore_exports",
-            "config_key": "ignoreExports",
-            "file": target_display,
-            "entries": &entries,
-            "proposed_diff": diff,
-            "created_files": [target_display],
-            "dry_run": true,
-        }));
+        apply_create_dry_run(&target_display, &entries, &proposed, output, fixes);
         return false;
     }
 
@@ -285,6 +281,33 @@ fn apply_create(
         "applied": true,
     }));
     false
+}
+
+/// Render the dry-run preview (diff + JSON entry) for the config-create path.
+fn apply_create_dry_run(
+    target_display: &str,
+    entries: &[IgnoreExportRule],
+    proposed: &str,
+    output: OutputFormat,
+    fixes: &mut Vec<serde_json::Value>,
+) {
+    let diff = render_create_diff(target_display, proposed);
+    if !matches!(output, OutputFormat::Json) {
+        eprintln!(
+            "Would create {target_display} with {} ignoreExports rule(s):",
+            entries.len()
+        );
+        eprintln!("{diff}");
+    }
+    fixes.push(serde_json::json!({
+        "type": "add_ignore_exports",
+        "config_key": "ignoreExports",
+        "file": target_display,
+        "entries": entries,
+        "proposed_diff": diff,
+        "created_files": [target_display],
+        "dry_run": true,
+    }));
 }
 
 fn emit_blocked_monorepo(

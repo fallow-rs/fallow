@@ -85,71 +85,9 @@ fn print_audit_human(result: &AuditResult, quiet: bool, explain: bool, output: O
     let has_check_issues = result.summary.dead_code_issues > 0;
     let has_health_findings = result.summary.complexity_findings > 0;
     let has_dupe_groups = result.summary.duplication_clone_groups > 0;
-    let has_any_findings = has_check_issues || has_health_findings || has_dupe_groups;
 
-    if has_any_findings {
-        if show_headers && std::io::stdout().is_terminal() && !crate::report::sink::is_redirected()
-        {
-            println!(
-                "{}",
-                "Tip: run `fallow explain <issue label>`; spaces and hyphens both work, e.g. `fallow explain unused files`."
-                    .dimmed()
-            );
-            println!();
-        }
-
-        if result.verdict != AuditVerdict::Fail && !quiet {
-            print_audit_vital_signs(result);
-        }
-
-        if has_check_issues && let Some(ref check) = result.check {
-            if show_headers {
-                eprintln!();
-                eprintln!("── Dead Code ──────────────────────────────────────");
-            }
-            crate::check::print_check_result(
-                check,
-                crate::check::PrintCheckOptions {
-                    quiet,
-                    explain,
-                    regression_json: false,
-                    group_by: None,
-                    top: None,
-                    summary: false,
-                    summary_heading: true,
-                    show_explain_tip: false,
-                },
-            );
-        }
-
-        if has_dupe_groups && let Some(ref dupes) = result.dupes {
-            if show_headers {
-                eprintln!();
-                eprintln!("── Duplication ────────────────────────────────────");
-            }
-            crate::dupes::print_dupes_result(dupes, quiet, explain, false, true, false);
-        }
-
-        if has_health_findings && let Some(ref health) = result.health {
-            if show_headers {
-                eprintln!();
-                eprintln!("── Complexity ─────────────────────────────────────");
-            }
-            crate::health::print_health_result(
-                health,
-                crate::health::HealthPrintOptions {
-                    quiet,
-                    explain,
-                    min_score: None,
-                    min_severity: None,
-                    report_only: false,
-                    summary: false,
-                    summary_heading: true,
-                    show_explain_tip: false,
-                    skip_score_and_trend: false,
-                },
-            );
-        }
+    if has_check_issues || has_health_findings || has_dupe_groups {
+        print_audit_findings(result, quiet, explain, show_headers);
     }
 
     if !has_dupe_groups && let Some(ref dupes) = result.dupes {
@@ -159,6 +97,91 @@ fn print_audit_human(result: &AuditResult, quiet: bool, explain: bool, output: O
 
     if !quiet {
         print_audit_status_line(result);
+    }
+}
+
+/// Print the per-analysis findings sections (dead code, duplication, complexity)
+/// plus the explain tip and vital signs, with section headers when enabled.
+fn print_audit_findings(result: &AuditResult, quiet: bool, explain: bool, show_headers: bool) {
+    print_audit_explain_tip(show_headers);
+
+    if result.verdict != AuditVerdict::Fail && !quiet {
+        print_audit_vital_signs(result);
+    }
+
+    if result.summary.dead_code_issues > 0
+        && let Some(ref check) = result.check
+    {
+        print_audit_section_header(
+            show_headers,
+            "── Dead Code ──────────────────────────────────────",
+        );
+        crate::check::print_check_result(
+            check,
+            crate::check::PrintCheckOptions {
+                quiet,
+                explain,
+                regression_json: false,
+                group_by: None,
+                top: None,
+                summary: false,
+                summary_heading: true,
+                show_explain_tip: false,
+            },
+        );
+    }
+
+    if result.summary.duplication_clone_groups > 0
+        && let Some(ref dupes) = result.dupes
+    {
+        print_audit_section_header(
+            show_headers,
+            "── Duplication ────────────────────────────────────",
+        );
+        crate::dupes::print_dupes_result(dupes, quiet, explain, false, true, false);
+    }
+
+    if result.summary.complexity_findings > 0
+        && let Some(ref health) = result.health
+    {
+        print_audit_section_header(
+            show_headers,
+            "── Complexity ─────────────────────────────────────",
+        );
+        crate::health::print_health_result(
+            health,
+            crate::health::HealthPrintOptions {
+                quiet,
+                explain,
+                min_score: None,
+                min_severity: None,
+                report_only: false,
+                summary: false,
+                summary_heading: true,
+                show_explain_tip: false,
+                skip_score_and_trend: false,
+            },
+        );
+    }
+}
+
+/// Print the TTY-only explain tip above the findings sections.
+fn print_audit_explain_tip(show_headers: bool) {
+    if show_headers && std::io::stdout().is_terminal() && !crate::report::sink::is_redirected() {
+        println!(
+            "{}",
+            "Tip: run `fallow explain <issue label>`; spaces and hyphens both work, e.g. `fallow explain unused files`."
+                .dimmed()
+        );
+        println!();
+    }
+}
+
+/// Emit a blank line followed by a section header when headers are enabled.
+fn print_audit_section_header(show_headers: bool, header: &str) {
+    if show_headers {
+        eprintln!();
+        eprintln!("{header}");
     }
 }
 

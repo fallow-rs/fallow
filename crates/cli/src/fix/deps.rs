@@ -43,64 +43,87 @@ pub(super) fn apply_dependency_fixes(input: &mut DependencyFixInput<'_>) {
 
     let _ = input.root; // root was previously used to construct the path; now deps carry their own path
 
-    for (pkg_path, removals) in &deps_by_pkg {
-        if let Ok(content) = std::fs::read_to_string(pkg_path)
-            && let Ok(mut pkg_value) = serde_json::from_str::<serde_json::Value>(&content)
+    for (&pkg_path, removals) in &deps_by_pkg {
+        process_package_dependency_removals(input, pkg_path, removals.as_slice());
+    }
+}
+
+/// Read, edit, and (when not dry-run) stage one `package.json` for the
+/// queued dependency removals targeting it. Pushes a fix entry per removed
+/// package and corrects `applied` to false on a serialization failure.
+fn process_package_dependency_removals(
+    input: &mut DependencyFixInput<'_>,
+    pkg_path: &Path,
+    removals: &[(&str, &str)],
+) {
+    let Ok(content) = std::fs::read_to_string(pkg_path) else {
+        return;
+    };
+    let Ok(mut pkg_value) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return;
+    };
+
+    let mut changed = false;
+    for &(package_name, location) in removals {
+        if let Some(deps) = pkg_value.get_mut(location)
+            && let Some(obj) = deps.as_object_mut()
+            && obj.remove(package_name).is_some()
         {
-            let mut changed = false;
-
-            for &(package_name, location) in removals {
-                if let Some(deps) = pkg_value.get_mut(location)
-                    && let Some(obj) = deps.as_object_mut()
-                    && obj.remove(package_name).is_some()
-                {
-                    if input.dry_run {
-                        if !matches!(input.output, OutputFormat::Json) {
-                            eprintln!(
-                                "Would remove `{package_name}` from {location} in {}",
-                                pkg_path.display()
-                            );
-                        }
-                        input.fixes.push(serde_json::json!({
-                            "type": "remove_dependency",
-                            "package": package_name,
-                            "location": location,
-                            "file": pkg_path.display().to_string(),
-                        }));
-                    } else {
-                        changed = true;
-                        input.fixes.push(serde_json::json!({
-                            "type": "remove_dependency",
-                            "package": package_name,
-                            "location": location,
-                            "file": pkg_path.display().to_string(),
-                            "applied": true,
-                            "__target": pkg_path.display().to_string(),
-                        }));
-                    }
+            if input.dry_run {
+                if !matches!(input.output, OutputFormat::Json) {
+                    eprintln!(
+                        "Would remove `{package_name}` from {location} in {}",
+                        pkg_path.display()
+                    );
                 }
+                input.fixes.push(serde_json::json!({
+                    "type": "remove_dependency",
+                    "package": package_name,
+                    "location": location,
+                    "file": pkg_path.display().to_string(),
+                }));
+            } else {
+                changed = true;
+                input.fixes.push(serde_json::json!({
+                    "type": "remove_dependency",
+                    "package": package_name,
+                    "location": location,
+                    "file": pkg_path.display().to_string(),
+                    "applied": true,
+                    "__target": pkg_path.display().to_string(),
+                }));
             }
+        }
+    }
 
-            if changed && !input.dry_run {
-                match serde_json::to_string_pretty(&pkg_value) {
-                    Ok(new_json) => {
-                        let pkg_content = new_json + "\n";
-                        input
-                            .plan
-                            .stage(pkg_path.to_path_buf(), pkg_content.into_bytes());
-                    }
-                    Err(e) => {
-                        eprintln!("Error: failed to serialize {}: {e}", pkg_path.display());
-                        for entry in input.fixes.iter_mut() {
-                            let matches = entry
-                                .get("__target")
-                                .and_then(|v| v.as_str())
-                                .is_some_and(|t| t == pkg_path.display().to_string());
-                            if matches {
-                                entry["applied"] = serde_json::json!(false);
-                            }
-                        }
-                    }
+    if changed && !input.dry_run {
+        stage_package_dependency_edit(input, pkg_path, &pkg_value);
+    }
+}
+
+/// Serialize the edited `package.json` value and stage it for write, or
+/// flip the corresponding fix entries to `applied: false` on failure.
+fn stage_package_dependency_edit(
+    input: &mut DependencyFixInput<'_>,
+    pkg_path: &Path,
+    pkg_value: &serde_json::Value,
+) {
+    match serde_json::to_string_pretty(pkg_value) {
+        Ok(new_json) => {
+            let pkg_content = new_json + "\n";
+            input
+                .plan
+                .stage(pkg_path.to_path_buf(), pkg_content.into_bytes());
+        }
+        Err(e) => {
+            eprintln!("Error: failed to serialize {}: {e}", pkg_path.display());
+            for entry in input.fixes.iter_mut() {
+                let matches = entry
+                    .get("__target")
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|t| t == pkg_path.display().to_string());
+                if matches {
+                    entry["applied"] = serde_json::json!(false);
                 }
             }
         }
