@@ -26,7 +26,75 @@ pub(super) fn build_coverage_summary(
     }
 }
 
-pub(super) fn compute_coverage_gaps(
+/// Whether a path is a stylesheet excluded from runtime coverage gaps.
+fn is_excluded_coverage_extension(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|ext| matches!(ext, "css" | "scss" | "less" | "sass"))
+}
+
+/// Whether the module opted out of coverage-gap reporting via a file suppression.
+fn module_is_coverage_suppressed(module: Option<&fallow_core::extract::ModuleInfo>) -> bool {
+    module.is_some_and(|m| {
+        fallow_core::suppress::is_file_suppressed(
+            &m.suppressions,
+            fallow_types::suppress::IssueKind::CoverageGaps,
+        )
+    })
+}
+
+/// Append untested value exports of one node (those with no test-reachable
+/// reference and not already flagged unused) to `exports`.
+fn collect_untested_exports(
+    exports: &mut Vec<UntestedExport>,
+    graph: &fallow_core::graph::ModuleGraph,
+    node: &fallow_core::graph::ModuleNode,
+    module: &fallow_core::extract::ModuleInfo,
+    path: &std::path::Path,
+    unused_exports: &rustc_hash::FxHashSet<(&std::path::Path, String)>,
+) {
+    for export in &node.exports {
+        if export.is_type_only {
+            continue;
+        }
+        if unused_exports.contains(&(path, export.name.to_string())) {
+            continue;
+        }
+
+        let has_test_dependency = export.references.iter().any(|reference| {
+            graph
+                .modules
+                .get(reference.from_file.0 as usize)
+                .is_some_and(|module| module.is_test_reachable())
+        });
+        if has_test_dependency {
+            continue;
+        }
+
+        let (line, col) = fallow_types::extract::byte_offset_to_line_col(
+            &module.line_offsets,
+            export.span.start,
+        );
+        exports.push(UntestedExport {
+            path: path.to_path_buf(),
+            export_name: export.name.to_string(),
+            line,
+            col,
+        });
+    }
+}
+
+/// Accumulated coverage-gap scan results before sorting and wrapping.
+struct CoverageGapScan {
+    runtime_files: usize,
+    covered_files: usize,
+    runtime_paths: Vec<std::path::PathBuf>,
+    files: Vec<UntestedFile>,
+    exports: Vec<UntestedExport>,
+}
+
+/// Walk runtime-reachable modules, collecting untested files and exports.
+fn scan_runtime_files(
     graph: &fallow_core::graph::ModuleGraph,
     file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
     module_by_id: &rustc_hash::FxHashMap<
@@ -34,13 +102,14 @@ pub(super) fn compute_coverage_gaps(
         &fallow_core::extract::ModuleInfo,
     >,
     unused_exports: &rustc_hash::FxHashSet<(&std::path::Path, String)>,
-    root: &std::path::Path,
-) -> CoverageGapData {
-    let mut runtime_files = 0usize;
-    let mut covered_files = 0usize;
-    let mut runtime_paths = Vec::new();
-    let mut files: Vec<UntestedFile> = Vec::new();
-    let mut exports: Vec<UntestedExport> = Vec::new();
+) -> CoverageGapScan {
+    let mut scan = CoverageGapScan {
+        runtime_files: 0,
+        covered_files: 0,
+        runtime_paths: Vec::new(),
+        files: Vec::new(),
+        exports: Vec::new(),
+    };
 
     for node in &graph.modules {
         if !node.is_runtime_reachable() {
@@ -51,31 +120,22 @@ pub(super) fn compute_coverage_gaps(
             continue;
         };
 
-        if path
-            .extension()
-            .and_then(|e| e.to_str())
-            .is_some_and(|ext| matches!(ext, "css" | "scss" | "less" | "sass"))
-        {
+        if is_excluded_coverage_extension(path) {
             continue;
         }
 
-        let module = module_by_id.get(&node.file_id);
-        if module.is_some_and(|m| {
-            fallow_core::suppress::is_file_suppressed(
-                &m.suppressions,
-                fallow_types::suppress::IssueKind::CoverageGaps,
-            )
-        }) {
+        let module = module_by_id.get(&node.file_id).copied();
+        if module_is_coverage_suppressed(module) {
             continue;
         }
 
-        runtime_paths.push((*path).clone());
+        scan.runtime_paths.push((*path).clone());
 
-        runtime_files += 1;
+        scan.runtime_files += 1;
         if node.is_test_reachable() {
-            covered_files += 1;
+            scan.covered_files += 1;
         } else {
-            files.push(UntestedFile {
+            scan.files.push(UntestedFile {
                 path: (*path).clone(),
                 value_export_count: node.exports.iter().filter(|e| !e.is_type_only).count(),
             });
@@ -85,36 +145,21 @@ pub(super) fn compute_coverage_gaps(
             continue;
         };
 
-        for export in &node.exports {
-            if export.is_type_only {
-                continue;
-            }
-            if unused_exports.contains(&(path.as_path(), export.name.to_string())) {
-                continue;
-            }
-
-            let has_test_dependency = export.references.iter().any(|reference| {
-                graph
-                    .modules
-                    .get(reference.from_file.0 as usize)
-                    .is_some_and(|module| module.is_test_reachable())
-            });
-            if has_test_dependency {
-                continue;
-            }
-
-            let (line, col) = fallow_types::extract::byte_offset_to_line_col(
-                &module.line_offsets,
-                export.span.start,
-            );
-            exports.push(UntestedExport {
-                path: (*path).clone(),
-                export_name: export.name.to_string(),
-                line,
-                col,
-            });
-        }
+        collect_untested_exports(&mut scan.exports, graph, node, module, path, unused_exports);
     }
+
+    scan
+}
+
+/// Sort, wrap, and summarize the scan results into the final report data.
+fn build_coverage_gap_data(scan: CoverageGapScan, root: &std::path::Path) -> CoverageGapData {
+    let CoverageGapScan {
+        runtime_files,
+        covered_files,
+        runtime_paths,
+        mut files,
+        mut exports,
+    } = scan;
 
     files.sort_by(|a, b| a.path.cmp(&b.path));
     exports.sort_by(|a, b| {
@@ -148,4 +193,18 @@ pub(super) fn compute_coverage_gaps(
         },
         runtime_paths,
     }
+}
+
+pub(super) fn compute_coverage_gaps(
+    graph: &fallow_core::graph::ModuleGraph,
+    file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
+    module_by_id: &rustc_hash::FxHashMap<
+        fallow_core::discover::FileId,
+        &fallow_core::extract::ModuleInfo,
+    >,
+    unused_exports: &rustc_hash::FxHashSet<(&std::path::Path, String)>,
+    root: &std::path::Path,
+) -> CoverageGapData {
+    let scan = scan_runtime_files(graph, file_paths, module_by_id, unused_exports);
+    build_coverage_gap_data(scan, root)
 }
