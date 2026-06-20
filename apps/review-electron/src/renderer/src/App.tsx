@@ -4,6 +4,7 @@ import { ReviewFocus } from "./components/ReviewFocus";
 import { ClearedPanel } from "./components/ClearedPanel";
 import { DecisionList } from "./components/DecisionList";
 import { StageList } from "./components/StageList";
+import { AnnotateCanvas } from "./components/AnnotateCanvas";
 import { isViewed as readViewed, setViewed as writeViewed } from "./lib/viewed";
 import { theme } from "./theme";
 
@@ -97,8 +98,8 @@ export const App = () => {
           </>
         )}
       </aside>
-      <main style={{ display: "grid", placeItems: "center", color: theme.muted }}>
-        <span>app-under-review region (Phases 5-7)</span>
+      <main style={{ overflow: "hidden" }}>
+        <AnnotateCanvas />
       </main>
     </div>
   );

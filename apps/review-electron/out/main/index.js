@@ -131,6 +131,40 @@ const buildAgentWalkthrough = (graphSnapshotHash, items) => ({
     return judgment;
   })
 });
+const decodePngDataUrl = (dataUrl) => {
+  const match = /^data:image\/png;base64,(.+)$/s.exec(dataUrl);
+  const b64 = match?.[1];
+  if (b64 === void 0) throw new Error("expected a base64 png data url");
+  return Buffer.from(b64, "base64");
+};
+const shotPath = (root, at2) => node_path.join(root, ".fallow-review", "shots", `shot-${at2}.png`);
+const saveAnnotatedShot = async (root, payload, at2) => {
+  const png = decodePngDataUrl(payload.annotatedDataUrl);
+  const path = shotPath(root, at2);
+  await promises.mkdir(node_path.dirname(path), { recursive: true });
+  await promises.writeFile(path, png);
+  await appendFeedItem(root, {
+    target: { kind: "file_line", value: payload.target ?? "screenshot" },
+    note: payload.note,
+    imageRef: path,
+    at: new Date(at2).toISOString()
+  });
+  return path;
+};
+const captureUrl = async (root, url, at2) => {
+  const win = new electron.BrowserWindow({ width: 1024, height: 768, show: false });
+  try {
+    await win.loadURL(url);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    const image = await win.webContents.capturePage();
+    const path = shotPath(root, at2);
+    await promises.mkdir(node_path.dirname(path), { recursive: true });
+    await promises.writeFile(path, image.toPNG());
+    return { dataUrl: image.toDataURL(), path };
+  } finally {
+    win.destroy();
+  }
+};
 const createWindow = () => {
   const win = new electron.BrowserWindow({
     width: 1400,
@@ -155,6 +189,11 @@ electron.ipcMain.handle("feed:append", (_event, item) => appendFeedItem(process.
 electron.ipcMain.handle(
   "review:validate",
   (_event, hash, items) => validateWalkthrough(buildAgentWalkthrough(hash, items))
+);
+electron.ipcMain.handle("shot:capture", (_event, url) => captureUrl(process.cwd(), url, Date.now()));
+electron.ipcMain.handle(
+  "shot:save",
+  (_event, payload) => saveAnnotatedShot(process.cwd(), payload, Date.now())
 );
 void electron.app.whenReady().then(() => {
   createWindow();

@@ -3,6 +3,8 @@ import { app, BrowserWindow, ipcMain } from "electron";
 import { runReview, runGuide, validateWalkthrough } from "./review";
 import { appendFeedItem } from "./feed";
 import { buildAgentWalkthrough } from "./agentWalkthrough";
+import { captureUrl } from "./capture";
+import { saveAnnotatedShot, type SaveAnnotation } from "./shots";
 import type { FeedItem } from "../model/agent";
 
 const createWindow = (): void => {
@@ -30,6 +32,10 @@ ipcMain.handle("review:guide", (_event, root: string | undefined) => runGuide(ro
 ipcMain.handle("feed:append", (_event, item: FeedItem) => appendFeedItem(process.cwd(), item));
 ipcMain.handle("review:validate", (_event, hash: string, items: FeedItem[]) =>
   validateWalkthrough(buildAgentWalkthrough(hash, items)),
+);
+ipcMain.handle("shot:capture", (_event, url: string) => captureUrl(process.cwd(), url, Date.now()));
+ipcMain.handle("shot:save", (_event, payload: SaveAnnotation) =>
+  saveAnnotatedShot(process.cwd(), payload, Date.now()),
 );
 
 void app.whenReady().then(() => {

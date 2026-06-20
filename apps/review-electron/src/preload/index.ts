@@ -1,6 +1,8 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { WalkthroughDocument } from "../model/walkthrough";
 import type { FeedItem, Guide } from "../model/agent";
+import type { Capture } from "../main/capture";
+import type { SaveAnnotation } from "../main/shots";
 
 const api = {
   getReview: (root?: string): Promise<WalkthroughDocument> =>
@@ -9,6 +11,8 @@ const api = {
   appendFeed: (item: FeedItem): Promise<void> => ipcRenderer.invoke("feed:append", item),
   validate: (hash: string, items: FeedItem[]): Promise<unknown> =>
     ipcRenderer.invoke("review:validate", hash, items),
+  capture: (url: string): Promise<Capture> => ipcRenderer.invoke("shot:capture", url),
+  saveShot: (payload: SaveAnnotation): Promise<string> => ipcRenderer.invoke("shot:save", payload),
 };
 
 contextBridge.exposeInMainWorld("fallow", api);

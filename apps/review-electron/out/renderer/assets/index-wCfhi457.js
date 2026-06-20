@@ -12630,6 +12630,113 @@ const StageList = ({ stages, isViewed: isViewed2, onToggleViewed, onAddNote }) =
     f.path
   )) })
 ] }, stage.moduleDir)) });
+const AnnotateCanvas = () => {
+  const [url, setUrl] = reactExports.useState("http://localhost:5273");
+  const [img, setImg] = reactExports.useState(null);
+  const [note, setNote] = reactExports.useState("");
+  const [status, setStatus] = reactExports.useState(null);
+  const canvasRef = reactExports.useRef(null);
+  const drawing = reactExports.useRef(false);
+  const capture = async () => {
+    setStatus("capturing…");
+    try {
+      const shot = await window.fallow.capture(url);
+      setImg(shot.dataUrl);
+      setStatus(null);
+    } catch (e) {
+      setStatus(e instanceof Error ? e.message : String(e));
+    }
+  };
+  reactExports.useEffect(() => {
+    if (!img) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return;
+    const image = new Image();
+    image.onload = () => {
+      canvas.width = image.width;
+      canvas.height = image.height;
+      ctx.drawImage(image, 0, 0);
+    };
+    image.src = img;
+  }, [img]);
+  const at = (e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const sx = e.currentTarget.width / rect.width;
+    const sy = e.currentTarget.height / rect.height;
+    return [(e.clientX - rect.left) * sx, (e.clientY - rect.top) * sy];
+  };
+  const start = (e) => {
+    const ctx = canvasRef.current?.getContext("2d");
+    if (!ctx) return;
+    drawing.current = true;
+    const [x, y] = at(e);
+    ctx.strokeStyle = theme.danger;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+  };
+  const move = (e) => {
+    const ctx = canvasRef.current?.getContext("2d");
+    if (!drawing.current || !ctx) return;
+    const [x, y] = at(e);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+  };
+  const end = () => {
+    drawing.current = false;
+  };
+  const save = async () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    await window.fallow.saveShot({
+      annotatedDataUrl: canvas.toDataURL("image/png"),
+      note,
+      target: url
+    });
+    setStatus("saved to agent feed");
+    setNote("");
+  };
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { style: { padding: 12, width: "100%", height: "100%", overflow: "auto", color: theme.text }, children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { style: { display: "flex", gap: 6, marginBottom: 8 }, children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "input",
+        {
+          value: url,
+          onChange: (e) => setUrl(e.target.value),
+          style: { flex: 1, fontSize: 12 }
+        }
+      ),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { onClick: () => void capture(), style: { fontSize: 12 }, children: "Screenshot" })
+    ] }),
+    status && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { style: { fontSize: 11, color: theme.muted }, children: status }),
+    img && /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "canvas",
+        {
+          ref: canvasRef,
+          onMouseDown: start,
+          onMouseMove: move,
+          onMouseUp: end,
+          onMouseLeave: end,
+          style: { maxWidth: "100%", border: `1px solid ${theme.border}`, cursor: "crosshair" }
+        }
+      ),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { style: { display: "flex", gap: 6, marginTop: 8 }, children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "input",
+          {
+            value: note,
+            onChange: (e) => setNote(e.target.value),
+            placeholder: "note for the agent",
+            style: { flex: 1, fontSize: 12 }
+          }
+        ),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { onClick: () => void save(), style: { fontSize: 12 }, children: "Save annotation" })
+      ] })
+    ] })
+  ] });
+};
 const key = (path) => `fallow-viewed:${path}`;
 const isViewed = (store, path) => store.getItem(key(path)) === "1";
 const setViewed = (store, path, viewed) => {
@@ -12727,7 +12834,7 @@ const App = () => {
             ]
           }
         ),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("main", { style: { display: "grid", placeItems: "center", color: theme.muted }, children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "app-under-review region (Phases 5-7)" }) })
+        /* @__PURE__ */ jsxRuntimeExports.jsx("main", { style: { overflow: "hidden" }, children: /* @__PURE__ */ jsxRuntimeExports.jsx(AnnotateCanvas, {}) })
       ]
     }
   );
