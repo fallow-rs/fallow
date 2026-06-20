@@ -1,0 +1,8 @@
+node_modules/
+dist/
+dist-electron/
+release/
+.fallow-review/
+*.log
+fixtures/sample-app/node_modules/
+fixtures/sample-app/dist/
