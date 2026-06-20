@@ -3,6 +3,8 @@ dist/
 dist-electron/
 out/
 release/
+test-results/
+playwright-report/
 .fallow-review/
 *.log
 fixtures/sample-app/node_modules/
