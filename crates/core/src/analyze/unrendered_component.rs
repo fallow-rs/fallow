@@ -276,21 +276,15 @@ fn credit_static_import(
             }
         }
         ImportedName::Namespace => {
-            // `import * as ns from barrel` then `<ns.Foo />`: credit every SFC
-            // the barrel re-exports (liberal, zero-drift).
-            if is_sfc_extension(&graph_path(graph, target)) {
-                used.insert(target);
-            }
-            if let Some(module) = graph.modules.get(target.0 as usize) {
-                let names: Vec<(FileId, String)> = module
-                    .re_exports
-                    .iter()
-                    .map(|re| (re.source_file, re.imported_name.clone()))
-                    .collect();
-                for (source, name) in names {
-                    credit_rendered_sfc_chain(graph, source, &name, used);
-                }
-            }
+            // `import * as ns from barrel` then `<ns.Foo />` (or the two-level
+            // `<ns.Sub.Foo />`): the rendered member is syntactically unknowable,
+            // so credit every SFC reachable from the namespace target through ANY
+            // re-export shape. `credit_all_reexported_sfcs` is name-agnostic, so it
+            // also follows nested `export * as Sub from './x'` and `export * from
+            // './x'` barrels that the old per-edge name walk (which re-walked each
+            // edge under the unmatched name `"*"`) silently dropped, and credits
+            // the target itself when it is an SFC.
+            credit_all_reexported_sfcs(graph, target, used);
         }
     }
 }

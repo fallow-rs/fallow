@@ -47,3 +47,35 @@ fn credits_components_rendered_through_namespace_reexport() {
         "an unconsumed namespace component must still be flagged: {flagged:?}"
     );
 }
+
+#[test]
+fn credits_components_rendered_through_namespace_import() {
+    // The `import * as DS from "@/design-system"` form (the whole-namespace
+    // import, distinct from the named `import { List }` form above): members are
+    // rendered via two-level dotted tags `<DS.List.ListRoot>`. The namespace
+    // target re-exports through nested `export * as List` barrels, which the
+    // per-edge name walk on the namespace-import arm dropped.
+    let root = fixture_path("unrendered-component-namespace-import");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let flagged: Vec<&str> = results
+        .unrendered_components
+        .iter()
+        .map(|c| c.component.component_name.as_str())
+        .collect();
+
+    // Every member reached through the imported namespace is credited.
+    for credited in ["ListRoot", "ListItem", "PopoverRoot", "PopoverContent"] {
+        assert!(
+            !flagged.contains(&credited),
+            "a namespace-import-rendered component must not be flagged: {credited} in {flagged:?}"
+        );
+    }
+    // Re-exported by a barrel kept reachable through a side-effect import but
+    // rendered nowhere: the non-vacuous control proving the whole-namespace
+    // crediting does not over-credit project-wide.
+    assert!(
+        flagged.contains(&"Orphan"),
+        "an unrendered component outside the imported namespace must still be flagged: {flagged:?}"
+    );
+}

@@ -12,11 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Vue components exposed as namespaces are no longer falsely reported as unused.**
   A design system that re-exports compound components through namespace barrels
   (`export * as List from "./components/List"`) and renders their members via dotted
-  tags (`import { List } from "@/design-system"`; `<List.Root>`, `<List.Item>`) had
-  every such member reported by the `unrendered-component` check as "reachable but
-  rendered nowhere". The render-usage walk now follows namespace re-export edges back
-  to the underlying `.vue` files and credits them. This removes those false positives;
-  a component re-exported through a namespace that nothing renders is still reported.
+  tags had every such member reported by the `unrendered-component` check as
+  "reachable but rendered nowhere". The render-usage walk now follows namespace
+  re-export edges back to the underlying `.vue` files and credits them, for both the
+  named-import form (`import { List } from "@/design-system"`; `<List.Root>`) and the
+  whole-namespace-import form (`import * as DS from "@/design-system"`;
+  `<DS.List.Root>`), including barrels nested through further `export *` /
+  `export * as` re-exports. This removes those false positives; a component
+  re-exported through a namespace that nothing renders is still reported.
   Thanks for the report. (Closes [#1351](https://github.com/fallow-rs/fallow/issues/1351))
 
 - **Varlock now activates from a nested `.env.schema`, not just a root-level one.**
