@@ -3,7 +3,6 @@
   "private": true,
   "version": "0.0.0",
   "description": "Native Electron Fallow code-review app: grounded review walkthrough + live-app inspector, fed back to a coding agent.",
-  "type": "module",
   "main": "out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",

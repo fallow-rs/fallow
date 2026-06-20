@@ -8,7 +8,7 @@ stacked on `fix/review-quality` (engine E1-E8+E11).
 
 - Phase 0 (baseline + data-source + sample app): DONE
 - Phase 1 (W1 render model): DONE
-- Phase 2 (Electron scaffold): pending
+- Phase 2 (Electron scaffold): DONE
 - Phase 3 (W4-core walkthrough UI): pending
 - Phase 4 (W3 agent feedback channel): pending
 - Phase 5 (W4-visual screenshot annotate): pending
@@ -27,3 +27,5 @@ stacked on `fix/review-quality` (engine E1-E8+E11).
 - deps installed (vite pinned ^5 for electron-vite peer); lockfile committed.
 - Phase 1 DONE: W1 WalkthroughDocument + pure adapter (signal_id anti-hallucination
   drop); vitest 4/4 + tsc green.
+- Phase 2 DONE: electron-vite scaffold (CJS), main+preload+renderer, IPC
+  review:get -> runReview -> adapter; electron-vite build + tsc + vitest green.
