@@ -170,6 +170,8 @@ mod type_only_deps;
 mod unprovided_injects;
 #[path = "integration_test/unrendered_components.rs"]
 mod unrendered_components;
+#[path = "integration_test/unrendered_components_namespace.rs"]
+mod unrendered_components_namespace;
 #[path = "integration_test/unused_component_emits.rs"]
 mod unused_component_emits;
 #[path = "integration_test/unused_component_io_angular.rs"]

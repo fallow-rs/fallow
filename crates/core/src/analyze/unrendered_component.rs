@@ -317,20 +317,61 @@ fn credit_rendered_sfc_chain(
         if is_sfc_extension(&module.path) {
             used.insert(file_id);
         }
-        let mut matched_named = false;
+        // `name` is always a concrete export name here (the start name is a
+        // named/default import, never "*"), so `exported_name == name` already
+        // implies `exported_name != "*"`.
+        let mut matched = false;
         for re in &module.re_exports {
-            if re.exported_name != "*" && re.imported_name != "*" && re.exported_name == name {
-                stack.push((re.source_file, re.imported_name.clone()));
-                matched_named = true;
+            if re.exported_name != name {
+                continue;
             }
+            if re.imported_name == "*" {
+                // Namespace re-export: `export * as <name> from './x'`. The
+                // consumer rendered `<name.member>` for a member we cannot pin
+                // down, so credit EVERY SFC the namespace target re-exports
+                // (liberal, zero-drift, mirroring the direct `import * as ns`
+                // handling in `credit_static_import`).
+                credit_all_reexported_sfcs(graph, re.source_file, used);
+            } else {
+                // Named / renamed re-export: `export { X } from`,
+                // `export { Y as X } from`.
+                stack.push((re.source_file, re.imported_name.clone()));
+            }
+            matched = true;
         }
-        if matched_named {
+        if matched {
             continue;
         }
         for re in &module.re_exports {
             if re.exported_name == "*" {
                 stack.push((re.source_file, name.clone()));
             }
+        }
+    }
+}
+
+/// Credit EVERY SFC reachable through ANY re-export edge from `start` (a
+/// namespace re-export target). When a consumer renders `<ns.member>` through a
+/// `export * as ns` barrel, the member is unknowable syntactically, so every
+/// member the namespace exposes is conservatively credited. Follows named,
+/// renamed, namespace, and star re-exports uniformly (name-agnostic) and is
+/// cycle-safe via the visited set. Over-crediting here can only suppress a
+/// finding, never create one.
+fn credit_all_reexported_sfcs(graph: &ModuleGraph, start: FileId, used: &mut FxHashSet<FileId>) {
+    let mut visited: FxHashSet<FileId> = FxHashSet::default();
+    let mut stack: Vec<FileId> = vec![start];
+    while let Some(file_id) = stack.pop() {
+        if !visited.insert(file_id) {
+            continue;
+        }
+        let Some(module) = graph.modules.get(file_id.0 as usize) else {
+            continue;
+        };
+        if is_sfc_extension(&module.path) {
+            used.insert(file_id);
+        }
+        for re in &module.re_exports {
+            stack.push(re.source_file);
         }
     }
 }
