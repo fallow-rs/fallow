@@ -52,6 +52,9 @@ export const startInspectServer = (
       })();
     });
   });
+  // The inspector bridge is optional; never crash the app if the port is taken
+  // (e.g. a second window or a parallel e2e launch).
+  server.on("error", () => undefined);
   server.listen(INSPECT_PORT, "127.0.0.1");
   return server;
 };
