@@ -1,0 +1,462 @@
+{
+  "kind": "review-walkthrough-guide",
+  "schema_version": 4,
+  "version": "2.100.0",
+  "command": "review-walkthrough-guide",
+  "graph_snapshot_hash": "graph:584652be09ac2358",
+  "digest": {
+    "schema_version": 4,
+    "version": "2.100.0",
+    "command": "audit-brief",
+    "triage": {
+      "files": 78,
+      "risk_class": "high",
+      "review_effort": "deep_dive"
+    },
+    "graph_facts": {
+      "exports_added": 0,
+      "api_width_delta": 0,
+      "reachable_from": [],
+      "boundaries_touched": []
+    },
+    "partition": {
+      "units": [
+        {
+          "module_dir": "apps/review-electron/fixtures/sample-app",
+          "files": [
+            "apps/review-electron/fixtures/sample-app/index.html",
+            "apps/review-electron/fixtures/sample-app/vite.config.ts"
+          ]
+        },
+        {
+          "module_dir": "apps/review-electron/fixtures/sample-app/src",
+          "files": [
+            "apps/review-electron/fixtures/sample-app/src/App.tsx",
+            "apps/review-electron/fixtures/sample-app/src/main.tsx"
+          ]
+        },
+        {
+          "module_dir": "apps/review-electron/fixtures/sample-app/src/components",
+          "files": [
+            "apps/review-electron/fixtures/sample-app/src/components/Button.tsx",
+            "apps/review-electron/fixtures/sample-app/src/components/Card.tsx",
+            "apps/review-electron/fixtures/sample-app/src/components/Header.tsx"
+          ]
+        },
+        {
+          "module_dir": "editors/vscode/src/generated",
+          "files": [
+            "editors/vscode/src/generated/output-contract.d.ts"
+          ]
+        },
+        {
+          "module_dir": "npm/fallow/types",
+          "files": [
+            "npm/fallow/types/output-contract.d.ts"
+          ]
+        }
+      ],
+      "order": [
+        "apps/review-electron/fixtures/sample-app/src/components",
+        "apps/review-electron/fixtures/sample-app/src",
+        "apps/review-electron/fixtures/sample-app",
+        "editors/vscode/src/generated",
+        "npm/fallow/types"
+      ]
+    },
+    "impact_closure": {
+      "affected_not_shown": [],
+      "coordination_gap": []
+    },
+    "focus": {
+      "review_here": [
+        {
+          "file": "apps/review-electron/fixtures/sample-app/src/App.tsx",
+          "score": {
+            "fan_io": 5,
+            "security_taint": 0,
+            "risk_zone": 0,
+            "change_shape": 0,
+            "total": 5
+          },
+          "label": "review-here",
+          "reason": "high fan-in (1 importer), fan-out 3"
+        },
+        {
+          "file": "apps/review-electron/fixtures/sample-app/src/main.tsx",
+          "score": {
+            "fan_io": 3,
+            "security_taint": 0,
+            "risk_zone": 0,
+            "change_shape": 0,
+            "total": 3
+          },
+          "label": "review-here",
+          "reason": "high fan-in (1 importer), fan-out 1"
+        }
+      ],
+      "deprioritized": [
+        {
+          "file": "apps/review-electron/fixtures/sample-app/index.html",
+          "score": {
+            "fan_io": 1,
+            "security_taint": 0,
+            "risk_zone": 0,
+            "change_shape": 0,
+            "total": 1
+          },
+          "label": "not-prioritized",
+          "reason": "fan-out 1"
+        },
+        {
+          "file": "apps/review-electron/fixtures/sample-app/src/components/Button.tsx",
+          "score": {
+            "fan_io": 2,
+            "security_taint": 0,
+            "risk_zone": 0,
+            "change_shape": 0,
+            "total": 2
+          },
+          "label": "not-prioritized",
+          "reason": "high fan-in (1 importer)"
+        },
+        {
+          "file": "apps/review-electron/fixtures/sample-app/src/components/Card.tsx",
+          "score": {
+            "fan_io": 2,
+            "security_taint": 0,
+            "risk_zone": 0,
+            "change_shape": 0,
+            "total": 2
+          },
+          "label": "not-prioritized",
+          "reason": "high fan-in (1 importer)"
+        },
+        {
+          "file": "apps/review-electron/fixtures/sample-app/src/components/Header.tsx",
+          "score": {
+            "fan_io": 2,
+            "security_taint": 0,
+            "risk_zone": 0,
+            "change_shape": 0,
+            "total": 2
+          },
+          "label": "not-prioritized",
+          "reason": "high fan-in (1 importer)"
+        },
+        {
+          "file": "apps/review-electron/fixtures/sample-app/vite.config.ts",
+          "score": {
+            "fan_io": 0,
+            "security_taint": 0,
+            "risk_zone": 0,
+            "change_shape": 0,
+            "total": 0
+          },
+          "label": "not-prioritized",
+          "reason": "isolated change, no blast beyond the diff"
+        },
+        {
+          "file": "editors/vscode/src/generated/output-contract.d.ts",
+          "score": {
+            "fan_io": 0,
+            "security_taint": 0,
+            "risk_zone": 0,
+            "change_shape": 0,
+            "total": 0
+          },
+          "label": "not-prioritized",
+          "reason": "isolated change, no blast beyond the diff"
+        },
+        {
+          "file": "npm/fallow/types/output-contract.d.ts",
+          "score": {
+            "fan_io": 0,
+            "security_taint": 0,
+            "risk_zone": 0,
+            "change_shape": 0,
+            "total": 0
+          },
+          "label": "not-prioritized",
+          "reason": "isolated change, no blast beyond the diff"
+        }
+      ]
+    },
+    "deltas": {
+      "boundary_introduced": [],
+      "cycle_introduced": [],
+      "public_api_added": []
+    },
+    "weakening": [
+      {
+        "kind": "suppression-added",
+        "file": "apps/review-electron/fixtures/sample-review.json",
+        "evidence": "fallow-ignore added (0 -> 71)"
+      },
+      {
+        "kind": "suppression-added",
+        "file": "crates/cli/src/audit_decision_surface.rs",
+        "evidence": "fallow-ignore added (0 -> 11)"
+      },
+      {
+        "kind": "suppression-added",
+        "file": "crates/cli/src/audit_weakening.rs",
+        "evidence": "fallow-ignore added (0 -> 2)"
+      },
+      {
+        "kind": "suppression-added",
+        "file": "crates/cli/src/audit_weakening.rs",
+        "evidence": "eslint-disable added (0 -> 3)"
+      },
+      {
+        "kind": "suppression-added",
+        "file": "crates/cli/src/audit_weakening.rs",
+        "evidence": "@ts-ignore added (0 -> 2)"
+      },
+      {
+        "kind": "suppression-added",
+        "file": "crates/cli/src/audit_weakening.rs",
+        "evidence": "@ts-expect-error added (0 -> 2)"
+      },
+      {
+        "kind": "suppression-added",
+        "file": "crates/cli/src/main.rs",
+        "evidence": "fallow-ignore added (0 -> 1)"
+      },
+      {
+        "kind": "suppression-added",
+        "file": "crates/mcp/src/server/mod.rs",
+        "evidence": "fallow-ignore added (1 -> 2)"
+      },
+      {
+        "kind": "suppression-added",
+        "file": "docs/output-schema.json",
+        "evidence": "fallow-ignore added (22 -> 23)"
+      }
+    ],
+    "routing": {
+      "units": [
+        {
+          "file": "crates/cli/src/audit.rs",
+          "expert": [
+            "raihassanraza10",
+            "Hal-Spidernight"
+          ],
+          "bus_factor_one": true
+        },
+        {
+          "file": "crates/cli/src/check/output.rs",
+          "expert": [
+            "john"
+          ],
+          "bus_factor_one": true
+        },
+        {
+          "file": "crates/cli/src/explain.rs",
+          "expert": [
+            "raihassanraza10"
+          ],
+          "bus_factor_one": true
+        },
+        {
+          "file": "crates/cli/src/main.rs",
+          "expert": [
+            "dojce1048",
+            "h.raza1164"
+          ],
+          "bus_factor_one": true
+        },
+        {
+          "file": "crates/cli/src/programmatic.rs",
+          "expert": [
+            "dojce1048"
+          ],
+          "bus_factor_one": true
+        },
+        {
+          "file": "crates/core/src/analyze/mod.rs",
+          "expert": [
+            "mike",
+            "filipe.m.guerreiro"
+          ],
+          "bus_factor_one": true
+        },
+        {
+          "file": "crates/core/src/lib.rs",
+          "expert": [
+            "raihassanraza10",
+            "hussainarslan"
+          ],
+          "bus_factor_one": true
+        },
+        {
+          "file": "crates/core/src/trace.rs",
+          "expert": [
+            "kamilthedev"
+          ],
+          "bus_factor_one": true
+        },
+        {
+          "file": "crates/core/tests/integration_test.rs",
+          "expert": [
+            "raihassanraza10",
+            "niels"
+          ],
+          "bus_factor_one": true
+        },
+        {
+          "file": "crates/extract/src/cache/types.rs",
+          "expert": [
+            "raihassanraza10",
+            "jsgoldman"
+          ],
+          "bus_factor_one": true
+        },
+        {
+          "file": "crates/extract/src/visitor/tests.rs",
+          "expert": [
+            "raihassanraza10",
+            "kamilthedev"
+          ],
+          "bus_factor_one": true
+        },
+        {
+          "file": "crates/extract/src/visitor/visit_impl.rs",
+          "expert": [
+            "raihassanraza10",
+            "kamilthedev"
+          ],
+          "bus_factor_one": true
+        },
+        {
+          "file": "crates/graph/src/graph/mod.rs",
+          "expert": [
+            "kamilthedev",
+            "raihassanraza10"
+          ],
+          "bus_factor_one": true
+        },
+        {
+          "file": "crates/mcp/src/params.rs",
+          "expert": [
+            "raihassanraza10"
+          ],
+          "bus_factor_one": true
+        },
+        {
+          "file": "crates/mcp/src/server/mod.rs",
+          "expert": [
+            "raihassanraza10"
+          ],
+          "bus_factor_one": true
+        },
+        {
+          "file": "crates/mcp/src/server/tests/e2e.rs",
+          "expert": [
+            "raihassanraza10"
+          ],
+          "bus_factor_one": true
+        },
+        {
+          "file": "crates/mcp/src/server/tests/server_info.rs",
+          "expert": [
+            "raihassanraza10"
+          ],
+          "bus_factor_one": true
+        },
+        {
+          "file": "crates/mcp/src/tools/mod.rs",
+          "expert": [
+            "raihassanraza10"
+          ],
+          "bus_factor_one": true
+        }
+      ]
+    },
+    "decisions": {
+      "decisions": [],
+      "emitted_signal_ids": []
+    }
+  },
+  "direction": {
+    "order": [
+      "apps/review-electron/fixtures/sample-app/src/App.tsx",
+      "apps/review-electron/fixtures/sample-app/src/main.tsx",
+      "apps/review-electron/fixtures/sample-app/src/components/Button.tsx",
+      "apps/review-electron/fixtures/sample-app/src/components/Card.tsx",
+      "apps/review-electron/fixtures/sample-app/src/components/Header.tsx",
+      "apps/review-electron/fixtures/sample-app/vite.config.ts",
+      "editors/vscode/src/generated/output-contract.d.ts",
+      "npm/fallow/types/output-contract.d.ts"
+    ],
+    "units": [
+      {
+        "file": "apps/review-electron/fixtures/sample-app/src/App.tsx",
+        "concern_lens": "orientation",
+        "scoring_budget": 5,
+        "out_of_diff": [],
+        "expert": []
+      },
+      {
+        "file": "apps/review-electron/fixtures/sample-app/src/main.tsx",
+        "concern_lens": "orientation",
+        "scoring_budget": 3,
+        "out_of_diff": [],
+        "expert": []
+      },
+      {
+        "file": "apps/review-electron/fixtures/sample-app/src/components/Button.tsx",
+        "concern_lens": "orientation",
+        "scoring_budget": 2,
+        "out_of_diff": [],
+        "expert": []
+      },
+      {
+        "file": "apps/review-electron/fixtures/sample-app/src/components/Card.tsx",
+        "concern_lens": "orientation",
+        "scoring_budget": 2,
+        "out_of_diff": [],
+        "expert": []
+      },
+      {
+        "file": "apps/review-electron/fixtures/sample-app/src/components/Header.tsx",
+        "concern_lens": "orientation",
+        "scoring_budget": 2,
+        "out_of_diff": [],
+        "expert": []
+      },
+      {
+        "file": "apps/review-electron/fixtures/sample-app/vite.config.ts",
+        "concern_lens": "orientation",
+        "scoring_budget": 0,
+        "out_of_diff": [],
+        "expert": []
+      },
+      {
+        "file": "editors/vscode/src/generated/output-contract.d.ts",
+        "concern_lens": "orientation",
+        "scoring_budget": 0,
+        "out_of_diff": [],
+        "expert": []
+      },
+      {
+        "file": "npm/fallow/types/output-contract.d.ts",
+        "concern_lens": "orientation",
+        "scoring_budget": 0,
+        "out_of_diff": [],
+        "expert": []
+      }
+    ]
+  },
+  "agent_schema": {
+    "judgment_shape": "Return { \"graph_snapshot_hash\": <echoed>, \"judgments\": [ { \"signal_id\": <one fallow emitted>, \"framing\": <free text>, \"concern\": <optional> } ] }.",
+    "echo_field": "graph_snapshot_hash",
+    "anchoring_rule": "Every judgment must cite a signal_id fallow emitted; an unanchored id is rejected (anti-hallucination)."
+  },
+  "injection_note": "The digest is built from the deterministic module graph only; PR prose is untrusted and never enters the digest. Your free-text framing is fenced as non-deterministic and never gates or auto-posts.",
+  "_meta": {
+    "telemetry": {
+      "analysis_run_id": "run_e256a7b6aaf2a606"
+    }
+  }
+}

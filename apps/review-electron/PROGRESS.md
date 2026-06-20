@@ -6,7 +6,7 @@ stacked on `fix/review-quality` (engine E1-E8+E11).
 
 ## Status
 
-- Phase 0 (baseline + data-source + sample app): IN PROGRESS
+- Phase 0 (baseline + data-source + sample app): DONE
 - Phase 1 (W1 render model): pending
 - Phase 2 (Electron scaffold): pending
 - Phase 3 (W4-core walkthrough UI): pending
@@ -21,3 +21,6 @@ stacked on `fix/review-quality` (engine E1-E8+E11).
 
 - Worktree created @ ccaaed53f73; overnight build plan written; release CLI build
   started; sample Vite/React app fixture scaffolded.
+- Phase 0 DONE: CLI built (2.100.0), review flags confirmed, audit-brief +
+  walkthrough-guide fixtures captured, app manifest (package.json/tsconfig) added,
+  deps install kicked off.
