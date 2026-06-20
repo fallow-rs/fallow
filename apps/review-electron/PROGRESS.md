@@ -10,7 +10,7 @@ stacked on `fix/review-quality` (engine E1-E8+E11).
 - Phase 1 (W1 render model): DONE
 - Phase 2 (Electron scaffold): DONE
 - Phase 3 (W4-core walkthrough UI): DONE (vertical slice complete)
-- Phase 4 (W3 agent feedback channel): pending
+- Phase 4 (W3 agent feedback channel): DONE (acceptance proof owed to Phase 8)
 - Phase 5 (W4-visual screenshot annotate): pending
 - Phase 6 (W5 grounded inspector): pending
 - Phase 7 (W6 live-app annotate): pending
@@ -32,3 +32,7 @@ stacked on `fix/review-quality` (engine E1-E8+E11).
 - Phase 3 DONE: walkthrough UI (ReviewFocus/StageList/FileRow/ClearedPanel/
   DecisionList) + localStorage viewed-state; pure badge/viewed helpers tested;
   vitest 7/7 + tsc + build green. VERTICAL SLICE (0-3) complete.
+- Phase 4 DONE: W3 feed channel (.fallow-review/feed.jsonl) + agent-walkthrough
+  builder + review:validate IPC; vitest 10/10, tsc, build green. Live proof:
+  unanchored -> rejected, stale hash -> rejected. Accepted-judgment proof owed to
+  Phase 8 (decision-producing fixture).

@@ -1,6 +1,9 @@
 import { join } from "node:path";
 import { app, BrowserWindow, ipcMain } from "electron";
-import { runReview } from "./review";
+import { runReview, runGuide, validateWalkthrough } from "./review";
+import { appendFeedItem } from "./feed";
+import { buildAgentWalkthrough } from "./agentWalkthrough";
+import type { FeedItem } from "../model/agent";
 
 const createWindow = (): void => {
   const win = new BrowserWindow({
@@ -23,6 +26,11 @@ const createWindow = (): void => {
 };
 
 ipcMain.handle("review:get", (_event, root: string | undefined) => runReview(root));
+ipcMain.handle("review:guide", (_event, root: string | undefined) => runGuide(root));
+ipcMain.handle("feed:append", (_event, item: FeedItem) => appendFeedItem(process.cwd(), item));
+ipcMain.handle("review:validate", (_event, hash: string, items: FeedItem[]) =>
+  validateWalkthrough(buildAgentWalkthrough(hash, items)),
+);
 
 void app.whenReady().then(() => {
   createWindow();

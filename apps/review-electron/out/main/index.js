@@ -2,6 +2,8 @@
 const node_path = require("node:path");
 const electron = require("electron");
 const node_child_process = require("node:child_process");
+const promises = require("node:fs/promises");
+const node_os = require("node:os");
 const node_util = require("node:util");
 const toScore = (s) => ({
   fanIo: s?.fan_io ?? 0,
@@ -84,13 +86,51 @@ const toWalkthroughDocument = (brief) => {
 };
 const run = node_util.promisify(node_child_process.execFile);
 const fallowBin = () => process.env["FALLOW_BIN"] ?? "fallow";
+const at = (root) => root ?? process.cwd();
+const MAX_BUFFER = 64 * 1024 * 1024;
 const runReview = async (root) => {
   const { stdout } = await run(fallowBin(), ["review", "--format", "json"], {
-    cwd: root ?? process.cwd(),
-    maxBuffer: 64 * 1024 * 1024
+    cwd: at(root),
+    maxBuffer: MAX_BUFFER
   });
   return toWalkthroughDocument(JSON.parse(stdout));
 };
+const runGuide = async (root) => {
+  const { stdout } = await run(fallowBin(), ["review", "--walkthrough-guide", "--format", "json"], {
+    cwd: at(root),
+    maxBuffer: MAX_BUFFER
+  });
+  const g = JSON.parse(stdout);
+  return {
+    graphSnapshotHash: g.graph_snapshot_hash ?? "",
+    emittedSignalIds: g.digest?.decisions?.emitted_signal_ids ?? [],
+    order: g.direction?.order ?? []
+  };
+};
+const validateWalkthrough = async (payload, root) => {
+  const file = node_path.join(node_os.tmpdir(), `fallow-agent-wt-${process.pid}-${Date.now()}.json`);
+  await promises.writeFile(file, JSON.stringify(payload), "utf8");
+  const { stdout } = await run(fallowBin(), ["review", "--walkthrough-file", file, "--format", "json"], {
+    cwd: at(root),
+    maxBuffer: MAX_BUFFER
+  });
+  return JSON.parse(stdout);
+};
+const feedPath = (root) => node_path.join(root, ".fallow-review", "feed.jsonl");
+const appendFeedItem = async (root, item) => {
+  const path = feedPath(root);
+  await promises.mkdir(node_path.dirname(path), { recursive: true });
+  await promises.appendFile(path, `${JSON.stringify(item)}
+`, "utf8");
+};
+const buildAgentWalkthrough = (graphSnapshotHash, items) => ({
+  graph_snapshot_hash: graphSnapshotHash,
+  judgments: items.filter((i) => i.target.kind === "signal_id" && i.target.value.length > 0).map((i) => {
+    const judgment = { signal_id: i.target.value, framing: i.note };
+    if (i.verdict) judgment.concern = i.verdict;
+    return judgment;
+  })
+});
 const createWindow = () => {
   const win = new electron.BrowserWindow({
     width: 1400,
@@ -110,6 +150,12 @@ const createWindow = () => {
   }
 };
 electron.ipcMain.handle("review:get", (_event, root) => runReview(root));
+electron.ipcMain.handle("review:guide", (_event, root) => runGuide(root));
+electron.ipcMain.handle("feed:append", (_event, item) => appendFeedItem(process.cwd(), item));
+electron.ipcMain.handle(
+  "review:validate",
+  (_event, hash, items) => validateWalkthrough(buildAgentWalkthrough(hash, items))
+);
 void electron.app.whenReady().then(() => {
   createWindow();
   electron.app.on("activate", () => {

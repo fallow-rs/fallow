@@ -6,9 +6,10 @@ type Props = {
   stages: WalkthroughStage[];
   isViewed: (path: string) => boolean;
   onToggleViewed: (path: string) => void;
+  onAddNote: (path: string, note: string) => void;
 };
 
-export const StageList = ({ stages, isViewed, onToggleViewed }: Props) => (
+export const StageList = ({ stages, isViewed, onToggleViewed, onAddNote }: Props) => (
   <div>
     {stages.map((stage) => (
       <section key={stage.moduleDir} style={{ marginBottom: 16 }}>
@@ -29,6 +30,7 @@ export const StageList = ({ stages, isViewed, onToggleViewed }: Props) => (
               file={f}
               viewed={isViewed(f.path)}
               onToggleViewed={onToggleViewed}
+              onAddNote={onAddNote}
             />
           ))}
         </ul>

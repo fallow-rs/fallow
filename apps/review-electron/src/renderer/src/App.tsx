@@ -12,6 +12,7 @@ export const App = () => {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [viewedTick, setViewedTick] = useState(0);
+  const [noteCount, setNoteCount] = useState(0);
 
   const load = async (): Promise<void> => {
     setError(null);
@@ -33,6 +34,15 @@ export const App = () => {
   const onToggleViewed = useCallback((path: string) => {
     writeViewed(window.localStorage, path, !readViewed(window.localStorage, path));
     setViewedTick((t) => t + 1);
+  }, []);
+
+  const onAddNote = useCallback((path: string, note: string) => {
+    void window.fallow.appendFeed({
+      target: { kind: "file_line", value: path },
+      note,
+      at: new Date().toISOString(),
+    });
+    setNoteCount((n) => n + 1);
   }, []);
 
   return (
@@ -67,6 +77,9 @@ export const App = () => {
             {loading ? "Reviewing…" : "Load review"}
           </button>
         </div>
+        {noteCount > 0 && (
+          <p style={{ fontSize: 11, color: theme.muted }}>{noteCount} note(s) sent to the agent feed</p>
+        )}
         {error && (
           <p style={{ color: theme.danger, whiteSpace: "pre-wrap", fontSize: 12 }}>{error}</p>
         )}
@@ -75,7 +88,12 @@ export const App = () => {
             <ReviewFocus focus={doc.focus} />
             <ClearedPanel cleared={doc.cleared} />
             <DecisionList decisions={doc.decisions} />
-            <StageList stages={doc.stages} isViewed={isViewed} onToggleViewed={onToggleViewed} />
+            <StageList
+              stages={doc.stages}
+              isViewed={isViewed}
+              onToggleViewed={onToggleViewed}
+              onAddNote={onAddNote}
+            />
           </>
         )}
       </aside>

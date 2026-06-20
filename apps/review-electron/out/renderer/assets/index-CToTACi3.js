@@ -12517,41 +12517,92 @@ const deriveFileBadges = (file) => {
   return badges;
 };
 const toneColor = (tone) => tone === "high" ? theme.high : tone === "info" ? theme.info : theme.muted;
-const FileRow = ({ file, viewed, onToggleViewed }) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
-  "li",
-  {
-    style: {
-      listStyle: "none",
-      padding: "6px 0",
-      borderBottom: `1px solid ${theme.border}`,
-      opacity: viewed ? 0.45 : 1
-    },
-    children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { style: { display: "flex", gap: 8, alignItems: "baseline", cursor: "pointer" }, children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("input", { type: "checkbox", checked: viewed, onChange: () => onToggleViewed(file.path) }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { style: { flex: 1 }, children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { style: { fontFamily: "ui-monospace, monospace", fontSize: 12 }, children: file.path }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { style: { display: "block", color: theme.muted, fontSize: 11 }, children: file.reason || "no signal" })
+const FileRow = ({ file, viewed, onToggleViewed, onAddNote }) => {
+  const [adding, setAdding] = reactExports.useState(false);
+  const [note, setNote] = reactExports.useState("");
+  const save = () => {
+    if (note.trim()) onAddNote(file.path, note.trim());
+    setNote("");
+    setAdding(false);
+  };
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+    "li",
+    {
+      style: {
+        listStyle: "none",
+        padding: "6px 0",
+        borderBottom: `1px solid ${theme.border}`,
+        opacity: viewed ? 0.45 : 1
+      },
+      children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { style: { display: "flex", gap: 8, alignItems: "baseline", cursor: "pointer" }, children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("input", { type: "checkbox", checked: viewed, onChange: () => onToggleViewed(file.path) }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { style: { flex: 1 }, children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { style: { fontFamily: "ui-monospace, monospace", fontSize: 12 }, children: file.path }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { style: { display: "block", color: theme.muted, fontSize: 11 }, children: file.reason || "no signal" })
+          ] })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "div",
+          {
+            style: {
+              display: "flex",
+              gap: 4,
+              marginTop: 2,
+              marginLeft: 24,
+              flexWrap: "wrap",
+              alignItems: "center"
+            },
+            children: [
+              deriveFileBadges(file).map((b) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "span",
+                {
+                  style: {
+                    fontSize: 9,
+                    padding: "1px 5px",
+                    borderRadius: 3,
+                    color: theme.bg,
+                    background: toneColor(b.tone)
+                  },
+                  children: b.label
+                },
+                b.label
+              )),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "button",
+                {
+                  onClick: () => setAdding((a) => !a),
+                  style: {
+                    fontSize: 9,
+                    background: "none",
+                    border: `1px solid ${theme.border}`,
+                    color: theme.muted,
+                    borderRadius: 3,
+                    cursor: "pointer"
+                  },
+                  children: "+ note"
+                }
+              )
+            ]
+          }
+        ),
+        adding && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { style: { display: "flex", gap: 4, marginLeft: 24, marginTop: 4 }, children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "input",
+            {
+              value: note,
+              onChange: (e) => setNote(e.target.value),
+              placeholder: "note for the agent",
+              style: { flex: 1, fontSize: 11 }
+            }
+          ),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("button", { onClick: save, style: { fontSize: 11 }, children: "save" })
         ] })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { style: { display: "flex", gap: 4, marginTop: 2, marginLeft: 24, flexWrap: "wrap" }, children: deriveFileBadges(file).map((b) => /* @__PURE__ */ jsxRuntimeExports.jsx(
-        "span",
-        {
-          style: {
-            fontSize: 9,
-            padding: "1px 5px",
-            borderRadius: 3,
-            color: theme.bg,
-            background: toneColor(b.tone)
-          },
-          children: b.label
-        },
-        b.label
-      )) })
-    ]
-  }
-);
-const StageList = ({ stages, isViewed: isViewed2, onToggleViewed }) => /* @__PURE__ */ jsxRuntimeExports.jsx("div", { children: stages.map((stage) => /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { style: { marginBottom: 16 }, children: [
+      ]
+    }
+  );
+};
+const StageList = ({ stages, isViewed: isViewed2, onToggleViewed, onAddNote }) => /* @__PURE__ */ jsxRuntimeExports.jsx("div", { children: stages.map((stage) => /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { style: { marginBottom: 16 }, children: [
   /* @__PURE__ */ jsxRuntimeExports.jsxs(
     "h3",
     {
@@ -12573,7 +12624,8 @@ const StageList = ({ stages, isViewed: isViewed2, onToggleViewed }) => /* @__PUR
     {
       file: f,
       viewed: isViewed2(f.path),
-      onToggleViewed
+      onToggleViewed,
+      onAddNote
     },
     f.path
   )) })
@@ -12588,6 +12640,7 @@ const App = () => {
   const [error, setError] = reactExports.useState(null);
   const [loading, setLoading] = reactExports.useState(false);
   const [viewedTick, setViewedTick] = reactExports.useState(0);
+  const [noteCount, setNoteCount] = reactExports.useState(0);
   const load = async () => {
     setError(null);
     setLoading(true);
@@ -12606,6 +12659,14 @@ const App = () => {
   const onToggleViewed = reactExports.useCallback((path) => {
     setViewed(window.localStorage, path, !isViewed(window.localStorage, path));
     setViewedTick((t) => t + 1);
+  }, []);
+  const onAddNote = reactExports.useCallback((path, note) => {
+    void window.fallow.appendFeed({
+      target: { kind: "file_line", value: path },
+      note,
+      at: (/* @__PURE__ */ new Date()).toISOString()
+    });
+    setNoteCount((n) => n + 1);
   }, []);
   return /* @__PURE__ */ jsxRuntimeExports.jsxs(
     "div",
@@ -12644,12 +12705,24 @@ const App = () => {
                   ]
                 }
               ),
+              noteCount > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { style: { fontSize: 11, color: theme.muted }, children: [
+                noteCount,
+                " note(s) sent to the agent feed"
+              ] }),
               error && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { style: { color: theme.danger, whiteSpace: "pre-wrap", fontSize: 12 }, children: error }),
               doc && /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
                 /* @__PURE__ */ jsxRuntimeExports.jsx(ReviewFocus, { focus: doc.focus }),
                 /* @__PURE__ */ jsxRuntimeExports.jsx(ClearedPanel, { cleared: doc.cleared }),
                 /* @__PURE__ */ jsxRuntimeExports.jsx(DecisionList, { decisions: doc.decisions }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx(StageList, { stages: doc.stages, isViewed: isViewed$1, onToggleViewed })
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  StageList,
+                  {
+                    stages: doc.stages,
+                    isViewed: isViewed$1,
+                    onToggleViewed,
+                    onAddNote
+                  }
+                )
               ] })
             ]
           }
