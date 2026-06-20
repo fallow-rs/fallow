@@ -9,7 +9,7 @@ stacked on `fix/review-quality` (engine E1-E8+E11).
 - Phase 0 (baseline + data-source + sample app): DONE
 - Phase 1 (W1 render model): DONE
 - Phase 2 (Electron scaffold): DONE
-- Phase 3 (W4-core walkthrough UI): pending
+- Phase 3 (W4-core walkthrough UI): DONE (vertical slice complete)
 - Phase 4 (W3 agent feedback channel): pending
 - Phase 5 (W4-visual screenshot annotate): pending
 - Phase 6 (W5 grounded inspector): pending
@@ -29,3 +29,6 @@ stacked on `fix/review-quality` (engine E1-E8+E11).
   drop); vitest 4/4 + tsc green.
 - Phase 2 DONE: electron-vite scaffold (CJS), main+preload+renderer, IPC
   review:get -> runReview -> adapter; electron-vite build + tsc + vitest green.
+- Phase 3 DONE: walkthrough UI (ReviewFocus/StageList/FileRow/ClearedPanel/
+  DecisionList) + localStorage viewed-state; pure badge/viewed helpers tested;
+  vitest 7/7 + tsc + build green. VERTICAL SLICE (0-3) complete.

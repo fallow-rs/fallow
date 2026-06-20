@@ -11,9 +11,9 @@ var reactJsxRuntime_production = {};
  */
 var REACT_ELEMENT_TYPE$2 = Symbol.for("react.transitional.element"), REACT_FRAGMENT_TYPE$2 = Symbol.for("react.fragment");
 function jsxProd(type, config, maybeKey) {
-  var key = null;
-  void 0 !== maybeKey && (key = "" + maybeKey);
-  void 0 !== config.key && (key = "" + config.key);
+  var key2 = null;
+  void 0 !== maybeKey && (key2 = "" + maybeKey);
+  void 0 !== config.key && (key2 = "" + config.key);
   if ("key" in config) {
     maybeKey = {};
     for (var propName in config)
@@ -23,7 +23,7 @@ function jsxProd(type, config, maybeKey) {
   return {
     $$typeof: REACT_ELEMENT_TYPE$2,
     type,
-    key,
+    key: key2,
     ref: void 0 !== config ? config : null,
     props: maybeKey
   };
@@ -97,12 +97,12 @@ var isArrayImpl$1 = Array.isArray;
 function noop$3() {
 }
 var ReactSharedInternals$2 = { H: null, A: null, T: null, S: null }, hasOwnProperty$1 = Object.prototype.hasOwnProperty;
-function ReactElement(type, key, props) {
+function ReactElement(type, key2, props) {
   var refProp = props.ref;
   return {
     $$typeof: REACT_ELEMENT_TYPE$1,
     type,
-    key,
+    key: key2,
     ref: void 0 !== refProp ? refProp : null,
     props
   };
@@ -113,9 +113,9 @@ function cloneAndReplaceKey(oldElement, newKey) {
 function isValidElement(object) {
   return "object" === typeof object && null !== object && object.$$typeof === REACT_ELEMENT_TYPE$1;
 }
-function escape(key) {
+function escape(key2) {
   var escaperLookup = { "=": "=0", ":": "=2" };
-  return "$" + key.replace(/[=:]/g, function(match) {
+  return "$" + key2.replace(/[=:]/g, function(match) {
     return escaperLookup[match];
   });
 }
@@ -320,9 +320,9 @@ react_production.cloneElement = function(element, config, children) {
     throw Error(
       "The argument must be a React element, but you passed " + element + "."
     );
-  var props = assign$1({}, element.props), key = element.key;
+  var props = assign$1({}, element.props), key2 = element.key;
   if (null != config)
-    for (propName in void 0 !== config.key && (key = "" + config.key), config)
+    for (propName in void 0 !== config.key && (key2 = "" + config.key), config)
       !hasOwnProperty$1.call(config, propName) || "key" === propName || "__self" === propName || "__source" === propName || "ref" === propName && void 0 === config.ref || (props[propName] = config[propName]);
   var propName = arguments.length - 2;
   if (1 === propName) props.children = children;
@@ -331,7 +331,7 @@ react_production.cloneElement = function(element, config, children) {
       childArray[i] = arguments[i + 2];
     props.children = childArray;
   }
-  return ReactElement(element.type, key, props);
+  return ReactElement(element.type, key2, props);
 };
 react_production.createContext = function(defaultValue) {
   defaultValue = {
@@ -350,9 +350,9 @@ react_production.createContext = function(defaultValue) {
   return defaultValue;
 };
 react_production.createElement = function(type, config, children) {
-  var propName, props = {}, key = null;
+  var propName, props = {}, key2 = null;
   if (null != config)
-    for (propName in void 0 !== config.key && (key = "" + config.key), config)
+    for (propName in void 0 !== config.key && (key2 = "" + config.key), config)
       hasOwnProperty$1.call(config, propName) && "key" !== propName && "__self" !== propName && "__source" !== propName && (props[propName] = config[propName]);
   var childrenLength = arguments.length - 2;
   if (1 === childrenLength) props.children = children;
@@ -364,7 +364,7 @@ react_production.createElement = function(type, config, children) {
   if (type && type.defaultProps)
     for (propName in childrenLength = type.defaultProps, childrenLength)
       void 0 === props[propName] && (props[propName] = childrenLength[propName]);
-  return ReactElement(type, key, props);
+  return ReactElement(type, key2, props);
 };
 react_production.createRef = function() {
   return { current: null };
@@ -775,10 +775,10 @@ var Internals = {
   findDOMNode: null
 }, REACT_PORTAL_TYPE$1 = Symbol.for("react.portal");
 function createPortal$1(children, containerInfo, implementation) {
-  var key = 3 < arguments.length && void 0 !== arguments[3] ? arguments[3] : null;
+  var key2 = 3 < arguments.length && void 0 !== arguments[3] ? arguments[3] : null;
   return {
     $$typeof: REACT_PORTAL_TYPE$1,
-    key: null == key ? null : "" + key,
+    key: null == key2 ? null : "" + key2,
     children,
     containerInfo,
     implementation
@@ -792,10 +792,10 @@ function getCrossOriginStringAs(as, input) {
 }
 reactDom_production.__DOM_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE = Internals;
 reactDom_production.createPortal = function(children, container) {
-  var key = 2 < arguments.length && void 0 !== arguments[2] ? arguments[2] : null;
+  var key2 = 2 < arguments.length && void 0 !== arguments[2] ? arguments[2] : null;
   if (!container || 1 !== container.nodeType && 9 !== container.nodeType && 11 !== container.nodeType)
     throw Error(formatProdErrorMessage$1(299));
-  return createPortal$1(children, container, null, key);
+  return createPortal$1(children, container, null, key2);
 };
 reactDom_production.flushSync = function(fn) {
   var previousTransition = ReactSharedInternals$1.T, previousUpdatePriority = Internals.p;
@@ -2229,8 +2229,8 @@ function getEventModifierState() {
 var KeyboardEventInterface = assign({}, UIEventInterface, {
   key: function(nativeEvent) {
     if (nativeEvent.key) {
-      var key = normalizeKey[nativeEvent.key] || nativeEvent.key;
-      if ("Unidentified" !== key) return key;
+      var key2 = normalizeKey[nativeEvent.key] || nativeEvent.key;
+      if ("Unidentified" !== key2) return key2;
     }
     return "keypress" === nativeEvent.type ? (nativeEvent = getEventCharCode(nativeEvent), 13 === nativeEvent ? "Enter" : String.fromCharCode(nativeEvent)) : "keydown" === nativeEvent.type || "keyup" === nativeEvent.type ? translateToKey[nativeEvent.keyCode] || "Unidentified" : "";
   },
@@ -2611,9 +2611,9 @@ function getRootForUpdatedFiber(sourceFiber) {
   return 3 === sourceFiber.tag ? sourceFiber.stateNode : null;
 }
 var emptyContextObject = {};
-function FiberNode(tag, pendingProps, key, mode) {
+function FiberNode(tag, pendingProps, key2, mode) {
   this.tag = tag;
-  this.key = key;
+  this.key = key2;
   this.sibling = this.child = this.return = this.stateNode = this.type = this.elementType = null;
   this.index = 0;
   this.refCleanup = this.ref = null;
@@ -2625,8 +2625,8 @@ function FiberNode(tag, pendingProps, key, mode) {
   this.childLanes = this.lanes = 0;
   this.alternate = null;
 }
-function createFiberImplClass(tag, pendingProps, key, mode) {
-  return new FiberNode(tag, pendingProps, key, mode);
+function createFiberImplClass(tag, pendingProps, key2, mode) {
+  return new FiberNode(tag, pendingProps, key2, mode);
 }
 function shouldConstruct(Component2) {
   Component2 = Component2.prototype;
@@ -2664,7 +2664,7 @@ function resetWorkInProgress(workInProgress2, renderLanes2) {
   });
   return workInProgress2;
 }
-function createFiberFromTypeAndProps(type, key, pendingProps, owner, mode, lanes) {
+function createFiberFromTypeAndProps(type, key2, pendingProps, owner, mode, lanes) {
   var fiberTag = 0;
   owner = type;
   if ("function" === typeof type) shouldConstruct(type) && (fiberTag = 1);
@@ -2677,19 +2677,19 @@ function createFiberFromTypeAndProps(type, key, pendingProps, owner, mode, lanes
   else
     a: switch (type) {
       case REACT_ACTIVITY_TYPE:
-        return type = createFiberImplClass(31, pendingProps, key, mode), type.elementType = REACT_ACTIVITY_TYPE, type.lanes = lanes, type;
+        return type = createFiberImplClass(31, pendingProps, key2, mode), type.elementType = REACT_ACTIVITY_TYPE, type.lanes = lanes, type;
       case REACT_FRAGMENT_TYPE:
-        return createFiberFromFragment(pendingProps.children, mode, lanes, key);
+        return createFiberFromFragment(pendingProps.children, mode, lanes, key2);
       case REACT_STRICT_MODE_TYPE:
         fiberTag = 8;
         mode |= 24;
         break;
       case REACT_PROFILER_TYPE:
-        return type = createFiberImplClass(12, pendingProps, key, mode | 2), type.elementType = REACT_PROFILER_TYPE, type.lanes = lanes, type;
+        return type = createFiberImplClass(12, pendingProps, key2, mode | 2), type.elementType = REACT_PROFILER_TYPE, type.lanes = lanes, type;
       case REACT_SUSPENSE_TYPE:
-        return type = createFiberImplClass(13, pendingProps, key, mode), type.elementType = REACT_SUSPENSE_TYPE, type.lanes = lanes, type;
+        return type = createFiberImplClass(13, pendingProps, key2, mode), type.elementType = REACT_SUSPENSE_TYPE, type.lanes = lanes, type;
       case REACT_SUSPENSE_LIST_TYPE:
-        return type = createFiberImplClass(19, pendingProps, key, mode), type.elementType = REACT_SUSPENSE_LIST_TYPE, type.lanes = lanes, type;
+        return type = createFiberImplClass(19, pendingProps, key2, mode), type.elementType = REACT_SUSPENSE_LIST_TYPE, type.lanes = lanes, type;
       default:
         if ("object" === typeof type && null !== type)
           switch (type.$$typeof) {
@@ -2716,14 +2716,14 @@ function createFiberFromTypeAndProps(type, key, pendingProps, owner, mode, lanes
         );
         owner = null;
     }
-  key = createFiberImplClass(fiberTag, pendingProps, key, mode);
-  key.elementType = type;
-  key.type = owner;
-  key.lanes = lanes;
-  return key;
+  key2 = createFiberImplClass(fiberTag, pendingProps, key2, mode);
+  key2.elementType = type;
+  key2.type = owner;
+  key2.lanes = lanes;
+  return key2;
 }
-function createFiberFromFragment(elements, mode, lanes, key) {
-  elements = createFiberImplClass(7, elements, key, mode);
+function createFiberFromFragment(elements, mode, lanes, key2) {
+  elements = createFiberImplClass(7, elements, key2, mode);
   elements.lanes = lanes;
   return elements;
 }
@@ -3345,13 +3345,13 @@ function createChildReconciler(shouldTrackSideEffects) {
     current.return = returnFiber;
     return current;
   }
-  function updateFragment(returnFiber, current, fragment, lanes, key) {
+  function updateFragment(returnFiber, current, fragment, lanes, key2) {
     if (null === current || 7 !== current.tag)
       return current = createFiberFromFragment(
         fragment,
         returnFiber.mode,
         lanes,
-        key
+        key2
       ), current.return = returnFiber, current;
     current = useFiber(current, fragment);
     current.return = returnFiber;
@@ -3404,20 +3404,20 @@ function createChildReconciler(shouldTrackSideEffects) {
     return null;
   }
   function updateSlot(returnFiber, oldFiber, newChild, lanes) {
-    var key = null !== oldFiber ? oldFiber.key : null;
+    var key2 = null !== oldFiber ? oldFiber.key : null;
     if ("string" === typeof newChild && "" !== newChild || "number" === typeof newChild || "bigint" === typeof newChild)
-      return null !== key ? null : updateTextNode(returnFiber, oldFiber, "" + newChild, lanes);
+      return null !== key2 ? null : updateTextNode(returnFiber, oldFiber, "" + newChild, lanes);
     if ("object" === typeof newChild && null !== newChild) {
       switch (newChild.$$typeof) {
         case REACT_ELEMENT_TYPE:
-          return newChild.key === key ? updateElement(returnFiber, oldFiber, newChild, lanes) : null;
+          return newChild.key === key2 ? updateElement(returnFiber, oldFiber, newChild, lanes) : null;
         case REACT_PORTAL_TYPE:
-          return newChild.key === key ? updatePortal(returnFiber, oldFiber, newChild, lanes) : null;
+          return newChild.key === key2 ? updatePortal(returnFiber, oldFiber, newChild, lanes) : null;
         case REACT_LAZY_TYPE:
           return newChild = resolveLazy(newChild), updateSlot(returnFiber, oldFiber, newChild, lanes);
       }
       if (isArrayImpl(newChild) || getIteratorFn(newChild))
-        return null !== key ? null : updateFragment(returnFiber, oldFiber, newChild, lanes, null);
+        return null !== key2 ? null : updateFragment(returnFiber, oldFiber, newChild, lanes, null);
       if ("function" === typeof newChild.then)
         return updateSlot(
           returnFiber,
@@ -3568,10 +3568,10 @@ function createChildReconciler(shouldTrackSideEffects) {
       switch (newChild.$$typeof) {
         case REACT_ELEMENT_TYPE:
           a: {
-            for (var key = newChild.key; null !== currentFirstChild; ) {
-              if (currentFirstChild.key === key) {
-                key = newChild.type;
-                if (key === REACT_FRAGMENT_TYPE) {
+            for (var key2 = newChild.key; null !== currentFirstChild; ) {
+              if (currentFirstChild.key === key2) {
+                key2 = newChild.type;
+                if (key2 === REACT_FRAGMENT_TYPE) {
                   if (7 === currentFirstChild.tag) {
                     deleteRemainingChildren(
                       returnFiber,
@@ -3585,7 +3585,7 @@ function createChildReconciler(shouldTrackSideEffects) {
                     returnFiber = lanes;
                     break a;
                   }
-                } else if (currentFirstChild.elementType === key || "object" === typeof key && null !== key && key.$$typeof === REACT_LAZY_TYPE && resolveLazy(key) === currentFirstChild.type) {
+                } else if (currentFirstChild.elementType === key2 || "object" === typeof key2 && null !== key2 && key2.$$typeof === REACT_LAZY_TYPE && resolveLazy(key2) === currentFirstChild.type) {
                   deleteRemainingChildren(
                     returnFiber,
                     currentFirstChild.sibling
@@ -3618,8 +3618,8 @@ function createChildReconciler(shouldTrackSideEffects) {
           return placeSingleChild(returnFiber);
         case REACT_PORTAL_TYPE:
           a: {
-            for (key = newChild.key; null !== currentFirstChild; ) {
-              if (currentFirstChild.key === key)
+            for (key2 = newChild.key; null !== currentFirstChild; ) {
+              if (currentFirstChild.key === key2)
                 if (4 === currentFirstChild.tag && currentFirstChild.stateNode.containerInfo === newChild.containerInfo && currentFirstChild.stateNode.implementation === newChild.implementation) {
                   deleteRemainingChildren(
                     returnFiber,
@@ -3657,9 +3657,9 @@ function createChildReconciler(shouldTrackSideEffects) {
           lanes
         );
       if (getIteratorFn(newChild)) {
-        key = getIteratorFn(newChild);
-        if ("function" !== typeof key) throw Error(formatProdErrorMessage(150));
-        newChild = key.call(newChild);
+        key2 = getIteratorFn(newChild);
+        if ("function" !== typeof key2) throw Error(formatProdErrorMessage(150));
+        newChild = key2.call(newChild);
         return reconcileChildrenIterator(
           returnFiber,
           currentFirstChild,
@@ -5367,8 +5367,8 @@ function updateForwardRef(current, workInProgress2, Component2, nextProps, rende
   var ref = workInProgress2.ref;
   if ("ref" in nextProps) {
     var propsWithoutRef = {};
-    for (var key in nextProps)
-      "ref" !== key && (propsWithoutRef[key] = nextProps[key]);
+    for (var key2 in nextProps)
+      "ref" !== key2 && (propsWithoutRef[key2] = nextProps[key2]);
   } else propsWithoutRef = nextProps;
   prepareToReadContext(workInProgress2);
   nextProps = renderWithHooks(
@@ -5379,10 +5379,10 @@ function updateForwardRef(current, workInProgress2, Component2, nextProps, rende
     ref,
     renderLanes2
   );
-  key = checkDidRenderIdHook();
+  key2 = checkDidRenderIdHook();
   if (null !== current && !didReceiveUpdate)
     return bailoutHooks(current, workInProgress2, renderLanes2), bailoutOnAlreadyFinishedWork(current, workInProgress2, renderLanes2);
-  isHydrating && key && pushMaterializedTreeId(workInProgress2);
+  isHydrating && key2 && pushMaterializedTreeId(workInProgress2);
   workInProgress2.flags |= 1;
   reconcileChildren(current, workInProgress2, nextProps, renderLanes2);
   return workInProgress2.child;
@@ -10137,8 +10137,8 @@ function checkForUnmatchedText(serverText, clientText) {
   clientText = normalizeMarkupForTextOrAttribute(clientText);
   return normalizeMarkupForTextOrAttribute(serverText) === clientText ? true : false;
 }
-function setProp(domElement, tag, key, value, props, prevValue) {
-  switch (key) {
+function setProp(domElement, tag, key2, value, props, prevValue) {
+  switch (key2) {
     case "children":
       "string" === typeof value ? "body" === tag || "textarea" === tag && "" === value || setTextContent(domElement, value) : ("number" === typeof value || "bigint" === typeof value) && "body" !== tag && setTextContent(domElement, "" + value);
       break;
@@ -10153,7 +10153,7 @@ function setProp(domElement, tag, key, value, props, prevValue) {
     case "viewBox":
     case "width":
     case "height":
-      setValueForKnownAttribute(domElement, key, value);
+      setValueForKnownAttribute(domElement, key2, value);
       break;
     case "style":
       setValueForStyles(domElement, value, prevValue);
@@ -10165,27 +10165,27 @@ function setProp(domElement, tag, key, value, props, prevValue) {
       }
     case "src":
     case "href":
-      if ("" === value && ("a" !== tag || "href" !== key)) {
-        domElement.removeAttribute(key);
+      if ("" === value && ("a" !== tag || "href" !== key2)) {
+        domElement.removeAttribute(key2);
         break;
       }
       if (null == value || "function" === typeof value || "symbol" === typeof value || "boolean" === typeof value) {
-        domElement.removeAttribute(key);
+        domElement.removeAttribute(key2);
         break;
       }
       value = sanitizeURL("" + value);
-      domElement.setAttribute(key, value);
+      domElement.setAttribute(key2, value);
       break;
     case "action":
     case "formAction":
       if ("function" === typeof value) {
         domElement.setAttribute(
-          key,
+          key2,
           "javascript:throw new Error('A React form was unexpectedly submitted. If you called form.submit() manually, consider using form.requestSubmit() instead. If you\\'re trying to use event.stopPropagation() in a submit event handler, consider also calling event.preventDefault().')"
         );
         break;
       } else
-        "function" === typeof prevValue && ("formAction" === key ? ("input" !== tag && setProp(domElement, tag, "name", props.name, props, null), setProp(
+        "function" === typeof prevValue && ("formAction" === key2 ? ("input" !== tag && setProp(domElement, tag, "name", props.name, props, null), setProp(
           domElement,
           tag,
           "formEncType",
@@ -10208,11 +10208,11 @@ function setProp(domElement, tag, key, value, props, prevValue) {
           null
         )) : (setProp(domElement, tag, "encType", props.encType, props, null), setProp(domElement, tag, "method", props.method, props, null), setProp(domElement, tag, "target", props.target, props, null)));
       if (null == value || "symbol" === typeof value || "boolean" === typeof value) {
-        domElement.removeAttribute(key);
+        domElement.removeAttribute(key2);
         break;
       }
       value = sanitizeURL("" + value);
-      domElement.setAttribute(key, value);
+      domElement.setAttribute(key2, value);
       break;
     case "onClick":
       null != value && (domElement.onclick = noop$1);
@@ -10227,10 +10227,10 @@ function setProp(domElement, tag, key, value, props, prevValue) {
       if (null != value) {
         if ("object" !== typeof value || !("__html" in value))
           throw Error(formatProdErrorMessage(61));
-        key = value.__html;
-        if (null != key) {
+        key2 = value.__html;
+        if (null != key2) {
           if (null != props.children) throw Error(formatProdErrorMessage(60));
-          domElement.innerHTML = key;
+          domElement.innerHTML = key2;
         }
       }
       break;
@@ -10254,11 +10254,11 @@ function setProp(domElement, tag, key, value, props, prevValue) {
         domElement.removeAttribute("xlink:href");
         break;
       }
-      key = sanitizeURL("" + value);
+      key2 = sanitizeURL("" + value);
       domElement.setAttributeNS(
         "http://www.w3.org/1999/xlink",
         "xlink:href",
-        key
+        key2
       );
       break;
     case "contentEditable":
@@ -10269,7 +10269,7 @@ function setProp(domElement, tag, key, value, props, prevValue) {
     case "externalResourcesRequired":
     case "focusable":
     case "preserveAlpha":
-      null != value && "function" !== typeof value && "symbol" !== typeof value ? domElement.setAttribute(key, "" + value) : domElement.removeAttribute(key);
+      null != value && "function" !== typeof value && "symbol" !== typeof value ? domElement.setAttribute(key2, "" + value) : domElement.removeAttribute(key2);
       break;
     case "inert":
     case "allowFullScreen":
@@ -10294,21 +10294,21 @@ function setProp(domElement, tag, key, value, props, prevValue) {
     case "scoped":
     case "seamless":
     case "itemScope":
-      value && "function" !== typeof value && "symbol" !== typeof value ? domElement.setAttribute(key, "") : domElement.removeAttribute(key);
+      value && "function" !== typeof value && "symbol" !== typeof value ? domElement.setAttribute(key2, "") : domElement.removeAttribute(key2);
       break;
     case "capture":
     case "download":
-      true === value ? domElement.setAttribute(key, "") : false !== value && null != value && "function" !== typeof value && "symbol" !== typeof value ? domElement.setAttribute(key, value) : domElement.removeAttribute(key);
+      true === value ? domElement.setAttribute(key2, "") : false !== value && null != value && "function" !== typeof value && "symbol" !== typeof value ? domElement.setAttribute(key2, value) : domElement.removeAttribute(key2);
       break;
     case "cols":
     case "rows":
     case "size":
     case "span":
-      null != value && "function" !== typeof value && "symbol" !== typeof value && !isNaN(value) && 1 <= value ? domElement.setAttribute(key, value) : domElement.removeAttribute(key);
+      null != value && "function" !== typeof value && "symbol" !== typeof value && !isNaN(value) && 1 <= value ? domElement.setAttribute(key2, value) : domElement.removeAttribute(key2);
       break;
     case "rowSpan":
     case "start":
-      null == value || "function" === typeof value || "symbol" === typeof value || isNaN(value) ? domElement.removeAttribute(key) : domElement.setAttribute(key, value);
+      null == value || "function" === typeof value || "symbol" === typeof value || isNaN(value) ? domElement.removeAttribute(key2) : domElement.setAttribute(key2, value);
       break;
     case "popover":
       listenToNonDelegatedEvent("beforetoggle", domElement);
@@ -10394,12 +10394,12 @@ function setProp(domElement, tag, key, value, props, prevValue) {
     case "textContent":
       break;
     default:
-      if (!(2 < key.length) || "o" !== key[0] && "O" !== key[0] || "n" !== key[1] && "N" !== key[1])
-        key = aliases.get(key) || key, setValueForAttribute(domElement, key, value);
+      if (!(2 < key2.length) || "o" !== key2[0] && "O" !== key2[0] || "n" !== key2[1] && "N" !== key2[1])
+        key2 = aliases.get(key2) || key2, setValueForAttribute(domElement, key2, value);
   }
 }
-function setPropOnCustomElement(domElement, tag, key, value, props, prevValue) {
-  switch (key) {
+function setPropOnCustomElement(domElement, tag, key2, value, props, prevValue) {
+  switch (key2) {
     case "style":
       setValueForStyles(domElement, value, prevValue);
       break;
@@ -10407,10 +10407,10 @@ function setPropOnCustomElement(domElement, tag, key, value, props, prevValue) {
       if (null != value) {
         if ("object" !== typeof value || !("__html" in value))
           throw Error(formatProdErrorMessage(61));
-        key = value.__html;
-        if (null != key) {
+        key2 = value.__html;
+        if (null != key2) {
           if (null != props.children) throw Error(formatProdErrorMessage(60));
-          domElement.innerHTML = key;
+          domElement.innerHTML = key2;
         }
       }
       break;
@@ -10435,14 +10435,14 @@ function setPropOnCustomElement(domElement, tag, key, value, props, prevValue) {
     case "textContent":
       break;
     default:
-      if (!registrationNameDependencies.hasOwnProperty(key))
+      if (!registrationNameDependencies.hasOwnProperty(key2))
         a: {
-          if ("o" === key[0] && "n" === key[1] && (props = key.endsWith("Capture"), tag = key.slice(2, props ? key.length - 7 : void 0), prevValue = domElement[internalPropsKey] || null, prevValue = null != prevValue ? prevValue[key] : null, "function" === typeof prevValue && domElement.removeEventListener(tag, prevValue, props), "function" === typeof value)) {
-            "function" !== typeof prevValue && null !== prevValue && (key in domElement ? domElement[key] = null : domElement.hasAttribute(key) && domElement.removeAttribute(key));
+          if ("o" === key2[0] && "n" === key2[1] && (props = key2.endsWith("Capture"), tag = key2.slice(2, props ? key2.length - 7 : void 0), prevValue = domElement[internalPropsKey] || null, prevValue = null != prevValue ? prevValue[key2] : null, "function" === typeof prevValue && domElement.removeEventListener(tag, prevValue, props), "function" === typeof value)) {
+            "function" !== typeof prevValue && null !== prevValue && (key2 in domElement ? domElement[key2] = null : domElement.hasAttribute(key2) && domElement.removeAttribute(key2));
             domElement.addEventListener(tag, value, props);
             break a;
           }
-          key in domElement ? domElement[key] = value : true === value ? domElement.setAttribute(key, "") : setValueForAttribute(domElement, key, value);
+          key2 in domElement ? domElement[key2] = value : true === value ? domElement.setAttribute(key2, "") : setValueForAttribute(domElement, key2, value);
         }
   }
 }
@@ -11254,29 +11254,29 @@ function preload(href, as, options) {
     ) + '"]', "string" === typeof options.imageSizes && (preloadSelector += '[imagesizes="' + escapeSelectorAttributeValueInsideDoubleQuotes(
       options.imageSizes
     ) + '"]')) : preloadSelector += '[href="' + escapeSelectorAttributeValueInsideDoubleQuotes(href) + '"]' : preloadSelector += '[href="' + escapeSelectorAttributeValueInsideDoubleQuotes(href) + '"]';
-    var key = preloadSelector;
+    var key2 = preloadSelector;
     switch (as) {
       case "style":
-        key = getStyleKey(href);
+        key2 = getStyleKey(href);
         break;
       case "script":
-        key = getScriptKey(href);
+        key2 = getScriptKey(href);
     }
-    preloadPropsMap.has(key) || (href = assign(
+    preloadPropsMap.has(key2) || (href = assign(
       {
         rel: "preload",
         href: "image" === as && options && options.imageSrcSet ? void 0 : href,
         as
       },
       options
-    ), preloadPropsMap.set(key, href), null !== ownerDocument.querySelector(preloadSelector) || "style" === as && ownerDocument.querySelector(getStylesheetSelectorFromKey(key)) || "script" === as && ownerDocument.querySelector(getScriptSelectorFromKey(key)) || (as = ownerDocument.createElement("link"), setInitialProperties(as, "link", href), markNodeAsHoistable(as), ownerDocument.head.appendChild(as)));
+    ), preloadPropsMap.set(key2, href), null !== ownerDocument.querySelector(preloadSelector) || "style" === as && ownerDocument.querySelector(getStylesheetSelectorFromKey(key2)) || "script" === as && ownerDocument.querySelector(getScriptSelectorFromKey(key2)) || (as = ownerDocument.createElement("link"), setInitialProperties(as, "link", href), markNodeAsHoistable(as), ownerDocument.head.appendChild(as)));
   }
 }
 function preloadModule(href, options) {
   previousDispatcher.m(href, options);
   var ownerDocument = globalDocument;
   if (ownerDocument && href) {
-    var as = options && "string" === typeof options.as ? options.as : "script", preloadSelector = 'link[rel="modulepreload"][as="' + escapeSelectorAttributeValueInsideDoubleQuotes(as) + '"][href="' + escapeSelectorAttributeValueInsideDoubleQuotes(href) + '"]', key = preloadSelector;
+    var as = options && "string" === typeof options.as ? options.as : "script", preloadSelector = 'link[rel="modulepreload"][as="' + escapeSelectorAttributeValueInsideDoubleQuotes(as) + '"][href="' + escapeSelectorAttributeValueInsideDoubleQuotes(href) + '"]', key2 = preloadSelector;
     switch (as) {
       case "audioworklet":
       case "paintworklet":
@@ -11284,9 +11284,9 @@ function preloadModule(href, options) {
       case "sharedworker":
       case "worker":
       case "script":
-        key = getScriptKey(href);
+        key2 = getScriptKey(href);
     }
-    if (!preloadPropsMap.has(key) && (href = assign({ rel: "modulepreload", href }, options), preloadPropsMap.set(key, href), null === ownerDocument.querySelector(preloadSelector))) {
+    if (!preloadPropsMap.has(key2) && (href = assign({ rel: "modulepreload", href }, options), preloadPropsMap.set(key2, href), null === ownerDocument.querySelector(preloadSelector))) {
       switch (as) {
         case "audioworklet":
         case "paintworklet":
@@ -11294,7 +11294,7 @@ function preloadModule(href, options) {
         case "sharedworker":
         case "worker":
         case "script":
-          if (ownerDocument.querySelector(getScriptSelectorFromKey(key)))
+          if (ownerDocument.querySelector(getScriptSelectorFromKey(key2)))
             return;
       }
       as = ownerDocument.createElement("link");
@@ -11308,13 +11308,13 @@ function preinitStyle(href, precedence, options) {
   previousDispatcher.S(href, precedence, options);
   var ownerDocument = globalDocument;
   if (ownerDocument && href) {
-    var styles = getResourcesFromRoot(ownerDocument).hoistableStyles, key = getStyleKey(href);
+    var styles = getResourcesFromRoot(ownerDocument).hoistableStyles, key2 = getStyleKey(href);
     precedence = precedence || "default";
-    var resource = styles.get(key);
+    var resource = styles.get(key2);
     if (!resource) {
       var state = { loading: 0, preload: null };
       if (resource = ownerDocument.querySelector(
-        getStylesheetSelectorFromKey(key)
+        getStylesheetSelectorFromKey(key2)
       ))
         state.loading = 5;
       else {
@@ -11322,7 +11322,7 @@ function preinitStyle(href, precedence, options) {
           { rel: "stylesheet", href, "data-precedence": precedence },
           options
         );
-        (options = preloadPropsMap.get(key)) && adoptPreloadPropsForStylesheet(href, options);
+        (options = preloadPropsMap.get(key2)) && adoptPreloadPropsForStylesheet(href, options);
         var link = resource = ownerDocument.createElement("link");
         markNodeAsHoistable(link);
         setInitialProperties(link, "link", href);
@@ -11345,7 +11345,7 @@ function preinitStyle(href, precedence, options) {
         count: 1,
         state
       };
-      styles.set(key, resource);
+      styles.set(key2, resource);
     }
   }
 }
@@ -11353,26 +11353,26 @@ function preinitScript(src, options) {
   previousDispatcher.X(src, options);
   var ownerDocument = globalDocument;
   if (ownerDocument && src) {
-    var scripts = getResourcesFromRoot(ownerDocument).hoistableScripts, key = getScriptKey(src), resource = scripts.get(key);
-    resource || (resource = ownerDocument.querySelector(getScriptSelectorFromKey(key)), resource || (src = assign({ src, async: true }, options), (options = preloadPropsMap.get(key)) && adoptPreloadPropsForScript(src, options), resource = ownerDocument.createElement("script"), markNodeAsHoistable(resource), setInitialProperties(resource, "link", src), ownerDocument.head.appendChild(resource)), resource = {
+    var scripts = getResourcesFromRoot(ownerDocument).hoistableScripts, key2 = getScriptKey(src), resource = scripts.get(key2);
+    resource || (resource = ownerDocument.querySelector(getScriptSelectorFromKey(key2)), resource || (src = assign({ src, async: true }, options), (options = preloadPropsMap.get(key2)) && adoptPreloadPropsForScript(src, options), resource = ownerDocument.createElement("script"), markNodeAsHoistable(resource), setInitialProperties(resource, "link", src), ownerDocument.head.appendChild(resource)), resource = {
       type: "script",
       instance: resource,
       count: 1,
       state: null
-    }, scripts.set(key, resource));
+    }, scripts.set(key2, resource));
   }
 }
 function preinitModuleScript(src, options) {
   previousDispatcher.M(src, options);
   var ownerDocument = globalDocument;
   if (ownerDocument && src) {
-    var scripts = getResourcesFromRoot(ownerDocument).hoistableScripts, key = getScriptKey(src), resource = scripts.get(key);
-    resource || (resource = ownerDocument.querySelector(getScriptSelectorFromKey(key)), resource || (src = assign({ src, async: true, type: "module" }, options), (options = preloadPropsMap.get(key)) && adoptPreloadPropsForScript(src, options), resource = ownerDocument.createElement("script"), markNodeAsHoistable(resource), setInitialProperties(resource, "link", src), ownerDocument.head.appendChild(resource)), resource = {
+    var scripts = getResourcesFromRoot(ownerDocument).hoistableScripts, key2 = getScriptKey(src), resource = scripts.get(key2);
+    resource || (resource = ownerDocument.querySelector(getScriptSelectorFromKey(key2)), resource || (src = assign({ src, async: true, type: "module" }, options), (options = preloadPropsMap.get(key2)) && adoptPreloadPropsForScript(src, options), resource = ownerDocument.createElement("script"), markNodeAsHoistable(resource), setInitialProperties(resource, "link", src), ownerDocument.head.appendChild(resource)), resource = {
       type: "script",
       instance: resource,
       count: 1,
       state: null
-    }, scripts.set(key, resource));
+    }, scripts.set(key2, resource));
   }
 }
 function getResource(type, currentProps, pendingProps, currentResource) {
@@ -11442,8 +11442,8 @@ function getResource(type, currentProps, pendingProps, currentResource) {
 function getStyleKey(href) {
   return 'href="' + escapeSelectorAttributeValueInsideDoubleQuotes(href) + '"';
 }
-function getStylesheetSelectorFromKey(key) {
-  return 'link[rel="stylesheet"][' + key + "]";
+function getStylesheetSelectorFromKey(key2) {
+  return 'link[rel="stylesheet"][' + key2 + "]";
 }
 function stylesheetPropsFromRawProps(rawProps) {
   return assign({}, rawProps, {
@@ -11451,18 +11451,18 @@ function stylesheetPropsFromRawProps(rawProps) {
     precedence: null
   });
 }
-function preloadStylesheet(ownerDocument, key, preloadProps, state) {
-  ownerDocument.querySelector('link[rel="preload"][as="style"][' + key + "]") ? state.loading = 1 : (key = ownerDocument.createElement("link"), state.preload = key, key.addEventListener("load", function() {
+function preloadStylesheet(ownerDocument, key2, preloadProps, state) {
+  ownerDocument.querySelector('link[rel="preload"][as="style"][' + key2 + "]") ? state.loading = 1 : (key2 = ownerDocument.createElement("link"), state.preload = key2, key2.addEventListener("load", function() {
     return state.loading |= 1;
-  }), key.addEventListener("error", function() {
+  }), key2.addEventListener("error", function() {
     return state.loading |= 2;
-  }), setInitialProperties(key, "link", preloadProps), markNodeAsHoistable(key), ownerDocument.head.appendChild(key));
+  }), setInitialProperties(key2, "link", preloadProps), markNodeAsHoistable(key2), ownerDocument.head.appendChild(key2));
 }
 function getScriptKey(src) {
   return '[src="' + escapeSelectorAttributeValueInsideDoubleQuotes(src) + '"]';
 }
-function getScriptSelectorFromKey(key) {
-  return "script[async]" + key;
+function getScriptSelectorFromKey(key2) {
+  return "script[async]" + key2;
 }
 function acquireResource(hoistableRoot, resource, props) {
   resource.count++;
@@ -11611,8 +11611,8 @@ function preloadResource(resource) {
 function suspendResource(state, hoistableRoot, resource, props) {
   if ("stylesheet" === resource.type && ("string" !== typeof props.media || false !== matchMedia(props.media).matches) && 0 === (resource.state.loading & 4)) {
     if (null === resource.instance) {
-      var key = getStyleKey(props.href), instance = hoistableRoot.querySelector(
-        getStylesheetSelectorFromKey(key)
+      var key2 = getStyleKey(props.href), instance = hoistableRoot.querySelector(
+        getStylesheetSelectorFromKey(key2)
       );
       if (instance) {
         hoistableRoot = instance._p;
@@ -11624,7 +11624,7 @@ function suspendResource(state, hoistableRoot, resource, props) {
       }
       instance = hoistableRoot.ownerDocument || hoistableRoot;
       props = stylesheetPropsFromRawProps(props);
-      (key = preloadPropsMap.get(key)) && adoptPreloadPropsForStylesheet(props, key);
+      (key2 = preloadPropsMap.get(key2)) && adoptPreloadPropsForStylesheet(props, key2);
       instance = instance.createElement("link");
       markNodeAsHoistable(instance);
       var linkInstance = instance;
@@ -12174,8 +12174,8 @@ function attemptReplayContinuousQueuedEvent(queuedEvent) {
   }
   return true;
 }
-function attemptReplayContinuousQueuedEventInMap(queuedEvent, key, map) {
-  attemptReplayContinuousQueuedEvent(queuedEvent) && map.delete(key);
+function attemptReplayContinuousQueuedEventInMap(queuedEvent, key2, map) {
+  attemptReplayContinuousQueuedEvent(queuedEvent) && map.delete(key2);
 }
 function replayUnblockedEvents() {
   hasScheduledReplayAttempt = false;
@@ -12436,10 +12436,158 @@ function checkDCE() {
   client.exports = reactDomClient_production;
 }
 var clientExports = client.exports;
+const theme = {
+  bg: "#0e0c0a",
+  panel: "#16130f",
+  border: "#2a2521",
+  text: "#e8e3da",
+  muted: "#8a8073",
+  accent: "#d98c3f",
+  high: "#e5a35a",
+  danger: "#e5484d",
+  info: "#6ea8fe"
+};
+const ReviewFocus = ({ focus }) => /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { style: { marginBottom: 16 }, children: [
+  /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { style: { fontSize: 11, color: theme.muted }, children: [
+    focus.baseDescription,
+    " · ",
+    focus.baseRef.slice(0, 9)
+  ] }),
+  /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { style: { fontSize: 14, margin: "4px 0" }, children: focus.headline }),
+  /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { style: { fontSize: 11, color: theme.muted }, children: [
+    focus.changedFiles,
+    " files · risk ",
+    focus.riskClass,
+    " · effort ",
+    focus.reviewEffort
+  ] })
+] });
+const ClearedPanel = ({ cleared }) => {
+  const [open, setOpen] = reactExports.useState(false);
+  if (cleared.length === 0) return null;
+  const total = cleared.reduce((n, c) => n + c.count, 0);
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { style: { marginBottom: 16 }, children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs(
+      "button",
+      {
+        onClick: () => setOpen((o) => !o),
+        style: {
+          background: "none",
+          border: `1px solid ${theme.border}`,
+          color: theme.muted,
+          borderRadius: 4,
+          padding: "4px 8px",
+          cursor: "pointer",
+          fontSize: 12
+        },
+        children: [
+          open ? "▾" : "▸",
+          " Fallow already handled ",
+          total,
+          " technical items"
+        ]
+      }
+    ),
+    open && /* @__PURE__ */ jsxRuntimeExports.jsx("ul", { style: { margin: "8px 0 0", paddingLeft: 18, color: theme.muted, fontSize: 12 }, children: cleared.map((c) => /* @__PURE__ */ jsxRuntimeExports.jsxs("li", { children: [
+      c.count,
+      " ",
+      c.label
+    ] }, c.kind)) })
+  ] });
+};
+const DecisionList = ({ decisions }) => {
+  if (decisions.length === 0) return null;
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { style: { marginBottom: 16 }, children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("h3", { style: { fontSize: 12, color: theme.accent, margin: "0 0 4px" }, children: [
+      "Decisions (",
+      decisions.length,
+      ")"
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("ul", { style: { margin: 0, paddingLeft: 18, fontSize: 12 }, children: decisions.map((d) => /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: d.question || d.signalId }, d.signalId)) })
+  ] });
+};
+const HIGH_FAN_IN = 4;
+const deriveFileBadges = (file) => {
+  const badges = [
+    file.deprioritized ? { label: "DEPRIORITIZED", tone: "muted" } : { label: "REVIEW HERE", tone: "high" }
+  ];
+  if (file.score.fanIo >= HIGH_FAN_IN) badges.push({ label: "HIGH FAN-IN", tone: "info" });
+  if (file.score.securityTaint > 0) badges.push({ label: "SECURITY", tone: "high" });
+  if (file.score.riskZone > 0) badges.push({ label: "RISK ZONE", tone: "info" });
+  return badges;
+};
+const toneColor = (tone) => tone === "high" ? theme.high : tone === "info" ? theme.info : theme.muted;
+const FileRow = ({ file, viewed, onToggleViewed }) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+  "li",
+  {
+    style: {
+      listStyle: "none",
+      padding: "6px 0",
+      borderBottom: `1px solid ${theme.border}`,
+      opacity: viewed ? 0.45 : 1
+    },
+    children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { style: { display: "flex", gap: 8, alignItems: "baseline", cursor: "pointer" }, children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("input", { type: "checkbox", checked: viewed, onChange: () => onToggleViewed(file.path) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { style: { flex: 1 }, children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { style: { fontFamily: "ui-monospace, monospace", fontSize: 12 }, children: file.path }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { style: { display: "block", color: theme.muted, fontSize: 11 }, children: file.reason || "no signal" })
+        ] })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { style: { display: "flex", gap: 4, marginTop: 2, marginLeft: 24, flexWrap: "wrap" }, children: deriveFileBadges(file).map((b) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "span",
+        {
+          style: {
+            fontSize: 9,
+            padding: "1px 5px",
+            borderRadius: 3,
+            color: theme.bg,
+            background: toneColor(b.tone)
+          },
+          children: b.label
+        },
+        b.label
+      )) })
+    ]
+  }
+);
+const StageList = ({ stages, isViewed: isViewed2, onToggleViewed }) => /* @__PURE__ */ jsxRuntimeExports.jsx("div", { children: stages.map((stage) => /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { style: { marginBottom: 16 }, children: [
+  /* @__PURE__ */ jsxRuntimeExports.jsxs(
+    "h3",
+    {
+      style: {
+        fontSize: 12,
+        color: theme.accent,
+        margin: "0 0 4px",
+        fontFamily: "ui-monospace, monospace"
+      },
+      children: [
+        stage.order + 1,
+        ". ",
+        stage.moduleDir
+      ]
+    }
+  ),
+  /* @__PURE__ */ jsxRuntimeExports.jsx("ul", { style: { margin: 0, padding: 0 }, children: stage.files.map((f) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+    FileRow,
+    {
+      file: f,
+      viewed: isViewed2(f.path),
+      onToggleViewed
+    },
+    f.path
+  )) })
+] }, stage.moduleDir)) });
+const key = (path) => `fallow-viewed:${path}`;
+const isViewed = (store, path) => store.getItem(key(path)) === "1";
+const setViewed = (store, path, viewed) => {
+  store.setItem(key(path), viewed ? "1" : "0");
+};
 const App = () => {
   const [doc, setDoc] = reactExports.useState(null);
   const [error, setError] = reactExports.useState(null);
   const [loading, setLoading] = reactExports.useState(false);
+  const [viewedTick, setViewedTick] = reactExports.useState(0);
   const load = async () => {
     setError(null);
     setLoading(true);
@@ -12451,62 +12599,62 @@ const App = () => {
       setLoading(false);
     }
   };
+  const isViewed$1 = reactExports.useCallback(
+    (path) => viewedTick >= 0 && isViewed(window.localStorage, path),
+    [viewedTick]
+  );
+  const onToggleViewed = reactExports.useCallback((path) => {
+    setViewed(window.localStorage, path, !isViewed(window.localStorage, path));
+    setViewedTick((t) => t + 1);
+  }, []);
   return /* @__PURE__ */ jsxRuntimeExports.jsxs(
     "div",
     {
       style: {
         display: "grid",
-        gridTemplateColumns: "400px 1fr",
+        gridTemplateColumns: "440px 1fr",
         height: "100vh",
-        fontFamily: "system-ui, sans-serif"
+        fontFamily: "system-ui, sans-serif",
+        background: theme.bg,
+        color: theme.text
       },
       children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs(
           "aside",
           {
             style: {
-              borderRight: "1px solid #2a2521",
+              borderRight: `1px solid ${theme.border}`,
               padding: 16,
               overflow: "auto",
-              background: "#16130f",
-              color: "#e8e3da"
+              background: theme.panel
             },
             children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { style: { fontSize: 16, margin: "0 0 12px" }, children: "Fallow Review" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("button", { onClick: () => void load(), disabled: loading, children: loading ? "Reviewing…" : "Load review" }),
-              error && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { style: { color: "#e5484d", whiteSpace: "pre-wrap" }, children: error }),
-              doc && /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { style: { marginTop: 16, fontSize: 13 }, children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsx("p", { style: { fontWeight: 600 }, children: doc.focus.headline }),
-                /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { children: [
-                  doc.stages.length,
-                  " stages · ",
-                  doc.decisions.length,
-                  " decisions"
-                ] }),
-                doc.cleared.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
-                  /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { style: { fontSize: 13, marginBottom: 4 }, children: "Fallow already handled" }),
-                  /* @__PURE__ */ jsxRuntimeExports.jsx("ul", { style: { margin: 0, paddingLeft: 18 }, children: doc.cleared.map((c) => /* @__PURE__ */ jsxRuntimeExports.jsxs("li", { children: [
-                    c.count,
-                    " ",
-                    c.label
-                  ] }, c.kind)) })
-                ] })
+              /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                "div",
+                {
+                  style: {
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    marginBottom: 12
+                  },
+                  children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { style: { fontSize: 14, margin: 0 }, children: "Fallow Review" }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("button", { onClick: () => void load(), disabled: loading, style: { fontSize: 12 }, children: loading ? "Reviewing…" : "Load review" })
+                  ]
+                }
+              ),
+              error && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { style: { color: theme.danger, whiteSpace: "pre-wrap", fontSize: 12 }, children: error }),
+              doc && /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx(ReviewFocus, { focus: doc.focus }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(ClearedPanel, { cleared: doc.cleared }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(DecisionList, { decisions: doc.decisions }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(StageList, { stages: doc.stages, isViewed: isViewed$1, onToggleViewed })
               ] })
             ]
           }
         ),
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "main",
-          {
-            style: {
-              background: "#0e0c0a",
-              color: "#6b6356",
-              display: "grid",
-              placeItems: "center"
-            },
-            children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "app-under-review region (Phases 5-7)" })
-          }
-        )
+        /* @__PURE__ */ jsxRuntimeExports.jsx("main", { style: { display: "grid", placeItems: "center", color: theme.muted }, children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "app-under-review region (Phases 5-7)" }) })
       ]
     }
   );

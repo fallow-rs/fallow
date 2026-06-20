@@ -1,10 +1,17 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import type { WalkthroughDocument } from "../../model/walkthrough";
+import { ReviewFocus } from "./components/ReviewFocus";
+import { ClearedPanel } from "./components/ClearedPanel";
+import { DecisionList } from "./components/DecisionList";
+import { StageList } from "./components/StageList";
+import { isViewed as readViewed, setViewed as writeViewed } from "./lib/viewed";
+import { theme } from "./theme";
 
 export const App = () => {
   const [doc, setDoc] = useState<WalkthroughDocument | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [viewedTick, setViewedTick] = useState(0);
 
   const load = async (): Promise<void> => {
     setError(null);
@@ -18,58 +25,61 @@ export const App = () => {
     }
   };
 
+  // viewedTick forces a fresh closure (and re-render) after each toggle.
+  const isViewed = useCallback(
+    (path: string) => viewedTick >= 0 && readViewed(window.localStorage, path),
+    [viewedTick],
+  );
+  const onToggleViewed = useCallback((path: string) => {
+    writeViewed(window.localStorage, path, !readViewed(window.localStorage, path));
+    setViewedTick((t) => t + 1);
+  }, []);
+
   return (
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "400px 1fr",
+        gridTemplateColumns: "440px 1fr",
         height: "100vh",
         fontFamily: "system-ui, sans-serif",
+        background: theme.bg,
+        color: theme.text,
       }}
     >
       <aside
         style={{
-          borderRight: "1px solid #2a2521",
+          borderRight: `1px solid ${theme.border}`,
           padding: 16,
           overflow: "auto",
-          background: "#16130f",
-          color: "#e8e3da",
+          background: theme.panel,
         }}
       >
-        <h1 style={{ fontSize: 16, margin: "0 0 12px" }}>Fallow Review</h1>
-        <button onClick={() => void load()} disabled={loading}>
-          {loading ? "Reviewing…" : "Load review"}
-        </button>
-        {error && <p style={{ color: "#e5484d", whiteSpace: "pre-wrap" }}>{error}</p>}
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 12,
+          }}
+        >
+          <h1 style={{ fontSize: 14, margin: 0 }}>Fallow Review</h1>
+          <button onClick={() => void load()} disabled={loading} style={{ fontSize: 12 }}>
+            {loading ? "Reviewing…" : "Load review"}
+          </button>
+        </div>
+        {error && (
+          <p style={{ color: theme.danger, whiteSpace: "pre-wrap", fontSize: 12 }}>{error}</p>
+        )}
         {doc && (
-          <section style={{ marginTop: 16, fontSize: 13 }}>
-            <p style={{ fontWeight: 600 }}>{doc.focus.headline}</p>
-            <p>
-              {doc.stages.length} stages · {doc.decisions.length} decisions
-            </p>
-            {doc.cleared.length > 0 && (
-              <>
-                <h2 style={{ fontSize: 13, marginBottom: 4 }}>Fallow already handled</h2>
-                <ul style={{ margin: 0, paddingLeft: 18 }}>
-                  {doc.cleared.map((c) => (
-                    <li key={c.kind}>
-                      {c.count} {c.label}
-                    </li>
-                  ))}
-                </ul>
-              </>
-            )}
-          </section>
+          <>
+            <ReviewFocus focus={doc.focus} />
+            <ClearedPanel cleared={doc.cleared} />
+            <DecisionList decisions={doc.decisions} />
+            <StageList stages={doc.stages} isViewed={isViewed} onToggleViewed={onToggleViewed} />
+          </>
         )}
       </aside>
-      <main
-        style={{
-          background: "#0e0c0a",
-          color: "#6b6356",
-          display: "grid",
-          placeItems: "center",
-        }}
-      >
+      <main style={{ display: "grid", placeItems: "center", color: theme.muted }}>
         <span>app-under-review region (Phases 5-7)</span>
       </main>
     </div>
