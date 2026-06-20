@@ -12630,6 +12630,27 @@ const StageList = ({ stages, isViewed: isViewed2, onToggleViewed, onAddNote }) =
     f.path
   )) })
 ] }, stage.moduleDir)) });
+const InspectorCard = ({ card }) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+  "section",
+  {
+    style: {
+      border: `1px solid ${theme.accent}`,
+      borderRadius: 6,
+      padding: 10,
+      marginBottom: 12
+    },
+    children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { style: { fontSize: 11, color: theme.muted }, children: "inspected" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { style: { fontFamily: "ui-monospace, monospace", fontSize: 12 }, children: [
+        card.component ? `${card.component} · ` : "",
+        card.file,
+        ":",
+        card.line
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("ul", { style: { margin: "6px 0 0", paddingLeft: 16, fontSize: 11, color: theme.muted }, children: card.facts.map((f, i) => /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: f }, `${card.file}-${i}`)) })
+    ]
+  }
+);
 const AnnotateCanvas = () => {
   const [url, setUrl] = reactExports.useState("http://localhost:5273");
   const [img, setImg] = reactExports.useState(null);
@@ -12748,6 +12769,10 @@ const App = () => {
   const [loading, setLoading] = reactExports.useState(false);
   const [viewedTick, setViewedTick] = reactExports.useState(0);
   const [noteCount, setNoteCount] = reactExports.useState(0);
+  const [card, setCard] = reactExports.useState(null);
+  reactExports.useEffect(() => {
+    window.fallow.onInspectSelection(setCard);
+  }, []);
   const load = async () => {
     setError(null);
     setLoading(true);
@@ -12817,6 +12842,7 @@ const App = () => {
                 " note(s) sent to the agent feed"
               ] }),
               error && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { style: { color: theme.danger, whiteSpace: "pre-wrap", fontSize: 12 }, children: error }),
+              card && /* @__PURE__ */ jsxRuntimeExports.jsx(InspectorCard, { card }),
               doc && /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
                 /* @__PURE__ */ jsxRuntimeExports.jsx(ReviewFocus, { focus: doc.focus }),
                 /* @__PURE__ */ jsxRuntimeExports.jsx(ClearedPanel, { cleared: doc.cleared }),

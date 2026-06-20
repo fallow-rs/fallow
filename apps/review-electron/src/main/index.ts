@@ -5,9 +5,14 @@ import { appendFeedItem } from "./feed";
 import { buildAgentWalkthrough } from "./agentWalkthrough";
 import { captureUrl } from "./capture";
 import { saveAnnotatedShot, type SaveAnnotation } from "./shots";
+import { startInspectServer } from "./inspectServer";
 import type { FeedItem } from "../model/agent";
+import type { WalkthroughDocument } from "../model/walkthrough";
 
-const createWindow = (): void => {
+let mainWindow: BrowserWindow | null = null;
+let latestDoc: WalkthroughDocument | null = null;
+
+const createWindow = (): BrowserWindow => {
   const win = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -25,9 +30,13 @@ const createWindow = (): void => {
   } else {
     void win.loadFile(join(__dirname, "../renderer/index.html"));
   }
+  return win;
 };
 
-ipcMain.handle("review:get", (_event, root: string | undefined) => runReview(root));
+ipcMain.handle("review:get", async (_event, root: string | undefined) => {
+  latestDoc = await runReview(root);
+  return latestDoc;
+});
 ipcMain.handle("review:guide", (_event, root: string | undefined) => runGuide(root));
 ipcMain.handle("feed:append", (_event, item: FeedItem) => appendFeedItem(process.cwd(), item));
 ipcMain.handle("review:validate", (_event, hash: string, items: FeedItem[]) =>
@@ -39,9 +48,14 @@ ipcMain.handle("shot:save", (_event, payload: SaveAnnotation) =>
 );
 
 void app.whenReady().then(() => {
-  createWindow();
+  mainWindow = createWindow();
+  startInspectServer(
+    () => latestDoc,
+    (card) => mainWindow?.webContents.send("inspect:selection", card),
+    process.cwd(),
+  );
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (BrowserWindow.getAllWindows().length === 0) mainWindow = createWindow();
   });
 });
 

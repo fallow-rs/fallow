@@ -9,3 +9,11 @@ createRoot(root).render(
     <App />
   </StrictMode>,
 );
+
+// Dev only: inject the Fallow grounded-inspector picker, posting selections to
+// the Electron host's localhost bridge.
+if (import.meta.env.DEV) {
+  void import("../../../src/inspector/picker").then((m) =>
+    m.startInspector({ bridgeUrl: "http://localhost:7787/fallow-select" }),
+  );
+}

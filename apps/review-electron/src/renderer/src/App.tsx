@@ -1,9 +1,11 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { WalkthroughDocument } from "../../model/walkthrough";
+import type { InspectorCard as InspectorCardData } from "../../main/inspect";
 import { ReviewFocus } from "./components/ReviewFocus";
 import { ClearedPanel } from "./components/ClearedPanel";
 import { DecisionList } from "./components/DecisionList";
 import { StageList } from "./components/StageList";
+import { InspectorCard } from "./components/InspectorCard";
 import { AnnotateCanvas } from "./components/AnnotateCanvas";
 import { isViewed as readViewed, setViewed as writeViewed } from "./lib/viewed";
 import { theme } from "./theme";
@@ -14,6 +16,11 @@ export const App = () => {
   const [loading, setLoading] = useState(false);
   const [viewedTick, setViewedTick] = useState(0);
   const [noteCount, setNoteCount] = useState(0);
+  const [card, setCard] = useState<InspectorCardData | null>(null);
+
+  useEffect(() => {
+    window.fallow.onInspectSelection(setCard);
+  }, []);
 
   const load = async (): Promise<void> => {
     setError(null);
@@ -79,11 +86,14 @@ export const App = () => {
           </button>
         </div>
         {noteCount > 0 && (
-          <p style={{ fontSize: 11, color: theme.muted }}>{noteCount} note(s) sent to the agent feed</p>
+          <p style={{ fontSize: 11, color: theme.muted }}>
+            {noteCount} note(s) sent to the agent feed
+          </p>
         )}
         {error && (
           <p style={{ color: theme.danger, whiteSpace: "pre-wrap", fontSize: 12 }}>{error}</p>
         )}
+        {card && <InspectorCard card={card} />}
         {doc && (
           <>
             <ReviewFocus focus={doc.focus} />

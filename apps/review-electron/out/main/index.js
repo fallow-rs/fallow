@@ -5,6 +5,7 @@ const node_child_process = require("node:child_process");
 const promises = require("node:fs/promises");
 const node_os = require("node:os");
 const node_util = require("node:util");
+const node_http = require("node:http");
 const toScore = (s) => ({
   fanIo: s?.fan_io ?? 0,
   securityTaint: s?.security_taint ?? 0,
@@ -165,6 +166,67 @@ const captureUrl = async (root, url, at2) => {
     win.destroy();
   }
 };
+const factsForFile = (doc, file) => {
+  for (const stage of doc.stages) {
+    const found = stage.files.find((f) => f.path === file);
+    if (!found) continue;
+    const facts = [`stage ${stage.order + 1}: ${stage.moduleDir}`];
+    if (found.reason) facts.push(found.reason);
+    facts.push(`attention ${found.attention}${found.deprioritized ? " (deprioritized)" : ""}`);
+    return facts;
+  }
+  return ["no Fallow signal for this file in the current review"];
+};
+const buildInspectorCard = (doc, sel) => ({
+  file: sel.file,
+  line: sel.line,
+  component: sel.component ?? null,
+  facts: doc ? factsForFile(doc, sel.file) : ["no review loaded yet"]
+});
+const INSPECT_PORT = 7787;
+const SELECT_PATH = "/fallow-select";
+const CORS = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-methods": "POST, OPTIONS",
+  "access-control-allow-headers": "content-type"
+};
+const startInspectServer = (getDoc, send, root) => {
+  const server = node_http.createServer((req, res) => {
+    if (req.method === "OPTIONS") {
+      res.writeHead(204, CORS).end();
+      return;
+    }
+    if (req.method !== "POST" || req.url !== SELECT_PATH) {
+      res.writeHead(404, CORS).end();
+      return;
+    }
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk;
+    });
+    req.on("end", () => {
+      void (async () => {
+        try {
+          const sel = JSON.parse(body);
+          const card = buildInspectorCard(getDoc(), sel);
+          send(card);
+          await appendFeedItem(root, {
+            target: { kind: "component", value: sel.component ?? `${sel.file}:${sel.line}` },
+            note: `inspected ${sel.component ?? sel.file}`,
+            at: (/* @__PURE__ */ new Date()).toISOString()
+          });
+          res.writeHead(200, { "content-type": "application/json", ...CORS }).end(JSON.stringify(card));
+        } catch (err) {
+          res.writeHead(400, CORS).end(String(err));
+        }
+      })();
+    });
+  });
+  server.listen(INSPECT_PORT, "127.0.0.1");
+  return server;
+};
+let mainWindow = null;
+let latestDoc = null;
 const createWindow = () => {
   const win = new electron.BrowserWindow({
     width: 1400,
@@ -182,8 +244,12 @@ const createWindow = () => {
   } else {
     void win.loadFile(node_path.join(__dirname, "../renderer/index.html"));
   }
+  return win;
 };
-electron.ipcMain.handle("review:get", (_event, root) => runReview(root));
+electron.ipcMain.handle("review:get", async (_event, root) => {
+  latestDoc = await runReview(root);
+  return latestDoc;
+});
 electron.ipcMain.handle("review:guide", (_event, root) => runGuide(root));
 electron.ipcMain.handle("feed:append", (_event, item) => appendFeedItem(process.cwd(), item));
 electron.ipcMain.handle(
@@ -196,9 +262,14 @@ electron.ipcMain.handle(
   (_event, payload) => saveAnnotatedShot(process.cwd(), payload, Date.now())
 );
 void electron.app.whenReady().then(() => {
-  createWindow();
+  mainWindow = createWindow();
+  startInspectServer(
+    () => latestDoc,
+    (card) => mainWindow?.webContents.send("inspect:selection", card),
+    process.cwd()
+  );
   electron.app.on("activate", () => {
-    if (electron.BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (electron.BrowserWindow.getAllWindows().length === 0) mainWindow = createWindow();
   });
 });
 electron.app.on("window-all-closed", () => {
