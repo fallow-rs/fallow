@@ -1,6 +1,7 @@
 node_modules/
 dist/
 dist-electron/
+out/
 release/
 .fallow-review/
 *.log
