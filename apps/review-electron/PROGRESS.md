@@ -13,7 +13,7 @@ stacked on `fix/review-quality` (engine E1-E8+E11).
 - Phase 4 (W3 agent feedback channel): DONE (acceptance proof owed to Phase 8)
 - Phase 5 (W4-visual screenshot annotate): DONE
 - Phase 6 (W5 grounded inspector): DONE (live flow e2e-verified in Phase 8)
-- Phase 7 (W6 live-app annotate): pending
+- Phase 7 (W6 live-app annotate): DONE (live webview interaction e2e in Phase 8)
 - Phase 8 (e2e tests): pending
 - Phase 9 (package + docs): pending
 
@@ -45,3 +45,6 @@ stacked on `fix/review-quality` (engine E1-E8+E11).
   (port 7787 + CORS), buildInspectorCard enrichment, inspect:selection -> UI
   InspectorCard, sample-app vite wiring (dev-only babel + picker). vitest 23/23,
   tsc, electron-vite build green. Live flow e2e in Phase 8.
+- Phase 7 DONE: LiveApp <webview> live embed (webviewTag) + capturePage of the
+  current state -> shared DrawableImage -> feed; right-region Live|Screenshot
+  toggle. vitest 23/23, tsc, build green. sample-app deps installed.

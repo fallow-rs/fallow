@@ -21,6 +21,7 @@ const createWindow = (): BrowserWindow => {
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
       sandbox: false,
+      webviewTag: true,
     },
   });
 

@@ -12651,25 +12651,12 @@ const InspectorCard = ({ card }) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
     ]
   }
 );
-const AnnotateCanvas = () => {
-  const [url, setUrl] = reactExports.useState("http://localhost:5273");
-  const [img, setImg] = reactExports.useState(null);
-  const [note, setNote] = reactExports.useState("");
-  const [status, setStatus] = reactExports.useState(null);
+const DrawableImage = ({ dataUrl, target, onDone }) => {
   const canvasRef = reactExports.useRef(null);
   const drawing = reactExports.useRef(false);
-  const capture = async () => {
-    setStatus("capturing…");
-    try {
-      const shot = await window.fallow.capture(url);
-      setImg(shot.dataUrl);
-      setStatus(null);
-    } catch (e) {
-      setStatus(e instanceof Error ? e.message : String(e));
-    }
-  };
+  const [note, setNote] = reactExports.useState("");
+  const [status, setStatus] = reactExports.useState(null);
   reactExports.useEffect(() => {
-    if (!img) return;
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx) return;
@@ -12679,15 +12666,16 @@ const AnnotateCanvas = () => {
       canvas.height = image.height;
       ctx.drawImage(image, 0, 0);
     };
-    image.src = img;
-  }, [img]);
+    image.src = dataUrl;
+  }, [dataUrl]);
   const at = (e) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    const sx = e.currentTarget.width / rect.width;
-    const sy = e.currentTarget.height / rect.height;
-    return [(e.clientX - rect.left) * sx, (e.clientY - rect.top) * sy];
+    return [
+      (e.clientX - rect.left) * (e.currentTarget.width / rect.width),
+      (e.clientY - rect.top) * (e.currentTarget.height / rect.height)
+    ];
   };
-  const start = (e) => {
+  const startDraw = (e) => {
     const ctx = canvasRef.current?.getContext("2d");
     if (!ctx) return;
     drawing.current = true;
@@ -12697,26 +12685,65 @@ const AnnotateCanvas = () => {
     ctx.beginPath();
     ctx.moveTo(x, y);
   };
-  const move = (e) => {
+  const moveDraw = (e) => {
     const ctx = canvasRef.current?.getContext("2d");
     if (!drawing.current || !ctx) return;
     const [x, y] = at(e);
     ctx.lineTo(x, y);
     ctx.stroke();
   };
-  const end = () => {
+  const endDraw = () => {
     drawing.current = false;
   };
   const save = async () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    await window.fallow.saveShot({
-      annotatedDataUrl: canvas.toDataURL("image/png"),
-      note,
-      target: url
-    });
+    await window.fallow.saveShot({ annotatedDataUrl: canvas.toDataURL("image/png"), note, target });
     setStatus("saved to agent feed");
     setNote("");
+    onDone?.();
+  };
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { style: { padding: 8, overflow: "auto" }, children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      "canvas",
+      {
+        ref: canvasRef,
+        onMouseDown: startDraw,
+        onMouseMove: moveDraw,
+        onMouseUp: endDraw,
+        onMouseLeave: endDraw,
+        style: { maxWidth: "100%", border: `1px solid ${theme.border}`, cursor: "crosshair" }
+      }
+    ),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { style: { display: "flex", gap: 6, marginTop: 8 }, children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "input",
+        {
+          value: note,
+          onChange: (e) => setNote(e.target.value),
+          placeholder: "note for the agent",
+          style: { flex: 1, fontSize: 12 }
+        }
+      ),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { onClick: () => void save(), style: { fontSize: 12 }, children: "Save annotation" }),
+      onDone && /* @__PURE__ */ jsxRuntimeExports.jsx("button", { onClick: onDone, style: { fontSize: 12 }, children: "Back" })
+    ] }),
+    status && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { style: { fontSize: 11, color: theme.muted }, children: status })
+  ] });
+};
+const AnnotateCanvas = () => {
+  const [url, setUrl] = reactExports.useState("http://localhost:5273");
+  const [img, setImg] = reactExports.useState(null);
+  const [status, setStatus] = reactExports.useState(null);
+  const capture = async () => {
+    setStatus("capturing…");
+    try {
+      const shot = await window.fallow.capture(url);
+      setImg(shot.dataUrl);
+      setStatus(null);
+    } catch (e) {
+      setStatus(e instanceof Error ? e.message : String(e));
+    }
   };
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { style: { padding: 12, width: "100%", height: "100%", overflow: "auto", color: theme.text }, children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { style: { display: "flex", gap: 6, marginBottom: 8 }, children: [
@@ -12731,31 +12758,59 @@ const AnnotateCanvas = () => {
       /* @__PURE__ */ jsxRuntimeExports.jsx("button", { onClick: () => void capture(), style: { fontSize: 12 }, children: "Screenshot" })
     ] }),
     status && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { style: { fontSize: 11, color: theme.muted }, children: status }),
-    img && /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+    img && /* @__PURE__ */ jsxRuntimeExports.jsx(DrawableImage, { dataUrl: img, target: url, onDone: () => setImg(null) })
+  ] });
+};
+const LiveApp = () => {
+  const hostRef = reactExports.useRef(null);
+  const webviewRef = reactExports.useRef(null);
+  const [url, setUrl] = reactExports.useState("http://localhost:5273");
+  const [shot, setShot] = reactExports.useState(null);
+  const [status, setStatus] = reactExports.useState(null);
+  reactExports.useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    const wv = document.createElement("webview");
+    wv.src = url;
+    Object.assign(wv.style, { width: "100%", height: "100%", border: "none" });
+    host.appendChild(wv);
+    webviewRef.current = wv;
+    return () => {
+      wv.remove();
+      webviewRef.current = null;
+    };
+  }, []);
+  const go = () => {
+    const wv = webviewRef.current;
+    if (wv) void wv.loadURL(url).catch(() => void 0);
+  };
+  const annotate = async () => {
+    const wv = webviewRef.current;
+    if (!wv) return;
+    setStatus("capturing live view…");
+    try {
+      const img = await wv.capturePage();
+      setShot(img.toDataURL());
+      setStatus(null);
+    } catch (e) {
+      setStatus(e instanceof Error ? e.message : String(e));
+    }
+  };
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { style: { display: "grid", gridTemplateRows: "auto 1fr", height: "100%", color: theme.text }, children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { style: { display: "flex", gap: 6, padding: 8, borderBottom: `1px solid ${theme.border}` }, children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx(
-        "canvas",
+        "input",
         {
-          ref: canvasRef,
-          onMouseDown: start,
-          onMouseMove: move,
-          onMouseUp: end,
-          onMouseLeave: end,
-          style: { maxWidth: "100%", border: `1px solid ${theme.border}`, cursor: "crosshair" }
+          value: url,
+          onChange: (e) => setUrl(e.target.value),
+          style: { flex: 1, fontSize: 12 }
         }
       ),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { style: { display: "flex", gap: 6, marginTop: 8 }, children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "input",
-          {
-            value: note,
-            onChange: (e) => setNote(e.target.value),
-            placeholder: "note for the agent",
-            style: { flex: 1, fontSize: 12 }
-          }
-        ),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { onClick: () => void save(), style: { fontSize: 12 }, children: "Save annotation" })
-      ] })
-    ] })
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { onClick: go, style: { fontSize: 12 }, children: "Go" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { onClick: () => void annotate(), style: { fontSize: 12 }, children: "Annotate view" })
+    ] }),
+    status && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { style: { fontSize: 11, color: theme.muted, margin: 4 }, children: status }),
+    shot ? /* @__PURE__ */ jsxRuntimeExports.jsx(DrawableImage, { dataUrl: shot, target: url, onDone: () => setShot(null) }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { ref: hostRef, style: { height: "100%" } })
   ] });
 };
 const key = (path) => `fallow-viewed:${path}`;
@@ -12770,6 +12825,7 @@ const App = () => {
   const [viewedTick, setViewedTick] = reactExports.useState(0);
   const [noteCount, setNoteCount] = reactExports.useState(0);
   const [card, setCard] = reactExports.useState(null);
+  const [rightMode, setRightMode] = reactExports.useState("live");
   reactExports.useEffect(() => {
     window.fallow.onInspectSelection(setCard);
   }, []);
@@ -12860,7 +12916,13 @@ const App = () => {
             ]
           }
         ),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("main", { style: { overflow: "hidden" }, children: /* @__PURE__ */ jsxRuntimeExports.jsx(AnnotateCanvas, {}) })
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("main", { style: { overflow: "hidden", display: "grid", gridTemplateRows: "auto 1fr" }, children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { style: { display: "flex", gap: 6, padding: 6, borderBottom: `1px solid ${theme.border}` }, children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { onClick: () => setRightMode("live"), disabled: rightMode === "live", style: { fontSize: 12 }, children: "Live app" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { onClick: () => setRightMode("shot"), disabled: rightMode === "shot", style: { fontSize: 12 }, children: "Screenshot URL" })
+          ] }),
+          rightMode === "live" ? /* @__PURE__ */ jsxRuntimeExports.jsx(LiveApp, {}) : /* @__PURE__ */ jsxRuntimeExports.jsx(AnnotateCanvas, {})
+        ] })
       ]
     }
   );

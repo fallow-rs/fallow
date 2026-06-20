@@ -235,7 +235,8 @@ const createWindow = () => {
     backgroundColor: "#0e0c0a",
     webPreferences: {
       preload: node_path.join(__dirname, "../preload/index.js"),
-      sandbox: false
+      sandbox: false,
+      webviewTag: true
     }
   });
   const devUrl = process.env["ELECTRON_RENDERER_URL"];

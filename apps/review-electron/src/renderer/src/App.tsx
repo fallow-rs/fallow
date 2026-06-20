@@ -7,6 +7,7 @@ import { DecisionList } from "./components/DecisionList";
 import { StageList } from "./components/StageList";
 import { InspectorCard } from "./components/InspectorCard";
 import { AnnotateCanvas } from "./components/AnnotateCanvas";
+import { LiveApp } from "./components/LiveApp";
 import { isViewed as readViewed, setViewed as writeViewed } from "./lib/viewed";
 import { theme } from "./theme";
 
@@ -17,6 +18,7 @@ export const App = () => {
   const [viewedTick, setViewedTick] = useState(0);
   const [noteCount, setNoteCount] = useState(0);
   const [card, setCard] = useState<InspectorCardData | null>(null);
+  const [rightMode, setRightMode] = useState<"live" | "shot">("live");
 
   useEffect(() => {
     window.fallow.onInspectSelection(setCard);
@@ -108,8 +110,16 @@ export const App = () => {
           </>
         )}
       </aside>
-      <main style={{ overflow: "hidden" }}>
-        <AnnotateCanvas />
+      <main style={{ overflow: "hidden", display: "grid", gridTemplateRows: "auto 1fr" }}>
+        <div style={{ display: "flex", gap: 6, padding: 6, borderBottom: `1px solid ${theme.border}` }}>
+          <button onClick={() => setRightMode("live")} disabled={rightMode === "live"} style={{ fontSize: 12 }}>
+            Live app
+          </button>
+          <button onClick={() => setRightMode("shot")} disabled={rightMode === "shot"} style={{ fontSize: 12 }}>
+            Screenshot URL
+          </button>
+        </div>
+        {rightMode === "live" ? <LiveApp /> : <AnnotateCanvas />}
       </main>
     </div>
   );
