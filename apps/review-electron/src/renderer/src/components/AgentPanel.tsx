@@ -39,17 +39,17 @@ export const AgentPanel = () => {
         <Bot className="size-3.5" />
         agent review
       </div>
-      <div className="flex flex-wrap gap-1">
+      <div className="inline-flex items-center gap-0.5 rounded-lg bg-muted p-0.5">
         {backends.map((b) => (
           <button
             key={b.id}
             type="button"
             onClick={() => setSelected(b.id)}
             className={cn(
-              "rounded-md px-2 py-1 text-[11px] lowercase transition-colors",
+              "rounded-md px-2.5 py-1 text-[11px] lowercase transition-colors",
               selected === b.id
-                ? "bg-primary text-primary-foreground"
-                : "bg-background text-muted-foreground hover:text-foreground",
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
             )}
           >
             {b.label}

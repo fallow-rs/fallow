@@ -168,3 +168,9 @@ stacked on `fix/review-quality` (engine E1-E8+E11).
   toolbar so DiffView owns the path + stats header, matching live/shot where each
   sub-component owns its own toolbar. Main mode bar is now just the segmented
   control across all three modes. format/lint/tsc/build/e2e 5/5.
+- Round 7 (segmented-control consistency, MED): the AgentPanel backend picker
+  (claude code / codex / opencode) used a different visual pattern (separate pills,
+  bg-primary active) than the diff/live/screenshot mode control (unified bg-muted
+  container, bg-background active) for the same pick-one interaction. Unified the
+  backend picker to the segmented-control treatment so both read identically.
+  format/lint/tsc/build/e2e 5/5.
