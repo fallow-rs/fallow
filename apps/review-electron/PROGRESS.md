@@ -74,3 +74,8 @@ stacked on `fix/review-quality` (engine E1-E8+E11).
   inline styles. Conventions applied (lowercase, mono tabular-nums, Badge variants
   for signal). tsc + oxlint + build + e2e 3/3 green. Next: P2 codiff-style diff
   views (@pierre/diffs + git:diff IPC).
+- P2 DONE: codiff-style diff views. diff:get IPC (git diff vs review base) +
+  hand-rolled unified-diff parser (lib/diff.ts, tested) + shadcn DiffView (unified,
+  mono, line-number gutters, fallow-green/red signal, +N/-N stats, binary
+  fallback); clickable file row -> diff mode. e2e opens a diff (4/4). split/
+  markdown/image/deferred = optional codiff parity, deferred. Next: P3 skills layer.

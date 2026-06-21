@@ -6,9 +6,10 @@ type Props = {
   isViewed: (path: string) => boolean;
   onToggleViewed: (path: string) => void;
   onAddNote: (path: string, note: string) => void;
+  onOpenDiff: (path: string) => void;
 };
 
-export const StageList = ({ stages, isViewed, onToggleViewed, onAddNote }: Props) => (
+export const StageList = ({ stages, isViewed, onToggleViewed, onAddNote, onOpenDiff }: Props) => (
   <div>
     {stages.map((stage) => (
       <section key={stage.moduleDir} className="mb-4">
@@ -23,6 +24,7 @@ export const StageList = ({ stages, isViewed, onToggleViewed, onAddNote }: Props
               viewed={isViewed(f.path)}
               onToggleViewed={onToggleViewed}
               onAddNote={onAddNote}
+              onOpenDiff={onOpenDiff}
             />
           ))}
         </ul>

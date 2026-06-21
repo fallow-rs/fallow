@@ -6,6 +6,7 @@ import { appendFeedItem } from "./feed";
 import { buildAgentWalkthrough } from "./agentWalkthrough";
 import { captureUrl } from "./capture";
 import { saveAnnotatedShot, type SaveAnnotation } from "./shots";
+import { getFileDiff } from "./diff";
 import { startInspectServer } from "./inspectServer";
 import type { FeedItem } from "../model/agent";
 import type { WalkthroughDocument } from "../model/walkthrough";
@@ -57,6 +58,9 @@ ipcMain.handle("review:validate", (_event, hash: string, items: FeedItem[]) =>
 ipcMain.handle("shot:capture", (_event, url: string) => captureUrl(process.cwd(), url, Date.now()));
 ipcMain.handle("shot:save", (_event, payload: SaveAnnotation) =>
   saveAnnotatedShot(process.cwd(), payload, Date.now()),
+);
+ipcMain.handle("diff:get", (_event, base: string, file: string) =>
+  getFileDiff(process.cwd(), base, file),
 );
 
 /**

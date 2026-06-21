@@ -12,12 +12,13 @@ type Props = {
   viewed: boolean;
   onToggleViewed: (path: string) => void;
   onAddNote: (path: string, note: string) => void;
+  onOpenDiff: (path: string) => void;
 };
 
 const badgeVariant = (tone: Tone): "default" | "secondary" | "outline" =>
   tone === "high" ? "default" : tone === "info" ? "secondary" : "outline";
 
-export const FileRow = ({ file, viewed, onToggleViewed, onAddNote }: Props) => {
+export const FileRow = ({ file, viewed, onToggleViewed, onAddNote, onOpenDiff }: Props) => {
   const [adding, setAdding] = useState(false);
   const [note, setNote] = useState("");
 
@@ -29,19 +30,25 @@ export const FileRow = ({ file, viewed, onToggleViewed, onAddNote }: Props) => {
 
   return (
     <li className={cn("border-b border-border py-1.5", viewed && "opacity-45")}>
-      <label className="flex cursor-pointer items-baseline gap-2">
+      <div className="flex items-baseline gap-2">
         <Checkbox
           checked={viewed}
           onCheckedChange={() => onToggleViewed(file.path)}
           className="mt-0.5"
+          aria-label={`mark ${file.path} reviewed`}
         />
-        <span className="flex-1">
+        <button
+          type="button"
+          data-testid="file-open"
+          onClick={() => onOpenDiff(file.path)}
+          className="flex-1 text-left hover:underline"
+        >
           <span className="font-mono text-xs">{file.path}</span>
           <span className="block text-[11px] text-muted-foreground">
             {file.reason || "no signal"}
           </span>
-        </span>
-      </label>
+        </button>
+      </div>
       <div className="ml-6 mt-1 flex flex-wrap items-center gap-1">
         {deriveFileBadges(file).map((b) => (
           <Badge

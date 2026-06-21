@@ -8,8 +8,11 @@ import { StageList } from "./components/StageList";
 import { InspectorCard } from "./components/InspectorCard";
 import { AnnotateCanvas } from "./components/AnnotateCanvas";
 import { LiveApp } from "./components/LiveApp";
+import { DiffView } from "./components/DiffView";
 import { isViewed as readViewed, setViewed as writeViewed } from "./lib/viewed";
 import { Button } from "@/components/ui/button";
+
+type RightMode = "live" | "shot" | "diff";
 
 export const App = () => {
   const [doc, setDoc] = useState<WalkthroughDocument | null>(null);
@@ -18,7 +21,8 @@ export const App = () => {
   const [viewedTick, setViewedTick] = useState(0);
   const [noteCount, setNoteCount] = useState(0);
   const [card, setCard] = useState<InspectorCardData | null>(null);
-  const [rightMode, setRightMode] = useState<"live" | "shot">("live");
+  const [rightMode, setRightMode] = useState<RightMode>("live");
+  const [diffFile, setDiffFile] = useState<string | null>(null);
 
   useEffect(() => {
     window.fallow.onInspectSelection(setCard);
@@ -55,6 +59,11 @@ export const App = () => {
     setNoteCount((n) => n + 1);
   }, []);
 
+  const onOpenDiff = useCallback((path: string) => {
+    setDiffFile(path);
+    setRightMode("diff");
+  }, []);
+
   return (
     <div className="grid h-screen grid-cols-[440px_1fr] bg-background font-sans text-foreground">
       <aside className="flex flex-col overflow-auto border-r border-border bg-card p-4">
@@ -82,12 +91,21 @@ export const App = () => {
               isViewed={isViewed}
               onToggleViewed={onToggleViewed}
               onAddNote={onAddNote}
+              onOpenDiff={onOpenDiff}
             />
           </>
         )}
       </aside>
       <main className="grid grid-rows-[auto_1fr] overflow-hidden">
-        <div className="flex gap-1.5 border-b border-border p-1.5">
+        <div className="flex items-center gap-1.5 border-b border-border p-1.5">
+          <Button
+            size="sm"
+            variant={rightMode === "diff" ? "secondary" : "ghost"}
+            disabled={!diffFile}
+            onClick={() => setRightMode("diff")}
+          >
+            diff
+          </Button>
           <Button
             size="sm"
             variant={rightMode === "live" ? "secondary" : "ghost"}
@@ -103,7 +121,13 @@ export const App = () => {
             screenshot url
           </Button>
         </div>
-        {rightMode === "live" ? <LiveApp /> : <AnnotateCanvas />}
+        {rightMode === "diff" && diffFile ? (
+          <DiffView file={diffFile} base={doc?.focus.baseRef ?? ""} />
+        ) : rightMode === "live" ? (
+          <LiveApp />
+        ) : (
+          <AnnotateCanvas />
+        )}
       </main>
     </div>
   );

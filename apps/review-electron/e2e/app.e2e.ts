@@ -37,6 +37,15 @@ test("loads a grounded walkthrough from the real engine", async () => {
   });
 });
 
+test("opens a file diff from the walkthrough", async () => {
+  app = await launch();
+  const win = await app.firstWindow();
+  await win.getByRole("button", { name: "Load review" }).click();
+  await expect(win.getByText(/changed files, .* risk, verdict/)).toBeVisible({ timeout: 50_000 });
+  await win.getByTestId("file-open").first().click();
+  await expect(win.getByText(/@@|no textual diff/)).toBeVisible({ timeout: 20_000 });
+});
+
 test("inspector bridge pushes a grounded card to the UI", async () => {
   app = await launch();
   const win = await app.firstWindow();
