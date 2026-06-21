@@ -32,6 +32,26 @@ Launch it from the repo you want to review (it reviews `process.cwd()`).
 - Live agent round-trip proven against the engine: an unanchored `signal_id` is
   rejected (`unanchored-signal-id`); a stale graph hash is rejected (`stale`).
 
+## Security hardening (Electron security checklist + electron-toolkit)
+
+Applied and e2e-verified (the app boots + the review/inspector flows pass under
+all of these):
+
+- `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`,
+  `webSecurity` on, no remote module.
+- `contextBridge` only (one method per IPC channel; preload guarded by
+  `process.contextIsolated`).
+- Strict CSP on the packaged/file-loaded document (`default-src 'self'`, scripts
+  `'self'`); dev server + the `<webview>` guest left untouched.
+- `setWindowOpenHandler(() => deny)` on every webContents; `will-navigate` blocked
+  for the app shell (off-app navigation denied).
+- `<webview>` hardened via `will-attach-webview` (preload stripped, nodeIntegration
+  off, contextIsolation on); webviewTag enabled only on the host window.
+- All permission requests + checks denied by default.
+- Single-instance lock; `ready-to-show` (no white flash); `setAppUserModelId`;
+  `optimizer.watchWindowShortcuts` (devtools in dev only).
+- Inspector bridge binds `127.0.0.1` only.
+
 ## Phases (all built; per-phase detail in apps/review-electron/PROGRESS.md)
 
 0 baseline + sample app · 1 W1 render model · 2 Electron scaffold · 3 walkthrough

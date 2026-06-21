@@ -14,6 +14,7 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@electron-toolkit/utils": "^4.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
@@ -35,9 +36,14 @@
   "build": {
     "appId": "dev.fallow.review",
     "productName": "Fallow Review",
-    "files": ["out/**/*", "package.json"],
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
     "mac": {
-      "target": ["dir"],
+      "target": [
+        "dir"
+      ],
       "category": "public.app-category.developer-tools"
     }
   }

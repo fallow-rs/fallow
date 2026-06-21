@@ -54,3 +54,7 @@ stacked on `fix/review-quality` (engine E1-E8+E11).
   hardened against port reuse. W3 accepted-judgment proof still owed.
 - Phase 9 DONE: npm run package -> signed dist/mac-arm64/Fallow Review.app;
   README + worktree STATUS.md written. ALL PHASES BUILT. Loop stopping.
+- Hardening pass: Electron security checklist applied (sandbox, contextIsolation,
+  CSP on file://, setWindowOpenHandler deny, will-navigate block, will-attach-
+  webview strip, permission deny-all, single-instance, ready-to-show,
+  @electron-toolkit/utils). tsc + vitest + build + e2e 3/3 green under all of it.
