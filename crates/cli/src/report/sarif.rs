@@ -4203,4 +4203,1429 @@ mod tests {
         let entries = sarif["runs"][0]["results"].as_array().unwrap();
         assert!(entries.is_empty());
     }
+
+    // --- Lines 44-45: SourceSnippetCache returns None for line == 0 ---
+    #[test]
+    fn source_snippet_cache_line_zero_returns_none() {
+        // An UnusedFile has no region; sarif_unused_file_fields sets source_path None
+        // so the snippet path is never read. We exercise the line == 0 guard
+        // indirectly through a dep finding with line = 0 (no snippet, no crash).
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .unused_dependencies
+            .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+                package_name: "zero-line".to_string(),
+                location: DependencyLocation::Dependencies,
+                path: root.join("package.json"),
+                line: 0,
+                used_in_workspaces: Vec::new(),
+            }));
+        let sarif = build_sarif(&results, &root, &RulesConfig::default());
+        let entry = &sarif["runs"][0]["results"][0];
+        // line == 0 means no region block
+        let phys = &entry["locations"][0]["physicalLocation"];
+        assert!(phys.get("region").is_none());
+    }
+
+    // --- Lines 214-234: sarif_private_type_leak_fields (lines 1445-1453 push) ---
+    #[test]
+    fn sarif_private_type_leak_result() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .private_type_leaks
+            .push(PrivateTypeLeakFinding::with_actions(PrivateTypeLeak {
+                path: root.join("src/api.ts"),
+                export_name: "publicFn".to_string(),
+                type_name: "_InternalType".to_string(),
+                line: 7,
+                col: 2,
+                span_start: 0,
+            }));
+        let rules = RulesConfig {
+            private_type_leaks: Severity::Error,
+            ..RulesConfig::default()
+        };
+        let sarif = build_sarif(&results, &root, &rules);
+        let entry = &sarif["runs"][0]["results"][0];
+        assert_eq!(entry["ruleId"], "fallow/private-type-leak");
+        assert_eq!(entry["level"], "error");
+        let msg = entry["message"]["text"].as_str().unwrap();
+        assert!(
+            msg.contains("publicFn"),
+            "message should mention the export name"
+        );
+        assert!(
+            msg.contains("_InternalType"),
+            "message should mention the private type"
+        );
+        let region = &entry["locations"][0]["physicalLocation"]["region"];
+        assert_eq!(region["startLine"], 7);
+        assert_eq!(region["startColumn"], 3); // col 2 + 1
+        assert_eq!(
+            entry["locations"][0]["physicalLocation"]["artifactLocation"]["uri"],
+            "src/api.ts"
+        );
+    }
+
+    // --- Lines 244-253: sarif_dep_fields with non-empty used_in_workspaces ---
+    #[test]
+    fn sarif_dep_with_workspace_context_in_message() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .unused_dependencies
+            .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+                package_name: "shared-lib".to_string(),
+                location: DependencyLocation::Dependencies,
+                path: root.join("packages/app/package.json"),
+                line: 4,
+                used_in_workspaces: vec![root.join("packages/other/package.json")],
+            }));
+        let sarif = build_sarif(&results, &root, &RulesConfig::default());
+        let entry = &sarif["runs"][0]["results"][0];
+        assert_eq!(entry["ruleId"], "fallow/unused-dependency");
+        let msg = entry["message"]["text"].as_str().unwrap();
+        assert!(
+            msg.contains("imported in other workspaces"),
+            "workspace hint should appear: {msg}"
+        );
+    }
+
+    // --- Lines 343-345 / 375-376 / 384-386: re-export cycle variants ---
+    #[test]
+    fn sarif_re_export_cycle_self_loop() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .re_export_cycles
+            .push(ReExportCycleFinding::with_actions(ReExportCycle {
+                files: vec![root.join("src/barrel.ts")],
+                kind: ReExportCycleKind::SelfLoop,
+            }));
+        let sarif = build_sarif(&results, &root, &RulesConfig::default());
+        let entry = &sarif["runs"][0]["results"][0];
+        assert_eq!(entry["ruleId"], "fallow/re-export-cycle");
+        let msg = entry["message"]["text"].as_str().unwrap();
+        assert!(
+            msg.contains("(self-loop)"),
+            "self-loop tag should be present: {msg}"
+        );
+        assert!(
+            msg.contains("src/barrel.ts"),
+            "file should be in the message: {msg}"
+        );
+    }
+
+    #[test]
+    fn sarif_re_export_cycle_multi_node() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .re_export_cycles
+            .push(ReExportCycleFinding::with_actions(ReExportCycle {
+                files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
+                kind: ReExportCycleKind::MultiNode,
+            }));
+        let sarif = build_sarif(&results, &root, &RulesConfig::default());
+        let entry = &sarif["runs"][0]["results"][0];
+        assert_eq!(entry["ruleId"], "fallow/re-export-cycle");
+        let msg = entry["message"]["text"].as_str().unwrap();
+        // MultiNode should NOT carry the (self-loop) tag
+        assert!(
+            !msg.contains("(self-loop)"),
+            "multi-node should not have self-loop tag: {msg}"
+        );
+        assert!(msg.contains("src/a.ts"), "first file should appear: {msg}");
+    }
+
+    // --- Lines 442-444: boundary violation with line == 0 ---
+    #[test]
+    fn sarif_boundary_violation_line_zero_skips_region() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .boundary_violations
+            .push(BoundaryViolationFinding::with_actions(BoundaryViolation {
+                from_path: root.join("src/ui/Btn.tsx"),
+                to_path: root.join("src/db/query.ts"),
+                from_zone: "ui".to_string(),
+                to_zone: "db".to_string(),
+                import_specifier: "src/db/query.ts".to_string(),
+                line: 0,
+                col: 0,
+            }));
+        let sarif = build_sarif(&results, &root, &RulesConfig::default());
+        let entry = &sarif["runs"][0]["results"][0];
+        assert_eq!(entry["ruleId"], "fallow/boundary-violation");
+        let phys = &entry["locations"][0]["physicalLocation"];
+        assert!(phys.get("region").is_none());
+    }
+
+    // --- Lines 449-463: sarif_boundary_coverage_fields ---
+    #[test]
+    fn sarif_boundary_coverage_result() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .boundary_coverage_violations
+            .push(BoundaryCoverageViolationFinding::with_actions(
+                BoundaryCoverageViolation {
+                    path: root.join("src/orphan.ts"),
+                    line: 1,
+                    col: 0,
+                },
+            ));
+        let sarif = build_sarif(&results, &root, &RulesConfig::default());
+        let entry = &sarif["runs"][0]["results"][0];
+        assert_eq!(entry["ruleId"], "fallow/boundary-coverage");
+        let msg = entry["message"]["text"].as_str().unwrap();
+        assert!(
+            msg.contains("architecture boundary zone"),
+            "message should describe coverage gap: {msg}"
+        );
+        let region = &entry["locations"][0]["physicalLocation"]["region"];
+        assert_eq!(region["startLine"], 1);
+        assert_eq!(region["startColumn"], 1); // col 0 + 1
+    }
+
+    // --- Lines 465-482: sarif_boundary_call_fields ---
+    #[test]
+    fn sarif_boundary_call_violation_result() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .boundary_call_violations
+            .push(BoundaryCallViolationFinding::with_actions(
+                BoundaryCallViolation {
+                    path: root.join("src/browser/index.ts"),
+                    line: 10,
+                    col: 4,
+                    zone: "browser".to_string(),
+                    callee: "fs.readFileSync".to_string(),
+                    pattern: "fs.*".to_string(),
+                },
+            ));
+        let sarif = build_sarif(&results, &root, &RulesConfig::default());
+        let entry = &sarif["runs"][0]["results"][0];
+        assert_eq!(entry["ruleId"], "fallow/boundary-call-violation");
+        let msg = entry["message"]["text"].as_str().unwrap();
+        assert!(msg.contains("fs.readFileSync"), "callee in message: {msg}");
+        assert!(msg.contains("fs.*"), "pattern in message: {msg}");
+        assert!(msg.contains("browser"), "zone in message: {msg}");
+        let region = &entry["locations"][0]["physicalLocation"]["region"];
+        assert_eq!(region["startLine"], 10);
+        assert_eq!(region["startColumn"], 5); // col 4 + 1
+    }
+
+    // --- Lines 484-515: sarif_policy_violation_fields (with and without message) ---
+    #[test]
+    fn sarif_policy_violation_with_message() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .policy_violations
+            .push(PolicyViolationFinding::with_actions(PolicyViolation {
+                path: root.join("src/service.ts"),
+                line: 3,
+                col: 0,
+                pack: "security".to_string(),
+                rule_id: "no-eval".to_string(),
+                kind: PolicyRuleKind::BannedCall,
+                matched: "eval".to_string(),
+                severity: PolicyViolationSeverity::Error,
+                message: Some("eval is a security hazard".to_string()),
+            }));
+        let sarif = build_sarif(&results, &root, &RulesConfig::default());
+        let entry = &sarif["runs"][0]["results"][0];
+        assert_eq!(entry["ruleId"], "fallow/policy-violation");
+        assert_eq!(entry["level"], "error");
+        let msg = entry["message"]["text"].as_str().unwrap();
+        assert!(
+            msg.contains("security/no-eval"),
+            "pack/rule in message: {msg}"
+        );
+        assert!(
+            msg.contains("eval is a security hazard"),
+            "custom message in output: {msg}"
+        );
+        // Policy violations carry policyRule in properties
+        assert_eq!(entry["properties"]["policyRule"], "security/no-eval");
+    }
+
+    #[test]
+    fn sarif_policy_violation_without_message() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .policy_violations
+            .push(PolicyViolationFinding::with_actions(PolicyViolation {
+                path: root.join("src/legacy.ts"),
+                line: 1,
+                col: 0,
+                pack: "style".to_string(),
+                rule_id: "no-moment".to_string(),
+                kind: PolicyRuleKind::BannedImport,
+                matched: "moment".to_string(),
+                severity: PolicyViolationSeverity::Warn,
+                message: None,
+            }));
+        let sarif = build_sarif(&results, &root, &RulesConfig::default());
+        let entry = &sarif["runs"][0]["results"][0];
+        assert_eq!(entry["ruleId"], "fallow/policy-violation");
+        assert_eq!(entry["level"], "warning");
+        let msg = entry["message"]["text"].as_str().unwrap();
+        assert!(msg.contains("style/no-moment"), "pack/rule: {msg}");
+        assert!(
+            !msg.contains("None"),
+            "None should not appear when message is absent: {msg}"
+        );
+    }
+
+    // --- Lines 555-572: sarif_misplaced_directive_fields (lines 1971-1978 push) ---
+    #[test]
+    fn sarif_misplaced_directive_result() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .misplaced_directives
+            .push(MisplacedDirectiveFinding::with_actions(
+                MisplacedDirective {
+                    path: root.join("src/components/Client.tsx"),
+                    directive: "use client".to_string(),
+                    line: 5,
+                    col: 0,
+                },
+            ));
+        let sarif = build_sarif(&results, &root, &RulesConfig::default());
+        let entry = &sarif["runs"][0]["results"][0];
+        assert_eq!(entry["ruleId"], "fallow/misplaced-directive");
+        let msg = entry["message"]["text"].as_str().unwrap();
+        assert!(msg.contains("use client"), "directive in message: {msg}");
+        assert!(
+            msg.contains("leading position"),
+            "guidance in message: {msg}"
+        );
+        let region = &entry["locations"][0]["physicalLocation"]["region"];
+        assert_eq!(region["startLine"], 5);
+        assert_eq!(region["startColumn"], 1); // col 0 + 1
+    }
+
+    // --- Lines 536-553: sarif_mixed_client_server_barrel_fields (lines 1961-1965) ---
+    #[test]
+    fn sarif_mixed_client_server_barrel_result() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .mixed_client_server_barrels
+            .push(MixedClientServerBarrelFinding::with_actions(
+                MixedClientServerBarrel {
+                    path: root.join("src/components/index.ts"),
+                    client_origin: "Button.tsx".to_string(),
+                    server_origin: "actions.ts".to_string(),
+                    line: 2,
+                    col: 0,
+                },
+            ));
+        let sarif = build_sarif(&results, &root, &RulesConfig::default());
+        let entry = &sarif["runs"][0]["results"][0];
+        assert_eq!(entry["ruleId"], "fallow/mixed-client-server-barrel");
+        let msg = entry["message"]["text"].as_str().unwrap();
+        assert!(
+            msg.contains("Button.tsx"),
+            "client origin in message: {msg}"
+        );
+        assert!(
+            msg.contains("actions.ts"),
+            "server origin in message: {msg}"
+        );
+    }
+
+    // --- Lines 745-768: sarif_prop_drilling_fields (lines 1796-1799) ---
+    #[test]
+    fn sarif_prop_drilling_result() {
+        use fallow_types::output_dead_code::PropDrillingChainFinding;
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .prop_drilling_chains
+            .push(PropDrillingChainFinding::with_actions(PropDrillingChain {
+                prop: "userId".to_string(),
+                depth: 3,
+                hops: vec![
+                    PropDrillHop {
+                        file: root.join("src/Page.tsx"),
+                        line: 10,
+                        component: "Page".to_string(),
+                    },
+                    PropDrillHop {
+                        file: root.join("src/Section.tsx"),
+                        line: 5,
+                        component: "Section".to_string(),
+                    },
+                    PropDrillHop {
+                        file: root.join("src/Widget.tsx"),
+                        line: 3,
+                        component: "Widget".to_string(),
+                    },
+                ],
+            }));
+        let rules = RulesConfig {
+            prop_drilling: Severity::Warn,
+            ..RulesConfig::default()
+        };
+        let sarif = build_sarif(&results, &root, &rules);
+        let entry = &sarif["runs"][0]["results"][0];
+        assert_eq!(entry["ruleId"], "fallow/prop-drilling");
+        let msg = entry["message"]["text"].as_str().unwrap();
+        assert!(msg.contains("userId"), "prop name in message: {msg}");
+        assert!(msg.contains('3'), "depth in message: {msg}");
+        assert!(msg.contains("Widget"), "consumer in message: {msg}");
+        // Anchored at the first hop
+        assert_eq!(
+            entry["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+                .as_str()
+                .unwrap()
+                .replace('\\', "/"),
+            "src/Page.tsx"
+        );
+        let region = &entry["locations"][0]["physicalLocation"]["region"];
+        assert_eq!(region["startLine"], 10);
+    }
+
+    // --- Lines 770-787: sarif_thin_wrapper_fields (lines 1800-1806) ---
+    #[test]
+    fn sarif_thin_wrapper_result() {
+        use fallow_types::output_dead_code::ThinWrapperFinding;
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .thin_wrappers
+            .push(ThinWrapperFinding::with_actions(ThinWrapper {
+                file: root.join("src/AliasBtn.tsx"),
+                line: 4,
+                component: "AliasBtn".to_string(),
+                child_component: "Button".to_string(),
+            }));
+        let rules = RulesConfig {
+            thin_wrapper: Severity::Warn,
+            ..RulesConfig::default()
+        };
+        let sarif = build_sarif(&results, &root, &rules);
+        let entry = &sarif["runs"][0]["results"][0];
+        assert_eq!(entry["ruleId"], "fallow/thin-wrapper");
+        let msg = entry["message"]["text"].as_str().unwrap();
+        assert!(msg.contains("AliasBtn"), "wrapper name in message: {msg}");
+        assert!(msg.contains("Button"), "child name in message: {msg}");
+        let region = &entry["locations"][0]["physicalLocation"]["region"];
+        assert_eq!(region["startLine"], 4);
+        assert_eq!(region["startColumn"], 1);
+    }
+
+    // --- Lines 789-808: sarif_duplicate_prop_shape_fields (lines 1807-1818) ---
+    #[test]
+    fn sarif_duplicate_prop_shape_result() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .duplicate_prop_shapes
+            .push(DuplicatePropShapeFinding::with_actions(
+                DuplicatePropShape {
+                    file: root.join("src/CardA.tsx"),
+                    line: 2,
+                    component: "CardA".to_string(),
+                    shape: vec!["id".to_string(), "label".to_string(), "onClick".to_string()],
+                    group_size: 3,
+                    sharing_components: vec![
+                        DuplicatePropShapeMember {
+                            file: root.join("src/CardB.tsx"),
+                            line: 2,
+                            component: "CardB".to_string(),
+                        },
+                        DuplicatePropShapeMember {
+                            file: root.join("src/CardC.tsx"),
+                            line: 2,
+                            component: "CardC".to_string(),
+                        },
+                    ],
+                },
+            ));
+        let rules = RulesConfig {
+            duplicate_prop_shape: Severity::Warn,
+            ..RulesConfig::default()
+        };
+        let sarif = build_sarif(&results, &root, &rules);
+        let entry = &sarif["runs"][0]["results"][0];
+        assert_eq!(entry["ruleId"], "fallow/duplicate-prop-shape");
+        let msg = entry["message"]["text"].as_str().unwrap();
+        assert!(msg.contains("CardA"), "component in message: {msg}");
+        assert!(msg.contains("id"), "shape in message: {msg}");
+        let region = &entry["locations"][0]["physicalLocation"]["region"];
+        assert_eq!(region["startLine"], 2);
+        assert_eq!(region["startColumn"], 1);
+    }
+
+    // --- Lines 810-828: sarif_route_collision_fields (lines 2011-2017) ---
+    #[test]
+    fn sarif_route_collision_result() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .route_collisions
+            .push(RouteCollisionFinding::with_actions(RouteCollision {
+                path: root.join("src/app/about/page.tsx"),
+                url: "/about".to_string(),
+                conflicting_paths: vec![root.join("src/app/(marketing)/about/page.tsx")],
+                line: 1,
+                col: 0,
+            }));
+        let sarif = build_sarif(&results, &root, &RulesConfig::default());
+        let entry = &sarif["runs"][0]["results"][0];
+        assert_eq!(entry["ruleId"], "fallow/route-collision");
+        let msg = entry["message"]["text"].as_str().unwrap();
+        assert!(msg.contains("/about"), "URL in message: {msg}");
+        assert!(
+            msg.contains("1 other file"),
+            "conflict count in message: {msg}"
+        );
+    }
+
+    // --- Lines 830-847: sarif_dynamic_segment_name_conflict_fields (lines 2018-2029) ---
+    #[test]
+    fn sarif_dynamic_segment_name_conflict_result() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results.dynamic_segment_name_conflicts.push(
+            DynamicSegmentNameConflictFinding::with_actions(DynamicSegmentNameConflict {
+                path: root.join("src/app/shop/[id]/page.tsx"),
+                position: "/shop".to_string(),
+                conflicting_segments: vec!["[id]".to_string(), "[slug]".to_string()],
+                conflicting_paths: vec![root.join("src/app/shop/[slug]/page.tsx")],
+                line: 1,
+                col: 0,
+            }),
+        );
+        let sarif = build_sarif(&results, &root, &RulesConfig::default());
+        let entry = &sarif["runs"][0]["results"][0];
+        assert_eq!(entry["ruleId"], "fallow/dynamic-segment-name-conflict");
+        let msg = entry["message"]["text"].as_str().unwrap();
+        assert!(msg.contains("/shop"), "position in message: {msg}");
+        assert!(
+            msg.contains("[id]"),
+            "conflicting segment in message: {msg}"
+        );
+        assert!(
+            msg.contains("[slug]"),
+            "conflicting segment in message: {msg}"
+        );
+    }
+
+    // --- Lines 878-904: sarif_unused_catalog_entry_fields named-catalog branch ---
+    #[test]
+    fn sarif_unused_catalog_entry_named_catalog() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .unused_catalog_entries
+            .push(UnusedCatalogEntryFinding::with_actions(
+                UnusedCatalogEntry {
+                    entry_name: "react".to_string(),
+                    catalog_name: "react17".to_string(),
+                    path: root.join("pnpm-workspace.yaml"),
+                    line: 5,
+                    hardcoded_consumers: vec![],
+                },
+            ));
+        let sarif = build_sarif(&results, &root, &RulesConfig::default());
+        let entry = &sarif["runs"][0]["results"][0];
+        assert_eq!(entry["ruleId"], "fallow/unused-catalog-entry");
+        let msg = entry["message"]["text"].as_str().unwrap();
+        // Named catalog message format: "Catalog entry 'X' (catalog 'Y') ..."
+        assert!(msg.contains("react17"), "catalog name in message: {msg}");
+        assert!(msg.contains("react"), "entry name in message: {msg}");
+    }
+
+    // --- Lines 919-920: sarif_unused_catalog_entry_fields default-catalog branch ---
+    #[test]
+    fn sarif_unused_catalog_entry_default_catalog() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .unused_catalog_entries
+            .push(UnusedCatalogEntryFinding::with_actions(
+                UnusedCatalogEntry {
+                    entry_name: "lodash".to_string(),
+                    catalog_name: "default".to_string(),
+                    path: root.join("pnpm-workspace.yaml"),
+                    line: 3,
+                    hardcoded_consumers: vec![],
+                },
+            ));
+        let sarif = build_sarif(&results, &root, &RulesConfig::default());
+        let entry = &sarif["runs"][0]["results"][0];
+        let msg = entry["message"]["text"].as_str().unwrap();
+        // Default-catalog message format: "Catalog entry 'X' is not referenced ..."
+        // (does NOT include "(catalog 'default')")
+        assert!(msg.contains("lodash"), "entry name in message: {msg}");
+        assert!(
+            !msg.contains("(catalog 'default')"),
+            "default catalog should not appear in parentheses: {msg}"
+        );
+    }
+
+    // --- Lines 954-991: sarif_unresolved_catalog_reference_fields ---
+    #[test]
+    fn sarif_unresolved_catalog_reference_named_catalog() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results.unresolved_catalog_references.push(
+            UnresolvedCatalogReferenceFinding::with_actions(UnresolvedCatalogReference {
+                entry_name: "zod".to_string(),
+                catalog_name: "peer-deps".to_string(),
+                path: root.join("packages/app/package.json"),
+                line: 7,
+                available_in_catalogs: vec![],
+            }),
+        );
+        let sarif = build_sarif(&results, &root, &RulesConfig::default());
+        let entry = &sarif["runs"][0]["results"][0];
+        assert_eq!(entry["ruleId"], "fallow/unresolved-catalog-reference");
+        let msg = entry["message"]["text"].as_str().unwrap();
+        assert!(msg.contains("zod"), "package name in message: {msg}");
+        assert!(msg.contains("peer-deps"), "catalog name in message: {msg}");
+    }
+
+    #[test]
+    fn sarif_unresolved_catalog_reference_default_catalog() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results.unresolved_catalog_references.push(
+            UnresolvedCatalogReferenceFinding::with_actions(UnresolvedCatalogReference {
+                entry_name: "typescript".to_string(),
+                catalog_name: "default".to_string(),
+                path: root.join("packages/app/package.json"),
+                line: 4,
+                available_in_catalogs: vec![],
+            }),
+        );
+        let sarif = build_sarif(&results, &root, &RulesConfig::default());
+        let entry = &sarif["runs"][0]["results"][0];
+        assert_eq!(entry["ruleId"], "fallow/unresolved-catalog-reference");
+        let msg = entry["message"]["text"].as_str().unwrap();
+        assert!(msg.contains("typescript"), "package name in message: {msg}");
+        assert!(
+            msg.contains("the default catalog"),
+            "default catalog description in message: {msg}"
+        );
+    }
+
+    // --- Lines 982-983: available_in_catalogs non-empty branch ---
+    #[test]
+    fn sarif_unresolved_catalog_reference_with_available_catalogs() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results.unresolved_catalog_references.push(
+            UnresolvedCatalogReferenceFinding::with_actions(UnresolvedCatalogReference {
+                entry_name: "react".to_string(),
+                catalog_name: "react18".to_string(),
+                path: root.join("packages/ui/package.json"),
+                line: 6,
+                available_in_catalogs: vec!["default".to_string(), "react17".to_string()],
+            }),
+        );
+        let sarif = build_sarif(&results, &root, &RulesConfig::default());
+        let entry = &sarif["runs"][0]["results"][0];
+        let msg = entry["message"]["text"].as_str().unwrap();
+        assert!(
+            msg.contains("available in:"),
+            "available catalogs hint in message: {msg}"
+        );
+        assert!(msg.contains("default"), "default in available list: {msg}");
+        assert!(msg.contains("react17"), "react17 in available list: {msg}");
+    }
+
+    // --- Health SARIF: lines 2163-2326 ---
+    #[test]
+    fn health_sarif_critical_severity_maps_to_error_level() {
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            findings: vec![
+                crate::health_types::ComplexityViolation {
+                    path: root.join("src/behemoth.ts"),
+                    name: "doAll".to_string(),
+                    line: 1,
+                    col: 0,
+                    cyclomatic: 50,
+                    cognitive: 60,
+                    line_count: 300,
+                    param_count: 0,
+                    react_hook_count: 0,
+                    react_jsx_max_depth: 0,
+                    react_prop_count: 0,
+                    react_hook_profile: None,
+                    exceeded: crate::health_types::ExceededThreshold::Both,
+                    severity: crate::health_types::FindingSeverity::Critical,
+                    crap: None,
+                    coverage_pct: None,
+                    coverage_tier: None,
+                    coverage_source: None,
+                    inherited_from: None,
+                    component_rollup: None,
+                    contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
+                }
+                .into(),
+            ],
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 1,
+                functions_analyzed: 1,
+                functions_above_threshold: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let sarif = build_health_sarif(&report, &root);
+        let entry = &sarif["runs"][0]["results"][0];
+        assert_eq!(entry["level"], "error");
+    }
+
+    #[test]
+    fn health_sarif_moderate_severity_maps_to_note_level() {
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            findings: vec![
+                crate::health_types::ComplexityViolation {
+                    path: root.join("src/mild.ts"),
+                    name: "parseArgs".to_string(),
+                    line: 5,
+                    col: 0,
+                    cyclomatic: 15,
+                    cognitive: 8,
+                    line_count: 40,
+                    param_count: 0,
+                    react_hook_count: 0,
+                    react_jsx_max_depth: 0,
+                    react_prop_count: 0,
+                    react_hook_profile: None,
+                    exceeded: crate::health_types::ExceededThreshold::Cyclomatic,
+                    severity: crate::health_types::FindingSeverity::Moderate,
+                    crap: None,
+                    coverage_pct: None,
+                    coverage_tier: None,
+                    coverage_source: None,
+                    inherited_from: None,
+                    component_rollup: None,
+                    contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
+                }
+                .into(),
+            ],
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 1,
+                functions_analyzed: 1,
+                functions_above_threshold: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let sarif = build_health_sarif(&report, &root);
+        let entry = &sarif["runs"][0]["results"][0];
+        assert_eq!(entry["level"], "note");
+    }
+
+    #[test]
+    fn health_sarif_crap_no_coverage_omits_coverage_phrase() {
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            findings: vec![
+                crate::health_types::ComplexityViolation {
+                    path: root.join("src/risky.ts"),
+                    name: "fragile".to_string(),
+                    line: 1,
+                    col: 0,
+                    cyclomatic: 20,
+                    cognitive: 5,
+                    line_count: 60,
+                    param_count: 0,
+                    react_hook_count: 0,
+                    react_jsx_max_depth: 0,
+                    react_prop_count: 0,
+                    react_hook_profile: None,
+                    exceeded: crate::health_types::ExceededThreshold::CognitiveCrap,
+                    severity: crate::health_types::FindingSeverity::High,
+                    crap: Some(60.0),
+                    coverage_pct: None,
+                    coverage_tier: None,
+                    coverage_source: None,
+                    inherited_from: None,
+                    component_rollup: None,
+                    contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
+                }
+                .into(),
+            ],
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 1,
+                functions_analyzed: 1,
+                functions_above_threshold: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let sarif = build_health_sarif(&report, &root);
+        let entry = &sarif["runs"][0]["results"][0];
+        assert_eq!(entry["ruleId"], "fallow/high-crap-score");
+        let msg = entry["message"]["text"].as_str().unwrap();
+        assert!(msg.contains("CRAP score 60.0"), "crap score in msg: {msg}");
+        assert!(
+            !msg.contains("coverage"),
+            "no coverage phrase when pct absent: {msg}"
+        );
+    }
+
+    #[test]
+    fn health_sarif_all_exceeded_threshold_uses_crap_rule() {
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            findings: vec![
+                crate::health_types::ComplexityViolation {
+                    path: root.join("src/monster.ts"),
+                    name: "giant".to_string(),
+                    line: 1,
+                    col: 0,
+                    cyclomatic: 80,
+                    cognitive: 90,
+                    line_count: 400,
+                    param_count: 0,
+                    react_hook_count: 0,
+                    react_jsx_max_depth: 0,
+                    react_prop_count: 0,
+                    react_hook_profile: None,
+                    exceeded: crate::health_types::ExceededThreshold::All,
+                    severity: crate::health_types::FindingSeverity::Critical,
+                    crap: Some(200.0),
+                    coverage_pct: Some(5.0),
+                    coverage_tier: None,
+                    coverage_source: None,
+                    inherited_from: None,
+                    component_rollup: None,
+                    contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
+                }
+                .into(),
+            ],
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 1,
+                functions_analyzed: 1,
+                functions_above_threshold: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let sarif = build_health_sarif(&report, &root);
+        let entry = &sarif["runs"][0]["results"][0];
+        assert_eq!(entry["ruleId"], "fallow/high-crap-score");
+        let msg = entry["message"]["text"].as_str().unwrap();
+        assert!(msg.contains("coverage 5%"), "coverage in msg: {msg}");
+    }
+
+    // --- Runtime coverage SARIF (lines 2601-2679) ---
+    #[test]
+    fn health_sarif_runtime_coverage_safe_to_delete() {
+        use crate::health_types::{
+            RuntimeCoverageConfidence, RuntimeCoverageEvidence, RuntimeCoverageFinding,
+            RuntimeCoverageReport, RuntimeCoverageReportVerdict, RuntimeCoverageSummary,
+            RuntimeCoverageVerdict,
+        };
+
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            summary: crate::health_types::HealthSummary::default(),
+            runtime_coverage: Some(RuntimeCoverageReport {
+                schema_version: crate::health_types::RuntimeCoverageSchemaVersion::V1,
+                verdict: RuntimeCoverageReportVerdict::ColdCodeDetected,
+                signals: vec![],
+                summary: RuntimeCoverageSummary::default(),
+                findings: vec![RuntimeCoverageFinding {
+                    id: "fallow:prod:abc123".to_string(),
+                    stable_id: None,
+                    source_hash: None,
+                    path: root.join("src/dead.ts"),
+                    function: "orphan".to_string(),
+                    line: 3,
+                    verdict: RuntimeCoverageVerdict::SafeToDelete,
+                    invocations: Some(0),
+                    confidence: RuntimeCoverageConfidence::High,
+                    evidence: RuntimeCoverageEvidence {
+                        static_status: "unused".to_string(),
+                        test_coverage: "not_covered".to_string(),
+                        v8_tracking: "tracked".to_string(),
+                        untracked_reason: None,
+                        observation_days: 30,
+                        deployments_observed: 1,
+                    },
+                    actions: vec![],
+                }],
+                hot_paths: vec![],
+                blast_radius: vec![],
+                importance: vec![],
+                watermark: None,
+                warnings: vec![],
+            }),
+            ..Default::default()
+        };
+        let sarif = build_health_sarif(&report, &root);
+        let entry = &sarif["runs"][0]["results"][0];
+        assert_eq!(entry["ruleId"], "fallow/runtime-safe-to-delete");
+        assert_eq!(entry["level"], "warning");
+        let msg = entry["message"]["text"].as_str().unwrap();
+        assert!(msg.contains("orphan"), "function name in msg: {msg}");
+        assert!(msg.contains("safe to delete"), "verdict in msg: {msg}");
+        assert!(
+            msg.contains("0 invocations"),
+            "invocation count in msg: {msg}"
+        );
+    }
+
+    #[test]
+    fn health_sarif_runtime_coverage_review_required() {
+        use crate::health_types::{
+            RuntimeCoverageConfidence, RuntimeCoverageEvidence, RuntimeCoverageFinding,
+            RuntimeCoverageReport, RuntimeCoverageReportVerdict, RuntimeCoverageSummary,
+            RuntimeCoverageVerdict,
+        };
+
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            summary: crate::health_types::HealthSummary::default(),
+            runtime_coverage: Some(RuntimeCoverageReport {
+                schema_version: crate::health_types::RuntimeCoverageSchemaVersion::V1,
+                verdict: RuntimeCoverageReportVerdict::ColdCodeDetected,
+                signals: vec![],
+                summary: RuntimeCoverageSummary::default(),
+                findings: vec![RuntimeCoverageFinding {
+                    id: "fallow:prod:def456".to_string(),
+                    stable_id: None,
+                    source_hash: None,
+                    path: root.join("src/maybe.ts"),
+                    function: "maybeUsed".to_string(),
+                    line: 7,
+                    verdict: RuntimeCoverageVerdict::ReviewRequired,
+                    invocations: None,
+                    confidence: RuntimeCoverageConfidence::Medium,
+                    evidence: RuntimeCoverageEvidence {
+                        static_status: "used".to_string(),
+                        test_coverage: "not_covered".to_string(),
+                        v8_tracking: "tracked".to_string(),
+                        untracked_reason: None,
+                        observation_days: 7,
+                        deployments_observed: 1,
+                    },
+                    actions: vec![],
+                }],
+                hot_paths: vec![],
+                blast_radius: vec![],
+                importance: vec![],
+                watermark: None,
+                warnings: vec![],
+            }),
+            ..Default::default()
+        };
+        let sarif = build_health_sarif(&report, &root);
+        let entry = &sarif["runs"][0]["results"][0];
+        assert_eq!(entry["ruleId"], "fallow/runtime-review-required");
+        assert_eq!(entry["level"], "warning");
+        let msg = entry["message"]["text"].as_str().unwrap();
+        // invocations is None => "untracked" hint
+        assert!(msg.contains("untracked"), "untracked hint in msg: {msg}");
+    }
+
+    #[test]
+    fn health_sarif_runtime_coverage_low_traffic_verdict() {
+        use crate::health_types::{
+            RuntimeCoverageConfidence, RuntimeCoverageEvidence, RuntimeCoverageFinding,
+            RuntimeCoverageReport, RuntimeCoverageReportVerdict, RuntimeCoverageSummary,
+            RuntimeCoverageVerdict,
+        };
+
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            summary: crate::health_types::HealthSummary::default(),
+            runtime_coverage: Some(RuntimeCoverageReport {
+                schema_version: crate::health_types::RuntimeCoverageSchemaVersion::V1,
+                verdict: RuntimeCoverageReportVerdict::Unknown,
+                signals: vec![],
+                summary: RuntimeCoverageSummary::default(),
+                findings: vec![RuntimeCoverageFinding {
+                    id: "fallow:prod:ghi789".to_string(),
+                    stable_id: None,
+                    source_hash: None,
+                    path: root.join("src/rare.ts"),
+                    function: "rarelyUsed".to_string(),
+                    line: 2,
+                    verdict: RuntimeCoverageVerdict::LowTraffic,
+                    invocations: Some(3),
+                    confidence: RuntimeCoverageConfidence::Low,
+                    evidence: RuntimeCoverageEvidence {
+                        static_status: "used".to_string(),
+                        test_coverage: "covered".to_string(),
+                        v8_tracking: "tracked".to_string(),
+                        untracked_reason: None,
+                        observation_days: 14,
+                        deployments_observed: 1,
+                    },
+                    actions: vec![],
+                }],
+                hot_paths: vec![],
+                blast_radius: vec![],
+                importance: vec![],
+                watermark: None,
+                warnings: vec![],
+            }),
+            ..Default::default()
+        };
+        let sarif = build_health_sarif(&report, &root);
+        let entry = &sarif["runs"][0]["results"][0];
+        assert_eq!(entry["ruleId"], "fallow/runtime-low-traffic");
+        // LowTraffic maps to "note" level (not SafeToDelete/ReviewRequired)
+        assert_eq!(entry["level"], "note");
+    }
+
+    #[test]
+    fn health_sarif_runtime_coverage_unavailable_verdict() {
+        use crate::health_types::{
+            RuntimeCoverageConfidence, RuntimeCoverageEvidence, RuntimeCoverageFinding,
+            RuntimeCoverageReport, RuntimeCoverageReportVerdict, RuntimeCoverageSummary,
+            RuntimeCoverageVerdict,
+        };
+
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            summary: crate::health_types::HealthSummary::default(),
+            runtime_coverage: Some(RuntimeCoverageReport {
+                schema_version: crate::health_types::RuntimeCoverageSchemaVersion::V1,
+                verdict: RuntimeCoverageReportVerdict::Unknown,
+                signals: vec![],
+                summary: RuntimeCoverageSummary::default(),
+                findings: vec![RuntimeCoverageFinding {
+                    id: "fallow:prod:jkl000".to_string(),
+                    stable_id: None,
+                    source_hash: None,
+                    path: root.join("src/unknown.ts"),
+                    function: "mysteryFn".to_string(),
+                    line: 1,
+                    verdict: RuntimeCoverageVerdict::CoverageUnavailable,
+                    invocations: None,
+                    confidence: RuntimeCoverageConfidence::None,
+                    evidence: RuntimeCoverageEvidence {
+                        static_status: "used".to_string(),
+                        test_coverage: "not_covered".to_string(),
+                        v8_tracking: "untracked".to_string(),
+                        untracked_reason: Some("lazy_parsed".to_string()),
+                        observation_days: 0,
+                        deployments_observed: 0,
+                    },
+                    actions: vec![],
+                }],
+                hot_paths: vec![],
+                blast_radius: vec![],
+                importance: vec![],
+                watermark: None,
+                warnings: vec![],
+            }),
+            ..Default::default()
+        };
+        let sarif = build_health_sarif(&report, &root);
+        let entry = &sarif["runs"][0]["results"][0];
+        assert_eq!(entry["ruleId"], "fallow/runtime-coverage-unavailable");
+        assert_eq!(entry["level"], "note");
+    }
+
+    #[test]
+    fn health_sarif_runtime_active_verdict_maps_to_generic_rule() {
+        use crate::health_types::{
+            RuntimeCoverageConfidence, RuntimeCoverageEvidence, RuntimeCoverageFinding,
+            RuntimeCoverageReport, RuntimeCoverageReportVerdict, RuntimeCoverageSummary,
+            RuntimeCoverageVerdict,
+        };
+
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            summary: crate::health_types::HealthSummary::default(),
+            runtime_coverage: Some(RuntimeCoverageReport {
+                schema_version: crate::health_types::RuntimeCoverageSchemaVersion::V1,
+                verdict: RuntimeCoverageReportVerdict::Clean,
+                signals: vec![],
+                summary: RuntimeCoverageSummary::default(),
+                findings: vec![RuntimeCoverageFinding {
+                    id: "fallow:prod:mno111".to_string(),
+                    stable_id: None,
+                    source_hash: None,
+                    path: root.join("src/hot.ts"),
+                    function: "hotPath".to_string(),
+                    line: 10,
+                    verdict: RuntimeCoverageVerdict::Active,
+                    invocations: Some(10_000),
+                    confidence: RuntimeCoverageConfidence::VeryHigh,
+                    evidence: RuntimeCoverageEvidence {
+                        static_status: "used".to_string(),
+                        test_coverage: "covered".to_string(),
+                        v8_tracking: "tracked".to_string(),
+                        untracked_reason: None,
+                        observation_days: 30,
+                        deployments_observed: 5,
+                    },
+                    actions: vec![],
+                }],
+                hot_paths: vec![],
+                blast_radius: vec![],
+                importance: vec![],
+                watermark: None,
+                warnings: vec![],
+            }),
+            ..Default::default()
+        };
+        let sarif = build_health_sarif(&report, &root);
+        let entry = &sarif["runs"][0]["results"][0];
+        assert_eq!(entry["ruleId"], "fallow/runtime-coverage");
+        assert_eq!(entry["level"], "note");
+    }
+
+    // --- Coverage intelligence: clean/unknown verdicts skip (lines 2691-2692) ---
+    #[test]
+    fn health_sarif_coverage_intelligence_clean_verdict_skipped() {
+        use crate::health_types::{
+            CoverageIntelligenceConfidence, CoverageIntelligenceEvidence,
+            CoverageIntelligenceFinding, CoverageIntelligenceMatchConfidence,
+            CoverageIntelligenceRecommendation, CoverageIntelligenceReport,
+            CoverageIntelligenceSchemaVersion, CoverageIntelligenceSummary,
+            CoverageIntelligenceVerdict, HealthReport, HealthSummary,
+        };
+
+        let root = PathBuf::from("/project");
+        let report = HealthReport {
+            summary: HealthSummary::default(),
+            coverage_intelligence: Some(CoverageIntelligenceReport {
+                schema_version: CoverageIntelligenceSchemaVersion::V1,
+                verdict: CoverageIntelligenceVerdict::Clean,
+                summary: CoverageIntelligenceSummary::default(),
+                findings: vec![CoverageIntelligenceFinding {
+                    id: "fallow:coverage-intel:cleanid".to_string(),
+                    path: root.join("src/clean.ts"),
+                    identity: Some("cleanFn".to_string()),
+                    line: 1,
+                    verdict: CoverageIntelligenceVerdict::Clean,
+                    signals: vec![],
+                    recommendation: CoverageIntelligenceRecommendation::AddTestOrSplitBeforeMerge,
+                    confidence: CoverageIntelligenceConfidence::High,
+                    related_ids: vec![],
+                    evidence: CoverageIntelligenceEvidence {
+                        match_confidence: CoverageIntelligenceMatchConfidence::Direct,
+                        ..Default::default()
+                    },
+                    actions: vec![],
+                }],
+            }),
+            ..Default::default()
+        };
+        let sarif = build_health_sarif(&report, &root);
+        let results = sarif["runs"][0]["results"].as_array().unwrap();
+        assert!(
+            results.is_empty(),
+            "Clean verdict should produce no SARIF results"
+        );
+    }
+
+    // Coverage intelligence rule-id variants (lines 2728-2745)
+    #[test]
+    fn health_sarif_coverage_intelligence_risky_change_rule_id() {
+        use crate::health_types::{
+            CoverageIntelligenceConfidence, CoverageIntelligenceEvidence,
+            CoverageIntelligenceFinding, CoverageIntelligenceMatchConfidence,
+            CoverageIntelligenceRecommendation, CoverageIntelligenceReport,
+            CoverageIntelligenceSchemaVersion, CoverageIntelligenceSummary,
+            CoverageIntelligenceVerdict, HealthReport, HealthSummary,
+        };
+
+        let root = PathBuf::from("/project");
+        let report = HealthReport {
+            summary: HealthSummary::default(),
+            coverage_intelligence: Some(CoverageIntelligenceReport {
+                schema_version: CoverageIntelligenceSchemaVersion::V1,
+                verdict: CoverageIntelligenceVerdict::RiskyChangeDetected,
+                summary: CoverageIntelligenceSummary::default(),
+                findings: vec![CoverageIntelligenceFinding {
+                    id: "fallow:coverage-intel:risky1".to_string(),
+                    path: root.join("src/risky.ts"),
+                    identity: Some("riskyFn".to_string()),
+                    line: 4,
+                    verdict: CoverageIntelligenceVerdict::RiskyChangeDetected,
+                    signals: vec![],
+                    recommendation: CoverageIntelligenceRecommendation::AddTestOrSplitBeforeMerge,
+                    confidence: CoverageIntelligenceConfidence::High,
+                    related_ids: vec![],
+                    evidence: CoverageIntelligenceEvidence {
+                        match_confidence: CoverageIntelligenceMatchConfidence::Direct,
+                        ..Default::default()
+                    },
+                    actions: vec![],
+                }],
+            }),
+            ..Default::default()
+        };
+        let sarif = build_health_sarif(&report, &root);
+        let entry = &sarif["runs"][0]["results"][0];
+        assert_eq!(entry["ruleId"], "fallow/coverage-intelligence-risky-change");
+    }
+
+    #[test]
+    fn health_sarif_coverage_intelligence_review_rule_id() {
+        use crate::health_types::{
+            CoverageIntelligenceConfidence, CoverageIntelligenceEvidence,
+            CoverageIntelligenceFinding, CoverageIntelligenceMatchConfidence,
+            CoverageIntelligenceRecommendation, CoverageIntelligenceReport,
+            CoverageIntelligenceSchemaVersion, CoverageIntelligenceSummary,
+            CoverageIntelligenceVerdict, HealthReport, HealthSummary,
+        };
+
+        let root = PathBuf::from("/project");
+        let report = HealthReport {
+            summary: HealthSummary::default(),
+            coverage_intelligence: Some(CoverageIntelligenceReport {
+                schema_version: CoverageIntelligenceSchemaVersion::V1,
+                verdict: CoverageIntelligenceVerdict::ReviewRequired,
+                summary: CoverageIntelligenceSummary::default(),
+                findings: vec![CoverageIntelligenceFinding {
+                    id: "fallow:coverage-intel:review1".to_string(),
+                    path: root.join("src/cold.ts"),
+                    identity: Some("coldFn".to_string()),
+                    line: 2,
+                    verdict: CoverageIntelligenceVerdict::ReviewRequired,
+                    signals: vec![],
+                    recommendation: CoverageIntelligenceRecommendation::ReviewBeforeChanging,
+                    confidence: CoverageIntelligenceConfidence::Medium,
+                    related_ids: vec![],
+                    evidence: CoverageIntelligenceEvidence {
+                        match_confidence: CoverageIntelligenceMatchConfidence::Direct,
+                        ..Default::default()
+                    },
+                    actions: vec![],
+                }],
+            }),
+            ..Default::default()
+        };
+        let sarif = build_health_sarif(&report, &root);
+        let entry = &sarif["runs"][0]["results"][0];
+        assert_eq!(entry["ruleId"], "fallow/coverage-intelligence-review");
+    }
+
+    #[test]
+    fn health_sarif_coverage_intelligence_refactor_rule_id() {
+        use crate::health_types::{
+            CoverageIntelligenceConfidence, CoverageIntelligenceEvidence,
+            CoverageIntelligenceFinding, CoverageIntelligenceMatchConfidence,
+            CoverageIntelligenceRecommendation, CoverageIntelligenceReport,
+            CoverageIntelligenceSchemaVersion, CoverageIntelligenceSummary,
+            CoverageIntelligenceVerdict, HealthReport, HealthSummary,
+        };
+
+        let root = PathBuf::from("/project");
+        let report = HealthReport {
+            summary: HealthSummary::default(),
+            coverage_intelligence: Some(CoverageIntelligenceReport {
+                schema_version: CoverageIntelligenceSchemaVersion::V1,
+                verdict: CoverageIntelligenceVerdict::RefactorCarefully,
+                summary: CoverageIntelligenceSummary::default(),
+                findings: vec![CoverageIntelligenceFinding {
+                    id: "fallow:coverage-intel:refactor1".to_string(),
+                    path: root.join("src/hot_complex.ts"),
+                    identity: Some("hotComplexFn".to_string()),
+                    line: 6,
+                    verdict: CoverageIntelligenceVerdict::RefactorCarefully,
+                    signals: vec![],
+                    recommendation:
+                        CoverageIntelligenceRecommendation::RefactorCarefullyKeepBehavior,
+                    confidence: CoverageIntelligenceConfidence::High,
+                    related_ids: vec![],
+                    evidence: CoverageIntelligenceEvidence {
+                        match_confidence: CoverageIntelligenceMatchConfidence::Direct,
+                        ..Default::default()
+                    },
+                    actions: vec![],
+                }],
+            }),
+            ..Default::default()
+        };
+        let sarif = build_health_sarif(&report, &root);
+        let entry = &sarif["runs"][0]["results"][0];
+        assert_eq!(entry["ruleId"], "fallow/coverage-intelligence-refactor");
+    }
+
+    // --- Lines 2747-2769: print_grouped_health_sarif decorates results with group property ---
+    #[test]
+    fn health_grouped_sarif_adds_group_property() {
+        use crate::report::grouping::OwnershipResolver;
+
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            findings: vec![
+                crate::health_types::ComplexityViolation {
+                    path: root.join("src/utils.ts"),
+                    name: "parseExpr".to_string(),
+                    line: 10,
+                    col: 0,
+                    cyclomatic: 20,
+                    cognitive: 10,
+                    line_count: 50,
+                    param_count: 0,
+                    react_hook_count: 0,
+                    react_jsx_max_depth: 0,
+                    react_prop_count: 0,
+                    react_hook_profile: None,
+                    exceeded: crate::health_types::ExceededThreshold::Cyclomatic,
+                    severity: crate::health_types::FindingSeverity::High,
+                    crap: None,
+                    coverage_pct: None,
+                    coverage_tier: None,
+                    coverage_source: None,
+                    inherited_from: None,
+                    component_rollup: None,
+                    contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
+                }
+                .into(),
+            ],
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 1,
+                functions_analyzed: 1,
+                functions_above_threshold: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        // Empty CODEOWNERS resolver produces an empty-string group
+        let resolver = OwnershipResolver::Directory;
+        let mut sarif = build_health_sarif(&report, &root);
+
+        if let Some(runs) = sarif.get_mut("runs").and_then(|r| r.as_array_mut()) {
+            for run in runs {
+                if let Some(results) = run.get_mut("results").and_then(|r| r.as_array_mut()) {
+                    for result in results {
+                        let uri = result
+                            .pointer("/locations/0/physicalLocation/artifactLocation/uri")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        let decoded = uri.replace("%5B", "[").replace("%5D", "]");
+                        let group = super::super::grouping::resolve_owner(
+                            std::path::Path::new(&decoded),
+                            std::path::Path::new(""),
+                            &resolver,
+                        );
+                        let props = result
+                            .as_object_mut()
+                            .unwrap()
+                            .entry("properties")
+                            .or_insert_with(|| serde_json::json!({}));
+                        props
+                            .as_object_mut()
+                            .unwrap()
+                            .insert("group".to_string(), serde_json::Value::String(group));
+                    }
+                }
+            }
+        }
+
+        let entry = &sarif["runs"][0]["results"][0];
+        // The group key is always present after the post-process pass
+        assert!(entry["properties"].get("group").is_some());
+    }
+
+    // --- Coverage gap plural/singular branches (lines 2599-2603) ---
+    #[test]
+    fn health_sarif_coverage_gap_single_export_singular_message() {
+        use crate::health_types::{
+            CoverageGapSummary, CoverageGaps, HealthReport, HealthSummary, UntestedFile,
+            UntestedFileFinding,
+        };
+
+        let root = PathBuf::from("/project");
+        let report = HealthReport {
+            summary: HealthSummary::default(),
+            coverage_gaps: Some(CoverageGaps {
+                summary: CoverageGapSummary {
+                    runtime_files: 1,
+                    covered_files: 0,
+                    file_coverage_pct: 0.0,
+                    untested_files: 1,
+                    untested_exports: 0,
+                },
+                files: vec![UntestedFileFinding::with_actions(
+                    UntestedFile {
+                        path: root.join("src/solo.ts"),
+                        value_export_count: 1,
+                    },
+                    &root,
+                )],
+                exports: vec![],
+            }),
+            ..Default::default()
+        };
+        let sarif = build_health_sarif(&report, &root);
+        let entry = &sarif["runs"][0]["results"][0];
+        let msg = entry["message"]["text"].as_str().unwrap();
+        // value_export_count == 1 => singular "value export" (no trailing 's')
+        assert!(
+            msg.contains("1 value export)"),
+            "singular export in msg: {msg}"
+        );
+        assert!(
+            !msg.contains("exports)"),
+            "plural should not appear for count=1: {msg}"
+        );
+    }
+
+    #[test]
+    fn health_sarif_coverage_gap_plural_exports_message() {
+        use crate::health_types::{
+            CoverageGapSummary, CoverageGaps, HealthReport, HealthSummary, UntestedFile,
+            UntestedFileFinding,
+        };
+
+        let root = PathBuf::from("/project");
+        let report = HealthReport {
+            summary: HealthSummary::default(),
+            coverage_gaps: Some(CoverageGaps {
+                summary: CoverageGapSummary {
+                    runtime_files: 1,
+                    covered_files: 0,
+                    file_coverage_pct: 0.0,
+                    untested_files: 1,
+                    untested_exports: 0,
+                },
+                files: vec![UntestedFileFinding::with_actions(
+                    UntestedFile {
+                        path: root.join("src/multi.ts"),
+                        value_export_count: 5,
+                    },
+                    &root,
+                )],
+                exports: vec![],
+            }),
+            ..Default::default()
+        };
+        let sarif = build_health_sarif(&report, &root);
+        let entry = &sarif["runs"][0]["results"][0];
+        let msg = entry["message"]["text"].as_str().unwrap();
+        assert!(
+            msg.contains("5 value exports)"),
+            "plural exports in msg: {msg}"
+        );
+    }
 }

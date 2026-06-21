@@ -3374,4 +3374,1774 @@ mod tests {
         assert!(md.contains("1 clone group found"));
         assert!(!md.contains("1 clone groups found"));
     }
+
+    // -------------------------------------------------------------------------
+    // display_complexity_entry_name: <component> case (lines 24-25)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn display_complexity_entry_name_component_variant() {
+        assert_eq!(
+            display_complexity_entry_name("<component>"),
+            "<component> (component rollup)"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // private_type_leaks section (lines 95-99)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn markdown_private_type_leak_section() {
+        use fallow_types::output_dead_code::PrivateTypeLeakFinding;
+        use fallow_types::results::PrivateTypeLeak;
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .private_type_leaks
+            .push(PrivateTypeLeakFinding::with_actions(PrivateTypeLeak {
+                path: root.join("src/api.ts"),
+                export_name: "publicFn".to_string(),
+                type_name: "InternalType".to_string(),
+                line: 7,
+                col: 0,
+                span_start: 0,
+            }));
+        let md = build_markdown(&results, &root);
+        assert!(md.contains("### Private type leaks (1)"));
+        let normalized = md.replace('\\', "/");
+        assert!(normalized.contains("`src/api.ts`"));
+        assert!(normalized.contains("`publicFn` references private type `InternalType`"));
+    }
+
+    // -------------------------------------------------------------------------
+    // circular dependency with is_cross_package: true (lines 409-413)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn markdown_circular_dep_cross_package_tag() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .circular_dependencies
+            .push(CircularDependencyFinding::with_actions(
+                CircularDependency {
+                    files: vec![root.join("pkg-a/src/a.ts"), root.join("pkg-b/src/b.ts")],
+                    length: 2,
+                    line: 1,
+                    col: 0,
+                    edges: Vec::new(),
+                    is_cross_package: true,
+                },
+            ));
+        let md = build_markdown(&results, &root);
+        assert!(md.contains("*(cross-package)*"));
+    }
+
+    // -------------------------------------------------------------------------
+    // boundary coverage violation (lines 460-468)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn markdown_boundary_coverage_violation_format() {
+        use fallow_types::output_dead_code::BoundaryCoverageViolationFinding;
+        use fallow_types::results::BoundaryCoverageViolation;
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .boundary_coverage_violations
+            .push(BoundaryCoverageViolationFinding::with_actions(
+                BoundaryCoverageViolation {
+                    path: root.join("src/orphan.ts"),
+                    line: 1,
+                    col: 0,
+                },
+            ));
+        let md = build_markdown(&results, &root);
+        assert!(md.contains("### Boundary coverage (1)"));
+        let normalized = md.replace('\\', "/");
+        assert!(normalized.contains("src/orphan.ts"));
+        assert!(normalized.contains("no matching boundary zone"));
+    }
+
+    // -------------------------------------------------------------------------
+    // boundary call violation (lines 471-483)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn markdown_boundary_call_violation_format() {
+        use fallow_types::output_dead_code::BoundaryCallViolationFinding;
+        use fallow_types::results::BoundaryCallViolation;
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .boundary_call_violations
+            .push(BoundaryCallViolationFinding::with_actions(
+                BoundaryCallViolation {
+                    path: root.join("src/caller.ts"),
+                    line: 42,
+                    col: 0,
+                    callee: "dangerousCall".to_string(),
+                    zone: "public".to_string(),
+                    pattern: "dangerous*".to_string(),
+                },
+            ));
+        let md = build_markdown(&results, &root);
+        assert!(md.contains("### Boundary calls (1)"));
+        let normalized = md.replace('\\', "/");
+        assert!(normalized.contains("`dangerousCall` forbidden in zone `public`"));
+        assert!(normalized.contains("pattern `dangerous*`"));
+    }
+
+    // -------------------------------------------------------------------------
+    // policy violation (lines 485-502)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn markdown_policy_violation_without_message() {
+        use fallow_types::output_dead_code::PolicyViolationFinding;
+        use fallow_types::results::{PolicyRuleKind, PolicyViolation, PolicyViolationSeverity};
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .policy_violations
+            .push(PolicyViolationFinding::with_actions(PolicyViolation {
+                path: root.join("src/banned.ts"),
+                line: 3,
+                col: 0,
+                matched: "eval".to_string(),
+                pack: "security".to_string(),
+                rule_id: "no-eval".to_string(),
+                kind: PolicyRuleKind::BannedCall,
+                severity: PolicyViolationSeverity::Error,
+                message: None,
+            }));
+        let md = build_markdown(&results, &root);
+        assert!(md.contains("### Policy violations (1)"));
+        let normalized = md.replace('\\', "/");
+        assert!(normalized.contains("`eval` banned by `security/no-eval`"));
+    }
+
+    #[test]
+    fn markdown_policy_violation_with_message() {
+        use fallow_types::output_dead_code::PolicyViolationFinding;
+        use fallow_types::results::{PolicyRuleKind, PolicyViolation, PolicyViolationSeverity};
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .policy_violations
+            .push(PolicyViolationFinding::with_actions(PolicyViolation {
+                path: root.join("src/banned.ts"),
+                line: 8,
+                col: 0,
+                matched: "console.log".to_string(),
+                pack: "style".to_string(),
+                rule_id: "no-console".to_string(),
+                kind: PolicyRuleKind::BannedCall,
+                severity: PolicyViolationSeverity::Warn,
+                message: Some("Use a logger instead".to_string()),
+            }));
+        let md = build_markdown(&results, &root);
+        let normalized = md.replace('\\', "/");
+        assert!(normalized.contains("(Use a logger instead)"));
+    }
+
+    // -------------------------------------------------------------------------
+    // misplaced directive (lines 530-540)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn markdown_misplaced_directive_format() {
+        use fallow_types::output_dead_code::MisplacedDirectiveFinding;
+        use fallow_types::results::MisplacedDirective;
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .misplaced_directives
+            .push(MisplacedDirectiveFinding::with_actions(
+                MisplacedDirective {
+                    path: root.join("src/app.ts"),
+                    line: 10,
+                    col: 0,
+                    directive: "use client".to_string(),
+                },
+            ));
+        let md = build_markdown(&results, &root);
+        assert!(md.contains("### Misplaced directives (1)"));
+        let normalized = md.replace('\\', "/");
+        assert!(normalized.contains("src/app.ts"));
+        assert!(normalized.contains("not in the leading position"));
+    }
+
+    // -------------------------------------------------------------------------
+    // route collision (lines 651-661)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn markdown_route_collision_format() {
+        use fallow_types::output_dead_code::RouteCollisionFinding;
+        use fallow_types::results::RouteCollision;
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .route_collisions
+            .push(RouteCollisionFinding::with_actions(RouteCollision {
+                path: root.join("app/dashboard/page.tsx"),
+                url: "/dashboard".to_string(),
+                conflicting_paths: vec![root.join("pages/dashboard.tsx")],
+                line: 1,
+                col: 0,
+            }));
+        let md = build_markdown(&results, &root);
+        assert!(md.contains("### Route collisions (1)"));
+        let normalized = md.replace('\\', "/");
+        assert!(normalized.contains("/dashboard"));
+        assert!(normalized.contains("dashboard"));
+    }
+
+    // -------------------------------------------------------------------------
+    // dynamic segment name conflict (lines 663-674)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn markdown_dynamic_segment_name_conflict_format() {
+        use fallow_types::output_dead_code::DynamicSegmentNameConflictFinding;
+        use fallow_types::results::DynamicSegmentNameConflict;
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results.dynamic_segment_name_conflicts.push(
+            DynamicSegmentNameConflictFinding::with_actions(DynamicSegmentNameConflict {
+                path: root.join("app/[slug]/page.tsx"),
+                conflicting_segments: vec!["[slug]".to_string(), "[id]".to_string()],
+                conflicting_paths: vec![root.join("app/[id]/page.tsx")],
+                position: "/product".to_string(),
+                line: 1,
+                col: 0,
+            }),
+        );
+        let md = build_markdown(&results, &root);
+        assert!(md.contains("### Dynamic segment conflicts (1)"));
+        let normalized = md.replace('\\', "/");
+        assert!(normalized.contains("slug"));
+        assert!(normalized.contains("id"));
+    }
+
+    // -------------------------------------------------------------------------
+    // catalog entry with hardcoded consumers (lines 741-751)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn markdown_catalog_entry_with_hardcoded_consumers() {
+        use fallow_types::output_dead_code::UnusedCatalogEntryFinding;
+        use fallow_types::results::UnusedCatalogEntry;
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .unused_catalog_entries
+            .push(UnusedCatalogEntryFinding::with_actions(
+                UnusedCatalogEntry {
+                    entry_name: "lodash".to_string(),
+                    catalog_name: "default".to_string(),
+                    path: root.join("pnpm-workspace.yaml"),
+                    line: 4,
+                    hardcoded_consumers: vec![root.join("packages/legacy")],
+                },
+            ));
+        let md = build_markdown(&results, &root);
+        assert!(md.contains("### Unused catalog entries (1)"));
+        let normalized = md.replace('\\', "/");
+        assert!(normalized.contains("hardcoded in"));
+        assert!(normalized.contains("packages/legacy"));
+    }
+
+    // -------------------------------------------------------------------------
+    // unresolved catalog reference with available_in_catalogs (lines 765-774)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn markdown_unresolved_catalog_reference_with_alts() {
+        use fallow_types::output_dead_code::UnresolvedCatalogReferenceFinding;
+        use fallow_types::results::UnresolvedCatalogReference;
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results.unresolved_catalog_references.push(
+            UnresolvedCatalogReferenceFinding::with_actions(UnresolvedCatalogReference {
+                entry_name: "react".to_string(),
+                catalog_name: "default".to_string(),
+                path: root.join("packages/app/package.json"),
+                line: 12,
+                available_in_catalogs: vec!["shared".to_string()],
+            }),
+        );
+        let md = build_markdown(&results, &root);
+        assert!(md.contains("### Unresolved catalog references (1)"));
+        let normalized = md.replace('\\', "/");
+        assert!(normalized.contains("available in: `shared`"));
+    }
+
+    // -------------------------------------------------------------------------
+    // vital signs section (lines 1536-1571)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn health_markdown_vital_signs_all_optional_fields() {
+        use crate::health_types::{HotspotSummary, VitalSigns};
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            vital_signs: Some(VitalSigns {
+                dead_file_pct: Some(2.5),
+                dead_export_pct: Some(10.0),
+                avg_cyclomatic: 3.2,
+                critical_complexity_pct: None,
+                p90_cyclomatic: 8,
+                duplication_pct: None,
+                hotspot_count: Some(4),
+                hotspot_top_pct_count: None,
+                maintainability_avg: Some(75.0),
+                maintainability_low_pct: None,
+                unused_dep_count: Some(3),
+                unused_deps_per_k_files: None,
+                circular_dep_count: Some(2),
+                circular_deps_per_k_files: None,
+                counts: None,
+                unit_size_profile: None,
+                functions_over_60_loc_per_k: None,
+                unit_interfacing_profile: None,
+                p95_fan_in: None,
+                coupling_high_pct: None,
+                prop_drilling_chain_count: None,
+                prop_drilling_max_depth: None,
+                p95_render_fan_in: None,
+                render_fan_in_high_pct: None,
+                max_render_fan_in: None,
+                top_render_fan_in: Vec::new(),
+                total_loc: 5000,
+            }),
+            hotspot_summary: Some(HotspotSummary {
+                since: "3 months".to_string(),
+                min_commits: 2,
+                files_analyzed: 20,
+                files_excluded: 0,
+                shallow_clone: false,
+            }),
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 10,
+                functions_analyzed: 80,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let md = build_health_markdown(&report, &root);
+        assert!(md.contains("## Vital Signs"));
+        assert!(md.contains("| Total LOC | 5000 |"));
+        assert!(md.contains("| Avg Cyclomatic | 3.2 |"));
+        assert!(md.contains("| Dead Files | 2.5% |"));
+        assert!(md.contains("| Dead Exports | 10.0% |"));
+        assert!(md.contains("| Maintainability (avg) | 75.0 |"));
+        assert!(md.contains("| Hotspots (since 3 months) | 4 |"));
+        assert!(md.contains("| Circular Deps | 2 |"));
+        assert!(md.contains("| Unused Deps | 3 |"));
+    }
+
+    #[test]
+    fn health_markdown_vital_signs_hotspot_without_summary() {
+        use crate::health_types::VitalSigns;
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            vital_signs: Some(VitalSigns {
+                avg_cyclomatic: 2.0,
+                p90_cyclomatic: 5,
+                total_loc: 0,
+                dead_file_pct: None,
+                dead_export_pct: None,
+                critical_complexity_pct: None,
+                duplication_pct: None,
+                hotspot_count: Some(7),
+                hotspot_top_pct_count: None,
+                maintainability_avg: None,
+                maintainability_low_pct: None,
+                unused_dep_count: None,
+                unused_deps_per_k_files: None,
+                circular_dep_count: None,
+                circular_deps_per_k_files: None,
+                counts: None,
+                unit_size_profile: None,
+                functions_over_60_loc_per_k: None,
+                unit_interfacing_profile: None,
+                p95_fan_in: None,
+                coupling_high_pct: None,
+                prop_drilling_chain_count: None,
+                prop_drilling_max_depth: None,
+                p95_render_fan_in: None,
+                render_fan_in_high_pct: None,
+                max_render_fan_in: None,
+                top_render_fan_in: Vec::new(),
+            }),
+            hotspot_summary: None,
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 5,
+                functions_analyzed: 20,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let md = build_health_markdown(&report, &root);
+        // When hotspot_summary is None, the label should just say "Hotspots"
+        assert!(md.contains("| Hotspots | 7 |"));
+        assert!(!md.contains("since"));
+    }
+
+    // -------------------------------------------------------------------------
+    // health score section (lines 1052-1054 / 1679-1681)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn health_markdown_health_score_header() {
+        use crate::health_types::{HealthScore, HealthScorePenalties};
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            health_score: Some(HealthScore {
+                formula_version: 2,
+                score: 82.0,
+                grade: "B",
+                penalties: HealthScorePenalties {
+                    dead_files: None,
+                    dead_exports: None,
+                    complexity: 5.0,
+                    p90_complexity: 3.0,
+                    maintainability: None,
+                    hotspots: None,
+                    unused_deps: None,
+                    circular_deps: None,
+                    unit_size: None,
+                    coupling: None,
+                    duplication: None,
+                    prop_drilling: None,
+                },
+            }),
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 5,
+                functions_analyzed: 20,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let md = build_health_markdown(&report, &root);
+        assert!(md.contains("## Health Score: 82 (B)"));
+    }
+
+    // -------------------------------------------------------------------------
+    // threshold overrides section (lines 1696-1747)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn health_markdown_threshold_overrides_active() {
+        use crate::health_types::{
+            HealthConfiguredThresholds, HealthEffectiveThresholds, ThresholdOverrideMetrics,
+            ThresholdOverrideState, ThresholdOverrideStatus,
+        };
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            findings: vec![
+                crate::health_types::ComplexityViolation {
+                    path: root.join("src/complex.ts"),
+                    name: "bigFn".to_string(),
+                    line: 10,
+                    col: 0,
+                    cyclomatic: 25,
+                    cognitive: 20,
+                    line_count: 50,
+                    param_count: 0,
+                    react_hook_count: 0,
+                    react_jsx_max_depth: 0,
+                    react_prop_count: 0,
+                    react_hook_profile: None,
+                    exceeded: crate::health_types::ExceededThreshold::Both,
+                    severity: crate::health_types::FindingSeverity::High,
+                    crap: None,
+                    coverage_pct: None,
+                    coverage_tier: None,
+                    coverage_source: None,
+                    inherited_from: None,
+                    component_rollup: None,
+                    contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
+                }
+                .into(),
+            ],
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 2,
+                functions_analyzed: 5,
+                functions_above_threshold: 1,
+                ..Default::default()
+            },
+            threshold_overrides: vec![ThresholdOverrideState {
+                status: ThresholdOverrideStatus::Active,
+                override_index: 0,
+                path: Some(root.join("src/complex.ts")),
+                function: Some("bigFn".to_string()),
+                configured_thresholds: HealthConfiguredThresholds {
+                    max_cyclomatic: Some(30),
+                    max_cognitive: Some(25),
+                    max_crap: None,
+                },
+                effective_thresholds: HealthEffectiveThresholds {
+                    max_cyclomatic: 30,
+                    max_cognitive: 25,
+                    max_crap: 30.0,
+                },
+                metrics: Some(ThresholdOverrideMetrics {
+                    cyclomatic: 25,
+                    cognitive: 20,
+                    crap: None,
+                }),
+                reason: None,
+            }],
+            ..Default::default()
+        };
+        let md = build_health_markdown(&report, &root);
+        assert!(md.contains("## Health Threshold Overrides"));
+        assert!(md.contains("| Override | Status |"));
+        let normalized = md.replace('\\', "/");
+        assert!(normalized.contains("active"));
+        assert!(normalized.contains("src/complex.ts:bigFn"));
+        assert!(normalized.contains("cyclomatic 25, cognitive 20"));
+    }
+
+    #[test]
+    fn health_markdown_threshold_overrides_stale_no_match() {
+        use crate::health_types::{
+            HealthConfiguredThresholds, HealthEffectiveThresholds, ThresholdOverrideState,
+            ThresholdOverrideStatus,
+        };
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            findings: vec![
+                crate::health_types::ComplexityViolation {
+                    path: root.join("src/x.ts"),
+                    name: "fn1".to_string(),
+                    line: 1,
+                    col: 0,
+                    cyclomatic: 22,
+                    cognitive: 18,
+                    line_count: 40,
+                    param_count: 0,
+                    react_hook_count: 0,
+                    react_jsx_max_depth: 0,
+                    react_prop_count: 0,
+                    react_hook_profile: None,
+                    exceeded: crate::health_types::ExceededThreshold::Both,
+                    severity: crate::health_types::FindingSeverity::High,
+                    crap: None,
+                    coverage_pct: None,
+                    coverage_tier: None,
+                    coverage_source: None,
+                    inherited_from: None,
+                    component_rollup: None,
+                    contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
+                }
+                .into(),
+            ],
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 1,
+                functions_analyzed: 3,
+                functions_above_threshold: 1,
+                ..Default::default()
+            },
+            threshold_overrides: vec![
+                ThresholdOverrideState {
+                    status: ThresholdOverrideStatus::Stale,
+                    override_index: 1,
+                    path: None,
+                    function: None,
+                    configured_thresholds: HealthConfiguredThresholds {
+                        max_cyclomatic: Some(40),
+                        max_cognitive: None,
+                        max_crap: None,
+                    },
+                    effective_thresholds: HealthEffectiveThresholds {
+                        max_cyclomatic: 40,
+                        max_cognitive: 15,
+                        max_crap: 30.0,
+                    },
+                    metrics: None,
+                    reason: None,
+                },
+                ThresholdOverrideState {
+                    status: ThresholdOverrideStatus::NoMatch,
+                    override_index: 2,
+                    path: None,
+                    function: None,
+                    configured_thresholds: HealthConfiguredThresholds {
+                        max_cyclomatic: None,
+                        max_cognitive: None,
+                        max_crap: Some(50.0),
+                    },
+                    effective_thresholds: HealthEffectiveThresholds {
+                        max_cyclomatic: 20,
+                        max_cognitive: 15,
+                        max_crap: 50.0,
+                    },
+                    metrics: None,
+                    reason: None,
+                },
+            ],
+            ..Default::default()
+        };
+        let md = build_health_markdown(&report, &root);
+        assert!(md.contains("stale"));
+        assert!(md.contains("no_match"));
+        assert!(md.contains("<no matching file or function>"));
+        // No metrics so the column is a dash
+        assert!(md.contains("| - |"));
+    }
+
+    // -------------------------------------------------------------------------
+    // file scores section (lines 1749-1791)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn health_markdown_file_scores_section() {
+        use crate::health_types::FileHealthScore;
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            file_scores: vec![FileHealthScore {
+                path: root.join("src/util.ts"),
+                fan_in: 5,
+                fan_out: 3,
+                dead_code_ratio: 0.1,
+                complexity_density: 0.25,
+                maintainability_index: 68.0,
+                total_cyclomatic: 40,
+                total_cognitive: 30,
+                function_count: 8,
+                lines: 200,
+                crap_max: 22.5,
+                crap_above_threshold: 1,
+            }],
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 5,
+                functions_analyzed: 20,
+                average_maintainability: Some(71.0),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let md = build_health_markdown(&report, &root);
+        assert!(md.contains("### File Health Scores (1 files)"));
+        assert!(md.contains("| File | Maintainability |"));
+        let normalized = md.replace('\\', "/");
+        assert!(normalized.contains("`src/util.ts`"));
+        assert!(normalized.contains("68.0"));
+        // avg maintainability is shown when set
+        assert!(md.contains("**Average maintainability index:** 71.0/100"));
+    }
+
+    // -------------------------------------------------------------------------
+    // coverage gaps: empty files and exports (lines 1810-1813)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn health_markdown_coverage_gaps_empty_files_and_exports() {
+        use crate::health_types::{CoverageGapSummary, CoverageGaps};
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            coverage_gaps: Some(CoverageGaps {
+                summary: CoverageGapSummary {
+                    runtime_files: 5,
+                    covered_files: 5,
+                    file_coverage_pct: 100.0,
+                    untested_files: 0,
+                    untested_exports: 0,
+                },
+                files: vec![],
+                exports: vec![],
+            }),
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 5,
+                functions_analyzed: 20,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let md = build_health_markdown(&report, &root);
+        assert!(md.contains("### Coverage Gaps"));
+        assert!(md.contains("_No coverage gaps found in scope._"));
+    }
+
+    // -------------------------------------------------------------------------
+    // hotspots section without ownership (lines 1889-1928)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn health_markdown_hotspots_without_ownership() {
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            findings: vec![
+                crate::health_types::ComplexityViolation {
+                    path: root.join("src/x.ts"),
+                    name: "hotFn".to_string(),
+                    line: 5,
+                    col: 0,
+                    cyclomatic: 22,
+                    cognitive: 18,
+                    line_count: 60,
+                    param_count: 0,
+                    react_hook_count: 0,
+                    react_jsx_max_depth: 0,
+                    react_prop_count: 0,
+                    react_hook_profile: None,
+                    exceeded: crate::health_types::ExceededThreshold::Both,
+                    severity: crate::health_types::FindingSeverity::High,
+                    crap: None,
+                    coverage_pct: None,
+                    coverage_tier: None,
+                    coverage_source: None,
+                    inherited_from: None,
+                    component_rollup: None,
+                    contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
+                }
+                .into(),
+            ],
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 5,
+                functions_analyzed: 10,
+                functions_above_threshold: 1,
+                ..Default::default()
+            },
+            hotspots: vec![
+                crate::health_types::HotspotEntry {
+                    path: root.join("src/hot.ts"),
+                    score: 75.0,
+                    commits: 20,
+                    weighted_commits: 18.0,
+                    lines_added: 200,
+                    lines_deleted: 80,
+                    complexity_density: 0.7,
+                    fan_in: 8,
+                    trend: fallow_core::churn::ChurnTrend::Accelerating,
+                    ownership: None,
+                    is_test_path: false,
+                }
+                .into(),
+            ],
+            hotspot_summary: None,
+            ..Default::default()
+        };
+        let md = build_health_markdown(&report, &root);
+        assert!(md.contains("### Hotspots (1 files)"));
+        // No "since" when hotspot_summary is None
+        assert!(!md.contains("since"));
+        // Without ownership the narrow table is used
+        assert!(md.contains("| File | Score | Commits | Churn | Density | Fan-in | Trend |"));
+        assert!(!md.contains("Bus"));
+        let normalized = md.replace('\\', "/");
+        assert!(normalized.contains("`src/hot.ts`"));
+        assert!(md.contains("75.0"));
+        assert!(md.contains("accelerating"));
+    }
+
+    #[test]
+    fn health_markdown_hotspots_with_summary_since_and_excluded() {
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            findings: vec![
+                crate::health_types::ComplexityViolation {
+                    path: root.join("src/z.ts"),
+                    name: "g".to_string(),
+                    line: 1,
+                    col: 0,
+                    cyclomatic: 22,
+                    cognitive: 18,
+                    line_count: 30,
+                    param_count: 0,
+                    react_hook_count: 0,
+                    react_jsx_max_depth: 0,
+                    react_prop_count: 0,
+                    react_hook_profile: None,
+                    exceeded: crate::health_types::ExceededThreshold::Both,
+                    severity: crate::health_types::FindingSeverity::High,
+                    crap: None,
+                    coverage_pct: None,
+                    coverage_tier: None,
+                    coverage_source: None,
+                    inherited_from: None,
+                    component_rollup: None,
+                    contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
+                }
+                .into(),
+            ],
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 5,
+                functions_analyzed: 10,
+                functions_above_threshold: 1,
+                ..Default::default()
+            },
+            hotspots: vec![
+                crate::health_types::HotspotEntry {
+                    path: root.join("src/churn.ts"),
+                    score: 60.0,
+                    commits: 15,
+                    weighted_commits: 12.0,
+                    lines_added: 150,
+                    lines_deleted: 40,
+                    complexity_density: 0.4,
+                    fan_in: 2,
+                    trend: fallow_core::churn::ChurnTrend::Cooling,
+                    ownership: None,
+                    is_test_path: false,
+                }
+                .into(),
+            ],
+            hotspot_summary: Some(crate::health_types::HotspotSummary {
+                since: "12 months".to_string(),
+                min_commits: 5,
+                files_analyzed: 100,
+                files_excluded: 3,
+                shallow_clone: false,
+            }),
+            ..Default::default()
+        };
+        let md = build_health_markdown(&report, &root);
+        assert!(md.contains("### Hotspots (1 files, since 12 months)"));
+        // files_excluded > 0 triggers the excluded message
+        assert!(md.contains("3 file"));
+        assert!(md.contains("excluded"));
+        assert!(md.contains("< 5 commits"));
+    }
+
+    // -------------------------------------------------------------------------
+    // hotspots with ownership (lines 1854-1887)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn health_markdown_hotspots_with_ownership() {
+        use crate::health_types::{
+            ContributorEntry, ContributorIdentifierFormat, OwnershipMetrics, OwnershipState,
+        };
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            findings: vec![
+                crate::health_types::ComplexityViolation {
+                    path: root.join("src/owned.ts"),
+                    name: "fn2".to_string(),
+                    line: 1,
+                    col: 0,
+                    cyclomatic: 22,
+                    cognitive: 18,
+                    line_count: 50,
+                    param_count: 0,
+                    react_hook_count: 0,
+                    react_jsx_max_depth: 0,
+                    react_prop_count: 0,
+                    react_hook_profile: None,
+                    exceeded: crate::health_types::ExceededThreshold::Both,
+                    severity: crate::health_types::FindingSeverity::High,
+                    crap: None,
+                    coverage_pct: None,
+                    coverage_tier: None,
+                    coverage_source: None,
+                    inherited_from: None,
+                    component_rollup: None,
+                    contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
+                }
+                .into(),
+            ],
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 2,
+                functions_analyzed: 4,
+                functions_above_threshold: 1,
+                ..Default::default()
+            },
+            hotspots: vec![
+                crate::health_types::HotspotEntry {
+                    path: root.join("src/owned.ts"),
+                    score: 80.0,
+                    commits: 25,
+                    weighted_commits: 22.0,
+                    lines_added: 300,
+                    lines_deleted: 100,
+                    complexity_density: 0.6,
+                    fan_in: 5,
+                    trend: fallow_core::churn::ChurnTrend::Stable,
+                    ownership: Some(OwnershipMetrics {
+                        bus_factor: 1,
+                        contributor_count: 2,
+                        top_contributor: ContributorEntry {
+                            identifier: "alice".to_string(),
+                            format: ContributorIdentifierFormat::Raw,
+                            share: 0.8,
+                            stale_days: 5,
+                            commits: 20,
+                        },
+                        recent_contributors: vec![],
+                        suggested_reviewers: vec![],
+                        declared_owner: Some("@team/core".to_string()),
+                        unowned: Some(false),
+                        ownership_state: OwnershipState::Active,
+                        drift: false,
+                        drift_reason: None,
+                    }),
+                    is_test_path: false,
+                }
+                .into(),
+            ],
+            hotspot_summary: None,
+            ..Default::default()
+        };
+        let md = build_health_markdown(&report, &root);
+        // Ownership widens the table with Bus/Top/Owner/Notes columns
+        assert!(md.contains("| Bus | Top | Owner | Notes |"));
+        assert!(md.contains("`alice` (80%)"));
+        assert!(md.contains("@team/core"));
+    }
+
+    // -------------------------------------------------------------------------
+    // health trend section (lines 1456-1501)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn health_markdown_trend_section() {
+        use crate::health_types::{HealthTrend, TrendDirection, TrendMetric, TrendPoint};
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            health_trend: Some(HealthTrend {
+                compared_to: TrendPoint {
+                    timestamp: "2026-05-01T00:00:00Z".to_string(),
+                    git_sha: Some("abc1234".to_string()),
+                    score: Some(70.0),
+                    grade: Some("B".to_string()),
+                    coverage_model: None,
+                    snapshot_schema_version: None,
+                },
+                metrics: vec![TrendMetric {
+                    name: "score",
+                    label: "Health Score",
+                    previous: 70.0,
+                    current: 82.0,
+                    delta: 12.0,
+                    direction: TrendDirection::Improving,
+                    unit: "pts",
+                    previous_count: None,
+                    current_count: None,
+                }],
+                snapshots_loaded: 3,
+                overall_direction: TrendDirection::Improving,
+            }),
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 5,
+                functions_analyzed: 20,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let md = build_health_markdown(&report, &root);
+        assert!(md.contains("## Trend (vs 2026-05-01 (abc1234))"));
+        assert!(md.contains("| Metric | Previous | Current | Delta | Direction |"));
+        assert!(md.contains("Health Score"));
+        assert!(md.contains("+12"));
+        assert!(md.contains("improving"));
+        assert!(md.contains("3 snapshots available"));
+    }
+
+    #[test]
+    fn health_markdown_trend_single_snapshot_singular() {
+        use crate::health_types::{HealthTrend, TrendDirection, TrendPoint};
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            health_trend: Some(HealthTrend {
+                compared_to: TrendPoint {
+                    timestamp: "2026-06-01T12:00:00Z".to_string(),
+                    git_sha: None,
+                    score: None,
+                    grade: None,
+                    coverage_model: None,
+                    snapshot_schema_version: None,
+                },
+                metrics: vec![],
+                snapshots_loaded: 1,
+                overall_direction: TrendDirection::Stable,
+            }),
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 2,
+                functions_analyzed: 5,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let md = build_health_markdown(&report, &root);
+        assert!(md.contains("1 snapshot available"));
+        assert!(!md.contains("1 snapshots available"));
+    }
+
+    // -------------------------------------------------------------------------
+    // trend metric with % unit (lines 1506-1507, 1516-1517)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn health_markdown_trend_metric_percent_unit() {
+        use crate::health_types::{HealthTrend, TrendDirection, TrendMetric, TrendPoint};
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            health_trend: Some(HealthTrend {
+                compared_to: TrendPoint {
+                    timestamp: "2026-04-01T00:00:00Z".to_string(),
+                    git_sha: None,
+                    score: None,
+                    grade: None,
+                    coverage_model: None,
+                    snapshot_schema_version: None,
+                },
+                metrics: vec![TrendMetric {
+                    name: "dead_file_pct",
+                    label: "Dead Files",
+                    previous: 5.0,
+                    current: 3.0,
+                    delta: -2.0,
+                    direction: TrendDirection::Improving,
+                    unit: "%",
+                    previous_count: None,
+                    current_count: None,
+                }],
+                snapshots_loaded: 2,
+                overall_direction: TrendDirection::Improving,
+            }),
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 5,
+                functions_analyzed: 20,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let md = build_health_markdown(&report, &root);
+        // Percent values include the % sign
+        assert!(md.contains("5.0%"));
+        assert!(md.contains("3.0%"));
+        assert!(md.contains("-2.0%"));
+    }
+
+    // -------------------------------------------------------------------------
+    // runtime coverage with watermark (lines 1380-1382)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn health_markdown_runtime_coverage_with_watermark() {
+        use crate::health_types::{
+            RuntimeCoverageReport, RuntimeCoverageReportVerdict, RuntimeCoverageSchemaVersion,
+            RuntimeCoverageSummary, RuntimeCoverageWatermark,
+        };
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            runtime_coverage: Some(RuntimeCoverageReport {
+                schema_version: RuntimeCoverageSchemaVersion::V1,
+                verdict: RuntimeCoverageReportVerdict::Clean,
+                signals: vec![],
+                summary: RuntimeCoverageSummary {
+                    functions_tracked: 100,
+                    functions_hit: 90,
+                    functions_unhit: 10,
+                    functions_untracked: 5,
+                    coverage_percent: 90.0,
+                    trace_count: 5000,
+                    period_days: 7,
+                    deployments_seen: 2,
+                    ..Default::default()
+                },
+                findings: vec![],
+                hot_paths: vec![],
+                blast_radius: vec![],
+                importance: vec![],
+                watermark: Some(RuntimeCoverageWatermark::TrialExpired),
+                warnings: vec![],
+            }),
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 5,
+                functions_analyzed: 30,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let md = build_health_markdown(&report, &root);
+        assert!(md.contains("## Runtime Coverage"));
+        assert!(md.contains("- Watermark: trial-expired"));
+    }
+
+    // -------------------------------------------------------------------------
+    // runtime coverage hot paths (lines 1428-1453)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn health_markdown_runtime_coverage_hot_paths() {
+        use crate::health_types::{
+            RuntimeCoverageHotPath, RuntimeCoverageReport, RuntimeCoverageReportVerdict,
+            RuntimeCoverageSchemaVersion, RuntimeCoverageSummary,
+        };
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            runtime_coverage: Some(RuntimeCoverageReport {
+                schema_version: RuntimeCoverageSchemaVersion::V1,
+                verdict: RuntimeCoverageReportVerdict::HotPathTouched,
+                signals: vec![],
+                summary: RuntimeCoverageSummary {
+                    functions_tracked: 50,
+                    functions_hit: 40,
+                    functions_unhit: 10,
+                    functions_untracked: 0,
+                    coverage_percent: 80.0,
+                    trace_count: 2000,
+                    period_days: 3,
+                    deployments_seen: 1,
+                    ..Default::default()
+                },
+                findings: vec![],
+                hot_paths: vec![RuntimeCoverageHotPath {
+                    id: "fallow:hot:deadbeef".to_string(),
+                    stable_id: None,
+                    path: root.join("src/service.ts"),
+                    function: "handleRequest".to_string(),
+                    line: 42,
+                    end_line: 80,
+                    invocations: 12_345,
+                    percentile: 99,
+                    actions: vec![],
+                }],
+                blast_radius: vec![],
+                importance: vec![],
+                watermark: None,
+                warnings: vec![],
+            }),
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 5,
+                functions_analyzed: 20,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let md = build_health_markdown(&report, &root);
+        assert!(md.contains("| ID | Hot path | Function |"));
+        let normalized = md.replace('\\', "/");
+        assert!(normalized.contains("fallow:hot:deadbeef"));
+        assert!(normalized.contains("handleRequest"));
+        assert!(normalized.contains("12345"));
+    }
+
+    // -------------------------------------------------------------------------
+    // CSS analytics section (lines 1100-1270)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn health_markdown_css_analytics_basic() {
+        use crate::health_types::{CssAnalyticsReport, CssAnalyticsSummary};
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            css_analytics: Some(CssAnalyticsReport {
+                files: vec![],
+                summary: CssAnalyticsSummary {
+                    files_analyzed: 3,
+                    total_rules: 120,
+                    total_declarations: 600,
+                    important_declarations: 10,
+                    empty_rules: 2,
+                    max_nesting_depth: 4,
+                    unique_colors: 15,
+                    unique_font_sizes: 8,
+                    unique_z_indexes: 3,
+                    unique_box_shadows: 2,
+                    unique_border_radii: 5,
+                    unique_line_heights: 4,
+                    custom_properties_defined: 20,
+                    custom_properties_unreferenced: 3,
+                    custom_properties_undefined: 1,
+                    keyframes_defined: 5,
+                    keyframes_unreferenced: 2,
+                    keyframes_undefined: 1,
+                    scoped_unused_classes: 4,
+                    duplicate_declaration_blocks: 1,
+                    duplicate_declarations_total: 8,
+                    tailwind_arbitrary_values: 3,
+                    tailwind_arbitrary_value_uses: 7,
+                    unused_property_registrations: 0,
+                    unused_layers: 1,
+                    unresolved_class_references: 2,
+                    unreferenced_css_classes: 0,
+                    unused_font_faces: 1,
+                    unused_theme_tokens: 0,
+                    font_size_units_used: 2,
+                    notable_truncated_files: 0,
+                },
+                scoped_unused: vec![],
+                unreferenced_keyframes: vec![],
+                undefined_keyframes: vec![],
+                duplicate_declaration_blocks: vec![],
+                tailwind_arbitrary_values: vec![],
+                unused_at_rules: vec![],
+                unresolved_class_references: vec![],
+                unreferenced_css_classes: vec![],
+                unused_font_faces: vec![],
+                unused_theme_tokens: vec![],
+                font_size_unit_mix: None,
+            }),
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 5,
+                functions_analyzed: 20,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let md = build_health_markdown(&report, &root);
+        assert!(md.contains("## CSS Health"));
+        assert!(md.contains("Stylesheets: 3 | Rules: 120"));
+        assert!(md.contains("Value sprawl:"));
+        assert!(md.contains("Candidates:"));
+    }
+
+    #[test]
+    fn health_markdown_css_analytics_undefined_keyframes() {
+        use crate::health_types::{
+            CssAnalyticsReport, CssAnalyticsSummary, CssCandidateAction, CssCandidateActionType,
+            UndefinedKeyframes,
+        };
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            css_analytics: Some(CssAnalyticsReport {
+                files: vec![],
+                summary: CssAnalyticsSummary {
+                    files_analyzed: 1,
+                    total_rules: 10,
+                    total_declarations: 50,
+                    important_declarations: 0,
+                    empty_rules: 0,
+                    max_nesting_depth: 2,
+                    unique_colors: 5,
+                    unique_font_sizes: 2,
+                    unique_z_indexes: 1,
+                    unique_box_shadows: 0,
+                    unique_border_radii: 2,
+                    unique_line_heights: 2,
+                    custom_properties_defined: 5,
+                    custom_properties_unreferenced: 0,
+                    custom_properties_undefined: 0,
+                    keyframes_defined: 2,
+                    keyframes_unreferenced: 0,
+                    keyframes_undefined: 1,
+                    scoped_unused_classes: 0,
+                    duplicate_declaration_blocks: 0,
+                    duplicate_declarations_total: 0,
+                    tailwind_arbitrary_values: 0,
+                    tailwind_arbitrary_value_uses: 0,
+                    unused_property_registrations: 0,
+                    unused_layers: 0,
+                    unresolved_class_references: 0,
+                    unreferenced_css_classes: 0,
+                    unused_font_faces: 0,
+                    unused_theme_tokens: 0,
+                    font_size_units_used: 1,
+                    notable_truncated_files: 0,
+                },
+                scoped_unused: vec![],
+                unreferenced_keyframes: vec![],
+                undefined_keyframes: vec![UndefinedKeyframes {
+                    name: "slide-in".to_string(),
+                    path: "src/styles.css".to_string(),
+                    actions: vec![CssCandidateAction {
+                        kind: CssCandidateActionType::VerifyUnused,
+                        auto_fixable: false,
+                        description: "Verify unused keyframe".to_string(),
+                        command: None,
+                    }],
+                }],
+                duplicate_declaration_blocks: vec![],
+                tailwind_arbitrary_values: vec![],
+                unused_at_rules: vec![],
+                unresolved_class_references: vec![],
+                unreferenced_css_classes: vec![],
+                unused_font_faces: vec![],
+                unused_theme_tokens: vec![],
+                font_size_unit_mix: None,
+            }),
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 2,
+                functions_analyzed: 5,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let md = build_health_markdown(&report, &root);
+        assert!(md.contains("Undefined @keyframes"));
+        assert!(md.contains("`slide-in`"));
+    }
+
+    #[test]
+    fn health_markdown_css_analytics_tailwind_and_class_candidates() {
+        use crate::health_types::{
+            CssAnalyticsReport, CssAnalyticsSummary, CssCandidateAction, CssCandidateActionType,
+            TailwindArbitraryValue, UnreferencedCssClass, UnresolvedClassReference,
+        };
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            css_analytics: Some(CssAnalyticsReport {
+                files: vec![],
+                summary: CssAnalyticsSummary {
+                    files_analyzed: 1,
+                    total_rules: 5,
+                    total_declarations: 20,
+                    important_declarations: 0,
+                    empty_rules: 0,
+                    max_nesting_depth: 1,
+                    unique_colors: 2,
+                    unique_font_sizes: 1,
+                    unique_z_indexes: 0,
+                    unique_box_shadows: 0,
+                    unique_border_radii: 1,
+                    unique_line_heights: 1,
+                    custom_properties_defined: 0,
+                    custom_properties_unreferenced: 0,
+                    custom_properties_undefined: 0,
+                    keyframes_defined: 0,
+                    keyframes_unreferenced: 0,
+                    keyframes_undefined: 0,
+                    scoped_unused_classes: 0,
+                    duplicate_declaration_blocks: 0,
+                    duplicate_declarations_total: 0,
+                    tailwind_arbitrary_values: 2,
+                    tailwind_arbitrary_value_uses: 4,
+                    unused_property_registrations: 0,
+                    unused_layers: 0,
+                    unresolved_class_references: 1,
+                    unreferenced_css_classes: 1,
+                    unused_font_faces: 0,
+                    unused_theme_tokens: 0,
+                    font_size_units_used: 1,
+                    notable_truncated_files: 0,
+                },
+                scoped_unused: vec![],
+                unreferenced_keyframes: vec![],
+                undefined_keyframes: vec![],
+                duplicate_declaration_blocks: vec![],
+                tailwind_arbitrary_values: vec![TailwindArbitraryValue {
+                    value: "w-[42px]".to_string(),
+                    count: 3,
+                    path: "src/App.tsx".to_string(),
+                    line: 7,
+                    actions: vec![CssCandidateAction {
+                        kind: CssCandidateActionType::VerifyUnused,
+                        auto_fixable: false,
+                        description: "Replace with a scale token".to_string(),
+                        command: None,
+                    }],
+                }],
+                unused_at_rules: vec![],
+                unresolved_class_references: vec![UnresolvedClassReference {
+                    class: "btn-primry".to_string(),
+                    suggestion: "btn-primary".to_string(),
+                    path: "src/index.html".to_string(),
+                    line: 15,
+                    actions: vec![],
+                }],
+                unreferenced_css_classes: vec![UnreferencedCssClass {
+                    class: "old-header".to_string(),
+                    path: "src/styles.css".to_string(),
+                    line: 22,
+                    actions: vec![],
+                }],
+                unused_font_faces: vec![],
+                unused_theme_tokens: vec![],
+                font_size_unit_mix: None,
+            }),
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 2,
+                functions_analyzed: 5,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let md = build_health_markdown(&report, &root);
+        assert!(md.contains("Top Tailwind arbitrary values"));
+        assert!(md.contains("`w-[42px]` (3x)"));
+        assert!(md.contains("Likely class typos"));
+        assert!(md.contains("`btn-primry` -> `btn-primary`"));
+        assert!(md.contains("Unreferenced global classes"));
+        assert!(md.contains("`.old-header`"));
+    }
+
+    #[test]
+    fn health_markdown_css_analytics_font_candidates() {
+        use crate::health_types::{
+            CssAnalyticsReport, CssAnalyticsSummary, CssCandidateAction, CssCandidateActionType,
+            CssNotationConsistency, CssNotationCount, UnusedFontFace, UnusedThemeToken,
+        };
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            css_analytics: Some(CssAnalyticsReport {
+                files: vec![],
+                summary: CssAnalyticsSummary {
+                    files_analyzed: 1,
+                    total_rules: 5,
+                    total_declarations: 20,
+                    important_declarations: 0,
+                    empty_rules: 0,
+                    max_nesting_depth: 1,
+                    unique_colors: 2,
+                    unique_font_sizes: 3,
+                    unique_z_indexes: 0,
+                    unique_box_shadows: 0,
+                    unique_border_radii: 1,
+                    unique_line_heights: 1,
+                    custom_properties_defined: 0,
+                    custom_properties_unreferenced: 0,
+                    custom_properties_undefined: 0,
+                    keyframes_defined: 0,
+                    keyframes_unreferenced: 0,
+                    keyframes_undefined: 0,
+                    scoped_unused_classes: 0,
+                    duplicate_declaration_blocks: 0,
+                    duplicate_declarations_total: 0,
+                    tailwind_arbitrary_values: 0,
+                    tailwind_arbitrary_value_uses: 0,
+                    unused_property_registrations: 0,
+                    unused_layers: 0,
+                    unresolved_class_references: 0,
+                    unreferenced_css_classes: 0,
+                    unused_font_faces: 1,
+                    unused_theme_tokens: 1,
+                    font_size_units_used: 2,
+                    notable_truncated_files: 0,
+                },
+                scoped_unused: vec![],
+                unreferenced_keyframes: vec![],
+                undefined_keyframes: vec![],
+                duplicate_declaration_blocks: vec![],
+                tailwind_arbitrary_values: vec![],
+                unused_at_rules: vec![],
+                unresolved_class_references: vec![],
+                unreferenced_css_classes: vec![],
+                unused_font_faces: vec![UnusedFontFace {
+                    family: "OldFont".to_string(),
+                    path: "src/fonts.css".to_string(),
+                    actions: vec![CssCandidateAction {
+                        kind: CssCandidateActionType::VerifyUnused,
+                        auto_fixable: false,
+                        description: "Check if used from JS".to_string(),
+                        command: None,
+                    }],
+                }],
+                unused_theme_tokens: vec![UnusedThemeToken {
+                    token: "--color-stale".to_string(),
+                    namespace: "color".to_string(),
+                    path: "src/theme.css".to_string(),
+                    line: 10,
+                    actions: vec![],
+                }],
+                font_size_unit_mix: Some(CssNotationConsistency {
+                    axis: "Font sizes".to_string(),
+                    notations: vec![
+                        CssNotationCount {
+                            notation: "rem".to_string(),
+                            count: 8,
+                        },
+                        CssNotationCount {
+                            notation: "px".to_string(),
+                            count: 3,
+                        },
+                    ],
+                    actions: vec![],
+                }),
+            }),
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 2,
+                functions_analyzed: 5,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let md = build_health_markdown(&report, &root);
+        assert!(md.contains("Unused @font-face"));
+        assert!(md.contains("`OldFont` (src/fonts.css)"));
+        assert!(md.contains("Unused @theme tokens"));
+        assert!(md.contains("`--color-stale` (src/theme.css:10)"));
+        assert!(md.contains("Font sizes mix 2 units"));
+        assert!(md.contains("8 rem"));
+        assert!(md.contains("3 px"));
+    }
+
+    // -------------------------------------------------------------------------
+    // metric legend (lines 2010-2054)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn health_markdown_metric_legend_shown_when_relevant() {
+        use crate::health_types::FileHealthScore;
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            file_scores: vec![FileHealthScore {
+                path: root.join("src/x.ts"),
+                fan_in: 1,
+                fan_out: 1,
+                dead_code_ratio: 0.0,
+                complexity_density: 0.1,
+                maintainability_index: 80.0,
+                total_cyclomatic: 5,
+                total_cognitive: 4,
+                function_count: 2,
+                lines: 50,
+                crap_max: 5.0,
+                crap_above_threshold: 0,
+            }],
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 1,
+                functions_analyzed: 2,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let md = build_health_markdown(&report, &root);
+        assert!(md.contains("<details><summary>Metric definitions</summary>"));
+        assert!(md.contains("**MI**"));
+        assert!(md.contains("[Full metric reference]"));
+    }
+
+    #[test]
+    fn health_markdown_metric_legend_not_shown_without_sections() {
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            findings: vec![
+                crate::health_types::ComplexityViolation {
+                    path: root.join("src/y.ts"),
+                    name: "noLegend".to_string(),
+                    line: 1,
+                    col: 0,
+                    cyclomatic: 22,
+                    cognitive: 18,
+                    line_count: 30,
+                    param_count: 0,
+                    react_hook_count: 0,
+                    react_jsx_max_depth: 0,
+                    react_prop_count: 0,
+                    react_hook_profile: None,
+                    exceeded: crate::health_types::ExceededThreshold::Both,
+                    severity: crate::health_types::FindingSeverity::High,
+                    crap: None,
+                    coverage_pct: None,
+                    coverage_tier: None,
+                    coverage_source: None,
+                    inherited_from: None,
+                    component_rollup: None,
+                    contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
+                }
+                .into(),
+            ],
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 1,
+                functions_analyzed: 1,
+                functions_above_threshold: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let md = build_health_markdown(&report, &root);
+        // Findings only, no file_scores / hotspots / targets / coverage_gaps
+        // so the legend is suppressed
+        assert!(!md.contains("<details>"));
+    }
+
+    // -------------------------------------------------------------------------
+    // coverage_gaps section with single file (plural/singular wording)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn health_markdown_coverage_gaps_files_section_singular() {
+        use crate::health_types::{
+            CoverageGapSummary, CoverageGaps, UntestedFile, UntestedFileFinding,
+        };
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            coverage_gaps: Some(CoverageGaps {
+                summary: CoverageGapSummary {
+                    runtime_files: 1,
+                    covered_files: 0,
+                    file_coverage_pct: 0.0,
+                    untested_files: 1,
+                    untested_exports: 0,
+                },
+                files: vec![UntestedFileFinding::with_actions(
+                    UntestedFile {
+                        path: root.join("src/single.ts"),
+                        value_export_count: 1,
+                    },
+                    &root,
+                )],
+                exports: vec![],
+            }),
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 2,
+                functions_analyzed: 5,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let md = build_health_markdown(&report, &root);
+        assert!(md.contains("#### Files"));
+        let normalized = md.replace('\\', "/");
+        // single export uses no plural "s"
+        assert!(normalized.contains("`src/single.ts` (1 value export)"));
+    }
+
+    // -------------------------------------------------------------------------
+    // health markdown with "shown" subset vs total (lines 1620-1626)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn health_markdown_findings_subset_shown() {
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            findings: vec![
+                crate::health_types::ComplexityViolation {
+                    path: root.join("src/big.ts"),
+                    name: "bigFn".to_string(),
+                    line: 5,
+                    col: 0,
+                    cyclomatic: 30,
+                    cognitive: 25,
+                    line_count: 100,
+                    param_count: 0,
+                    react_hook_count: 0,
+                    react_jsx_max_depth: 0,
+                    react_prop_count: 0,
+                    react_hook_profile: None,
+                    exceeded: crate::health_types::ExceededThreshold::Both,
+                    severity: crate::health_types::FindingSeverity::High,
+                    crap: None,
+                    coverage_pct: None,
+                    coverage_tier: None,
+                    coverage_source: None,
+                    inherited_from: None,
+                    component_rollup: None,
+                    contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
+                }
+                .into(),
+            ],
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 2,
+                functions_analyzed: 10,
+                // total > shown triggers the "(N shown)" suffix
+                functions_above_threshold: 5,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let md = build_health_markdown(&report, &root);
+        // 5 total but only 1 shown
+        assert!(md.contains("## Fallow: 5 high complexity functions (1 shown)"));
+    }
+
+    // -------------------------------------------------------------------------
+    // unused type export with is_type_only: true
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn markdown_unused_type_export_format() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .unused_types
+            .push(UnusedTypeFinding::with_actions(UnusedExport {
+                path: root.join("src/types.ts"),
+                export_name: "MyInterface".to_string(),
+                is_type_only: true,
+                line: 3,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
+        let md = build_markdown(&results, &root);
+        assert!(md.contains("### Unused type exports (1)"));
+        let normalized = md.replace('\\', "/");
+        assert!(normalized.contains("- `src/types.ts`"));
+        assert!(normalized.contains(":3 `MyInterface`"));
+    }
+
+    // -------------------------------------------------------------------------
+    // dependency with used_in_workspaces (lines 875-882)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn markdown_dep_with_multiple_workspace_consumers() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .unused_dependencies
+            .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+                package_name: "shared-utils".to_string(),
+                location: DependencyLocation::Dependencies,
+                path: root.join("packages/core/package.json"),
+                line: 3,
+                used_in_workspaces: vec![root.join("packages/app"), root.join("packages/admin")],
+            }));
+        let md = build_markdown(&results, &root);
+        let normalized = md.replace('\\', "/");
+        assert!(normalized.contains("imported in packages/app, packages/admin"));
+    }
+
+    // -------------------------------------------------------------------------
+    // <component> name in findings (lines 1586-1588 / <component> branch)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn health_markdown_component_rollup_entry_label() {
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            findings: vec![
+                crate::health_types::ComplexityViolation {
+                    path: root.join("src/Card.vue"),
+                    name: "<component>".to_string(),
+                    line: 1,
+                    col: 0,
+                    cyclomatic: 10,
+                    cognitive: 14,
+                    line_count: 60,
+                    param_count: 0,
+                    react_hook_count: 0,
+                    react_jsx_max_depth: 0,
+                    react_prop_count: 0,
+                    react_hook_profile: None,
+                    exceeded: crate::health_types::ExceededThreshold::Cognitive,
+                    severity: crate::health_types::FindingSeverity::Moderate,
+                    crap: None,
+                    coverage_pct: None,
+                    coverage_tier: None,
+                    coverage_source: None,
+                    inherited_from: None,
+                    component_rollup: None,
+                    contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
+                }
+                .into(),
+            ],
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 1,
+                functions_analyzed: 1,
+                functions_above_threshold: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let md = build_health_markdown(&report, &root);
+        // The table header says "Entry" for synthetic names
+        assert!(md.contains("| File | Entry |"));
+        assert!(md.contains("`<component> (component rollup)`"));
+    }
 }
