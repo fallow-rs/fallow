@@ -2235,4 +2235,496 @@ mod tests {
             "pnpm path with nested dist/esm should resolve through source fallback"
         );
     }
+
+    // --- package_map_target: non-object map branches (lines 583-586) ---
+
+    #[test]
+    fn package_map_target_string_value_dot_key() {
+        // A non-object top-level map with specifier_key "." delegates to
+        // package_map_match_value immediately.
+        let map = serde_json::Value::String("./src/index.ts".to_string());
+        let conds = conditions();
+        // A string value resolves to Targets.
+        let result = package_map_target(&map, ".", &conds);
+        assert!(
+            matches!(result, PackageMapTarget::Targets(_)),
+            "string map with '.' key should return Targets"
+        );
+    }
+
+    #[test]
+    fn package_map_target_string_value_non_dot_key_no_match() {
+        // A non-object top-level map with a non-"." specifier returns NoMatch.
+        let map = serde_json::Value::String("./src/index.ts".to_string());
+        let conds = conditions();
+        let result = package_map_target(&map, "./sub", &conds);
+        assert!(
+            matches!(result, PackageMapTarget::NoMatch),
+            "string map with non-dot key should return NoMatch"
+        );
+    }
+
+    #[test]
+    fn package_map_target_null_value_dot_key() {
+        // A null top-level map with "." returns Blocked (null means blocked).
+        let map = serde_json::Value::Null;
+        let conds = conditions();
+        let result = package_map_target(&map, ".", &conds);
+        assert!(
+            matches!(result, PackageMapTarget::Blocked),
+            "null map with '.' key should return Blocked"
+        );
+    }
+
+    #[test]
+    fn package_map_target_bool_value_non_dot_key() {
+        // A bool top-level map with non-dot key is not an object, returns NoMatch.
+        let map = serde_json::Value::Bool(true);
+        let conds = conditions();
+        let result = package_map_target(&map, "./sub", &conds);
+        assert!(
+            matches!(result, PackageMapTarget::NoMatch),
+            "bool map with non-dot key should return NoMatch"
+        );
+    }
+
+    // --- package_map_target: condition-only object map (lines 592-596) ---
+
+    #[test]
+    fn package_map_target_condition_only_object_dot_key() {
+        // An object whose keys are all conditions (not "." or "./...") is treated
+        // as a condition map when specifier_key is ".".
+        let map = serde_json::json!({
+            "import": "./src/index.mjs",
+            "require": "./src/index.cjs"
+        });
+        let conds = conditions();
+        let result = package_map_target(&map, ".", &conds);
+        assert!(
+            matches!(result, PackageMapTarget::Targets(_)),
+            "condition-only object with '.' key should return Targets"
+        );
+    }
+
+    #[test]
+    fn package_map_target_condition_only_object_non_dot_key() {
+        // Same object, but specifier_key != "." returns NoMatch because no
+        // subpath key like "./foo" exists.
+        let map = serde_json::json!({
+            "import": "./src/index.mjs",
+            "require": "./src/index.cjs"
+        });
+        let conds = conditions();
+        let result = package_map_target(&map, "./nonexistent", &conds);
+        assert!(
+            matches!(result, PackageMapTarget::NoMatch),
+            "condition-only object with non-dot key should return NoMatch"
+        );
+    }
+
+    // --- resolve_package_map_value: unmatched conditions, bool, null (lines 641-654) ---
+
+    #[test]
+    fn resolve_package_map_value_unmatched_conditions_returns_none() {
+        // Object whose only key is not in the active condition set returns None.
+        let value = serde_json::json!({ "browser": "./src/browser.js" });
+        let conds = conditions(); // does not include "browser"
+        assert_eq!(
+            resolve_package_map_value(&value, &conds, None),
+            None,
+            "unmatched condition should return None"
+        );
+    }
+
+    #[test]
+    fn resolve_package_map_value_bool_returns_none() {
+        let value = serde_json::Value::Bool(false);
+        let conds = conditions();
+        assert_eq!(
+            resolve_package_map_value(&value, &conds, None),
+            None,
+            "bool value should return None"
+        );
+    }
+
+    #[test]
+    fn resolve_package_map_value_number_returns_none() {
+        let value = serde_json::Value::Number(42.into());
+        let conds = conditions();
+        assert_eq!(
+            resolve_package_map_value(&value, &conds, None),
+            None,
+            "number value should return None"
+        );
+    }
+
+    #[test]
+    fn resolve_package_map_value_null_returns_none() {
+        let value = serde_json::Value::Null;
+        let conds = conditions();
+        assert_eq!(
+            resolve_package_map_value(&value, &conds, None),
+            None,
+            "null value should return None"
+        );
+    }
+
+    #[test]
+    fn resolve_package_map_value_array_all_null_returns_none() {
+        // Array where every element resolves to None yields None.
+        let value = serde_json::json!([null, false, 42]);
+        let conds = conditions();
+        assert_eq!(
+            resolve_package_map_value(&value, &conds, None),
+            None,
+            "array of unresolvable values should return None"
+        );
+    }
+
+    #[test]
+    fn resolve_package_map_value_array_with_valid_entry() {
+        // Array where one element is a valid string target.
+        let value = serde_json::json!([null, "./src/index.ts"]);
+        let conds = conditions();
+        let result = resolve_package_map_value(&value, &conds, None);
+        assert_eq!(
+            result,
+            Some(vec!["./src/index.ts".to_string()]),
+            "array with a valid string entry should return that entry"
+        );
+    }
+
+    // --- package_map_pattern_capture: two-star and no-star branches (lines 659-665) ---
+
+    #[test]
+    fn package_map_pattern_capture_no_star_returns_none() {
+        // A pattern without '*' returns None (no star found).
+        assert_eq!(
+            package_map_pattern_capture("./exact", "./exact"),
+            None,
+            "pattern with no star should return None"
+        );
+    }
+
+    #[test]
+    fn package_map_pattern_capture_two_stars_returns_none() {
+        // A pattern with more than one '*' returns None.
+        assert_eq!(
+            package_map_pattern_capture("./*/*.js", "./foo/bar.js"),
+            None,
+            "pattern with two stars should return None"
+        );
+    }
+
+    #[test]
+    fn package_map_pattern_capture_single_star_captures() {
+        // Sanity: the happy path still works after the guard checks.
+        assert_eq!(
+            package_map_pattern_capture("./dist/*/index.js", "./dist/utils/index.js"),
+            Some("utils".to_string()),
+        );
+    }
+
+    #[test]
+    fn package_map_pattern_capture_no_prefix_match_returns_none() {
+        // Specifier does not start with the pattern prefix.
+        assert_eq!(
+            package_map_pattern_capture("./lib/*.js", "./src/foo.js"),
+            None,
+        );
+    }
+
+    // --- resolve_package_map_target: parent-dir and root-absolute guard (lines 719-721) ---
+
+    #[test]
+    fn resolve_package_map_target_no_dot_slash_prefix_returns_none() {
+        // A target that does not start with "./" is rejected by strip_prefix.
+        let root = PathBuf::from("/project/packages/ui");
+        let pj = fallow_config::PackageJson::default();
+        with_package_map_ctx(root, Some("@myorg/ui"), pj, &[], |ctx, manifest, _root| {
+            let result = resolve_package_map_target(ctx, manifest, "src/index.ts", None);
+            assert_eq!(result, None, "target without './' should return None");
+        });
+    }
+
+    #[test]
+    fn resolve_package_map_target_parent_dir_returns_none() {
+        // A target starting with "../" is rejected as a path escape.
+        let root = PathBuf::from("/project/packages/ui");
+        let pj = fallow_config::PackageJson::default();
+        with_package_map_ctx(root, Some("@myorg/ui"), pj, &[], |ctx, manifest, _root| {
+            let result = resolve_package_map_target(ctx, manifest, "./../outside/file.ts", None);
+            assert_eq!(result, None, "parent-dir target should return None");
+        });
+    }
+
+    #[test]
+    fn resolve_package_map_target_absolute_path_returns_none() {
+        // A target starting with "/" after stripping "./" prefix is rejected.
+        let root = PathBuf::from("/project/packages/ui");
+        let pj = fallow_config::PackageJson::default();
+        with_package_map_ctx(root, Some("@myorg/ui"), pj, &[], |ctx, manifest, _root| {
+            // "./" + "/" -> "/" after strip_prefix("./") which is no-op, but
+            // an absolute path disguised as ".//abs" yields "/" start after strip.
+            let result = resolve_package_map_target(ctx, manifest, ".//abs/path.ts", None);
+            assert_eq!(result, None, "absolute target should return None");
+        });
+    }
+
+    #[test]
+    fn resolve_package_map_target_valid_target_hits_raw_path_map() {
+        // A valid "./" target resolves when the path is in raw_path_to_id.
+        let root = PathBuf::from("/project/packages/ui");
+        let src = root.join("src/index.ts");
+        let pj = fallow_config::PackageJson::default();
+        with_package_map_ctx(
+            root,
+            Some("@myorg/ui"),
+            pj,
+            &[(src, FileId(5))],
+            |ctx, manifest, _root| {
+                let result = resolve_package_map_target(ctx, manifest, "./src/index.ts", None);
+                assert_eq!(
+                    result,
+                    Some(FileId(5)),
+                    "valid target in raw_path_to_id should resolve"
+                );
+            },
+        );
+    }
+
+    // --- package_import_source_subpath: variants (lines 673-689) ---
+
+    #[test]
+    fn package_import_source_subpath_strips_hash_and_package_name() {
+        let manifest = PackageManifestInfo {
+            root: PathBuf::from("/project"),
+            canonical_root: PathBuf::from("/project"),
+            name: Some("my-pkg".to_string()),
+            package_json: fallow_config::PackageJson::default(),
+        };
+        let result = package_import_source_subpath(&manifest, "#my-pkg/utils");
+        assert_eq!(
+            result,
+            Some(PathBuf::from("utils")),
+            "should strip '#', package name, and '/' separator"
+        );
+    }
+
+    #[test]
+    fn package_import_source_subpath_no_package_name_match_keeps_full_subpath() {
+        // When the specifier after '#' does not start with the package name,
+        // the full stripped specifier is returned.
+        let manifest = PackageManifestInfo {
+            root: PathBuf::from("/project"),
+            canonical_root: PathBuf::from("/project"),
+            name: Some("my-pkg".to_string()),
+            package_json: fallow_config::PackageJson::default(),
+        };
+        let result = package_import_source_subpath(&manifest, "#utils");
+        assert_eq!(
+            result,
+            Some(PathBuf::from("utils")),
+            "without package-name prefix the full subpath should be kept"
+        );
+    }
+
+    #[test]
+    fn package_import_source_subpath_empty_hash_returns_none() {
+        // "#" with nothing after returns None because stripped is empty and
+        // the empty string is rejected by the is_empty guard.
+        let manifest = PackageManifestInfo {
+            root: PathBuf::from("/project"),
+            canonical_root: PathBuf::from("/project"),
+            name: Some("my-pkg".to_string()),
+            package_json: fallow_config::PackageJson::default(),
+        };
+        // "#" strips to "", which is_empty is true, so returns None.
+        let result = package_import_source_subpath(&manifest, "#");
+        assert_eq!(
+            result, None,
+            "specifier '#' with empty body should return None"
+        );
+    }
+
+    #[test]
+    fn package_import_source_subpath_no_hash_returns_none() {
+        // A specifier not starting with '#' returns None.
+        let manifest = PackageManifestInfo {
+            root: PathBuf::from("/project"),
+            canonical_root: PathBuf::from("/project"),
+            name: Some("my-pkg".to_string()),
+            package_json: fallow_config::PackageJson::default(),
+        };
+        let result = package_import_source_subpath(&manifest, "no-hash");
+        assert_eq!(result, None, "specifier without '#' should return None");
+    }
+
+    #[test]
+    fn package_import_source_subpath_no_manifest_name() {
+        // When the manifest has no name the full stripped specifier is returned.
+        let manifest = PackageManifestInfo {
+            root: PathBuf::from("/project"),
+            canonical_root: PathBuf::from("/project"),
+            name: None,
+            package_json: fallow_config::PackageJson::default(),
+        };
+        let result = package_import_source_subpath(&manifest, "#internal/helper");
+        assert_eq!(
+            result,
+            Some(PathBuf::from("internal/helper")),
+            "manifest without name should return the full stripped specifier"
+        );
+    }
+
+    // --- nearest_package_manifest: deepest selection (lines 691-701) ---
+
+    #[test]
+    fn nearest_package_manifest_returns_deepest_match() {
+        let root1 = PathBuf::from("/project");
+        let root2 = PathBuf::from("/project/packages/ui");
+        let m1 = PackageManifestInfo {
+            root: root1.clone(),
+            canonical_root: root1,
+            name: Some("root".to_string()),
+            package_json: fallow_config::PackageJson::default(),
+        };
+        let m2 = PackageManifestInfo {
+            root: root2.clone(),
+            canonical_root: root2,
+            name: Some("@myorg/ui".to_string()),
+            package_json: fallow_config::PackageJson::default(),
+        };
+        let manifests = [m1, m2];
+        let from_file = Path::new("/project/packages/ui/src/index.ts");
+        let result = nearest_package_manifest(&manifests, from_file);
+        assert_eq!(
+            result.and_then(|m| m.name.as_deref()),
+            Some("@myorg/ui"),
+            "should pick the deepest (longest path) manifest that contains the file"
+        );
+    }
+
+    #[test]
+    fn nearest_package_manifest_no_match_returns_none() {
+        let root = PathBuf::from("/project/packages/ui");
+        let m = PackageManifestInfo {
+            root: root.clone(),
+            canonical_root: root,
+            name: Some("@myorg/ui".to_string()),
+            package_json: fallow_config::PackageJson::default(),
+        };
+        let manifests = [m];
+        // File is outside the manifest root.
+        let from_file = Path::new("/other/project/src/index.ts");
+        let result = nearest_package_manifest(&manifests, from_file);
+        assert!(
+            result.is_none(),
+            "file outside all manifest roots should return None"
+        );
+    }
+
+    // --- lookup_internal_file_id: path_to_id fallback (line 832) ---
+
+    #[test]
+    fn lookup_internal_file_id_uses_path_to_id_when_raw_misses() {
+        // When raw_path_to_id does not contain the path but path_to_id does,
+        // lookup_internal_file_id should fall back to path_to_id.
+        let target = PathBuf::from("/project/src/index.ts");
+        let mut path_to_id: FxHashMap<&Path, FileId> = FxHashMap::default();
+        path_to_id.insert(target.as_path(), FileId(99));
+        let raw_path_to_id: FxHashMap<&Path, FileId> = FxHashMap::default();
+        let workspace_roots: FxHashMap<&str, &Path> = FxHashMap::default();
+        let condition_names = conditions();
+        let resolver = oxc_resolver::Resolver::new(oxc_resolver::ResolveOptions::default());
+        let tsconfig_warned = std::sync::Mutex::new(FxHashSet::default());
+        let root = PathBuf::from("/project");
+        let ctx = ResolveContext {
+            resolver: &resolver,
+            style_resolver: &resolver,
+            extensions: &[],
+            path_to_id: &path_to_id,
+            raw_path_to_id: &raw_path_to_id,
+            workspace_roots: &workspace_roots,
+            package_manifests: &[],
+            condition_names: &condition_names,
+            path_aliases: &[],
+            scss_include_paths: &[],
+            static_dir_mappings: &[],
+            root: &root,
+            canonical_fallback: None,
+            tsconfig_warned: &tsconfig_warned,
+        };
+        let result = lookup_internal_file_id(&ctx, &target);
+        assert_eq!(
+            result,
+            Some(FileId(99)),
+            "should fall back from raw_path_to_id to path_to_id"
+        );
+    }
+
+    // --- try_scss_partial_fallback: colon guard (line 91) ---
+
+    #[test]
+    fn try_scss_partial_fallback_rejects_colon_specifier() {
+        // A specifier containing ':' (e.g. a Sass built-in like "sass:math")
+        // must return None immediately.
+        let root = PathBuf::from("/project");
+        let pj = fallow_config::PackageJson::default();
+        with_package_map_ctx(root.clone(), None, pj, &[], |ctx, _manifest, _r| {
+            let from_file = root.join("src/main.scss");
+            let result = try_scss_partial_fallback(ctx, &from_file, "sass:math");
+            assert!(
+                result.is_none(),
+                "specifier with ':' should short-circuit to None"
+            );
+        });
+    }
+
+    #[test]
+    fn try_scss_partial_fallback_rejects_already_partial_filename() {
+        // A specifier whose filename already starts with '_' (i.e. it's already a
+        // partial path) must return None immediately.
+        let root = PathBuf::from("/project");
+        let pj = fallow_config::PackageJson::default();
+        with_package_map_ctx(root.clone(), None, pj, &[], |ctx, _manifest, _r| {
+            let from_file = root.join("src/main.scss");
+            let result = try_scss_partial_fallback(ctx, &from_file, "./_variables");
+            assert!(
+                result.is_none(),
+                "already-partial filename should short-circuit to None"
+            );
+        });
+    }
+
+    // --- try_workspace_package_fallback: bare-specifier guard (lines 967-968) ---
+
+    #[test]
+    fn try_workspace_package_fallback_rejects_relative_specifier() {
+        // Relative specifiers (starting with "./" or "../") are not bare specifiers
+        // and must return None without touching any manifest.
+        let root = PathBuf::from("/project");
+        let pj = fallow_config::PackageJson::default();
+        with_package_map_ctx(root, None, pj, &[], |ctx, _manifest, _r| {
+            let result = try_workspace_package_fallback(ctx, "./local/module");
+            assert!(
+                result.is_none(),
+                "relative specifier should return None from workspace fallback"
+            );
+        });
+    }
+
+    #[test]
+    fn try_workspace_package_fallback_rejects_absolute_path() {
+        // Absolute paths are not bare specifiers either.
+        let root = PathBuf::from("/project");
+        let pj = fallow_config::PackageJson::default();
+        with_package_map_ctx(root, None, pj, &[], |ctx, _manifest, _r| {
+            let result = try_workspace_package_fallback(ctx, "/absolute/path");
+            assert!(
+                result.is_none(),
+                "absolute path should return None from workspace fallback"
+            );
+        });
+    }
 }
