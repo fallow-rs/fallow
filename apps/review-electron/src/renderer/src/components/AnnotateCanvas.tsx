@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { DrawableImage } from "./DrawableImage";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,6 +8,10 @@ export const AnnotateCanvas = () => {
   const [url, setUrl] = useState("http://localhost:5273");
   const [img, setImg] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+
+  useEffect(() => {
+    void window.fallow.getConfig().then((cfg) => setUrl(cfg.defaultUrl));
+  }, []);
 
   const capture = async (): Promise<void> => {
     setStatus("capturing…");

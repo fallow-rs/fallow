@@ -10,9 +10,9 @@ export const AgentPanel = () => {
   const [running, setRunning] = useState(false);
 
   useEffect(() => {
-    void window.fallow.listBackends().then((b) => {
+    void Promise.all([window.fallow.listBackends(), window.fallow.getConfig()]).then(([b, cfg]) => {
       setBackends(b);
-      setSelected(b[0]?.id ?? "");
+      setSelected(b.some((x) => x.id === cfg.agentBackend) ? cfg.agentBackend : (b[0]?.id ?? ""));
     });
   }, []);
 

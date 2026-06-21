@@ -7,6 +7,7 @@ import type { InspectorCard } from "../main/inspect";
 import type { FileDiff } from "../main/diff";
 import type { AgentBackend } from "../main/backends";
 import type { AgentRunResult } from "../main/agentRun";
+import type { AppConfig } from "../main/config";
 
 const api = {
   getReview: (root?: string): Promise<WalkthroughDocument> =>
@@ -21,6 +22,7 @@ const api = {
     ipcRenderer.invoke("diff:get", base, file),
   listBackends: (): Promise<AgentBackend[]> => ipcRenderer.invoke("agent:backends"),
   runAgent: (id: string): Promise<AgentRunResult> => ipcRenderer.invoke("agent:run", id),
+  getConfig: (): Promise<AppConfig> => ipcRenderer.invoke("config:get"),
   onInspectSelection: (cb: (card: InspectorCard) => void): void => {
     ipcRenderer.on("inspect:selection", (_event, card: InspectorCard) => cb(card));
   },

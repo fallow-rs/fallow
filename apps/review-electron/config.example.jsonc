@@ -1,0 +1,19 @@
+{
+  // Copy to ~/.fallow-review/config.jsonc to override defaults.
+  "$schema": "./config.schema.json",
+
+  // Path to the `fallow` binary (default: `fallow` on PATH, or FALLOW_BIN).
+  "fallowBin": null,
+
+  // Default URL the live-app embed / screenshot tools open.
+  "defaultUrl": "http://localhost:5273",
+
+  // Localhost port for the in-page inspector bridge.
+  "inspectPort": 7787,
+
+  // Default agent backend: "claude-code" | "codex" | "opencode".
+  "agentBackend": "claude-code",
+
+  // Override the diff base (default: the review's merge-base).
+  "diffBase": null
+}

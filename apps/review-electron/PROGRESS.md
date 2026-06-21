@@ -83,3 +83,7 @@ stacked on `fix/review-quality` (engine E1-E8+E11).
   opencode) + buildAgentPrompt + extractAgentJson (pure, tested) + agentRun (guide
   -> spawn -> graph validation) + AgentPanel UI. runGuide returns digest+schemaShape.
   vitest 32, lint/typecheck/build/e2e 4/4 green. Next: P4 JSONC config.
+- P4 DONE: JSONC config (~/.fallow-review/config.jsonc). config.ts (stripJsonc +
+  parseConfig + loadConfig, pure, tested) + schema + example; main wires FALLOW_BIN
+  + inspectPort + config:get + fs.watch hot-reload; renderer reads defaults
+  (backend, url). vitest 35, lint/typecheck/build/e2e 4/4 green. Next: P5 design QA.

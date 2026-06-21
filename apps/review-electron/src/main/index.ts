@@ -1,6 +1,8 @@
 import { join } from "node:path";
+import { watch } from "node:fs";
 import { app, BrowserWindow, ipcMain, session, type WebContents } from "electron";
 import { electronApp, optimizer } from "@electron-toolkit/utils";
+import { loadConfig, configPath } from "./config";
 import { runReview, runGuide, validateWalkthrough } from "./review";
 import { appendFeedItem } from "./feed";
 import { buildAgentWalkthrough } from "./agentWalkthrough";
@@ -20,6 +22,9 @@ const rendererDevUrl = (): string | undefined => process.env["ELECTRON_RENDERER_
 
 let mainWindow: BrowserWindow | null = null;
 let latestDoc: WalkthroughDocument | null = null;
+let appConfig = loadConfig();
+// A config-provided binary wins over the ambient PATH for `fallow`.
+if (appConfig.fallowBin) process.env["FALLOW_BIN"] = appConfig.fallowBin;
 
 const createWindow = (): BrowserWindow => {
   const win = new BrowserWindow({
@@ -66,6 +71,7 @@ ipcMain.handle("diff:get", (_event, base: string, file: string) =>
 );
 ipcMain.handle("agent:backends", () => BACKENDS);
 ipcMain.handle("agent:run", (_event, id: string) => runAgentReview(process.cwd(), id));
+ipcMain.handle("config:get", () => appConfig);
 
 /**
  * Harden every webContents (security checklist): deny popups, block off-app
@@ -126,7 +132,17 @@ if (!app.requestSingleInstanceLock()) {
       () => latestDoc,
       (card) => mainWindow?.webContents.send("inspect:selection", card),
       process.cwd(),
+      appConfig.inspectPort,
     );
+
+    // Hot-reload the JSONC config on change (best-effort; ignored if absent).
+    try {
+      watch(configPath(), () => {
+        appConfig = loadConfig();
+      });
+    } catch {
+      /* no config file to watch */
+    }
 
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) mainWindow = createWindow();

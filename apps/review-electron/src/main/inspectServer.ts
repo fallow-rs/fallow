@@ -20,6 +20,7 @@ export const startInspectServer = (
   getDoc: () => WalkthroughDocument | null,
   send: (card: InspectorCard) => void,
   root: string,
+  port: number = INSPECT_PORT,
 ): Server => {
   const server = createServer((req, res) => {
     if (req.method === "OPTIONS") {
@@ -57,6 +58,6 @@ export const startInspectServer = (
   // The inspector bridge is optional; never crash the app if the port is taken
   // (e.g. a second window or a parallel e2e launch).
   server.on("error", () => undefined);
-  server.listen(INSPECT_PORT, "127.0.0.1");
+  server.listen(port, "127.0.0.1");
   return server;
 };
