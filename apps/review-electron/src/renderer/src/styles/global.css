@@ -1,0 +1,166 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+/* Fonts are not fetched from the network (offline desktop app + strict CSP); the
+ * font-family vars prefer locally-installed Inter / JetBrains Mono and fall back
+ * to system-ui / ui-monospace. */
+
+@custom-variant dark (&:is(.dark *));
+
+/* shadcn theme: zinc neutral, dark-primary. UI is sans (Inter); data (paths,
+ * numbers, badges, code) is mono (JetBrains Mono). Color is rare: a single
+ * accent for primary actions, plus muted fallow-* data signals. */
+:root {
+  --radius: 0.5rem;
+
+  --background: #ffffff;
+  --foreground: #18181b;
+  --card: #ffffff;
+  --card-foreground: #18181b;
+  --popover: #ffffff;
+  --popover-foreground: #18181b;
+  --primary: #18181b;
+  --primary-foreground: #fafafa;
+  --secondary: #f4f4f5;
+  --secondary-foreground: #18181b;
+  --muted: #f4f4f5;
+  --muted-foreground: #52525b;
+  --accent: #f4f4f5;
+  --accent-foreground: #18181b;
+  --destructive: #dc2626;
+  --destructive-foreground: #fafafa;
+  --border: #e4e4e7;
+  --input: #e4e4e7;
+  --ring: #a1a1aa;
+
+  /* fallow data signals (used sparingly: dots, badges, deltas) */
+  --fallow-red: #dc2626;
+  --fallow-amber: #b45309;
+  --fallow-green: #16a34a;
+  --fallow-blue: #2563eb;
+
+  --chart-1: #2563eb;
+  --chart-2: #16a34a;
+  --chart-3: #b45309;
+  --chart-4: #dc2626;
+  --chart-5: #7c3aed;
+
+  --sidebar: #fafafa;
+  --sidebar-foreground: #18181b;
+  --sidebar-primary: #18181b;
+  --sidebar-primary-foreground: #fafafa;
+  --sidebar-accent: #f4f4f5;
+  --sidebar-accent-foreground: #18181b;
+  --sidebar-border: #e4e4e7;
+  --sidebar-ring: #a1a1aa;
+
+  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", monospace;
+}
+
+.dark {
+  --background: #09090b;
+  --foreground: #fafafa;
+  --card: #0c0c0e;
+  --card-foreground: #fafafa;
+  --popover: #161618;
+  --popover-foreground: #fafafa;
+  --primary: #fafafa;
+  --primary-foreground: #09090b;
+  --secondary: #1c1c1f;
+  --secondary-foreground: #fafafa;
+  --muted: #1c1c1f;
+  --muted-foreground: #a1a1aa;
+  --accent: #232327;
+  --accent-foreground: #fafafa;
+  --destructive: #f87171;
+  --destructive-foreground: #fafafa;
+  --border: #27272a;
+  --input: #27272a;
+  --ring: #a1a1aa;
+
+  --fallow-red: #f87171;
+  --fallow-amber: #fbbf24;
+  --fallow-green: #4ade80;
+  --fallow-blue: #60a5fa;
+
+  --chart-1: #60a5fa;
+  --chart-2: #4ade80;
+  --chart-3: #fbbf24;
+  --chart-4: #f87171;
+  --chart-5: #a78bfa;
+
+  --sidebar: #0c0c0e;
+  --sidebar-foreground: #fafafa;
+  --sidebar-primary: #fafafa;
+  --sidebar-primary-foreground: #09090b;
+  --sidebar-accent: #1c1c1f;
+  --sidebar-accent-foreground: #fafafa;
+  --sidebar-border: #1d1d20;
+  --sidebar-ring: #52525b;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-fallow-red: var(--fallow-red);
+  --color-fallow-amber: var(--fallow-amber);
+  --color-fallow-green: var(--fallow-green);
+  --color-fallow-blue: var(--fallow-blue);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/* Tailwind v4 content discovery: scan the renderer source tree. */
+@source "../";

@@ -62,3 +62,9 @@ stacked on `fix/review-quality` (engine E1-E8+E11).
   (npm run format) + React Compiler (babel-plugin-react-compiler). 4 oxlint
   warnings fixed (toSorted, hoisted helper, addEventListener). tsc lib -> ES2023.
   oxlint + tsc + build + e2e 3/3 all green. Forge/Tailwind/multi-window skipped.
+
+## POLISH ROUND (shadcn + diff views) - plan: .plans/polish-shadcn-diff.md
+- P0 DONE: shadcn foundation. Tailwind v4 (@tailwindcss/vite) + zinc/neutral dark
+  theme (copied from fallow-cloud feat/dashboard-shadcn, fonts @import dropped for
+  offline+CSP) + cn util + components.json + `@` alias + dark default. CSS bundle
+  emitted; tsc + build + oxlint + e2e 3/3 green. P1 = port screens to shadcn.
