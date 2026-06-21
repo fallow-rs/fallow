@@ -87,3 +87,7 @@ stacked on `fix/review-quality` (engine E1-E8+E11).
   parseConfig + loadConfig, pure, tested) + schema + example; main wires FALLOW_BIN
   + inspectPort + config:get + fs.watch hot-reload; renderer reads defaults
   (backend, url). vitest 35, lint/typecheck/build/e2e 4/4 green. Next: P5 design QA.
+- P5 DONE: design QA. shots.e2e.ts captures 4 screens; round-1 critique + fixes
+  (effort humanize, sidebar header divider, screenshot empty-state hint); re-shot.
+  Ratings >= 8 all screens (walkthrough 8.5, diff 8.5, screenshot 8, live 8),
+  consistent. lint/tsc/e2e 5/5 green. Next: P6 finalize.

@@ -33,6 +33,11 @@ export const AnnotateCanvas = () => {
         </Button>
       </div>
       {status && <p className="text-[11px] text-muted-foreground">{status}</p>}
+      {!img && !status && (
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          screenshot a url to draw on it and send the annotation to the agent.
+        </p>
+      )}
       {img && <DrawableImage dataUrl={img} target={url} onDone={() => setImg(null)} />}
     </div>
   );

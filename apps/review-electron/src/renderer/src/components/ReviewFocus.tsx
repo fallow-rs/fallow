@@ -8,7 +8,7 @@ export const ReviewFocus = ({ focus }: { focus: Focus }) => (
     <h2 className="my-1 text-sm lowercase">{focus.headline}</h2>
     <div className="text-[11px] text-muted-foreground">
       <span className="font-mono tabular-nums">{focus.changedFiles}</span> files · risk{" "}
-      {focus.riskClass} · effort {focus.reviewEffort}
+      {focus.riskClass} · effort {focus.reviewEffort.replace(/_/g, " ")}
     </div>
   </header>
 );

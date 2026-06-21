@@ -68,7 +68,7 @@ export const App = () => {
   return (
     <div className="grid h-screen grid-cols-[440px_1fr] bg-background font-sans text-foreground">
       <aside className="flex flex-col overflow-auto border-r border-border bg-card p-4">
-        <div className="mb-3 flex items-center justify-between">
+        <div className="mb-3 flex items-center justify-between border-b border-border pb-3">
           <h1 className="text-sm font-semibold lowercase">fallow review</h1>
           <Button size="sm" variant="secondary" disabled={loading} onClick={() => void load()}>
             {loading ? "reviewing…" : "load review"}
