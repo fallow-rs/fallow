@@ -230,3 +230,8 @@ stacked on `fix/review-quality` (engine E1-E8+E11).
   (muted spinner / green check / red triangle). Not screenshot-captured (running
   it spawns a real agent backend, too flaky for e2e); existing 6 e2e prove no
   regression and it reuses the verified signal palette. format/lint/tsc/build/vitest/e2e green.
+- Round 16 (inspector bullet color discipline, MED): the InspectorCard rendered a
+  fallow-blue bullet on every fact, decorative color (identical marker, no signal)
+  against color-only-as-signal. Muted the bullets (text-muted-foreground/50) so the
+  sidebar's only colors are genuine signals (verdict/risk red, cleared-check green,
+  fan-in amber). Verified via 07-inspector. format/lint/tsc/build/e2e green.

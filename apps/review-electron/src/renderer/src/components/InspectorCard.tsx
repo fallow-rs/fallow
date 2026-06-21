@@ -16,7 +16,7 @@ export const InspectorCard = ({ card }: { card: Card }) => (
       <ul className="space-y-0.5 text-[11px] text-muted-foreground">
         {card.facts.map((f, i) => (
           <li key={`${card.file}-${i}`} className="flex gap-1.5">
-            <span className="text-fallow-blue">•</span>
+            <span className="text-muted-foreground/50">•</span>
             {f}
           </li>
         ))}
