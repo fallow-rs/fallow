@@ -85,6 +85,25 @@ Playwright-electron e2e · 9 package + docs.
   stamps root-relative `data-fallow-source` (locatorjs-style), kept in the same
   path-space as `fallow review` output for a correct join.
 
+## Polish round (shadcn + codiff): done
+
+Plan: `.plans/polish-shadcn-diff.md`. All on branch `feat/review-electron-app`.
+
+- **shadcn/ui + Tailwind v4**: every screen ported off inline styles to shadcn
+  (mirrors fallow-cloud `feat/dashboard-shadcn`: new-york, zinc/neutral dark, cn,
+  radix-ui). theme.ts deleted; conventions applied (lowercase, mono tabular-nums,
+  signal-only color). Fonts are not network-fetched (offline + CSP).
+- **codiff-style diff views**: `git diff` IPC + a hand-rolled unified-diff parser
+  (codiff uses @pierre/diffs; same hunk model, zero deps) + a mono DiffView
+  (line-number gutters, fallow-green/red, +N/-N, binary fallback); click a file to
+  open its diff.
+- **agent "skills" layer**: pluggable backends (claude-code / codex / opencode);
+  fetch the walkthrough-guide, run the agent, validate judgments against the graph.
+- **JSONC config**: `~/.fallow-review/config.jsonc` (+ schema) with hot-reload.
+- **design QA**: Playwright-electron screenshots of each screen, reviewed and
+  refined; all screens rate >= 8 and consistent.
+- Tooling: oxlint + oxfmt + React Compiler (codiff-aligned). All green.
+
 ## Pending / owed (honest)
 
 - W3 ACCEPTED-judgment proof: needs a decision-producing fixture (the current diff
