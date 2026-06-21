@@ -210,3 +210,10 @@ stacked on `fix/review-quality` (engine E1-E8+E11).
   the filename never truncates; full path + reason move to the hover title.
   Result: rows show clean filenames (App.tsx, walkthrough.ts ↓17) grouped under
   their module header, hub metrics aligned right. format/lint/tsc/build/vitest/e2e 5/5.
+- Round 13 (review error state, MED): a failed `fallow review` showed a cramped
+  red box pinned to the top of the sidebar while the "load a review" empty prompt
+  still rendered below it. Promoted error to a first-class centered state (red
+  TriangleAlert in a tinted ring, "review failed", the actual message, retry
+  button) mutually exclusive with loading/empty, matching the live/screenshot error
+  pattern. Added a second shots test that launches with a bad FALLOW_BIN to capture
+  13-review-error deterministically. format/lint/tsc/build/vitest/e2e (6 e2e) green.

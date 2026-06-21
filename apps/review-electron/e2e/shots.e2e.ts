@@ -119,3 +119,19 @@ test("capture screens for design QA", async () => {
 
   await app.close();
 });
+
+// Separate launch with a bad engine path so `fallow review` fails: QA the error.
+test("capture the review error state", async () => {
+  const app: ElectronApplication = await electron.launch({
+    args: [resolve(appDir, "out", "main", "index.js")],
+    cwd: worktreeRoot,
+    env: { ...process.env, FALLOW_BIN: "/nonexistent/fallow-bin" } as Record<string, string>,
+  });
+  const win = await app.firstWindow();
+  await safe(async () => {
+    await win.getByRole("button", { name: "Load review" }).click();
+    await win.getByTestId("review-error").waitFor({ timeout: 30_000 });
+    await win.screenshot({ path: `${shots}/13-review-error.png` });
+  });
+  await app.close();
+});

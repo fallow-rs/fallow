@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
-import { FileDiff, MonitorPlay, Camera, Sparkles, Loader2 } from "lucide-react";
+import {
+  FileDiff,
+  MonitorPlay,
+  Camera,
+  RefreshCw,
+  Sparkles,
+  Loader2,
+  TriangleAlert,
+} from "lucide-react";
 import type { WalkthroughDocument } from "../../model/walkthrough";
 import type { InspectorCard as InspectorCardData } from "../../main/inspect";
 import { ReviewFocus } from "./components/ReviewFocus";
@@ -85,11 +93,6 @@ export const App = () => {
         </header>
 
         <div className="min-h-0 flex-1 space-y-5 overflow-auto p-4">
-          {error && (
-            <p className="rounded-md border border-fallow-red/30 bg-fallow-red/10 p-2 text-xs text-fallow-red">
-              {error}
-            </p>
-          )}
           {card && <InspectorCard card={card} />}
           {doc && <ReviewFocus focus={doc.focus} noteCount={noteCount} />}
           <AgentPanel />
@@ -111,13 +114,33 @@ export const App = () => {
               <p className="text-sm">running fallow review…</p>
               <p className="text-[11px]">scoring blast radius and partitioning the diff</p>
             </div>
-          ) : (
-            !error && (
-              <div className="flex flex-col items-center gap-2 py-16 text-center text-muted-foreground">
-                <Sparkles className="size-6 opacity-40" />
-                <p className="text-sm">load a review to see what to look at first</p>
+          ) : error ? (
+            <div
+              data-testid="review-error"
+              className="flex flex-col items-center gap-3 py-16 text-center"
+            >
+              <div className="flex size-11 items-center justify-center rounded-full border border-fallow-red/30 bg-fallow-red/10">
+                <TriangleAlert className="size-5 text-fallow-red" />
               </div>
-            )
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-foreground">review failed</p>
+                <p className="max-w-xs break-words text-xs text-muted-foreground">{error}</p>
+              </div>
+              <Button
+                size="sm"
+                variant="secondary"
+                className="lowercase"
+                onClick={() => void load()}
+              >
+                <RefreshCw className="size-3.5" />
+                retry
+              </Button>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center gap-2 py-16 text-center text-muted-foreground">
+              <Sparkles className="size-6 opacity-40" />
+              <p className="text-sm">load a review to see what to look at first</p>
+            </div>
           )}
         </div>
       </aside>
