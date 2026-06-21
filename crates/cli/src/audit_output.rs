@@ -774,4 +774,104 @@ mod tests {
 
         assert_eq!(print_audit_result(&result, true, false), ExitCode::from(1));
     }
+
+    fn audit_result_with_findings(verdict: AuditVerdict, output: OutputFormat) -> AuditResult {
+        let mut result = audit_result(verdict, output);
+        result.summary = AuditSummary {
+            dead_code_issues: 2,
+            dead_code_has_errors: true,
+            complexity_findings: 1,
+            max_cyclomatic: Some(14),
+            duplication_clone_groups: 3,
+        };
+        result.changed_files_count = 4;
+        result
+    }
+
+    #[test]
+    fn print_audit_json_emits_optional_header_fields() {
+        let mut result = audit_result(AuditVerdict::Pass, OutputFormat::Json);
+        result.base_description = Some("merge-base with origin/main".to_string());
+        result.head_sha = Some("abc123".to_string());
+        result.performance = true;
+        result.base_snapshot_skipped = true;
+        result.changed_files_count = 5;
+
+        // Pass verdict + successful JSON emit (no sub-results) maps to success;
+        // exercises insert_audit_json_header's optional base_description / head_sha
+        // / performance branches and the empty next-steps path.
+        assert_eq!(print_audit_result(&result, true, false), ExitCode::SUCCESS);
+    }
+
+    #[test]
+    fn print_audit_result_renders_sarif_skeleton_without_findings() {
+        let result = audit_result(AuditVerdict::Pass, OutputFormat::Sarif);
+
+        assert_eq!(print_audit_result(&result, true, false), ExitCode::SUCCESS);
+    }
+
+    #[test]
+    fn print_audit_result_renders_codeclimate_without_findings() {
+        let result = audit_result(AuditVerdict::Pass, OutputFormat::CodeClimate);
+
+        assert_eq!(print_audit_result(&result, true, false), ExitCode::SUCCESS);
+    }
+
+    #[test]
+    fn print_audit_result_renders_pr_comment_for_both_providers() {
+        for format in [OutputFormat::PrCommentGithub, OutputFormat::PrCommentGitlab] {
+            let result = audit_result(AuditVerdict::Pass, format);
+            assert_eq!(print_audit_result(&result, true, false), ExitCode::SUCCESS);
+        }
+    }
+
+    #[test]
+    fn print_audit_result_renders_review_envelope_for_both_providers() {
+        for format in [OutputFormat::ReviewGithub, OutputFormat::ReviewGitlab] {
+            let result = audit_result(AuditVerdict::Pass, format);
+            assert_eq!(print_audit_result(&result, true, false), ExitCode::SUCCESS);
+        }
+    }
+
+    #[test]
+    fn print_audit_result_compact_and_markdown_use_human_path() {
+        for format in [OutputFormat::Compact, OutputFormat::Markdown] {
+            let result = audit_result(AuditVerdict::Pass, format);
+            assert_eq!(print_audit_result(&result, true, false), ExitCode::SUCCESS);
+        }
+    }
+
+    #[test]
+    fn print_audit_result_human_pass_renders_scope_and_status_line() {
+        let mut result = audit_result(AuditVerdict::Pass, OutputFormat::Human);
+        result.changed_files_count = 2;
+
+        // quiet=false drives the scope line + the green "no issues" status line.
+        assert_eq!(print_audit_result(&result, false, false), ExitCode::SUCCESS);
+    }
+
+    #[test]
+    fn print_audit_result_human_warn_renders_vital_signs_and_notes() {
+        let mut result = audit_result_with_findings(AuditVerdict::Warn, OutputFormat::Human);
+        result.attribution = AuditAttribution {
+            gate: AuditGate::NewOnly,
+            dead_code_inherited: 2,
+            complexity_inherited: 1,
+            duplication_inherited: 0,
+            ..AuditAttribution::default()
+        };
+        result.performance = true;
+
+        // Warn + findings (without sub-results) covers the explain tip, vital
+        // signs, the gate-excluded inherited note, and the performance note.
+        assert_eq!(print_audit_result(&result, false, false), ExitCode::SUCCESS);
+    }
+
+    #[test]
+    fn print_audit_result_human_fail_renders_red_status_line() {
+        let result = audit_result_with_findings(AuditVerdict::Fail, OutputFormat::Human);
+
+        // Fail maps to exit 1 and renders the red status line via build_status_parts.
+        assert_eq!(print_audit_result(&result, false, false), ExitCode::from(1));
+    }
 }
