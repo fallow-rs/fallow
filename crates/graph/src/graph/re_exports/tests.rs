@@ -211,6 +211,10 @@ fn barrel_re_export_creates_export_symbol() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+)]
 fn barrel_unused_re_export_has_no_references() {
     let files = vec![
         DiscoveredFile {
@@ -333,6 +337,10 @@ fn barrel_unused_re_export_has_no_references() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+)]
 fn type_only_re_export_creates_type_only_export_symbol() {
     let files = vec![
         DiscoveredFile {
@@ -562,6 +570,10 @@ fn default_re_export_creates_default_export_symbol() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+)]
 fn multi_level_re_export_chain_propagation() {
     let files = vec![
         DiscoveredFile {
@@ -1080,6 +1092,10 @@ fn entry_point_multi_level_named_re_export_chain() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+)]
 fn star_re_export_through_multiple_barrel_layers() {
     let files = vec![
         DiscoveredFile {
@@ -1668,6 +1684,10 @@ fn star_re_export_cycle_terminates() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+)]
 fn mixed_star_and_named_re_exports_from_same_source() {
     let files = vec![
         DiscoveredFile {
@@ -1808,6 +1828,10 @@ fn mixed_star_and_named_re_exports_from_same_source() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+)]
 fn entry_point_named_re_export_no_in_graph_consumers_multiple_exports() {
     let files = vec![
         DiscoveredFile {
@@ -2091,6 +2115,10 @@ fn no_re_exports_skips_chain_resolution() {
     reason = "test file/span counts are trivially small"
 )]
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+)]
 fn star_re_export_many_consumers_no_quadratic_blowup() {
     let consumer_count = 20;
     let barrel_id = FileId(consumer_count as u32);
@@ -2601,6 +2629,10 @@ fn type_only_star_chain_synthesizes_type_only_stub() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+)]
 fn type_only_star_chain_named_consumer_synthesizes_type_only_stub() {
     let files = vec![
         DiscoveredFile {
@@ -2907,6 +2939,10 @@ fn self_re_export_does_not_panic() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+)]
 fn re_export_cycle_payload_lists_member_paths() {
     let files = vec![
         DiscoveredFile {

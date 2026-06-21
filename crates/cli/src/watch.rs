@@ -11,7 +11,7 @@ use notify::{RecommendedWatcher, Watcher};
 use rustc_hash::FxHashSet;
 
 use crate::report;
-use crate::runtime_support::load_config;
+use crate::runtime_support::{LoadConfigArgs, load_config};
 
 /// ANSI escape: clear screen + scrollback + move cursor home.
 const CLEAR_SCREEN: &str = "\x1B[2J\x1B[3J\x1B[H";
@@ -36,11 +36,7 @@ pub struct WatchOptions<'a> {
 type LoadConfigFn = fn(
     root: &Path,
     config_path: &Option<PathBuf>,
-    output: OutputFormat,
-    no_cache: bool,
-    threads: usize,
-    production: bool,
-    quiet: bool,
+    args: LoadConfigArgs,
 ) -> Result<fallow_config::ResolvedConfig, ExitCode>;
 
 fn is_relevant_source(path: &Path) -> bool {
@@ -341,11 +337,13 @@ fn reload_config_or_keep_previous(
     match load(
         opts.root,
         opts.config_path,
-        opts.output,
-        opts.no_cache,
-        opts.threads,
-        opts.production,
-        opts.quiet,
+        LoadConfigArgs {
+            output: opts.output,
+            no_cache: opts.no_cache,
+            threads: opts.threads,
+            production: opts.production,
+            quiet: opts.quiet,
+        },
     ) {
         Ok(mut reloaded) => {
             if opts.include_entry_exports {
@@ -511,11 +509,13 @@ fn load_watch_config(opts: &WatchOptions<'_>) -> Result<fallow_config::ResolvedC
     let mut config = load_config(
         opts.root,
         opts.config_path,
-        opts.output,
-        opts.no_cache,
-        opts.threads,
-        opts.production,
-        opts.quiet,
+        LoadConfigArgs {
+            output: opts.output,
+            no_cache: opts.no_cache,
+            threads: opts.threads,
+            production: opts.production,
+            quiet: opts.quiet,
+        },
     )?;
     if opts.include_entry_exports {
         config.include_entry_exports = true;
@@ -1064,13 +1064,14 @@ mod tests {
         let mut config = make_config(root, OutputFormat::Human, 1, false);
         let opts = make_watch_options(root, OutputFormat::Json, 8, true);
 
-        reload_config_or_keep_previous(
-            &mut config,
-            &opts,
-            |_root, _config_path, output, _no_cache, threads, _production, quiet| {
-                Ok(make_config(Path::new("/project"), output, threads, quiet))
-            },
-        );
+        reload_config_or_keep_previous(&mut config, &opts, |_root, _config_path, args| {
+            Ok(make_config(
+                Path::new("/project"),
+                args.output,
+                args.threads,
+                args.quiet,
+            ))
+        });
 
         assert!(matches!(config.output, OutputFormat::Json));
         assert_eq!(config.threads, 8);
@@ -1086,13 +1087,14 @@ mod tests {
         let mut opts = make_watch_options(root, OutputFormat::Json, 8, true);
         opts.include_entry_exports = true;
 
-        reload_config_or_keep_previous(
-            &mut config,
-            &opts,
-            |_root, _config_path, output, _no_cache, threads, _production, quiet| {
-                Ok(make_config(Path::new("/project"), output, threads, quiet))
-            },
-        );
+        reload_config_or_keep_previous(&mut config, &opts, |_root, _config_path, args| {
+            Ok(make_config(
+                Path::new("/project"),
+                args.output,
+                args.threads,
+                args.quiet,
+            ))
+        });
 
         assert!(
             config.include_entry_exports,
@@ -1106,13 +1108,9 @@ mod tests {
         let mut config = make_config(root, OutputFormat::Human, 1, false);
         let opts = make_watch_options(root, OutputFormat::Json, 8, true);
 
-        reload_config_or_keep_previous(
-            &mut config,
-            &opts,
-            |_root, _config_path, _output, _no_cache, _threads, _production, _quiet| {
-                Err(ExitCode::from(2))
-            },
-        );
+        reload_config_or_keep_previous(&mut config, &opts, |_root, _config_path, _args| {
+            Err(ExitCode::from(2))
+        });
 
         assert!(matches!(config.output, OutputFormat::Human));
         assert_eq!(config.threads, 1);

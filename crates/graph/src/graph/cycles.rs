@@ -485,24 +485,8 @@ mod tests {
         ModuleGraph::build(&resolved_modules, &entry_points, &files)
     }
 
-    fn dfs_find_cycles_from_for_test(
-        start: usize,
-        depth_limit: usize,
-        scc_set: &FxHashSet<usize>,
-        succs: &SuccessorMap<'_>,
-        max_cycles: usize,
-        seen: &mut FxHashSet<Vec<u32>>,
-        cycles: &mut Vec<Vec<usize>>,
-    ) {
-        dfs_find_cycles_from(&mut DfsCycleInput {
-            start,
-            depth_limit,
-            scc_set,
-            succs,
-            max_cycles,
-            seen,
-            cycles,
-        });
+    fn dfs_find_cycles_from_for_test(mut input: DfsCycleInput<'_>) {
+        dfs_find_cycles_from(&mut input);
     }
 
     #[test]
@@ -830,7 +814,15 @@ mod tests {
         let mut seen = FxHashSet::default();
         let mut cycles = Vec::new();
 
-        dfs_find_cycles_from_for_test(0, 2, &scc_set, &succs, 10, &mut seen, &mut cycles);
+        dfs_find_cycles_from_for_test(DfsCycleInput {
+            start: 0,
+            depth_limit: 2,
+            scc_set: &scc_set,
+            succs: &succs,
+            max_cycles: 10,
+            seen: &mut seen,
+            cycles: &mut cycles,
+        });
         assert!(cycles.is_empty(), "isolated node should have no cycles");
     }
 
@@ -846,7 +838,15 @@ mod tests {
         let mut seen = FxHashSet::default();
         let mut cycles = Vec::new();
 
-        dfs_find_cycles_from_for_test(0, 2, &scc_set, &succs, 10, &mut seen, &mut cycles);
+        dfs_find_cycles_from_for_test(DfsCycleInput {
+            start: 0,
+            depth_limit: 2,
+            scc_set: &scc_set,
+            succs: &succs,
+            max_cycles: 10,
+            seen: &mut seen,
+            cycles: &mut cycles,
+        });
         assert_eq!(cycles.len(), 1);
         assert_eq!(cycles[0].len(), 2);
     }
@@ -864,7 +864,15 @@ mod tests {
         let mut seen = FxHashSet::default();
         let mut cycles = Vec::new();
 
-        dfs_find_cycles_from_for_test(0, 3, &scc_set, &succs, 10, &mut seen, &mut cycles);
+        dfs_find_cycles_from_for_test(DfsCycleInput {
+            start: 0,
+            depth_limit: 3,
+            scc_set: &scc_set,
+            succs: &succs,
+            max_cycles: 10,
+            seen: &mut seen,
+            cycles: &mut cycles,
+        });
         assert_eq!(cycles.len(), 2, "diamond should have two 3-node cycles");
         assert!(cycles.iter().all(|c| c.len() == 3));
     }
@@ -882,7 +890,15 @@ mod tests {
         let mut seen = FxHashSet::default();
         let mut cycles = Vec::new();
 
-        dfs_find_cycles_from_for_test(0, 3, &scc_set, &succs, 10, &mut seen, &mut cycles);
+        dfs_find_cycles_from_for_test(DfsCycleInput {
+            start: 0,
+            depth_limit: 3,
+            scc_set: &scc_set,
+            succs: &succs,
+            max_cycles: 10,
+            seen: &mut seen,
+            cycles: &mut cycles,
+        });
         assert!(
             cycles.is_empty(),
             "depth_limit=3 should prevent finding a 4-node cycle"
@@ -902,7 +918,15 @@ mod tests {
         let mut seen = FxHashSet::default();
         let mut cycles = Vec::new();
 
-        dfs_find_cycles_from_for_test(0, 4, &scc_set, &succs, 10, &mut seen, &mut cycles);
+        dfs_find_cycles_from_for_test(DfsCycleInput {
+            start: 0,
+            depth_limit: 4,
+            scc_set: &scc_set,
+            succs: &succs,
+            max_cycles: 10,
+            seen: &mut seen,
+            cycles: &mut cycles,
+        });
         assert_eq!(
             cycles.len(),
             1,
@@ -926,7 +950,15 @@ mod tests {
         let mut seen = FxHashSet::default();
         let mut cycles = Vec::new();
 
-        dfs_find_cycles_from_for_test(0, 2, &scc_set, &succs, 2, &mut seen, &mut cycles);
+        dfs_find_cycles_from_for_test(DfsCycleInput {
+            start: 0,
+            depth_limit: 2,
+            scc_set: &scc_set,
+            succs: &succs,
+            max_cycles: 2,
+            seen: &mut seen,
+            cycles: &mut cycles,
+        });
         assert!(
             cycles.len() <= 2,
             "should respect max_cycles limit, got {}",
@@ -947,7 +979,15 @@ mod tests {
         let mut cycles = Vec::new();
 
         for depth in 2..=3 {
-            dfs_find_cycles_from_for_test(0, depth, &scc_set, &succs, 10, &mut seen, &mut cycles);
+            dfs_find_cycles_from_for_test(DfsCycleInput {
+                start: 0,
+                depth_limit: depth,
+                scc_set: &scc_set,
+                succs: &succs,
+                max_cycles: 10,
+                seen: &mut seen,
+                cycles: &mut cycles,
+            });
         }
         assert!(
             cycles.is_empty(),
@@ -1104,7 +1144,15 @@ mod tests {
         let mut cycles = Vec::new();
 
         for depth in 1..=3 {
-            dfs_find_cycles_from_for_test(0, depth, &scc_set, &succs, 10, &mut seen, &mut cycles);
+            dfs_find_cycles_from_for_test(DfsCycleInput {
+                start: 0,
+                depth_limit: depth,
+                scc_set: &scc_set,
+                succs: &succs,
+                max_cycles: 10,
+                seen: &mut seen,
+                cycles: &mut cycles,
+            });
         }
         assert!(
             cycles.is_empty(),

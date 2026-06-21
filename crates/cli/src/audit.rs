@@ -1338,9 +1338,11 @@ fn assemble_audit_result(input: AuditAssemblyInput<'_>) -> Result<AuditResult, E
         input.cached_base_snapshot,
         input.base_res,
         input.base_cache_key.as_ref(),
-        check_result.as_ref(),
-        dupes_result.as_ref(),
-        health_result.as_ref(),
+        CurrentAnalysisRefs {
+            check: check_result.as_ref(),
+            dupes: dupes_result.as_ref(),
+            health: health_result.as_ref(),
+        },
     )?;
     if let Some(ref mut check) = check_result {
         check.shared_parse = None;
@@ -1394,14 +1396,22 @@ fn compute_audit_outcome(
 /// Resolve the base key snapshot for the `new`-only gate: prefer the cache, then a
 /// freshly computed base worktree (persisting it), else fall back to current keys
 /// (marking the snapshot skipped). Returns `(None, false)` outside `new`-only mode.
+/// The current-run analysis result references threaded together so the base
+/// snapshot resolver can fall back to the current keys without a six-deep
+/// argument list. Bundled refs of the optional check / dupes / health results.
+#[derive(Clone, Copy)]
+struct CurrentAnalysisRefs<'a> {
+    check: Option<&'a CheckResult>,
+    dupes: Option<&'a DupesResult>,
+    health: Option<&'a HealthResult>,
+}
+
 fn resolve_base_snapshot(
     opts: &AuditOptions<'_>,
     cached_base_snapshot: Option<AuditKeySnapshot>,
     base_res: Option<Result<AuditKeySnapshot, ExitCode>>,
     base_cache_key: Option<&AuditBaseSnapshotCacheKey>,
-    check: Option<&CheckResult>,
-    dupes: Option<&DupesResult>,
-    health: Option<&HealthResult>,
+    current: CurrentAnalysisRefs<'_>,
 ) -> Result<(Option<AuditKeySnapshot>, bool), ExitCode> {
     if !matches!(opts.gate, AuditGate::NewOnly) {
         return Ok((None, false));
@@ -1416,6 +1426,11 @@ fn resolve_base_snapshot(
         }
         return Ok((Some(snapshot), false));
     }
+    let CurrentAnalysisRefs {
+        check,
+        dupes,
+        health,
+    } = current;
     Ok((Some(current_keys_as_base_keys(check, dupes, health)), true))
 }
 
@@ -3664,6 +3679,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+    )]
     fn audit_base_preserves_tsconfig_paths_when_extends_is_in_untracked_node_modules() {
         let tmp = tempfile::TempDir::new().expect("temp dir should be created");
         let root = tmp.path();
@@ -3799,6 +3818,10 @@ export function App() {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+    )]
     fn audit_base_preserves_subdirectory_root_resolution() {
         let tmp = tempfile::TempDir::new().expect("temp dir should be created");
         let repo = tmp.path().join("repo");

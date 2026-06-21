@@ -494,35 +494,40 @@ fn run_analysis_setup(config: &ResolvedConfig) -> AnalysisSetup {
     }
 }
 
+/// Borrowed inputs for plugin detection and script analysis.
+struct PluginScriptInput<'a> {
+    config: &'a ResolvedConfig,
+    progress: &'a progress::AnalysisProgress,
+    files: &'a [discover::DiscoveredFile],
+    workspaces: &'a [fallow_config::WorkspaceInfo],
+    root_pkg: Option<&'a PackageJson>,
+    workspace_pkgs: &'a [LoadedWorkspacePackage<'a>],
+    config_candidates: &'a [std::path::PathBuf],
+}
+
 /// Run plugin detection and package.json/CI script analysis, returning the
 /// aggregated plugin result plus the two phase timings.
 fn run_plugins_and_scripts(
-    config: &ResolvedConfig,
-    progress: &progress::AnalysisProgress,
-    files: &[discover::DiscoveredFile],
-    workspaces: &[fallow_config::WorkspaceInfo],
-    root_pkg: Option<&PackageJson>,
-    workspace_pkgs: &[LoadedWorkspacePackage<'_>],
-    config_candidates: &[std::path::PathBuf],
+    input: &PluginScriptInput<'_>,
 ) -> Result<(plugins::AggregatedPluginResult, f64, f64), FallowError> {
     let t = Instant::now();
-    progress.set_stage("detecting plugins...");
+    input.progress.set_stage("detecting plugins...");
     let mut plugin_result = run_plugins(
-        config,
-        files,
-        workspaces,
-        root_pkg,
-        workspace_pkgs,
-        config_candidates,
+        input.config,
+        input.files,
+        input.workspaces,
+        input.root_pkg,
+        input.workspace_pkgs,
+        input.config_candidates,
     )?;
     let plugins_ms = t.elapsed().as_secs_f64() * 1000.0;
 
     let t = Instant::now();
     analyze_all_scripts(
-        config,
-        workspaces,
-        root_pkg,
-        workspace_pkgs,
+        input.config,
+        input.workspaces,
+        input.root_pkg,
+        input.workspace_pkgs,
         &mut plugin_result,
     );
     let scripts_ms = t.elapsed().as_secs_f64() * 1000.0;
@@ -564,15 +569,15 @@ pub fn analyze_with_parse_result(
     let workspaces = project.workspaces();
     let workspace_pkgs = load_workspace_packages(workspaces);
 
-    let (plugin_result, plugins_ms, scripts_ms) = run_plugins_and_scripts(
+    let (plugin_result, plugins_ms, scripts_ms) = run_plugins_and_scripts(&PluginScriptInput {
         config,
-        &progress,
+        progress: &progress,
         files,
         workspaces,
-        root_pkg.as_ref(),
-        &workspace_pkgs,
-        &config_candidates,
-    )?;
+        root_pkg: root_pkg.as_ref(),
+        workspace_pkgs: &workspace_pkgs,
+        config_candidates: &config_candidates,
+    })?;
 
     let core = run_reused_analysis_core(&ReusedAnalysisCoreInput {
         config,
@@ -903,15 +908,15 @@ fn analyze_full(
     let workspaces = project.workspaces();
     let workspace_pkgs = load_workspace_packages(workspaces);
 
-    let (plugin_result, plugins_ms, scripts_ms) = run_plugins_and_scripts(
+    let (plugin_result, plugins_ms, scripts_ms) = run_plugins_and_scripts(&PluginScriptInput {
         config,
-        &progress,
+        progress: &progress,
         files,
         workspaces,
-        root_pkg.as_ref(),
-        &workspace_pkgs,
-        &config_candidates,
-    )?;
+        root_pkg: root_pkg.as_ref(),
+        workspace_pkgs: &workspace_pkgs,
+        config_candidates: &config_candidates,
+    })?;
 
     let FullAnalysisCoreOutput { core, metrics } = run_full_analysis_core(&FullAnalysisCoreInput {
         config,

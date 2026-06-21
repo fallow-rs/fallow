@@ -18,6 +18,13 @@ use crate::suppress::{IssueKind, Suppression};
 
 const MAX_DUPES_CACHE_SIZE: usize = 512 * 1024 * 1024;
 
+/// Extracted token payload cached for one file.
+pub(super) struct TokenPayload<'a> {
+    pub(super) hashed_tokens: &'a [HashedToken],
+    pub(super) file_tokens: &'a FileTokens,
+    pub(super) suppressions: &'a [Suppression],
+}
+
 #[derive(Debug, Encode, Decode)]
 struct CacheStore {
     version: u32,
@@ -142,9 +149,7 @@ impl TokenCache {
         path: &Path,
         metadata: &std::fs::Metadata,
         mode: TokenCacheMode,
-        hashed_tokens: &[HashedToken],
-        file_tokens: &FileTokens,
-        suppressions: &[Suppression],
+        payload: &TokenPayload<'_>,
     ) {
         let (mtime_ns, file_size) = metadata_key(metadata);
         self.store.entries.insert(
@@ -153,9 +158,9 @@ impl TokenCache {
                 mtime_ns,
                 file_size,
                 mode.hash,
-                hashed_tokens,
-                file_tokens,
-                suppressions,
+                payload.hashed_tokens,
+                payload.file_tokens,
+                payload.suppressions,
             ),
         );
         self.dirty = true;
@@ -408,9 +413,11 @@ mod tests {
             file,
             metadata,
             mode,
-            &entry.hashed_tokens,
-            &entry.file_tokens,
-            &entry.suppressions,
+            &TokenPayload {
+                hashed_tokens: &entry.hashed_tokens,
+                file_tokens: &entry.file_tokens,
+                suppressions: &entry.suppressions,
+            },
         );
     }
 

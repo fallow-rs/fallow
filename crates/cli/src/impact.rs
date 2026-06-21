@@ -1041,15 +1041,15 @@ fn apply_attribution(
     };
     classify_file_disappearances(&mut disappearance_input);
     update_file_frontier(&mut frontier, &changed, current_findings, current_supps);
-    classify_clone_disappearances(
+    classify_clone_disappearances(&mut CloneDisappearancesInput {
         store,
-        &frontier,
-        &mut clone_frontier,
+        frontier: &frontier,
+        clone_frontier: &mut clone_frontier,
         input,
-        &changed,
+        changed: &changed,
         git_sha,
         timestamp,
-    );
+    });
     prune_frontier(&mut frontier, &mut clone_frontier, root);
     bound_recent_resolved(store);
 
@@ -1255,15 +1255,27 @@ fn update_file_frontier(
     }
 }
 
-fn classify_clone_disappearances(
-    store: &mut ImpactStore,
-    frontier: &FlatFrontier,
-    clone_frontier: &mut FlatCloneFrontier,
-    input: &AttributionInput<'_>,
-    changed: &FxHashSet<String>,
-    git_sha: Option<&str>,
-    timestamp: &str,
-) {
+/// Inputs to the clone-disappearance classifier, bundled so it takes a single
+/// parameter struct instead of seven (mirrors the sibling
+/// `FileDisappearancesInput` used by `classify_file_disappearances`).
+struct CloneDisappearancesInput<'a> {
+    store: &'a mut ImpactStore,
+    frontier: &'a FlatFrontier,
+    clone_frontier: &'a mut FlatCloneFrontier,
+    input: &'a AttributionInput<'a>,
+    changed: &'a FxHashSet<String>,
+    git_sha: Option<&'a str>,
+    timestamp: &'a str,
+}
+
+fn classify_clone_disappearances(args: &mut CloneDisappearancesInput<'_>) {
+    let store = &mut *args.store;
+    let frontier = args.frontier;
+    let clone_frontier = &mut *args.clone_frontier;
+    let input = args.input;
+    let changed = args.changed;
+    let git_sha = args.git_sha;
+    let timestamp = args.timestamp;
     let current = collect_changed_clone_groups(input, changed);
 
     let still_duplicated: FxHashSet<&String> = current.values().flatten().collect();
@@ -2732,6 +2744,10 @@ mod tests {
     }
 
     /// Record a run with no per-finding attribution (v1 surfacing/trend/containment only).
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "test scaffold; positional record builder mirrors the AuditRunRecord fields, bundling adds churn with no production value"
+    )]
     fn record_v1(
         root: &Path,
         summary: &AuditSummary,
@@ -3751,6 +3767,10 @@ mod tests {
     }
 
     /// Build a report literal for render-state tests.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "test scaffold; positional ImpactReport builder, bundling adds churn with no production value"
+    )]
     fn rreport(
         record_count: usize,
         first_recorded: Option<&str>,

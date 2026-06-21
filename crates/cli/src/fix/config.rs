@@ -104,15 +104,29 @@ pub fn is_config_fixable(root: &Path, explicit: Option<&PathBuf>) -> bool {
     )
 }
 
-pub(super) fn apply_config_fixes(
-    root: &Path,
-    config_path: Option<&PathBuf>,
-    results: &AnalysisResults,
-    output: OutputFormat,
-    dry_run: bool,
-    no_create_config: bool,
-    fixes: &mut Vec<serde_json::Value>,
-) -> bool {
+/// Inputs for [`apply_config_fixes`], bundled so the entry point takes one
+/// parameter struct instead of seven (mirrors the `*FixInput` convention used
+/// by the dependency and export fixers in this module).
+pub(super) struct ConfigFixInput<'a> {
+    pub(super) root: &'a Path,
+    pub(super) config_path: Option<&'a PathBuf>,
+    pub(super) results: &'a AnalysisResults,
+    pub(super) output: OutputFormat,
+    pub(super) dry_run: bool,
+    pub(super) no_create_config: bool,
+    pub(super) fixes: &'a mut Vec<serde_json::Value>,
+}
+
+pub(super) fn apply_config_fixes(input: ConfigFixInput<'_>) -> bool {
+    let ConfigFixInput {
+        root,
+        config_path,
+        results,
+        output,
+        dry_run,
+        no_create_config,
+        fixes,
+    } = input;
     if results.duplicate_exports.is_empty() {
         return false;
     }
@@ -762,15 +776,15 @@ mod tests {
             let root = dir.path();
             let results = results_with_duplicate(root, "Card");
             let mut fixes = Vec::new();
-            let err = apply_config_fixes(
-                root,
-                None,
-                &results,
-                OutputFormat::Human,
-                /* dry_run */ true,
-                /* no_create_config */ false,
-                &mut fixes,
-            );
+            let err = apply_config_fixes(ConfigFixInput {
+                    root,
+                    config_path: None,
+                    results: &results,
+                    output: OutputFormat::Human,
+                    dry_run: /* dry_run */ true,
+                    no_create_config: /* no_create_config */ false,
+                    fixes: &mut fixes,
+            });
             assert!(!err);
             assert!(
                 !root.join(".fallowrc.json").exists(),
@@ -802,15 +816,15 @@ mod tests {
 
             let results = results_with_duplicate(root, "Card");
             let mut fixes = Vec::new();
-            let err = apply_config_fixes(
-                root,
-                None,
-                &results,
-                OutputFormat::Human,
-                /* dry_run */ false,
-                /* no_create_config */ false,
-                &mut fixes,
-            );
+            let err = apply_config_fixes(ConfigFixInput {
+                    root,
+                    config_path: None,
+                    results: &results,
+                    output: OutputFormat::Human,
+                    dry_run: /* dry_run */ false,
+                    no_create_config: /* no_create_config */ false,
+                    fixes: &mut fixes,
+            });
             assert!(!err);
             assert_eq!(fixes.len(), 1);
             assert_eq!(fixes[0]["applied"], serde_json::json!(true));
@@ -850,15 +864,15 @@ mod tests {
             let root = dir.path();
             let results = results_with_duplicate(root, "Card");
             let mut fixes = Vec::new();
-            let err = apply_config_fixes(
-                root,
-                None,
-                &results,
-                OutputFormat::Human,
-                /* dry_run */ false,
-                /* no_create_config */ true,
-                &mut fixes,
-            );
+            let err = apply_config_fixes(ConfigFixInput {
+                    root,
+                    config_path: None,
+                    results: &results,
+                    output: OutputFormat::Human,
+                    dry_run: /* dry_run */ false,
+                    no_create_config: /* no_create_config */ true,
+                    fixes: &mut fixes,
+            });
             assert!(!err);
             assert!(!root.join(".fallowrc.json").exists());
             assert_eq!(fixes.len(), 1);
@@ -879,15 +893,15 @@ mod tests {
             std::fs::create_dir_all(&sub).unwrap();
             let results = results_with_duplicate(&sub, "Card");
             let mut fixes = Vec::new();
-            let err = apply_config_fixes(
-                &sub,
-                None,
-                &results,
-                OutputFormat::Human,
-                /* dry_run */ false,
-                /* no_create_config */ false,
-                &mut fixes,
-            );
+            let err = apply_config_fixes(ConfigFixInput {
+                    root: &sub,
+                    config_path: None,
+                    results: &results,
+                    output: OutputFormat::Human,
+                    dry_run: /* dry_run */ false,
+                    no_create_config: /* no_create_config */ false,
+                    fixes: &mut fixes,
+            });
             assert!(!err);
             assert!(!sub.join(".fallowrc.json").exists());
             assert_eq!(fixes.len(), 1);
@@ -905,15 +919,15 @@ mod tests {
             let before = std::fs::read_to_string(&cfg_path).unwrap();
             let results = results_with_duplicate(root, "Card");
             let mut fixes = Vec::new();
-            apply_config_fixes(
+            apply_config_fixes(ConfigFixInput {
                 root,
-                None,
-                &results,
-                OutputFormat::Human,
-                true,
-                false,
-                &mut fixes,
-            );
+                config_path: None,
+                results: &results,
+                output: OutputFormat::Human,
+                dry_run: true,
+                no_create_config: false,
+                fixes: &mut fixes,
+            });
             assert_eq!(
                 std::fs::read_to_string(&cfg_path).unwrap(),
                 before,
@@ -933,15 +947,15 @@ mod tests {
             std::fs::write(&cfg_path, "production = true\n").unwrap();
             let results = results_with_duplicate(root, "Card");
             let mut fixes = Vec::new();
-            apply_config_fixes(
+            apply_config_fixes(ConfigFixInput {
                 root,
-                None,
-                &results,
-                OutputFormat::Human,
-                true,
-                false,
-                &mut fixes,
-            );
+                config_path: None,
+                results: &results,
+                output: OutputFormat::Human,
+                dry_run: true,
+                no_create_config: false,
+                fixes: &mut fixes,
+            });
             assert_eq!(
                 std::fs::read_to_string(&cfg_path).unwrap(),
                 "production = true\n"
@@ -959,15 +973,15 @@ mod tests {
             std::fs::write(&cfg_path, "").unwrap();
             let results = results_with_duplicate(root, "Card");
             let mut fixes = Vec::new();
-            apply_config_fixes(
+            apply_config_fixes(ConfigFixInput {
                 root,
-                None,
-                &results,
-                OutputFormat::Human,
-                true,
-                false,
-                &mut fixes,
-            );
+                config_path: None,
+                results: &results,
+                output: OutputFormat::Human,
+                dry_run: true,
+                no_create_config: false,
+                fixes: &mut fixes,
+            });
             assert_eq!(fixes.len(), 1);
             let diff = fixes[0]["proposed_diff"].as_str().unwrap();
             assert!(diff.contains("[[ignoreExports]]"));
@@ -981,15 +995,15 @@ mod tests {
             std::fs::write(&cfg_path, "{\n}\n").unwrap();
             let results = results_with_duplicate(root, "Card");
             let mut fixes = Vec::new();
-            apply_config_fixes(
+            apply_config_fixes(ConfigFixInput {
                 root,
-                None,
-                &results,
-                OutputFormat::Human,
-                true,
-                false,
-                &mut fixes,
-            );
+                config_path: None,
+                results: &results,
+                output: OutputFormat::Human,
+                dry_run: true,
+                no_create_config: false,
+                fixes: &mut fixes,
+            });
             assert_eq!(fixes.len(), 1);
             let diff = fixes[0]["proposed_diff"].as_str().unwrap();
             assert!(diff.contains("ignoreExports"));
@@ -1002,15 +1016,15 @@ mod tests {
             let root = dir.path();
             let results = results_with_duplicate(root, "Card");
             let mut fixes = Vec::new();
-            apply_config_fixes(
+            apply_config_fixes(ConfigFixInput {
                 root,
-                None,
-                &results,
-                OutputFormat::Json,
-                true,
-                false,
-                &mut fixes,
-            );
+                config_path: None,
+                results: &results,
+                output: OutputFormat::Json,
+                dry_run: true,
+                no_create_config: false,
+                fixes: &mut fixes,
+            });
             assert_eq!(fixes.len(), 1);
             assert!(fixes[0]["proposed_diff"].is_string());
         }

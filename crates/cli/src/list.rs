@@ -4,7 +4,7 @@ use fallow_config::OutputFormat;
 
 use crate::output_envelope::{WorkspaceInfo, WorkspacesOutput};
 use crate::report::format_display_path;
-use crate::runtime_support::load_config;
+use crate::runtime_support::{LoadConfigArgs, load_config};
 
 pub struct ListOptions<'a> {
     pub root: &'a std::path::Path,
@@ -35,11 +35,13 @@ pub fn run_list(opts: &ListOptions<'_>) -> ExitCode {
     let config = match load_config(
         opts.root,
         opts.config_path,
-        opts.output,
-        opts.no_cache,
-        opts.threads,
-        opts.production,
-        true, // list command doesn't need progress bars
+        LoadConfigArgs {
+            output: opts.output,
+            no_cache: opts.no_cache,
+            threads: opts.threads,
+            production: opts.production,
+            quiet: true, // list command doesn't need progress bars
+        },
     ) {
         Ok(c) => c,
         Err(code) => return code,

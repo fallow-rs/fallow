@@ -58,11 +58,13 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
     let config = match crate::runtime_support::load_config(
         opts.root,
         opts.config_path,
-        opts.output,
-        opts.no_cache,
-        opts.threads,
-        opts.production,
-        opts.quiet,
+        crate::runtime_support::LoadConfigArgs {
+            output: opts.output,
+            no_cache: opts.no_cache,
+            threads: opts.threads,
+            production: opts.production,
+            quiet: opts.quiet,
+        },
     ) {
         Ok(c) => c,
         Err(code) => return code,
@@ -165,15 +167,15 @@ fn apply_all_fixes(
         fixes: &mut *fixes,
     });
 
-    let mut had_write_error = config::apply_config_fixes(
-        opts.root,
-        opts.config_path.as_ref(),
+    let mut had_write_error = config::apply_config_fixes(config::ConfigFixInput {
+        root: opts.root,
+        config_path: opts.config_path.as_ref(),
         results,
-        opts.output,
-        opts.dry_run,
-        opts.no_create_config,
+        output: opts.output,
+        dry_run: opts.dry_run,
+        no_create_config: opts.no_create_config,
         fixes,
-    );
+    });
 
     apply_unused_enum_member_fixes(&mut FixApplicationInput {
         root: opts.root,
@@ -272,15 +274,15 @@ fn apply_unused_enum_member_fixes(input: &mut FixApplicationInput<'_>) {
             .or_default()
             .push(&finding.member);
     }
-    enum_members::apply_enum_member_fixes(
-        input.root,
-        &enum_members_by_file,
-        input.file_hashes,
-        input.plan,
-        input.output,
-        input.dry_run,
-        input.fixes,
-    );
+    enum_members::apply_enum_member_fixes(enum_members::EnumMemberFixInput {
+        root: input.root,
+        members_by_file: &enum_members_by_file,
+        hashes: input.file_hashes,
+        plan: input.plan,
+        output: input.output,
+        dry_run: input.dry_run,
+        fixes: input.fixes,
+    });
 }
 
 impl CommitOutcome {
@@ -378,15 +380,16 @@ fn apply_catalog_fixes(request: &mut CatalogFixRequest<'_>) -> CatalogFixTotals 
             fixes: &mut *request.fixes,
         },
     );
-    let empty_catalog_summary = catalog::apply_empty_catalog_group_fixes(
-        request.root,
-        &request.results.empty_catalog_groups,
-        request.file_hashes,
-        request.plan,
-        request.output,
-        request.dry_run,
-        request.fixes,
-    );
+    let empty_catalog_summary =
+        catalog::apply_empty_catalog_group_fixes(catalog::EmptyCatalogGroupFixInput {
+            root: request.root,
+            groups: &request.results.empty_catalog_groups,
+            hashes: request.file_hashes,
+            plan: request.plan,
+            output: request.output,
+            dry_run: request.dry_run,
+            fixes: request.fixes,
+        });
     CatalogFixTotals {
         applied: catalog_summary.applied + empty_catalog_summary.applied,
         skipped: catalog_summary.skipped + empty_catalog_summary.skipped,

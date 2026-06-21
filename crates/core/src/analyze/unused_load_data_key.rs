@@ -93,15 +93,15 @@ pub fn find_unused_load_data_keys(
 
     let module_indexes = build_module_indexes(graph, modules);
     let global_used = collect_global_page_data_member_accesses(modules);
-    let findings = collect_unused_load_data_key_findings(
+    let findings = collect_unused_load_data_key_findings(&LoadDataKeyScanInput {
         graph,
         modules,
-        &module_indexes,
-        &global_used,
+        module_indexes: &module_indexes,
+        global_used: &global_used,
         root,
         suppressions,
         line_offsets_by_file,
-    );
+    });
 
     LoadDataKeyResult {
         findings,
@@ -109,20 +109,29 @@ pub fn find_unused_load_data_keys(
     }
 }
 
+/// Inputs for the SvelteKit unused-load-data-key emit pass.
+struct LoadDataKeyScanInput<'a> {
+    graph: &'a ModuleGraph,
+    modules: &'a [ModuleInfo],
+    module_indexes: &'a ModuleIndexes<'a>,
+    global_used: &'a FxHashSet<&'a str>,
+    root: &'a Path,
+    suppressions: &'a SuppressionContext<'a>,
+    line_offsets_by_file: &'a LineOffsetsMap<'a>,
+}
+
 fn collect_unused_load_data_key_findings(
-    graph: &ModuleGraph,
-    modules: &[ModuleInfo],
-    module_indexes: &ModuleIndexes<'_>,
-    global_used: &FxHashSet<&str>,
-    root: &Path,
-    suppressions: &SuppressionContext<'_>,
-    line_offsets_by_file: &LineOffsetsMap<'_>,
+    input: &LoadDataKeyScanInput<'_>,
 ) -> Vec<UnusedLoadDataKey> {
     let mut findings = Vec::new();
-    for node in &graph.modules {
-        let Some(candidate) =
-            producer_candidate_for_node(node, modules, module_indexes, global_used, root)
-        else {
+    for node in &input.graph.modules {
+        let Some(candidate) = producer_candidate_for_node(
+            node,
+            input.modules,
+            input.module_indexes,
+            input.global_used,
+            input.root,
+        ) else {
             continue;
         };
 
@@ -139,8 +148,8 @@ fn collect_unused_load_data_key_findings(
             producer_path,
             route_dir,
             route_used: &route_used,
-            suppressions,
-            line_offsets_by_file,
+            suppressions: input.suppressions,
+            line_offsets_by_file: input.line_offsets_by_file,
         };
         append_unused_keys_for_producer(&mut findings, &finding_input);
     }

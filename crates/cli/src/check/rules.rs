@@ -808,6 +808,10 @@ mod tests {
     use fallow_core::results::*;
     use std::path::PathBuf;
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+    )]
     fn make_results() -> AnalysisResults {
         let mut r = AnalysisResults::default();
         r.unused_files

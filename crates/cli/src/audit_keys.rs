@@ -392,6 +392,34 @@ fn misconfigured_dependency_override_key(
 /// or has no key representation today (bind with underscore and document why).
 ///
 /// Sibling exhaustive sites: `fallow_core::changed_files::filter_results_by_changed_files`,
+/// The six dependency-related finding slices, bundled so the dependency
+/// dispatcher takes one parameter instead of six.
+#[derive(Clone, Copy)]
+#[allow(
+    clippy::struct_field_names,
+    reason = "field names mirror the AnalysisResults field names so the destructure stays shorthand"
+)]
+struct DependencyFindingSlices<'a> {
+    unused_dependencies: &'a [fallow_core::results::UnusedDependencyFinding],
+    unused_dev_dependencies: &'a [fallow_core::results::UnusedDevDependencyFinding],
+    unused_optional_dependencies: &'a [fallow_core::results::UnusedOptionalDependencyFinding],
+    unlisted_dependencies: &'a [fallow_core::results::UnlistedDependencyFinding],
+    type_only_dependencies: &'a [fallow_core::results::TypeOnlyDependencyFinding],
+    test_only_dependencies: &'a [fallow_core::results::TestOnlyDependencyFinding],
+}
+
+/// The six framework-specific finding slices, bundled so the framework
+/// dispatcher takes one parameter instead of six.
+#[derive(Clone, Copy)]
+struct FrameworkFindingSlices<'a> {
+    unprovided_injects: &'a [fallow_core::results::UnprovidedInjectFinding],
+    unrendered_components: &'a [fallow_core::results::UnrenderedComponentFinding],
+    unused_server_actions: &'a [fallow_core::results::UnusedServerActionFinding],
+    unused_load_data_keys: &'a [fallow_core::results::UnusedLoadDataKeyFinding],
+    route_collisions: &'a [fallow_core::results::RouteCollisionFinding],
+    dynamic_segment_name_conflicts: &'a [fallow_core::results::DynamicSegmentNameConflictFinding],
+}
+
 /// `dead_code_keys`, `retain_introduced_dead_code`.
 /// Non-exhaustive siblings the compiler will NOT flag (wire manually when a
 /// finding type is added): `annotate_dead_code_json` (same key formats, this
@@ -402,141 +430,151 @@ pub(super) fn dead_code_keys(
     results: &fallow_core::results::AnalysisResults,
     root: &Path,
 ) -> FxHashSet<String> {
-    let fallow_core::results::AnalysisResults {
-        unused_files,
-        unused_exports,
-        unused_types,
-        private_type_leaks,
-        unused_dependencies,
-        unused_dev_dependencies,
-        unused_optional_dependencies,
-        unused_enum_members,
-        unused_class_members,
-        unused_store_members,
-        unresolved_imports,
-        unlisted_dependencies,
-        duplicate_exports,
-        type_only_dependencies,
-        test_only_dependencies,
-        circular_dependencies,
-        re_export_cycles,
-        boundary_violations,
-        boundary_coverage_violations,
-        boundary_call_violations,
-        policy_violations,
-        stale_suppressions,
-        unused_catalog_entries,
-        empty_catalog_groups,
-        unresolved_catalog_references,
-        unused_dependency_overrides,
-        misconfigured_dependency_overrides,
-        invalid_client_exports,
-        mixed_client_server_barrels,
-        misplaced_directives,
-        unprovided_injects,
-        unrendered_components,
-        unused_component_props,
-        unused_component_emits,
-        unused_component_inputs,
-        unused_component_outputs,
-        unused_svelte_events,
-        unused_server_actions,
-        unused_load_data_keys,
-        unused_load_data_keys_global_abstain: _unused_load_data_keys_global_abstain,
-        route_collisions,
-        dynamic_segment_name_conflicts,
-        // Non-finding fields: counts and metadata, not attributable to a key.
-        suppression_count: _suppression_count,
-        active_suppressions: _active_suppressions,
-        feature_flags: _feature_flags,
-        // Security findings are emitted via `fallow security`, not the audit
-        // dead-code gate; they have no dead-code key representation today.
-        security_findings: _security_findings,
-        security_unresolved_edge_files: _security_unresolved_edge_files,
-        security_unresolved_callee_sites: _security_unresolved_callee_sites,
-        security_unresolved_callee_diagnostics: _security_unresolved_callee_diagnostics,
-        // Prop-drilling is a dormant multi-file health signal (rule defaults to
-        // `off`); like security findings it has no dead-code attribution key.
-        prop_drilling_chains: _prop_drilling_chains,
-        // Thin wrappers are a dormant health signal (rule defaults to `off`); a
-        // candidate-for-inlining record, not a dead-code attribution key.
-        thin_wrappers: _thin_wrappers,
-        // Duplicate prop shapes are a dormant multi-file health signal (rule
-        // defaults to `off`); a missing-abstraction record, not a dead-code
-        // attribution key.
-        duplicate_prop_shapes: _duplicate_prop_shapes,
-        // Export usages and entry-point summary are metadata, not issue
-        // collections; no key needed.
-        export_usages: _export_usages,
-        entry_point_summary: _entry_point_summary,
-        // Render fan-in is a whole-project descriptive metric, not an issue
-        // collection; no attribution key needed.
-        render_fan_in: _render_fan_in,
-    } = results;
-
     let mut collector = DeadCodeKeyCollector::new(root);
-    collector.add_core_findings(
-        unused_files,
-        unused_exports,
-        unused_types,
-        private_type_leaks,
-    );
-    collector.add_client_directive_findings(
-        invalid_client_exports,
-        mixed_client_server_barrels,
-        misplaced_directives,
-    );
-    collector.add_dependency_findings(
-        unused_dependencies,
-        unused_dev_dependencies,
-        unused_optional_dependencies,
-        unlisted_dependencies,
-        type_only_dependencies,
-        test_only_dependencies,
-    );
-    collector.add_dependency_override_findings(
-        unused_dependency_overrides,
-        misconfigured_dependency_overrides,
-    );
-    collector.add_member_findings(
-        unused_enum_members,
-        unused_class_members,
-        unused_store_members,
-    );
-    collector.add_component_contract_findings(
-        unused_component_props,
-        unused_component_emits,
-        unused_component_inputs,
-        unused_component_outputs,
-        unused_svelte_events,
-    );
-    collector.add_graph_findings(
-        unresolved_imports,
-        duplicate_exports,
-        circular_dependencies,
-        re_export_cycles,
-    );
-    collector.add_boundary_findings(
-        boundary_violations,
-        boundary_coverage_violations,
-        boundary_call_violations,
-        policy_violations,
-        stale_suppressions,
-    );
-    collector.add_catalog_findings(
-        unresolved_catalog_references,
-        unused_catalog_entries,
-        empty_catalog_groups,
-    );
-    collector.add_framework_findings(
-        unprovided_injects,
-        unrendered_components,
-        unused_server_actions,
-        unused_load_data_keys,
-        route_collisions,
-        dynamic_segment_name_conflicts,
-    );
+    collector.add_all_findings(results);
     collector.into_keys()
+}
+
+impl DeadCodeKeyCollector<'_> {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "flat field-by-field destructure of the large AnalysisResults struct (with per-field provenance comments) plus straight-line dispatch; length tracks the field count, not branching"
+    )]
+    fn add_all_findings(&mut self, results: &fallow_core::results::AnalysisResults) {
+        let fallow_core::results::AnalysisResults {
+            unused_files,
+            unused_exports,
+            unused_types,
+            private_type_leaks,
+            unused_dependencies,
+            unused_dev_dependencies,
+            unused_optional_dependencies,
+            unused_enum_members,
+            unused_class_members,
+            unused_store_members,
+            unresolved_imports,
+            unlisted_dependencies,
+            duplicate_exports,
+            type_only_dependencies,
+            test_only_dependencies,
+            circular_dependencies,
+            re_export_cycles,
+            boundary_violations,
+            boundary_coverage_violations,
+            boundary_call_violations,
+            policy_violations,
+            stale_suppressions,
+            unused_catalog_entries,
+            empty_catalog_groups,
+            unresolved_catalog_references,
+            unused_dependency_overrides,
+            misconfigured_dependency_overrides,
+            invalid_client_exports,
+            mixed_client_server_barrels,
+            misplaced_directives,
+            unprovided_injects,
+            unrendered_components,
+            unused_component_props,
+            unused_component_emits,
+            unused_component_inputs,
+            unused_component_outputs,
+            unused_svelte_events,
+            unused_server_actions,
+            unused_load_data_keys,
+            unused_load_data_keys_global_abstain: _unused_load_data_keys_global_abstain,
+            route_collisions,
+            dynamic_segment_name_conflicts,
+            // Non-finding fields: counts and metadata, not attributable to a key.
+            suppression_count: _suppression_count,
+            active_suppressions: _active_suppressions,
+            feature_flags: _feature_flags,
+            // Security findings are emitted via `fallow security`, not the audit
+            // dead-code gate; they have no dead-code key representation today.
+            security_findings: _security_findings,
+            security_unresolved_edge_files: _security_unresolved_edge_files,
+            security_unresolved_callee_sites: _security_unresolved_callee_sites,
+            security_unresolved_callee_diagnostics: _security_unresolved_callee_diagnostics,
+            // Prop-drilling is a dormant multi-file health signal (rule defaults to
+            // `off`); like security findings it has no dead-code attribution key.
+            prop_drilling_chains: _prop_drilling_chains,
+            // Thin wrappers are a dormant health signal (rule defaults to `off`); a
+            // candidate-for-inlining record, not a dead-code attribution key.
+            thin_wrappers: _thin_wrappers,
+            // Duplicate prop shapes are a dormant multi-file health signal (rule
+            // defaults to `off`); a missing-abstraction record, not a dead-code
+            // attribution key.
+            duplicate_prop_shapes: _duplicate_prop_shapes,
+            // Export usages and entry-point summary are metadata, not issue
+            // collections; no key needed.
+            export_usages: _export_usages,
+            entry_point_summary: _entry_point_summary,
+            // Render fan-in is a whole-project descriptive metric, not an issue
+            // collection; no attribution key needed.
+            render_fan_in: _render_fan_in,
+        } = results;
+
+        self.add_core_findings(
+            unused_files,
+            unused_exports,
+            unused_types,
+            private_type_leaks,
+        );
+        self.add_client_directive_findings(
+            invalid_client_exports,
+            mixed_client_server_barrels,
+            misplaced_directives,
+        );
+        self.add_dependency_findings(&DependencyFindingSlices {
+            unused_dependencies,
+            unused_dev_dependencies,
+            unused_optional_dependencies,
+            unlisted_dependencies,
+            type_only_dependencies,
+            test_only_dependencies,
+        });
+        self.add_dependency_override_findings(
+            unused_dependency_overrides,
+            misconfigured_dependency_overrides,
+        );
+        self.add_member_findings(
+            unused_enum_members,
+            unused_class_members,
+            unused_store_members,
+        );
+        self.add_component_contract_findings(
+            unused_component_props,
+            unused_component_emits,
+            unused_component_inputs,
+            unused_component_outputs,
+            unused_svelte_events,
+        );
+        self.add_graph_findings(
+            unresolved_imports,
+            duplicate_exports,
+            circular_dependencies,
+            re_export_cycles,
+        );
+        self.add_boundary_findings(
+            boundary_violations,
+            boundary_coverage_violations,
+            boundary_call_violations,
+            policy_violations,
+            stale_suppressions,
+        );
+        self.add_catalog_findings(
+            unresolved_catalog_references,
+            unused_catalog_entries,
+            empty_catalog_groups,
+        );
+        self.add_framework_findings(&FrameworkFindingSlices {
+            unprovided_injects,
+            unrendered_components,
+            unused_server_actions,
+            unused_load_data_keys,
+            route_collisions,
+            dynamic_segment_name_conflicts,
+        });
+    }
 }
 
 struct DeadCodeKeyCollector<'a> {
@@ -584,15 +622,15 @@ impl<'a> DeadCodeKeyCollector<'a> {
         self.add_misplaced_directives(misplaced_directives);
     }
 
-    fn add_dependency_findings(
-        &mut self,
-        unused_dependencies: &[fallow_core::results::UnusedDependencyFinding],
-        unused_dev_dependencies: &[fallow_core::results::UnusedDevDependencyFinding],
-        unused_optional_dependencies: &[fallow_core::results::UnusedOptionalDependencyFinding],
-        unlisted_dependencies: &[fallow_core::results::UnlistedDependencyFinding],
-        type_only_dependencies: &[fallow_core::results::TypeOnlyDependencyFinding],
-        test_only_dependencies: &[fallow_core::results::TestOnlyDependencyFinding],
-    ) {
+    fn add_dependency_findings(&mut self, deps: &DependencyFindingSlices<'_>) {
+        let DependencyFindingSlices {
+            unused_dependencies,
+            unused_dev_dependencies,
+            unused_optional_dependencies,
+            unlisted_dependencies,
+            type_only_dependencies,
+            test_only_dependencies,
+        } = *deps;
         self.add_unused_dependencies(unused_dependencies);
         self.add_unused_dev_dependencies(unused_dev_dependencies);
         self.add_unused_optional_dependencies(unused_optional_dependencies);
@@ -675,15 +713,15 @@ impl<'a> DeadCodeKeyCollector<'a> {
         self.add_empty_catalog_groups(empty_catalog_groups);
     }
 
-    fn add_framework_findings(
-        &mut self,
-        unprovided_injects: &[fallow_core::results::UnprovidedInjectFinding],
-        unrendered_components: &[fallow_core::results::UnrenderedComponentFinding],
-        unused_server_actions: &[fallow_core::results::UnusedServerActionFinding],
-        unused_load_data_keys: &[fallow_core::results::UnusedLoadDataKeyFinding],
-        route_collisions: &[fallow_core::results::RouteCollisionFinding],
-        dynamic_segment_name_conflicts: &[fallow_core::results::DynamicSegmentNameConflictFinding],
-    ) {
+    fn add_framework_findings(&mut self, framework: &FrameworkFindingSlices<'_>) {
+        let FrameworkFindingSlices {
+            unprovided_injects,
+            unrendered_components,
+            unused_server_actions,
+            unused_load_data_keys,
+            route_collisions,
+            dynamic_segment_name_conflicts,
+        } = *framework;
         self.add_unprovided_injects(unprovided_injects);
         self.add_unrendered_components(unrendered_components);
         self.add_unused_server_actions(unused_server_actions);
@@ -2418,6 +2456,10 @@ mod tests {
         assert!(keys.contains("test-only-dependency:package.json:vitest"));
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+    )]
     fn graph_boundary_catalog_override_results(root: &std::path::Path) -> AnalysisResults {
         let source = root.join("src/app.ts");
         let other = root.join("src/other.ts");

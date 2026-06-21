@@ -758,6 +758,10 @@ fn collect_workspace_unused_categories(
 ///
 /// Retained for test coverage of the individual guard logic.
 #[cfg(test)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "test-only guard helper; params are independent suppression sets, bundling would not aid readability"
+)]
 fn should_skip_dependency(
     dep: &str,
     root_flagged: &FxHashSet<String>,
@@ -1456,6 +1460,10 @@ fn unresolved_import_location(
 }
 
 /// Find imports that could not be resolved.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "frozen deprecated public API (ADR-008); signature must not change"
+)]
 pub fn find_unresolved_imports(
     resolved_modules: &[ResolvedModule],
     config: &ResolvedConfig,

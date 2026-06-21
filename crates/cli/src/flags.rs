@@ -99,11 +99,13 @@ fn load_flags_config(opts: &FlagsOptions<'_>) -> Result<ResolvedConfig, ExitCode
     crate::runtime_support::load_config(
         opts.root,
         opts.config_path,
-        opts.output,
-        opts.no_cache,
-        opts.threads,
-        opts.production,
-        opts.quiet,
+        crate::runtime_support::LoadConfigArgs {
+            output: opts.output,
+            no_cache: opts.no_cache,
+            threads: opts.threads,
+            production: opts.production,
+            quiet: opts.quiet,
+        },
     )
 }
 

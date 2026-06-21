@@ -481,9 +481,11 @@ fn save_duplication_token_cache(
                 &file.path,
                 metadata,
                 mode,
-                &file.hashed_tokens,
-                &file.file_tokens,
-                &file.suppressions,
+                &cache::TokenPayload {
+                    hashed_tokens: &file.hashed_tokens,
+                    file_tokens: &file.file_tokens,
+                    suppressions: &file.suppressions,
+                },
             );
         }
     }
@@ -990,6 +992,10 @@ export function processData(input: string): string {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+    )]
     fn min_occurrences_hides_pairs_and_records_count() {
         let dir = tempfile::tempdir().expect("create temp dir");
         let src_dir = dir.path().join("src");

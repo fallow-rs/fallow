@@ -550,6 +550,18 @@ fn prepare_health_core_sections(
     })
 }
 
+/// The per-run scan filters shared by every CSS and markup health scanner:
+/// resolved config, the ignore globset, the optional changed-file set, and
+/// the optional workspace roots. Bundled so the scanners take one context
+/// instead of repeating the same four borrows.
+#[derive(Clone, Copy)]
+struct HealthScanCtx<'a> {
+    config: &'a ResolvedConfig,
+    ignore_set: &'a globset::GlobSet,
+    changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
+    ws_roots: Option<&'a [std::path::PathBuf]>,
+}
+
 struct HealthReportSideEffectsInput<'a> {
     opts: &'a HealthOptions<'a>,
     report: &'a mut crate::health_types::HealthReport,
@@ -575,10 +587,12 @@ fn finalize_health_report_side_effects(input: &mut HealthReportSideEffectsInput<
     if input.opts.css {
         input.report.css_analytics = compute_css_analytics_report(
             input.files,
-            input.config,
-            input.ignore_set,
-            input.changed_files,
-            input.ws_roots,
+            HealthScanCtx {
+                config: input.config,
+                ignore_set: input.ignore_set,
+                changed_files: input.changed_files,
+                ws_roots: input.ws_roots,
+            },
         );
     }
 
@@ -1128,11 +1142,15 @@ fn project_uses_tailwind(root: &std::path::Path) -> bool {
 /// scope) or unreadable.
 fn read_markup_scan_source(
     file: &fallow_types::discover::DiscoveredFile,
-    config: &ResolvedConfig,
-    ignore_set: &globset::GlobSet,
-    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
-    ws_roots: Option<&[std::path::PathBuf]>,
+    ctx: HealthScanCtx<'_>,
 ) -> Option<(String, String)> {
+    let HealthScanCtx {
+        config,
+        ignore_set,
+        changed_files,
+        ws_roots,
+    } = ctx;
+
     let path = &file.path;
     let extension = path.extension().and_then(|ext| ext.to_str());
     if !matches!(
@@ -1162,12 +1180,11 @@ fn read_markup_scan_source(
 
 fn scan_markup_tailwind_arbitrary_values(
     files: &[fallow_types::discover::DiscoveredFile],
-    config: &ResolvedConfig,
-    ignore_set: &globset::GlobSet,
-    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
-    ws_roots: Option<&[std::path::PathBuf]>,
+    ctx: HealthScanCtx<'_>,
     summary: &mut crate::health_types::CssAnalyticsSummary,
 ) -> Vec<crate::health_types::TailwindArbitraryValue> {
+    let HealthScanCtx { config, .. } = ctx;
+
     use crate::health_types::TailwindArbitraryValue;
 
     if !project_uses_tailwind(&config.root) {
@@ -1179,9 +1196,7 @@ fn scan_markup_tailwind_arbitrary_values(
         rustc_hash::FxHashMap::default();
     let mut total_uses: u32 = 0;
     for file in files {
-        let Some((rel, source)) =
-            read_markup_scan_source(file, config, ignore_set, changed_files, ws_roots)
-        else {
+        let Some((rel, source)) = read_markup_scan_source(file, ctx) else {
             continue;
         };
         for arb in fallow_core::extract::scan_tailwind_arbitrary_values(&source) {
@@ -1499,12 +1514,13 @@ fn collect_unresolved_class_refs_in_file<'a>(
 /// an authored class. Candidates, never gated.
 fn scan_unresolved_class_references(
     files: &[fallow_types::discover::DiscoveredFile],
-    config: &ResolvedConfig,
-    ignore_set: &globset::GlobSet,
-    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
-    ws_roots: Option<&[std::path::PathBuf]>,
+    ctx: HealthScanCtx<'_>,
     summary: &mut crate::health_types::CssAnalyticsSummary,
 ) -> Vec<crate::health_types::UnresolvedClassReference> {
+    let HealthScanCtx {
+        config, ignore_set, ..
+    } = ctx;
+
     use crate::health_types::UnresolvedClassReference;
 
     // Abstain on preprocessor-dominant projects. lightningcss parses `.scss` /
@@ -1528,9 +1544,7 @@ fn scan_unresolved_class_references(
     let mut out: Vec<UnresolvedClassReference> = Vec::new();
     let mut seen: rustc_hash::FxHashSet<(String, u32, String)> = rustc_hash::FxHashSet::default();
     for file in files {
-        let Some((rel, source)) =
-            read_markup_scan_source(file, config, ignore_set, changed_files, ws_roots)
-        else {
+        let Some((rel, source)) = read_markup_scan_source(file, ctx) else {
             continue;
         };
         collect_unresolved_class_refs_in_file(
@@ -1965,12 +1979,16 @@ fn published_css_paths(config: &ResolvedConfig) -> rustc_hash::FxHashSet<String>
 ///   assembled from a `${...}` / `clsx(...)` fragment is never flagged.
 fn scan_unreferenced_css_classes(
     files: &[fallow_types::discover::DiscoveredFile],
-    config: &ResolvedConfig,
-    ignore_set: &globset::GlobSet,
-    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
-    ws_roots: Option<&[std::path::PathBuf]>,
+    ctx: HealthScanCtx<'_>,
     summary: &mut crate::health_types::CssAnalyticsSummary,
 ) -> Vec<crate::health_types::UnreferencedCssClass> {
+    let HealthScanCtx {
+        config,
+        ignore_set,
+        changed_files,
+        ws_roots,
+    } = ctx;
+
     use crate::health_types::UnreferencedCssClass;
 
     // Partial scope cannot prove a global class dead.
@@ -2406,28 +2424,34 @@ fn scan_markup_css_candidates(input: &mut MarkupCssCandidateInput<'_>) -> Markup
         // Markup arbitrary-value scan (gated on the project using Tailwind).
         tailwind_arbitrary_values: scan_markup_tailwind_arbitrary_values(
             input.files,
-            input.config,
-            input.ignore_set,
-            input.changed_files,
-            input.ws_roots,
+            HealthScanCtx {
+                config: input.config,
+                ignore_set: input.ignore_set,
+                changed_files: input.changed_files,
+                ws_roots: input.ws_roots,
+            },
             input.summary,
         ),
         // Static markup class tokens one edit from a defined class (likely typos).
         unresolved_class_references: scan_unresolved_class_references(
             input.files,
-            input.config,
-            input.ignore_set,
-            input.changed_files,
-            input.ws_roots,
+            HealthScanCtx {
+                config: input.config,
+                ignore_set: input.ignore_set,
+                changed_files: input.changed_files,
+                ws_roots: input.ws_roots,
+            },
             input.summary,
         ),
         // Global classes referenced by no in-project markup (heavily gated).
         unreferenced_css_classes: scan_unreferenced_css_classes(
             input.files,
-            input.config,
-            input.ignore_set,
-            input.changed_files,
-            input.ws_roots,
+            HealthScanCtx {
+                config: input.config,
+                ignore_set: input.ignore_set,
+                changed_files: input.changed_files,
+                ws_roots: input.ws_roots,
+            },
             input.summary,
         ),
         // Tailwind v4 @theme design tokens used by no utility / var() / @apply
@@ -2446,11 +2470,15 @@ fn scan_markup_css_candidates(input: &mut MarkupCssCandidateInput<'_>) -> Markup
 
 fn css_report_scan_target<'a>(
     file: &'a fallow_types::discover::DiscoveredFile,
-    config: &ResolvedConfig,
-    ignore_set: &globset::GlobSet,
-    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
-    ws_roots: Option<&[std::path::PathBuf]>,
+    ctx: HealthScanCtx<'_>,
 ) -> Option<(&'a std::path::Path, bool)> {
+    let HealthScanCtx {
+        config,
+        ignore_set,
+        changed_files,
+        ws_roots,
+    } = ctx;
+
     let path = &file.path;
     let extension = path.extension().and_then(|ext| ext.to_str());
     let is_css = extension == Some("css");
@@ -2550,10 +2578,7 @@ struct CssTokenMetrics {
 /// project token sets, and scoped SFC unused-class findings.
 fn walk_css_files(
     files: &[fallow_types::discover::DiscoveredFile],
-    config: &ResolvedConfig,
-    ignore_set: &globset::GlobSet,
-    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
-    ws_roots: Option<&[std::path::PathBuf]>,
+    ctx: HealthScanCtx<'_>,
 ) -> CssWalkAccum {
     use crate::health_types::{CssAnalyticsSummary, CssFileAnalytics, ScopedUnusedClasses};
 
@@ -2566,9 +2591,7 @@ fn walk_css_files(
     let mut tokens = CssTokenSets::default();
 
     for file in files {
-        let Some((relative, is_sfc)) =
-            css_report_scan_target(file, config, ignore_set, changed_files, ws_roots)
-        else {
+        let Some((relative, is_sfc)) = css_report_scan_target(file, ctx) else {
             continue;
         };
         let Ok(source) = std::fs::read_to_string(&file.path) else {
@@ -2658,12 +2681,16 @@ fn finalize_css_token_metrics(
 
 fn compute_css_analytics_report(
     files: &[fallow_types::discover::DiscoveredFile],
-    config: &ResolvedConfig,
-    ignore_set: &globset::GlobSet,
-    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
-    ws_roots: Option<&[std::path::PathBuf]>,
+    ctx: HealthScanCtx<'_>,
 ) -> Option<crate::health_types::CssAnalyticsReport> {
-    let mut walk = walk_css_files(files, config, ignore_set, changed_files, ws_roots);
+    let HealthScanCtx {
+        config,
+        ignore_set,
+        changed_files,
+        ws_roots,
+    } = ctx;
+
+    let mut walk = walk_css_files(files, ctx);
     let metrics = finalize_css_token_metrics(
         &mut walk.tokens,
         &mut walk.summary,
@@ -3226,13 +3253,16 @@ struct ThresholdOverrideStateTracker {
 impl ThresholdOverrideStateTracker {
     fn record_complexity(
         &mut self,
-        path: &std::path::Path,
-        function: &str,
-        cyclomatic: u16,
-        cognitive: u16,
+        function: ComplexityFunctionContext<'_>,
         matches: &[ThresholdOverrideMatch<'_>],
         global: GlobalHealthThresholds,
     ) {
+        let ComplexityFunctionContext {
+            path,
+            function,
+            cyclomatic,
+            cognitive,
+        } = function;
         for matched in matches {
             self.matched_indexes.insert(matched.entry.index);
             let configured = matched.entry.configured;
@@ -3386,6 +3416,17 @@ impl ThresholdOverrideStateTracker {
                 reason: input.reason,
             });
     }
+}
+
+/// One function's identity (path + name) and measured complexity metrics,
+/// bundled so `record_complexity` takes the function descriptor as a single
+/// parameter instead of four.
+#[derive(Clone, Copy)]
+struct ComplexityFunctionContext<'a> {
+    path: &'a std::path::Path,
+    function: &'a str,
+    cyclomatic: u16,
+    cognitive: u16,
 }
 
 struct ThresholdOverrideStateInput {
@@ -5949,10 +5990,12 @@ fn collect_complexity_finding(
     let (applied_thresholds, matched_overrides) =
         input.threshold_resolver.resolve(relative, &fc.name);
     input.threshold_state_tracker.record_complexity(
-        path,
-        &fc.name,
-        fc.cyclomatic,
-        fc.cognitive,
+        ComplexityFunctionContext {
+            path,
+            function: &fc.name,
+            cyclomatic: fc.cyclomatic,
+            cognitive: fc.cognitive,
+        },
         &matched_overrides,
         input.threshold_resolver.global,
     );
@@ -8032,6 +8075,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+    )]
     fn runtime_coverage_top_applies_after_baseline_filtering() {
         let root = Path::new("/project");
         let baseline = HealthBaselineData {

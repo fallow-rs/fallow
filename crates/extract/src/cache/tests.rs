@@ -242,6 +242,10 @@ fn cache_store_missing_key_returns_none() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+)]
 fn cache_store_overwrite_entry() {
     let mut store = CacheStore::new();
     let m1 = CachedModule {
@@ -394,6 +398,10 @@ fn cache_store_overwrite_entry() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+)]
 fn module_to_cached_roundtrip_named_export() {
     let module = ModuleInfo {
         file_id: FileId(0),
@@ -689,6 +697,10 @@ fn module_to_cached_roundtrip_default_export() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+)]
 fn module_to_cached_roundtrip_imports() {
     let module = ModuleInfo {
         file_id: FileId(0),
@@ -1017,6 +1029,10 @@ fn module_to_cached_roundtrip_dynamic_imports() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+)]
 fn module_to_cached_roundtrip_members() {
     let module = ModuleInfo {
         file_id: FileId(0),
@@ -2964,6 +2980,10 @@ fn module_to_cached_roundtrip_unused_import_bindings() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+)]
 fn module_to_cached_roundtrip_complexity() {
     use fallow_types::extract::FunctionComplexity;
 

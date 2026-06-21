@@ -590,12 +590,14 @@ struct HumanPkgDepSectionInput<'a, T> {
 
 fn push_human_pkg_dep_section<T: NamedPkgDep>(input: &mut HumanPkgDepSectionInput<'_, T>) {
     build_human_section_ex(
-        input.lines,
-        input.items,
-        input.title,
-        severity_to_level(input.severity),
-        input.max_items,
-        input.total_issues,
+        HumanSectionInput {
+            lines: input.lines,
+            items: input.items,
+            title: input.title,
+            level: severity_to_level(input.severity),
+            max: input.max_items,
+            total_issues: input.total_issues,
+        },
         |dep| {
             vec![format!(
                 "  {}",
@@ -686,12 +688,14 @@ fn push_unused_files_section(input: &mut UnusedCodeSectionInput<'_>) {
         );
     } else {
         build_human_section_ex(
-            input.lines,
-            &input.results.unused_files,
-            "Unused files",
-            severity_to_level(input.rules.unused_files),
-            input.max_items,
-            input.total_issues,
+            HumanSectionInput {
+                lines: input.lines,
+                items: &input.results.unused_files,
+                title: "Unused files",
+                level: severity_to_level(input.rules.unused_files),
+                max: input.max_items,
+                total_issues: input.total_issues,
+            },
             |file| {
                 let path_str = relative_path(&file.file.path, input.root)
                     .display()
@@ -930,12 +934,14 @@ fn push_import_dependency_sections(input: ImportDependencySectionInput<'_>) {
         },
     });
     build_human_section_ex(
-        lines,
-        &results.unlisted_dependencies,
-        "Unlisted dependencies",
-        severity_to_level(rules.unlisted_dependencies),
-        max_items,
-        total_issues,
+        HumanSectionInput {
+            lines,
+            items: &results.unlisted_dependencies,
+            title: "Unlisted dependencies",
+            level: severity_to_level(rules.unlisted_dependencies),
+            max: max_items,
+            total_issues,
+        },
         |dep| vec![format!("  {}", dep.dep.package_name.bold())],
     );
     push_human_pkg_dep_section(&mut HumanPkgDepSectionInput {
@@ -1034,12 +1040,14 @@ fn push_unused_catalog_entries_section(
     }
     let level = severity_to_level(severity);
     build_human_section_ex(
-        lines,
-        entries,
-        "Unused catalog entries",
-        level,
-        max_items,
-        total_issues,
+        HumanSectionInput {
+            lines,
+            items: entries,
+            title: "Unused catalog entries",
+            level,
+            max: max_items,
+            total_issues,
+        },
         |entry| {
             let entry = &entry.entry;
             let path_display = root.join(&entry.path);
@@ -1086,12 +1094,14 @@ fn push_empty_catalog_groups_section(
     }
     let level = severity_to_level(severity);
     build_human_section_ex(
-        lines,
-        groups,
-        "Empty catalog groups",
-        level,
-        max_items,
-        total_issues,
+        HumanSectionInput {
+            lines,
+            items: groups,
+            title: "Empty catalog groups",
+            level,
+            max: max_items,
+            total_issues,
+        },
         |group| {
             let group = &group.group;
             let path_display = root.join(&group.path);
@@ -1131,12 +1141,14 @@ fn push_unresolved_catalog_references_section(
     }
     let level = severity_to_level(severity);
     build_human_section_ex(
-        lines,
-        findings,
-        "Unresolved catalog references",
-        level,
-        max_items,
-        total_issues,
+        HumanSectionInput {
+            lines,
+            items: findings,
+            title: "Unresolved catalog references",
+            level,
+            max: max_items,
+            total_issues,
+        },
         |finding| format_unresolved_catalog_reference(finding, root),
     );
 }
@@ -1211,12 +1223,14 @@ fn push_unused_dependency_overrides_section(
     }
     let level = severity_to_level(severity);
     build_human_section_ex(
-        lines,
-        findings,
-        "Unused dependency overrides",
-        level,
-        max_items,
-        total_issues,
+        HumanSectionInput {
+            lines,
+            items: findings,
+            title: "Unused dependency overrides",
+            level,
+            max: max_items,
+            total_issues,
+        },
         |finding| {
             let finding = &finding.entry;
             let path_display = root.join(&finding.path);
@@ -1265,12 +1279,14 @@ fn push_misconfigured_dependency_overrides_section(
     }
     let level = severity_to_level(severity);
     build_human_section_ex(
-        lines,
-        findings,
-        "Misconfigured dependency overrides",
-        level,
-        max_items,
-        total_issues,
+        HumanSectionInput {
+            lines,
+            items: findings,
+            title: "Misconfigured dependency overrides",
+            level,
+            max: max_items,
+            total_issues,
+        },
         |finding| {
             let finding = &finding.entry;
             let path_display = root.join(&finding.path);
@@ -2158,15 +2174,30 @@ fn render_dir_rollup_entries(
 }
 
 /// Append a non-empty section with a header, doc-link footer, and truncated items.
-fn build_human_section_ex<T>(
-    lines: &mut Vec<String>,
-    items: &[T],
-    title: &str,
+/// The non-closure inputs to [`build_human_section_ex`], bundled so the entry
+/// point takes the section descriptor plus the per-item formatter closure
+/// instead of seven positional parameters.
+struct HumanSectionInput<'a, T> {
+    lines: &'a mut Vec<String>,
+    items: &'a [T],
+    title: &'a str,
     level: Level,
     max: usize,
     total_issues: usize,
+}
+
+fn build_human_section_ex<T>(
+    section: HumanSectionInput<'_, T>,
     format_lines: impl Fn(&T) -> Vec<String>,
 ) {
+    let HumanSectionInput {
+        lines,
+        items,
+        title,
+        level,
+        max,
+        total_issues,
+    } = section;
     if items.is_empty() {
         return;
     }

@@ -12,6 +12,10 @@ fn write(path: std::path::PathBuf, contents: &str) {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+)]
 fn velite_config_content_roots_and_generated_output_are_used() {
     let dir = tempfile::tempdir().expect("temp dir");
     let root = dir.path();

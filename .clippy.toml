@@ -19,14 +19,15 @@ disallowed-methods = [
 # Catches deeply nested control flow that should be refactored.
 excessive-nesting-threshold = 7
 
-# SIG Unit Size: functions >150 LOC are flagged.
-# SIG thresholds: >60 LOC = "very high risk". Start at 150 to catch
-# the worst offenders, ratchet down toward 100 over time.
-too-many-lines-threshold = 150
+# SIG Unit Size: functions >100 LOC are flagged.
+# SIG thresholds: >60 LOC = "very high risk". Ratcheted from 150 to 100
+# to keep the worst-offender ceiling tightening over time.
+too-many-lines-threshold = 100
 
-# SIG Unit Interfacing: >=7 parameters = "very high risk".
-# Matches the SIG 4-star certification threshold exactly.
-too-many-arguments-threshold = 7
+# SIG Unit Interfacing: ratcheted from 7 to 6 so the 7-parameter outliers
+# get bundled into context structs. SIG 4-star cert wants <=2; 6 is the
+# pragmatic project ceiling matching the unit-size ratchet posture.
+too-many-arguments-threshold = 6
 
 # SIG Unit Complexity: cognitive complexity >25 = "very high risk".
 # This is the clippy default and matches SIG's CC threshold.

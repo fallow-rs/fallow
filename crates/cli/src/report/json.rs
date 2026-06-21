@@ -854,6 +854,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+    )]
     fn health_json_includes_runtime_coverage_with_relative_paths_and_actions() {
         let root = PathBuf::from("/project");
         let report = crate::health_types::HealthReport {
@@ -2604,6 +2608,10 @@ mod tests {
     /// Build a single-finding health JSON envelope with the supplied action
     /// context. Used by the suppress-line gating tests to exercise the
     /// `baseline-active` / `config-disabled` reasons.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "test scaffold; positional envelope builder over independent metric/threshold knobs, bundling adds churn with no production value"
+    )]
     fn build_finding_envelope_with_ctx(
         coverage_tier: Option<&str>,
         cyclomatic: u16,

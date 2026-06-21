@@ -146,16 +146,31 @@ pub struct ConfigLoadOptions {
     pub quiet: bool,
 }
 
+/// The scalar config-loading knobs for [`load_config`], bundled so the entry
+/// point takes the root + config path plus one args struct instead of seven
+/// positional parameters.
+#[derive(Clone, Copy)]
+pub struct LoadConfigArgs {
+    pub output: OutputFormat,
+    pub no_cache: bool,
+    pub threads: usize,
+    pub production: bool,
+    pub quiet: bool,
+}
+
 #[expect(clippy::ref_option, reason = "&Option matches clap's field type")]
 pub fn load_config(
     root: &Path,
     config_path: &Option<PathBuf>,
-    output: OutputFormat,
-    no_cache: bool,
-    threads: usize,
-    production: bool,
-    quiet: bool,
+    args: LoadConfigArgs,
 ) -> Result<ResolvedConfig, ExitCode> {
+    let LoadConfigArgs {
+        output,
+        no_cache,
+        threads,
+        production,
+        quiet,
+    } = args;
     load_config_for_analysis(
         root,
         config_path,

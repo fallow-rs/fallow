@@ -727,6 +727,10 @@ fn build_dead_code_run_context<'a>(
     since = "2.76.0",
     note = "fallow_core is internal; use fallow_cli::programmatic::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/fallow-core-migration.md and ADR-008."
 )]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "frozen deprecated public API (ADR-008); signature must not change"
+)]
 pub fn find_dead_code_full(
     graph: &ModuleGraph,
     config: &ResolvedConfig,
@@ -2165,12 +2169,14 @@ fn annotate_security_findings(
     );
     let boundary_crossings = boundary_crossings_by_file(&results.boundary_violations);
     security::rank_security_findings(
-        ctx.graph,
-        ctx.modules,
-        ctx.line_offsets_by_file,
-        ctx.declared_deps,
-        ctx.request_receivers,
-        &boundary_crossings,
+        &security::SecurityRankingInput {
+            graph: ctx.graph,
+            modules: ctx.modules,
+            line_offsets_by_file: ctx.line_offsets_by_file,
+            declared_deps: ctx.declared_deps,
+            request_receivers: ctx.request_receivers,
+            boundary_crossings: &boundary_crossings,
+        },
         &mut results.security_findings,
     );
 }
@@ -2962,6 +2968,10 @@ mod tests {
         }
 
         #[test]
+        #[expect(
+            clippy::too_many_lines,
+            reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+        )]
         fn suppressions_built_from_modules() {
             use crate::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
             use crate::extract::ModuleInfo;

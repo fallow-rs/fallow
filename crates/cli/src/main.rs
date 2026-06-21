@@ -68,7 +68,8 @@ use health::{HealthOptions, SortBy};
 use list::ListOptions;
 pub use runtime_support::{AnalysisKind, GroupBy};
 pub(crate) use runtime_support::{
-    ConfigLoadOptions, build_ownership_resolver, load_config, load_config_for_analysis,
+    ConfigLoadOptions, LoadConfigArgs, build_ownership_resolver, load_config,
+    load_config_for_analysis,
 };
 
 const SECURITY_UNSUPPORTED_GLOBAL_LONGS: &[&str] = &[
@@ -3432,7 +3433,13 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             all,
             sort,
             limit,
-        } => dispatch_impact(root, quiet, output, subcommand, all, sort, limit),
+        } => dispatch_impact(
+            root,
+            quiet,
+            output,
+            subcommand,
+            ImpactCrossRepoOpts { all, sort, limit },
+        ),
         security @ Command::Security { .. } => dispatch_security_command(security, dispatch),
         Command::Schema => unreachable!("handled above"),
         migrate @ Command::Migrate { .. } => dispatch_migrate_command(migrate, root),
@@ -4157,15 +4164,23 @@ fn dispatch_flags_command(dispatch: &DispatchContext<'_>, top: Option<usize>) ->
     })
 }
 
+/// The `fallow impact --all` cross-repo view options, bundled so
+/// `dispatch_impact` takes one parameter instead of three.
+#[derive(Clone, Copy)]
+struct ImpactCrossRepoOpts {
+    all: bool,
+    sort: ImpactSortCli,
+    limit: Option<usize>,
+}
+
 fn dispatch_impact(
     root: &std::path::Path,
     quiet: bool,
     output: fallow_config::OutputFormat,
     subcommand: Option<ImpactCli>,
-    all: bool,
-    sort: ImpactSortCli,
-    limit: Option<usize>,
+    cross_repo: ImpactCrossRepoOpts,
 ) -> ExitCode {
+    let ImpactCrossRepoOpts { all, sort, limit } = cross_repo;
     if all {
         if subcommand.is_some() {
             return emit_known_failure(
@@ -4998,11 +5013,13 @@ fn resolve_audit_inputs(
     let config = load_config(
         root,
         &cli.config,
-        output,
-        cli.no_cache,
-        dispatch.threads,
-        cli.production,
-        dispatch.quiet,
+        LoadConfigArgs {
+            output,
+            no_cache: cli.no_cache,
+            threads: dispatch.threads,
+            production: cli.production,
+            quiet: dispatch.quiet,
+        },
     )?;
     let cache_dir = config.cache_dir.clone();
     let audit_cfg = config.audit;
@@ -5137,11 +5154,13 @@ fn resolve_health_coverage_inputs(
             load_config(
                 dispatch.root,
                 &dispatch.cli.config,
-                dispatch.output,
-                dispatch.cli.no_cache,
-                dispatch.threads,
-                dispatch.cli.production,
-                dispatch.quiet,
+                LoadConfigArgs {
+                    output: dispatch.output,
+                    no_cache: dispatch.cli.no_cache,
+                    threads: dispatch.threads,
+                    production: dispatch.cli.production,
+                    quiet: dispatch.quiet,
+                },
             )?
             .health,
         )

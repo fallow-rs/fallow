@@ -1307,6 +1307,10 @@ fn health_args_minimal() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+)]
 fn health_args_with_all_options() {
     let params = HealthParams {
         root: Some("/src".to_string()),

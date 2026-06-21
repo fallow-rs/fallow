@@ -10,7 +10,7 @@ paths:
 ## Clippy configuration
 - Lint groups: `all`, `pedantic`, `nursery`, `cargo` (priority -1) with strategic allow-list
 - Restriction lints including `excessive_nesting` (threshold 7 in `.clippy.toml`), `allow_attributes_without_reason`, `unimplemented`; see `[workspace.lints.clippy]` in `Cargo.toml` for the full list
-- SIG-aligned thresholds in `.clippy.toml`: `too_many_lines` (150 LOC, ratchet toward 100), `too_many_arguments` (7 params), `cognitive_complexity` (25). These map to SIG Unit Size, Unit Interfacing, and Unit Complexity properties respectively
+- SIG-aligned thresholds in `.clippy.toml`: `too_many_lines` (100 LOC, ratcheted from 150), `too_many_arguments` (6 params, ratcheted from 7), `cognitive_complexity` (25). These map to SIG Unit Size, Unit Interfacing, and Unit Complexity properties respectively
 - Compiler lints: `unsafe_op_in_unsafe_fn`, `unused_unsafe`, `non_ascii_idents`, `tail_expr_drop_order`
 - All suppressions use `#[expect(clippy::..., reason = "...")]` — warns when unnecessary, preventing dead annotations. Every `#[allow]` and `#[expect]` must include a `reason` attribute. Use `#[allow]` only for pedantic-only or target-dependent lints where `#[expect]` would be unfulfilled.
 

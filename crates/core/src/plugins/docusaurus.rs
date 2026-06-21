@@ -887,6 +887,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+    )]
     fn resolve_config_supports_async_config_creators_and_custom_roots() {
         let temp = tempdir().expect("temp dir");
         fs::create_dir_all(temp.path().join("static-assets/styles")).expect("styles dir");

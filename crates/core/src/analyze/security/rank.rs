@@ -199,27 +199,22 @@ fn prepend_dead_code_action(finding: &mut SecurityFinding) {
 /// radius, crosses-boundary, active-code over dead-code candidates, then the
 /// existing deterministic `(path, line, col, category)` tiebreak so output stays
 /// stable across runs.
-pub fn rank_security_findings(
-    graph: &ModuleGraph,
-    modules: &[ModuleInfo],
-    line_offsets_by_file: &LineOffsetsMap<'_>,
-    declared_deps: &FxHashSet<String>,
-    request_receivers: &FxHashSet<String>,
-    boundary_crossings: &FxHashMap<PathBuf, (String, String)>,
-    findings: &mut [SecurityFinding],
-) {
+/// Graph and run inputs that drive security-finding ranking.
+pub struct SecurityRankingInput<'a> {
+    pub graph: &'a ModuleGraph,
+    pub modules: &'a [ModuleInfo],
+    pub line_offsets_by_file: &'a LineOffsetsMap<'a>,
+    pub declared_deps: &'a FxHashSet<String>,
+    pub request_receivers: &'a FxHashSet<String>,
+    pub boundary_crossings: &'a FxHashMap<PathBuf, (String, String)>,
+}
+
+pub fn rank_security_findings(input: &SecurityRankingInput<'_>, findings: &mut [SecurityFinding]) {
     if findings.is_empty() {
         return;
     }
 
-    let context = SecurityRankingContext::build(
-        graph,
-        modules,
-        line_offsets_by_file,
-        declared_deps,
-        request_receivers,
-        boundary_crossings,
-    );
+    let context = SecurityRankingContext::build(input);
 
     for finding in findings.iter_mut() {
         enrich_ranked_security_finding(finding, &context);
@@ -238,21 +233,20 @@ struct SecurityRankingContext<'a> {
 }
 
 impl<'a> SecurityRankingContext<'a> {
-    fn build(
-        graph: &'a ModuleGraph,
-        modules: &'a [ModuleInfo],
-        line_offsets_by_file: &'a LineOffsetsMap<'a>,
-        declared_deps: &FxHashSet<String>,
-        request_receivers: &FxHashSet<String>,
-        boundary_crossings: &'a FxHashMap<PathBuf, (String, String)>,
-    ) -> Self {
+    fn build(input: &SecurityRankingInput<'a>) -> Self {
+        let graph = input.graph;
+        let modules = input.modules;
         let path_to_id = graph
             .modules
             .iter()
             .map(|node| (node.path.as_path(), node.file_id))
             .collect();
-        let source_index =
-            UntrustedSourceIndex::build(graph, modules, declared_deps, request_receivers);
+        let source_index = UntrustedSourceIndex::build(
+            graph,
+            modules,
+            input.declared_deps,
+            input.request_receivers,
+        );
         let modules_by_id: FxHashMap<FileId, &ModuleInfo> = modules
             .iter()
             .map(|module| (module.file_id, module))
@@ -269,8 +263,8 @@ impl<'a> SecurityRankingContext<'a> {
 
         Self {
             graph,
-            line_offsets_by_file,
-            boundary_crossings,
+            line_offsets_by_file: input.line_offsets_by_file,
+            boundary_crossings: input.boundary_crossings,
             path_to_id,
             source_index,
             modules_by_path,
@@ -900,12 +894,14 @@ mod tests {
             .map(|path| (path.clone(), ("from".to_string(), "to".to_string())))
             .collect();
         rank_security_findings(
-            graph,
-            &modules,
-            &line_offsets,
-            &declared_deps,
-            &request_receivers,
-            &boundary_crossings,
+            &SecurityRankingInput {
+                graph,
+                modules: &modules,
+                line_offsets_by_file: &line_offsets,
+                declared_deps: &declared_deps,
+                request_receivers: &request_receivers,
+                boundary_crossings: &boundary_crossings,
+            },
             findings,
         );
     }
@@ -920,12 +916,14 @@ mod tests {
         let request_receivers = FxHashSet::default();
         let boundary_crossings = FxHashMap::default();
         rank_security_findings(
-            graph,
-            modules,
-            &line_offsets,
-            &declared_deps,
-            &request_receivers,
-            &boundary_crossings,
+            &SecurityRankingInput {
+                graph,
+                modules,
+                line_offsets_by_file: &line_offsets,
+                declared_deps: &declared_deps,
+                request_receivers: &request_receivers,
+                boundary_crossings: &boundary_crossings,
+            },
             findings,
         );
     }

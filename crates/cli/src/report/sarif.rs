@@ -57,6 +57,16 @@ impl SourceSnippetCache {
     }
 }
 
+/// Read-only context threaded through the SARIF result builders: the
+/// analysis results, project root, and rule severities. Bundled so the
+/// `push_*_sarif_results` family shares one parameter instead of three.
+#[derive(Clone, Copy)]
+struct SarifCtx<'a> {
+    results: &'a AnalysisResults,
+    root: &'a Path,
+    rules: &'a RulesConfig,
+}
+
 fn severity_to_sarif_level(s: Severity) -> &'static str {
     severity::sarif_level(s)
 }
@@ -1356,10 +1366,15 @@ pub fn build_sarif(
 ) -> serde_json::Value {
     let mut sarif_results = Vec::new();
     let mut snippets = SourceSnippetCache::default();
+    let ctx = SarifCtx {
+        results,
+        root,
+        rules,
+    };
 
-    push_primary_dead_code_sarif_results(&mut sarif_results, results, root, rules, &mut snippets);
-    push_dependency_sarif_results(&mut sarif_results, results, root, rules, &mut snippets);
-    push_member_sarif_results(&mut sarif_results, results, root, rules, &mut snippets);
+    push_primary_dead_code_sarif_results(&mut sarif_results, &ctx, &mut snippets);
+    push_dependency_sarif_results(&mut sarif_results, &ctx, &mut snippets);
+    push_member_sarif_results(&mut sarif_results, &ctx, &mut snippets);
     push_sarif_results(
         &mut sarif_results,
         &results.unresolved_imports,
@@ -1372,9 +1387,9 @@ pub fn build_sarif(
             )
         },
     );
-    push_misc_sarif_results(&mut sarif_results, results, root, rules, &mut snippets);
-    push_graph_sarif_results(&mut sarif_results, results, root, rules, &mut snippets);
-    push_catalog_sarif_results(&mut sarif_results, results, root, rules, &mut snippets);
+    push_misc_sarif_results(&mut sarif_results, &ctx, &mut snippets);
+    push_graph_sarif_results(&mut sarif_results, &ctx, &mut snippets);
+    push_catalog_sarif_results(&mut sarif_results, &ctx, &mut snippets);
 
     let sarif_rules = build_sarif_rules(rules);
     sarif_document(&sarif_results, &sarif_rules)
@@ -1382,11 +1397,15 @@ pub fn build_sarif(
 
 fn push_primary_dead_code_sarif_results(
     sarif_results: &mut Vec<serde_json::Value>,
-    results: &AnalysisResults,
-    root: &Path,
-    rules: &RulesConfig,
+    ctx: &SarifCtx<'_>,
     snippets: &mut SourceSnippetCache,
 ) {
+    let SarifCtx {
+        results,
+        root,
+        rules,
+    } = *ctx;
+
     push_sarif_results(sarif_results, &results.unused_files, snippets, |finding| {
         sarif_unused_file_fields(
             &finding.file,
@@ -1456,23 +1475,25 @@ fn sarif_document(
 
 fn push_dependency_sarif_results(
     sarif_results: &mut Vec<serde_json::Value>,
-    results: &AnalysisResults,
-    root: &Path,
-    rules: &RulesConfig,
+    ctx: &SarifCtx<'_>,
     snippets: &mut SourceSnippetCache,
 ) {
-    push_unused_dependency_sarif_results(sarif_results, results, root, rules, snippets);
-    push_classified_dependency_sarif_results(sarif_results, results, root, rules, snippets);
+    push_unused_dependency_sarif_results(sarif_results, ctx, snippets);
+    push_classified_dependency_sarif_results(sarif_results, ctx, snippets);
 }
 
 /// Push SARIF results for unused runtime, dev, and optional dependencies.
 fn push_unused_dependency_sarif_results(
     sarif_results: &mut Vec<serde_json::Value>,
-    results: &AnalysisResults,
-    root: &Path,
-    rules: &RulesConfig,
+    ctx: &SarifCtx<'_>,
     snippets: &mut SourceSnippetCache,
 ) {
+    let SarifCtx {
+        results,
+        root,
+        rules,
+    } = *ctx;
+
     push_sarif_results(sarif_results, &results.unused_dependencies, snippets, |d| {
         sarif_dep_fields(
             &d.dep,
@@ -1515,11 +1536,15 @@ fn push_unused_dependency_sarif_results(
 /// Push SARIF results for type-only and test-only dependency misclassifications.
 fn push_classified_dependency_sarif_results(
     sarif_results: &mut Vec<serde_json::Value>,
-    results: &AnalysisResults,
-    root: &Path,
-    rules: &RulesConfig,
+    ctx: &SarifCtx<'_>,
     snippets: &mut SourceSnippetCache,
 ) {
+    let SarifCtx {
+        results,
+        root,
+        rules,
+    } = *ctx;
+
     push_sarif_results(
         sarif_results,
         &results.type_only_dependencies,
@@ -1548,11 +1573,15 @@ fn push_classified_dependency_sarif_results(
 
 fn push_member_sarif_results(
     sarif_results: &mut Vec<serde_json::Value>,
-    results: &AnalysisResults,
-    root: &Path,
-    rules: &RulesConfig,
+    ctx: &SarifCtx<'_>,
     snippets: &mut SourceSnippetCache,
 ) {
+    let SarifCtx {
+        results,
+        root,
+        rules,
+    } = *ctx;
+
     push_sarif_results(sarif_results, &results.unused_enum_members, snippets, |m| {
         sarif_member_fields(
             &m.member,
@@ -1594,11 +1623,15 @@ fn push_member_sarif_results(
 
 fn push_misc_sarif_results(
     sarif_results: &mut Vec<serde_json::Value>,
-    results: &AnalysisResults,
-    root: &Path,
-    rules: &RulesConfig,
+    ctx: &SarifCtx<'_>,
     snippets: &mut SourceSnippetCache,
 ) {
+    let SarifCtx {
+        results,
+        root,
+        rules,
+    } = *ctx;
+
     if !results.unlisted_dependencies.is_empty() {
         push_sarif_unlisted_deps(
             sarif_results,
@@ -1624,24 +1657,26 @@ fn push_misc_sarif_results(
 /// that function under the unit-size lint.
 fn push_component_contract_sarif_results(
     sarif_results: &mut Vec<serde_json::Value>,
-    results: &AnalysisResults,
-    root: &Path,
-    rules: &RulesConfig,
+    ctx: &SarifCtx<'_>,
     snippets: &mut SourceSnippetCache,
 ) {
-    push_component_member_sarif_results(sarif_results, results, root, rules, snippets);
-    push_component_framework_sarif_results(sarif_results, results, root, rules, snippets);
-    push_component_shape_sarif_results(sarif_results, results, root, rules, snippets);
+    push_component_member_sarif_results(sarif_results, ctx, snippets);
+    push_component_framework_sarif_results(sarif_results, ctx, snippets);
+    push_component_shape_sarif_results(sarif_results, ctx, snippets);
 }
 
 /// Push SARIF results for unused component props, emits, inputs, and outputs.
 fn push_component_member_sarif_results(
     sarif_results: &mut Vec<serde_json::Value>,
-    results: &AnalysisResults,
-    root: &Path,
-    rules: &RulesConfig,
+    ctx: &SarifCtx<'_>,
     snippets: &mut SourceSnippetCache,
 ) {
+    let SarifCtx {
+        results,
+        root,
+        rules,
+    } = *ctx;
+
     push_sarif_results(
         sarif_results,
         &results.unused_component_props,
@@ -1695,11 +1730,15 @@ fn push_component_member_sarif_results(
 /// Push SARIF results for Svelte events, server actions, and load-data keys.
 fn push_component_framework_sarif_results(
     sarif_results: &mut Vec<serde_json::Value>,
-    results: &AnalysisResults,
-    root: &Path,
-    rules: &RulesConfig,
+    ctx: &SarifCtx<'_>,
     snippets: &mut SourceSnippetCache,
 ) {
+    let SarifCtx {
+        results,
+        root,
+        rules,
+    } = *ctx;
+
     push_sarif_results(
         sarif_results,
         &results.unused_svelte_events,
@@ -1741,11 +1780,15 @@ fn push_component_framework_sarif_results(
 /// Push SARIF results for prop drilling, thin wrappers, and duplicate prop shapes.
 fn push_component_shape_sarif_results(
     sarif_results: &mut Vec<serde_json::Value>,
-    results: &AnalysisResults,
-    root: &Path,
-    rules: &RulesConfig,
+    ctx: &SarifCtx<'_>,
     snippets: &mut SourceSnippetCache,
 ) {
+    let SarifCtx {
+        results,
+        root,
+        rules,
+    } = *ctx;
+
     push_sarif_results(
         sarif_results,
         &results.prop_drilling_chains,
@@ -1777,36 +1820,36 @@ fn push_component_shape_sarif_results(
 
 fn push_graph_sarif_results(
     sarif_results: &mut Vec<serde_json::Value>,
-    results: &AnalysisResults,
-    root: &Path,
-    rules: &RulesConfig,
+    ctx: &SarifCtx<'_>,
     snippets: &mut SourceSnippetCache,
 ) {
-    push_structure_sarif_results(sarif_results, results, root, rules, snippets);
-    push_framework_sarif_results(sarif_results, results, root, rules, snippets);
-    push_route_sarif_results(sarif_results, results, root, rules, snippets);
-    push_suppression_sarif_results(sarif_results, results, root, rules, snippets);
+    push_structure_sarif_results(sarif_results, ctx, snippets);
+    push_framework_sarif_results(sarif_results, ctx, snippets);
+    push_route_sarif_results(sarif_results, ctx, snippets);
+    push_suppression_sarif_results(sarif_results, ctx, snippets);
 }
 
 fn push_structure_sarif_results(
     sarif_results: &mut Vec<serde_json::Value>,
-    results: &AnalysisResults,
-    root: &Path,
-    rules: &RulesConfig,
+    ctx: &SarifCtx<'_>,
     snippets: &mut SourceSnippetCache,
 ) {
-    push_cycle_sarif_results(sarif_results, results, root, rules, snippets);
-    push_boundary_sarif_results(sarif_results, results, root, rules, snippets);
+    push_cycle_sarif_results(sarif_results, ctx, snippets);
+    push_boundary_sarif_results(sarif_results, ctx, snippets);
 }
 
 /// Push SARIF results for circular dependencies and re-export cycles.
 fn push_cycle_sarif_results(
     sarif_results: &mut Vec<serde_json::Value>,
-    results: &AnalysisResults,
-    root: &Path,
-    rules: &RulesConfig,
+    ctx: &SarifCtx<'_>,
     snippets: &mut SourceSnippetCache,
 ) {
+    let SarifCtx {
+        results,
+        root,
+        rules,
+    } = *ctx;
+
     push_sarif_results(
         sarif_results,
         &results.circular_dependencies,
@@ -1831,11 +1874,15 @@ fn push_cycle_sarif_results(
 /// Push SARIF results for boundary violations, coverage, calls, and policy violations.
 fn push_boundary_sarif_results(
     sarif_results: &mut Vec<serde_json::Value>,
-    results: &AnalysisResults,
-    root: &Path,
-    rules: &RulesConfig,
+    ctx: &SarifCtx<'_>,
     snippets: &mut SourceSnippetCache,
 ) {
+    let SarifCtx {
+        results,
+        root,
+        rules,
+    } = *ctx;
+
     push_sarif_results(sarif_results, &results.boundary_violations, snippets, |v| {
         sarif_boundary_violation_fields(
             &v.violation,
@@ -1874,23 +1921,25 @@ fn push_boundary_sarif_results(
 
 fn push_framework_sarif_results(
     sarif_results: &mut Vec<serde_json::Value>,
-    results: &AnalysisResults,
-    root: &Path,
-    rules: &RulesConfig,
+    ctx: &SarifCtx<'_>,
     snippets: &mut SourceSnippetCache,
 ) {
-    push_framework_boundary_sarif_results(sarif_results, results, root, rules, snippets);
-    push_component_contract_sarif_results(sarif_results, results, root, rules, snippets);
+    push_framework_boundary_sarif_results(sarif_results, ctx, snippets);
+    push_component_contract_sarif_results(sarif_results, ctx, snippets);
 }
 
 /// Push SARIF results for client exports, barrels, directives, injects, and unrendered components.
 fn push_framework_boundary_sarif_results(
     sarif_results: &mut Vec<serde_json::Value>,
-    results: &AnalysisResults,
-    root: &Path,
-    rules: &RulesConfig,
+    ctx: &SarifCtx<'_>,
     snippets: &mut SourceSnippetCache,
 ) {
+    let SarifCtx {
+        results,
+        root,
+        rules,
+    } = *ctx;
+
     push_sarif_results(
         sarif_results,
         &results.invalid_client_exports,
@@ -1950,11 +1999,15 @@ fn push_framework_boundary_sarif_results(
 
 fn push_route_sarif_results(
     sarif_results: &mut Vec<serde_json::Value>,
-    results: &AnalysisResults,
-    root: &Path,
-    rules: &RulesConfig,
+    ctx: &SarifCtx<'_>,
     snippets: &mut SourceSnippetCache,
 ) {
+    let SarifCtx {
+        results,
+        root,
+        rules,
+    } = *ctx;
+
     push_sarif_results(sarif_results, &results.route_collisions, snippets, |c| {
         sarif_route_collision_fields(
             &c.collision,
@@ -1978,11 +2031,15 @@ fn push_route_sarif_results(
 
 fn push_suppression_sarif_results(
     sarif_results: &mut Vec<serde_json::Value>,
-    results: &AnalysisResults,
-    root: &Path,
-    rules: &RulesConfig,
+    ctx: &SarifCtx<'_>,
     snippets: &mut SourceSnippetCache,
 ) {
+    let SarifCtx {
+        results,
+        root,
+        rules,
+    } = *ctx;
+
     push_sarif_results(sarif_results, &results.stale_suppressions, snippets, |s| {
         sarif_stale_suppression_fields(
             s,
@@ -1994,23 +2051,25 @@ fn push_suppression_sarif_results(
 
 fn push_catalog_sarif_results(
     sarif_results: &mut Vec<serde_json::Value>,
-    results: &AnalysisResults,
-    root: &Path,
-    rules: &RulesConfig,
+    ctx: &SarifCtx<'_>,
     snippets: &mut SourceSnippetCache,
 ) {
-    push_catalog_entry_sarif_results(sarif_results, results, root, rules, snippets);
-    push_dependency_override_sarif_results(sarif_results, results, root, rules, snippets);
+    push_catalog_entry_sarif_results(sarif_results, ctx, snippets);
+    push_dependency_override_sarif_results(sarif_results, ctx, snippets);
 }
 
 /// Push SARIF results for unused catalog entries, empty groups, and unresolved references.
 fn push_catalog_entry_sarif_results(
     sarif_results: &mut Vec<serde_json::Value>,
-    results: &AnalysisResults,
-    root: &Path,
-    rules: &RulesConfig,
+    ctx: &SarifCtx<'_>,
     snippets: &mut SourceSnippetCache,
 ) {
+    let SarifCtx {
+        results,
+        root,
+        rules,
+    } = *ctx;
+
     push_sarif_results(
         sarif_results,
         &results.unused_catalog_entries,
@@ -2052,11 +2111,15 @@ fn push_catalog_entry_sarif_results(
 /// Push SARIF results for unused and misconfigured dependency overrides.
 fn push_dependency_override_sarif_results(
     sarif_results: &mut Vec<serde_json::Value>,
-    results: &AnalysisResults,
-    root: &Path,
-    rules: &RulesConfig,
+    ctx: &SarifCtx<'_>,
     snippets: &mut SourceSnippetCache,
 ) {
+    let SarifCtx {
+        results,
+        root,
+        rules,
+    } = *ctx;
+
     push_sarif_results(
         sarif_results,
         &results.unused_dependency_overrides,

@@ -32,6 +32,10 @@ pub(super) use super::super::{
     is_package_listed_for_file, should_skip_dependency,
 };
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "test helper; thin wrapper mirroring the production signature for fixture setup"
+)]
 pub(super) fn find_unlisted_dependencies(
     graph: &ModuleGraph,
     pkg: &PackageJson,

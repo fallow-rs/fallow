@@ -746,6 +746,10 @@ fn make_file_data(path: &str, source: &str, num_tokens: usize) -> FileData {
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "test helper; thin wrapper bundling fixture inputs for clone-group extraction"
+)]
 fn extract_clone_groups_for_test(
     sa: &[usize],
     lcp: &[usize],

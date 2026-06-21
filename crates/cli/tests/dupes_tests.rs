@@ -366,6 +366,10 @@ fn dupes_still_reports_repeated_callback_bodies_inside_calls() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+)]
 fn dupes_reports_web_format_clone_groups() {
     let dir = tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join("src")).unwrap();

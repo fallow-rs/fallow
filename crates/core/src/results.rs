@@ -83,6 +83,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+    )]
     fn results_total_counts_all_types() {
         let mut results = AnalysisResults::default();
         results

@@ -193,12 +193,14 @@ fn build_target_for_score(
     }
 
     let (category, recommendation) = try_match_rules(
-        score,
-        hotspot,
-        is_circular,
-        is_entry,
-        top_fns,
-        value_exports,
+        RuleMatchContext {
+            score,
+            hotspot,
+            is_circular,
+            is_entry,
+            top_fns,
+            value_exports,
+        },
         thresholds,
     )?;
 
@@ -209,11 +211,13 @@ fn build_target_for_score(
     let evidence = build_evidence(
         &category,
         &score.path,
-        aux.unused_export_names,
         top_fns,
-        aux.cycle_members,
-        aux.direct_callers,
-        aux.clone_siblings,
+        EvidenceSources {
+            unused_export_names: aux.unused_export_names,
+            cycle_members: aux.cycle_members,
+            direct_callers: aux.direct_callers,
+            clone_siblings: aux.clone_siblings,
+        },
     );
 
     Some(RefactoringTarget {
@@ -365,15 +369,31 @@ fn export_target_thresholds(thresholds: &DistributionThresholds) -> TargetThresh
 /// Try to match a file against refactoring rules in priority order.
 ///
 /// Returns the first matching `(category, recommendation)`, or `None` if no rule matches.
-fn try_match_rules(
-    score: &FileHealthScore,
-    hotspot: Option<&HotspotEntry>,
+/// Per-file inputs to the refactoring-target rule matcher, bundled so
+/// `try_match_rules` takes the file context plus shared thresholds instead of
+/// seven positional parameters.
+#[derive(Clone, Copy)]
+struct RuleMatchContext<'a> {
+    score: &'a FileHealthScore,
+    hotspot: Option<&'a HotspotEntry>,
     is_circular: bool,
     is_entry: bool,
-    top_fns: Option<&Vec<(String, u32, u16)>>,
+    top_fns: Option<&'a Vec<(String, u32, u16)>>,
     value_exports: usize,
+}
+
+fn try_match_rules(
+    ctx: RuleMatchContext<'_>,
     thresholds: &DistributionThresholds,
 ) -> Option<(RecommendationCategory, String)> {
+    let RuleMatchContext {
+        score,
+        hotspot,
+        is_circular,
+        is_entry,
+        top_fns,
+        value_exports,
+    } = ctx;
     match_churn_complexity(score, hotspot)
         .or_else(|| match_circular_impact(score, is_circular))
         .or_else(|| match_high_impact_split(score, thresholds))
@@ -569,15 +589,28 @@ fn compute_effort_estimate(
 }
 
 /// Build structured evidence for a refactoring target based on its category.
+/// The per-file evidence lookup maps, bundled so `build_evidence` takes the
+/// category and path plus one sources struct instead of seven parameters.
+#[derive(Clone, Copy)]
+struct EvidenceSources<'a> {
+    unused_export_names: &'a rustc_hash::FxHashMap<std::path::PathBuf, Vec<String>>,
+    cycle_members: &'a rustc_hash::FxHashMap<std::path::PathBuf, Vec<std::path::PathBuf>>,
+    direct_callers: &'a rustc_hash::FxHashMap<std::path::PathBuf, Vec<DirectCallerEvidence>>,
+    clone_siblings: &'a rustc_hash::FxHashMap<std::path::PathBuf, Vec<CloneSiblingEvidence>>,
+}
+
 fn build_evidence(
     category: &RecommendationCategory,
     path: &std::path::Path,
-    unused_export_names: &rustc_hash::FxHashMap<std::path::PathBuf, Vec<String>>,
     top_fns: Option<&Vec<(String, u32, u16)>>,
-    cycle_members: &rustc_hash::FxHashMap<std::path::PathBuf, Vec<std::path::PathBuf>>,
-    direct_callers: &rustc_hash::FxHashMap<std::path::PathBuf, Vec<DirectCallerEvidence>>,
-    clone_siblings: &rustc_hash::FxHashMap<std::path::PathBuf, Vec<CloneSiblingEvidence>>,
+    sources: EvidenceSources<'_>,
 ) -> Option<TargetEvidence> {
+    let EvidenceSources {
+        unused_export_names,
+        cycle_members,
+        direct_callers,
+        clone_siblings,
+    } = sources;
     let mut evidence = TargetEvidence {
         direct_callers: direct_callers.get(path).cloned().unwrap_or_default(),
         clone_siblings: clone_siblings.get(path).cloned().unwrap_or_default(),
@@ -988,11 +1021,13 @@ mod tests {
         let evidence = build_evidence(
             &RecommendationCategory::ExtractDependencies,
             &path,
-            &rustc_hash::FxHashMap::default(),
             None,
-            &rustc_hash::FxHashMap::default(),
-            &direct_callers,
-            &clone_siblings,
+            EvidenceSources {
+                unused_export_names: &rustc_hash::FxHashMap::default(),
+                cycle_members: &rustc_hash::FxHashMap::default(),
+                direct_callers: &direct_callers,
+                clone_siblings: &clone_siblings,
+            },
         )
         .expect("generic evidence should keep target evidence present");
 
@@ -1048,7 +1083,17 @@ mod tests {
     fn rule_no_match_clean_file() {
         let score = make_score(|_| {});
         let t = default_thresholds();
-        let result = try_match_rules(&score, None, false, false, None, 0, &t);
+        let result = try_match_rules(
+            RuleMatchContext {
+                score: &score,
+                hotspot: None,
+                is_circular: false,
+                is_entry: false,
+                top_fns: None,
+                value_exports: 0,
+            },
+            &t,
+        );
         assert!(result.is_none());
     }
 
@@ -1056,7 +1101,17 @@ mod tests {
     fn rule_circular_dep_high_fan_in() {
         let score = make_score(|s| s.fan_in = 5);
         let t = default_thresholds();
-        let result = try_match_rules(&score, None, true, false, None, 0, &t);
+        let result = try_match_rules(
+            RuleMatchContext {
+                score: &score,
+                hotspot: None,
+                is_circular: true,
+                is_entry: false,
+                top_fns: None,
+                value_exports: 0,
+            },
+            &t,
+        );
         assert!(result.is_some());
         let (cat, _) = result.unwrap();
         assert!(matches!(
@@ -1069,7 +1124,17 @@ mod tests {
     fn rule_circular_dep_low_fan_in_fallback() {
         let score = make_score(|s| s.fan_in = 1);
         let t = default_thresholds();
-        let result = try_match_rules(&score, None, true, false, None, 0, &t);
+        let result = try_match_rules(
+            RuleMatchContext {
+                score: &score,
+                hotspot: None,
+                is_circular: true,
+                is_entry: false,
+                top_fns: None,
+                value_exports: 0,
+            },
+            &t,
+        );
         assert!(result.is_some());
         let (cat, _) = result.unwrap();
         assert!(matches!(
@@ -1086,7 +1151,17 @@ mod tests {
             s.complexity_density = 0.5;
         });
         let t = default_thresholds();
-        let result = try_match_rules(&score, None, false, false, None, 0, &t);
+        let result = try_match_rules(
+            RuleMatchContext {
+                score: &score,
+                hotspot: None,
+                is_circular: false,
+                is_entry: false,
+                top_fns: None,
+                value_exports: 0,
+            },
+            &t,
+        );
         assert!(result.is_some());
         let (cat, rec) = result.unwrap();
         assert!(matches!(cat, RecommendationCategory::AddTestCoverage));
@@ -1101,7 +1176,17 @@ mod tests {
             s.complexity_density = 0.2;
         });
         let t = default_thresholds();
-        let result = try_match_rules(&score, None, false, false, None, 0, &t);
+        let result = try_match_rules(
+            RuleMatchContext {
+                score: &score,
+                hotspot: None,
+                is_circular: false,
+                is_entry: false,
+                top_fns: None,
+                value_exports: 0,
+            },
+            &t,
+        );
         assert!(result.is_none());
     }
 
@@ -1112,7 +1197,17 @@ mod tests {
             s.fan_in = 20;
         });
         let t = default_thresholds();
-        let result = try_match_rules(&score, None, false, false, None, 0, &t);
+        let result = try_match_rules(
+            RuleMatchContext {
+                score: &score,
+                hotspot: None,
+                is_circular: false,
+                is_entry: false,
+                top_fns: None,
+                value_exports: 0,
+            },
+            &t,
+        );
         assert!(result.is_some());
         let (cat, rec) = result.unwrap();
         assert!(matches!(cat, RecommendationCategory::SplitHighImpact));
@@ -1126,7 +1221,17 @@ mod tests {
     fn rule_remove_dead_code() {
         let score = make_score(|s| s.dead_code_ratio = 0.6);
         let t = default_thresholds();
-        let result = try_match_rules(&score, None, false, false, None, 5, &t);
+        let result = try_match_rules(
+            RuleMatchContext {
+                score: &score,
+                hotspot: None,
+                is_circular: false,
+                is_entry: false,
+                top_fns: None,
+                value_exports: 5,
+            },
+            &t,
+        );
         assert!(result.is_some());
         let (cat, _) = result.unwrap();
         assert!(matches!(cat, RecommendationCategory::RemoveDeadCode));
@@ -1136,7 +1241,17 @@ mod tests {
     fn rule_dead_code_gate_too_few_exports() {
         let score = make_score(|s| s.dead_code_ratio = 0.8);
         let t = default_thresholds();
-        let result = try_match_rules(&score, None, false, false, None, 2, &t);
+        let result = try_match_rules(
+            RuleMatchContext {
+                score: &score,
+                hotspot: None,
+                is_circular: false,
+                is_entry: false,
+                top_fns: None,
+                value_exports: 2,
+            },
+            &t,
+        );
         assert!(result.is_none());
     }
 
@@ -1145,7 +1260,17 @@ mod tests {
         let score = make_score(|_| {});
         let fns = vec![("handleSubmit".to_string(), 10u32, 35u16)];
         let t = default_thresholds();
-        let result = try_match_rules(&score, None, false, false, Some(&fns), 0, &t);
+        let result = try_match_rules(
+            RuleMatchContext {
+                score: &score,
+                hotspot: None,
+                is_circular: false,
+                is_entry: false,
+                top_fns: Some(&fns),
+                value_exports: 0,
+            },
+            &t,
+        );
         assert!(result.is_some());
         let (cat, rec) = result.unwrap();
         assert!(matches!(
@@ -1166,7 +1291,17 @@ mod tests {
             s.maintainability_index = 50.0;
         });
         let t = default_thresholds();
-        let result = try_match_rules(&score, None, false, false, None, 0, &t);
+        let result = try_match_rules(
+            RuleMatchContext {
+                score: &score,
+                hotspot: None,
+                is_circular: false,
+                is_entry: false,
+                top_fns: None,
+                value_exports: 0,
+            },
+            &t,
+        );
         assert!(result.is_some());
         let (cat, rec) = result.unwrap();
         assert!(matches!(cat, RecommendationCategory::ExtractDependencies));
@@ -1183,7 +1318,17 @@ mod tests {
             s.maintainability_index = 50.0;
         });
         let t = default_thresholds();
-        let result = try_match_rules(&score, None, false, true, None, 0, &t);
+        let result = try_match_rules(
+            RuleMatchContext {
+                score: &score,
+                hotspot: None,
+                is_circular: false,
+                is_entry: true,
+                top_fns: None,
+                value_exports: 0,
+            },
+            &t,
+        );
         assert!(result.is_none());
     }
 
@@ -1204,7 +1349,17 @@ mod tests {
             is_test_path: false,
         };
         let t = default_thresholds();
-        let result = try_match_rules(&score, Some(&hotspot), false, false, None, 0, &t);
+        let result = try_match_rules(
+            RuleMatchContext {
+                score: &score,
+                hotspot: Some(&hotspot),
+                is_circular: false,
+                is_entry: false,
+                top_fns: None,
+                value_exports: 0,
+            },
+            &t,
+        );
         assert!(result.is_some());
         let (cat, _) = result.unwrap();
         assert!(matches!(cat, RecommendationCategory::UrgentChurnComplexity));
@@ -1282,11 +1437,13 @@ mod tests {
         let ev = build_evidence(
             &RecommendationCategory::RemoveDeadCode,
             std::path::Path::new("/src/foo.ts"),
-            &unused,
             None,
-            &cycle_members,
-            &rustc_hash::FxHashMap::default(),
-            &rustc_hash::FxHashMap::default(),
+            EvidenceSources {
+                unused_export_names: &unused,
+                cycle_members: &cycle_members,
+                direct_callers: &rustc_hash::FxHashMap::default(),
+                clone_siblings: &rustc_hash::FxHashMap::default(),
+            },
         );
         assert!(ev.is_some());
         let ev = ev.unwrap();
@@ -1302,11 +1459,13 @@ mod tests {
         let ev = build_evidence(
             &RecommendationCategory::RemoveDeadCode,
             std::path::Path::new("/src/foo.ts"),
-            &unused,
             None,
-            &cycle_members,
-            &rustc_hash::FxHashMap::default(),
-            &rustc_hash::FxHashMap::default(),
+            EvidenceSources {
+                unused_export_names: &unused,
+                cycle_members: &cycle_members,
+                direct_callers: &rustc_hash::FxHashMap::default(),
+                clone_siblings: &rustc_hash::FxHashMap::default(),
+            },
         );
         assert!(ev.is_none());
     }
@@ -1323,11 +1482,13 @@ mod tests {
         let ev = build_evidence(
             &RecommendationCategory::ExtractComplexFunctions,
             std::path::Path::new("/src/foo.ts"),
-            &unused,
             Some(&fns),
-            &cycle_members,
-            &rustc_hash::FxHashMap::default(),
-            &rustc_hash::FxHashMap::default(),
+            EvidenceSources {
+                unused_export_names: &unused,
+                cycle_members: &cycle_members,
+                direct_callers: &rustc_hash::FxHashMap::default(),
+                clone_siblings: &rustc_hash::FxHashMap::default(),
+            },
         );
         assert!(ev.is_some());
         let ev = ev.unwrap();
@@ -1351,11 +1512,13 @@ mod tests {
         let ev = build_evidence(
             &RecommendationCategory::BreakCircularDependency,
             std::path::Path::new("/src/a.ts"),
-            &unused,
             None,
-            &cycle_members,
-            &rustc_hash::FxHashMap::default(),
-            &rustc_hash::FxHashMap::default(),
+            EvidenceSources {
+                unused_export_names: &unused,
+                cycle_members: &cycle_members,
+                direct_callers: &rustc_hash::FxHashMap::default(),
+                clone_siblings: &rustc_hash::FxHashMap::default(),
+            },
         );
         assert!(ev.is_some());
         let ev = ev.unwrap();
@@ -1371,11 +1534,13 @@ mod tests {
         let ev = build_evidence(
             &RecommendationCategory::AddTestCoverage,
             std::path::Path::new("/src/foo.ts"),
-            &unused,
             Some(&fns),
-            &cycle_members,
-            &rustc_hash::FxHashMap::default(),
-            &rustc_hash::FxHashMap::default(),
+            EvidenceSources {
+                unused_export_names: &unused,
+                cycle_members: &cycle_members,
+                direct_callers: &rustc_hash::FxHashMap::default(),
+                clone_siblings: &rustc_hash::FxHashMap::default(),
+            },
         );
         assert!(ev.is_some());
         let ev = ev.unwrap();
@@ -1390,11 +1555,13 @@ mod tests {
         let ev = build_evidence(
             &RecommendationCategory::SplitHighImpact,
             std::path::Path::new("/src/foo.ts"),
-            &unused,
             None,
-            &cycle_members,
-            &rustc_hash::FxHashMap::default(),
-            &rustc_hash::FxHashMap::default(),
+            EvidenceSources {
+                unused_export_names: &unused,
+                cycle_members: &cycle_members,
+                direct_callers: &rustc_hash::FxHashMap::default(),
+                clone_siblings: &rustc_hash::FxHashMap::default(),
+            },
         );
         assert!(ev.is_none());
     }
@@ -1436,7 +1603,17 @@ mod tests {
             is_test_path: false,
         };
         let t = default_thresholds();
-        let result = try_match_rules(&score, Some(&hotspot), true, false, None, 0, &t);
+        let result = try_match_rules(
+            RuleMatchContext {
+                score: &score,
+                hotspot: Some(&hotspot),
+                is_circular: true,
+                is_entry: false,
+                top_fns: None,
+                value_exports: 0,
+            },
+            &t,
+        );
         assert!(result.is_some());
         let (cat, _) = result.unwrap();
         assert!(
@@ -1453,7 +1630,17 @@ mod tests {
             ("handleEvent".to_string(), 25u32, 35u16),
         ];
         let t = default_thresholds();
-        let result = try_match_rules(&score, None, false, false, Some(&fns), 0, &t);
+        let result = try_match_rules(
+            RuleMatchContext {
+                score: &score,
+                hotspot: None,
+                is_circular: false,
+                is_entry: false,
+                top_fns: Some(&fns),
+                value_exports: 0,
+            },
+            &t,
+        );
         assert!(result.is_some());
         let (cat, rec) = result.unwrap();
         assert!(matches!(
@@ -1667,7 +1854,17 @@ mod tests {
             s.function_count = 8;
         });
         let t = default_thresholds();
-        let result = try_match_rules(&score, None, false, false, None, 0, &t);
+        let result = try_match_rules(
+            RuleMatchContext {
+                score: &score,
+                hotspot: None,
+                is_circular: false,
+                is_entry: false,
+                top_fns: None,
+                value_exports: 0,
+            },
+            &t,
+        );
         assert!(result.is_some());
         let (cat, _) = result.unwrap();
         assert!(matches!(cat, RecommendationCategory::SplitHighImpact));

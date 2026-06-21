@@ -56,6 +56,21 @@ struct ArgSinkSiteInput<'site, 'ast> {
     span: Span,
 }
 
+/// Per-argument inputs to [`ModuleInfoExtractor::push_security_sink_arg`].
+///
+/// Bundles the cohesive call-/new-expression argument context (the callee path,
+/// sink shape, argument index and expression, the call-level arg-0 URL literal,
+/// and the owning span) that `capture_call_sink_args` and
+/// `capture_new_expression_sink` both assemble per argument.
+struct PushSinkArgInput<'site, 'ast> {
+    callee_path: &'site str,
+    sink_shape: SinkShape,
+    arg_index: u32,
+    arg_expr: &'site Expression<'ast>,
+    url_arg_literal: Option<String>,
+    span: Span,
+}
+
 impl ModuleInfoExtractor {
     fn is_module_scope(&self) -> bool {
         self.block_depth == 0 && self.function_depth == 0 && self.namespace_depth == 0
@@ -7806,17 +7821,18 @@ impl ModuleInfoExtractor {
     /// Shared by `capture_call_sink` and `capture_new_expression_sink` (oxc
     /// represents `new X(...)` as a distinct `NewExpression`), keeping the
     /// per-argument `SinkSite` construction byte-identical across both shapes.
-    /// `url_arg_literal` is the call-level arg-0 URL signal (always `None` for
-    /// new-expressions). `span` is the owning call / new expression's span.
-    fn push_security_sink_arg(
-        &mut self,
-        callee_path: &str,
-        sink_shape: SinkShape,
-        arg_index: u32,
-        arg_expr: &Expression<'_>,
-        url_arg_literal: Option<String>,
-        span: Span,
-    ) {
+    /// `input.url_arg_literal` is the call-level arg-0 URL signal (always `None`
+    /// for new-expressions). `input.span` is the owning call / new expression's
+    /// span.
+    fn push_security_sink_arg(&mut self, input: PushSinkArgInput<'_, '_>) {
+        let PushSinkArgInput {
+            callee_path,
+            sink_shape,
+            arg_index,
+            arg_expr,
+            url_arg_literal,
+            span,
+        } = input;
         let arg_literal = self.static_sink_literal_value(arg_expr);
         let arg_is_non_literal = arg_literal.is_none() && is_non_literal_arg(arg_expr);
         if arg_is_non_literal
@@ -7967,14 +7983,14 @@ impl ModuleInfoExtractor {
             let Ok(arg_index) = u32::try_from(index) else {
                 continue;
             };
-            self.push_security_sink_arg(
+            self.push_security_sink_arg(PushSinkArgInput {
                 callee_path,
                 sink_shape,
                 arg_index,
                 arg_expr,
-                url_arg_literal.clone(),
-                expr.span,
-            );
+                url_arg_literal: url_arg_literal.clone(),
+                span: expr.span,
+            });
         }
     }
 
@@ -7992,14 +8008,14 @@ impl ModuleInfoExtractor {
             let Ok(arg_index) = u32::try_from(index) else {
                 continue;
             };
-            self.push_security_sink_arg(
-                &callee_path,
-                SinkShape::NewExpression,
+            self.push_security_sink_arg(PushSinkArgInput {
+                callee_path: &callee_path,
+                sink_shape: SinkShape::NewExpression,
                 arg_index,
                 arg_expr,
-                None,
-                expr.span,
-            );
+                url_arg_literal: None,
+                span: expr.span,
+            });
         }
     }
 

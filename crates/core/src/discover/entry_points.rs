@@ -1219,6 +1219,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+    )]
     fn plugin_entry_point_sets_preserve_runtime_test_and_support_roles() {
         let dir = tempfile::tempdir().expect("create temp dir");
         let root = dir.path();

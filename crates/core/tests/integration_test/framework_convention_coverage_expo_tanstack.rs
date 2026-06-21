@@ -606,6 +606,10 @@ export const routes = rootRoute("root.tsx", [
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+)]
 fn tanstack_router_vite_plugin_inline_virtual_routes_are_covered() {
     let temp = tempdir().expect("create temp dir");
     let root = temp.path();

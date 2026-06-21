@@ -107,6 +107,20 @@ fn detect_folded_enums(lines: &[&str], member_fixes: &[EnumMemberFix]) -> Vec<Fo
     folded
 }
 
+/// Inputs for [`apply_enum_member_fixes`], bundled so the entry point takes one
+/// parameter struct instead of seven (mirrors the `*FixInput` convention used
+/// by the dependency and export fixers in this module).
+pub(super) struct EnumMemberFixInput<'a, 'member> {
+    pub(super) root: &'a Path,
+    pub(super) members_by_file:
+        &'a FxHashMap<PathBuf, Vec<&'member fallow_core::results::UnusedMember>>,
+    pub(super) hashes: &'a CapturedHashes,
+    pub(super) plan: &'a mut FixPlan,
+    pub(super) output: OutputFormat,
+    pub(super) dry_run: bool,
+    pub(super) fixes: &'a mut Vec<serde_json::Value>,
+}
+
 /// Apply enum member fixes to source files, returning JSON fix entries.
 ///
 /// Removes unused enum members from their declarations. Handles:
@@ -114,15 +128,16 @@ fn detect_folded_enums(lines: &[&str], member_fixes: &[EnumMemberFix]) -> Vec<Fo
 /// - Single-line enums: removes the member token from the line
 /// - Trailing commas: cleans up when the last member is removed
 /// - All members removed: leaves the enum body empty (`enum Foo {}`)
-pub(super) fn apply_enum_member_fixes(
-    root: &Path,
-    members_by_file: &FxHashMap<PathBuf, Vec<&fallow_core::results::UnusedMember>>,
-    hashes: &CapturedHashes,
-    plan: &mut FixPlan,
-    output: OutputFormat,
-    dry_run: bool,
-    fixes: &mut Vec<serde_json::Value>,
-) {
+pub(super) fn apply_enum_member_fixes(input: EnumMemberFixInput<'_, '_>) {
+    let EnumMemberFixInput {
+        root,
+        members_by_file,
+        hashes,
+        plan,
+        output,
+        dry_run,
+        fixes,
+    } = input;
     for (path, file_members) in members_by_file {
         let Some((content, meta)) = read_source_with_hash_check(root, path, hashes, plan) else {
             continue;
@@ -429,15 +444,15 @@ mod tests {
         let mut fixes = Vec::new();
         let mut plan = FixPlan::new();
         let hashes = capture_hashes(&[file]);
-        apply_enum_member_fixes(
+        apply_enum_member_fixes(EnumMemberFixInput {
             root,
-            &map,
-            &hashes,
-            &mut plan,
-            OutputFormat::Human,
+            members_by_file: &map,
+            hashes: &hashes,
+            plan: &mut plan,
+            output: OutputFormat::Human,
             dry_run,
-            &mut fixes,
-        );
+            fixes: &mut fixes,
+        });
         if !dry_run {
             let _ = plan.commit();
         }
@@ -501,15 +516,15 @@ mod tests {
         let mut fixes = Vec::new();
         let mut plan = FixPlan::new();
         let hashes = capture_hashes(&[&file]);
-        apply_enum_member_fixes(
+        apply_enum_member_fixes(EnumMemberFixInput {
             root,
-            &members_by_file,
-            &hashes,
-            &mut plan,
-            OutputFormat::Human,
-            false,
-            &mut fixes,
-        );
+            members_by_file: &members_by_file,
+            hashes: &hashes,
+            plan: &mut plan,
+            output: OutputFormat::Human,
+            dry_run: false,
+            fixes: &mut fixes,
+        });
         let _ = plan.commit();
 
         let content = std::fs::read_to_string(&file).unwrap();
@@ -532,15 +547,15 @@ mod tests {
         let mut fixes = Vec::new();
         let mut plan = FixPlan::new();
         let hashes = capture_hashes(&[&file]);
-        apply_enum_member_fixes(
+        apply_enum_member_fixes(EnumMemberFixInput {
             root,
-            &members_by_file,
-            &hashes,
-            &mut plan,
-            OutputFormat::Human,
-            false,
-            &mut fixes,
-        );
+            members_by_file: &members_by_file,
+            hashes: &hashes,
+            plan: &mut plan,
+            output: OutputFormat::Human,
+            dry_run: false,
+            fixes: &mut fixes,
+        });
         let _ = plan.commit();
 
         let content = std::fs::read_to_string(&file).unwrap();
@@ -629,15 +644,15 @@ mod tests {
         let mut fixes = Vec::new();
         let mut plan = FixPlan::new();
         let hashes = capture_hashes(&[&file]);
-        apply_enum_member_fixes(
+        apply_enum_member_fixes(EnumMemberFixInput {
             root,
-            &members_by_file,
-            &hashes,
-            &mut plan,
-            OutputFormat::Json,
-            true,
-            &mut fixes,
-        );
+            members_by_file: &members_by_file,
+            hashes: &hashes,
+            plan: &mut plan,
+            output: OutputFormat::Json,
+            dry_run: true,
+            fixes: &mut fixes,
+        });
 
         assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
         assert_eq!(fixes.len(), 1);
@@ -810,15 +825,15 @@ mod tests {
         let mut fixes = Vec::new();
         let mut plan = FixPlan::new();
         let hashes = capture_hashes(&[&file]);
-        apply_enum_member_fixes(
+        apply_enum_member_fixes(EnumMemberFixInput {
             root,
-            &members_by_file,
-            &hashes,
-            &mut plan,
-            OutputFormat::Human,
-            false,
-            &mut fixes,
-        );
+            members_by_file: &members_by_file,
+            hashes: &hashes,
+            plan: &mut plan,
+            output: OutputFormat::Human,
+            dry_run: false,
+            fixes: &mut fixes,
+        });
         let _ = plan.commit();
 
         let content = std::fs::read_to_string(&file).unwrap();
@@ -906,15 +921,15 @@ mod tests {
         let mut fixes = Vec::new();
         let mut plan = FixPlan::new();
         let hashes = capture_hashes(&[&file]);
-        apply_enum_member_fixes(
+        apply_enum_member_fixes(EnumMemberFixInput {
             root,
-            &members_by_file,
-            &hashes,
-            &mut plan,
-            OutputFormat::Human,
-            false,
-            &mut fixes,
-        );
+            members_by_file: &members_by_file,
+            hashes: &hashes,
+            plan: &mut plan,
+            output: OutputFormat::Human,
+            dry_run: false,
+            fixes: &mut fixes,
+        });
         let _ = plan.commit();
 
         let path_str = fixes[0]["path"].as_str().unwrap().replace('\\', "/");
@@ -936,15 +951,15 @@ mod tests {
         let mut fixes = Vec::new();
         let mut plan = FixPlan::new();
         let hashes = capture_hashes(&[&file]);
-        apply_enum_member_fixes(
+        apply_enum_member_fixes(EnumMemberFixInput {
             root,
-            &members_by_file,
-            &hashes,
-            &mut plan,
-            OutputFormat::Human,
-            true,
-            &mut fixes,
-        );
+            members_by_file: &members_by_file,
+            hashes: &hashes,
+            plan: &mut plan,
+            output: OutputFormat::Human,
+            dry_run: true,
+            fixes: &mut fixes,
+        });
 
         assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
         assert_eq!(fixes.len(), 1);
@@ -966,15 +981,15 @@ mod tests {
         let mut fixes = Vec::new();
         let mut plan = FixPlan::new();
         let hashes = capture_hashes(&[&file]);
-        apply_enum_member_fixes(
+        apply_enum_member_fixes(EnumMemberFixInput {
             root,
-            &members_by_file,
-            &hashes,
-            &mut plan,
-            OutputFormat::Human,
-            false,
-            &mut fixes,
-        );
+            members_by_file: &members_by_file,
+            hashes: &hashes,
+            plan: &mut plan,
+            output: OutputFormat::Human,
+            dry_run: false,
+            fixes: &mut fixes,
+        });
         let _ = plan.commit();
 
         let content = std::fs::read_to_string(&file).unwrap();
@@ -999,15 +1014,15 @@ mod tests {
         let mut fixes = Vec::new();
         let mut plan = FixPlan::new();
         let hashes = capture_hashes(&[&file]);
-        apply_enum_member_fixes(
+        apply_enum_member_fixes(EnumMemberFixInput {
             root,
-            &members_by_file,
-            &hashes,
-            &mut plan,
-            OutputFormat::Human,
-            false,
-            &mut fixes,
-        );
+            members_by_file: &members_by_file,
+            hashes: &hashes,
+            plan: &mut plan,
+            output: OutputFormat::Human,
+            dry_run: false,
+            fixes: &mut fixes,
+        });
         let _ = plan.commit();
 
         let content = std::fs::read_to_string(&file).unwrap();
@@ -1042,15 +1057,15 @@ mod tests {
         let mut fixes = Vec::new();
         let mut plan = FixPlan::new();
         let hashes = capture_hashes(&[&file]);
-        apply_enum_member_fixes(
+        apply_enum_member_fixes(EnumMemberFixInput {
             root,
-            &members_by_file,
-            &hashes,
-            &mut plan,
-            OutputFormat::Human,
-            false,
-            &mut fixes,
-        );
+            members_by_file: &members_by_file,
+            hashes: &hashes,
+            plan: &mut plan,
+            output: OutputFormat::Human,
+            dry_run: false,
+            fixes: &mut fixes,
+        });
         let _ = plan.commit();
 
         let content = std::fs::read_to_string(&file).unwrap();
@@ -1077,15 +1092,15 @@ mod tests {
         let mut fixes = Vec::new();
         let mut plan = FixPlan::new();
         let hashes = capture_hashes(&[&file]);
-        apply_enum_member_fixes(
+        apply_enum_member_fixes(EnumMemberFixInput {
             root,
-            &members_by_file,
-            &hashes,
-            &mut plan,
-            OutputFormat::Human,
-            false,
-            &mut fixes,
-        );
+            members_by_file: &members_by_file,
+            hashes: &hashes,
+            plan: &mut plan,
+            output: OutputFormat::Human,
+            dry_run: false,
+            fixes: &mut fixes,
+        });
         let _ = plan.commit();
 
         let content = std::fs::read_to_string(&file).unwrap();
@@ -1114,15 +1129,15 @@ mod tests {
         let mut fixes = Vec::new();
         let mut plan = FixPlan::new();
         let hashes = capture_hashes(&[&file]);
-        apply_enum_member_fixes(
+        apply_enum_member_fixes(EnumMemberFixInput {
             root,
-            &members_by_file,
-            &hashes,
-            &mut plan,
-            OutputFormat::Human,
-            false,
-            &mut fixes,
-        );
+            members_by_file: &members_by_file,
+            hashes: &hashes,
+            plan: &mut plan,
+            output: OutputFormat::Human,
+            dry_run: false,
+            fixes: &mut fixes,
+        });
         let _ = plan.commit();
 
         let content = std::fs::read_to_string(&file).unwrap();
@@ -1149,15 +1164,15 @@ mod tests {
         let mut fixes = Vec::new();
         let mut plan = FixPlan::new();
         let hashes = capture_hashes(&[&file]);
-        apply_enum_member_fixes(
+        apply_enum_member_fixes(EnumMemberFixInput {
             root,
-            &members_by_file,
-            &hashes,
-            &mut plan,
-            OutputFormat::Human,
-            true,
-            &mut fixes,
-        );
+            members_by_file: &members_by_file,
+            hashes: &hashes,
+            plan: &mut plan,
+            output: OutputFormat::Human,
+            dry_run: true,
+            fixes: &mut fixes,
+        });
 
         let content = std::fs::read_to_string(&file).unwrap();
         assert_eq!(content, "export enum Status {\n  Active,\n  Inactive,\n}\n");
@@ -1182,15 +1197,15 @@ mod tests {
         let mut fixes = Vec::new();
         let mut plan = FixPlan::new();
         let hashes = capture_hashes(&[&file]);
-        apply_enum_member_fixes(
+        apply_enum_member_fixes(EnumMemberFixInput {
             root,
-            &members_by_file,
-            &hashes,
-            &mut plan,
-            OutputFormat::Human,
-            false,
-            &mut fixes,
-        );
+            members_by_file: &members_by_file,
+            hashes: &hashes,
+            plan: &mut plan,
+            output: OutputFormat::Human,
+            dry_run: false,
+            fixes: &mut fixes,
+        });
         let _ = plan.commit();
 
         let content = std::fs::read_to_string(&file).unwrap();

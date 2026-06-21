@@ -126,6 +126,16 @@ struct PluginRunContext<'a> {
     active: Vec<&'a dyn Plugin>,
 }
 
+/// Inputs governing which built-in plugins activate for a project.
+struct PluginActivationInput<'a> {
+    pkg: &'a PackageJson,
+    root: &'a Path,
+    discovered_files: &'a [PathBuf],
+    all_deps: &'a [String],
+    script_packages: &'a FxHashSet<String>,
+    candidate_index: Option<&'a ConfigCandidateIndex>,
+}
+
 /// Invalid user-authored regex extracted from a plugin config file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PluginRegexValidationError {
@@ -456,6 +466,10 @@ impl PluginRegistry {
 
     /// Run all plugins against a project with explicit config-file search roots,
     /// returning invalid plugin regexes as hard errors.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "public PluginRegistry API; signature is part of the crate surface for embedders"
+    )]
     pub fn try_run_with_search_roots(
         &self,
         pkg: &PackageJson,
@@ -556,14 +570,14 @@ impl PluginRegistry {
             .map(|(abs_path, _)| abs_path.clone())
             .collect();
 
-        let active = self.collect_active_plugins(
-            input.pkg,
-            input.root,
-            &workspace_files,
-            &all_deps,
-            &script_packages,
-            input.candidate_index,
-        );
+        let active = self.collect_active_plugins(&PluginActivationInput {
+            pkg: input.pkg,
+            root: input.root,
+            discovered_files: &workspace_files,
+            all_deps: &all_deps,
+            script_packages: &script_packages,
+            candidate_index: input.candidate_index,
+        });
 
         log_active_plugins(&active);
 
@@ -681,14 +695,14 @@ impl PluginRegistry {
     ) -> PluginRunContext<'a> {
         let all_deps = pkg.all_dependency_names();
         let script_packages = script_activation_packages(pkg, root, &all_deps, production_mode);
-        let active = self.collect_active_plugins(
+        let active = self.collect_active_plugins(&PluginActivationInput {
             pkg,
             root,
             discovered_files,
-            &all_deps,
-            &script_packages,
+            all_deps: &all_deps,
+            script_packages: &script_packages,
             candidate_index,
-        );
+        });
 
         PluginRunContext { all_deps, active }
     }
@@ -709,19 +723,18 @@ impl PluginRegistry {
     /// scripts, or package.json. Shared by the root and workspace-fast paths.
     fn collect_active_plugins<'a>(
         &'a self,
-        pkg: &PackageJson,
-        root: &Path,
-        discovered_files: &[PathBuf],
-        all_deps: &[String],
-        script_packages: &FxHashSet<String>,
-        candidate_index: Option<&ConfigCandidateIndex>,
+        activation: &PluginActivationInput<'_>,
     ) -> Vec<&'a dyn Plugin> {
         self.plugins
             .iter()
             .filter(|p| {
-                p.is_enabled_with_files(all_deps, root, discovered_files, candidate_index)
-                    || p.is_enabled_with_scripts(script_packages, root)
-                    || p.is_enabled_with_package_json(pkg, root)
+                p.is_enabled_with_files(
+                    activation.all_deps,
+                    activation.root,
+                    activation.discovered_files,
+                    activation.candidate_index,
+                ) || p.is_enabled_with_scripts(activation.script_packages, activation.root)
+                    || p.is_enabled_with_package_json(activation.pkg, activation.root)
             })
             .map(AsRef::as_ref)
             .collect()

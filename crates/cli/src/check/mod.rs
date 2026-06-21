@@ -993,6 +993,10 @@ mod tests {
         assert_eq!(rules.private_type_leaks, fallow_config::Severity::Warn);
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+    )]
     fn make_results() -> AnalysisResults {
         let mut r = AnalysisResults::default();
         r.unused_files

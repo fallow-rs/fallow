@@ -296,6 +296,11 @@ struct PolicyCollectionInput<'a> {
 }
 
 fn collect_banned_imports(input: &mut PolicyCollectionInput<'_>) {
+    let ctx = BannedImportCtx {
+        node: input.node,
+        suppressions: input.suppressions,
+        line_offsets_by_file: input.line_offsets_by_file,
+    };
     for (_, rule) in input.in_scope {
         if rule.rule.kind != RulePackRuleKind::BannedImport {
             continue;
@@ -323,7 +328,7 @@ fn collect_banned_imports(input: &mut PolicyCollectionInput<'_>) {
             }));
         for (source, is_type_only, span_start) in sites {
             push_banned_import_if_matched(
-                input.node,
+                &ctx,
                 rule,
                 severity,
                 &BannedImportSite {
@@ -331,8 +336,6 @@ fn collect_banned_imports(input: &mut PolicyCollectionInput<'_>) {
                     is_type_only,
                     span_start,
                 },
-                input.suppressions,
-                input.line_offsets_by_file,
                 input.violations,
             );
         }
@@ -346,15 +349,20 @@ struct BannedImportSite<'a> {
     span_start: u32,
 }
 
+/// Per-module emission context shared across every `banned-import` site check.
+struct BannedImportCtx<'a> {
+    node: &'a crate::graph::ModuleNode,
+    suppressions: &'a SuppressionContext<'a>,
+    line_offsets_by_file: &'a LineOffsetsMap<'a>,
+}
+
 /// Push a `banned-import` violation when `site`'s specifier matches the rule and
 /// is neither type-only-skipped nor suppressed.
 fn push_banned_import_if_matched(
-    node: &crate::graph::ModuleNode,
+    ctx: &BannedImportCtx<'_>,
     rule: &CompiledRule<'_>,
     severity: PolicyViolationSeverity,
     site: &BannedImportSite<'_>,
-    suppressions: &SuppressionContext<'_>,
-    line_offsets_by_file: &LineOffsetsMap<'_>,
     violations: &mut Vec<PolicyViolation>,
 ) {
     if rule.rule.ignore_type_only && site.is_type_only {
@@ -368,12 +376,16 @@ fn push_banned_import_if_matched(
     {
         return;
     }
-    let (line, col) = byte_offset_to_line_col(line_offsets_by_file, node.file_id, site.span_start);
-    if suppressions.is_policy_suppressed(node.file_id, line, rule.pack, &rule.rule.id) {
+    let (line, col) =
+        byte_offset_to_line_col(ctx.line_offsets_by_file, ctx.node.file_id, site.span_start);
+    if ctx
+        .suppressions
+        .is_policy_suppressed(ctx.node.file_id, line, rule.pack, &rule.rule.id)
+    {
         return;
     }
     violations.push(PolicyViolation {
-        path: node.path.clone(),
+        path: ctx.node.path.clone(),
         line,
         col,
         pack: rule.pack.to_owned(),

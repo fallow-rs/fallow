@@ -435,15 +435,31 @@ fn skip_hardcoded_catalog_consumers(
 /// Deletes only the named catalog header line. Comments or blank lines between
 /// that header and the next sibling remain in place, matching the conservative
 /// comment-preservation policy used by the catalog entry fixer.
+/// Inputs for [`apply_empty_catalog_group_fixes`], bundled so the entry point
+/// takes one parameter struct instead of seven (mirrors the `*FixInput`
+/// convention used by the dependency and export fixers in this module).
+pub(super) struct EmptyCatalogGroupFixInput<'a> {
+    pub(super) root: &'a Path,
+    pub(super) groups: &'a [EmptyCatalogGroupFinding],
+    pub(super) hashes: &'a CapturedHashes,
+    pub(super) plan: &'a mut FixPlan,
+    pub(super) output: OutputFormat,
+    pub(super) dry_run: bool,
+    pub(super) fixes: &'a mut Vec<serde_json::Value>,
+}
+
 pub(super) fn apply_empty_catalog_group_fixes(
-    root: &Path,
-    groups: &[EmptyCatalogGroupFinding],
-    hashes: &CapturedHashes,
-    plan: &mut FixPlan,
-    output: OutputFormat,
-    dry_run: bool,
-    fixes: &mut Vec<serde_json::Value>,
+    input: EmptyCatalogGroupFixInput<'_>,
 ) -> CatalogFixSummary {
+    let EmptyCatalogGroupFixInput {
+        root,
+        groups,
+        hashes,
+        plan,
+        output,
+        dry_run,
+        fixes,
+    } = input;
     let mut summary = CatalogFixSummary::default();
 
     if groups.is_empty() {
@@ -1178,9 +1194,15 @@ mod tests {
     ) -> CatalogFixSummary {
         let mut plan = FixPlan::new();
         let hashes = CapturedHashes::default();
-        let mut summary = apply_empty_catalog_group_fixes(
-            root, groups, &hashes, &mut plan, output, dry_run, fixes,
-        );
+        let mut summary = apply_empty_catalog_group_fixes(EmptyCatalogGroupFixInput {
+            root,
+            groups,
+            hashes: &hashes,
+            plan: &mut plan,
+            output,
+            dry_run,
+            fixes,
+        });
         if !dry_run && !plan.commit().failed.is_empty() {
             summary.write_error = true;
         }

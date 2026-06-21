@@ -327,6 +327,11 @@ fn collect_catalog_consumers_from_package(
         .strip_prefix(root)
         .map_or_else(|_| pkg_path.to_path_buf(), Path::to_path_buf);
     let line_map = scan_dep_lines(&raw_source);
+    let ctx = CatalogConsumerContext {
+        line_map: &line_map,
+        absolute_path: pkg_path,
+        relative_path: &relative_path,
+    };
 
     for (section, deps) in [
         (DepSection::Dependencies, pkg.dependencies.as_ref()),
@@ -341,17 +346,16 @@ fn collect_catalog_consumers_from_package(
             continue;
         };
         for (name, version) in deps {
-            collect_catalog_consumer_dependency(
-                consumers,
-                name,
-                version,
-                section,
-                &line_map,
-                pkg_path,
-                &relative_path,
-            );
+            collect_catalog_consumer_dependency(consumers, name, version, section, &ctx);
         }
     }
+}
+
+/// Per-package location context for catalog consumer attribution.
+struct CatalogConsumerContext<'a> {
+    line_map: &'a DepLineMap,
+    absolute_path: &'a Path,
+    relative_path: &'a Path,
 }
 
 fn collect_catalog_consumer_dependency(
@@ -359,26 +363,24 @@ fn collect_catalog_consumer_dependency(
     name: &str,
     version: &str,
     section: DepSection,
-    line_map: &DepLineMap,
-    absolute_path: &Path,
-    relative_path: &Path,
+    ctx: &CatalogConsumerContext<'_>,
 ) {
     if let Some(catalog) = parse_catalog_reference(version) {
         consumers.references.insert(OwnedConsumerKey {
             package_name: name.to_string(),
             catalog_name: catalog.to_string(),
         });
-        let line = line_map.line_for(section, name).unwrap_or(1);
+        let line = ctx.line_map.line_for(section, name).unwrap_or(1);
         consumers.referenced_with_locations.push(ConsumerReference {
             package_name: name.to_string(),
             catalog_name: catalog.to_string(),
-            consumer_path: absolute_path.to_path_buf(),
+            consumer_path: ctx.absolute_path.to_path_buf(),
             line,
         });
     } else if is_hardcoded_version(version) {
         consumers
             .hardcoded
-            .push((name.to_string(), relative_path.to_path_buf()));
+            .push((name.to_string(), ctx.relative_path.to_path_buf()));
     }
 }
 

@@ -504,21 +504,46 @@ fn apply_github_reconcile(
         return result;
     }
 
-    run_github_operations(&operations, &agent, &repo, pr, &token, api, &mut result);
+    run_github_operations(
+        &operations,
+        GithubConnection {
+            agent: &agent,
+            repo: &repo,
+            pr,
+            token: &token,
+            api,
+        },
+        &mut result,
+    );
     result
 }
 
 /// Apply each staged GitHub operation in order, recording a failure (with the
 /// not-yet-applied suffix) and stopping at the first error.
+/// The GitHub PR connection context (agent + repo/PR coordinates + auth)
+/// shared by every staged operation, bundled so the operation runner takes one
+/// parameter instead of five.
+#[derive(Clone, Copy)]
+struct GithubConnection<'a> {
+    agent: &'a ureq::Agent,
+    repo: &'a str,
+    pr: &'a str,
+    token: &'a str,
+    api: &'a str,
+}
+
 fn run_github_operations(
     operations: &[GithubApplyOperation],
-    agent: &ureq::Agent,
-    repo: &str,
-    pr: &str,
-    token: &str,
-    api: &str,
+    conn: GithubConnection<'_>,
     result: &mut ApplyResult,
 ) {
+    let GithubConnection {
+        agent,
+        repo,
+        pr,
+        token,
+        api,
+    } = conn;
     for (index, operation) in operations.iter().enumerate() {
         if let Err(failure) = apply_github_operation(&mut GithubOperationInput {
             operation,
@@ -855,27 +880,44 @@ fn apply_gitlab_reconcile(
 
     run_gitlab_operations(
         &operations,
-        &agent,
-        &encoded_project,
-        mr,
-        &token,
-        &api,
+        GitlabConnection {
+            agent: &agent,
+            encoded_project: &encoded_project,
+            mr,
+            token: &token,
+            api: &api,
+        },
         &mut result,
     );
     result
+}
+
+/// The GitLab MR connection context (agent + project/MR coordinates + auth)
+/// shared by every staged operation, bundled so the operation runner takes one
+/// parameter instead of five.
+#[derive(Clone, Copy)]
+struct GitlabConnection<'a> {
+    agent: &'a ureq::Agent,
+    encoded_project: &'a str,
+    mr: &'a str,
+    token: &'a str,
+    api: &'a str,
 }
 
 /// Apply each staged GitLab operation in order, recording a failure (with the
 /// not-yet-applied suffix) and stopping at the first error.
 fn run_gitlab_operations(
     operations: &[GitlabApplyOperation],
-    agent: &ureq::Agent,
-    encoded_project: &str,
-    mr: &str,
-    token: &str,
-    api: &str,
+    conn: GitlabConnection<'_>,
     result: &mut ApplyResult,
 ) {
+    let GitlabConnection {
+        agent,
+        encoded_project,
+        mr,
+        token,
+        api,
+    } = conn;
     for (index, operation) in operations.iter().enumerate() {
         if let Err(failure) = apply_gitlab_operation(&mut GitlabOperationInput {
             operation,

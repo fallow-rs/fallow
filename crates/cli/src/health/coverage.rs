@@ -3108,6 +3108,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+    )]
     fn build_request_joins_dead_code_and_direct_test_signals() {
         let root = make_temp_dir("coverage-static-signals");
         let src_dir = root.join("src");

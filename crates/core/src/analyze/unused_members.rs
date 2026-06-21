@@ -1924,6 +1924,10 @@ fn propagate_member_accesses_through_inheritance(
     note = "fallow_core is internal; use fallow_cli::programmatic::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/fallow-core-migration.md and ADR-008."
 )]
 #[allow(dead_code, reason = "kept for the deprecated fallow_core helper API")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "frozen deprecated public API (ADR-008); signature must not change"
+)]
 pub fn find_unused_members(
     graph: &ModuleGraph,
     resolved_modules: &[ResolvedModule],
@@ -2074,11 +2078,13 @@ impl MemberReportContext<'_, '_> {
         }
 
         self.collect_export_members(
-            module,
+            &MemberScanTarget {
+                module,
+                export_name: &export_name,
+                store_only_scan,
+            },
             export,
-            &export_name,
             &export_key,
-            store_only_scan,
             buckets,
         );
     }
@@ -2104,13 +2110,12 @@ impl MemberReportContext<'_, '_> {
     /// Build the shared per-export skip context and scan each declared member.
     fn collect_export_members(
         &self,
-        module: &crate::graph::ModuleNode,
+        target: &MemberScanTarget<'_>,
         export: &crate::graph::ExportSymbol,
-        export_name: &str,
         export_key: &ExportKey,
-        store_only_scan: bool,
         buckets: &mut MemberScanBuckets,
     ) {
+        let module = target.module;
         let file_self_accesses = self.prepared.self_accessed_members.get(&module.file_id);
         let is_public_api_class_export = is_entry_point_public_class_export(
             self.input.graph,
@@ -2130,9 +2135,8 @@ impl MemberReportContext<'_, '_> {
 
         for member in &export.members {
             self.collect_member(
-                module,
+                target,
                 member,
-                export_name,
                 &MemberSkipContext {
                     export_key,
                     accessed_members: &self.prepared.accessed_members,
@@ -2144,7 +2148,6 @@ impl MemberReportContext<'_, '_> {
                     implemented_interfaces,
                     is_public_api_class_export,
                 },
-                store_only_scan,
                 buckets,
             );
         }
@@ -2152,14 +2155,12 @@ impl MemberReportContext<'_, '_> {
 
     fn collect_member(
         &self,
-        module: &crate::graph::ModuleNode,
+        target: &MemberScanTarget<'_>,
         member: &MemberInfo,
-        export_name: &str,
         skip_context: &MemberSkipContext<'_>,
-        store_only_scan: bool,
         buckets: &mut MemberScanBuckets,
     ) {
-        if store_only_scan && member.kind != MemberKind::StoreMember {
+        if target.store_only_scan && member.kind != MemberKind::StoreMember {
             return;
         }
         if should_skip_member_for_unused_report(member, skip_context) {
@@ -2167,9 +2168,9 @@ impl MemberReportContext<'_, '_> {
         }
 
         let Some(unused) = build_unsuppressed_unused_member(
-            module.file_id,
-            &module.path,
-            export_name,
+            target.module.file_id,
+            &target.module.path,
+            target.export_name,
             member,
             self.input.suppressions,
             self.input.line_offsets_by_file,
@@ -2178,6 +2179,14 @@ impl MemberReportContext<'_, '_> {
         };
         push_unused_member(buckets, unused, member.kind);
     }
+}
+
+/// Shared per-export scan target: the module, the export's rendered name, and
+/// whether this is an entry-point store-only scan.
+struct MemberScanTarget<'a> {
+    module: &'a crate::graph::ModuleNode,
+    export_name: &'a str,
+    store_only_scan: bool,
 }
 
 fn push_unused_member(buckets: &mut MemberScanBuckets, unused: UnusedMember, kind: MemberKind) {
@@ -4153,6 +4162,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+    )]
     fn interface_member_usage_propagates_to_implementers() {
         let mut graph = build_graph(&[
             ("/src/main.ts", true),
@@ -4271,6 +4284,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+    )]
     fn same_named_interfaces_do_not_share_member_usage() {
         let mut graph = build_graph(&[
             ("/src/main.ts", true),

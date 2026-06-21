@@ -681,6 +681,10 @@ fn health_emits_component_rollup_for_angular_component() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+)]
 fn health_angular_template_crap_inherits_from_component_ts() {
     let dir = tempdir().unwrap();
     let fixture = fixture_path("angular-template-complexity");
@@ -1294,6 +1298,10 @@ fn health_vital_signs_omit_render_fan_in_on_non_react_project() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+)]
 fn health_score_save_snapshot_keeps_hotspot_vital_signs() {
     let temp = tempdir().expect("create temp dir");
     let root = temp.path();
@@ -1442,6 +1450,10 @@ fn health_score_flag_with_config_does_not_render_coverage_gaps() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+)]
 fn health_baseline_partial_overflow_does_not_emit_stale_baseline_warning() {
     let dir = tempfile::tempdir().expect("create temp dir");
     write_file(
@@ -2681,6 +2693,10 @@ fn health_min_score_gate_fails_below_threshold() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+)]
 fn health_churn_file_powers_hotspots_and_ownership_without_git() {
     let dir = tempdir().unwrap();
     write_file(
@@ -2814,6 +2830,10 @@ fn health_churn_file_powers_hotspots_and_ownership_without_git() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+)]
 fn health_css_flag_surfaces_css_analytics() {
     let dir = tempdir().unwrap();
     let root = dir.path();

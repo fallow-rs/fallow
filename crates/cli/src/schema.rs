@@ -197,6 +197,10 @@ fn apply_dead_code_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) {
     apply_catalog_issue_meta(bare_id, m);
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "flat per-issue-id metadata table (one match arm per rule); no branching logic to extract"
+)]
 fn apply_source_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
     match bare_id {
         "unused-file" => {

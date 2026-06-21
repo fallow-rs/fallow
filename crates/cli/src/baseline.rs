@@ -2947,6 +2947,10 @@ mod tests {
         );
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+    )]
     fn make_full_results() -> AnalysisResults {
         use fallow_core::extract::MemberKind;
         use fallow_core::results::*;

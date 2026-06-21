@@ -549,6 +549,10 @@ fn resolve_path_policy_settings(
 
 impl FallowConfig {
     /// Resolve into a fully resolved config with compiled globs.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "public cross-crate API: ResolvedConfig builder whose runtime-override parameters (root, output, threads, no_cache, quiet, cache_max_size_mb) are an established stable signature; bundling them would break callers"
+    )]
     pub fn resolve(
         self,
         root: PathBuf,

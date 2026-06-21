@@ -4333,6 +4333,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+    )]
     fn all_sections_combined() {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
