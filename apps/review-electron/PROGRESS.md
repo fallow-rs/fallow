@@ -119,3 +119,11 @@ stacked on `fix/review-quality` (engine E1-E8+E11).
   a 05-live-error capture that drives the failed state deterministically. Live now
   rates ~8.5 (loaded), error state ~8.5. format/lint/tsc/build/vitest/e2e 5/5 all
   green. Next weakest: screenshot-mode empty state (sparse void, one line of hint).
+- Round 2 (screenshot/annotate surface, was 5/10): the empty state was a single
+  text-[11px] line crammed top-left over a void. Rebuilt it on the same centered
+  idle|capturing|error pattern as the live surface for cross-surface consistency:
+  ringed Camera glyph + "annotate a screenshot" heading + muted explanation + a
+  discoverable centered "screenshot this url" CTA; capturing -> spinner; error ->
+  ImageOff glyph + message + retry. Phase state machine replaces the ad-hoc status
+  string; added shot-url / shot-capture / shot-overlay testids. Screenshot empty
+  state now ~8.5, visually matched to live. format/lint/tsc/build/vitest/e2e 5/5.
