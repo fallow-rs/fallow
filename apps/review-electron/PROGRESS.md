@@ -147,3 +147,11 @@ stacked on `fix/review-quality` (engine E1-E8+E11).
   signal, not wash). Blue @@ hunk marker, row hover highlight, and a real
   loading-diff spinner state. format/lint/tsc/build/vitest/e2e 5/5. Next: 4b
   syntax highlighting (the code text is still monochrome vs codiff).
+- Round 4b (diff syntax highlighting, was 6.5/10): code text was monochrome
+  foreground vs codiff's highlighted source. Added a pure, zero-dep, per-line
+  JS/TS/JSON tokenizer (lib/highlight.ts, tested: keyword/string/number/comment,
+  exact round-trip, never throws on unterminated input) and rendered tokens with
+  existing theme tokens only (violet chart-5 keywords, fallow-green strings,
+  fallow-amber numbers, muted-italic comments) so no new palette is invented and
+  the diff's green/red stays the add/del signal. Diff now reads like a real
+  syntax-highlighted review surface. format/lint/tsc/build/vitest/e2e 5/5.

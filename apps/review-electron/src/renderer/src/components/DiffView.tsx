@@ -1,12 +1,31 @@
 import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { parseUnifiedDiff, diffStats, type DiffHunk } from "../lib/diff";
+import { tokenize, type TokenType } from "../lib/highlight";
 import { cn } from "@/lib/utils";
 
 type Props = { file: string; base: string };
 
 const gutter =
   "w-12 shrink-0 select-none px-2 text-right text-[11px] tabular-nums text-muted-foreground/60";
+
+const TOKEN_CLASS: Record<TokenType, string> = {
+  keyword: "text-chart-5",
+  string: "text-fallow-green",
+  number: "text-fallow-amber",
+  comment: "text-muted-foreground/70 italic",
+  plain: "",
+};
+
+const Code = ({ text }: { text: string }) => (
+  <code className="flex-1 whitespace-pre pr-3 text-foreground">
+    {tokenize(text).map((t, k) => (
+      <span key={k} className={TOKEN_CLASS[t.type]}>
+        {t.value}
+      </span>
+    ))}
+  </code>
+);
 
 export const DiffView = ({ file, base }: Props) => {
   const [hunks, setHunks] = useState<DiffHunk[] | null>(null);
@@ -80,7 +99,7 @@ export const DiffView = ({ file, base }: Props) => {
               >
                 {row.kind === "add" ? "+" : row.kind === "del" ? "-" : " "}
               </span>
-              <code className="flex-1 whitespace-pre pr-3 text-foreground">{row.text}</code>
+              <Code text={row.text} />
             </div>
           ))}
         </div>
