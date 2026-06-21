@@ -224,3 +224,9 @@ stacked on `fix/review-quality` (engine E1-E8+E11).
   screenshot-triggerable in an all-additions review, but identical to five already
   verified centered states; the happy diff path re-captured and the e2e text
   selectors (/@@|no textual diff/) still match. format/lint/tsc/build/vitest/e2e green.
+- Round 15 (agent-panel status signal, MED): the agent run result rendered both
+  success and "error: ..." in identical muted text, against color-only-as-signal.
+  Modeled status as a typed running|ok|error value rendered with a tone + icon
+  (muted spinner / green check / red triangle). Not screenshot-captured (running
+  it spawns a real agent backend, too flaky for e2e); existing 6 e2e prove no
+  regression and it reuses the verified signal palette. format/lint/tsc/build/vitest/e2e green.

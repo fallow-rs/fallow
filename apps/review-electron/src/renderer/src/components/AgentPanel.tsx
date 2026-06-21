@@ -1,14 +1,22 @@
 import { useEffect, useState } from "react";
-import { Bot, Loader2, Play } from "lucide-react";
+import { Bot, CheckCircle2, Loader2, Play, TriangleAlert } from "lucide-react";
 import type { AgentBackend } from "../../../main/backends";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+
+type Status = { kind: "running" | "ok" | "error"; text: string };
+
+const STATUS_TONE: Record<Status["kind"], string> = {
+  running: "text-muted-foreground",
+  ok: "text-fallow-green",
+  error: "text-fallow-red",
+};
 
 /** Pick a coding-agent backend (codiff-style) and run a grounded agent review. */
 export const AgentPanel = () => {
   const [backends, setBackends] = useState<AgentBackend[]>([]);
   const [selected, setSelected] = useState<string>("");
-  const [status, setStatus] = useState<string | null>(null);
+  const [status, setStatus] = useState<Status | null>(null);
   const [running, setRunning] = useState(false);
 
   useEffect(() => {
@@ -20,11 +28,13 @@ export const AgentPanel = () => {
 
   const run = async (): Promise<void> => {
     setRunning(true);
-    setStatus("running agent…");
+    setStatus({ kind: "running", text: "running agent…" });
     try {
       const result = await window.fallow.runAgent(selected);
       setStatus(
-        result.ok ? "agent judgments validated against the graph" : `error: ${result.error}`,
+        result.ok
+          ? { kind: "ok", text: "judgments validated against the graph" }
+          : { kind: "error", text: result.error },
       );
     } finally {
       setRunning(false);
@@ -65,7 +75,18 @@ export const AgentPanel = () => {
         {running ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
         {running ? "running" : "run agent review"}
       </Button>
-      {status && <p className="text-[11px] text-muted-foreground">{status}</p>}
+      {status && (
+        <p className={cn("flex items-start gap-1.5 text-[11px]", STATUS_TONE[status.kind])}>
+          {status.kind === "running" ? (
+            <Loader2 className="mt-px size-3 shrink-0 animate-spin" />
+          ) : status.kind === "ok" ? (
+            <CheckCircle2 className="mt-px size-3 shrink-0" />
+          ) : (
+            <TriangleAlert className="mt-px size-3 shrink-0" />
+          )}
+          <span className="min-w-0 break-words">{status.text}</span>
+        </p>
+      )}
     </section>
   );
 };
