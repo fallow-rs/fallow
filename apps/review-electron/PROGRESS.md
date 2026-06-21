@@ -217,3 +217,10 @@ stacked on `fix/review-quality` (engine E1-E8+E11).
   button) mutually exclusive with loading/empty, matching the live/screenshot error
   pattern. Added a second shots test that launches with a bad FALLOW_BIN to capture
   13-review-error deterministically. format/lint/tsc/build/vitest/e2e (6 e2e) green.
+- Round 14 (diff empty/error states, MED consistency): the DiffView "no textual
+  diff" and load-error states were plain top-left text, the last surfaces not on
+  the centered empty/error pattern. Reworked both to centered cards (FileX for
+  no-diff, red TriangleAlert for error) matching live/screenshot/review. Not
+  screenshot-triggerable in an all-additions review, but identical to five already
+  verified centered states; the happy diff path re-captured and the e2e text
+  selectors (/@@|no textual diff/) still match. format/lint/tsc/build/vitest/e2e green.

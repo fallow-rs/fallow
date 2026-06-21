@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { FileX, Loader2, TriangleAlert } from "lucide-react";
 import { parseUnifiedDiff, diffStats, type DiffHunk } from "../lib/diff";
 import { tokenize, type TokenType } from "../lib/highlight";
 import { cn } from "@/lib/utils";
@@ -66,11 +66,27 @@ export const DiffView = ({ file, base }: Props) => {
           <span className="text-xs">loading diff…</span>
         </div>
       )}
-      {error && <p className="p-3 text-destructive">{error}</p>}
+      {error && (
+        <div className="flex flex-col items-center gap-3 px-6 py-16 text-center">
+          <div className="flex size-11 items-center justify-center rounded-full border border-fallow-red/30 bg-fallow-red/10">
+            <TriangleAlert className="size-5 text-fallow-red" />
+          </div>
+          <div className="space-y-1">
+            <p className="text-sm font-medium text-foreground">couldn't load the diff</p>
+            <p className="max-w-xs break-words text-xs text-muted-foreground">{error}</p>
+          </div>
+        </div>
+      )}
       {hunks?.length === 0 && !error && (
-        <p className="p-3 text-muted-foreground">
-          no textual diff (new, binary, or unchanged file)
-        </p>
+        <div className="flex flex-col items-center gap-3 px-6 py-16 text-center">
+          <div className="flex size-11 items-center justify-center rounded-full border border-border bg-muted/30">
+            <FileX className="size-5 text-muted-foreground" />
+          </div>
+          <div className="space-y-1">
+            <p className="text-sm font-medium text-foreground">no textual diff</p>
+            <p className="text-xs text-muted-foreground">new, binary, or unchanged file</p>
+          </div>
+        </div>
       )}
       {hunks?.map((hunk, i) => (
         <div key={i}>
