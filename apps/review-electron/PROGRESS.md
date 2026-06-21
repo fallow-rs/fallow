@@ -240,3 +240,10 @@ stacked on `fix/review-quality` (engine E1-E8+E11).
   purposefully". Swapped to Telescope, which reads as look-ahead / focus on what
   matters and pairs with the "see what to look at first" copy. Verified via
   11-loading header. format/lint/tsc/build/vitest/e2e green.
+- CLEAN PASS 1/2: harsh full-screen evaluation over all 13 captured states
+  (walkthrough, diff unified+highlighted, diff empty/error, inspector, live
+  loaded/loading/error, screenshot/annotate + drawing tools, focus ring, review
+  loading, cleared breakdown, review error). No HIGH/MED visual issues found; the
+  only remaining nit (the live/screenshot "go" button's refresh icon) is LOW and
+  defensible (it reloads the typed URL). No code changes this pass. One more clean
+  pass confirms the stop condition.
