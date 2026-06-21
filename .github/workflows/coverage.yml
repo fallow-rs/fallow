@@ -47,6 +47,19 @@ jobs:
           echo "COVERAGE=$COVERAGE" >> "$GITHUB_ENV"
           echo "Coverage: $COVERAGE%"
 
+      - name: Enforce coverage floor
+        # Hard gate: fail if workspace line coverage drops below the floor.
+        # Ratcheted upward over time; raise only, never lower. Current main ~92.7%.
+        run: |
+          FLOOR=92.0
+          awk -v cov="$COVERAGE" -v floor="$FLOOR" 'BEGIN {
+            if (cov + 0 < floor + 0) {
+              printf "FAIL: coverage %.1f%% is below the floor of %.1f%%\n", cov, floor
+              exit 1
+            }
+            printf "OK: coverage %.1f%% meets the floor of %.1f%%\n", cov, floor
+          }'
+
       - name: Compute badge color
         run: |
           int=${COVERAGE%.*}
