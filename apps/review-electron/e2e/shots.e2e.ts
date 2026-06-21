@@ -36,12 +36,23 @@ test("capture screens for design QA", async () => {
     await win.screenshot({ path: `${shots}/02-diff.png` });
   });
   await safe(async () => {
-    await win.getByTestId("mode-screenshot").click({ timeout: 10_000 });
+    await win.getByTestId("mode-shot").click({ timeout: 10_000 });
     await win.screenshot({ path: `${shots}/03-screenshot-mode.png` });
   });
   await safe(async () => {
     await win.getByTestId("mode-live").click({ timeout: 10_000 });
+    // Let the live webview settle into its loaded (or overlay) state.
+    await win.waitForTimeout(1500);
     await win.screenshot({ path: `${shots}/04-live.png` });
+  });
+  await safe(async () => {
+    // Drive the live surface to its unreachable-server error state.
+    await win.getByTestId("live-url").fill("http://localhost:1");
+    await win.getByTestId("live-go").click({ timeout: 10_000 });
+    await win
+      .locator('[data-testid="live-overlay"][data-conn="failed"]')
+      .waitFor({ timeout: 15_000 });
+    await win.screenshot({ path: `${shots}/05-live-error.png` });
   });
 
   await app.close();

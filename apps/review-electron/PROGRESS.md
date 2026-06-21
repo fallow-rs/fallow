@@ -105,3 +105,17 @@ stacked on `fix/review-quality` (engine E1-E8+E11).
   bridge port was the only test-4 flake; killed.)
 - Disk: e2e binary now defaults to the worktree's own release build (rebuilt
   ~771M, isolated from the parallel-agent checkouts).
+
+## POLISH LOOP (autonomous, taste-driven)
+- Round 1 (live surface, was 4/10): the <webview> host had no background and no
+  loading/error state, so an unreachable dev server (or a fresh remount) leaked a
+  full white void into the dark app. Added a `loading|ready|failed` connection
+  state machine driven by did-start-loading / did-finish-load / did-fail-load
+  (main-frame + non-aborted only); dark `bg-background` host; centered loading
+  overlay (spinner + "connecting to <url>") and a polished error overlay (unplug
+  glyph in a ringed circle, "can't reach the app", server hint, retry button).
+  Also fixed shots.e2e: was clicking nonexistent `mode-screenshot` (id is `shot`)
+  so screen 03 never captured; added live-url / live-go / live-overlay testids and
+  a 05-live-error capture that drives the failed state deterministically. Live now
+  rates ~8.5 (loaded), error state ~8.5. format/lint/tsc/build/vitest/e2e 5/5 all
+  green. Next weakest: screenshot-mode empty state (sparse void, one line of hint).
