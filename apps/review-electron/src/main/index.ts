@@ -7,6 +7,8 @@ import { buildAgentWalkthrough } from "./agentWalkthrough";
 import { captureUrl } from "./capture";
 import { saveAnnotatedShot, type SaveAnnotation } from "./shots";
 import { getFileDiff } from "./diff";
+import { BACKENDS } from "./backends";
+import { runAgentReview } from "./agentRun";
 import { startInspectServer } from "./inspectServer";
 import type { FeedItem } from "../model/agent";
 import type { WalkthroughDocument } from "../model/walkthrough";
@@ -62,6 +64,8 @@ ipcMain.handle("shot:save", (_event, payload: SaveAnnotation) =>
 ipcMain.handle("diff:get", (_event, base: string, file: string) =>
   getFileDiff(process.cwd(), base, file),
 );
+ipcMain.handle("agent:backends", () => BACKENDS);
+ipcMain.handle("agent:run", (_event, id: string) => runAgentReview(process.cwd(), id));
 
 /**
  * Harden every webContents (security checklist): deny popups, block off-app

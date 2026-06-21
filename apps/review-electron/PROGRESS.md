@@ -79,3 +79,7 @@ stacked on `fix/review-quality` (engine E1-E8+E11).
   mono, line-number gutters, fallow-green/red signal, +N/-N stats, binary
   fallback); clickable file row -> diff mode. e2e opens a diff (4/4). split/
   markdown/image/deferred = optional codiff parity, deferred. Next: P3 skills layer.
+- P3 DONE: agent skills layer (codiff-style). backends registry (claude-code/codex/
+  opencode) + buildAgentPrompt + extractAgentJson (pure, tested) + agentRun (guide
+  -> spawn -> graph validation) + AgentPanel UI. runGuide returns digest+schemaShape.
+  vitest 32, lint/typecheck/build/e2e 4/4 green. Next: P4 JSONC config.

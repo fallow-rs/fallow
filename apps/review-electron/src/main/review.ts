@@ -31,11 +31,14 @@ export const runGuide = async (root?: string): Promise<Guide> => {
     graph_snapshot_hash?: string;
     digest?: { decisions?: { emitted_signal_ids?: string[] } };
     direction?: { order?: string[] };
+    agent_schema?: { judgment_shape?: string };
   };
   return {
     graphSnapshotHash: g.graph_snapshot_hash ?? "",
     emittedSignalIds: g.digest?.decisions?.emitted_signal_ids ?? [],
     order: g.direction?.order ?? [],
+    digest: g.digest ?? null,
+    schemaShape: g.agent_schema?.judgment_shape ?? "",
   };
 };
 

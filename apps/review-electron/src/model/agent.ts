@@ -19,6 +19,8 @@ export type Guide = {
   graphSnapshotHash: string;
   emittedSignalIds: string[];
   order: string[];
+  digest: unknown;
+  schemaShape: string;
 };
 
 /** One judgment in the agent-walkthrough payload fallow post-validates. */

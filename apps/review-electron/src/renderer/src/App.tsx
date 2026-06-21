@@ -9,6 +9,7 @@ import { InspectorCard } from "./components/InspectorCard";
 import { AnnotateCanvas } from "./components/AnnotateCanvas";
 import { LiveApp } from "./components/LiveApp";
 import { DiffView } from "./components/DiffView";
+import { AgentPanel } from "./components/AgentPanel";
 import { isViewed as readViewed, setViewed as writeViewed } from "./lib/viewed";
 import { Button } from "@/components/ui/button";
 
@@ -80,6 +81,7 @@ export const App = () => {
           </p>
         )}
         {error && <p className="mb-2 whitespace-pre-wrap text-xs text-destructive">{error}</p>}
+        <AgentPanel />
         {card && <InspectorCard card={card} />}
         {doc && (
           <>
