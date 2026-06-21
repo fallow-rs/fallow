@@ -40,3 +40,12 @@ rules:
   template-injection:
     ignore:
       - ci.yml
+  # ci.yml smoke-installs the freshly built (unpublished) npm tarball, which has
+  # no lockfile by definition. release.yml installs pinned npm (the required
+  # two-step bootstrap) and pinned @vscode/vsce / ovsx publisher CLIs. All use
+  # exact version pins plus --ignore-scripts, so the ad-hoc install surface is
+  # already hardened (see .claude/rules/release-workflow.md).
+  adhoc-packages:
+    ignore:
+      - ci.yml
+      - release.yml
