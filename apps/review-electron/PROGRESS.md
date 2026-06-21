@@ -127,3 +127,15 @@ stacked on `fix/review-quality` (engine E1-E8+E11).
   ImageOff glyph + message + retry. Phase state machine replaces the ad-hoc status
   string; added shot-url / shot-capture / shot-overlay testids. Screenshot empty
   state now ~8.5, visually matched to live. format/lint/tsc/build/vitest/e2e 5/5.
+- Round 3 (file rows, cross-cutting, was 5/10): every row carried a full-width
+  gray reason sentence ("isolated change, no blast beyond the diff", "high fan-in
+  (17 importers)"), rendered as undifferentiated prose so a 17-importer hub looked
+  identical to an isolated file. The reason is NOT boilerplate; it encodes the
+  blast-radius signal. Refactored badges.ts -> deriveFileSignal (parses fan-in /
+  fan-out / isolated from reason + score, graded muted|elevated|hub). Rebuilt
+  FileRow as single-line: filename dominates, reason -> hover tooltip, a compact
+  right-aligned mono tabular-nums fan-in metric (ArrowDownToLine + count) shown
+  only for fanIn>=2, amber for hubs (>=6); security/risk-zone as red/amber icons;
+  deprioritized rows dimmed. Verified amber grading via a 06-files-scrolled QA shot
+  (walkthrough.ts ↓17 + agent.ts ↓7 in amber, ↓2/↓5 neutral, isolated files clean).
+  Rows ~halved in height, far more scannable. format/lint/tsc/build/vitest/e2e 5/5.

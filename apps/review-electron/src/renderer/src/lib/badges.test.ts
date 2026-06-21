@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { deriveFileBadges } from "./badges";
+import { deriveFileSignal, fanInTone } from "./badges";
 import type { WalkthroughFile } from "../../../model/walkthrough";
 
 const file = (over: Partial<WalkthroughFile>): WalkthroughFile => ({
@@ -12,19 +12,34 @@ const file = (over: Partial<WalkthroughFile>): WalkthroughFile => ({
   ...over,
 });
 
-describe("deriveFileBadges", () => {
-  it("flags review-here vs deprioritized", () => {
-    expect(deriveFileBadges(file({})).some((b) => b.label === "REVIEW HERE")).toBe(true);
-    expect(
-      deriveFileBadges(file({ deprioritized: true })).some((b) => b.label === "DEPRIORITIZED"),
-    ).toBe(true);
+describe("deriveFileSignal", () => {
+  it("parses fan-in and fan-out from the reason", () => {
+    const s = deriveFileSignal(file({ reason: "high fan-in (17 importers), fan-out 2" }));
+    expect(s.fanIn).toBe(17);
+    expect(s.fanOut).toBe(2);
+    expect(s.fanInTone).toBe("hub");
   });
 
-  it("flags high fan-in and security from the score", () => {
-    const badges = deriveFileBadges(
-      file({ score: { fanIo: 9, securityTaint: 1, riskZone: 0, changeShape: 0, total: 10 } }),
+  it("handles a single importer and isolated changes", () => {
+    expect(deriveFileSignal(file({ reason: "high fan-in (1 importer)" })).fanIn).toBe(1);
+    const iso = deriveFileSignal(file({ reason: "isolated change, no blast beyond the diff" }));
+    expect(iso.fanIn).toBe(0);
+    expect(iso.isolated).toBe(true);
+  });
+
+  it("flags security and risk zones from the score", () => {
+    const s = deriveFileSignal(
+      file({ score: { fanIo: 9, securityTaint: 1, riskZone: 1, changeShape: 0, total: 10 } }),
     );
-    expect(badges.some((b) => b.label === "HIGH FAN-IN")).toBe(true);
-    expect(badges.some((b) => b.label === "SECURITY")).toBe(true);
+    expect(s.security).toBe(true);
+    expect(s.riskZone).toBe(true);
+  });
+});
+
+describe("fanInTone", () => {
+  it("only grades genuine hubs as accented", () => {
+    expect(fanInTone(1)).toBe("muted");
+    expect(fanInTone(3)).toBe("elevated");
+    expect(fanInTone(6)).toBe("hub");
   });
 });

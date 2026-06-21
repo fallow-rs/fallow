@@ -1,8 +1,7 @@
 import { useState } from "react";
-import { FileText, Plus } from "lucide-react";
+import { ArrowDownToLine, FileText, Plus, ShieldAlert, TriangleAlert } from "lucide-react";
 import type { WalkthroughFile } from "../../../model/walkthrough";
-import { deriveFileBadges, type Tone } from "../lib/badges";
-import { Badge } from "@/components/ui/badge";
+import { deriveFileSignal, type SignalTone } from "../lib/badges";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -16,11 +15,11 @@ type Props = {
   onOpenDiff: (path: string) => void;
 };
 
-const badgeVariant = (tone: Tone): "default" | "secondary" | "outline" =>
-  tone === "high" ? "default" : tone === "info" ? "secondary" : "outline";
-
-// Status badges become row styling (dimming / accent), not repeated chips.
-const STATUS_LABELS = new Set(["REVIEW HERE", "DEPRIORITIZED"]);
+const FAN_IN_TONE: Record<SignalTone, string> = {
+  hub: "text-fallow-amber",
+  elevated: "text-foreground",
+  muted: "text-muted-foreground",
+};
 
 export const FileRow = ({ file, viewed, onToggleViewed, onAddNote, onOpenDiff }: Props) => {
   const [adding, setAdding] = useState(false);
@@ -34,10 +33,16 @@ export const FileRow = ({ file, viewed, onToggleViewed, onAddNote, onOpenDiff }:
 
   const base = file.path.split("/").pop() ?? file.path;
   const dir = file.path.slice(0, file.path.length - base.length);
-  const badges = deriveFileBadges(file).filter((b) => !STATUS_LABELS.has(b.label));
+  const signal = deriveFileSignal(file);
 
   return (
-    <li className={cn("group rounded-md px-2 py-1.5 hover:bg-accent/40", viewed && "opacity-40")}>
+    <li
+      className={cn(
+        "group rounded-md px-2 py-1 hover:bg-accent/40",
+        signal.deprioritized && "opacity-55",
+        viewed && "opacity-40",
+      )}
+    >
       <div className="flex items-center gap-2">
         <Checkbox
           checked={viewed}
@@ -47,6 +52,7 @@ export const FileRow = ({ file, viewed, onToggleViewed, onAddNote, onOpenDiff }:
         <button
           type="button"
           data-testid="file-open"
+          title={file.reason || undefined}
           onClick={() => onOpenDiff(file.path)}
           className="flex min-w-0 flex-1 items-center gap-2 text-left"
         >
@@ -56,15 +62,26 @@ export const FileRow = ({ file, viewed, onToggleViewed, onAddNote, onOpenDiff }:
             <span className="text-foreground">{base}</span>
           </span>
         </button>
-        {badges.map((b) => (
-          <Badge
-            key={b.label}
-            variant={badgeVariant(b.tone)}
-            className="shrink-0 px-1.5 py-0 font-mono text-[9px] lowercase"
-          >
-            {b.label}
-          </Badge>
-        ))}
+        <div className="flex shrink-0 items-center gap-1.5">
+          {signal.security && (
+            <ShieldAlert className="size-3.5 text-fallow-red" aria-label="security taint" />
+          )}
+          {signal.riskZone && (
+            <TriangleAlert className="size-3.5 text-fallow-amber" aria-label="risk zone" />
+          )}
+          {signal.fanIn >= 2 && (
+            <span
+              title={`${signal.fanIn} importers depend on this`}
+              className={cn(
+                "inline-flex items-center gap-0.5 font-mono text-[10px] tabular-nums",
+                FAN_IN_TONE[signal.fanInTone],
+              )}
+            >
+              <ArrowDownToLine className="size-3" />
+              {signal.fanIn}
+            </span>
+          )}
+        </div>
         <Button
           variant="ghost"
           size="icon"
@@ -75,9 +92,6 @@ export const FileRow = ({ file, viewed, onToggleViewed, onAddNote, onOpenDiff }:
           <Plus className="size-3.5" />
         </Button>
       </div>
-      {file.reason && (
-        <p className="ml-7 truncate text-[11px] text-muted-foreground">{file.reason}</p>
-      )}
       {adding && (
         <div className="ml-7 mt-1.5 flex gap-1">
           <Input

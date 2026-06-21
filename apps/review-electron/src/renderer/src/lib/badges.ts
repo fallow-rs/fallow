@@ -1,19 +1,44 @@
 import type { WalkthroughFile } from "../../../model/walkthrough";
 
-export type Tone = "high" | "info" | "muted";
-export type Badge = { label: string; tone: Tone };
+/** Visual weight for the fan-in metric: a hub (many importers) draws the eye. */
+export type SignalTone = "hub" | "elevated" | "muted";
 
-const HIGH_FAN_IN = 4;
+/**
+ * Structured review signal for one file, parsed from the engine's focus score
+ * and reason. Fan-in (how many modules import this file) is the blast-radius
+ * signal worth surfacing; fan-out and "isolated" are low-signal and recede.
+ */
+export type FileSignal = {
+  fanIn: number;
+  fanOut: number;
+  security: boolean;
+  riskZone: boolean;
+  deprioritized: boolean;
+  isolated: boolean;
+  fanInTone: SignalTone;
+};
 
-/** Deterministic per-file badges derived purely from the Fallow focus score. */
-export const deriveFileBadges = (file: WalkthroughFile): Badge[] => {
-  const badges: Badge[] = [
-    file.deprioritized
-      ? { label: "DEPRIORITIZED", tone: "muted" }
-      : { label: "REVIEW HERE", tone: "high" },
-  ];
-  if (file.score.fanIo >= HIGH_FAN_IN) badges.push({ label: "HIGH FAN-IN", tone: "info" });
-  if (file.score.securityTaint > 0) badges.push({ label: "SECURITY", tone: "high" });
-  if (file.score.riskZone > 0) badges.push({ label: "RISK ZONE", tone: "info" });
-  return badges;
+const IMPORTERS = /(\d+)\s+importers?/;
+const FAN_OUT = /fan-out\s+(\d+)/;
+const HUB = 6;
+const ELEVATED = 2;
+
+/** Grade a fan-in count so only genuine hubs earn an accent color. */
+export const fanInTone = (fanIn: number): SignalTone =>
+  fanIn >= HUB ? "hub" : fanIn >= ELEVATED ? "elevated" : "muted";
+
+/** Deterministic per-file signal derived purely from the Fallow focus entry. */
+export const deriveFileSignal = (file: WalkthroughFile): FileSignal => {
+  const importers = IMPORTERS.exec(file.reason);
+  const fanOut = FAN_OUT.exec(file.reason);
+  const fanIn = importers ? Number(importers[1]) : 0;
+  return {
+    fanIn,
+    fanOut: fanOut ? Number(fanOut[1]) : 0,
+    security: file.score.securityTaint > 0,
+    riskZone: file.score.riskZone > 0,
+    deprioritized: file.deprioritized,
+    isolated: /isolated change/.test(file.reason),
+    fanInTone: fanInTone(fanIn),
+  };
 };

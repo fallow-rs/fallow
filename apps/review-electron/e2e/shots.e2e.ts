@@ -31,6 +31,17 @@ test("capture screens for design QA", async () => {
   await win.screenshot({ path: `${shots}/01-walkthrough.png` });
 
   await safe(async () => {
+    // Scroll a high fan-in hub (accented metric) into view to QA the grading.
+    await win
+      .getByTestId("file-open")
+      .filter({ hasText: "walkthrough.ts" })
+      .first()
+      .scrollIntoViewIfNeeded();
+    await win.waitForTimeout(200);
+    await win.screenshot({ path: `${shots}/06-files-scrolled.png` });
+  });
+
+  await safe(async () => {
     await win.getByTestId("file-open").first().click();
     await win.getByText(/@@|no textual diff/).waitFor({ timeout: 20_000 });
     await win.screenshot({ path: `${shots}/02-diff.png` });
