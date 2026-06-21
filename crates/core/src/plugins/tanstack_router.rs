@@ -1052,7 +1052,800 @@ fn used_export_rule_from_path_rule(
 
 #[cfg(test)]
 mod tests {
+    use std::io::Write as _;
+
     use super::*;
+
+    // ---------------------------------------------------------------------------
+    // Plugin trait accessors (lines 169-178, 178-193)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn used_exports_returns_both_route_dirs_and_lazy_variants() {
+        let plugin = TanstackRouterPlugin;
+        let rules = plugin.used_exports();
+        assert!(
+            rules
+                .iter()
+                .any(|(pat, _)| *pat == "src/routes/**/*.{ts,tsx,js,jsx}"),
+            "expected src/routes standard pattern"
+        );
+        assert!(
+            rules
+                .iter()
+                .any(|(pat, _)| *pat == "app/routes/**/*.{ts,tsx,js,jsx}"),
+            "expected app/routes standard pattern"
+        );
+        assert!(
+            rules
+                .iter()
+                .any(|(pat, _)| *pat == "src/routes/**/*.lazy.{ts,tsx,js,jsx}"),
+            "expected lazy pattern"
+        );
+        // lazy variants carry only the subset of exports
+        let lazy_exports = rules
+            .iter()
+            .find(|(pat, _)| *pat == "src/routes/**/*.lazy.{ts,tsx,js,jsx}")
+            .map_or(&[][..], |(_, exports)| *exports);
+        assert!(
+            lazy_exports.contains(&"component"),
+            "lazy exports missing component"
+        );
+        assert!(
+            !lazy_exports.contains(&"loader"),
+            "lazy exports must not include loader"
+        );
+    }
+
+    #[test]
+    fn used_export_rules_covers_both_default_route_dirs() {
+        let plugin = TanstackRouterPlugin;
+        let rules = plugin.used_export_rules();
+        assert!(
+            rules
+                .iter()
+                .any(|r| r.path.pattern == "src/routes/**/*.{ts,tsx,js,jsx}"),
+            "expected src/routes rule"
+        );
+        assert!(
+            rules
+                .iter()
+                .any(|r| r.path.pattern == "app/routes/**/*.{ts,tsx,js,jsx}"),
+            "expected app/routes rule"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // resolve_config: non-tsr-config path falls back to bundler config (197-201)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn resolve_config_on_unknown_bundler_config_returns_default() {
+        let plugin = TanstackRouterPlugin;
+        // vite.config.ts without a tanstackRouter() call -> empty PluginResult
+        let result = plugin.resolve_config(
+            Path::new("/project/vite.config.ts"),
+            "export default {};",
+            Path::new("/project"),
+        );
+        assert!(result.entry_patterns.is_empty());
+    }
+
+    #[test]
+    fn resolve_config_on_bundler_config_with_tanstack_router_call_extracts_routes_dir() {
+        let plugin = TanstackRouterPlugin;
+        let source = r#"
+import { tanstackRouter } from "@tanstack/router-plugin/vite";
+export default {
+  plugins: [tanstackRouter({ routesDirectory: "./custom/routes" })],
+};
+"#;
+        let result = plugin.resolve_config(
+            Path::new("/project/vite.config.ts"),
+            source,
+            Path::new("/project"),
+        );
+        assert!(
+            result.replace_entry_patterns,
+            "should replace entry patterns"
+        );
+        assert!(
+            result
+                .entry_patterns
+                .iter()
+                .any(|r| r.pattern == "custom/routes/**/*.{ts,tsx,js,jsx}"),
+            "custom routes dir pattern missing: {:?}",
+            result.entry_patterns,
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // tsr.config.json: virtualRouteConfig as inline JSON object (lines 330-336,
+    // 477-503)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn tsr_config_with_inline_virtual_route_config_extracts_file_entries() {
+        let plugin = TanstackRouterPlugin;
+        let source = r#"{
+            "routesDirectory": "./src/routes",
+            "virtualRouteConfig": {
+                "type": "rootRoute",
+                "file": "root.tsx",
+                "children": [
+                    { "type": "route", "path": "/about", "file": "about.tsx" }
+                ]
+            }
+        }"#;
+        let result = plugin.resolve_config(
+            Path::new("/project/tsr.config.json"),
+            source,
+            Path::new("/project"),
+        );
+        assert!(
+            result.replace_entry_patterns,
+            "should replace entry patterns"
+        );
+        let patterns: Vec<&str> = result
+            .entry_patterns
+            .iter()
+            .map(|r| r.pattern.as_str())
+            .collect();
+        assert!(
+            patterns.iter().any(|p| p.contains("root.tsx")),
+            "root.tsx missing from entry patterns: {patterns:?}"
+        );
+        assert!(
+            patterns.iter().any(|p| p.contains("about.tsx")),
+            "about.tsx missing from entry patterns: {patterns:?}"
+        );
+    }
+
+    #[test]
+    fn collect_json_file_properties_traverses_array_children() {
+        let source = r#"{
+            "routesDirectory": "./src/routes",
+            "virtualRouteConfig": [
+                { "file": "a.tsx" },
+                { "file": "b.tsx" }
+            ]
+        }"#;
+        let files = collect_inline_virtual_route_files(source);
+        assert!(
+            files.contains(&"a.tsx".to_string()),
+            "a.tsx missing: {files:?}"
+        );
+        assert!(
+            files.contains(&"b.tsx".to_string()),
+            "b.tsx missing: {files:?}"
+        );
+    }
+
+    #[test]
+    fn collect_json_file_properties_ignores_non_file_leaves() {
+        // A scalar at the top level (not object/array) should yield nothing.
+        let source = r#"{ "virtualRouteConfig": "not-an-object" }"#;
+        let files = collect_inline_virtual_route_files(source);
+        assert!(files.is_empty(), "expected no files: {files:?}");
+    }
+
+    #[test]
+    fn collect_inline_virtual_route_files_returns_empty_on_invalid_json() {
+        let files = collect_inline_virtual_route_files("not json at all");
+        assert!(files.is_empty());
+    }
+
+    #[test]
+    fn collect_inline_virtual_route_files_returns_empty_when_key_absent() {
+        let files = collect_inline_virtual_route_files(r#"{ "routesDirectory": "./src/routes" }"#);
+        assert!(files.is_empty());
+    }
+
+    // ---------------------------------------------------------------------------
+    // resolve_bundler_virtual_route_config: inline object expression (line 394)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn bundler_config_virtual_route_config_as_inline_object_with_route_calls() {
+        let plugin = TanstackRouterPlugin;
+        let source = r#"
+import { tanstackRouter } from "@tanstack/router-plugin/vite";
+import { rootRoute, route } from "@tanstack/virtual-file-routes";
+export default {
+  plugins: [tanstackRouter({
+    virtualRouteConfig: rootRoute("root.tsx", [
+      route("/about", "about.tsx"),
+    ]),
+  })],
+};
+"#;
+        let result = plugin.resolve_config(
+            Path::new("/project/vite.config.ts"),
+            source,
+            Path::new("/project"),
+        );
+        let patterns: Vec<&str> = result
+            .entry_patterns
+            .iter()
+            .map(|r| r.pattern.as_str())
+            .collect();
+        assert!(
+            patterns.iter().any(|p| p.contains("root.tsx")),
+            "root.tsx not found: {patterns:?}"
+        );
+        assert!(
+            patterns.iter().any(|p| p.contains("about.tsx")),
+            "about.tsx not found: {patterns:?}"
+        );
+    }
+
+    #[test]
+    fn bundler_config_virtual_route_config_as_variable_reference() {
+        let plugin = TanstackRouterPlugin;
+        let source = r#"
+import { tanstackRouter } from "@tanstack/router-plugin/vite";
+import { rootRoute, index } from "@tanstack/virtual-file-routes";
+const routes = rootRoute("root.tsx", [index("index.tsx")]);
+export default {
+  plugins: [tanstackRouter({ virtualRouteConfig: routes })],
+};
+"#;
+        let result = plugin.resolve_config(
+            Path::new("/project/vite.config.ts"),
+            source,
+            Path::new("/project"),
+        );
+        let patterns: Vec<&str> = result
+            .entry_patterns
+            .iter()
+            .map(|r| r.pattern.as_str())
+            .collect();
+        assert!(
+            patterns.iter().any(|p| p.contains("root.tsx")),
+            "root.tsx missing: {patterns:?}"
+        );
+        assert!(
+            patterns.iter().any(|p| p.contains("index.tsx")),
+            "index.tsx missing: {patterns:?}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // find_variable_init_expression: identifier not found (line 573-577)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn bundler_config_virtual_route_config_unknown_variable_yields_no_routes() {
+        let plugin = TanstackRouterPlugin;
+        // virtualRouteConfig references an identifier that is never declared.
+        let source = r#"
+import { tanstackRouter } from "@tanstack/router-plugin/vite";
+export default {
+  plugins: [tanstackRouter({ virtualRouteConfig: undeclaredVariable })],
+};
+"#;
+        let result = plugin.resolve_config(
+            Path::new("/project/vite.config.ts"),
+            source,
+            Path::new("/project"),
+        );
+        // Should not panic; virtual route config should be empty so standard
+        // route patterns are produced instead.
+        assert!(result.replace_entry_patterns);
+    }
+
+    // ---------------------------------------------------------------------------
+    // RouterPluginCallCollector: namespace import + require forms (606-680)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn bundler_config_router_plugin_via_namespace_import() {
+        let plugin = TanstackRouterPlugin;
+        let source = r#"
+import * as tsr from "@tanstack/router-plugin/vite";
+export default {
+  plugins: [tsr.tanstackRouter({ routesDirectory: "./pages" })],
+};
+"#;
+        let result = plugin.resolve_config(
+            Path::new("/project/vite.config.ts"),
+            source,
+            Path::new("/project"),
+        );
+        assert!(result.replace_entry_patterns);
+        assert!(
+            result
+                .entry_patterns
+                .iter()
+                .any(|r| r.pattern == "pages/**/*.{ts,tsx,js,jsx}"),
+            "namespace import route dir missing: {:?}",
+            result.entry_patterns
+        );
+    }
+
+    #[test]
+    fn bundler_config_router_plugin_via_destructured_require() {
+        let plugin = TanstackRouterPlugin;
+        let source = r#"
+const { tanstackRouter } = require("@tanstack/router-plugin/vite");
+module.exports = {
+  plugins: [tanstackRouter({ routesDirectory: "./pages" })],
+};
+"#;
+        let result = plugin.resolve_config(
+            Path::new("/project/webpack.config.js"),
+            source,
+            Path::new("/project"),
+        );
+        assert!(result.replace_entry_patterns);
+        assert!(
+            result
+                .entry_patterns
+                .iter()
+                .any(|r| r.pattern == "pages/**/*.{ts,tsx,js,jsx}"),
+            "require destructure route dir missing: {:?}",
+            result.entry_patterns
+        );
+    }
+
+    #[test]
+    fn bundler_config_router_plugin_via_namespace_require() {
+        let plugin = TanstackRouterPlugin;
+        let source = r#"
+const tsr = require("@tanstack/router-plugin/vite");
+module.exports = {
+  plugins: [tsr.tanstackRouter({ routesDirectory: "./pages" })],
+};
+"#;
+        let result = plugin.resolve_config(
+            Path::new("/project/webpack.config.cjs"),
+            source,
+            Path::new("/project"),
+        );
+        assert!(result.replace_entry_patterns);
+        assert!(
+            result
+                .entry_patterns
+                .iter()
+                .any(|r| r.pattern == "pages/**/*.{ts,tsx,js,jsx}"),
+            "namespace require route dir missing: {:?}",
+            result.entry_patterns
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // VirtualRouteCallCollector: require-based virtual file routes (719-798)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn virtual_route_collector_via_destructured_require() {
+        let source = r#"
+const { rootRoute, route } = require("@tanstack/virtual-file-routes");
+module.exports = rootRoute("root.tsx", [route("/about", "about.tsx")]);
+"#;
+        let path = Path::new("virtual.routes.js");
+        let refs = collect_virtual_route_call_refs(source, path);
+        assert!(
+            refs.route_files.contains(&"root.tsx".to_string()),
+            "root.tsx missing: {:?}",
+            refs.route_files
+        );
+        assert!(
+            refs.route_files.contains(&"about.tsx".to_string()),
+            "about.tsx missing: {:?}",
+            refs.route_files
+        );
+    }
+
+    #[test]
+    fn virtual_route_collector_via_namespace_require() {
+        let source = r#"
+const vfr = require("@tanstack/virtual-file-routes");
+module.exports = vfr.rootRoute("root.tsx", [vfr.physical("routes/admin", "admin")]);
+"#;
+        let path = Path::new("virtual.routes.js");
+        let refs = collect_virtual_route_call_refs(source, path);
+        assert!(
+            refs.route_files.contains(&"root.tsx".to_string()),
+            "root.tsx missing: {:?}",
+            refs.route_files
+        );
+        assert!(
+            refs.physical_dirs.contains(&"admin".to_string()),
+            "admin dir missing: {:?}",
+            refs.physical_dirs
+        );
+    }
+
+    #[test]
+    fn virtual_route_collector_ignores_non_virtual_file_routes_require() {
+        let source = r#"
+const { rootRoute } = require("@tanstack/some-other-package");
+module.exports = rootRoute("root.tsx");
+"#;
+        let path = Path::new("virtual.routes.js");
+        let refs = collect_virtual_route_call_refs(source, path);
+        // The helper binding should not have been registered, so no files.
+        assert!(refs.route_files.is_empty());
+    }
+
+    // ---------------------------------------------------------------------------
+    // VirtualRouteCallCollector: namespace member call (lines 804-817)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn virtual_route_helper_via_namespace_member_call() {
+        let source = r#"
+import * as vfr from "@tanstack/virtual-file-routes";
+export default vfr.rootRoute("root.tsx", [
+  vfr.index("index.tsx"),
+  vfr.layout("layout.tsx", [vfr.route("/about", "about.tsx")]),
+  vfr.physical("./physical-routes", "phys"),
+]);
+"#;
+        let path = Path::new("routes.ts");
+        let refs = collect_virtual_route_call_refs(source, path);
+        assert!(
+            refs.route_files.contains(&"root.tsx".to_string()),
+            "root.tsx missing: {:?}",
+            refs.route_files
+        );
+        assert!(
+            refs.route_files.contains(&"index.tsx".to_string()),
+            "index.tsx missing: {:?}",
+            refs.route_files
+        );
+        assert!(
+            refs.route_files.contains(&"layout.tsx".to_string()),
+            "layout.tsx missing: {:?}",
+            refs.route_files
+        );
+        assert!(
+            refs.route_files.contains(&"about.tsx".to_string()),
+            "about.tsx missing: {:?}",
+            refs.route_files
+        );
+        assert!(
+            refs.physical_dirs.contains(&"phys".to_string()),
+            "phys dir missing: {:?}",
+            refs.physical_dirs
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // string_arg: template literal form (lines 839-841)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn virtual_route_call_with_template_literal_string_argument() {
+        // rootRoute accepts a template literal with no expressions as a file arg.
+        let source = r#"
+import { rootRoute } from "@tanstack/virtual-file-routes";
+export default rootRoute(`root.tsx`);
+"#;
+        let path = Path::new("routes.ts");
+        let refs = collect_virtual_route_call_refs(source, path);
+        assert!(
+            refs.route_files.contains(&"root.tsx".to_string()),
+            "template literal arg not captured: {:?}",
+            refs.route_files
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // require_source: non-call-expression fast path (line 847-848)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn virtual_route_collector_skips_non_call_expression_init() {
+        // Declarator initialised with a literal, not a call expression.
+        let source = r#"
+const { rootRoute } = "@tanstack/virtual-file-routes";
+"#;
+        let path = Path::new("routes.ts");
+        // Should not panic; no bindings recorded so no files.
+        let refs = collect_virtual_route_call_refs(source, path);
+        assert!(refs.route_files.is_empty());
+    }
+
+    // ---------------------------------------------------------------------------
+    // push_unique: deduplication (lines 891-895)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn push_unique_does_not_insert_duplicate_values() {
+        let mut values: Vec<String> = Vec::new();
+        push_unique(&mut values, "a".to_string());
+        push_unique(&mut values, "b".to_string());
+        push_unique(&mut values, "a".to_string());
+        assert_eq!(values, vec!["a".to_string(), "b".to_string()]);
+    }
+
+    // ---------------------------------------------------------------------------
+    // route_dir_exclusions: ignore pattern branch (lines 1019-1021)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn route_rules_with_empty_ignore_prefix_produce_no_prefix_exclusion_glob() {
+        let rule = route_dir_rule("src/routes", "", "", None, RouteFileKind::Standard);
+        // Empty ignore prefix: no exclusion globs for the prefix pattern.
+        assert!(
+            !rule.exclude_globs.iter().any(|g| g.ends_with("/**/*")),
+            "unexpected exclusion glob: {:?}",
+            rule.exclude_globs
+        );
+    }
+
+    #[test]
+    fn route_dir_exclusions_appends_segment_regex_when_ignore_pattern_set() {
+        let exclusions =
+            route_dir_exclusions("src/routes", DEFAULT_ROUTE_FILE_IGNORE_PREFIX, Some("^__"));
+        assert!(
+            exclusions.segment_regexes.contains(&"^__".to_string()),
+            "segment regex not added: {:?}",
+            exclusions.segment_regexes
+        );
+    }
+
+    #[test]
+    fn route_dir_exclusions_empty_ignore_pattern_skips_segment_regex() {
+        let exclusions = route_dir_exclusions("src/routes", DEFAULT_ROUTE_FILE_IGNORE_PREFIX, None);
+        assert!(exclusions.segment_regexes.is_empty());
+    }
+
+    // ---------------------------------------------------------------------------
+    // apply_virtual_route_config: lazy route used-export rule (lines 466-472)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn virtual_route_file_ending_in_lazy_gets_lazy_exports() {
+        let rule = virtual_route_used_export_rule("src/routes/about.lazy.tsx");
+        assert!(
+            rule.exports.contains(&"component".to_string()),
+            "lazy exports missing component: {:?}",
+            rule.exports
+        );
+        assert!(
+            !rule.exports.contains(&"loader".to_string()),
+            "lazy export rule should not include loader: {:?}",
+            rule.exports
+        );
+    }
+
+    #[test]
+    fn virtual_route_file_not_lazy_gets_full_route_exports() {
+        let rule = virtual_route_used_export_rule("src/routes/about.tsx");
+        assert!(
+            rule.exports.contains(&"loader".to_string()),
+            "standard route missing loader: {:?}",
+            rule.exports
+        );
+        assert!(
+            rule.exports.contains(&"default".to_string()),
+            "standard route missing default: {:?}",
+            rule.exports
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // add_virtual_route_refs: normalizes paths relative to base dir (416-427)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn add_virtual_route_refs_normalizes_route_file_relative_to_base_dir() {
+        let mut config = VirtualRouteConfig::default();
+        let refs = VirtualRouteRefs {
+            route_files: vec!["./about.tsx".to_string()],
+            physical_dirs: vec!["./admin".to_string()],
+        };
+        add_virtual_route_refs(&mut config, refs, "src/routes");
+        assert_eq!(config.route_files, vec!["src/routes/about.tsx".to_string()]);
+        assert_eq!(config.physical_dirs, vec!["src/routes/admin".to_string()]);
+    }
+
+    #[test]
+    fn add_virtual_route_refs_skips_absolute_paths() {
+        let mut config = VirtualRouteConfig::default();
+        let refs = VirtualRouteRefs {
+            route_files: vec!["/absolute/root.tsx".to_string()],
+            physical_dirs: vec![],
+        };
+        add_virtual_route_refs(&mut config, refs, "src/routes");
+        assert!(
+            config.route_files.is_empty(),
+            "absolute paths should be skipped: {:?}",
+            config.route_files
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // add_virtual_route_config_file: reads config file from disk (400-414)
+    // ---------------------------------------------------------------------------
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn add_virtual_route_config_file_reads_and_parses_virtual_route_file() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        let config_file = "src/routes.ts";
+        let routes_path = root.join("src");
+        std::fs::create_dir_all(&routes_path).expect("create dir");
+        let full_path = routes_path.join("routes.ts");
+        let mut f = std::fs::File::create(&full_path).expect("create file");
+        writeln!(
+            f,
+            r#"import {{ rootRoute, index }} from "@tanstack/virtual-file-routes";
+export default rootRoute("root.tsx", [index("index.tsx")]);"#
+        )
+        .expect("write");
+
+        let mut config = VirtualRouteConfig::default();
+        add_virtual_route_config_file(&mut config, root, config_file);
+
+        assert!(
+            config.config_files.contains(&config_file.to_string()),
+            "config file not registered: {:?}",
+            config.config_files
+        );
+        let files: Vec<String> = config
+            .route_files
+            .iter()
+            .map(|s| s.replace('\\', "/"))
+            .collect();
+        assert!(
+            files.iter().any(|f| f.contains("root.tsx")),
+            "root.tsx missing: {files:?}"
+        );
+        assert!(
+            files.iter().any(|f| f.contains("index.tsx")),
+            "index.tsx missing: {files:?}"
+        );
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn add_virtual_route_config_file_returns_early_when_file_missing() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        let mut config = VirtualRouteConfig::default();
+        // File does not exist on disk; should record config_file but not panic.
+        add_virtual_route_config_file(&mut config, root, "nonexistent/routes.ts");
+        assert!(
+            config
+                .config_files
+                .contains(&"nonexistent/routes.ts".to_string()),
+            "config file not registered even when missing from disk"
+        );
+        assert!(config.route_files.is_empty());
+    }
+
+    // ---------------------------------------------------------------------------
+    // tsr.config.json: virtualRouteConfig as file path string (lines 320-328)
+    // ---------------------------------------------------------------------------
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn tsr_config_virtual_route_config_as_file_path_string() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        let routes_dir = root.join("src");
+        std::fs::create_dir_all(&routes_dir).expect("create dir");
+        let virtual_path = routes_dir.join("routes.ts");
+        let mut f = std::fs::File::create(&virtual_path).expect("create file");
+        writeln!(
+            f,
+            r#"import {{ rootRoute }} from "@tanstack/virtual-file-routes";
+export default rootRoute("root.tsx");"#
+        )
+        .expect("write");
+
+        let plugin = TanstackRouterPlugin;
+        let source = r#"{ "virtualRouteConfig": "./src/routes.ts" }"#;
+        let result = plugin.resolve_config(&root.join("tsr.config.json"), source, root);
+        let patterns: Vec<String> = result
+            .entry_patterns
+            .iter()
+            .map(|r| r.pattern.replace('\\', "/"))
+            .collect();
+        assert!(
+            patterns.iter().any(|p| p.contains("routes.ts")),
+            "virtual config file not in entry patterns: {patterns:?}"
+        );
+        assert!(
+            patterns.iter().any(|p| p.contains("root.tsx")),
+            "root.tsx from virtual config file not in entry patterns: {patterns:?}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // layout helper: file as first arg when no path segment provided (lines 746-749)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn virtual_route_layout_with_file_as_first_arg() {
+        let source = r#"
+import { rootRoute, layout } from "@tanstack/virtual-file-routes";
+export default rootRoute("root.tsx", [layout("layout.tsx")]);
+"#;
+        let path = Path::new("routes.ts");
+        let refs = collect_virtual_route_call_refs(source, path);
+        assert!(
+            refs.route_files.contains(&"layout.tsx".to_string()),
+            "layout.tsx missing from first-arg form: {:?}",
+            refs.route_files
+        );
+    }
+
+    #[test]
+    fn virtual_route_layout_with_path_segment_and_file_as_second_arg() {
+        let source = r#"
+import { rootRoute, layout } from "@tanstack/virtual-file-routes";
+export default rootRoute("root.tsx", [layout("/dashboard", "dashboard-layout.tsx")]);
+"#;
+        let path = Path::new("routes.ts");
+        let refs = collect_virtual_route_call_refs(source, path);
+        assert!(
+            refs.route_files
+                .contains(&"dashboard-layout.tsx".to_string()),
+            "dashboard-layout.tsx missing from second-arg form: {:?}",
+            refs.route_files
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // physical helper: dir as first arg when no prefix is provided (lines 750-753)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn virtual_route_physical_with_dir_as_first_arg() {
+        let source = r#"
+import { rootRoute, physical } from "@tanstack/virtual-file-routes";
+export default rootRoute("root.tsx", [physical("admin")]);
+"#;
+        let path = Path::new("routes.ts");
+        let refs = collect_virtual_route_call_refs(source, path);
+        assert!(
+            refs.physical_dirs.contains(&"admin".to_string()),
+            "admin dir missing from first-arg form: {:?}",
+            refs.physical_dirs
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // normalize_project_relative edge cases (856-875)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn normalize_project_relative_rejects_empty_string() {
+        assert!(normalize_project_relative("src/routes", "").is_none());
+    }
+
+    #[test]
+    fn normalize_project_relative_rejects_url_with_scheme() {
+        assert!(normalize_project_relative("src/routes", "https://example.com/foo").is_none());
+    }
+
+    #[test]
+    fn normalize_project_relative_resolves_dotdot_components() {
+        let result = normalize_project_relative("src/routes/sub", "../sibling.tsx");
+        assert_eq!(
+            result.as_deref().map(|s| s.replace('\\', "/")),
+            Some("src/routes/sibling.tsx".to_string())
+        );
+    }
+
+    #[test]
+    fn normalize_project_relative_with_empty_base_dir() {
+        let result = normalize_project_relative("", "pages/home.tsx");
+        assert_eq!(
+            result.as_deref().map(|s| s.replace('\\', "/")),
+            Some("pages/home.tsx".to_string())
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // Existing tests (unchanged)
+    // ---------------------------------------------------------------------------
 
     #[test]
     fn used_exports_cover_lazy_routes_without_inheriting_non_lazy_exports() {

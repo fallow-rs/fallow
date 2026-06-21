@@ -4242,4 +4242,516 @@ export function choose(value: number): string {
             "skipped stale URI must still be tracked in previous_diagnostic_uris",
         );
     }
+
+    // -------------------------------------------------------------------------
+    // config_load_error_detail
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn config_load_error_detail_with_explicit_config_path() {
+        let root = Path::new("/workspace/my-project");
+        let config = Path::new("/workspace/my-project/fallow.json");
+        let msg = config_load_error_detail(root, Some(config), "file not found");
+        assert!(
+            msg.contains("fallow.configPath"),
+            "explicit config errors must mention fallow.configPath"
+        );
+        assert!(
+            msg.contains("fallow.json"),
+            "message must include the config path"
+        );
+        assert!(
+            msg.contains("file not found"),
+            "message must include the original error"
+        );
+        assert!(
+            msg.contains("no diagnostics will be produced"),
+            "explicit-config failure must warn that no diagnostics will be produced"
+        );
+    }
+
+    #[test]
+    fn config_load_error_detail_without_explicit_config_path() {
+        let root = Path::new("/workspace/my-project");
+        let msg = config_load_error_detail(root, None, "parse error");
+        assert!(
+            !msg.contains("fallow.configPath"),
+            "implicit config errors must not mention fallow.configPath"
+        );
+        assert!(
+            msg.contains("config error for"),
+            "implicit config error must use the plain config-error prefix"
+        );
+        assert!(
+            msg.contains("parse error"),
+            "message must include the original error"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // build_health_ignore_set
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn build_health_ignore_set_returns_none_for_empty_patterns() {
+        assert!(
+            build_health_ignore_set(&[]).is_none(),
+            "empty pattern list must yield None so callers skip the match check"
+        );
+    }
+
+    #[test]
+    fn build_health_ignore_set_matches_glob_patterns() {
+        let set =
+            build_health_ignore_set(&["**/*.test.ts".to_string(), "src/generated/**".to_string()])
+                .expect("non-empty patterns must yield Some(GlobSet)");
+
+        assert!(
+            set.is_match(Path::new("src/utils.test.ts")),
+            "*.test.ts glob must match test files"
+        );
+        assert!(
+            set.is_match(Path::new("src/generated/api.ts")),
+            "src/generated/** glob must match generated files"
+        );
+        assert!(
+            !set.is_match(Path::new("src/utils.ts")),
+            "non-matching path must not be covered"
+        );
+    }
+
+    #[test]
+    fn build_health_ignore_set_skips_invalid_patterns() {
+        // An invalid glob is silently skipped; the result is still a valid
+        // (empty) GlobSet rather than None, because at least one token was
+        // processed.
+        let result = build_health_ignore_set(&["[invalid-glob".to_string()]);
+        // Whether this is None or Some(empty set) depends on the globset
+        // implementation; the key property is that it does not panic.
+        if let Some(set) = result {
+            assert!(
+                !set.is_match(Path::new("any/path.ts")),
+                "set built from only invalid patterns must not match anything"
+            );
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // filter_inline_complexity_by_changed_files
+    // -------------------------------------------------------------------------
+
+    fn make_inline_finding(path: PathBuf) -> InlineComplexityFinding {
+        InlineComplexityFinding {
+            path,
+            name: "myFn".to_string(),
+            line: 1,
+            col: 0,
+            cyclomatic: 5,
+            cognitive: 4,
+            exceeded: InlineComplexityExceeded::Cyclomatic,
+        }
+    }
+
+    #[test]
+    fn filter_inline_complexity_keeps_findings_in_changed_set() {
+        let changed: FxHashSet<PathBuf> = [PathBuf::from("/src/a.ts"), PathBuf::from("/src/b.ts")]
+            .into_iter()
+            .collect();
+        let mut findings = vec![
+            make_inline_finding(PathBuf::from("/src/a.ts")),
+            make_inline_finding(PathBuf::from("/src/c.ts")),
+        ];
+
+        filter_inline_complexity_by_changed_files(&mut findings, &changed);
+
+        assert_eq!(findings.len(), 1);
+        assert_eq!(
+            findings[0].path.to_string_lossy().replace('\\', "/"),
+            "/src/a.ts"
+        );
+    }
+
+    #[test]
+    fn filter_inline_complexity_removes_all_when_changed_set_empty() {
+        let changed: FxHashSet<PathBuf> = FxHashSet::default();
+        let mut findings = vec![make_inline_finding(PathBuf::from("/src/a.ts"))];
+
+        filter_inline_complexity_by_changed_files(&mut findings, &changed);
+
+        assert!(
+            findings.is_empty(),
+            "empty changed-files set must drop all inline complexity findings"
+        );
+    }
+
+    #[test]
+    fn filter_inline_complexity_keeps_all_when_all_in_changed_set() {
+        let path_a = PathBuf::from("/src/a.ts");
+        let path_b = PathBuf::from("/src/b.ts");
+        let changed: FxHashSet<PathBuf> = [path_a.clone(), path_b.clone()].into_iter().collect();
+        let mut findings = vec![make_inline_finding(path_a), make_inline_finding(path_b)];
+
+        filter_inline_complexity_by_changed_files(&mut findings, &changed);
+
+        assert_eq!(
+            findings.len(),
+            2,
+            "all findings in the changed set must be retained"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // filter_disabled_diagnostics
+    // -------------------------------------------------------------------------
+
+    fn make_diagnostic_with_code(code: &str) -> Diagnostic {
+        Diagnostic {
+            range: Range {
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: 0,
+                    character: 5,
+                },
+            },
+            code: Some(NumberOrString::String(code.to_string())),
+            source: Some("fallow".to_string()),
+            message: format!("Issue: {code}"),
+            ..Default::default()
+        }
+    }
+
+    fn make_diagnostic_with_numeric_code(code: i32) -> Diagnostic {
+        Diagnostic {
+            range: Range {
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: 0,
+                    character: 5,
+                },
+            },
+            code: Some(NumberOrString::Number(code)),
+            source: Some("fallow".to_string()),
+            message: "numeric code diagnostic".to_string(),
+            ..Default::default()
+        }
+    }
+
+    fn make_diagnostic_no_code() -> Diagnostic {
+        Diagnostic {
+            range: Range {
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: 0,
+                    character: 5,
+                },
+            },
+            code: None,
+            source: Some("fallow".to_string()),
+            message: "no code diagnostic".to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn filter_disabled_diagnostics_empty_disabled_set_passes_all() {
+        let diags = vec![
+            make_diagnostic_with_code("unused-export"),
+            make_diagnostic_with_code("unused-file"),
+        ];
+        let disabled: FxHashSet<String> = FxHashSet::default();
+        let result = filter_disabled_diagnostics(&diags, &disabled);
+        assert_eq!(
+            result.len(),
+            2,
+            "empty disabled set must pass every diagnostic through"
+        );
+    }
+
+    #[test]
+    fn filter_disabled_diagnostics_removes_matching_string_code() {
+        let diags = vec![
+            make_diagnostic_with_code("unused-export"),
+            make_diagnostic_with_code("unused-file"),
+        ];
+        let disabled: FxHashSet<String> = std::iter::once("unused-export".to_string()).collect();
+        let result = filter_disabled_diagnostics(&diags, &disabled);
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result[0]
+                .code
+                .as_ref()
+                .and_then(|c| if let NumberOrString::String(s) = c {
+                    Some(s.as_str())
+                } else {
+                    None
+                }),
+            Some("unused-file"),
+            "only the non-disabled diagnostic must survive"
+        );
+    }
+
+    #[test]
+    fn filter_disabled_diagnostics_keeps_numeric_codes_always() {
+        let diags = vec![make_diagnostic_with_numeric_code(1001)];
+        let disabled: FxHashSet<String> = std::iter::once("1001".to_string()).collect();
+        let result = filter_disabled_diagnostics(&diags, &disabled);
+        assert_eq!(
+            result.len(),
+            1,
+            "numeric-code diagnostics must never be filtered by string-keyed disabled set"
+        );
+    }
+
+    #[test]
+    fn filter_disabled_diagnostics_keeps_codeless_diagnostics() {
+        let diags = vec![make_diagnostic_no_code()];
+        let disabled: FxHashSet<String> = std::iter::once("unused-export".to_string()).collect();
+        let result = filter_disabled_diagnostics(&diags, &disabled);
+        assert_eq!(
+            result.len(),
+            1,
+            "diagnostics without a code must always pass through"
+        );
+    }
+
+    #[test]
+    fn filter_disabled_diagnostics_removes_all_disabled() {
+        let diags = vec![
+            make_diagnostic_with_code("unused-export"),
+            make_diagnostic_with_code("unused-file"),
+            make_diagnostic_with_code("circular-dependency"),
+        ];
+        let disabled: FxHashSet<String> = [
+            "unused-export".to_string(),
+            "unused-file".to_string(),
+            "circular-dependency".to_string(),
+        ]
+        .into_iter()
+        .collect();
+        let result = filter_disabled_diagnostics(&diags, &disabled);
+        assert!(
+            result.is_empty(),
+            "all diagnostics disabled must yield an empty result"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // uri_is_stale (FallowLspServer::uri_is_stale)
+    // -------------------------------------------------------------------------
+
+    fn make_doc(version: i32, text: &str) -> DocumentState {
+        DocumentState {
+            version,
+            text: text.to_string(),
+        }
+    }
+
+    fn clean_snapshot(uri: &Uri, version: i32) -> VersionSnapshot {
+        std::iter::once((
+            uri.clone(),
+            DocumentSnapshot {
+                version,
+                matches_disk: true,
+            },
+        ))
+        .collect()
+    }
+
+    fn dirty_snapshot(uri: &Uri, version: i32) -> VersionSnapshot {
+        std::iter::once((
+            uri.clone(),
+            DocumentSnapshot {
+                version,
+                matches_disk: false,
+            },
+        ))
+        .collect()
+    }
+
+    #[test]
+    fn uri_is_stale_same_version_and_clean_snapshot_is_not_stale() {
+        let uri: Uri = "file:///a.ts".parse().unwrap();
+        let snapshot = clean_snapshot(&uri, 5);
+        let mut live: FxHashMap<Uri, DocumentState> = FxHashMap::default();
+        live.insert(uri.clone(), make_doc(5, "content"));
+
+        assert!(
+            !FallowLspServer::uri_is_stale(&uri, &snapshot, &live),
+            "same version + clean snapshot = not stale"
+        );
+    }
+
+    #[test]
+    fn uri_is_stale_advanced_version_is_stale() {
+        let uri: Uri = "file:///a.ts".parse().unwrap();
+        let snapshot = clean_snapshot(&uri, 3);
+        let mut live: FxHashMap<Uri, DocumentState> = FxHashMap::default();
+        live.insert(uri.clone(), make_doc(4, "edited"));
+
+        assert!(
+            FallowLspServer::uri_is_stale(&uri, &snapshot, &live),
+            "live version > snapshot version is stale (user edited mid-run)"
+        );
+    }
+
+    #[test]
+    fn uri_is_stale_closed_mid_run_is_stale() {
+        let uri: Uri = "file:///closed.ts".parse().unwrap();
+        let snapshot = clean_snapshot(&uri, 1);
+        let live: FxHashMap<Uri, DocumentState> = FxHashMap::default();
+
+        assert!(
+            FallowLspServer::uri_is_stale(&uri, &snapshot, &live),
+            "URI in snapshot but absent from live documents is stale (closed mid-run)"
+        );
+    }
+
+    #[test]
+    fn uri_is_stale_absent_from_both_is_not_stale() {
+        let uri: Uri = "file:///package.json".parse().unwrap();
+        let snapshot: VersionSnapshot = FxHashMap::default();
+        let live: FxHashMap<Uri, DocumentState> = FxHashMap::default();
+
+        assert!(
+            !FallowLspServer::uri_is_stale(&uri, &snapshot, &live),
+            "URI absent from both snapshot and live (e.g. package.json) must not be stale"
+        );
+    }
+
+    #[test]
+    fn uri_is_stale_dirty_snapshot_is_stale() {
+        let uri: Uri = "file:///dirty.ts".parse().unwrap();
+        let snapshot = dirty_snapshot(&uri, 1);
+        let mut live: FxHashMap<Uri, DocumentState> = FxHashMap::default();
+        live.insert(uri.clone(), make_doc(1, "buffer content"));
+
+        assert!(
+            FallowLspServer::uri_is_stale(&uri, &snapshot, &live),
+            "snapshot with matches_disk=false must be treated as stale"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // LspDuplicationOptions::merge_with edge cases
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn lsp_duplication_options_min_occurrences_below_2_defers_to_config() {
+        // The LSP clamps min_occurrences to >= 2; a value of 1 is nonsensical
+        // for clone detection and must fall back to the project config value.
+        let project = DuplicatesConfig {
+            min_occurrences: 3,
+            ..DuplicatesConfig::default()
+        };
+        let options = LspDuplicationOptions {
+            min_occurrences: Some(1),
+            ..LspDuplicationOptions::default()
+        };
+
+        let merged = options.merge_with(&project);
+        assert_eq!(
+            merged.min_occurrences, 3,
+            "min_occurrences < 2 from LSP options must defer to the project config value"
+        );
+    }
+
+    #[test]
+    fn lsp_duplication_options_all_none_preserves_project_config() {
+        let project = DuplicatesConfig {
+            mode: DetectionMode::Semantic,
+            min_tokens: 99,
+            min_lines: 7,
+            min_occurrences: 4,
+            threshold: 5.5,
+            skip_local: true,
+            cross_language: true,
+            ignore_imports: true,
+            ..DuplicatesConfig::default()
+        };
+        let options = LspDuplicationOptions::default(); // all None
+
+        let merged = options.merge_with(&project);
+        assert_eq!(merged.mode, DetectionMode::Semantic);
+        assert_eq!(merged.min_tokens, 99);
+        assert_eq!(merged.min_lines, 7);
+        assert_eq!(merged.min_occurrences, 4);
+        assert!((merged.threshold - 5.5).abs() < f64::EPSILON);
+        assert!(merged.skip_local);
+        assert!(merged.cross_language);
+        assert!(merged.ignore_imports);
+    }
+
+    // -------------------------------------------------------------------------
+    // initialization_duplication_options edge cases
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn initialization_duplication_options_returns_none_for_absent_key() {
+        let opts = serde_json::json!({});
+        assert!(
+            initialization_duplication_options(&opts).is_none(),
+            "missing 'duplication' key must yield None"
+        );
+    }
+
+    #[test]
+    fn initialization_duplication_options_returns_default_for_empty_object() {
+        let opts = serde_json::json!({ "duplication": {} });
+        let parsed = initialization_duplication_options(&opts)
+            .expect("empty duplication object must deserialize to default LspDuplicationOptions");
+        assert_eq!(parsed, LspDuplicationOptions::default());
+    }
+
+    #[test]
+    fn initialization_duplication_options_partial_fields_are_none_when_absent() {
+        let opts = serde_json::json!({ "duplication": { "minTokens": 32 } });
+        let parsed = initialization_duplication_options(&opts)
+            .expect("partial duplication object must deserialize");
+        assert_eq!(parsed.min_tokens, Some(32));
+        assert!(parsed.mode.is_none(), "unset 'mode' field must remain None");
+        assert!(
+            parsed.threshold.is_none(),
+            "unset 'threshold' field must remain None"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // inline_complexity_enabled false path
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn initialization_inline_complexity_false_explicitly() {
+        let opts = serde_json::json!({ "health": { "inlineComplexity": false } });
+        assert!(
+            !initialization_inline_complexity_enabled(&opts),
+            "explicit false must disable inline complexity"
+        );
+    }
+
+    #[test]
+    fn initialization_inline_complexity_non_boolean_health_key() {
+        let opts = serde_json::json!({ "health": { "inlineComplexity": "yes" } });
+        assert!(
+            !initialization_inline_complexity_enabled(&opts),
+            "non-boolean inlineComplexity must default to false"
+        );
+    }
+
+    #[test]
+    fn initialization_inline_complexity_missing_health_object() {
+        let opts = serde_json::json!({ "otherKey": true });
+        assert!(
+            !initialization_inline_complexity_enabled(&opts),
+            "absent health object must default inline complexity to false"
+        );
+    }
 }

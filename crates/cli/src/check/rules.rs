@@ -1960,4 +1960,2075 @@ mod tests {
         };
         assert!(has_error_severity_issues(&results, &rules, None));
     }
+
+    // -------------------------------------------------------------------------
+    // Helpers for the extended tests
+    // -------------------------------------------------------------------------
+
+    fn config_with_override_for_rule(
+        pattern: &str,
+        configure: impl FnOnce(&mut fallow_config::PartialRulesConfig),
+    ) -> ResolvedConfig {
+        let mut partial = fallow_config::PartialRulesConfig::default();
+        configure(&mut partial);
+        fallow_config::FallowConfig {
+            schema: None,
+            extends: vec![],
+            entry: vec![],
+            ignore_patterns: vec![],
+            framework: vec![],
+            workspaces: None,
+            ignore_dependencies: vec![],
+            ignore_unresolved_imports: vec![],
+            ignore_exports: vec![],
+            ignore_catalog_references: vec![],
+            ignore_dependency_overrides: vec![],
+            ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+            used_class_members: vec![],
+            ignore_decorators: vec![],
+            duplicates: fallow_config::DuplicatesConfig::default(),
+            health: fallow_config::HealthConfig::default(),
+            rules: RulesConfig::default(),
+            boundaries: fallow_config::BoundaryConfig::default(),
+            production: false.into(),
+            plugins: vec![],
+            rule_packs: vec![],
+            dynamically_loaded: vec![],
+            regression: None,
+            audit: fallow_config::AuditConfig::default(),
+            codeowners: None,
+            public_packages: vec![],
+            flags: fallow_config::FlagsConfig::default(),
+            security: fallow_config::SecurityConfig::default(),
+            fix: fallow_config::FixConfig::default(),
+            resolve: fallow_config::ResolveConfig::default(),
+            sealed: false,
+            include_entry_exports: false,
+            auto_imports: false,
+            cache: fallow_config::CacheConfig::default(),
+            overrides: vec![fallow_config::ConfigOverride {
+                files: vec![pattern.to_string()],
+                rules: partial,
+            }],
+        }
+        .resolve(
+            PathBuf::from("/project"),
+            fallow_config::OutputFormat::Human,
+            1,
+            true,
+            true,
+            None,
+        )
+    }
+
+    fn stale_suppression(path: &str, missing_reason: bool) -> StaleSuppression {
+        StaleSuppression {
+            path: PathBuf::from(path),
+            line: 1,
+            col: 0,
+            origin: SuppressionOrigin::Comment {
+                issue_kind: Some("unused-exports".to_string()),
+                reason: if missing_reason {
+                    None
+                } else {
+                    Some("no longer needed".to_string())
+                },
+                is_file_level: false,
+                kind_known: true,
+            },
+            missing_reason,
+            actions: StaleSuppression::actions_for(missing_reason),
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Lines 51-61: apply_base_collection_rules - re_export_cycle / boundary_violation
+    // / policy_violation / catalog rules / dep override rules
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn base_collection_re_export_cycle_off_clears_findings() {
+        let mut results = AnalysisResults::default();
+        results
+            .re_export_cycles
+            .push(ReExportCycleFinding::with_actions(ReExportCycle {
+                files: vec![
+                    PathBuf::from("/project/src/a.ts"),
+                    PathBuf::from("/project/src/b.ts"),
+                ],
+                kind: ReExportCycleKind::MultiNode,
+            }));
+        let rules = RulesConfig {
+            re_export_cycle: Severity::Off,
+            ..RulesConfig::default()
+        };
+        let config = config_with_rules(rules);
+        apply_rules(&mut results, &config);
+        assert!(results.re_export_cycles.is_empty());
+    }
+
+    #[test]
+    fn base_collection_boundary_violation_off_clears_all_three_vecs() {
+        let mut results = AnalysisResults::default();
+        results
+            .boundary_violations
+            .push(boundary_violation("/project/src/a.ts"));
+        results
+            .boundary_coverage_violations
+            .push(boundary_coverage_violation("/project/src/a.ts"));
+        results
+            .boundary_call_violations
+            .push(BoundaryCallViolationFinding::with_actions(
+                BoundaryCallViolation {
+                    path: PathBuf::from("/project/src/a.ts"),
+                    line: 1,
+                    col: 0,
+                    zone: "ui".to_string(),
+                    callee: "fs.readFileSync".to_string(),
+                    pattern: "fs.*".to_string(),
+                },
+            ));
+        let rules = RulesConfig {
+            boundary_violation: Severity::Off,
+            ..RulesConfig::default()
+        };
+        let config = config_with_rules(rules);
+        apply_rules(&mut results, &config);
+        assert!(results.boundary_violations.is_empty());
+        assert!(results.boundary_coverage_violations.is_empty());
+        assert!(results.boundary_call_violations.is_empty());
+    }
+
+    #[test]
+    fn base_collection_policy_violation_off_clears_findings() {
+        let mut results = AnalysisResults::default();
+        results
+            .policy_violations
+            .push(PolicyViolationFinding::with_actions(PolicyViolation {
+                path: PathBuf::from("/project/src/a.ts"),
+                line: 1,
+                col: 0,
+                pack: "my-pack".to_string(),
+                rule_id: "no-exec".to_string(),
+                kind: PolicyRuleKind::BannedCall,
+                matched: "cp.exec".to_string(),
+                severity: PolicyViolationSeverity::Error,
+                message: None,
+            }));
+        let rules = RulesConfig {
+            policy_violation: Severity::Off,
+            ..RulesConfig::default()
+        };
+        let config = config_with_rules(rules);
+        apply_rules(&mut results, &config);
+        assert!(results.policy_violations.is_empty());
+    }
+
+    #[test]
+    fn base_collection_unused_catalog_entries_off_clears_findings() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_catalog_entries
+            .push(UnusedCatalogEntryFinding::with_actions(
+                UnusedCatalogEntry {
+                    entry_name: "lodash".to_string(),
+                    catalog_name: "default".to_string(),
+                    path: PathBuf::from("/project/pnpm-workspace.yaml"),
+                    line: 5,
+                    hardcoded_consumers: vec![],
+                },
+            ));
+        let rules = RulesConfig {
+            unused_catalog_entries: Severity::Off,
+            ..RulesConfig::default()
+        };
+        let config = config_with_rules(rules);
+        apply_rules(&mut results, &config);
+        assert!(results.unused_catalog_entries.is_empty());
+    }
+
+    #[test]
+    fn base_collection_empty_catalog_groups_off_clears_findings() {
+        let mut results = AnalysisResults::default();
+        results
+            .empty_catalog_groups
+            .push(EmptyCatalogGroupFinding::with_actions(EmptyCatalogGroup {
+                catalog_name: "tools".to_string(),
+                path: PathBuf::from("/project/pnpm-workspace.yaml"),
+                line: 10,
+            }));
+        let rules = RulesConfig {
+            empty_catalog_groups: Severity::Off,
+            ..RulesConfig::default()
+        };
+        let config = config_with_rules(rules);
+        apply_rules(&mut results, &config);
+        assert!(results.empty_catalog_groups.is_empty());
+    }
+
+    #[test]
+    fn base_collection_unresolved_catalog_references_off_clears_findings() {
+        let mut results = AnalysisResults::default();
+        results.unresolved_catalog_references.push(
+            UnresolvedCatalogReferenceFinding::with_actions(UnresolvedCatalogReference {
+                entry_name: "missing-pkg".to_string(),
+                catalog_name: "default".to_string(),
+                path: PathBuf::from("/project/package.json"),
+                line: 3,
+                available_in_catalogs: vec![],
+            }),
+        );
+        let rules = RulesConfig {
+            unresolved_catalog_references: Severity::Off,
+            ..RulesConfig::default()
+        };
+        let config = config_with_rules(rules);
+        apply_rules(&mut results, &config);
+        assert!(results.unresolved_catalog_references.is_empty());
+    }
+
+    #[test]
+    fn base_collection_unused_dependency_overrides_off_clears_findings() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_dependency_overrides
+            .push(UnusedDependencyOverrideFinding::with_actions(
+                UnusedDependencyOverride {
+                    raw_key: "old-dep".to_string(),
+                    target_package: "old-dep".to_string(),
+                    parent_package: None,
+                    version_constraint: None,
+                    version_range: "^1.0.0".to_string(),
+                    source: DependencyOverrideSource::PnpmWorkspaceYaml,
+                    path: PathBuf::from("/project/pnpm-workspace.yaml"),
+                    line: 7,
+                    hint: None,
+                },
+            ));
+        let rules = RulesConfig {
+            unused_dependency_overrides: Severity::Off,
+            ..RulesConfig::default()
+        };
+        let config = config_with_rules(rules);
+        apply_rules(&mut results, &config);
+        assert!(results.unused_dependency_overrides.is_empty());
+    }
+
+    #[test]
+    fn base_collection_misconfigured_dependency_overrides_off_clears_findings() {
+        let mut results = AnalysisResults::default();
+        results.misconfigured_dependency_overrides.push(
+            MisconfiguredDependencyOverrideFinding::with_actions(MisconfiguredDependencyOverride {
+                raw_key: "bad>".to_string(),
+                target_package: None,
+                raw_value: "1.0.0".to_string(),
+                reason: DependencyOverrideMisconfigReason::UnparsableKey,
+                source: DependencyOverrideSource::PnpmPackageJson,
+                path: PathBuf::from("/project/package.json"),
+                line: 4,
+            }),
+        );
+        let rules = RulesConfig {
+            misconfigured_dependency_overrides: Severity::Off,
+            ..RulesConfig::default()
+        };
+        let config = config_with_rules(rules);
+        apply_rules(&mut results, &config);
+        assert!(results.misconfigured_dependency_overrides.is_empty());
+    }
+
+    // -------------------------------------------------------------------------
+    // Lines 110-147: apply_core_dead_code_override_rules (with overrides active)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn override_drops_unused_types_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_types
+            .push(UnusedTypeFinding::with_actions(UnusedExport {
+                path: PathBuf::from("/project/src/generated/types.ts"),
+                export_name: "GenType".to_string(),
+                is_type_only: true,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
+        let config = config_with_override_for_rule("src/generated/**", |p| {
+            p.unused_types = Some(Severity::Off);
+        });
+        apply_rules(&mut results, &config);
+        assert!(results.unused_types.is_empty());
+    }
+
+    #[test]
+    fn override_keeps_unused_types_for_non_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_types
+            .push(UnusedTypeFinding::with_actions(UnusedExport {
+                path: PathBuf::from("/project/src/core/types.ts"),
+                export_name: "CoreType".to_string(),
+                is_type_only: true,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
+        let config = config_with_override_for_rule("src/generated/**", |p| {
+            p.unused_types = Some(Severity::Off);
+        });
+        apply_rules(&mut results, &config);
+        assert_eq!(results.unused_types.len(), 1);
+    }
+
+    #[test]
+    fn override_drops_private_type_leaks_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .private_type_leaks
+            .push(PrivateTypeLeakFinding::with_actions(PrivateTypeLeak {
+                path: PathBuf::from("/project/src/generated/api.ts"),
+                export_name: "publicFn".to_string(),
+                type_name: "_PrivateHelper".to_string(),
+                line: 5,
+                col: 0,
+                span_start: 0,
+            }));
+        let config = config_with_override_for_rule("src/generated/**", |p| {
+            p.private_type_leaks = Some(Severity::Off);
+        });
+        apply_rules(&mut results, &config);
+        assert!(results.private_type_leaks.is_empty());
+    }
+
+    #[test]
+    fn override_drops_unused_enum_members_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_enum_members
+            .push(UnusedEnumMemberFinding::with_actions(UnusedMember {
+                path: PathBuf::from("/project/src/generated/enums.ts"),
+                parent_name: "Status".to_string(),
+                member_name: "Legacy".to_string(),
+                kind: MemberKind::EnumMember,
+                line: 8,
+                col: 0,
+            }));
+        let config = config_with_override_for_rule("src/generated/**", |p| {
+            p.unused_enum_members = Some(Severity::Off);
+        });
+        apply_rules(&mut results, &config);
+        assert!(results.unused_enum_members.is_empty());
+    }
+
+    #[test]
+    fn override_drops_unused_class_members_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_class_members
+            .push(UnusedClassMemberFinding::with_actions(UnusedMember {
+                path: PathBuf::from("/project/src/generated/service.ts"),
+                parent_name: "MyService".to_string(),
+                member_name: "_legacyHelper".to_string(),
+                kind: MemberKind::ClassMethod,
+                line: 20,
+                col: 0,
+            }));
+        let config = config_with_override_for_rule("src/generated/**", |p| {
+            p.unused_class_members = Some(Severity::Off);
+        });
+        apply_rules(&mut results, &config);
+        assert!(results.unused_class_members.is_empty());
+    }
+
+    #[test]
+    fn override_drops_unused_store_members_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_store_members
+            .push(UnusedStoreMemberFinding::with_actions(UnusedMember {
+                path: PathBuf::from("/project/src/generated/store.ts"),
+                parent_name: "useGenStore".to_string(),
+                member_name: "unusedAction".to_string(),
+                kind: MemberKind::StoreMember,
+                line: 12,
+                col: 0,
+            }));
+        let config = config_with_override_for_rule("src/generated/**", |p| {
+            p.unused_store_members = Some(Severity::Off);
+        });
+        apply_rules(&mut results, &config);
+        assert!(results.unused_store_members.is_empty());
+    }
+
+    #[test]
+    fn override_drops_unprovided_injects_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .unprovided_injects
+            .push(UnprovidedInjectFinding::with_actions(UnprovidedInject {
+                path: PathBuf::from("/project/src/generated/child.vue"),
+                key_name: "INJECT_KEY".to_string(),
+                framework: "vue".to_string(),
+                line: 3,
+                col: 0,
+            }));
+        let config = config_with_override_for_rule("src/generated/**", |p| {
+            p.unprovided_injects = Some(Severity::Off);
+        });
+        apply_rules(&mut results, &config);
+        assert!(results.unprovided_injects.is_empty());
+    }
+
+    #[test]
+    fn override_drops_unresolved_imports_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .unresolved_imports
+            .push(UnresolvedImportFinding::with_actions(UnresolvedImport {
+                path: PathBuf::from("/project/src/generated/mod.ts"),
+                specifier: "./missing-gen".to_string(),
+                line: 1,
+                col: 0,
+                specifier_col: 0,
+            }));
+        let config = config_with_override_for_rule("src/generated/**", |p| {
+            p.unresolved_imports = Some(Severity::Off);
+        });
+        apply_rules(&mut results, &config);
+        assert!(results.unresolved_imports.is_empty());
+    }
+
+    // -------------------------------------------------------------------------
+    // Lines 154-202: apply_component_dead_code_override_rules
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn override_drops_unrendered_components_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .unrendered_components
+            .push(UnrenderedComponentFinding::with_actions(
+                UnrenderedComponent {
+                    path: PathBuf::from("/project/src/legacy/LegacyWidget.vue"),
+                    component_name: "LegacyWidget".to_string(),
+                    framework: "vue".to_string(),
+                    reachable_via: None,
+                    line: 1,
+                    col: 0,
+                },
+            ));
+        let config = config_with_override_for_rule("src/legacy/**", |p| {
+            p.unrendered_components = Some(Severity::Off);
+        });
+        apply_rules(&mut results, &config);
+        assert!(results.unrendered_components.is_empty());
+    }
+
+    #[test]
+    fn override_drops_unused_component_props_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_component_props
+            .push(UnusedComponentPropFinding::with_actions(
+                UnusedComponentProp {
+                    path: PathBuf::from("/project/src/legacy/Card.vue"),
+                    component_name: "Card".to_string(),
+                    prop_name: "unusedColor".to_string(),
+                    line: 5,
+                    col: 0,
+                },
+            ));
+        let config = config_with_override_for_rule("src/legacy/**", |p| {
+            p.unused_component_props = Some(Severity::Off);
+        });
+        apply_rules(&mut results, &config);
+        assert!(results.unused_component_props.is_empty());
+    }
+
+    #[test]
+    fn override_drops_unused_component_emits_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_component_emits
+            .push(UnusedComponentEmitFinding::with_actions(
+                UnusedComponentEmit {
+                    path: PathBuf::from("/project/src/legacy/Button.vue"),
+                    component_name: "Button".to_string(),
+                    emit_name: "legacy-click".to_string(),
+                    line: 7,
+                    col: 0,
+                },
+            ));
+        let config = config_with_override_for_rule("src/legacy/**", |p| {
+            p.unused_component_emits = Some(Severity::Off);
+        });
+        apply_rules(&mut results, &config);
+        assert!(results.unused_component_emits.is_empty());
+    }
+
+    #[test]
+    fn override_drops_unused_component_inputs_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_component_inputs
+            .push(UnusedComponentInputFinding::with_actions(
+                UnusedComponentInput {
+                    path: PathBuf::from("/project/src/legacy/table.component.ts"),
+                    component_name: "table".to_string(),
+                    input_name: "deprecated".to_string(),
+                    line: 12,
+                    col: 0,
+                },
+            ));
+        let config = config_with_override_for_rule("src/legacy/**", |p| {
+            p.unused_component_inputs = Some(Severity::Off);
+        });
+        apply_rules(&mut results, &config);
+        assert!(results.unused_component_inputs.is_empty());
+    }
+
+    #[test]
+    fn override_drops_unused_component_outputs_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_component_outputs
+            .push(UnusedComponentOutputFinding::with_actions(
+                UnusedComponentOutput {
+                    path: PathBuf::from("/project/src/legacy/table.component.ts"),
+                    component_name: "table".to_string(),
+                    output_name: "deprecatedChange".to_string(),
+                    line: 15,
+                    col: 0,
+                },
+            ));
+        let config = config_with_override_for_rule("src/legacy/**", |p| {
+            p.unused_component_outputs = Some(Severity::Off);
+        });
+        apply_rules(&mut results, &config);
+        assert!(results.unused_component_outputs.is_empty());
+    }
+
+    #[test]
+    fn override_drops_unused_svelte_events_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_svelte_events
+            .push(UnusedSvelteEventFinding::with_actions(UnusedSvelteEvent {
+                path: PathBuf::from("/project/src/legacy/Widget.svelte"),
+                component_name: "Widget".to_string(),
+                event_name: "legacy".to_string(),
+                line: 10,
+                col: 0,
+            }));
+        let config = config_with_override_for_rule("src/legacy/**", |p| {
+            p.unused_svelte_events = Some(Severity::Off);
+        });
+        apply_rules(&mut results, &config);
+        assert!(results.unused_svelte_events.is_empty());
+    }
+
+    #[test]
+    fn override_drops_unused_server_actions_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_server_actions
+            .push(UnusedServerActionFinding::with_actions(
+                UnusedServerAction {
+                    path: PathBuf::from("/project/src/legacy/actions.ts"),
+                    action_name: "deprecatedAction".to_string(),
+                    line: 3,
+                    col: 0,
+                },
+            ));
+        let config = config_with_override_for_rule("src/legacy/**", |p| {
+            p.unused_server_actions = Some(Severity::Off);
+        });
+        apply_rules(&mut results, &config);
+        assert!(results.unused_server_actions.is_empty());
+    }
+
+    #[test]
+    fn override_drops_unused_load_data_keys_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_load_data_keys
+            .push(UnusedLoadDataKeyFinding::with_actions(UnusedLoadDataKey {
+                path: PathBuf::from("/project/src/legacy/+page.server.ts"),
+                key_name: "oldKey".to_string(),
+                line: 4,
+                col: 0,
+                route_dir: None,
+            }));
+        let config = config_with_override_for_rule("src/legacy/**", |p| {
+            p.unused_load_data_keys = Some(Severity::Off);
+        });
+        apply_rules(&mut results, &config);
+        assert!(results.unused_load_data_keys.is_empty());
+    }
+
+    // -------------------------------------------------------------------------
+    // Lines 208-240: apply_catalog_override_rules
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn override_drops_stale_suppression_when_stale_rule_off() {
+        let mut results = AnalysisResults::default();
+        results
+            .stale_suppressions
+            .push(stale_suppression("/project/src/generated/a.ts", false));
+        let config = config_with_override_for_rule("src/generated/**", |p| {
+            p.stale_suppressions = Some(Severity::Off);
+        });
+        apply_rules(&mut results, &config);
+        assert!(results.stale_suppressions.is_empty());
+    }
+
+    #[test]
+    fn override_drops_missing_reason_suppression_when_require_reason_off() {
+        let mut results = AnalysisResults::default();
+        results
+            .stale_suppressions
+            .push(stale_suppression("/project/src/generated/b.ts", true));
+        let config = config_with_override_for_rule("src/generated/**", |p| {
+            p.require_suppression_reason = Some(Severity::Off);
+        });
+        apply_rules(&mut results, &config);
+        assert!(results.stale_suppressions.is_empty());
+    }
+
+    #[test]
+    fn override_keeps_stale_suppression_for_non_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .stale_suppressions
+            .push(stale_suppression("/project/src/core/a.ts", false));
+        let config = config_with_override_for_rule("src/generated/**", |p| {
+            p.stale_suppressions = Some(Severity::Off);
+        });
+        apply_rules(&mut results, &config);
+        assert_eq!(results.stale_suppressions.len(), 1);
+    }
+
+    #[test]
+    fn override_drops_unresolved_catalog_references_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results.unresolved_catalog_references.push(
+            UnresolvedCatalogReferenceFinding::with_actions(UnresolvedCatalogReference {
+                entry_name: "react".to_string(),
+                catalog_name: "default".to_string(),
+                path: PathBuf::from("/project/packages/app/package.json"),
+                line: 5,
+                available_in_catalogs: vec![],
+            }),
+        );
+        let config = config_with_override_for_rule("packages/app/**", |p| {
+            p.unresolved_catalog_references = Some(Severity::Off);
+        });
+        apply_rules(&mut results, &config);
+        assert!(results.unresolved_catalog_references.is_empty());
+    }
+
+    #[test]
+    fn override_drops_empty_catalog_groups_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .empty_catalog_groups
+            .push(EmptyCatalogGroupFinding::with_actions(EmptyCatalogGroup {
+                catalog_name: "legacy".to_string(),
+                path: PathBuf::from("/project/pnpm-workspace.yaml"),
+                line: 20,
+            }));
+        let config = config_with_override_for_rule("pnpm-workspace.yaml", |p| {
+            p.empty_catalog_groups = Some(Severity::Off);
+        });
+        apply_rules(&mut results, &config);
+        assert!(results.empty_catalog_groups.is_empty());
+    }
+
+    #[test]
+    fn override_drops_unused_dependency_overrides_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_dependency_overrides
+            .push(UnusedDependencyOverrideFinding::with_actions(
+                UnusedDependencyOverride {
+                    raw_key: "old-pkg".to_string(),
+                    target_package: "old-pkg".to_string(),
+                    parent_package: None,
+                    version_constraint: None,
+                    version_range: "^2.0.0".to_string(),
+                    source: DependencyOverrideSource::PnpmWorkspaceYaml,
+                    path: PathBuf::from("/project/pnpm-workspace.yaml"),
+                    line: 8,
+                    hint: None,
+                },
+            ));
+        let config = config_with_override_for_rule("pnpm-workspace.yaml", |p| {
+            p.unused_dependency_overrides = Some(Severity::Off);
+        });
+        apply_rules(&mut results, &config);
+        assert!(results.unused_dependency_overrides.is_empty());
+    }
+
+    #[test]
+    fn override_drops_misconfigured_dependency_overrides_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results.misconfigured_dependency_overrides.push(
+            MisconfiguredDependencyOverrideFinding::with_actions(MisconfiguredDependencyOverride {
+                raw_key: "bad>".to_string(),
+                target_package: None,
+                raw_value: "1.0.0".to_string(),
+                reason: DependencyOverrideMisconfigReason::UnparsableKey,
+                source: DependencyOverrideSource::PnpmWorkspaceYaml,
+                path: PathBuf::from("/project/pnpm-workspace.yaml"),
+                line: 12,
+            }),
+        );
+        let config = config_with_override_for_rule("pnpm-workspace.yaml", |p| {
+            p.misconfigured_dependency_overrides = Some(Severity::Off);
+        });
+        apply_rules(&mut results, &config);
+        assert!(results.misconfigured_dependency_overrides.is_empty());
+    }
+
+    // -------------------------------------------------------------------------
+    // Lines 246-276: apply_framework_override_rules
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn override_drops_invalid_client_exports_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .invalid_client_exports
+            .push(InvalidClientExportFinding::with_actions(
+                InvalidClientExport {
+                    path: PathBuf::from("/project/src/app/page.ts"),
+                    export_name: "metadata".to_string(),
+                    directive: "use client".to_string(),
+                    line: 3,
+                    col: 0,
+                },
+            ));
+        let config = config_with_override_for_rule("src/app/**", |p| {
+            p.invalid_client_export = Some(Severity::Off);
+        });
+        apply_rules(&mut results, &config);
+        assert!(results.invalid_client_exports.is_empty());
+    }
+
+    #[test]
+    fn override_drops_mixed_client_server_barrels_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .mixed_client_server_barrels
+            .push(MixedClientServerBarrelFinding::with_actions(
+                MixedClientServerBarrel {
+                    path: PathBuf::from("/project/src/app/index.ts"),
+                    client_origin: "./client".to_string(),
+                    server_origin: "./server".to_string(),
+                    line: 2,
+                    col: 0,
+                },
+            ));
+        let config = config_with_override_for_rule("src/app/**", |p| {
+            p.mixed_client_server_barrel = Some(Severity::Off);
+        });
+        apply_rules(&mut results, &config);
+        assert!(results.mixed_client_server_barrels.is_empty());
+    }
+
+    #[test]
+    fn override_drops_misplaced_directives_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .misplaced_directives
+            .push(MisplacedDirectiveFinding::with_actions(
+                MisplacedDirective {
+                    path: PathBuf::from("/project/src/app/widget.ts"),
+                    directive: "use client".to_string(),
+                    line: 5,
+                    col: 0,
+                },
+            ));
+        let config = config_with_override_for_rule("src/app/**", |p| {
+            p.misplaced_directive = Some(Severity::Off);
+        });
+        apply_rules(&mut results, &config);
+        assert!(results.misplaced_directives.is_empty());
+    }
+
+    #[test]
+    fn override_drops_route_collisions_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .route_collisions
+            .push(RouteCollisionFinding::with_actions(RouteCollision {
+                path: PathBuf::from("/project/src/app/(a)/about/page.tsx"),
+                url: "/about".to_string(),
+                conflicting_paths: vec![PathBuf::from("/project/src/app/(b)/about/page.tsx")],
+                line: 1,
+                col: 0,
+            }));
+        let config = config_with_override_for_rule("src/app/(a)/**", |p| {
+            p.route_collision = Some(Severity::Off);
+        });
+        apply_rules(&mut results, &config);
+        assert!(results.route_collisions.is_empty());
+    }
+
+    #[test]
+    fn override_drops_dynamic_segment_name_conflicts_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results.dynamic_segment_name_conflicts.push(
+            DynamicSegmentNameConflictFinding::with_actions(DynamicSegmentNameConflict {
+                path: PathBuf::from("/project/src/app/routes/page.tsx"),
+                position: "/".to_string(),
+                conflicting_segments: vec!["[id]".to_string(), "[slug]".to_string()],
+                conflicting_paths: vec![PathBuf::from("/project/src/app/other/page.tsx")],
+                line: 1,
+                col: 0,
+            }),
+        );
+        let config = config_with_override_for_rule("src/app/**", |p| {
+            p.dynamic_segment_name_conflict = Some(Severity::Off);
+        });
+        apply_rules(&mut results, &config);
+        assert!(results.dynamic_segment_name_conflicts.is_empty());
+    }
+
+    // -------------------------------------------------------------------------
+    // Lines 312-313: clear_base_core_dead_code - private_type_leaks Off
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn base_private_type_leaks_off_clears_findings() {
+        let mut results = AnalysisResults::default();
+        results
+            .private_type_leaks
+            .push(PrivateTypeLeakFinding::with_actions(PrivateTypeLeak {
+                path: PathBuf::from("/project/src/api.ts"),
+                export_name: "publicFn".to_string(),
+                type_name: "_Internal".to_string(),
+                line: 3,
+                col: 0,
+                span_start: 0,
+            }));
+        let rules = RulesConfig {
+            private_type_leaks: Severity::Off,
+            ..RulesConfig::default()
+        };
+        let config = config_with_rules(rules);
+        apply_rules(&mut results, &config);
+        assert!(results.private_type_leaks.is_empty());
+    }
+
+    // -------------------------------------------------------------------------
+    // Lines 367-388: clear_base_suppression_and_framework - stale_suppressions retain
+    // and base framework Off clears
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn base_stale_suppression_off_clears_non_missing_reason_suppressions() {
+        let mut results = AnalysisResults::default();
+        results
+            .stale_suppressions
+            .push(stale_suppression("/project/src/a.ts", false));
+        let rules = RulesConfig {
+            stale_suppressions: Severity::Off,
+            ..RulesConfig::default()
+        };
+        let config = config_with_rules(rules);
+        apply_rules(&mut results, &config);
+        assert!(results.stale_suppressions.is_empty());
+    }
+
+    #[test]
+    fn base_require_suppression_reason_off_clears_missing_reason_suppressions() {
+        let mut results = AnalysisResults::default();
+        results
+            .stale_suppressions
+            .push(stale_suppression("/project/src/a.ts", true));
+        let rules = RulesConfig {
+            require_suppression_reason: Severity::Off,
+            ..RulesConfig::default()
+        };
+        let config = config_with_rules(rules);
+        apply_rules(&mut results, &config);
+        assert!(results.stale_suppressions.is_empty());
+    }
+
+    #[test]
+    fn base_require_suppression_reason_off_keeps_normal_stale_suppressions() {
+        let mut results = AnalysisResults::default();
+        results
+            .stale_suppressions
+            .push(stale_suppression("/project/src/a.ts", false));
+        let rules = RulesConfig {
+            require_suppression_reason: Severity::Off,
+            ..RulesConfig::default()
+        };
+        let config = config_with_rules(rules);
+        apply_rules(&mut results, &config);
+        // stale_suppressions rule is still Error (default), so non-missing-reason stays
+        assert_eq!(results.stale_suppressions.len(), 1);
+    }
+
+    #[test]
+    fn base_invalid_client_export_off_clears_findings() {
+        let mut results = AnalysisResults::default();
+        results
+            .invalid_client_exports
+            .push(InvalidClientExportFinding::with_actions(
+                InvalidClientExport {
+                    path: PathBuf::from("/project/src/page.ts"),
+                    export_name: "metadata".to_string(),
+                    directive: "use client".to_string(),
+                    line: 1,
+                    col: 0,
+                },
+            ));
+        let rules = RulesConfig {
+            invalid_client_export: Severity::Off,
+            ..RulesConfig::default()
+        };
+        let config = config_with_rules(rules);
+        apply_rules(&mut results, &config);
+        assert!(results.invalid_client_exports.is_empty());
+    }
+
+    #[test]
+    fn base_mixed_client_server_barrel_off_clears_findings() {
+        let mut results = AnalysisResults::default();
+        results
+            .mixed_client_server_barrels
+            .push(MixedClientServerBarrelFinding::with_actions(
+                MixedClientServerBarrel {
+                    path: PathBuf::from("/project/src/index.ts"),
+                    client_origin: "./client".to_string(),
+                    server_origin: "./server".to_string(),
+                    line: 1,
+                    col: 0,
+                },
+            ));
+        let rules = RulesConfig {
+            mixed_client_server_barrel: Severity::Off,
+            ..RulesConfig::default()
+        };
+        let config = config_with_rules(rules);
+        apply_rules(&mut results, &config);
+        assert!(results.mixed_client_server_barrels.is_empty());
+    }
+
+    #[test]
+    fn base_misplaced_directive_off_clears_findings() {
+        let mut results = AnalysisResults::default();
+        results
+            .misplaced_directives
+            .push(MisplacedDirectiveFinding::with_actions(
+                MisplacedDirective {
+                    path: PathBuf::from("/project/src/widget.ts"),
+                    directive: "use client".to_string(),
+                    line: 5,
+                    col: 0,
+                },
+            ));
+        let rules = RulesConfig {
+            misplaced_directive: Severity::Off,
+            ..RulesConfig::default()
+        };
+        let config = config_with_rules(rules);
+        apply_rules(&mut results, &config);
+        assert!(results.misplaced_directives.is_empty());
+    }
+
+    #[test]
+    fn base_route_collision_off_clears_findings() {
+        let mut results = AnalysisResults::default();
+        results
+            .route_collisions
+            .push(RouteCollisionFinding::with_actions(RouteCollision {
+                path: PathBuf::from("/project/src/app/(a)/about/page.tsx"),
+                url: "/about".to_string(),
+                conflicting_paths: vec![PathBuf::from("/project/src/app/(b)/about/page.tsx")],
+                line: 1,
+                col: 0,
+            }));
+        let rules = RulesConfig {
+            route_collision: Severity::Off,
+            ..RulesConfig::default()
+        };
+        let config = config_with_rules(rules);
+        apply_rules(&mut results, &config);
+        assert!(results.route_collisions.is_empty());
+    }
+
+    #[test]
+    fn base_dynamic_segment_name_conflict_off_clears_findings() {
+        let mut results = AnalysisResults::default();
+        results.dynamic_segment_name_conflicts.push(
+            DynamicSegmentNameConflictFinding::with_actions(DynamicSegmentNameConflict {
+                path: PathBuf::from("/project/src/app/[id]/page.tsx"),
+                position: "/".to_string(),
+                conflicting_segments: vec!["[id]".to_string(), "[slug]".to_string()],
+                conflicting_paths: vec![PathBuf::from("/project/src/app/[slug]/page.tsx")],
+                line: 1,
+                col: 0,
+            }),
+        );
+        let rules = RulesConfig {
+            dynamic_segment_name_conflict: Severity::Off,
+            ..RulesConfig::default()
+        };
+        let config = config_with_rules(rules);
+        apply_rules(&mut results, &config);
+        assert!(results.dynamic_segment_name_conflicts.is_empty());
+    }
+
+    // -------------------------------------------------------------------------
+    // Lines 407-419: apply_boundary_override_rules - boundary_call_violations
+    // and policy_violations with override
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn override_drops_boundary_call_violations_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .boundary_call_violations
+            .push(BoundaryCallViolationFinding::with_actions(
+                BoundaryCallViolation {
+                    path: PathBuf::from("/project/src/ui/Component.ts"),
+                    line: 10,
+                    col: 0,
+                    zone: "ui".to_string(),
+                    callee: "cp.exec".to_string(),
+                    pattern: "child_process.*".to_string(),
+                },
+            ));
+        let config = config_with_override_for_rule("src/ui/**", |p| {
+            p.boundary_violation = Some(Severity::Off);
+        });
+        apply_rules(&mut results, &config);
+        assert!(results.boundary_call_violations.is_empty());
+    }
+
+    #[test]
+    fn override_keeps_boundary_call_violations_for_non_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .boundary_call_violations
+            .push(BoundaryCallViolationFinding::with_actions(
+                BoundaryCallViolation {
+                    path: PathBuf::from("/project/src/core/Service.ts"),
+                    line: 10,
+                    col: 0,
+                    zone: "core".to_string(),
+                    callee: "cp.exec".to_string(),
+                    pattern: "child_process.*".to_string(),
+                },
+            ));
+        let config = config_with_override_for_rule("src/ui/**", |p| {
+            p.boundary_violation = Some(Severity::Off);
+        });
+        apply_rules(&mut results, &config);
+        assert_eq!(results.boundary_call_violations.len(), 1);
+    }
+
+    #[test]
+    fn override_drops_policy_violations_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .policy_violations
+            .push(PolicyViolationFinding::with_actions(PolicyViolation {
+                path: PathBuf::from("/project/src/ui/Component.ts"),
+                line: 5,
+                col: 0,
+                pack: "no-exec".to_string(),
+                rule_id: "exec-banned".to_string(),
+                kind: PolicyRuleKind::BannedCall,
+                matched: "cp.exec".to_string(),
+                severity: PolicyViolationSeverity::Error,
+                message: None,
+            }));
+        let config = config_with_override_for_rule("src/ui/**", |p| {
+            p.policy_violation = Some(Severity::Off);
+        });
+        apply_rules(&mut results, &config);
+        assert!(results.policy_violations.is_empty());
+    }
+
+    // -------------------------------------------------------------------------
+    // Lines 467-511: has_override_core_dead_code_error - per-file Error check
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn has_error_override_unused_types_error_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_types
+            .push(UnusedTypeFinding::with_actions(UnusedExport {
+                path: PathBuf::from("/project/src/core/types.ts"),
+                export_name: "CoreType".to_string(),
+                is_type_only: true,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
+        let config = config_with_override_for_rule("src/generated/**", |p| {
+            p.unused_types = Some(Severity::Off);
+        });
+        let rules = &config.rules;
+        assert!(has_error_severity_issues(&results, rules, Some(&config)));
+    }
+
+    #[test]
+    fn has_error_override_unused_types_off_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_types
+            .push(UnusedTypeFinding::with_actions(UnusedExport {
+                path: PathBuf::from("/project/src/generated/types.ts"),
+                export_name: "GenType".to_string(),
+                is_type_only: true,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
+        let config = config_with_override_for_rule("src/generated/**", |p| {
+            p.unused_types = Some(Severity::Off);
+        });
+        let rules = &config.rules;
+        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+    }
+
+    #[test]
+    fn has_error_override_private_type_leaks_off_for_matching_file() {
+        // private_type_leaks base default is Off; override sets it to Warn for generated.
+        // A non-generated file keeps Off; the matching file with Off still produces no error.
+        let mut results = AnalysisResults::default();
+        results
+            .private_type_leaks
+            .push(PrivateTypeLeakFinding::with_actions(PrivateTypeLeak {
+                path: PathBuf::from("/project/src/generated/api.ts"),
+                export_name: "publicFn".to_string(),
+                type_name: "_Internal".to_string(),
+                line: 3,
+                col: 0,
+                span_start: 0,
+            }));
+        // Override generated files to Warn (not Error); should not produce an error.
+        let config = config_with_override_for_rule("src/generated/**", |p| {
+            p.private_type_leaks = Some(Severity::Warn);
+        });
+        let rules = &config.rules;
+        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+    }
+
+    #[test]
+    fn has_error_override_unused_enum_members_error_for_non_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_enum_members
+            .push(UnusedEnumMemberFinding::with_actions(UnusedMember {
+                path: PathBuf::from("/project/src/core/enums.ts"),
+                parent_name: "Status".to_string(),
+                member_name: "Legacy".to_string(),
+                kind: MemberKind::EnumMember,
+                line: 8,
+                col: 0,
+            }));
+        let config = config_with_override_for_rule("src/generated/**", |p| {
+            p.unused_enum_members = Some(Severity::Off);
+        });
+        let rules = &config.rules;
+        assert!(has_error_severity_issues(&results, rules, Some(&config)));
+    }
+
+    #[test]
+    fn has_error_override_unused_class_members_off_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_class_members
+            .push(UnusedClassMemberFinding::with_actions(UnusedMember {
+                path: PathBuf::from("/project/src/generated/service.ts"),
+                parent_name: "Service".to_string(),
+                member_name: "_hidden".to_string(),
+                kind: MemberKind::ClassMethod,
+                line: 20,
+                col: 0,
+            }));
+        let config = config_with_override_for_rule("src/generated/**", |p| {
+            p.unused_class_members = Some(Severity::Off);
+        });
+        let rules = &config.rules;
+        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+    }
+
+    #[test]
+    fn has_error_override_unused_store_members_off_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_store_members
+            .push(UnusedStoreMemberFinding::with_actions(UnusedMember {
+                path: PathBuf::from("/project/src/generated/store.ts"),
+                parent_name: "useGenStore".to_string(),
+                member_name: "unused".to_string(),
+                kind: MemberKind::StoreMember,
+                line: 5,
+                col: 0,
+            }));
+        let config = config_with_override_for_rule("src/generated/**", |p| {
+            p.unused_store_members = Some(Severity::Off);
+        });
+        let rules = &config.rules;
+        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+    }
+
+    #[test]
+    fn has_error_override_unprovided_injects_off_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .unprovided_injects
+            .push(UnprovidedInjectFinding::with_actions(UnprovidedInject {
+                path: PathBuf::from("/project/src/generated/child.vue"),
+                key_name: "KEY".to_string(),
+                framework: "vue".to_string(),
+                line: 2,
+                col: 0,
+            }));
+        let config = config_with_override_for_rule("src/generated/**", |p| {
+            p.unprovided_injects = Some(Severity::Off);
+        });
+        let rules = &config.rules;
+        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+    }
+
+    #[test]
+    fn has_error_override_unresolved_imports_off_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .unresolved_imports
+            .push(UnresolvedImportFinding::with_actions(UnresolvedImport {
+                path: PathBuf::from("/project/src/generated/mod.ts"),
+                specifier: "./missing".to_string(),
+                line: 1,
+                col: 0,
+                specifier_col: 0,
+            }));
+        let config = config_with_override_for_rule("src/generated/**", |p| {
+            p.unresolved_imports = Some(Severity::Off);
+        });
+        let rules = &config.rules;
+        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+    }
+
+    // -------------------------------------------------------------------------
+    // Lines 518-559: has_override_component_dead_code_error
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn has_error_override_unrendered_components_warn_for_non_matching_file() {
+        // unrendered_components base default is Warn (not Error), so non-matching
+        // files do not produce an error finding even when an override turns legacy files Off.
+        let mut results = AnalysisResults::default();
+        results
+            .unrendered_components
+            .push(UnrenderedComponentFinding::with_actions(
+                UnrenderedComponent {
+                    path: PathBuf::from("/project/src/core/Widget.vue"),
+                    component_name: "Widget".to_string(),
+                    framework: "vue".to_string(),
+                    reachable_via: None,
+                    line: 1,
+                    col: 0,
+                },
+            ));
+        let config = config_with_override_for_rule("src/legacy/**", |p| {
+            p.unrendered_components = Some(Severity::Off);
+        });
+        let rules = &config.rules;
+        // Base default is Warn, so a non-matched file is also Warn: no error.
+        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+    }
+
+    #[test]
+    fn has_error_override_unused_component_props_off_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_component_props
+            .push(UnusedComponentPropFinding::with_actions(
+                UnusedComponentProp {
+                    path: PathBuf::from("/project/src/legacy/Card.vue"),
+                    component_name: "Card".to_string(),
+                    prop_name: "oldProp".to_string(),
+                    line: 3,
+                    col: 0,
+                },
+            ));
+        let config = config_with_override_for_rule("src/legacy/**", |p| {
+            p.unused_component_props = Some(Severity::Off);
+        });
+        let rules = &config.rules;
+        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+    }
+
+    #[test]
+    fn has_error_override_unused_component_emits_off_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_component_emits
+            .push(UnusedComponentEmitFinding::with_actions(
+                UnusedComponentEmit {
+                    path: PathBuf::from("/project/src/legacy/Button.vue"),
+                    component_name: "Button".to_string(),
+                    emit_name: "old-click".to_string(),
+                    line: 6,
+                    col: 0,
+                },
+            ));
+        let config = config_with_override_for_rule("src/legacy/**", |p| {
+            p.unused_component_emits = Some(Severity::Off);
+        });
+        let rules = &config.rules;
+        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+    }
+
+    #[test]
+    fn has_error_override_unused_component_inputs_off_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_component_inputs
+            .push(UnusedComponentInputFinding::with_actions(
+                UnusedComponentInput {
+                    path: PathBuf::from("/project/src/legacy/table.component.ts"),
+                    component_name: "table".to_string(),
+                    input_name: "deprecated".to_string(),
+                    line: 10,
+                    col: 0,
+                },
+            ));
+        let config = config_with_override_for_rule("src/legacy/**", |p| {
+            p.unused_component_inputs = Some(Severity::Off);
+        });
+        let rules = &config.rules;
+        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+    }
+
+    #[test]
+    fn has_error_override_unused_component_outputs_off_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_component_outputs
+            .push(UnusedComponentOutputFinding::with_actions(
+                UnusedComponentOutput {
+                    path: PathBuf::from("/project/src/legacy/table.component.ts"),
+                    component_name: "table".to_string(),
+                    output_name: "legacyChange".to_string(),
+                    line: 14,
+                    col: 0,
+                },
+            ));
+        let config = config_with_override_for_rule("src/legacy/**", |p| {
+            p.unused_component_outputs = Some(Severity::Off);
+        });
+        let rules = &config.rules;
+        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+    }
+
+    #[test]
+    fn has_error_override_unused_svelte_events_off_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_svelte_events
+            .push(UnusedSvelteEventFinding::with_actions(UnusedSvelteEvent {
+                path: PathBuf::from("/project/src/legacy/Widget.svelte"),
+                component_name: "Widget".to_string(),
+                event_name: "oldEvent".to_string(),
+                line: 8,
+                col: 0,
+            }));
+        let config = config_with_override_for_rule("src/legacy/**", |p| {
+            p.unused_svelte_events = Some(Severity::Off);
+        });
+        let rules = &config.rules;
+        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+    }
+
+    #[test]
+    fn has_error_override_unused_server_actions_off_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_server_actions
+            .push(UnusedServerActionFinding::with_actions(
+                UnusedServerAction {
+                    path: PathBuf::from("/project/src/legacy/actions.ts"),
+                    action_name: "oldAction".to_string(),
+                    line: 3,
+                    col: 0,
+                },
+            ));
+        let config = config_with_override_for_rule("src/legacy/**", |p| {
+            p.unused_server_actions = Some(Severity::Off);
+        });
+        let rules = &config.rules;
+        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+    }
+
+    #[test]
+    fn has_error_override_unused_load_data_keys_off_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_load_data_keys
+            .push(UnusedLoadDataKeyFinding::with_actions(UnusedLoadDataKey {
+                path: PathBuf::from("/project/src/legacy/+page.server.ts"),
+                key_name: "oldKey".to_string(),
+                line: 2,
+                col: 0,
+                route_dir: None,
+            }));
+        let config = config_with_override_for_rule("src/legacy/**", |p| {
+            p.unused_load_data_keys = Some(Severity::Off);
+        });
+        let rules = &config.rules;
+        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+    }
+
+    // -------------------------------------------------------------------------
+    // Lines 565-592: has_override_catalog_boundary_error
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn has_error_override_stale_suppression_missing_reason_not_error_for_non_matching_file() {
+        // require_suppression_reason base default is Off, so even a non-matching file
+        // does not produce an error for missing-reason suppressions.
+        let mut results = AnalysisResults::default();
+        results
+            .stale_suppressions
+            .push(stale_suppression("/project/src/core/a.ts", true));
+        let config = config_with_override_for_rule("src/generated/**", |p| {
+            p.require_suppression_reason = Some(Severity::Off);
+        });
+        let rules = &config.rules;
+        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+    }
+
+    #[test]
+    fn has_error_override_stale_suppression_missing_reason_off_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .stale_suppressions
+            .push(stale_suppression("/project/src/generated/b.ts", true));
+        let config = config_with_override_for_rule("src/generated/**", |p| {
+            p.require_suppression_reason = Some(Severity::Off);
+        });
+        let rules = &config.rules;
+        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+    }
+
+    #[test]
+    fn has_error_override_stale_suppression_off_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .stale_suppressions
+            .push(stale_suppression("/project/src/generated/a.ts", false));
+        let config = config_with_override_for_rule("src/generated/**", |p| {
+            p.stale_suppressions = Some(Severity::Off);
+        });
+        let rules = &config.rules;
+        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+    }
+
+    #[test]
+    fn has_error_override_unresolved_catalog_references_off_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results.unresolved_catalog_references.push(
+            UnresolvedCatalogReferenceFinding::with_actions(UnresolvedCatalogReference {
+                entry_name: "react".to_string(),
+                catalog_name: "default".to_string(),
+                path: PathBuf::from("/project/packages/app/package.json"),
+                line: 5,
+                available_in_catalogs: vec![],
+            }),
+        );
+        let config = config_with_override_for_rule("packages/app/**", |p| {
+            p.unresolved_catalog_references = Some(Severity::Off);
+        });
+        let rules = &config.rules;
+        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+    }
+
+    #[test]
+    fn has_error_override_empty_catalog_groups_off_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .empty_catalog_groups
+            .push(EmptyCatalogGroupFinding::with_actions(EmptyCatalogGroup {
+                catalog_name: "tools".to_string(),
+                path: PathBuf::from("/project/pnpm-workspace.yaml"),
+                line: 10,
+            }));
+        let config = config_with_override_for_rule("pnpm-workspace.yaml", |p| {
+            p.empty_catalog_groups = Some(Severity::Off);
+        });
+        let rules = &config.rules;
+        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+    }
+
+    // -------------------------------------------------------------------------
+    // Lines 603-629: has_override_framework_error
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn has_error_override_invalid_client_exports_off_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .invalid_client_exports
+            .push(InvalidClientExportFinding::with_actions(
+                InvalidClientExport {
+                    path: PathBuf::from("/project/src/app/page.ts"),
+                    export_name: "metadata".to_string(),
+                    directive: "use client".to_string(),
+                    line: 1,
+                    col: 0,
+                },
+            ));
+        let config = config_with_override_for_rule("src/app/**", |p| {
+            p.invalid_client_export = Some(Severity::Off);
+        });
+        let rules = &config.rules;
+        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+    }
+
+    #[test]
+    fn has_error_override_mixed_client_server_barrel_off_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .mixed_client_server_barrels
+            .push(MixedClientServerBarrelFinding::with_actions(
+                MixedClientServerBarrel {
+                    path: PathBuf::from("/project/src/app/index.ts"),
+                    client_origin: "./client".to_string(),
+                    server_origin: "./server".to_string(),
+                    line: 1,
+                    col: 0,
+                },
+            ));
+        let config = config_with_override_for_rule("src/app/**", |p| {
+            p.mixed_client_server_barrel = Some(Severity::Off);
+        });
+        let rules = &config.rules;
+        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+    }
+
+    #[test]
+    fn has_error_override_misplaced_directive_off_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .misplaced_directives
+            .push(MisplacedDirectiveFinding::with_actions(
+                MisplacedDirective {
+                    path: PathBuf::from("/project/src/app/widget.ts"),
+                    directive: "use client".to_string(),
+                    line: 5,
+                    col: 0,
+                },
+            ));
+        let config = config_with_override_for_rule("src/app/**", |p| {
+            p.misplaced_directive = Some(Severity::Off);
+        });
+        let rules = &config.rules;
+        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+    }
+
+    #[test]
+    fn has_error_override_route_collision_off_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .route_collisions
+            .push(RouteCollisionFinding::with_actions(RouteCollision {
+                path: PathBuf::from("/project/src/app/(a)/about/page.tsx"),
+                url: "/about".to_string(),
+                conflicting_paths: vec![PathBuf::from("/project/src/app/(b)/about/page.tsx")],
+                line: 1,
+                col: 0,
+            }));
+        let config = config_with_override_for_rule("src/app/(a)/**", |p| {
+            p.route_collision = Some(Severity::Off);
+        });
+        let rules = &config.rules;
+        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+    }
+
+    #[test]
+    fn has_error_override_dynamic_segment_name_conflict_off_for_matching_file() {
+        let mut results = AnalysisResults::default();
+        results.dynamic_segment_name_conflicts.push(
+            DynamicSegmentNameConflictFinding::with_actions(DynamicSegmentNameConflict {
+                path: PathBuf::from("/project/src/app/routes/page.tsx"),
+                position: "/".to_string(),
+                conflicting_segments: vec!["[id]".to_string(), "[slug]".to_string()],
+                conflicting_paths: vec![PathBuf::from("/project/src/app/other/page.tsx")],
+                line: 1,
+                col: 0,
+            }),
+        );
+        let config = config_with_override_for_rule("src/app/**", |p| {
+            p.dynamic_segment_name_conflict = Some(Severity::Off);
+        });
+        let rules = &config.rules;
+        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+    }
+
+    // -------------------------------------------------------------------------
+    // Lines 638-679 / 691-720: has_default_file_scoped_error and
+    // has_project_level_error - stale-suppression and dep-override error arms
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn default_file_scoped_stale_suppression_missing_reason_error() {
+        let mut results = AnalysisResults::default();
+        results
+            .stale_suppressions
+            .push(stale_suppression("/project/src/a.ts", true));
+        let rules = RulesConfig {
+            require_suppression_reason: Severity::Error,
+            ..RulesConfig::default()
+        };
+        assert!(has_error_severity_issues(&results, &rules, None));
+    }
+
+    #[test]
+    fn default_file_scoped_stale_suppression_missing_reason_warn_not_error() {
+        let mut results = AnalysisResults::default();
+        results
+            .stale_suppressions
+            .push(stale_suppression("/project/src/a.ts", true));
+        // The missing_reason branch checks require_suppression_reason; stale branch checks stale_suppressions.
+        // Both are Warn here so no error.
+        let all_warn = RulesConfig {
+            unused_files: Severity::Warn,
+            unused_exports: Severity::Warn,
+            unused_types: Severity::Warn,
+            private_type_leaks: Severity::Warn,
+            unused_dependencies: Severity::Warn,
+            unused_dev_dependencies: Severity::Warn,
+            unused_optional_dependencies: Severity::Warn,
+            unused_enum_members: Severity::Warn,
+            unused_class_members: Severity::Warn,
+            unused_store_members: Severity::Warn,
+            unprovided_injects: Severity::Warn,
+            unrendered_components: Severity::Warn,
+            unused_component_props: Severity::Warn,
+            unused_component_emits: Severity::Warn,
+            unused_component_inputs: Severity::Warn,
+            unused_component_outputs: Severity::Warn,
+            unused_svelte_events: Severity::Warn,
+            unused_server_actions: Severity::Warn,
+            unused_load_data_keys: Severity::Warn,
+            prop_drilling: Severity::Off,
+            thin_wrapper: Severity::Off,
+            duplicate_prop_shape: Severity::Off,
+            unresolved_imports: Severity::Warn,
+            unlisted_dependencies: Severity::Warn,
+            duplicate_exports: Severity::Warn,
+            type_only_dependencies: Severity::Warn,
+            test_only_dependencies: Severity::Warn,
+            boundary_violation: Severity::Warn,
+            circular_dependencies: Severity::Warn,
+            re_export_cycle: Severity::Warn,
+            coverage_gaps: Severity::Warn,
+            feature_flags: Severity::Warn,
+            stale_suppressions: Severity::Warn,
+            require_suppression_reason: Severity::Warn,
+            unused_catalog_entries: Severity::Warn,
+            empty_catalog_groups: Severity::Warn,
+            unresolved_catalog_references: Severity::Warn,
+            unused_dependency_overrides: Severity::Warn,
+            misconfigured_dependency_overrides: Severity::Warn,
+            security_client_server_leak: Severity::Off,
+            security_sink: Severity::Off,
+            policy_violation: Severity::Warn,
+            invalid_client_export: Severity::Warn,
+            mixed_client_server_barrel: Severity::Warn,
+            misplaced_directive: Severity::Warn,
+            route_collision: Severity::Warn,
+            dynamic_segment_name_conflict: Severity::Warn,
+        };
+        assert!(!has_error_severity_issues(&results, &all_warn, None));
+    }
+
+    #[test]
+    fn project_level_unused_dep_overrides_error() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_dependency_overrides
+            .push(UnusedDependencyOverrideFinding::with_actions(
+                UnusedDependencyOverride {
+                    raw_key: "old-pkg".to_string(),
+                    target_package: "old-pkg".to_string(),
+                    parent_package: None,
+                    version_constraint: None,
+                    version_range: "^1.0.0".to_string(),
+                    source: DependencyOverrideSource::PnpmWorkspaceYaml,
+                    path: PathBuf::from("/project/pnpm-workspace.yaml"),
+                    line: 5,
+                    hint: None,
+                },
+            ));
+        let rules = RulesConfig {
+            unused_dependency_overrides: Severity::Error,
+            ..RulesConfig::default()
+        };
+        assert!(has_error_severity_issues(&results, &rules, None));
+    }
+
+    #[test]
+    fn project_level_misconfigured_dep_overrides_error() {
+        let mut results = AnalysisResults::default();
+        results.misconfigured_dependency_overrides.push(
+            MisconfiguredDependencyOverrideFinding::with_actions(MisconfiguredDependencyOverride {
+                raw_key: "bad>".to_string(),
+                target_package: None,
+                raw_value: "1.0.0".to_string(),
+                reason: DependencyOverrideMisconfigReason::UnparsableKey,
+                source: DependencyOverrideSource::PnpmPackageJson,
+                path: PathBuf::from("/project/package.json"),
+                line: 3,
+            }),
+        );
+        let rules = RulesConfig {
+            misconfigured_dependency_overrides: Severity::Error,
+            ..RulesConfig::default()
+        };
+        assert!(has_error_severity_issues(&results, &rules, None));
+    }
+
+    #[test]
+    fn project_level_re_export_cycle_error() {
+        let mut results = AnalysisResults::default();
+        results
+            .re_export_cycles
+            .push(ReExportCycleFinding::with_actions(ReExportCycle {
+                files: vec![
+                    PathBuf::from("/project/src/a.ts"),
+                    PathBuf::from("/project/src/b.ts"),
+                ],
+                kind: ReExportCycleKind::MultiNode,
+            }));
+        let rules = RulesConfig {
+            re_export_cycle: Severity::Error,
+            ..RulesConfig::default()
+        };
+        assert!(has_error_severity_issues(&results, &rules, None));
+    }
+
+    #[test]
+    fn project_level_unused_catalog_entries_error() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_catalog_entries
+            .push(UnusedCatalogEntryFinding::with_actions(
+                UnusedCatalogEntry {
+                    entry_name: "lodash".to_string(),
+                    catalog_name: "default".to_string(),
+                    path: PathBuf::from("/project/pnpm-workspace.yaml"),
+                    line: 5,
+                    hardcoded_consumers: vec![],
+                },
+            ));
+        let rules = RulesConfig {
+            unused_catalog_entries: Severity::Error,
+            ..RulesConfig::default()
+        };
+        assert!(has_error_severity_issues(&results, &rules, None));
+    }
+
+    #[test]
+    fn project_level_boundary_violation_no_override_error_for_call_violation() {
+        let mut results = AnalysisResults::default();
+        results
+            .boundary_call_violations
+            .push(BoundaryCallViolationFinding::with_actions(
+                BoundaryCallViolation {
+                    path: PathBuf::from("/project/src/ui/a.ts"),
+                    line: 1,
+                    col: 0,
+                    zone: "ui".to_string(),
+                    callee: "cp.exec".to_string(),
+                    pattern: "child_process.*".to_string(),
+                },
+            ));
+        let rules = RulesConfig::default(); // boundary_violation is Error
+        assert!(has_error_severity_issues(&results, &rules, None));
+    }
+
+    // -------------------------------------------------------------------------
+    // Lines 729-730: promote_policy_finding_warns
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn promote_policy_finding_warns_flips_warn_to_error() {
+        let mut results = AnalysisResults::default();
+        results
+            .policy_violations
+            .push(PolicyViolationFinding::with_actions(PolicyViolation {
+                path: PathBuf::from("/project/src/a.ts"),
+                line: 1,
+                col: 0,
+                pack: "pack".to_string(),
+                rule_id: "rule".to_string(),
+                kind: PolicyRuleKind::BannedCall,
+                matched: "exec".to_string(),
+                severity: PolicyViolationSeverity::Warn,
+                message: None,
+            }));
+        promote_policy_finding_warns(&mut results);
+        assert_eq!(
+            results.policy_violations[0].violation.severity,
+            PolicyViolationSeverity::Error
+        );
+    }
+
+    #[test]
+    fn promote_policy_finding_warns_preserves_error_severity() {
+        let mut results = AnalysisResults::default();
+        results
+            .policy_violations
+            .push(PolicyViolationFinding::with_actions(PolicyViolation {
+                path: PathBuf::from("/project/src/a.ts"),
+                line: 1,
+                col: 0,
+                pack: "pack".to_string(),
+                rule_id: "rule".to_string(),
+                kind: PolicyRuleKind::BannedCall,
+                matched: "exec".to_string(),
+                severity: PolicyViolationSeverity::Error,
+                message: None,
+            }));
+        promote_policy_finding_warns(&mut results);
+        assert_eq!(
+            results.policy_violations[0].violation.severity,
+            PolicyViolationSeverity::Error
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Lines 794-799: promote_policy_finding_warns on empty results
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn promote_policy_finding_warns_noop_on_empty() {
+        let mut results = AnalysisResults::default();
+        promote_policy_finding_warns(&mut results);
+        assert!(results.policy_violations.is_empty());
+    }
+
+    // -------------------------------------------------------------------------
+    // Additional base-component clearing (clear_base_component_dead_code)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn base_unrendered_components_off_clears_findings() {
+        let mut results = AnalysisResults::default();
+        results
+            .unrendered_components
+            .push(UnrenderedComponentFinding::with_actions(
+                UnrenderedComponent {
+                    path: PathBuf::from("/project/src/Widget.vue"),
+                    component_name: "Widget".to_string(),
+                    framework: "vue".to_string(),
+                    reachable_via: None,
+                    line: 1,
+                    col: 0,
+                },
+            ));
+        let rules = RulesConfig {
+            unrendered_components: Severity::Off,
+            ..RulesConfig::default()
+        };
+        let config = config_with_rules(rules);
+        apply_rules(&mut results, &config);
+        assert!(results.unrendered_components.is_empty());
+    }
+
+    #[test]
+    fn base_unused_component_props_off_clears_findings() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_component_props
+            .push(UnusedComponentPropFinding::with_actions(
+                UnusedComponentProp {
+                    path: PathBuf::from("/project/src/Card.vue"),
+                    component_name: "Card".to_string(),
+                    prop_name: "color".to_string(),
+                    line: 4,
+                    col: 0,
+                },
+            ));
+        let rules = RulesConfig {
+            unused_component_props: Severity::Off,
+            ..RulesConfig::default()
+        };
+        let config = config_with_rules(rules);
+        apply_rules(&mut results, &config);
+        assert!(results.unused_component_props.is_empty());
+    }
+
+    #[test]
+    fn base_unused_component_emits_off_clears_findings() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_component_emits
+            .push(UnusedComponentEmitFinding::with_actions(
+                UnusedComponentEmit {
+                    path: PathBuf::from("/project/src/Button.vue"),
+                    component_name: "Button".to_string(),
+                    emit_name: "click".to_string(),
+                    line: 6,
+                    col: 0,
+                },
+            ));
+        let rules = RulesConfig {
+            unused_component_emits: Severity::Off,
+            ..RulesConfig::default()
+        };
+        let config = config_with_rules(rules);
+        apply_rules(&mut results, &config);
+        assert!(results.unused_component_emits.is_empty());
+    }
+
+    #[test]
+    fn base_unused_component_inputs_off_clears_findings() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_component_inputs
+            .push(UnusedComponentInputFinding::with_actions(
+                UnusedComponentInput {
+                    path: PathBuf::from("/project/src/table.component.ts"),
+                    component_name: "table".to_string(),
+                    input_name: "rows".to_string(),
+                    line: 10,
+                    col: 0,
+                },
+            ));
+        let rules = RulesConfig {
+            unused_component_inputs: Severity::Off,
+            ..RulesConfig::default()
+        };
+        let config = config_with_rules(rules);
+        apply_rules(&mut results, &config);
+        assert!(results.unused_component_inputs.is_empty());
+    }
+
+    #[test]
+    fn base_unused_component_outputs_off_clears_findings() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_component_outputs
+            .push(UnusedComponentOutputFinding::with_actions(
+                UnusedComponentOutput {
+                    path: PathBuf::from("/project/src/table.component.ts"),
+                    component_name: "table".to_string(),
+                    output_name: "rowClick".to_string(),
+                    line: 14,
+                    col: 0,
+                },
+            ));
+        let rules = RulesConfig {
+            unused_component_outputs: Severity::Off,
+            ..RulesConfig::default()
+        };
+        let config = config_with_rules(rules);
+        apply_rules(&mut results, &config);
+        assert!(results.unused_component_outputs.is_empty());
+    }
+
+    #[test]
+    fn base_unused_svelte_events_off_clears_findings() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_svelte_events
+            .push(UnusedSvelteEventFinding::with_actions(UnusedSvelteEvent {
+                path: PathBuf::from("/project/src/Widget.svelte"),
+                component_name: "Widget".to_string(),
+                event_name: "toggle".to_string(),
+                line: 7,
+                col: 0,
+            }));
+        let rules = RulesConfig {
+            unused_svelte_events: Severity::Off,
+            ..RulesConfig::default()
+        };
+        let config = config_with_rules(rules);
+        apply_rules(&mut results, &config);
+        assert!(results.unused_svelte_events.is_empty());
+    }
+
+    #[test]
+    fn base_unused_server_actions_off_clears_findings() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_server_actions
+            .push(UnusedServerActionFinding::with_actions(
+                UnusedServerAction {
+                    path: PathBuf::from("/project/src/actions.ts"),
+                    action_name: "submitForm".to_string(),
+                    line: 2,
+                    col: 0,
+                },
+            ));
+        let rules = RulesConfig {
+            unused_server_actions: Severity::Off,
+            ..RulesConfig::default()
+        };
+        let config = config_with_rules(rules);
+        apply_rules(&mut results, &config);
+        assert!(results.unused_server_actions.is_empty());
+    }
+
+    #[test]
+    fn base_unused_load_data_keys_off_clears_findings() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_load_data_keys
+            .push(UnusedLoadDataKeyFinding::with_actions(UnusedLoadDataKey {
+                path: PathBuf::from("/project/src/routes/+page.server.ts"),
+                key_name: "userData".to_string(),
+                line: 3,
+                col: 0,
+                route_dir: Some("src/routes".to_string()),
+            }));
+        let rules = RulesConfig {
+            unused_load_data_keys: Severity::Off,
+            ..RulesConfig::default()
+        };
+        let config = config_with_rules(rules);
+        apply_rules(&mut results, &config);
+        assert!(results.unused_load_data_keys.is_empty());
+    }
+
+    #[test]
+    fn base_unprovided_injects_off_clears_findings() {
+        let mut results = AnalysisResults::default();
+        results
+            .unprovided_injects
+            .push(UnprovidedInjectFinding::with_actions(UnprovidedInject {
+                path: PathBuf::from("/project/src/Child.vue"),
+                key_name: "MY_KEY".to_string(),
+                framework: "vue".to_string(),
+                line: 2,
+                col: 0,
+            }));
+        let rules = RulesConfig {
+            unprovided_injects: Severity::Off,
+            ..RulesConfig::default()
+        };
+        let config = config_with_rules(rules);
+        apply_rules(&mut results, &config);
+        assert!(results.unprovided_injects.is_empty());
+    }
 }
