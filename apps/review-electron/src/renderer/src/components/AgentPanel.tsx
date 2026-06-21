@@ -46,7 +46,7 @@ export const AgentPanel = () => {
             type="button"
             onClick={() => setSelected(b.id)}
             className={cn(
-              "rounded-md px-2.5 py-1 text-[11px] lowercase transition-colors",
+              "rounded-md px-2.5 py-1 text-[11px] lowercase outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/60",
               selected === b.id
                 ? "bg-background text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground",

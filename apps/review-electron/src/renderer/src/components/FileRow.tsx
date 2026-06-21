@@ -54,7 +54,7 @@ export const FileRow = ({ file, viewed, onToggleViewed, onAddNote, onOpenDiff }:
           data-testid="file-open"
           title={file.reason || undefined}
           onClick={() => onOpenDiff(file.path)}
-          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
         >
           <FileText className="size-3.5 shrink-0 text-muted-foreground" />
           <span className="min-w-0 flex-1 truncate font-mono text-xs">

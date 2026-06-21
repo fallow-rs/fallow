@@ -182,3 +182,11 @@ stacked on `fix/review-quality` (engine E1-E8+E11).
   verdict pill + commit hash on one row, then aligned files / risk / effort cells
   (uppercase muted labels over mono values, risk color-toned). Verdict pill is now
   semibold. The review state reads as the anchor. format/lint/tsc/build/vitest/e2e 5/5.
+- Round 9 (keyboard focus states, MED a11y): the custom <button> elements (mode
+  control, agent backend picker, cleared-panel toggle, file-open row, annotation
+  pen swatches) had no visible keyboard-focus indicator, only the shadcn Button /
+  Checkbox primitives did. Added a consistent focus-visible:ring-2 ring-ring/60
+  (outline-none) to all of them, matching the shadcn focus pattern. Added a
+  10-focus QA capture that presses Tab (to enter keyboard modality so
+  :focus-visible matches) then focuses a file row; ring confirmed rendering.
+  format/lint/tsc/build/vitest/e2e 5/5.

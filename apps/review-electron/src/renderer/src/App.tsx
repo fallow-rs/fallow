@@ -129,7 +129,7 @@ export const App = () => {
                   disabled={disabled}
                   onClick={() => setRightMode(id)}
                   className={cn(
-                    "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs lowercase transition-colors",
+                    "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs lowercase outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/60",
                     rightMode === id
                       ? "bg-background text-foreground shadow-sm"
                       : "text-muted-foreground hover:text-foreground",

@@ -31,6 +31,15 @@ test("capture screens for design QA", async () => {
   await win.screenshot({ path: `${shots}/01-walkthrough.png` });
 
   await safe(async () => {
+    // Keyboard-focus a file row to QA the focus-visible ring. Press Tab first so
+    // the browser is in keyboard modality (otherwise :focus-visible won't match).
+    await win.keyboard.press("Tab");
+    await win.getByTestId("file-open").first().focus();
+    await win.waitForTimeout(150);
+    await win.screenshot({ path: `${shots}/10-focus.png` });
+  });
+
+  await safe(async () => {
     // Simulate the in-page picker posting a selection to the localhost bridge.
     await fetch("http://127.0.0.1:7787/fallow-select", {
       method: "POST",

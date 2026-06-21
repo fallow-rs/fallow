@@ -125,7 +125,7 @@ export const DrawableImage = ({ dataUrl, target, onDone }: Props) => {
               aria-pressed={colorIdx === i}
               onClick={() => setColorIdx(i)}
               className={cn(
-                "size-4 rounded-full ring-offset-2 ring-offset-background transition-shadow",
+                "size-4 rounded-full outline-none ring-offset-2 ring-offset-background transition-shadow focus-visible:ring-2 focus-visible:ring-ring",
                 s.bg,
                 colorIdx === i ? "ring-2 ring-ring" : "ring-0",
               )}
