@@ -2099,4 +2099,904 @@ mod tests {
         let value = markup_value(&hover);
         assert!(value.contains("`[click](command:vscode.open?evil)`"));
     }
+
+    // -------------------------------------------------------------------------
+    // Unrendered component (lines 466-503)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "test string lengths are trivially small"
+    )]
+    fn hover_on_unrendered_component() {
+        let root = test_root();
+        let path = root.join("src/components/MyCard.vue");
+        let mut results = AnalysisResults::default();
+        results.unrendered_components.push(
+            fallow_core::results::UnrenderedComponentFinding::with_actions(
+                fallow_core::results::UnrenderedComponent {
+                    path: path.clone(),
+                    component_name: "MyCard".to_string(),
+                    framework: "vue".to_string(),
+                    reachable_via: None,
+                    line: 1,
+                    col: 0,
+                },
+            ),
+        );
+        let duplication = DuplicationReport::default();
+        let pos = Position {
+            line: 0,
+            character: 3,
+        };
+
+        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let value = markup_value(&hover);
+        assert!(value.contains("MyCard"));
+        assert!(value.contains("rendered nowhere"));
+        let range = hover.range.unwrap();
+        assert_eq!(range.start.line, 0);
+        assert_eq!(range.start.character, 0);
+        assert_eq!(range.end.character, "MyCard".len() as u32);
+    }
+
+    #[test]
+    fn hover_on_unrendered_component_wrong_line_returns_none() {
+        let root = test_root();
+        let path = root.join("src/components/MyCard.vue");
+        let mut results = AnalysisResults::default();
+        results.unrendered_components.push(
+            fallow_core::results::UnrenderedComponentFinding::with_actions(
+                fallow_core::results::UnrenderedComponent {
+                    path: path.clone(),
+                    component_name: "MyCard".to_string(),
+                    framework: "vue".to_string(),
+                    reachable_via: None,
+                    line: 1,
+                    col: 0,
+                },
+            ),
+        );
+        let duplication = DuplicationReport::default();
+        let pos = Position {
+            line: 5,
+            character: 0,
+        };
+        assert!(build_hover(&results, &duplication, &path, pos).is_none());
+    }
+
+    #[test]
+    fn hover_on_unrendered_component_wrong_col_returns_none() {
+        let root = test_root();
+        let path = root.join("src/components/MyCard.vue");
+        let mut results = AnalysisResults::default();
+        results.unrendered_components.push(
+            fallow_core::results::UnrenderedComponentFinding::with_actions(
+                fallow_core::results::UnrenderedComponent {
+                    path: path.clone(),
+                    component_name: "MyCard".to_string(),
+                    framework: "vue".to_string(),
+                    reachable_via: None,
+                    line: 1,
+                    col: 5,
+                },
+            ),
+        );
+        let duplication = DuplicationReport::default();
+        let pos = Position {
+            line: 0,
+            character: 2,
+        };
+        assert!(build_hover(&results, &duplication, &path, pos).is_none());
+    }
+
+    // -------------------------------------------------------------------------
+    // Unused component prop (lines 516-553)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "test string lengths are trivially small"
+    )]
+    fn hover_on_unused_component_prop() {
+        let root = test_root();
+        let path = root.join("src/components/Button.vue");
+        let mut results = AnalysisResults::default();
+        results.unused_component_props.push(
+            fallow_core::results::UnusedComponentPropFinding::with_actions(
+                fallow_core::results::UnusedComponentProp {
+                    path: path.clone(),
+                    component_name: "Button".to_string(),
+                    prop_name: "variant".to_string(),
+                    line: 3,
+                    col: 2,
+                },
+            ),
+        );
+        let duplication = DuplicationReport::default();
+        let pos = Position {
+            line: 2,
+            character: 5,
+        };
+
+        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let value = markup_value(&hover);
+        assert!(value.contains("variant"));
+        assert!(value.contains("declared but referenced nowhere"));
+        let range = hover.range.unwrap();
+        assert_eq!(range.start.line, 2);
+        assert_eq!(range.start.character, 2);
+        assert_eq!(range.end.character, 2 + "variant".len() as u32);
+    }
+
+    #[test]
+    fn hover_on_unused_component_prop_wrong_col_returns_none() {
+        let root = test_root();
+        let path = root.join("src/components/Button.vue");
+        let mut results = AnalysisResults::default();
+        results.unused_component_props.push(
+            fallow_core::results::UnusedComponentPropFinding::with_actions(
+                fallow_core::results::UnusedComponentProp {
+                    path: path.clone(),
+                    component_name: "Button".to_string(),
+                    prop_name: "variant".to_string(),
+                    line: 3,
+                    col: 2,
+                },
+            ),
+        );
+        let duplication = DuplicationReport::default();
+        let pos = Position {
+            line: 2,
+            character: 50,
+        };
+        assert!(build_hover(&results, &duplication, &path, pos).is_none());
+    }
+
+    // -------------------------------------------------------------------------
+    // Unused component emit (lines 566-603)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "test string lengths are trivially small"
+    )]
+    fn hover_on_unused_component_emit() {
+        let root = test_root();
+        let path = root.join("src/components/Form.vue");
+        let mut results = AnalysisResults::default();
+        results.unused_component_emits.push(
+            fallow_core::results::UnusedComponentEmitFinding::with_actions(
+                fallow_core::results::UnusedComponentEmit {
+                    path: path.clone(),
+                    component_name: "Form".to_string(),
+                    emit_name: "submit".to_string(),
+                    line: 5,
+                    col: 4,
+                },
+            ),
+        );
+        let duplication = DuplicationReport::default();
+        let pos = Position {
+            line: 4,
+            character: 7,
+        };
+
+        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let value = markup_value(&hover);
+        assert!(value.contains("submit"));
+        assert!(value.contains("declared but emitted nowhere"));
+        let range = hover.range.unwrap();
+        assert_eq!(range.start.line, 4);
+        assert_eq!(range.start.character, 4);
+        assert_eq!(range.end.character, 4 + "submit".len() as u32);
+    }
+
+    #[test]
+    fn hover_on_unused_component_emit_wrong_col_returns_none() {
+        let root = test_root();
+        let path = root.join("src/components/Form.vue");
+        let mut results = AnalysisResults::default();
+        results.unused_component_emits.push(
+            fallow_core::results::UnusedComponentEmitFinding::with_actions(
+                fallow_core::results::UnusedComponentEmit {
+                    path: path.clone(),
+                    component_name: "Form".to_string(),
+                    emit_name: "submit".to_string(),
+                    line: 5,
+                    col: 4,
+                },
+            ),
+        );
+        let duplication = DuplicationReport::default();
+        let pos = Position {
+            line: 4,
+            character: 100,
+        };
+        assert!(build_hover(&results, &duplication, &path, pos).is_none());
+    }
+
+    // -------------------------------------------------------------------------
+    // Unused Angular component input (lines 616-653)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "test string lengths are trivially small"
+    )]
+    fn hover_on_unused_component_input() {
+        let root = test_root();
+        let path = root.join("src/app/card/card.component.ts");
+        let mut results = AnalysisResults::default();
+        results.unused_component_inputs.push(
+            fallow_core::results::UnusedComponentInputFinding::with_actions(
+                fallow_core::results::UnusedComponentInput {
+                    path: path.clone(),
+                    component_name: "CardComponent".to_string(),
+                    input_name: "title".to_string(),
+                    line: 7,
+                    col: 2,
+                },
+            ),
+        );
+        let duplication = DuplicationReport::default();
+        let pos = Position {
+            line: 6,
+            character: 4,
+        };
+
+        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let value = markup_value(&hover);
+        assert!(value.contains("title"));
+        assert!(value.contains("declared but read nowhere"));
+        let range = hover.range.unwrap();
+        assert_eq!(range.start.line, 6);
+        assert_eq!(range.start.character, 2);
+        assert_eq!(range.end.character, 2 + "title".len() as u32);
+    }
+
+    #[test]
+    fn hover_on_unused_component_input_wrong_line_returns_none() {
+        let root = test_root();
+        let path = root.join("src/app/card/card.component.ts");
+        let mut results = AnalysisResults::default();
+        results.unused_component_inputs.push(
+            fallow_core::results::UnusedComponentInputFinding::with_actions(
+                fallow_core::results::UnusedComponentInput {
+                    path: path.clone(),
+                    component_name: "CardComponent".to_string(),
+                    input_name: "title".to_string(),
+                    line: 7,
+                    col: 2,
+                },
+            ),
+        );
+        let duplication = DuplicationReport::default();
+        let pos = Position {
+            line: 20,
+            character: 2,
+        };
+        assert!(build_hover(&results, &duplication, &path, pos).is_none());
+    }
+
+    // -------------------------------------------------------------------------
+    // Unused Angular component output (lines 666-703)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "test string lengths are trivially small"
+    )]
+    fn hover_on_unused_component_output() {
+        let root = test_root();
+        let path = root.join("src/app/counter/counter.component.ts");
+        let mut results = AnalysisResults::default();
+        results.unused_component_outputs.push(
+            fallow_core::results::UnusedComponentOutputFinding::with_actions(
+                fallow_core::results::UnusedComponentOutput {
+                    path: path.clone(),
+                    component_name: "CounterComponent".to_string(),
+                    output_name: "changed".to_string(),
+                    line: 10,
+                    col: 4,
+                },
+            ),
+        );
+        let duplication = DuplicationReport::default();
+        let pos = Position {
+            line: 9,
+            character: 6,
+        };
+
+        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let value = markup_value(&hover);
+        assert!(value.contains("changed"));
+        assert!(value.contains("declared but emitted nowhere"));
+        let range = hover.range.unwrap();
+        assert_eq!(range.start.line, 9);
+        assert_eq!(range.start.character, 4);
+        assert_eq!(range.end.character, 4 + "changed".len() as u32);
+    }
+
+    #[test]
+    fn hover_on_unused_component_output_wrong_col_returns_none() {
+        let root = test_root();
+        let path = root.join("src/app/counter/counter.component.ts");
+        let mut results = AnalysisResults::default();
+        results.unused_component_outputs.push(
+            fallow_core::results::UnusedComponentOutputFinding::with_actions(
+                fallow_core::results::UnusedComponentOutput {
+                    path: path.clone(),
+                    component_name: "CounterComponent".to_string(),
+                    output_name: "changed".to_string(),
+                    line: 10,
+                    col: 4,
+                },
+            ),
+        );
+        let duplication = DuplicationReport::default();
+        let pos = Position {
+            line: 9,
+            character: 200,
+        };
+        assert!(build_hover(&results, &duplication, &path, pos).is_none());
+    }
+
+    // -------------------------------------------------------------------------
+    // Unused Svelte dispatched event (lines 716-753)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "test string lengths are trivially small"
+    )]
+    fn hover_on_unused_svelte_event() {
+        let root = test_root();
+        let path = root.join("src/lib/Notification.svelte");
+        let mut results = AnalysisResults::default();
+        results.unused_svelte_events.push(
+            fallow_core::results::UnusedSvelteEventFinding::with_actions(
+                fallow_core::results::UnusedSvelteEvent {
+                    path: path.clone(),
+                    component_name: "Notification".to_string(),
+                    event_name: "close".to_string(),
+                    line: 4,
+                    col: 0,
+                },
+            ),
+        );
+        let duplication = DuplicationReport::default();
+        let pos = Position {
+            line: 3,
+            character: 3,
+        };
+
+        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let value = markup_value(&hover);
+        assert!(value.contains("close"));
+        assert!(value.contains("dispatched but listened to nowhere"));
+        let range = hover.range.unwrap();
+        assert_eq!(range.start.line, 3);
+        assert_eq!(range.start.character, 0);
+        assert_eq!(range.end.character, "close".len() as u32);
+    }
+
+    #[test]
+    fn hover_on_unused_svelte_event_wrong_line_returns_none() {
+        let root = test_root();
+        let path = root.join("src/lib/Notification.svelte");
+        let mut results = AnalysisResults::default();
+        results.unused_svelte_events.push(
+            fallow_core::results::UnusedSvelteEventFinding::with_actions(
+                fallow_core::results::UnusedSvelteEvent {
+                    path: path.clone(),
+                    component_name: "Notification".to_string(),
+                    event_name: "close".to_string(),
+                    line: 4,
+                    col: 0,
+                },
+            ),
+        );
+        let duplication = DuplicationReport::default();
+        let pos = Position {
+            line: 10,
+            character: 0,
+        };
+        assert!(build_hover(&results, &duplication, &path, pos).is_none());
+    }
+
+    // -------------------------------------------------------------------------
+    // Unused Next.js server action (lines 766-803)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "test string lengths are trivially small"
+    )]
+    fn hover_on_unused_server_action() {
+        let root = test_root();
+        let path = root.join("src/app/actions.ts");
+        let mut results = AnalysisResults::default();
+        results.unused_server_actions.push(
+            fallow_core::results::UnusedServerActionFinding::with_actions(
+                fallow_core::results::UnusedServerAction {
+                    path: path.clone(),
+                    action_name: "deleteUser".to_string(),
+                    line: 8,
+                    col: 16,
+                },
+            ),
+        );
+        let duplication = DuplicationReport::default();
+        let pos = Position {
+            line: 7,
+            character: 20,
+        };
+
+        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let value = markup_value(&hover);
+        assert!(value.contains("deleteUser"));
+        assert!(value.contains("use server"));
+        assert!(value.contains("no code in this project references it"));
+        let range = hover.range.unwrap();
+        assert_eq!(range.start.line, 7);
+        assert_eq!(range.start.character, 16);
+        assert_eq!(range.end.character, 16 + "deleteUser".len() as u32);
+    }
+
+    #[test]
+    fn hover_on_unused_server_action_wrong_col_returns_none() {
+        let root = test_root();
+        let path = root.join("src/app/actions.ts");
+        let mut results = AnalysisResults::default();
+        results.unused_server_actions.push(
+            fallow_core::results::UnusedServerActionFinding::with_actions(
+                fallow_core::results::UnusedServerAction {
+                    path: path.clone(),
+                    action_name: "deleteUser".to_string(),
+                    line: 8,
+                    col: 16,
+                },
+            ),
+        );
+        let duplication = DuplicationReport::default();
+        let pos = Position {
+            line: 7,
+            character: 0,
+        };
+        assert!(build_hover(&results, &duplication, &path, pos).is_none());
+    }
+
+    // -------------------------------------------------------------------------
+    // Unused SvelteKit load() return key (lines 816-853)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "test string lengths are trivially small"
+    )]
+    fn hover_on_unused_load_data_key() {
+        let root = test_root();
+        let path = root.join("src/routes/blog/+page.server.ts");
+        let mut results = AnalysisResults::default();
+        results.unused_load_data_keys.push(
+            fallow_core::results::UnusedLoadDataKeyFinding::with_actions(
+                fallow_core::results::UnusedLoadDataKey {
+                    path: path.clone(),
+                    key_name: "posts".to_string(),
+                    line: 12,
+                    col: 4,
+                    route_dir: Some("src/routes/blog".to_string()),
+                },
+            ),
+        );
+        let duplication = DuplicationReport::default();
+        let pos = Position {
+            line: 11,
+            character: 6,
+        };
+
+        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let value = markup_value(&hover);
+        assert!(value.contains("posts"));
+        assert!(value.contains("load()"));
+        assert!(value.contains("read by no consumer"));
+        let range = hover.range.unwrap();
+        assert_eq!(range.start.line, 11);
+        assert_eq!(range.start.character, 4);
+        assert_eq!(range.end.character, 4 + "posts".len() as u32);
+    }
+
+    #[test]
+    fn hover_on_unused_load_data_key_wrong_line_returns_none() {
+        let root = test_root();
+        let path = root.join("src/routes/blog/+page.server.ts");
+        let mut results = AnalysisResults::default();
+        results.unused_load_data_keys.push(
+            fallow_core::results::UnusedLoadDataKeyFinding::with_actions(
+                fallow_core::results::UnusedLoadDataKey {
+                    path: path.clone(),
+                    key_name: "posts".to_string(),
+                    line: 12,
+                    col: 4,
+                    route_dir: None,
+                },
+            ),
+        );
+        let duplication = DuplicationReport::default();
+        let pos = Position {
+            line: 0,
+            character: 4,
+        };
+        assert!(build_hover(&results, &duplication, &path, pos).is_none());
+    }
+
+    #[test]
+    fn hover_on_unused_load_data_key_wrong_col_returns_none() {
+        let root = test_root();
+        let path = root.join("src/routes/blog/+page.server.ts");
+        let mut results = AnalysisResults::default();
+        results.unused_load_data_keys.push(
+            fallow_core::results::UnusedLoadDataKeyFinding::with_actions(
+                fallow_core::results::UnusedLoadDataKey {
+                    path: path.clone(),
+                    key_name: "posts".to_string(),
+                    line: 12,
+                    col: 4,
+                    route_dir: None,
+                },
+            ),
+        );
+        let duplication = DuplicationReport::default();
+        let pos = Position {
+            line: 11,
+            character: 0,
+        };
+        assert!(build_hover(&results, &duplication, &path, pos).is_none());
+    }
+
+    // -------------------------------------------------------------------------
+    // Security: ClientServerLeak next step (line 198-200), dead-code branch (202-205)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn hover_on_client_server_leak_security_candidate() {
+        let root = test_root();
+        let path = root.join("src/client/Secrets.tsx");
+        let finding = fallow_core::results::SecurityFinding {
+            finding_id: String::new(),
+            candidate: fallow_core::results::SecurityCandidate::default(),
+            taint_flow: None,
+            attack_surface: None,
+            kind: fallow_core::results::SecurityFindingKind::ClientServerLeak,
+            category: None,
+            cwe: None,
+            path: path.clone(),
+            line: 3,
+            col: 0,
+            evidence: "process.env.SECRET_KEY imported into client bundle".to_string(),
+            source_backed: false,
+            source_read: None,
+            severity: fallow_core::results::SecuritySeverity::High,
+            trace: vec![],
+            actions: vec![],
+            dead_code: None,
+            reachability: None,
+            runtime: None,
+        };
+        let mut results = AnalysisResults::default();
+        results.security_findings.push(finding);
+        let duplication = DuplicationReport::default();
+        let pos = Position {
+            line: 2,
+            character: 5,
+        };
+
+        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let value = markup_value(&hover);
+        assert!(value.contains("client-server-leak"));
+        assert!(value.contains("source-backed no"));
+        assert!(value.contains("reachable from a runtime entry point unknown"));
+        assert!(value.contains("type-only"));
+        assert!(value.contains("process.env.SECRET_KEY"));
+    }
+
+    #[test]
+    fn hover_on_tainted_sink_with_dead_code_context() {
+        let root = test_root();
+        let path = root.join("src/utils/xss.ts");
+        let mut finding = tainted_sink_finding(path.clone());
+        finding.dead_code = Some(fallow_core::results::SecurityDeadCodeContext {
+            kind: fallow_core::results::SecurityDeadCodeKind::UnusedExport,
+            export_name: Some("renderHtml".to_string()),
+            line: Some(8),
+            guidance: "Verify the dead-code finding and delete the code if safe before hardening."
+                .to_string(),
+        });
+        let mut results = AnalysisResults::default();
+        results.security_findings.push(finding);
+        let duplication = DuplicationReport::default();
+        let pos = Position {
+            line: 7,
+            character: 10,
+        };
+
+        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let value = markup_value(&hover);
+        assert!(value.contains("dead-code:"));
+        assert!(value.contains("Verify the dead-code finding"));
+        assert!(value.contains("Next: verify the dead-code finding"));
+    }
+
+    #[test]
+    fn hover_on_tainted_sink_with_boundary_crossing() {
+        let root = test_root();
+        let path = root.join("src/api/query.ts");
+        let mut finding = tainted_sink_finding(path.clone());
+        if let Some(ref mut reach) = finding.reachability {
+            reach.crosses_boundary = true;
+            reach.blast_radius = 7;
+        }
+        let mut results = AnalysisResults::default();
+        results.security_findings.push(finding);
+        let duplication = DuplicationReport::default();
+        let pos = Position {
+            line: 7,
+            character: 10,
+        };
+
+        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let value = markup_value(&hover);
+        assert!(value.contains("blast radius 7"));
+        assert!(value.contains("crosses an architecture boundary"));
+    }
+
+    // -------------------------------------------------------------------------
+    // Security: col-before-anchor guard (line 107-108)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn hover_on_security_candidate_col_before_anchor_returns_none() {
+        let root = test_root();
+        let path = root.join("src/render.ts");
+        let mut results = AnalysisResults::default();
+        results
+            .security_findings
+            .push(tainted_sink_finding(path.clone()));
+        let duplication = DuplicationReport::default();
+
+        let pos = Position {
+            line: 7,
+            character: 5,
+        };
+        assert!(build_hover(&results, &duplication, &path, pos).is_none());
+    }
+
+    // -------------------------------------------------------------------------
+    // build_hover dispatch lines 43-73 (new check_* returns exercised via
+    // priority ordering: unrendered wins over prop, etc.)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn unused_file_takes_priority_over_unrendered_component() {
+        let root = test_root();
+        let path = root.join("src/components/Dead.vue");
+        let mut results = AnalysisResults::default();
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: path.clone(),
+            }));
+        results.unrendered_components.push(
+            fallow_core::results::UnrenderedComponentFinding::with_actions(
+                fallow_core::results::UnrenderedComponent {
+                    path: path.clone(),
+                    component_name: "Dead".to_string(),
+                    framework: "vue".to_string(),
+                    reachable_via: None,
+                    line: 1,
+                    col: 0,
+                },
+            ),
+        );
+        let duplication = DuplicationReport::default();
+        let pos = Position {
+            line: 0,
+            character: 0,
+        };
+
+        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let value = markup_value(&hover);
+        assert!(
+            value.contains("not imported"),
+            "Expected unused-file hover, got: {value}"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Duplication: branch where others is non-empty (line 919-920 + 979-983)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn hover_duplication_single_other_shows_singular_word() {
+        let root = test_root();
+        let path_a = root.join("src/alpha.ts");
+        let path_b = root.join("src/beta.ts");
+        let results = AnalysisResults::default();
+        let duplication = DuplicationReport {
+            clone_groups: vec![CloneGroup {
+                instances: vec![
+                    CloneInstance {
+                        file: path_a.clone(),
+                        start_line: 1,
+                        end_line: 5,
+                        start_col: 0,
+                        end_col: 10,
+                        fragment: "dup".to_string(),
+                    },
+                    CloneInstance {
+                        file: path_b,
+                        start_line: 10,
+                        end_line: 14,
+                        start_col: 0,
+                        end_col: 10,
+                        fragment: "dup".to_string(),
+                    },
+                ],
+                token_count: 20,
+                line_count: 5,
+            }],
+            clone_families: vec![],
+            mirrored_directories: vec![],
+            stats: DuplicationStats {
+                total_files: 2,
+                files_with_clones: 2,
+                total_lines: 50,
+                duplicated_lines: 10,
+                total_tokens: 200,
+                duplicated_tokens: 40,
+                clone_groups: 1,
+                clone_instances: 2,
+                duplication_percentage: 20.0,
+                clone_groups_below_min_occurrences: 0,
+            },
+        };
+
+        let pos = Position {
+            line: 2,
+            character: 0,
+        };
+        let hover = build_hover(&results, &duplication, &path_a, pos).unwrap();
+        let value = markup_value(&hover);
+        assert!(
+            value.contains("1 other instance"),
+            "Expected singular form, got: {value}"
+        );
+        assert!(value.contains("beta.ts"));
+    }
+
+    // -------------------------------------------------------------------------
+    // Duplication: more-than-10-others overflow (lines 976-983)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn hover_duplication_more_than_10_others_shows_overflow_line() {
+        let root = test_root();
+        let path_main = root.join("src/main.ts");
+        let results = AnalysisResults::default();
+
+        let mut instances = vec![CloneInstance {
+            file: path_main.clone(),
+            start_line: 1,
+            end_line: 5,
+            start_col: 0,
+            end_col: 10,
+            fragment: "code".to_string(),
+        }];
+        for i in 1..=12_usize {
+            instances.push(CloneInstance {
+                file: root.join(format!("src/other{i}.ts")),
+                start_line: 10,
+                end_line: 14,
+                start_col: 0,
+                end_col: 10,
+                fragment: "code".to_string(),
+            });
+        }
+        let duplication = DuplicationReport {
+            clone_groups: vec![CloneGroup {
+                instances,
+                token_count: 30,
+                line_count: 5,
+            }],
+            clone_families: vec![],
+            mirrored_directories: vec![],
+            stats: DuplicationStats {
+                total_files: 13,
+                files_with_clones: 13,
+                total_lines: 200,
+                duplicated_lines: 65,
+                total_tokens: 500,
+                duplicated_tokens: 390,
+                clone_groups: 1,
+                clone_instances: 13,
+                duplication_percentage: 32.0,
+                clone_groups_below_min_occurrences: 0,
+            },
+        };
+
+        let pos = Position {
+            line: 2,
+            character: 0,
+        };
+        let hover = build_hover(&results, &duplication, &path_main, pos).unwrap();
+        let value = markup_value(&hover);
+        assert!(
+            value.contains("... and 2 more"),
+            "Expected overflow line, got: {value}",
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Store member hover (lines 417-422 - the store_iter arm)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn hover_on_unused_store_member_wrong_col_returns_none() {
+        let root = test_root();
+        let path = root.join("src/store.ts");
+        let mut results = AnalysisResults::default();
+        results
+            .unused_store_members
+            .push(UnusedStoreMemberFinding::with_actions(UnusedMember {
+                path: path.clone(),
+                parent_name: "useUserStore".to_string(),
+                member_name: "logout".to_string(),
+                kind: MemberKind::StoreMember,
+                line: 15,
+                col: 4,
+            }));
+        let duplication = DuplicationReport::default();
+
+        let pos = Position {
+            line: 14,
+            character: 100,
+        };
+        assert!(build_hover(&results, &duplication, &path, pos).is_none());
+    }
+
+    // -------------------------------------------------------------------------
+    // Unresolved import: path-mismatch guard (line 868-873 area)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn hover_on_unresolved_import_wrong_file_returns_none() {
+        let root = test_root();
+        let path_a = root.join("src/a.ts");
+        let path_b = root.join("src/b.ts");
+        let mut results = AnalysisResults::default();
+        results
+            .unresolved_imports
+            .push(UnresolvedImportFinding::with_actions(UnresolvedImport {
+                path: path_a,
+                specifier: "./missing".to_string(),
+                line: 1,
+                col: 0,
+                specifier_col: 10,
+            }));
+        let duplication = DuplicationReport::default();
+        let pos = Position {
+            line: 0,
+            character: 12,
+        };
+        assert!(build_hover(&results, &duplication, &path_b, pos).is_none());
+    }
 }
