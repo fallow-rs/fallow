@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Camera, RefreshCw } from "lucide-react";
 import { DrawableImage } from "./DrawableImage";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -58,13 +59,19 @@ export const LiveApp = () => {
 
   return (
     <div className="grid h-full grid-rows-[auto_1fr] text-foreground">
-      <div className="flex gap-1.5 border-b border-border p-2">
-        <Input value={url} onChange={(e) => setUrl(e.target.value)} className="h-8 text-xs" />
-        <Button size="sm" variant="secondary" className="lowercase" onClick={go}>
+      <div className="flex h-11 shrink-0 items-center gap-1.5 border-b border-border px-2">
+        <Input
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          className="h-7 font-mono text-xs"
+        />
+        <Button size="sm" variant="secondary" className="h-7 lowercase" onClick={go}>
+          <RefreshCw className="size-3.5" />
           go
         </Button>
-        <Button size="sm" className="lowercase" onClick={() => void annotate()}>
-          annotate view
+        <Button size="sm" className="h-7 lowercase" onClick={() => void annotate()}>
+          <Camera className="size-3.5" />
+          annotate
         </Button>
       </div>
       {status && <p className="m-1 text-[11px] text-muted-foreground">{status}</p>}

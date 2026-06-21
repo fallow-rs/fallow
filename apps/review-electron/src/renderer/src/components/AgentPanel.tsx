@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
+import { Bot, Loader2, Play } from "lucide-react";
 import type { AgentBackend } from "../../../main/backends";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 /** Pick a coding-agent backend (codiff-style) and run a grounded agent review. */
 export const AgentPanel = () => {
@@ -32,30 +34,38 @@ export const AgentPanel = () => {
   if (backends.length === 0) return null;
 
   return (
-    <section className="mb-4">
-      <h3 className="mb-1 text-xs font-medium lowercase">agent review</h3>
+    <section className="space-y-2.5 rounded-lg border border-border bg-muted/20 p-3">
+      <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+        <Bot className="size-3.5" />
+        agent review
+      </div>
       <div className="flex flex-wrap gap-1">
         {backends.map((b) => (
-          <Button
+          <button
             key={b.id}
-            size="sm"
-            variant={selected === b.id ? "secondary" : "ghost"}
-            className="h-6 text-[11px] lowercase"
+            type="button"
             onClick={() => setSelected(b.id)}
+            className={cn(
+              "rounded-md px-2 py-1 text-[11px] lowercase transition-colors",
+              selected === b.id
+                ? "bg-primary text-primary-foreground"
+                : "bg-background text-muted-foreground hover:text-foreground",
+            )}
           >
             {b.label}
-          </Button>
+          </button>
         ))}
       </div>
       <Button
         size="sm"
-        className="mt-1.5 h-7 text-xs lowercase"
+        className="w-full lowercase"
         disabled={running || !selected}
         onClick={() => void run()}
       >
-        {running ? "running…" : "run agent review"}
+        {running ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
+        {running ? "running" : "run agent review"}
       </Button>
-      {status && <p className="mt-1 text-[11px] text-muted-foreground">{status}</p>}
+      {status && <p className="text-[11px] text-muted-foreground">{status}</p>}
     </section>
   );
 };

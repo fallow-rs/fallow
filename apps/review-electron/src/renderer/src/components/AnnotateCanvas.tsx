@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Camera } from "lucide-react";
 import { DrawableImage } from "./DrawableImage";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,20 +26,27 @@ export const AnnotateCanvas = () => {
   };
 
   return (
-    <div className="h-full w-full overflow-auto p-3 text-foreground">
-      <div className="mb-2 flex gap-1.5">
-        <Input value={url} onChange={(e) => setUrl(e.target.value)} className="h-8 text-xs" />
-        <Button size="sm" className="lowercase" onClick={() => void capture()}>
+    <div className="flex h-full w-full flex-col overflow-auto text-foreground">
+      <div className="flex h-11 shrink-0 items-center gap-1.5 border-b border-border px-2">
+        <Input
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          className="h-7 font-mono text-xs"
+        />
+        <Button size="sm" className="h-7 lowercase" onClick={() => void capture()}>
+          <Camera className="size-3.5" />
           screenshot
         </Button>
       </div>
-      {status && <p className="text-[11px] text-muted-foreground">{status}</p>}
-      {!img && !status && (
-        <p className="mt-2 text-[11px] text-muted-foreground">
-          screenshot a url to draw on it and send the annotation to the agent.
-        </p>
-      )}
-      {img && <DrawableImage dataUrl={img} target={url} onDone={() => setImg(null)} />}
+      <div className="p-3">
+        {status && <p className="text-[11px] text-muted-foreground">{status}</p>}
+        {!img && !status && (
+          <p className="text-[11px] text-muted-foreground">
+            screenshot a url to draw on it and send the annotation to the agent.
+          </p>
+        )}
+        {img && <DrawableImage dataUrl={img} target={url} onDone={() => setImg(null)} />}
+      </div>
     </div>
   );
 };

@@ -91,3 +91,17 @@ stacked on `fix/review-quality` (engine E1-E8+E11).
   (effort humanize, sidebar header divider, screenshot empty-state hint); re-shot.
   Ratings >= 8 all screens (walkthrough 8.5, diff 8.5, screenshot 8, live 8),
   consistent. lint/tsc/e2e 5/5 green. Next: P6 finalize.
+
+## REDESIGN ROUND (user: "still ugly, go through it thoroughly")
+- The minimal pass read as cramped/flat/colorless. Full visual overhaul: real
+  header + toolbar bars (h-12), proper type scale + spacing rhythm, lucide icons
+  throughout, colored verdict/risk/signal pills, an "agent review" card, file rows
+  with file icons + dir/name split + hover + note-on-hover (status badges -> row
+  dimming, not repeated chips), segmented mode control (diff/live/screenshot),
+  diff toolbar shows path + stats, empty/loading states. Re-screenshotted +
+  reviewed: now reads as a real product. e2e decoupled from copy (testids:
+  review-loaded, file-open, mode-*); timeouts raised for parallel-build CPU
+  contention. oxlint + tsc + build + e2e 5/5 green. (Stray app process holding the
+  bridge port was the only test-4 flake; killed.)
+- Disk: e2e binary now defaults to the worktree's own release build (rebuilt
+  ~771M, isolated from the parallel-agent checkouts).
