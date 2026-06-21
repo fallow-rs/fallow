@@ -2,6 +2,7 @@ import { BrowserWindow } from "electron";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { shotPath } from "./shots";
+import { describeLoadError } from "./errors";
 
 export type Capture = { dataUrl: string; path: string };
 
@@ -12,7 +13,9 @@ export type Capture = { dataUrl: string; path: string };
 export const captureUrl = async (root: string, url: string, at: number): Promise<Capture> => {
   const win = new BrowserWindow({ width: 1024, height: 768, show: false });
   try {
-    await win.loadURL(url);
+    await win.loadURL(url).catch((e: unknown) => {
+      throw describeLoadError(e, url);
+    });
     await new Promise<void>((resolve) => setTimeout(resolve, 400));
     const image = await win.webContents.capturePage();
     const path = shotPath(root, at);

@@ -270,3 +270,21 @@ QA coverage grew from 4 to 13 screenshot states (added live-error, annotate,
 diff-mixed, focus, loading, cleared, review-error). e2e 3 -> 6.
 Only remaining nit is LOW (the live/screenshot "go" button reuses a refresh icon,
 which is defensible since it reloads the typed URL). Loop stopped; not rescheduled.
+
+## FOLLOW-UP: native-quality error messages (user-reported)
+The review-error state still showed the raw IPC string ("Error invoking remote
+method 'review:get': Error: spawn fallow ENOENT") -- the round-13 work fixed the
+error LAYOUT but not the message CONTENT. Fixed both layers, native-app style:
+- main/errors.ts (pure, tested): describeExecError maps ENOENT/EACCES/non-zero-exit
+  from spawn/exec into clean copy ("Couldn't find the \"fallow\" binary. Set
+  FALLOW_BIN or add fallow to your PATH."); describeLoadError maps Chromium
+  ERR_CONNECTION_REFUSED / ERR_NAME_NOT_RESOLVED / other ERR_* into human text.
+  Wired into review.ts (all 3 fallow exec calls + a JSON-parse guard), capture.ts
+  (loadURL), agentRun.ts (agent spawn).
+- renderer lib/errors.ts (pure, tested): errorMessage() strips Electron's
+  "invoking remote method '...': Error:" wrapper; used by App (review), DiffView,
+  AnnotateCanvas, LiveApp. Agent-run errors already return a clean string.
+Verified via 13-review-error: now "review failed" + "Couldn't find the
+\"fallow-bin\" binary. Make sure ... PATH." + retry. vitest 51, lint/tsc/build/e2e 6
+green. (The user's screenshot was a stale build with the pre-round-13 top-bar
+layout; current build is the centered state with the clean message.)

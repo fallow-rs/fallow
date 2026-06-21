@@ -20,6 +20,7 @@ import { AnnotateCanvas } from "./components/AnnotateCanvas";
 import { LiveApp } from "./components/LiveApp";
 import { DiffView } from "./components/DiffView";
 import { isViewed as readViewed, setViewed as writeViewed } from "./lib/viewed";
+import { errorMessage } from "./lib/errors";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -51,7 +52,7 @@ export const App = () => {
     try {
       setDoc(await window.fallow.getReview());
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setLoading(false);
     }

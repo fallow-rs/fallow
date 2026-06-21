@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Camera, Loader2, RefreshCw, Unplug } from "lucide-react";
 import { DrawableImage } from "./DrawableImage";
+import { errorMessage } from "../lib/errors";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -82,7 +83,7 @@ export const LiveApp = () => {
       setShot(img.toDataURL());
       setStatus(null);
     } catch (e) {
-      setStatus(e instanceof Error ? e.message : String(e));
+      setStatus(errorMessage(e));
     }
   };
 

@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { runGuide, validateWalkthrough } from "./review";
 import { buildAgentPrompt, extractAgentJson, resolveBackend } from "./backends";
+import { describeExecError } from "./errors";
 
 export type AgentRunResult = { ok: true; validation: unknown } | { ok: false; error: string };
 
@@ -9,7 +10,7 @@ const spawnAgent = (cmd: string, args: string[], input: string, cwd: string): Pr
     const child = spawn(cmd, args, { cwd });
     let out = "";
     let err = "";
-    child.on("error", reject);
+    child.on("error", (e: unknown) => reject(describeExecError(e, cmd)));
     child.stdout.on("data", (d: Buffer) => {
       out += d.toString();
     });

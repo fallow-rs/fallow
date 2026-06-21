@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { FileX, Loader2, TriangleAlert } from "lucide-react";
 import { parseUnifiedDiff, diffStats, type DiffHunk } from "../lib/diff";
 import { tokenize, type TokenType } from "../lib/highlight";
+import { errorMessage } from "../lib/errors";
 import { cn } from "@/lib/utils";
 
 type Props = { file: string; base: string };
@@ -41,7 +42,7 @@ export const DiffView = ({ file, base }: Props) => {
         if (!active) return;
         setHunks(d.binary ? [] : parseUnifiedDiff(d.patch));
       })
-      .catch((e) => active && setError(e instanceof Error ? e.message : String(e)));
+      .catch((e) => active && setError(errorMessage(e)));
     return () => {
       active = false;
     };

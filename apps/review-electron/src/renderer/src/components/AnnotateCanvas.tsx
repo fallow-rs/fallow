@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Camera, ImageOff, Loader2, RefreshCw } from "lucide-react";
 import { DrawableImage } from "./DrawableImage";
+import { errorMessage } from "../lib/errors";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -25,7 +26,7 @@ export const AnnotateCanvas = () => {
       setImg(shot.dataUrl);
       setPhase("idle");
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
       setPhase("error");
     }
   };
