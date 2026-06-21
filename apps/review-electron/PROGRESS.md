@@ -139,3 +139,11 @@ stacked on `fix/review-quality` (engine E1-E8+E11).
   deprioritized rows dimmed. Verified amber grading via a 06-files-scrolled QA shot
   (walkthrough.ts ↓17 + agent.ts ↓7 in amber, ↓2/↓5 neutral, isolated files clean).
   Rows ~halved in height, far more scannable. format/lint/tsc/build/vitest/e2e 5/5.
+- Round 4a (diff layout, was 6/10): the whole code line was tinted green/red, so
+  large diffs read as a garish wash and the +/- sign was crammed inline with the
+  code. Restructured rows to the standard GitHub/codiff layout: dual old/new
+  line-number gutters, a dedicated colored sign gutter, readable foreground code,
+  and a left-accent border + subtle tint as the add/del signal (green is now
+  signal, not wash). Blue @@ hunk marker, row hover highlight, and a real
+  loading-diff spinner state. format/lint/tsc/build/vitest/e2e 5/5. Next: 4b
+  syntax highlighting (the code text is still monochrome vs codiff).
