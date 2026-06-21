@@ -882,4 +882,858 @@ mod tests {
         );
         assert_eq!(json["calls"].as_array().map(Vec::len), Some(0));
     }
+
+    // ---- CodeModeTool::from_name round-trip --------------------------------
+
+    #[test]
+    fn all_valid_tool_names_parse_successfully() {
+        let valid = [
+            "analyze",
+            "check_changed",
+            "security_candidates",
+            "find_dupes",
+            "project_info",
+            "trace_export",
+            "trace_file",
+            "trace_dependency",
+            "trace_clone",
+            "check_health",
+            "audit",
+            "fallow_explain",
+            "list_boundaries",
+            "feature_flags",
+            "impact",
+            "check_runtime_coverage",
+            "get_hot_paths",
+            "get_blast_radius",
+            "get_importance",
+            "get_cleanup_candidates",
+        ];
+        for name in valid {
+            assert!(
+                CodeModeTool::from_name(name).is_ok(),
+                "expected '{name}' to parse"
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_tool_name_returns_unsupported_error() {
+        let Err(err) = CodeModeTool::from_name("nonexistent_tool") else {
+            panic!("expected Err for unknown tool")
+        };
+        assert!(
+            err.contains("unsupported code mode fallow tool"),
+            "error was: {err}"
+        );
+        assert!(err.contains("nonexistent_tool"), "error was: {err}");
+    }
+
+    #[test]
+    fn fix_preview_returns_no_fix_tools_error() {
+        let Err(err) = CodeModeTool::from_name("fix_preview") else {
+            panic!("expected Err for fix_preview")
+        };
+        assert!(
+            err.contains("does not expose fix tools"),
+            "error was: {err}"
+        );
+    }
+
+    #[test]
+    fn fix_apply_returns_no_fix_tools_error() {
+        let Err(err) = CodeModeTool::from_name("fix_apply") else {
+            panic!("expected Err for fix_apply")
+        };
+        assert!(
+            err.contains("does not expose fix tools"),
+            "error was: {err}"
+        );
+    }
+
+    #[test]
+    fn tool_name_round_trips_through_from_name_and_name() {
+        let pairs: &[(&str, &str)] = &[
+            ("analyze", "analyze"),
+            ("check_changed", "check_changed"),
+            ("security_candidates", "security_candidates"),
+            ("find_dupes", "find_dupes"),
+            ("project_info", "project_info"),
+            ("trace_export", "trace_export"),
+            ("trace_file", "trace_file"),
+            ("trace_dependency", "trace_dependency"),
+            ("trace_clone", "trace_clone"),
+            ("check_health", "check_health"),
+            ("audit", "audit"),
+            ("fallow_explain", "fallow_explain"),
+            ("list_boundaries", "list_boundaries"),
+            ("feature_flags", "feature_flags"),
+            ("impact", "impact"),
+            ("check_runtime_coverage", "check_runtime_coverage"),
+            ("get_hot_paths", "get_hot_paths"),
+            ("get_blast_radius", "get_blast_radius"),
+            ("get_importance", "get_importance"),
+            ("get_cleanup_candidates", "get_cleanup_candidates"),
+        ];
+        for (input, expected_name) in pairs {
+            let tool = CodeModeTool::from_name(input).unwrap();
+            assert_eq!(
+                tool.name(),
+                *expected_name,
+                "name() mismatch for input '{input}'"
+            );
+        }
+    }
+
+    // ---- classify_host_error -----------------------------------------------
+
+    #[test]
+    fn classify_unsupported_tool_via_does_not_expose() {
+        assert_eq!(
+            classify_host_error("code mode does not expose fix tools; use standalone MCP tools"),
+            "unsupported_tool"
+        );
+    }
+
+    #[test]
+    fn classify_unsupported_tool_via_unsupported_code_mode() {
+        assert_eq!(
+            classify_host_error("unsupported code mode fallow tool 'bad_name'"),
+            "unsupported_tool"
+        );
+    }
+
+    #[test]
+    fn classify_timeout_error() {
+        assert_eq!(
+            classify_host_error("code mode execution timed out"),
+            "timeout"
+        );
+    }
+
+    #[test]
+    fn classify_output_limit_via_host_output_exceeded() {
+        assert_eq!(
+            classify_host_error("code mode host output exceeded 1000000 bytes"),
+            "output_limit"
+        );
+    }
+
+    #[test]
+    fn classify_output_limit_via_output_byte_counter() {
+        assert_eq!(
+            classify_host_error("code mode output byte counter overflowed"),
+            "output_limit"
+        );
+    }
+
+    #[test]
+    fn classify_invalid_params_via_invalid_params_json() {
+        assert_eq!(
+            classify_host_error("invalid params JSON: unexpected end of input"),
+            "invalid_params"
+        );
+    }
+
+    #[test]
+    fn classify_invalid_params_via_params_must_be_object() {
+        assert_eq!(
+            classify_host_error("fallow host call params must be an object"),
+            "invalid_params"
+        );
+    }
+
+    #[test]
+    fn classify_invalid_params_via_invalid_tool_params() {
+        assert_eq!(
+            classify_host_error("invalid tool params: missing field `file`"),
+            "invalid_params"
+        );
+    }
+
+    #[test]
+    fn classify_unknown_error_falls_back_to_subprocess() {
+        assert_eq!(
+            classify_host_error("failed to execute fallow binary 'fallow': No such file"),
+            "subprocess"
+        );
+    }
+
+    // ---- merge_default_root ------------------------------------------------
+
+    #[test]
+    fn merge_default_root_no_default_leaves_params_unchanged() {
+        let params = merge_default_root(r#"{"files":true}"#, None).unwrap();
+        assert_eq!(params["files"], true);
+        assert!(params.get("root").is_none());
+    }
+
+    #[test]
+    fn merge_default_root_invalid_json_returns_error() {
+        let err = merge_default_root("{invalid", Some("/tmp/p")).unwrap_err();
+        assert!(err.contains("invalid params JSON"), "error was: {err}");
+    }
+
+    #[test]
+    fn merge_default_root_numeric_value_is_rejected() {
+        let err = merge_default_root("42", Some("/tmp/p")).unwrap_err();
+        assert!(err.contains("params must be an object"), "error was: {err}");
+    }
+
+    #[test]
+    fn merge_default_root_string_value_is_rejected() {
+        let err = merge_default_root(r#""hello""#, Some("/tmp/p")).unwrap_err();
+        assert!(err.contains("params must be an object"), "error was: {err}");
+    }
+
+    #[test]
+    fn merge_default_root_boolean_value_is_rejected() {
+        let err = merge_default_root("true", Some("/tmp/p")).unwrap_err();
+        assert!(err.contains("params must be an object"), "error was: {err}");
+    }
+
+    #[test]
+    fn merge_default_root_empty_object_gets_root_injected() {
+        let params = merge_default_root("{}", Some("/repo")).unwrap();
+        assert_eq!(params["root"], "/repo");
+    }
+
+    // ---- normalize_code_mode_error -----------------------------------------
+
+    #[test]
+    fn interrupted_before_deadline_is_not_timeout() {
+        let future_deadline = std::time::Instant::now() + std::time::Duration::from_mins(1);
+        let result = normalize_code_mode_error("interrupted", future_deadline);
+        assert_eq!(result, "interrupted");
+    }
+
+    #[test]
+    fn interrupted_after_deadline_becomes_timeout_message() {
+        let past_deadline = std::time::Instant::now()
+            .checked_sub(std::time::Duration::from_millis(1))
+            .unwrap();
+        let result = normalize_code_mode_error("interrupted", past_deadline);
+        assert_eq!(result, "code mode execution timed out");
+    }
+
+    #[test]
+    fn non_interrupted_error_is_passed_through() {
+        let past_deadline = std::time::Instant::now()
+            .checked_sub(std::time::Duration::from_millis(1))
+            .unwrap();
+        let result = normalize_code_mode_error("some other error", past_deadline);
+        assert_eq!(result, "some other error");
+    }
+
+    // ---- code_mode_limits --------------------------------------------------
+
+    #[test]
+    fn code_mode_limits_contains_expected_fields() {
+        let limits = code_mode_limits(5_000, 1_000_000);
+        assert_eq!(limits["timeout_ms"], 5_000_u64);
+        assert_eq!(limits["max_output_bytes"], 1_000_000_u64);
+        assert_eq!(limits["max_host_calls"], MAX_HOST_CALLS as u64);
+    }
+
+    // ---- user_source -------------------------------------------------------
+
+    #[test]
+    fn function_keyword_expression_is_preserved() {
+        let source = user_source("function myFn() { return 42; }");
+        assert!(source.contains("function myFn()"), "source was: {source}");
+    }
+
+    #[test]
+    fn parenthesized_expression_is_preserved() {
+        let source = user_source("({ fallow }) => ({ ok: true })");
+        assert!(
+            source.contains("({ fallow }) => ({ ok: true })"),
+            "source was: {source}"
+        );
+    }
+
+    #[test]
+    fn user_source_always_includes_use_strict() {
+        let source = user_source("return 1;");
+        assert!(source.contains("\"use strict\""), "source was: {source}");
+    }
+
+    #[test]
+    fn user_source_wraps_non_function_check() {
+        let source = user_source("return 1;");
+        assert!(
+            source.contains("code must evaluate to a function or function body"),
+            "source was: {source}"
+        );
+    }
+
+    // ---- normalize_output --------------------------------------------------
+
+    #[test]
+    fn exit_code_zero_with_stdout_returns_stdout() {
+        let result = normalize_output(0, b"{ \"ok\": true }", b"");
+        assert_eq!(result.unwrap(), "{ \"ok\": true }");
+    }
+
+    #[test]
+    fn exit_code_one_with_stdout_returns_stdout() {
+        let result = normalize_output(1, b"{ \"findings\": [] }", b"");
+        assert_eq!(result.unwrap(), "{ \"findings\": [] }");
+    }
+
+    #[test]
+    fn exit_code_zero_with_empty_stdout_returns_empty_object() {
+        let result = normalize_output(0, b"", b"");
+        assert_eq!(result.unwrap(), "{}");
+    }
+
+    #[test]
+    fn exit_code_one_with_empty_stdout_returns_empty_object() {
+        let result = normalize_output(1, b"", b"");
+        assert_eq!(result.unwrap(), "{}");
+    }
+
+    #[test]
+    fn nonzero_exit_with_valid_json_stdout_returns_err_with_stdout() {
+        let json_stdout = b"{ \"error\": true, \"message\": \"config error\" }";
+        let err = normalize_output(2, json_stdout, b"").unwrap_err();
+        assert_eq!(err, String::from_utf8_lossy(json_stdout));
+    }
+
+    #[test]
+    fn nonzero_exit_with_empty_stdout_returns_err_with_exit_code() {
+        let err = normalize_output(2, b"", b"").unwrap_err();
+        let parsed: serde_json::Value = serde_json::from_str(&err).unwrap();
+        assert_eq!(parsed["error"], true);
+        assert_eq!(parsed["exit_code"], 2);
+        assert!(
+            parsed["message"]
+                .as_str()
+                .is_some_and(|m| m.contains("exit")),
+            "message was: {}",
+            parsed["message"]
+        );
+    }
+
+    #[test]
+    fn nonzero_exit_with_stderr_uses_stderr_as_message() {
+        let err = normalize_output(3, b"", b"  some stderr text  ").unwrap_err();
+        let parsed: serde_json::Value = serde_json::from_str(&err).unwrap();
+        assert_eq!(parsed["error"], true);
+        assert_eq!(parsed["exit_code"], 3);
+        assert_eq!(parsed["message"], "some stderr text");
+    }
+
+    #[test]
+    fn nonzero_exit_with_invalid_json_stdout_and_empty_stderr_returns_exit_code_message() {
+        let err = normalize_output(5, b"not-json", b"").unwrap_err();
+        let parsed: serde_json::Value = serde_json::from_str(&err).unwrap();
+        assert_eq!(parsed["error"], true);
+        assert_eq!(parsed["exit_code"], 5);
+        assert!(
+            parsed["message"].as_str().is_some_and(|m| m.contains('5')),
+            "message was: {}",
+            parsed["message"]
+        );
+    }
+
+    #[test]
+    fn nonzero_exit_negative_one_with_stderr_uses_stderr() {
+        let err = normalize_output(-1, b"", b"process killed by signal").unwrap_err();
+        let parsed: serde_json::Value = serde_json::from_str(&err).unwrap();
+        assert_eq!(parsed["exit_code"], -1);
+        assert_eq!(parsed["message"], "process killed by signal");
+    }
+
+    // ---- build_tool_args dispatch ------------------------------------------
+
+    #[test]
+    fn build_tool_args_analyze_includes_dead_code_subcommand() {
+        let params = serde_json::json!({ "root": "/tmp/proj" });
+        let args =
+            build_tool_args(CodeModeTool::Analyze, params).expect("analyze args should build");
+        assert!(args.contains(&"dead-code".to_string()));
+        assert!(args.contains(&"--format".to_string()));
+        assert!(args.contains(&"json".to_string()));
+    }
+
+    #[test]
+    fn build_tool_args_find_dupes_includes_dupes_subcommand() {
+        let params = serde_json::json!({ "root": "/tmp/proj" });
+        let args =
+            build_tool_args(CodeModeTool::FindDupes, params).expect("find_dupes args should build");
+        assert!(args.contains(&"dupes".to_string()));
+    }
+
+    #[test]
+    fn build_tool_args_project_info_includes_list_subcommand() {
+        let params = serde_json::json!({});
+        let args = build_tool_args(CodeModeTool::ProjectInfo, params)
+            .expect("project_info args should build");
+        assert!(args.contains(&"list".to_string()));
+    }
+
+    #[test]
+    fn build_tool_args_check_changed_includes_changed_since_flag() {
+        let params = serde_json::json!({ "since": "main" });
+        let args = build_tool_args(CodeModeTool::CheckChanged, params)
+            .expect("check_changed args should build");
+        assert!(args.contains(&"--changed-since".to_string()));
+        assert!(args.contains(&"main".to_string()));
+    }
+
+    #[test]
+    fn build_tool_args_security_candidates_includes_security_subcommand() {
+        let params = serde_json::json!({});
+        let args = build_tool_args(CodeModeTool::SecurityCandidates, params)
+            .expect("security_candidates args should build");
+        assert!(args.contains(&"security".to_string()));
+    }
+
+    #[test]
+    fn build_tool_args_trace_export_includes_trace_flag() {
+        let params = serde_json::json!({
+            "file": "src/index.ts",
+            "export_name": "MyFn"
+        });
+        let args = build_tool_args(CodeModeTool::TraceExport, params)
+            .expect("trace_export args should build");
+        assert!(args.contains(&"--trace".to_string()));
+        assert!(args.iter().any(|a| a.contains("src/index.ts")));
+    }
+
+    #[test]
+    fn build_tool_args_trace_file_includes_trace_file_flag() {
+        let params = serde_json::json!({ "file": "src/utils.ts" });
+        let args =
+            build_tool_args(CodeModeTool::TraceFile, params).expect("trace_file args should build");
+        assert!(args.contains(&"--trace-file".to_string()));
+        assert!(args.contains(&"src/utils.ts".to_string()));
+    }
+
+    #[test]
+    fn build_tool_args_trace_dependency_includes_trace_dependency_flag() {
+        let params = serde_json::json!({ "package_name": "lodash" });
+        let args = build_tool_args(CodeModeTool::TraceDependency, params)
+            .expect("trace_dependency args should build");
+        assert!(args.contains(&"--trace-dependency".to_string()));
+        assert!(args.contains(&"lodash".to_string()));
+    }
+
+    #[test]
+    fn build_tool_args_trace_clone_with_fingerprint_includes_trace_flag() {
+        let params = serde_json::json!({ "fingerprint": "dup:abcd1234" });
+        let args = build_tool_args(CodeModeTool::TraceClone, params)
+            .expect("trace_clone args should build");
+        assert!(args.contains(&"--trace".to_string()));
+        assert!(args.contains(&"dup:abcd1234".to_string()));
+    }
+
+    #[test]
+    fn build_tool_args_check_health_includes_health_subcommand() {
+        let params = serde_json::json!({});
+        let args = build_tool_args(CodeModeTool::CheckHealth, params)
+            .expect("check_health args should build");
+        assert!(args.contains(&"health".to_string()));
+    }
+
+    #[test]
+    fn build_tool_args_audit_includes_audit_subcommand() {
+        let params = serde_json::json!({});
+        let args = build_tool_args(CodeModeTool::Audit, params).expect("audit args should build");
+        assert!(args.contains(&"audit".to_string()));
+    }
+
+    #[test]
+    fn build_tool_args_fallow_explain_includes_explain_subcommand() {
+        let params = serde_json::json!({ "issue_type": "unused-export" });
+        let args = build_tool_args(CodeModeTool::FallowExplain, params)
+            .expect("fallow_explain args should build");
+        assert!(args.contains(&"explain".to_string()));
+    }
+
+    #[test]
+    fn build_tool_args_list_boundaries_includes_boundaries_flag() {
+        let params = serde_json::json!({});
+        let args = build_tool_args(CodeModeTool::ListBoundaries, params)
+            .expect("list_boundaries args should build");
+        assert!(args.contains(&"--boundaries".to_string()));
+    }
+
+    #[test]
+    fn build_tool_args_feature_flags_includes_flags_subcommand() {
+        let params = serde_json::json!({});
+        let args = build_tool_args(CodeModeTool::FeatureFlags, params)
+            .expect("feature_flags args should build");
+        assert!(args.contains(&"flags".to_string()));
+    }
+
+    #[test]
+    fn build_tool_args_impact_includes_impact_subcommand() {
+        let params = serde_json::json!({});
+        let args = build_tool_args(CodeModeTool::Impact, params).expect("impact args should build");
+        assert!(args.contains(&"impact".to_string()));
+    }
+
+    #[test]
+    fn build_tool_args_check_runtime_coverage_includes_runtime_coverage_flag() {
+        let params = serde_json::json!({ "coverage": "./coverage" });
+        let args = build_tool_args(CodeModeTool::CheckRuntimeCoverage, params)
+            .expect("check_runtime_coverage args should build");
+        assert!(args.contains(&"--runtime-coverage".to_string()));
+        assert!(args.contains(&"./coverage".to_string()));
+    }
+
+    #[test]
+    fn build_tool_args_get_hot_paths_includes_runtime_coverage_flag() {
+        let params = serde_json::json!({ "coverage": "./cov" });
+        let args = build_tool_args(CodeModeTool::GetHotPaths, params)
+            .expect("get_hot_paths args should build");
+        assert!(args.contains(&"--runtime-coverage".to_string()));
+    }
+
+    #[test]
+    fn build_tool_args_get_blast_radius_includes_runtime_coverage_flag() {
+        let params = serde_json::json!({ "coverage": "./cov" });
+        let args = build_tool_args(CodeModeTool::GetBlastRadius, params)
+            .expect("get_blast_radius args should build");
+        assert!(args.contains(&"--runtime-coverage".to_string()));
+    }
+
+    #[test]
+    fn build_tool_args_get_importance_includes_runtime_coverage_flag() {
+        let params = serde_json::json!({ "coverage": "./cov" });
+        let args = build_tool_args(CodeModeTool::GetImportance, params)
+            .expect("get_importance args should build");
+        assert!(args.contains(&"--runtime-coverage".to_string()));
+    }
+
+    #[test]
+    fn build_tool_args_get_cleanup_candidates_includes_runtime_coverage_flag() {
+        let params = serde_json::json!({ "coverage": "./cov" });
+        let args = build_tool_args(CodeModeTool::GetCleanupCandidates, params)
+            .expect("get_cleanup_candidates args should build");
+        assert!(args.contains(&"--runtime-coverage".to_string()));
+    }
+
+    // ---- build_tool_args invalid-params rejection --------------------------
+
+    #[test]
+    fn build_tool_args_check_changed_missing_since_returns_error() {
+        let params = serde_json::json!({});
+        let err = build_tool_args(CodeModeTool::CheckChanged, params).unwrap_err();
+        assert!(err.contains("invalid tool params"), "error was: {err}");
+    }
+
+    #[test]
+    fn build_tool_args_trace_export_missing_file_returns_error() {
+        let params = serde_json::json!({ "export_name": "MyFn" });
+        let err = build_tool_args(CodeModeTool::TraceExport, params).unwrap_err();
+        assert!(
+            err.contains("invalid tool params") || err.contains("must not be empty"),
+            "error was: {err}"
+        );
+    }
+
+    #[test]
+    fn build_tool_args_trace_file_missing_file_returns_error() {
+        let params = serde_json::json!({});
+        let err = build_tool_args(CodeModeTool::TraceFile, params).unwrap_err();
+        assert!(
+            err.contains("invalid tool params") || err.contains("must not be empty"),
+            "error was: {err}"
+        );
+    }
+
+    #[test]
+    fn build_tool_args_trace_dependency_missing_package_name_returns_error() {
+        let params = serde_json::json!({});
+        let err = build_tool_args(CodeModeTool::TraceDependency, params).unwrap_err();
+        assert!(
+            err.contains("invalid tool params") || err.contains("must not be empty"),
+            "error was: {err}"
+        );
+    }
+
+    // ---- execute_code_mode: sandbox behavior (no real fallow binary) -------
+
+    #[test]
+    fn snippet_that_is_not_a_function_is_rejected() {
+        // A string literal like "hello" parses as a paren-expression that wraps
+        // to a non-function value, triggering the type-check throw.
+        let output = execute_code_mode(
+            "fallow".to_string(),
+            CodeExecuteParams {
+                code: r#"("hello")"#.to_string(),
+                root: None,
+                timeout_ms: Some(5_000),
+                max_output_bytes: Some(10_000),
+            },
+        )
+        .expect_err("non-function snippet should be rejected");
+
+        let json: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(json["ok"].as_bool(), Some(false));
+        assert!(
+            json["error"]
+                .as_str()
+                .is_some_and(|e| e.contains("code must evaluate to a function")),
+            "error was: {}",
+            json["error"]
+        );
+    }
+
+    #[test]
+    fn snippet_returning_json_value_succeeds() {
+        let output = execute_code_mode(
+            "fallow".to_string(),
+            CodeExecuteParams {
+                code: "return { status: \"ok\", count: 3 };".to_string(),
+                root: None,
+                timeout_ms: Some(5_000),
+                max_output_bytes: Some(10_000),
+            },
+        )
+        .expect("returning a plain object should succeed");
+
+        let json: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(json["ok"].as_bool(), Some(true));
+        assert_eq!(json["result"]["status"], "ok");
+        assert_eq!(json["result"]["count"], 3);
+        assert_eq!(json["schema_version"], "mcp-code-execute/v1");
+    }
+
+    #[test]
+    fn snippet_can_access_root_from_params() {
+        let output = execute_code_mode(
+            "fallow".to_string(),
+            CodeExecuteParams {
+                code: "return root;".to_string(),
+                root: Some("/my/project".to_string()),
+                timeout_ms: Some(5_000),
+                max_output_bytes: Some(10_000),
+            },
+        )
+        .expect("root access should succeed");
+
+        let json: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(json["ok"].as_bool(), Some(true));
+        assert_eq!(json["result"], "/my/project");
+    }
+
+    #[test]
+    fn snippet_returning_null_produces_null_result() {
+        let output = execute_code_mode(
+            "fallow".to_string(),
+            CodeExecuteParams {
+                code: "return null;".to_string(),
+                root: None,
+                timeout_ms: Some(5_000),
+                max_output_bytes: Some(10_000),
+            },
+        )
+        .expect("null return should succeed");
+
+        let json: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(json["ok"].as_bool(), Some(true));
+        assert_eq!(json["result"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn snippet_throwing_error_populates_error_field() {
+        let output = execute_code_mode(
+            "fallow".to_string(),
+            CodeExecuteParams {
+                code: r#"throw new Error("intentional test error");"#.to_string(),
+                root: None,
+                timeout_ms: Some(5_000),
+                max_output_bytes: Some(10_000),
+            },
+        )
+        .expect_err("throwing should produce Err");
+
+        let json: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(json["ok"].as_bool(), Some(false));
+        assert!(
+            json["error"]
+                .as_str()
+                .is_some_and(|e| e.contains("intentional test error")),
+            "error was: {}",
+            json["error"]
+        );
+    }
+
+    #[test]
+    fn response_always_includes_limits_block() {
+        let output = execute_code_mode(
+            "fallow".to_string(),
+            CodeExecuteParams {
+                code: "return 1;".to_string(),
+                root: None,
+                timeout_ms: Some(2_000),
+                max_output_bytes: Some(50_000),
+            },
+        )
+        .expect("should succeed");
+
+        let json: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(json["limits"]["timeout_ms"], 2_000_u64);
+        assert_eq!(json["limits"]["max_output_bytes"], 50_000_u64);
+        assert_eq!(json["limits"]["max_host_calls"], MAX_HOST_CALLS as u64);
+    }
+
+    #[test]
+    fn timeout_is_capped_at_max_timeout_ms() {
+        let output = execute_code_mode(
+            "fallow".to_string(),
+            CodeExecuteParams {
+                code: "return 1;".to_string(),
+                root: None,
+                timeout_ms: Some(MAX_TIMEOUT_MS + 99_999),
+                max_output_bytes: Some(10_000),
+            },
+        )
+        .expect("should succeed with capped timeout");
+
+        let json: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(json["limits"]["timeout_ms"], MAX_TIMEOUT_MS);
+    }
+
+    #[test]
+    fn max_output_bytes_is_capped_at_max_output_bytes_constant() {
+        let output = execute_code_mode(
+            "fallow".to_string(),
+            CodeExecuteParams {
+                code: "return 1;".to_string(),
+                root: None,
+                timeout_ms: Some(5_000),
+                max_output_bytes: Some(MAX_OUTPUT_BYTES + 1),
+            },
+        )
+        .expect("should succeed with capped output limit");
+
+        let json: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(json["limits"]["max_output_bytes"], MAX_OUTPUT_BYTES as u64);
+    }
+
+    #[test]
+    fn missing_timeout_uses_default() {
+        let output = execute_code_mode(
+            "fallow".to_string(),
+            CodeExecuteParams {
+                code: "return 1;".to_string(),
+                root: None,
+                timeout_ms: None,
+                max_output_bytes: None,
+            },
+        )
+        .expect("should succeed with defaults");
+
+        let json: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(json["limits"]["timeout_ms"], DEFAULT_TIMEOUT_MS);
+        assert_eq!(
+            json["limits"]["max_output_bytes"],
+            DEFAULT_MAX_OUTPUT_BYTES as u64
+        );
+    }
+
+    #[test]
+    fn hardened_globals_are_inaccessible_in_snippet() {
+        for blocked in ["fetch", "process", "require", "Deno", "Bun"] {
+            let output = execute_code_mode(
+                "fallow".to_string(),
+                CodeExecuteParams {
+                    code: format!("return typeof {blocked};"),
+                    root: None,
+                    timeout_ms: Some(5_000),
+                    max_output_bytes: Some(10_000),
+                },
+            )
+            .expect("typeof check should not throw");
+
+            let json: serde_json::Value = serde_json::from_str(&output).unwrap();
+            assert_eq!(
+                json["result"], "undefined",
+                "{blocked} should be undefined in sandbox"
+            );
+        }
+    }
+
+    #[test]
+    fn fallow_object_is_accessible_in_snippet() {
+        let output = execute_code_mode(
+            "fallow".to_string(),
+            CodeExecuteParams {
+                code: "return typeof fallow;".to_string(),
+                root: None,
+                timeout_ms: Some(5_000),
+                max_output_bytes: Some(10_000),
+            },
+        )
+        .expect("fallow typeof should succeed");
+
+        let json: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(json["result"], "object");
+    }
+
+    #[test]
+    fn fallow_run_is_callable_and_fails_fast_on_missing_binary() {
+        let output = execute_code_mode(
+            "nonexistent-binary-xyz-12345".to_string(),
+            CodeExecuteParams {
+                code: r#"return fallow.run("project_info", {});"#.to_string(),
+                root: Some("/tmp".to_string()),
+                timeout_ms: Some(5_000),
+                max_output_bytes: Some(10_000),
+            },
+        )
+        .expect_err("missing binary should produce Err");
+
+        let json: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(json["ok"].as_bool(), Some(false));
+        assert_eq!(json["calls"].as_array().map(Vec::len), Some(1));
+        let call = &json["calls"][0];
+        assert_eq!(call["tool"], "project_info");
+        assert_eq!(call["ok"], false);
+        assert_eq!(call["error_kind"], "subprocess");
+    }
+
+    #[test]
+    fn fallow_run_with_unsupported_tool_records_unsupported_tool_error_kind() {
+        let output = execute_code_mode(
+            "fallow".to_string(),
+            CodeExecuteParams {
+                code: r#"return fallow.run("fix_apply", {});"#.to_string(),
+                root: None,
+                timeout_ms: Some(5_000),
+                max_output_bytes: Some(10_000),
+            },
+        )
+        .expect_err("fix_apply should be rejected");
+
+        let json: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(json["ok"].as_bool(), Some(false));
+        assert_eq!(json["calls"].as_array().map(Vec::len), Some(1));
+        let call = &json["calls"][0];
+        assert_eq!(call["error_kind"], "unsupported_tool");
+        assert_eq!(call["ok"], false);
+    }
+
+    #[test]
+    fn successful_response_has_empty_calls_array_when_no_host_calls_made() {
+        let output = execute_code_mode(
+            "fallow".to_string(),
+            CodeExecuteParams {
+                code: "return { computed: 1 + 2 };".to_string(),
+                root: None,
+                timeout_ms: Some(5_000),
+                max_output_bytes: Some(10_000),
+            },
+        )
+        .expect("pure computation should succeed");
+
+        let json: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(json["ok"], true);
+        assert_eq!(json["calls"].as_array().map(Vec::len), Some(0));
+    }
 }

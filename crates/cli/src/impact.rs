@@ -4323,4 +4323,1055 @@ mod tests {
         assert!(dir.join("a.json").exists());
         assert!(dir.join("b.json").exists());
     }
+
+    // ----- LegacyFlatStore::into_store with empty frontiers -----------------
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn legacy_into_store_with_empty_frontiers_does_not_insert_worktree_key() {
+        // When a legacy store has no frontier or clone_frontier entries, the
+        // resulting v4 store must not insert empty sub-maps for the worktree key.
+        let legacy = LegacyFlatStore {
+            enabled: true,
+            explicit_decision: true,
+            first_recorded: Some("t0".to_owned()),
+            records: vec![],
+            project_records: vec![],
+            containment: vec![],
+            pending_containment: None,
+            frontier: FxHashMap::default(),
+            clone_frontier: FxHashMap::default(),
+            resolved_total: 0,
+            suppressed_total: 0,
+            recent_resolved: vec![],
+            onboarding_declined: false,
+            last_digest_epoch: None,
+        };
+        let store = legacy.into_store("wt-key");
+        assert!(
+            store.frontier.is_empty(),
+            "empty legacy frontier must not insert a worktree key"
+        );
+        assert!(
+            store.clone_frontier.is_empty(),
+            "empty legacy clone_frontier must not insert a worktree key"
+        );
+        assert_eq!(store.schema_version, STORE_SCHEMA_VERSION);
+        assert!(store.label.is_none(), "label is always None on migration");
+    }
+
+    // ----- repo_basename edge case: path with no parent ---------------------
+
+    #[test]
+    fn repo_basename_non_git_path_returns_last_component() {
+        // A non-.git directory name returns its own basename.
+        assert_eq!(
+            repo_basename(Path::new("/a/b/myproject")).as_deref(),
+            Some("myproject")
+        );
+    }
+
+    #[test]
+    fn repo_basename_root_path_returns_none() {
+        // A root-only path has no file_name; must return None, not panic.
+        assert!(repo_basename(Path::new("/")).is_none());
+    }
+
+    // ----- direction_for: stable and declining branches ---------------------
+
+    #[test]
+    fn direction_for_declining_when_delta_positive() {
+        assert_eq!(direction_for(1), ImpactTrendDirection::Declining);
+        assert_eq!(direction_for(100), ImpactTrendDirection::Declining);
+    }
+
+    #[test]
+    fn direction_for_stable_when_delta_zero() {
+        assert_eq!(direction_for(0), ImpactTrendDirection::Stable);
+    }
+
+    #[test]
+    fn direction_for_improving_when_delta_negative() {
+        assert_eq!(direction_for(-1), ImpactTrendDirection::Improving);
+    }
+
+    // ----- trend_arrow covers all three directions -------------------------
+
+    #[test]
+    fn trend_arrow_all_directions() {
+        assert_eq!(trend_arrow(ImpactTrendDirection::Improving), "down");
+        assert_eq!(trend_arrow(ImpactTrendDirection::Declining), "up");
+        assert_eq!(trend_arrow(ImpactTrendDirection::Stable), "flat");
+    }
+
+    // ----- build_report project_records trend is populated -----------------
+
+    #[test]
+    fn build_report_project_trend_populated_from_project_records() {
+        let mut store = ImpactStore {
+            enabled: true,
+            ..Default::default()
+        };
+        for total in [20usize, 15usize] {
+            store.project_records.push(ImpactRecord {
+                timestamp: format!("t{total}"),
+                version: "2.0.0".into(),
+                git_sha: None,
+                verdict: "warn".into(),
+                gate: false,
+                counts: ImpactCounts {
+                    total_issues: total,
+                    dead_code: total,
+                    complexity: 0,
+                    duplication: 0,
+                },
+            });
+        }
+        let report = build_report(&store);
+        let pt = report
+            .project_trend
+            .expect("two project records yield a trend");
+        assert_eq!(pt.direction, ImpactTrendDirection::Improving);
+        assert_eq!(pt.previous_total, 20);
+        assert_eq!(pt.current_total, 15);
+        assert_eq!(pt.total_delta, -5);
+    }
+
+    // ----- latest_activity selects the max timestamp across both series -----
+
+    #[test]
+    fn latest_activity_both_series_returns_newer() {
+        let mut store = ImpactStore::default();
+        store.records.push(ImpactRecord {
+            timestamp: "2026-01-01T00:00:00Z".to_owned(),
+            version: "2.0.0".to_owned(),
+            git_sha: None,
+            verdict: "warn".to_owned(),
+            gate: false,
+            counts: ImpactCounts::default(),
+        });
+        store.project_records.push(ImpactRecord {
+            timestamp: "2026-06-15T00:00:00Z".to_owned(),
+            version: "2.0.0".to_owned(),
+            git_sha: None,
+            verdict: "warn".to_owned(),
+            gate: false,
+            counts: ImpactCounts::default(),
+        });
+        assert_eq!(
+            latest_activity(&store).as_deref(),
+            Some("2026-06-15T00:00:00Z")
+        );
+    }
+
+    #[test]
+    fn latest_activity_only_project_records() {
+        let mut store = ImpactStore::default();
+        store.project_records.push(ImpactRecord {
+            timestamp: "2026-05-01T00:00:00Z".to_owned(),
+            version: "2.0.0".to_owned(),
+            git_sha: None,
+            verdict: "pass".to_owned(),
+            gate: false,
+            counts: ImpactCounts::default(),
+        });
+        assert_eq!(
+            latest_activity(&store).as_deref(),
+            Some("2026-05-01T00:00:00Z")
+        );
+    }
+
+    #[test]
+    fn latest_activity_empty_store_returns_none() {
+        assert!(latest_activity(&ImpactStore::default()).is_none());
+    }
+
+    // ----- apply_containment: containment overflow capped at MAX_CONTAINMENT --
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn containment_events_are_bounded_at_max_containment() {
+        let (_config, dir) = test_env();
+        let root = dir.path();
+        enable(root);
+        // Directly pre-fill the store with MAX_CONTAINMENT events.
+        let mut store = load(root);
+        for i in 0..MAX_CONTAINMENT {
+            store.containment.push(ContainmentEvent {
+                blocked_at: format!("block{i}"),
+                cleared_at: format!("clear{i}"),
+                git_sha: None,
+                blocked_counts: ImpactCounts::default(),
+            });
+        }
+        save(&store, root);
+
+        // Trigger one more containment cycle (fail then pass).
+        record_v1(
+            root,
+            &summary(1, 0, 0),
+            AuditVerdict::Fail,
+            true,
+            None,
+            "2.0.0",
+            "overflow_block",
+        );
+        record_v1(
+            root,
+            &summary(0, 0, 0),
+            AuditVerdict::Pass,
+            true,
+            None,
+            "2.0.0",
+            "overflow_clear",
+        );
+        let store = load(root);
+        assert_eq!(
+            store.containment.len(),
+            MAX_CONTAINMENT,
+            "containment must be capped at MAX_CONTAINMENT"
+        );
+        // The most recent event is at the end.
+        assert_eq!(
+            store.containment.last().unwrap().blocked_at,
+            "overflow_block"
+        );
+    }
+
+    // ----- disable from enabled state sets schema_version ------------------
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn disable_from_enabled_state_sets_schema_version() {
+        let (_config, dir) = test_env();
+        let root = dir.path();
+        enable(root);
+        let was_newly_disabled = disable(root);
+        assert!(
+            was_newly_disabled,
+            "disable returns true when previously enabled"
+        );
+        let store = load(root);
+        assert!(!store.enabled);
+        assert!(store.explicit_decision);
+        assert_eq!(store.schema_version, STORE_SCHEMA_VERSION);
+
+        // A second disable is a no-op (already off).
+        let again = disable(root);
+        assert!(!again, "disable returns false when already off");
+    }
+
+    // ----- record_combined_run: CI gate and project_records bounded ---------
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn record_combined_run_is_noop_in_ci() {
+        let (_config, dir) = test_env();
+        let root = dir.path();
+        enable(root);
+        TEST_FORCE_CI.with(|c| c.set(true));
+        record_combined_run(
+            root,
+            ImpactCounts::from_combined(5, 0, 0),
+            None,
+            "2.0.0",
+            "t0",
+            None,
+        );
+        TEST_FORCE_CI.with(|c| c.set(false));
+        assert!(
+            load(root).project_records.is_empty(),
+            "combined run must not record on CI"
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn record_combined_run_is_noop_when_disabled() {
+        let (_config, dir) = test_env();
+        let root = dir.path();
+        // store is disabled by default; no enable() call.
+        record_combined_run(
+            root,
+            ImpactCounts::from_combined(3, 0, 0),
+            None,
+            "2.0.0",
+            "t0",
+            None,
+        );
+        assert!(
+            load(root).project_records.is_empty(),
+            "combined run must not record when disabled"
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn record_combined_run_project_records_bounded_at_max() {
+        let (_config, dir) = test_env();
+        let root = dir.path();
+        enable(root);
+        // Pre-fill to MAX_RECORDS.
+        let mut store = load(root);
+        for i in 0..MAX_RECORDS {
+            store.project_records.push(ImpactRecord {
+                timestamp: format!("t{i}"),
+                version: "2.0.0".to_owned(),
+                git_sha: None,
+                verdict: "warn".to_owned(),
+                gate: false,
+                counts: ImpactCounts::default(),
+            });
+        }
+        save(&store, root);
+
+        record_combined_run(
+            root,
+            ImpactCounts::from_combined(1, 0, 0),
+            None,
+            "2.0.0",
+            "overflow",
+            None,
+        );
+        let store = load(root);
+        assert_eq!(
+            store.project_records.len(),
+            MAX_RECORDS,
+            "project_records must be capped at MAX_RECORDS"
+        );
+        assert_eq!(
+            store.project_records.last().unwrap().timestamp,
+            "overflow",
+            "newest record must be at the tail"
+        );
+    }
+
+    // ----- clone_dup_suppressed: clone disappearance with suppression -------
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn suppressed_clone_disappearance_credits_suppressed_not_resolved() {
+        let (_config, dir) = test_env();
+        let root = dir.path();
+        enable(root);
+        let a = touch(root, "src/a.ts");
+        let b = touch(root, "src/b.ts");
+        let clone = CloneInput {
+            fingerprint: "dup:suppressed".to_owned(),
+            instance_paths: vec![a.clone(), b.clone()],
+        };
+        run(root, &[&a, &b], vec![], vec![clone], &[], "t0");
+        // Second run: clone disappears AND a blanket suppression appears on `a`.
+        let blanket = ActiveSuppression {
+            path: a.clone(),
+            kind: None,
+            is_file_level: true,
+            reason: None,
+        };
+        run(root, &[&a, &b], vec![], vec![], &[blanket], "t1");
+        let store = load(root);
+        assert_eq!(
+            store.suppressed_total, 1,
+            "suppressed clone disappearance must count as suppressed"
+        );
+        assert_eq!(
+            store.resolved_total, 0,
+            "suppressed clone must not count as resolved"
+        );
+    }
+
+    // ----- load_all skips .lock and non-.json files -------------------------
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn load_all_skips_non_json_and_lock_files() {
+        let _cfg = aggregate_env();
+        seed_store("real", &store_with("real", 2, 0, "2026-06-10T00:00:00Z", 1));
+        let dir = impact_config_dir().unwrap().join("impact");
+        // Write a .lock sidecar and a non-json file that should both be ignored.
+        std::fs::write(dir.join("real.json.lock"), b"").unwrap();
+        std::fs::write(dir.join("notes.txt"), b"ignored").unwrap();
+        let (stores, unreadable) = load_all();
+        assert_eq!(stores.len(), 1, "only the .json store is loaded");
+        assert_eq!(
+            unreadable, 0,
+            "lock and txt files are not counted unreadable"
+        );
+    }
+
+    // ----- build_aggregate_report: project_wide_issues totalling ------------
+
+    #[test]
+    fn aggregate_totals_project_wide_issues_from_project_surfacing() {
+        // Build stores directly (no fs involvement for this pure test).
+        let mut s1 = ImpactStore {
+            enabled: true,
+            explicit_decision: true,
+            resolved_total: 3,
+            ..Default::default()
+        };
+        s1.records.push(ImpactRecord {
+            timestamp: "t1".to_owned(),
+            version: "2.0.0".to_owned(),
+            git_sha: None,
+            verdict: "warn".to_owned(),
+            gate: false,
+            counts: ImpactCounts::from_combined(5, 0, 0),
+        });
+        // Add a project_records entry so project_surfacing is non-None.
+        s1.project_records.push(ImpactRecord {
+            timestamp: "pt1".to_owned(),
+            version: "2.0.0".to_owned(),
+            git_sha: None,
+            verdict: "warn".to_owned(),
+            gate: false,
+            counts: ImpactCounts::from_combined(20, 0, 0),
+        });
+
+        let mut s2 = ImpactStore {
+            enabled: true,
+            explicit_decision: true,
+            resolved_total: 7,
+            ..Default::default()
+        };
+        s2.records.push(ImpactRecord {
+            timestamp: "t2".to_owned(),
+            version: "2.0.0".to_owned(),
+            git_sha: None,
+            verdict: "warn".to_owned(),
+            gate: false,
+            counts: ImpactCounts::from_combined(2, 0, 0),
+        });
+        s2.project_records.push(ImpactRecord {
+            timestamp: "pt2".to_owned(),
+            version: "2.0.0".to_owned(),
+            git_sha: None,
+            verdict: "warn".to_owned(),
+            gate: false,
+            counts: ImpactCounts::from_combined(30, 0, 0),
+        });
+
+        let report = build_aggregate_report(
+            vec![("k1".to_owned(), s1), ("k2".to_owned(), s2)],
+            0,
+            CrossRepoSort::Recent,
+        );
+        assert_eq!(report.totals.resolved_total, 10);
+        assert_eq!(report.totals.project_wide_issues, 50);
+        assert_eq!(report.totals.projects_with_baseline, 2);
+    }
+
+    // ----- sort_cross_repo: all sort variants --------------------------------
+
+    #[test]
+    fn aggregate_sort_resolved_orders_by_resolved_total() {
+        let _cfg = aggregate_env();
+        seed_store("low", &store_with("low", 1, 0, "2026-06-10T00:00:00Z", 1));
+        seed_store("high", &store_with("high", 9, 0, "2026-06-09T00:00:00Z", 1));
+        let report = aggregate(CrossRepoSort::Resolved);
+        assert_eq!(report.projects[0].label.as_deref(), Some("high"));
+        assert_eq!(report.projects[1].label.as_deref(), Some("low"));
+    }
+
+    #[test]
+    fn aggregate_sort_contained_orders_by_containment_count() {
+        let _cfg = aggregate_env();
+        seed_store("none", &store_with("none", 1, 0, "2026-06-10T00:00:00Z", 1));
+        seed_store("many", &store_with("many", 1, 3, "2026-06-09T00:00:00Z", 1));
+        let report = aggregate(CrossRepoSort::Contained);
+        assert_eq!(report.projects[0].label.as_deref(), Some("many"));
+        assert_eq!(report.projects[1].label.as_deref(), Some("none"));
+    }
+
+    #[test]
+    fn aggregate_sort_name_orders_alphabetically_by_label() {
+        let _cfg = aggregate_env();
+        seed_store("zzz", &store_with("zulu", 1, 0, "2026-06-10T00:00:00Z", 1));
+        seed_store("aaa", &store_with("alpha", 1, 0, "2026-06-09T00:00:00Z", 1));
+        let report = aggregate(CrossRepoSort::Name);
+        assert_eq!(report.projects[0].label.as_deref(), Some("alpha"));
+        assert_eq!(report.projects[1].label.as_deref(), Some("zulu"));
+    }
+
+    // ----- render_cross_repo_human: limit and overflow line -----------------
+
+    #[test]
+    fn render_cross_repo_human_limit_shows_overflow_line() {
+        let _cfg = aggregate_env();
+        seed_store("a", &store_with("alpha", 1, 0, "2026-06-10T00:00:00Z", 1));
+        seed_store("b", &store_with("beta", 2, 0, "2026-06-09T00:00:00Z", 1));
+        seed_store("c", &store_with("gamma", 3, 0, "2026-06-08T00:00:00Z", 1));
+        let report = aggregate(CrossRepoSort::Recent);
+        let human = render_cross_repo_human(&report, Some(2));
+        assert!(
+            human.contains("and 1 more"),
+            "overflow line missing when limit < tracked_count: {human}"
+        );
+    }
+
+    #[test]
+    fn render_cross_repo_human_no_limit_shows_all_rows() {
+        let _cfg = aggregate_env();
+        seed_store("a", &store_with("alpha", 1, 0, "2026-06-10T00:00:00Z", 1));
+        seed_store("b", &store_with("beta", 2, 0, "2026-06-09T00:00:00Z", 1));
+        let report = aggregate(CrossRepoSort::Recent);
+        let human = render_cross_repo_human(&report, None);
+        assert!(
+            !human.contains("more (raise --limit"),
+            "no limit => no overflow line: {human}"
+        );
+        assert!(human.contains("alpha"));
+        assert!(human.contains("beta"));
+    }
+
+    // ----- render_cross_repo_human: skipped (no-history) and unreadable ----
+
+    #[test]
+    fn render_cross_repo_human_shows_no_history_count() {
+        let _cfg = aggregate_env();
+        seed_store(
+            "empty",
+            &ImpactStore {
+                enabled: true,
+                explicit_decision: true,
+                ..Default::default()
+            },
+        );
+        seed_store("full", &store_with("full", 1, 0, "t0", 1));
+        let report = aggregate(CrossRepoSort::Recent);
+        let human = render_cross_repo_human(&report, None);
+        assert!(
+            human.contains("tracked project") && human.contains("no history yet"),
+            "must report the no-history count: {human}"
+        );
+    }
+
+    #[test]
+    fn render_cross_repo_human_shows_skipped_unreadable() {
+        let _cfg = aggregate_env();
+        seed_store("good", &store_with("good", 1, 0, "t0", 1));
+        let dir = impact_config_dir().unwrap().join("impact");
+        std::fs::write(dir.join("corrupt.json"), b"}{broken").unwrap();
+        let report = aggregate(CrossRepoSort::Recent);
+        let human = render_cross_repo_human(&report, None);
+        assert!(
+            human.contains("skipped") && human.contains("unreadable store"),
+            "must show the skipped unreadable count: {human}"
+        );
+    }
+
+    // ----- render_cross_repo_totals: project_wide line ----------------------
+
+    #[test]
+    fn render_cross_repo_human_grand_totals_shows_project_wide_when_present() {
+        let _cfg = aggregate_env();
+        let mut s = store_with("proj", 5, 1, "2026-06-10T00:00:00Z", 4);
+        // Add a project_records entry so project_surfacing is populated.
+        s.project_records.push(ImpactRecord {
+            timestamp: "pt".to_owned(),
+            version: "2.0.0".to_owned(),
+            git_sha: None,
+            verdict: "warn".to_owned(),
+            gate: false,
+            counts: ImpactCounts::from_combined(42, 0, 0),
+        });
+        seed_store("proj", &s);
+        let report = aggregate(CrossRepoSort::Recent);
+        let human = render_cross_repo_human(&report, None);
+        assert!(
+            human.contains("42 issue") && human.contains("project-wide"),
+            "grand totals must include the project-wide line: {human}"
+        );
+    }
+
+    // ----- render_human_resolved_section: resolved events without symbol ----
+
+    #[test]
+    fn render_human_resolved_event_without_symbol_omits_symbol() {
+        let report = ImpactReport {
+            schema_version: ImpactReportSchemaVersion::V1,
+            enabled: true,
+            enabled_source: EnabledSource::Project,
+            record_count: 2,
+            meta: None,
+            first_recorded: Some("2026-05-01T00:00:00Z".into()),
+            latest_git_sha: None,
+            surfacing: Some(ImpactCounts::default()),
+            trend: None,
+            project_surfacing: None,
+            project_trend: None,
+            containment_count: 0,
+            recent_containment: vec![],
+            resolved_total: 1,
+            suppressed_total: 0,
+            recent_resolved: vec![ResolutionEvent {
+                kind: "unused-file".to_owned(),
+                path: "src/dead.ts".to_owned(),
+                symbol: None,
+                git_sha: None,
+                timestamp: "t1".to_owned(),
+            }],
+            attribution_active: true,
+            onboarding_declined: false,
+            explicit_decision: true,
+        };
+        let human = render_human(&report);
+        // Resolved event without a symbol prints "kind in path", never "None".
+        assert!(
+            human.contains("unused-file in src/dead.ts"),
+            "no-symbol event must show 'kind in path': {human}"
+        );
+        assert!(!human.contains("None"), "must not stringify None: {human}");
+    }
+
+    // ----- render_markdown: disabled state and enabled with trend -----------
+
+    #[test]
+    fn render_markdown_disabled_shows_enable_hint() {
+        let report = ImpactReport {
+            schema_version: ImpactReportSchemaVersion::V1,
+            enabled: false,
+            enabled_source: EnabledSource::Default,
+            record_count: 0,
+            meta: None,
+            first_recorded: None,
+            latest_git_sha: None,
+            surfacing: None,
+            trend: None,
+            project_surfacing: None,
+            project_trend: None,
+            containment_count: 0,
+            recent_containment: vec![],
+            resolved_total: 0,
+            suppressed_total: 0,
+            recent_resolved: vec![],
+            attribution_active: false,
+            onboarding_declined: false,
+            explicit_decision: false,
+        };
+        let md = render_markdown(&report);
+        assert!(
+            md.contains("Impact tracking is off"),
+            "disabled markdown must show enable hint: {md}"
+        );
+        assert!(md.contains("fallow impact enable"));
+    }
+
+    #[test]
+    fn render_markdown_with_trend_shows_trend_line() {
+        let report = ImpactReport {
+            schema_version: ImpactReportSchemaVersion::V1,
+            enabled: true,
+            enabled_source: EnabledSource::Project,
+            record_count: 2,
+            meta: None,
+            first_recorded: Some("2026-05-01T00:00:00Z".into()),
+            latest_git_sha: None,
+            surfacing: Some(ImpactCounts::from_combined(3, 3, 0)),
+            trend: Some(TrendSummary {
+                direction: ImpactTrendDirection::Declining,
+                total_delta: 2,
+                previous_total: 1,
+                current_total: 3,
+            }),
+            project_surfacing: None,
+            project_trend: None,
+            containment_count: 0,
+            recent_containment: vec![],
+            resolved_total: 0,
+            suppressed_total: 0,
+            recent_resolved: vec![],
+            attribution_active: false,
+            onboarding_declined: false,
+            explicit_decision: true,
+        };
+        let md = render_markdown(&report);
+        assert!(
+            md.contains("Trend (changed-file scope"),
+            "markdown with trend must show trend line: {md}"
+        );
+        assert!(md.contains("1 -> 3 (up)"), "trend values present: {md}");
+    }
+
+    #[test]
+    fn render_markdown_with_project_trend_shows_project_trend_line() {
+        let report = ImpactReport {
+            schema_version: ImpactReportSchemaVersion::V1,
+            enabled: true,
+            enabled_source: EnabledSource::Project,
+            record_count: 1,
+            meta: None,
+            first_recorded: Some("2026-05-01T00:00:00Z".into()),
+            latest_git_sha: None,
+            surfacing: None,
+            trend: None,
+            project_surfacing: Some(ImpactCounts::from_combined(10, 5, 3)),
+            project_trend: Some(TrendSummary {
+                direction: ImpactTrendDirection::Stable,
+                total_delta: 0,
+                previous_total: 10,
+                current_total: 10,
+            }),
+            containment_count: 0,
+            recent_containment: vec![],
+            resolved_total: 0,
+            suppressed_total: 0,
+            recent_resolved: vec![],
+            attribution_active: false,
+            onboarding_declined: false,
+            explicit_decision: true,
+        };
+        let md = render_markdown(&report);
+        assert!(
+            md.contains("Project trend (whole project"),
+            "project trend line must appear in markdown: {md}"
+        );
+        assert!(
+            md.contains("10 -> 10 (flat)"),
+            "stable trend must read 'flat': {md}"
+        );
+    }
+
+    #[test]
+    fn render_markdown_enabled_no_history_shows_check_back() {
+        let report = ImpactReport {
+            schema_version: ImpactReportSchemaVersion::V1,
+            enabled: true,
+            enabled_source: EnabledSource::Project,
+            record_count: 0,
+            meta: None,
+            first_recorded: None,
+            latest_git_sha: None,
+            surfacing: None,
+            trend: None,
+            project_surfacing: None,
+            project_trend: None,
+            containment_count: 0,
+            recent_containment: vec![],
+            resolved_total: 0,
+            suppressed_total: 0,
+            recent_resolved: vec![],
+            attribution_active: false,
+            onboarding_declined: false,
+            explicit_decision: true,
+        };
+        let md = render_markdown(&report);
+        assert!(
+            md.contains("No history yet"),
+            "enabled but empty markdown must show 'No history yet': {md}"
+        );
+    }
+
+    #[test]
+    fn render_markdown_resolved_shows_count_when_positive() {
+        let report = ImpactReport {
+            schema_version: ImpactReportSchemaVersion::V1,
+            enabled: true,
+            enabled_source: EnabledSource::Project,
+            record_count: 3,
+            meta: None,
+            first_recorded: Some("2026-05-01T00:00:00Z".into()),
+            latest_git_sha: None,
+            surfacing: Some(ImpactCounts::default()),
+            trend: None,
+            project_surfacing: None,
+            project_trend: None,
+            containment_count: 0,
+            recent_containment: vec![],
+            resolved_total: 4,
+            suppressed_total: 1,
+            recent_resolved: vec![],
+            attribution_active: true,
+            onboarding_declined: false,
+            explicit_decision: true,
+        };
+        let md = render_markdown(&report);
+        assert!(
+            md.contains("**Resolved:** 4 finding"),
+            "markdown must show resolved count: {md}"
+        );
+        assert!(
+            md.contains("**Marked intentional:** 1 finding"),
+            "markdown must show suppressed count: {md}"
+        );
+    }
+
+    // ----- render_markdown_footer: project-only (no audit records) ----------
+
+    #[test]
+    fn render_markdown_footer_project_only_no_audit_records() {
+        // When record_count is 0 but project_surfacing exists, the footer
+        // must show the "Tracking since" form, not "recorded audit runs".
+        let report = ImpactReport {
+            schema_version: ImpactReportSchemaVersion::V1,
+            enabled: true,
+            enabled_source: EnabledSource::Project,
+            record_count: 0,
+            meta: None,
+            first_recorded: Some("2026-05-10T00:00:00Z".into()),
+            latest_git_sha: None,
+            surfacing: None,
+            trend: None,
+            project_surfacing: Some(ImpactCounts::from_combined(3, 2, 1)),
+            project_trend: None,
+            containment_count: 0,
+            recent_containment: vec![],
+            resolved_total: 0,
+            suppressed_total: 0,
+            recent_resolved: vec![],
+            attribution_active: false,
+            onboarding_declined: false,
+            explicit_decision: true,
+        };
+        let md = render_markdown(&report);
+        assert!(
+            md.contains("Tracking since 2026-05-10"),
+            "project-only footer must say 'Tracking since': {md}"
+        );
+        assert!(
+            !md.contains("recorded audit run"),
+            "project-only footer must not mention 'recorded audit run': {md}"
+        );
+    }
+
+    // ----- cross_repo_markdown: project_wide totals line --------------------
+
+    #[test]
+    fn render_cross_repo_markdown_includes_project_wide_totals_when_present() {
+        let _cfg = aggregate_env();
+        let mut s = store_with("proj", 2, 0, "t0", 1);
+        s.project_records.push(ImpactRecord {
+            timestamp: "pt".to_owned(),
+            version: "2.0.0".to_owned(),
+            git_sha: None,
+            verdict: "warn".to_owned(),
+            gate: false,
+            counts: ImpactCounts::from_combined(99, 0, 0),
+        });
+        seed_store("proj", &s);
+        let report = aggregate(CrossRepoSort::Recent);
+        let md = render_cross_repo_markdown(&report);
+        assert!(
+            md.contains("99 issue") && md.contains("project-wide"),
+            "cross-repo markdown must show project-wide totals: {md}"
+        );
+    }
+
+    // ----- migrate_legacy_store: corrupt legacy file falls back to default ---
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn migrate_legacy_store_corrupt_file_returns_default() {
+        let (_config, dir) = test_env();
+        let root = dir.path();
+        // Write a corrupt legacy in-repo store.
+        std::fs::create_dir_all(root.join(".fallow")).unwrap();
+        std::fs::write(legacy_store_path(root), b"{ corrupted json ][").unwrap();
+        // load() tries the user store (missing) then migrate_legacy_store.
+        let store = load(root);
+        // A corrupt legacy file must return a default store without panicking.
+        assert!(!store.enabled);
+        assert!(store.records.is_empty());
+    }
+
+    // ----- resolve_enabled: user source propagates to report ----------------
+
+    #[test]
+    fn resolve_enabled_user_source_appears_in_report() {
+        let (_config, _dir) = test_env();
+        set_global_default(true);
+        let never_asked = ImpactStore::default();
+        let (enabled, source) = resolve_enabled(&never_asked);
+        assert!(enabled);
+        assert_eq!(source, EnabledSource::User);
+        let report = build_report(&never_asked);
+        assert_eq!(report.enabled_source, EnabledSource::User);
+    }
+
+    // ----- render_cross_repo_human: long label truncated --------------------
+
+    #[test]
+    fn render_cross_repo_human_long_label_is_truncated_in_table() {
+        let _cfg = aggregate_env();
+        let very_long_name = "this_is_a_very_long_project_name_that_exceeds_the_column_width";
+        let s = store_with(very_long_name, 1, 0, "2026-06-10T00:00:00Z", 1);
+        seed_store("longkey", &s);
+        let report = aggregate(CrossRepoSort::Recent);
+        let human = render_cross_repo_human(&report, None);
+        // Must contain the truncation marker and never the full long name inline.
+        assert!(
+            human.contains("..."),
+            "long label must be truncated with '...': {human}"
+        );
+    }
+
+    // ----- aggregate_sort_name when label is absent: falls back to short key -
+
+    #[test]
+    fn aggregate_sort_name_falls_back_to_short_key_when_no_label() {
+        let _cfg = aggregate_env();
+        // Store with no label; cross_repo_label falls back to the key prefix.
+        let mut s = ImpactStore {
+            enabled: true,
+            explicit_decision: true,
+            resolved_total: 1,
+            label: None,
+            ..Default::default()
+        };
+        s.records.push(ImpactRecord {
+            timestamp: "t0".to_owned(),
+            version: "2.0.0".to_owned(),
+            git_sha: None,
+            verdict: "warn".to_owned(),
+            gate: false,
+            counts: ImpactCounts::from_combined(1, 0, 0),
+        });
+        seed_store("abcdefghijklmnop", &s);
+        let report = aggregate(CrossRepoSort::Name);
+        // The row is present even without a label.
+        assert_eq!(report.tracked_count, 1);
+        // The short_key used is the first 12 chars of the key.
+        assert_eq!(report.projects[0].project_key, "abcdefghijklmnop");
+    }
+
+    // ----- row_trend fallback to changed-file trend when no project trend ---
+
+    #[test]
+    fn row_trend_falls_back_to_changed_file_trend_when_no_project_trend() {
+        let report = ImpactReport {
+            schema_version: ImpactReportSchemaVersion::V1,
+            enabled: true,
+            enabled_source: EnabledSource::Project,
+            record_count: 2,
+            meta: None,
+            first_recorded: None,
+            latest_git_sha: None,
+            surfacing: Some(ImpactCounts::default()),
+            trend: Some(TrendSummary {
+                direction: ImpactTrendDirection::Improving,
+                total_delta: -3,
+                previous_total: 8,
+                current_total: 5,
+            }),
+            project_surfacing: None,
+            project_trend: None,
+            containment_count: 0,
+            recent_containment: vec![],
+            resolved_total: 0,
+            suppressed_total: 0,
+            recent_resolved: vec![],
+            attribution_active: false,
+            onboarding_declined: false,
+            explicit_decision: true,
+        };
+        assert_eq!(row_trend(&report), "down");
+    }
+
+    #[test]
+    fn row_trend_returns_dash_when_no_trend_at_all() {
+        let report = ImpactReport {
+            schema_version: ImpactReportSchemaVersion::V1,
+            enabled: true,
+            enabled_source: EnabledSource::Project,
+            record_count: 1,
+            meta: None,
+            first_recorded: None,
+            latest_git_sha: None,
+            surfacing: Some(ImpactCounts::default()),
+            trend: None,
+            project_surfacing: None,
+            project_trend: None,
+            containment_count: 0,
+            recent_containment: vec![],
+            resolved_total: 0,
+            suppressed_total: 0,
+            recent_resolved: vec![],
+            attribution_active: false,
+            onboarding_declined: false,
+            explicit_decision: true,
+        };
+        assert_eq!(row_trend(&report), "-");
+    }
+
+    // ----- opt_count returns "-" for None and the total for Some ------------
+
+    #[test]
+    fn opt_count_returns_dash_for_none_and_total_for_some() {
+        assert_eq!(opt_count(None), "-");
+        // from_combined(dead=4, complexity=2, dup=1) => total=7
+        assert_eq!(opt_count(Some(&ImpactCounts::from_combined(4, 2, 1))), "7");
+    }
+
+    // ----- project_key is stable (no separator) for non-git dirs -----------
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn impact_project_key_is_a_hex_string_with_no_separator() {
+        let (_config, dir) = test_env();
+        let root = dir.path();
+        let key = project_identity(root).0;
+        assert!(
+            !key.contains('/') && !key.contains('\\'),
+            "project key must not contain a path separator: {key}"
+        );
+        assert!(!key.is_empty(), "project key must not be empty");
+    }
+
+    // ----- ImpactCounts::from_combined wires through correctly --------------
+
+    #[test]
+    fn impact_counts_from_combined_sums_to_total() {
+        let c = ImpactCounts::from_combined(3, 2, 1);
+        assert_eq!(c.total_issues, 6);
+        assert_eq!(c.dead_code, 3);
+        assert_eq!(c.complexity, 2);
+        assert_eq!(c.duplication, 1);
+    }
+
+    // ----- cross_repo_markdown: no history case (project_count > 0, tracked_count 0) --
+
+    #[test]
+    fn render_cross_repo_markdown_all_empty_projects_tracked_count_zero() {
+        // All stores are enabled-but-empty => tracked_count 0, project_count > 0.
+        let _cfg = aggregate_env();
+        seed_store(
+            "empty1",
+            &ImpactStore {
+                enabled: true,
+                explicit_decision: true,
+                ..Default::default()
+            },
+        );
+        let report = aggregate(CrossRepoSort::Recent);
+        assert_eq!(report.project_count, 1);
+        assert_eq!(report.tracked_count, 0);
+        let md = render_cross_repo_markdown(&report);
+        // Must show project_count but NOT an empty table (projects vec is empty).
+        assert!(
+            md.contains("1 project tracked, 0 with history"),
+            "must show counts: {md}"
+        );
+        assert!(
+            !md.contains("| Project |"),
+            "no table when tracked_count is 0: {md}"
+        );
+    }
+
+    // ----- render_cross_repo_markdown: project_count == 0, unreadable > 0 --
+
+    #[test]
+    fn render_cross_repo_markdown_zero_projects_with_unreadable() {
+        let _cfg = aggregate_env();
+        let dir = impact_config_dir().unwrap().join("impact");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("bad.json"), b"}{bad").unwrap();
+        let report = aggregate(CrossRepoSort::Recent);
+        assert_eq!(report.project_count, 0);
+        assert_eq!(report.unreadable_count, 1);
+        let md = render_cross_repo_markdown(&report);
+        assert!(
+            md.contains("skipped") && md.contains("unreadable store"),
+            "must report corrupt stores: {md}"
+        );
+    }
 }

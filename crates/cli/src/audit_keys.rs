@@ -2208,30 +2208,45 @@ pub(super) fn dupe_group_key(group: &fallow_core::duplicates::CloneGroup, root: 
 mod tests {
     use std::path::{Path, PathBuf};
 
+    use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationReport};
     use fallow_core::extract::MemberKind;
     use fallow_core::results::{
         AnalysisResults, BoundaryCallViolation, BoundaryCallViolationFinding,
         BoundaryCoverageViolation, BoundaryCoverageViolationFinding, BoundaryViolation,
         BoundaryViolationFinding, CircularDependency, CircularDependencyFinding,
         DependencyLocation, DependencyOverrideMisconfigReason, DependencyOverrideSource,
-        DuplicateExport, DuplicateExportFinding, DuplicateLocation, EmptyCatalogGroup,
-        EmptyCatalogGroupFinding, ImportSite, MisconfiguredDependencyOverride,
-        MisconfiguredDependencyOverrideFinding, PrivateTypeLeak, PrivateTypeLeakFinding,
-        ReExportCycle, ReExportCycleFinding, ReExportCycleKind, StaleSuppression,
-        SuppressionOrigin, TestOnlyDependency, TestOnlyDependencyFinding, TypeOnlyDependency,
-        TypeOnlyDependencyFinding, UnlistedDependency, UnlistedDependencyFinding,
+        DuplicateExport, DuplicateExportFinding, DuplicateLocation, DynamicSegmentNameConflict,
+        DynamicSegmentNameConflictFinding, EmptyCatalogGroup, EmptyCatalogGroupFinding, ImportSite,
+        MisconfiguredDependencyOverride, MisconfiguredDependencyOverrideFinding, PolicyRuleKind,
+        PolicyViolation, PolicyViolationFinding, PolicyViolationSeverity, PrivateTypeLeak,
+        PrivateTypeLeakFinding, ReExportCycle, ReExportCycleFinding, ReExportCycleKind,
+        RouteCollision, RouteCollisionFinding, StaleSuppression, SuppressionOrigin,
+        TestOnlyDependency, TestOnlyDependencyFinding, TypeOnlyDependency,
+        TypeOnlyDependencyFinding, UnlistedDependency, UnlistedDependencyFinding, UnprovidedInject,
+        UnprovidedInjectFinding, UnrenderedComponent, UnrenderedComponentFinding,
         UnresolvedCatalogReference, UnresolvedCatalogReferenceFinding, UnresolvedImport,
         UnresolvedImportFinding, UnusedCatalogEntry, UnusedCatalogEntryFinding,
-        UnusedClassMemberFinding, UnusedDependency, UnusedDependencyFinding,
-        UnusedDependencyOverride, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
-        UnusedEnumMemberFinding, UnusedExport, UnusedExportFinding, UnusedFile, UnusedFileFinding,
-        UnusedMember, UnusedOptionalDependencyFinding, UnusedTypeFinding,
+        UnusedClassMemberFinding, UnusedComponentEmit, UnusedComponentEmitFinding,
+        UnusedComponentInput, UnusedComponentInputFinding, UnusedComponentOutput,
+        UnusedComponentOutputFinding, UnusedComponentProp, UnusedComponentPropFinding,
+        UnusedDependency, UnusedDependencyFinding, UnusedDependencyOverride,
+        UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
+        UnusedExport, UnusedExportFinding, UnusedFile, UnusedFileFinding, UnusedLoadDataKey,
+        UnusedLoadDataKeyFinding, UnusedMember, UnusedOptionalDependencyFinding,
+        UnusedServerAction, UnusedServerActionFinding, UnusedStoreMemberFinding, UnusedSvelteEvent,
+        UnusedSvelteEventFinding, UnusedTypeFinding,
     };
     use rustc_hash::FxHashSet;
     use serde_json::json;
 
+    use crate::health_types::{
+        ComplexityViolation, ExceededThreshold, FindingSeverity, HealthFinding, HealthReport,
+    };
+
     use super::{
-        annotate_dead_code_json, dead_code_keys, relative_key_path, retain_introduced_dead_code,
+        annotate_dead_code_json, annotate_dupes_json, annotate_health_json, dead_code_keys,
+        dupe_group_key, dupes_keys, health_finding_key, health_keys, relative_key_path,
+        retain_introduced_dead_code,
     };
 
     fn root() -> PathBuf {
@@ -2669,5 +2684,761 @@ mod tests {
         assert_eq!(json["unresolved_imports"][0]["introduced"], true);
         assert_eq!(json["unlisted_dependencies"][0]["introduced"], false);
         assert_eq!(json["duplicate_exports"][0]["introduced"], true);
+    }
+
+    // --- key-building coverage for lines 68-177 (framework-specific key fns) ---
+
+    #[test]
+    fn dead_code_keys_cover_framework_inject_and_render_variants() {
+        let root = root();
+        let src = root.join("src/App.vue");
+        let mut results = AnalysisResults::default();
+        results
+            .unprovided_injects
+            .push(UnprovidedInjectFinding::with_actions(UnprovidedInject {
+                path: src.clone(),
+                key_name: "userStore".to_string(),
+                framework: "vue".to_string(),
+                line: 5,
+                col: 0,
+            }));
+        results
+            .unrendered_components
+            .push(UnrenderedComponentFinding::with_actions(
+                UnrenderedComponent {
+                    path: src.clone(),
+                    component_name: "MyModal".to_string(),
+                    framework: "vue".to_string(),
+                    reachable_via: None,
+                    line: 1,
+                    col: 0,
+                },
+            ));
+        results
+            .unused_component_props
+            .push(UnusedComponentPropFinding::with_actions(
+                UnusedComponentProp {
+                    path: src.clone(),
+                    component_name: "MyModal".to_string(),
+                    prop_name: "title".to_string(),
+                    line: 3,
+                    col: 2,
+                },
+            ));
+        results
+            .unused_component_emits
+            .push(UnusedComponentEmitFinding::with_actions(
+                UnusedComponentEmit {
+                    path: src,
+                    component_name: "MyModal".to_string(),
+                    emit_name: "close".to_string(),
+                    line: 4,
+                    col: 2,
+                },
+            ));
+        results
+            .unused_svelte_events
+            .push(UnusedSvelteEventFinding::with_actions(UnusedSvelteEvent {
+                path: root.join("src/Counter.svelte"),
+                component_name: "Counter".to_string(),
+                event_name: "increment".to_string(),
+                line: 8,
+                col: 0,
+            }));
+
+        let keys = dead_code_keys(&results, &root);
+
+        assert!(keys.contains("unprovided-inject:src/App.vue:userStore"));
+        assert!(keys.contains("unrendered-component:src/App.vue:MyModal"));
+        assert!(keys.contains("unused-component-prop:src/App.vue:title"));
+        assert!(keys.contains("unused-component-emit:src/App.vue:close"));
+        assert!(keys.contains("unused-svelte-event:src/Counter.svelte:increment"));
+    }
+
+    #[test]
+    fn dead_code_keys_cover_server_action_load_data_and_route_variants() {
+        let root = root();
+        let actions_file = root.join("src/actions/submit.ts");
+        let page_file = root.join("src/routes/blog/+page.server.ts");
+        let route_file = root.join("app/(auth)/login/page.tsx");
+        let route_file2 = root.join("app/login/page.tsx");
+        let mut results = AnalysisResults::default();
+        results
+            .unused_server_actions
+            .push(UnusedServerActionFinding::with_actions(
+                UnusedServerAction {
+                    path: actions_file,
+                    action_name: "submitForm".to_string(),
+                    line: 2,
+                    col: 0,
+                },
+            ));
+        results
+            .unused_load_data_keys
+            .push(UnusedLoadDataKeyFinding::with_actions(UnusedLoadDataKey {
+                path: page_file,
+                key_name: "posts".to_string(),
+                line: 10,
+                col: 4,
+                route_dir: None,
+            }));
+        results
+            .route_collisions
+            .push(RouteCollisionFinding::with_actions(RouteCollision {
+                path: route_file.clone(),
+                url: "/login".to_string(),
+                conflicting_paths: vec![route_file2.clone()],
+                line: 1,
+                col: 0,
+            }));
+        results.dynamic_segment_name_conflicts.push(
+            DynamicSegmentNameConflictFinding::with_actions(DynamicSegmentNameConflict {
+                path: route_file,
+                position: "/shop".to_string(),
+                conflicting_segments: vec!["[id]".to_string(), "[slug]".to_string()],
+                conflicting_paths: vec![route_file2],
+                line: 1,
+                col: 0,
+            }),
+        );
+
+        let keys = dead_code_keys(&results, &root);
+
+        assert!(keys.contains("unused-server-action:src/actions/submit.ts:submitForm"));
+        assert!(keys.contains("unused-load-data-key:src/routes/blog/+page.server.ts:posts"));
+        assert!(keys.contains("route-collision:app/(auth)/login/page.tsx:/login"));
+        assert!(keys.contains("dynamic-segment-name-conflict:app/(auth)/login/page.tsx:/shop"));
+    }
+
+    #[test]
+    fn dead_code_keys_cover_angular_input_output_and_policy_variants() {
+        let root = root();
+        let component = root.join("src/app/card.component.ts");
+        let src = root.join("src/utils.ts");
+        let mut results = AnalysisResults::default();
+        results
+            .unused_component_inputs
+            .push(UnusedComponentInputFinding::with_actions(
+                UnusedComponentInput {
+                    path: component.clone(),
+                    component_name: "CardComponent".to_string(),
+                    input_name: "label".to_string(),
+                    line: 12,
+                    col: 4,
+                },
+            ));
+        results
+            .unused_component_outputs
+            .push(UnusedComponentOutputFinding::with_actions(
+                UnusedComponentOutput {
+                    path: component,
+                    component_name: "CardComponent".to_string(),
+                    output_name: "clicked".to_string(),
+                    line: 13,
+                    col: 4,
+                },
+            ));
+        results
+            .policy_violations
+            .push(PolicyViolationFinding::with_actions(PolicyViolation {
+                path: src,
+                line: 7,
+                col: 0,
+                pack: "security".to_string(),
+                rule_id: "no-eval".to_string(),
+                kind: PolicyRuleKind::BannedCall,
+                matched: "eval".to_string(),
+                severity: PolicyViolationSeverity::Error,
+                message: None,
+            }));
+
+        let keys = dead_code_keys(&results, &root);
+
+        assert!(keys.contains("unused-component-input:src/app/card.component.ts:label"));
+        assert!(keys.contains("unused-component-output:src/app/card.component.ts:clicked"));
+        assert!(keys.contains("policy-violation:src/utils.ts:security/no-eval:eval"));
+    }
+
+    #[test]
+    fn dead_code_keys_cover_re_export_cycle_multi_node_variant() {
+        let root = root();
+        let a = root.join("src/a.ts");
+        let b = root.join("src/b.ts");
+        let mut results = AnalysisResults::default();
+        results
+            .re_export_cycles
+            .push(ReExportCycleFinding::with_actions(ReExportCycle {
+                files: vec![b, a],
+                kind: ReExportCycleKind::MultiNode,
+            }));
+
+        let keys = dead_code_keys(&results, &root);
+
+        // multi-node variant hits line 275; files are sorted
+        assert!(keys.contains("re-export-cycle:multi-node:src/a.ts|src/b.ts"));
+    }
+
+    #[test]
+    fn dead_code_keys_cover_unused_store_member() {
+        let root = root();
+        let src = root.join("src/store.ts");
+        let mut results = AnalysisResults::default();
+        results
+            .unused_store_members
+            .push(UnusedStoreMemberFinding::with_actions(UnusedMember {
+                path: src,
+                parent_name: "useAuthStore".to_string(),
+                member_name: "resetPassword".to_string(),
+                kind: MemberKind::ClassMethod,
+                line: 42,
+                col: 2,
+            }));
+
+        let keys = dead_code_keys(&results, &root);
+
+        assert!(keys.contains("unused-store-member:src/store.ts:useAuthStore:resetPassword"));
+    }
+
+    // --- annotate_dead_code_json for framework / component / render / policy arrays ---
+
+    #[test]
+    fn annotate_dead_code_json_marks_framework_keys_correctly() {
+        let root = root();
+        let src = root.join("src/App.vue");
+        let mut results = AnalysisResults::default();
+        results
+            .unprovided_injects
+            .push(UnprovidedInjectFinding::with_actions(UnprovidedInject {
+                path: src.clone(),
+                key_name: "theme".to_string(),
+                framework: "vue".to_string(),
+                line: 3,
+                col: 0,
+            }));
+        results
+            .unrendered_components
+            .push(UnrenderedComponentFinding::with_actions(
+                UnrenderedComponent {
+                    path: src.clone(),
+                    component_name: "Dialog".to_string(),
+                    framework: "vue".to_string(),
+                    reachable_via: None,
+                    line: 1,
+                    col: 0,
+                },
+            ));
+        results
+            .unused_component_props
+            .push(UnusedComponentPropFinding::with_actions(
+                UnusedComponentProp {
+                    path: src.clone(),
+                    component_name: "Dialog".to_string(),
+                    prop_name: "open".to_string(),
+                    line: 5,
+                    col: 2,
+                },
+            ));
+        results
+            .unused_component_emits
+            .push(UnusedComponentEmitFinding::with_actions(
+                UnusedComponentEmit {
+                    path: src,
+                    component_name: "Dialog".to_string(),
+                    emit_name: "dismiss".to_string(),
+                    line: 6,
+                    col: 2,
+                },
+            ));
+
+        // Only the inject is in the base; the rest are new.
+        let base = FxHashSet::from_iter(["unprovided-inject:src/App.vue:theme".to_string()]);
+        let mut json_val = json!({
+            "unprovided_injects": [{}],
+            "unrendered_components": [{}],
+            "unused_component_props": [{}],
+            "unused_component_emits": [{}],
+        });
+
+        annotate_dead_code_json(&mut json_val, &results, &root, &base);
+
+        assert_eq!(json_val["unprovided_injects"][0]["introduced"], false);
+        assert_eq!(json_val["unrendered_components"][0]["introduced"], true);
+        assert_eq!(json_val["unused_component_props"][0]["introduced"], true);
+        assert_eq!(json_val["unused_component_emits"][0]["introduced"], true);
+    }
+
+    #[test]
+    fn annotate_dead_code_json_marks_component_io_and_route_keys_correctly() {
+        let root = root();
+        let component = root.join("src/card.component.ts");
+        let svelte_file = root.join("src/Counter.svelte");
+        let page_file = root.join("src/routes/+page.server.ts");
+        let route_file = root.join("app/about/page.tsx");
+        let route_file2 = root.join("app/(info)/about/page.tsx");
+        let mut results = AnalysisResults::default();
+        results
+            .unused_component_inputs
+            .push(UnusedComponentInputFinding::with_actions(
+                UnusedComponentInput {
+                    path: component.clone(),
+                    component_name: "CardComponent".to_string(),
+                    input_name: "size".to_string(),
+                    line: 8,
+                    col: 2,
+                },
+            ));
+        results
+            .unused_component_outputs
+            .push(UnusedComponentOutputFinding::with_actions(
+                UnusedComponentOutput {
+                    path: component,
+                    component_name: "CardComponent".to_string(),
+                    output_name: "hovered".to_string(),
+                    line: 9,
+                    col: 2,
+                },
+            ));
+        results
+            .unused_svelte_events
+            .push(UnusedSvelteEventFinding::with_actions(UnusedSvelteEvent {
+                path: svelte_file,
+                component_name: "Counter".to_string(),
+                event_name: "reset".to_string(),
+                line: 12,
+                col: 0,
+            }));
+        results
+            .unused_server_actions
+            .push(UnusedServerActionFinding::with_actions(
+                UnusedServerAction {
+                    path: page_file,
+                    action_name: "deletePost".to_string(),
+                    line: 3,
+                    col: 0,
+                },
+            ));
+        results
+            .route_collisions
+            .push(RouteCollisionFinding::with_actions(RouteCollision {
+                path: route_file.clone(),
+                url: "/about".to_string(),
+                conflicting_paths: vec![route_file2.clone()],
+                line: 1,
+                col: 0,
+            }));
+        results.dynamic_segment_name_conflicts.push(
+            DynamicSegmentNameConflictFinding::with_actions(DynamicSegmentNameConflict {
+                path: route_file,
+                position: "/".to_string(),
+                conflicting_segments: vec!["[id]".to_string()],
+                conflicting_paths: vec![route_file2],
+                line: 1,
+                col: 0,
+            }),
+        );
+
+        // Nothing is in base: all are introduced.
+        let base = FxHashSet::default();
+        let mut json_val = json!({
+            "unused_component_inputs": [{}],
+            "unused_component_outputs": [{}],
+            "unused_svelte_events": [{}],
+            "unused_server_actions": [{}],
+            "route_collisions": [{}],
+            "dynamic_segment_name_conflicts": [{}],
+        });
+
+        annotate_dead_code_json(&mut json_val, &results, &root, &base);
+
+        assert_eq!(json_val["unused_component_inputs"][0]["introduced"], true);
+        assert_eq!(json_val["unused_component_outputs"][0]["introduced"], true);
+        assert_eq!(json_val["unused_svelte_events"][0]["introduced"], true);
+        assert_eq!(json_val["unused_server_actions"][0]["introduced"], true);
+        assert_eq!(json_val["route_collisions"][0]["introduced"], true);
+        assert_eq!(
+            json_val["dynamic_segment_name_conflicts"][0]["introduced"],
+            true
+        );
+    }
+
+    #[test]
+    fn annotate_dead_code_json_marks_members_and_dependencies_correctly() {
+        let root = root();
+        let src = root.join("src/types.ts");
+        let pkg = root.join("package.json");
+        let mut results = AnalysisResults::default();
+        results
+            .unused_enum_members
+            .push(UnusedEnumMemberFinding::with_actions(UnusedMember {
+                path: src.clone(),
+                parent_name: "Color".to_string(),
+                member_name: "Blue".to_string(),
+                kind: MemberKind::EnumMember,
+                line: 5,
+                col: 2,
+            }));
+        results
+            .unused_class_members
+            .push(UnusedClassMemberFinding::with_actions(UnusedMember {
+                path: src.clone(),
+                parent_name: "Service".to_string(),
+                member_name: "reset".to_string(),
+                kind: MemberKind::ClassMethod,
+                line: 20,
+                col: 2,
+            }));
+        results
+            .unused_store_members
+            .push(UnusedStoreMemberFinding::with_actions(UnusedMember {
+                path: src,
+                parent_name: "useStore".to_string(),
+                member_name: "logout".to_string(),
+                kind: MemberKind::ClassMethod,
+                line: 30,
+                col: 2,
+            }));
+        results
+            .unused_dev_dependencies
+            .push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
+                package_name: "typescript".to_string(),
+                location: DependencyLocation::DevDependencies,
+                path: pkg.clone(),
+                line: 8,
+                used_in_workspaces: Vec::new(),
+            }));
+        results
+            .type_only_dependencies
+            .push(TypeOnlyDependencyFinding::with_actions(
+                TypeOnlyDependency {
+                    package_name: "zod".to_string(),
+                    path: pkg.clone(),
+                    line: 9,
+                },
+            ));
+        results
+            .test_only_dependencies
+            .push(TestOnlyDependencyFinding::with_actions(
+                TestOnlyDependency {
+                    package_name: "vitest".to_string(),
+                    path: pkg,
+                    line: 10,
+                },
+            ));
+
+        // Enum member and dev-dep are in base; class member, store member, type-only
+        // dep, and test-only dep are new.
+        let base = FxHashSet::from_iter([
+            "unused-enum-member:src/types.ts:Color:Blue".to_string(),
+            "unused-dev-dependency:package.json:typescript".to_string(),
+        ]);
+        let mut json_val = json!({
+            "unused_enum_members": [{}],
+            "unused_class_members": [{}],
+            "unused_store_members": [{}],
+            "unused_dev_dependencies": [{}],
+            "type_only_dependencies": [{}],
+            "test_only_dependencies": [{}],
+        });
+
+        annotate_dead_code_json(&mut json_val, &results, &root, &base);
+
+        assert_eq!(json_val["unused_enum_members"][0]["introduced"], false);
+        assert_eq!(json_val["unused_class_members"][0]["introduced"], true);
+        assert_eq!(json_val["unused_store_members"][0]["introduced"], true);
+        assert_eq!(json_val["unused_dev_dependencies"][0]["introduced"], false);
+        assert_eq!(json_val["type_only_dependencies"][0]["introduced"], true);
+        assert_eq!(json_val["test_only_dependencies"][0]["introduced"], true);
+    }
+
+    #[test]
+    fn annotate_dead_code_json_handles_missing_json_key_gracefully() {
+        // annotate_issue_array is a no-op when the key is absent; this covers
+        // the early-return branch inside annotate_issue_array (lines 1477-1479).
+        let root = root();
+        let results = sample_results(&root);
+        let base = FxHashSet::default();
+        let mut json_val = json!({"other_key": []});
+
+        // Must not panic when the expected arrays are absent.
+        annotate_dead_code_json(&mut json_val, &results, &root, &base);
+    }
+
+    // --- annotate_health_json ---
+
+    fn make_violation(path: &Path, name: &str) -> ComplexityViolation {
+        ComplexityViolation {
+            path: path.to_path_buf(),
+            name: name.to_string(),
+            line: 1,
+            col: 0,
+            cyclomatic: 20,
+            cognitive: 5,
+            line_count: 30,
+            param_count: 2,
+            react_hook_count: 0,
+            react_jsx_max_depth: 0,
+            react_prop_count: 0,
+            react_hook_profile: None,
+            exceeded: ExceededThreshold::Cyclomatic,
+            severity: FindingSeverity::High,
+            crap: None,
+            coverage_pct: None,
+            coverage_tier: None,
+            coverage_source: None,
+            inherited_from: None,
+            component_rollup: None,
+            contributions: Vec::new(),
+            effective_thresholds: None,
+            threshold_source: None,
+        }
+    }
+
+    fn make_health_report(paths_and_names: &[(&Path, &str)]) -> HealthReport {
+        let findings = paths_and_names
+            .iter()
+            .map(|(path, name)| HealthFinding::from(make_violation(path, name)))
+            .collect();
+        HealthReport {
+            findings,
+            ..HealthReport::default()
+        }
+    }
+
+    #[test]
+    fn health_keys_produces_stable_key_per_finding() {
+        let root = root();
+        let path = root.join("src/heavy.ts");
+        let report = make_health_report(&[(&path, "processAll")]);
+        let keys = health_keys(&report, &root);
+        assert!(keys.contains("complexity:src/heavy.ts:processAll:Cyclomatic"));
+    }
+
+    #[test]
+    fn health_finding_key_uses_path_name_and_exceeded() {
+        let root = root();
+        let path = root.join("src/heavy.ts");
+        let violation = make_violation(&path, "render");
+        let key = health_finding_key(&violation, &root);
+        assert_eq!(key, "complexity:src/heavy.ts:render:Cyclomatic");
+    }
+
+    #[test]
+    fn annotate_health_json_marks_introduced_and_inherited_flags() {
+        let root = root();
+        let path_a = root.join("src/heavy.ts");
+        let path_b = root.join("src/other.ts");
+        let report = make_health_report(&[(&path_a, "doWork"), (&path_b, "render")]);
+
+        // Only path_b:render is in the base.
+        let base = FxHashSet::from_iter(["complexity:src/other.ts:render:Cyclomatic".to_string()]);
+        let mut json_val = json!({
+            "findings": [{}, {}],
+        });
+
+        annotate_health_json(&mut json_val, &report, &root, &base);
+
+        assert_eq!(json_val["findings"][0]["introduced"], true);
+        assert_eq!(json_val["findings"][1]["introduced"], false);
+    }
+
+    #[test]
+    fn annotate_health_json_is_noop_when_findings_key_absent() {
+        let root = root();
+        let report = make_health_report(&[]);
+        let base = FxHashSet::default();
+        let mut json_val = json!({"summary": {}});
+        // Must not panic.
+        annotate_health_json(&mut json_val, &report, &root, &base);
+    }
+
+    // --- annotate_dupes_json and dupe_group_key ---
+
+    fn make_clone_group(files: &[PathBuf], fragment: &str) -> CloneGroup {
+        CloneGroup {
+            instances: files
+                .iter()
+                .map(|f| CloneInstance {
+                    file: f.clone(),
+                    start_line: 1,
+                    end_line: 5,
+                    start_col: 0,
+                    end_col: 80,
+                    fragment: fragment.to_string(),
+                })
+                .collect(),
+            token_count: 10,
+            line_count: 5,
+        }
+    }
+
+    fn make_duplication_report(groups: Vec<CloneGroup>) -> DuplicationReport {
+        DuplicationReport {
+            clone_groups: groups,
+            clone_families: Vec::new(),
+            mirrored_directories: Vec::new(),
+            stats: fallow_core::duplicates::DuplicationStats::default(),
+        }
+    }
+
+    #[test]
+    fn dupe_group_key_is_stable_for_sorted_deduplicated_files() {
+        let root = root();
+        let a = root.join("src/a.ts");
+        let b = root.join("src/b.ts");
+        // Build two groups with same fragment but different file order.
+        let group_ab = make_clone_group(&[a.clone(), b.clone()], "const x = 1;");
+        let group_ba = make_clone_group(&[b, a], "const x = 1;");
+        let key_ab = dupe_group_key(&group_ab, &root);
+        let key_ba = dupe_group_key(&group_ba, &root);
+        // File list is sorted so both keys share the same file prefix.
+        assert!(key_ab.starts_with("dupe:src/a.ts|src/b.ts:"));
+        assert!(key_ba.starts_with("dupe:src/a.ts|src/b.ts:"));
+        // Same fragment => same hash.
+        assert_eq!(key_ab, key_ba);
+    }
+
+    #[test]
+    fn dupes_keys_produces_one_key_per_clone_group() {
+        let root = root();
+        let a = root.join("src/a.ts");
+        let b = root.join("src/b.ts");
+        let groups = vec![
+            make_clone_group(&[a.clone(), b.clone()], "block one"),
+            make_clone_group(&[a, b], "block two"),
+        ];
+        let report = make_duplication_report(groups);
+        let keys = dupes_keys(&report, &root);
+        assert_eq!(keys.len(), 2);
+    }
+
+    #[test]
+    fn annotate_dupes_json_marks_introduced_and_inherited_flags() {
+        let root = root();
+        let a = root.join("src/a.ts");
+        let b = root.join("src/b.ts");
+        let group_new = make_clone_group(&[a.clone(), b.clone()], "new block");
+        let group_old = make_clone_group(&[a, b], "old block");
+        let old_key = dupe_group_key(&group_old, &root);
+        let base = FxHashSet::from_iter([old_key]);
+        let report = make_duplication_report(vec![group_new, group_old]);
+        let mut json_val = json!({
+            "clone_groups": [{}, {}],
+        });
+
+        annotate_dupes_json(&mut json_val, &report, &root, &base);
+
+        assert_eq!(json_val["clone_groups"][0]["introduced"], true);
+        assert_eq!(json_val["clone_groups"][1]["introduced"], false);
+    }
+
+    #[test]
+    fn annotate_dupes_json_is_noop_when_clone_groups_key_absent() {
+        let root = root();
+        let report = make_duplication_report(Vec::new());
+        let base = FxHashSet::default();
+        let mut json_val = json!({"stats": {}});
+        // Must not panic.
+        annotate_dupes_json(&mut json_val, &report, &root, &base);
+    }
+
+    // --- retain_introduced_dead_code with None base (no-op path, line 1127) ---
+
+    #[test]
+    fn retain_introduced_dead_code_is_noop_when_base_is_none() {
+        let root = root();
+        let mut results = sample_results(&root);
+        let original_file_count = results.unused_files.len();
+        let original_export_count = results.unused_exports.len();
+
+        retain_introduced_dead_code(&mut results, &root, None);
+
+        // Nothing should be filtered when base is None.
+        assert_eq!(results.unused_files.len(), original_file_count);
+        assert_eq!(results.unused_exports.len(), original_export_count);
+    }
+
+    // --- retain_introduced_dead_code covers framework / component / graph findings ---
+
+    #[test]
+    fn retain_introduced_dead_code_filters_framework_findings() {
+        let root = root();
+        let src = root.join("src/App.vue");
+        let mut results = AnalysisResults::default();
+        results
+            .unprovided_injects
+            .push(UnprovidedInjectFinding::with_actions(UnprovidedInject {
+                path: src.clone(),
+                key_name: "existing".to_string(),
+                framework: "vue".to_string(),
+                line: 1,
+                col: 0,
+            }));
+        results
+            .unprovided_injects
+            .push(UnprovidedInjectFinding::with_actions(UnprovidedInject {
+                path: src.clone(),
+                key_name: "new".to_string(),
+                framework: "vue".to_string(),
+                line: 2,
+                col: 0,
+            }));
+        results
+            .unrendered_components
+            .push(UnrenderedComponentFinding::with_actions(
+                UnrenderedComponent {
+                    path: src,
+                    component_name: "OldWidget".to_string(),
+                    framework: "vue".to_string(),
+                    reachable_via: None,
+                    line: 1,
+                    col: 0,
+                },
+            ));
+
+        let base = FxHashSet::from_iter([
+            "unprovided-inject:src/App.vue:existing".to_string(),
+            "unrendered-component:src/App.vue:OldWidget".to_string(),
+        ]);
+
+        retain_introduced_dead_code(&mut results, &root, Some(&base));
+
+        // Only "new" inject survives; OldWidget is filtered.
+        assert_eq!(results.unprovided_injects.len(), 1);
+        assert_eq!(results.unprovided_injects[0].inject.key_name, "new");
+        assert!(results.unrendered_components.is_empty());
+    }
+
+    #[test]
+    fn retain_introduced_dead_code_filters_graph_findings() {
+        let root = root();
+        let a = root.join("src/a.ts");
+        let b = root.join("src/b.ts");
+        let mut results = AnalysisResults::default();
+        results
+            .circular_dependencies
+            .push(CircularDependencyFinding::with_actions(
+                CircularDependency {
+                    files: vec![a.clone(), b],
+                    length: 2,
+                    line: 1,
+                    col: 0,
+                    edges: Vec::new(),
+                    is_cross_package: false,
+                },
+            ));
+        results
+            .re_export_cycles
+            .push(ReExportCycleFinding::with_actions(ReExportCycle {
+                files: vec![a],
+                kind: ReExportCycleKind::SelfLoop,
+            }));
+
+        // The circular dep is in the base; the re-export cycle is new.
+        let base = FxHashSet::from_iter(["circular-dependency:src/a.ts|src/b.ts".to_string()]);
+
+        retain_introduced_dead_code(&mut results, &root, Some(&base));
+
+        assert!(results.circular_dependencies.is_empty());
+        assert_eq!(results.re_export_cycles.len(), 1);
     }
 }
