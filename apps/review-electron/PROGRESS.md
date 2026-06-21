@@ -163,3 +163,8 @@ stacked on `fix/review-quality` (engine E1-E8+E11).
   -> "send to agent". Zero inline styles (Tailwind bg-fallow-* swatches + resolved
   stroke colors). Added 07-inspector (bridge POST) + 08-annotate QA captures so the
   inspector card and drawing toolbar are now screenshot-verified. e2e green 5/5.
+- Round 6 (diff path de-dup, MED): in diff mode the file path rendered twice (the
+  main mode toolbar AND DiffView's own sticky header). Removed it from the main
+  toolbar so DiffView owns the path + stats header, matching live/shot where each
+  sub-component owns its own toolbar. Main mode bar is now just the segmented
+  control across all three modes. format/lint/tsc/build/e2e 5/5.

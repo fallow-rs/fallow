@@ -142,9 +142,6 @@ export const App = () => {
               );
             })}
           </div>
-          {rightMode === "diff" && diffFile && (
-            <span className="truncate font-mono text-xs text-muted-foreground">{diffFile}</span>
-          )}
         </div>
         <div className="min-h-0 flex-1 overflow-hidden">
           {rightMode === "diff" && diffFile ? (
