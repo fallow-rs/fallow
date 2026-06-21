@@ -235,3 +235,8 @@ stacked on `fix/review-quality` (engine E1-E8+E11).
   against color-only-as-signal. Muted the bullets (text-muted-foreground/50) so the
   sidebar's only colors are genuine signals (verdict/risk red, cleared-check green,
   fan-in amber). Verified via 07-inspector. format/lint/tsc/build/e2e green.
+- Round 17 (purposeful brand mark, MED): the header and load-empty state used a
+  generic Sparkles (AI-cliche, decorative) against "lucide icons used
+  purposefully". Swapped to Telescope, which reads as look-ahead / focus on what
+  matters and pairs with the "see what to look at first" copy. Verified via
+  11-loading header. format/lint/tsc/build/vitest/e2e green.

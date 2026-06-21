@@ -4,7 +4,7 @@ import {
   MonitorPlay,
   Camera,
   RefreshCw,
-  Sparkles,
+  Telescope,
   Loader2,
   TriangleAlert,
 } from "lucide-react";
@@ -83,7 +83,7 @@ export const App = () => {
       <aside className="flex min-h-0 flex-col border-r border-border bg-card">
         <header className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border px-4">
           <div className="flex items-center gap-2">
-            <Sparkles className="size-4 text-primary" />
+            <Telescope className="size-4 text-primary" />
             <h1 className="text-sm font-semibold lowercase">fallow review</h1>
           </div>
           <Button size="sm" disabled={loading} onClick={() => void load()}>
@@ -138,7 +138,7 @@ export const App = () => {
             </div>
           ) : (
             <div className="flex flex-col items-center gap-2 py-16 text-center text-muted-foreground">
-              <Sparkles className="size-6 opacity-40" />
+              <Telescope className="size-6 opacity-40" />
               <p className="text-sm">load a review to see what to look at first</p>
             </div>
           )}
