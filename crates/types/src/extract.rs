@@ -2383,6 +2383,862 @@ mod tests {
         assert_eq!((line, col), (1, 0));
     }
 
+    // --- VisibilityTag ---
+
+    #[test]
+    fn visibility_tag_default_is_none_variant() {
+        assert_eq!(VisibilityTag::default(), VisibilityTag::None);
+    }
+
+    #[test]
+    fn visibility_tag_is_none_only_for_none_variant() {
+        assert!(VisibilityTag::None.is_none());
+        assert!(!VisibilityTag::Public.is_none());
+        assert!(!VisibilityTag::Internal.is_none());
+        assert!(!VisibilityTag::Beta.is_none());
+        assert!(!VisibilityTag::Alpha.is_none());
+        assert!(!VisibilityTag::ExpectedUnused.is_none());
+    }
+
+    #[test]
+    fn visibility_tag_suppresses_unused_for_api_tags() {
+        assert!(VisibilityTag::Public.suppresses_unused());
+        assert!(VisibilityTag::Internal.suppresses_unused());
+        assert!(VisibilityTag::Beta.suppresses_unused());
+        assert!(VisibilityTag::Alpha.suppresses_unused());
+    }
+
+    #[test]
+    fn visibility_tag_does_not_suppress_none_or_expected_unused() {
+        assert!(!VisibilityTag::None.suppresses_unused());
+        assert!(!VisibilityTag::ExpectedUnused.suppresses_unused());
+    }
+
+    // --- is_public_env_path ---
+
+    #[test]
+    fn is_public_env_path_process_env_public_prefix() {
+        assert!(is_public_env_path("process.env.NEXT_PUBLIC_API_URL"));
+        assert!(is_public_env_path("process.env.VITE_APP_KEY"));
+        assert!(is_public_env_path("process.env.REACT_APP_TITLE"));
+        assert!(is_public_env_path("process.env.NODE_ENV"));
+    }
+
+    #[test]
+    fn is_public_env_path_import_meta_env_public_prefix() {
+        assert!(is_public_env_path("import.meta.env.VITE_BASE_URL"));
+        assert!(is_public_env_path("import.meta.env.PUBLIC_API"));
+    }
+
+    #[test]
+    fn is_public_env_path_secret_env_vars_are_not_public() {
+        assert!(!is_public_env_path("process.env.SECRET_KEY"));
+        assert!(!is_public_env_path("process.env.DATABASE_PASSWORD"));
+        assert!(!is_public_env_path("import.meta.env.API_TOKEN"));
+    }
+
+    #[test]
+    fn is_public_env_path_non_env_paths_are_not_public() {
+        assert!(!is_public_env_path("req.query.id"));
+        assert!(!is_public_env_path("process.argv"));
+        assert!(!is_public_env_path("window.location.href"));
+    }
+
+    // --- is_public_env_var edge cases ---
+
+    #[test]
+    fn is_public_env_var_exact_matches() {
+        assert!(is_public_env_var("NODE_ENV"));
+    }
+
+    #[test]
+    fn is_public_env_var_all_known_prefixes() {
+        assert!(is_public_env_var("NUXT_PUBLIC_API_URL"));
+        assert!(is_public_env_var("PUBLIC_API_KEY"));
+        assert!(is_public_env_var("GATSBY_APP_ID"));
+        assert!(is_public_env_var("EXPO_PUBLIC_SENTRY_DSN"));
+        assert!(is_public_env_var("STORYBOOK_ENV"));
+    }
+
+    #[test]
+    fn is_public_env_var_secret_token_beats_metadata_token() {
+        // "SECRET_SHA": has SECRET (wins) and SHA (metadata); should NOT be public
+        assert!(!is_public_env_var("SECRET_SHA"));
+        // "REF_TOKEN": has TOKEN (secret) and REF (metadata); should NOT be public
+        assert!(!is_public_env_var("REF_TOKEN"));
+    }
+
+    #[test]
+    fn is_public_env_var_plain_unknown_names_are_not_public() {
+        assert!(!is_public_env_var("MY_SERVICE_URL"));
+        assert!(!is_public_env_var("FEATURE_FLAG"));
+        assert!(!is_public_env_var("DATABASE_URL"));
+    }
+
+    // --- SinkSite::span ---
+
+    #[test]
+    fn sink_site_span_reconstructs_from_offsets() {
+        let site = SinkSite {
+            sink_shape: SinkShape::Call,
+            callee_path: "eval".to_string(),
+            arg_index: 0,
+            arg_is_non_literal: true,
+            arg_kind: SinkArgKind::Other,
+            arg_literal: None,
+            regex_pattern: None,
+            object_properties: Vec::new(),
+            object_property_keys: Vec::new(),
+            object_property_keys_complete: false,
+            arg_idents: Vec::new(),
+            arg_source_paths: Vec::new(),
+            span_start: 5,
+            span_end: 15,
+            url_arg_literal: None,
+            url_shape: None,
+        };
+        let s = site.span();
+        assert_eq!(s.start, 5);
+        assert_eq!(s.end, 15);
+    }
+
+    // --- SecurityControlKind ---
+
+    #[test]
+    fn security_control_kind_equality_and_ordering() {
+        assert_eq!(
+            SecurityControlKind::Sanitization,
+            SecurityControlKind::Sanitization
+        );
+        assert_eq!(
+            SecurityControlKind::Validation,
+            SecurityControlKind::Validation
+        );
+        assert_ne!(
+            SecurityControlKind::Sanitization,
+            SecurityControlKind::Validation
+        );
+        assert!(SecurityControlKind::Sanitization < SecurityControlKind::Validation);
+        assert!(SecurityControlKind::Authentication < SecurityControlKind::Authorization);
+    }
+
+    // --- SanitizerScope ---
+
+    #[test]
+    fn sanitizer_scope_equality_and_ordering() {
+        assert_eq!(SanitizerScope::Html, SanitizerScope::Html);
+        assert_eq!(SanitizerScope::Url, SanitizerScope::Url);
+        assert_eq!(SanitizerScope::Path, SanitizerScope::Path);
+        assert_eq!(SanitizerScope::SqlIdentifier, SanitizerScope::SqlIdentifier);
+        assert_ne!(SanitizerScope::Html, SanitizerScope::Url);
+        assert!(SanitizerScope::Html < SanitizerScope::Url);
+    }
+
+    // --- SkippedSecurityCalleeReason ---
+
+    #[test]
+    fn skipped_security_callee_reason_equality() {
+        assert_eq!(
+            SkippedSecurityCalleeReason::ComputedMember,
+            SkippedSecurityCalleeReason::ComputedMember
+        );
+        assert_ne!(
+            SkippedSecurityCalleeReason::ComputedMember,
+            SkippedSecurityCalleeReason::DynamicDispatch
+        );
+        assert_ne!(
+            SkippedSecurityCalleeReason::DynamicDispatch,
+            SkippedSecurityCalleeReason::UnsupportedAssignmentObject
+        );
+    }
+
+    // --- SkippedSecurityCalleeExpressionKind ---
+
+    #[test]
+    fn skipped_security_callee_expression_kind_equality() {
+        use SkippedSecurityCalleeExpressionKind as K;
+        assert_eq!(K::StaticMemberExpression, K::StaticMemberExpression);
+        assert_eq!(K::ComputedMemberExpression, K::ComputedMemberExpression);
+        assert_eq!(K::Identifier, K::Identifier);
+        assert_eq!(K::Other, K::Other);
+        assert_ne!(K::StaticMemberExpression, K::ComputedMemberExpression);
+        assert_ne!(K::Identifier, K::Other);
+    }
+
+    // --- SinkLiteralValue ---
+
+    #[test]
+    fn sink_literal_value_equality() {
+        assert_eq!(
+            SinkLiteralValue::String("x".to_string()),
+            SinkLiteralValue::String("x".to_string())
+        );
+        assert_ne!(
+            SinkLiteralValue::String("x".to_string()),
+            SinkLiteralValue::String("y".to_string())
+        );
+        assert_eq!(SinkLiteralValue::Integer(42), SinkLiteralValue::Integer(42));
+        assert_ne!(SinkLiteralValue::Integer(1), SinkLiteralValue::Integer(2));
+        assert_eq!(
+            SinkLiteralValue::Boolean(true),
+            SinkLiteralValue::Boolean(true)
+        );
+        assert_ne!(
+            SinkLiteralValue::Boolean(true),
+            SinkLiteralValue::Boolean(false)
+        );
+        assert_eq!(SinkLiteralValue::Null, SinkLiteralValue::Null);
+        assert_ne!(SinkLiteralValue::Null, SinkLiteralValue::Boolean(false));
+    }
+
+    // --- SecurityUrlShape ---
+
+    #[test]
+    fn security_url_shape_equality() {
+        assert_eq!(
+            SecurityUrlShape::FixedOriginDynamicPath,
+            SecurityUrlShape::FixedOriginDynamicPath
+        );
+        assert_eq!(
+            SecurityUrlShape::DynamicOrigin,
+            SecurityUrlShape::DynamicOrigin
+        );
+        assert_ne!(
+            SecurityUrlShape::FixedOriginDynamicPath,
+            SecurityUrlShape::DynamicOrigin
+        );
+    }
+
+    // --- FlagUseKind ---
+
+    #[test]
+    fn flag_use_kind_equality() {
+        assert_eq!(FlagUseKind::EnvVar, FlagUseKind::EnvVar);
+        assert_eq!(FlagUseKind::SdkCall, FlagUseKind::SdkCall);
+        assert_eq!(FlagUseKind::ConfigObject, FlagUseKind::ConfigObject);
+        assert_ne!(FlagUseKind::EnvVar, FlagUseKind::SdkCall);
+        assert_ne!(FlagUseKind::SdkCall, FlagUseKind::ConfigObject);
+    }
+
+    // --- ComplexityMetric ---
+
+    #[test]
+    fn complexity_metric_equality() {
+        assert_eq!(ComplexityMetric::Cyclomatic, ComplexityMetric::Cyclomatic);
+        assert_eq!(ComplexityMetric::Cognitive, ComplexityMetric::Cognitive);
+        assert_ne!(ComplexityMetric::Cyclomatic, ComplexityMetric::Cognitive);
+    }
+
+    // --- ComplexityContributionKind ---
+
+    #[test]
+    fn complexity_contribution_kind_equality_spot_check() {
+        use ComplexityContributionKind as K;
+        assert_eq!(K::If, K::If);
+        assert_eq!(K::Else, K::Else);
+        assert_eq!(K::ElseIf, K::ElseIf);
+        assert_eq!(K::Ternary, K::Ternary);
+        assert_eq!(K::LogicalAnd, K::LogicalAnd);
+        assert_eq!(K::LogicalOr, K::LogicalOr);
+        assert_eq!(K::NullishCoalescing, K::NullishCoalescing);
+        assert_eq!(K::LogicalAssignment, K::LogicalAssignment);
+        assert_eq!(K::OptionalChain, K::OptionalChain);
+        assert_eq!(K::For, K::For);
+        assert_eq!(K::ForIn, K::ForIn);
+        assert_eq!(K::ForOf, K::ForOf);
+        assert_eq!(K::While, K::While);
+        assert_eq!(K::DoWhile, K::DoWhile);
+        assert_eq!(K::Switch, K::Switch);
+        assert_eq!(K::Case, K::Case);
+        assert_eq!(K::Catch, K::Catch);
+        assert_eq!(K::LabeledBreak, K::LabeledBreak);
+        assert_eq!(K::LabeledContinue, K::LabeledContinue);
+        assert_eq!(K::JsxDepth, K::JsxDepth);
+        assert_eq!(K::HookDensity, K::HookDensity);
+        assert_eq!(K::PropCount, K::PropCount);
+        assert_ne!(K::If, K::Else);
+        assert_ne!(K::For, K::While);
+        assert_ne!(K::Switch, K::Case);
+    }
+
+    // --- MisplacedDirectiveSite ---
+
+    #[test]
+    fn misplaced_directive_site_equality() {
+        let client = MisplacedDirectiveSite {
+            is_server: false,
+            span_start: 10,
+        };
+        let server = MisplacedDirectiveSite {
+            is_server: true,
+            span_start: 10,
+        };
+        let client2 = MisplacedDirectiveSite {
+            is_server: false,
+            span_start: 10,
+        };
+        assert_eq!(client, client2);
+        assert_ne!(client, server);
+    }
+
+    #[test]
+    fn misplaced_directive_site_is_server_flag() {
+        let site = MisplacedDirectiveSite {
+            is_server: true,
+            span_start: 42,
+        };
+        assert!(site.is_server);
+        assert_eq!(site.span_start, 42);
+
+        let client_site = MisplacedDirectiveSite {
+            is_server: false,
+            span_start: 0,
+        };
+        assert!(!client_site.is_server);
+    }
+
+    // --- DiRole / DiFramework ---
+
+    #[test]
+    fn di_role_equality() {
+        assert_eq!(DiRole::Provide, DiRole::Provide);
+        assert_eq!(DiRole::Inject, DiRole::Inject);
+        assert_ne!(DiRole::Provide, DiRole::Inject);
+    }
+
+    #[test]
+    fn di_framework_equality() {
+        assert_eq!(DiFramework::Vue, DiFramework::Vue);
+        assert_eq!(DiFramework::Svelte, DiFramework::Svelte);
+        assert_eq!(DiFramework::Angular, DiFramework::Angular);
+        assert_ne!(DiFramework::Vue, DiFramework::Svelte);
+        assert_ne!(DiFramework::Svelte, DiFramework::Angular);
+    }
+
+    // --- ComponentEmit ---
+
+    #[test]
+    fn component_emit_equality() {
+        let a = ComponentEmit {
+            name: "close".to_string(),
+            span_start: 10,
+            used: true,
+        };
+        let b = ComponentEmit {
+            name: "close".to_string(),
+            span_start: 10,
+            used: true,
+        };
+        let different_used = ComponentEmit {
+            name: "close".to_string(),
+            span_start: 10,
+            used: false,
+        };
+        let different_name = ComponentEmit {
+            name: "open".to_string(),
+            span_start: 10,
+            used: true,
+        };
+        assert_eq!(a, b);
+        assert_ne!(a, different_used);
+        assert_ne!(a, different_name);
+    }
+
+    // --- DispatchedEvent ---
+
+    #[test]
+    fn dispatched_event_equality() {
+        let a = DispatchedEvent {
+            name: "myEvent".to_string(),
+            span_start: 20,
+        };
+        let b = DispatchedEvent {
+            name: "myEvent".to_string(),
+            span_start: 20,
+        };
+        let c = DispatchedEvent {
+            name: "otherEvent".to_string(),
+            span_start: 20,
+        };
+        let d = DispatchedEvent {
+            name: "myEvent".to_string(),
+            span_start: 99,
+        };
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+        assert_ne!(a, d);
+    }
+
+    // --- AngularInputMember / AngularOutputMember ---
+
+    #[test]
+    fn angular_input_member_equality() {
+        let a = AngularInputMember {
+            name: "title".to_string(),
+            span_start: 5,
+        };
+        let b = AngularInputMember {
+            name: "title".to_string(),
+            span_start: 5,
+        };
+        let c = AngularInputMember {
+            name: "label".to_string(),
+            span_start: 5,
+        };
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn angular_output_member_equality() {
+        let a = AngularOutputMember {
+            name: "clicked".to_string(),
+            span_start: 8,
+        };
+        let b = AngularOutputMember {
+            name: "clicked".to_string(),
+            span_start: 8,
+        };
+        let c = AngularOutputMember {
+            name: "hovered".to_string(),
+            span_start: 8,
+        };
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    // --- AngularComponentSelector ---
+
+    #[test]
+    fn angular_component_selector_fields() {
+        let s = AngularComponentSelector {
+            selectors: vec!["app-foo".to_string(), "[appFoo]".to_string()],
+            span_start: 100,
+            class_name: "FooComponent".to_string(),
+        };
+        assert_eq!(s.selectors.len(), 2);
+        assert_eq!(s.selectors[0], "app-foo");
+        assert_eq!(s.selectors[1], "[appFoo]");
+        assert_eq!(s.class_name, "FooComponent");
+    }
+
+    #[test]
+    fn angular_component_selector_equality() {
+        let a = AngularComponentSelector {
+            selectors: vec!["app-bar".to_string()],
+            span_start: 0,
+            class_name: "BarComponent".to_string(),
+        };
+        let b = AngularComponentSelector {
+            selectors: vec!["app-bar".to_string()],
+            span_start: 0,
+            class_name: "BarComponent".to_string(),
+        };
+        let c = AngularComponentSelector {
+            selectors: vec!["app-baz".to_string()],
+            span_start: 0,
+            class_name: "BazComponent".to_string(),
+        };
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    // --- LoadReturnKey ---
+
+    #[test]
+    fn load_return_key_equality() {
+        let a = LoadReturnKey {
+            name: "user".to_string(),
+            span_start: 50,
+            span_end: 54,
+        };
+        let b = LoadReturnKey {
+            name: "user".to_string(),
+            span_start: 50,
+            span_end: 54,
+        };
+        let c = LoadReturnKey {
+            name: "posts".to_string(),
+            span_start: 50,
+            span_end: 55,
+        };
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn load_return_key_span_fields() {
+        let key = LoadReturnKey {
+            name: "data".to_string(),
+            span_start: 10,
+            span_end: 14,
+        };
+        assert_eq!(key.span_start, 10);
+        assert_eq!(key.span_end, 14);
+        assert_eq!(key.name, "data");
+    }
+
+    // --- ComponentFunctionKind ---
+
+    #[test]
+    fn component_function_kind_equality() {
+        assert_eq!(ComponentFunctionKind::FnDecl, ComponentFunctionKind::FnDecl);
+        assert_eq!(ComponentFunctionKind::Arrow, ComponentFunctionKind::Arrow);
+        assert_eq!(
+            ComponentFunctionKind::ForwardRefWrapper,
+            ComponentFunctionKind::ForwardRefWrapper
+        );
+        assert_eq!(
+            ComponentFunctionKind::MemoWrapper,
+            ComponentFunctionKind::MemoWrapper
+        );
+        assert_ne!(ComponentFunctionKind::FnDecl, ComponentFunctionKind::Arrow);
+        assert_ne!(
+            ComponentFunctionKind::ForwardRefWrapper,
+            ComponentFunctionKind::MemoWrapper
+        );
+    }
+
+    // --- HookUseKind ---
+
+    #[test]
+    fn hook_use_kind_equality() {
+        assert_eq!(HookUseKind::UseState, HookUseKind::UseState);
+        assert_eq!(HookUseKind::UseEffect, HookUseKind::UseEffect);
+        assert_eq!(HookUseKind::UseMemo, HookUseKind::UseMemo);
+        assert_eq!(HookUseKind::UseCallback, HookUseKind::UseCallback);
+        assert_eq!(HookUseKind::Custom, HookUseKind::Custom);
+        assert_ne!(HookUseKind::UseState, HookUseKind::UseEffect);
+        assert_ne!(HookUseKind::UseMemo, HookUseKind::Custom);
+    }
+
+    // --- HookUse ---
+
+    #[test]
+    fn hook_use_fields() {
+        let h = HookUse {
+            kind: HookUseKind::UseEffect,
+            dep_array_arity: Some(2),
+            span_start: 30,
+        };
+        assert_eq!(h.kind, HookUseKind::UseEffect);
+        assert_eq!(h.dep_array_arity, Some(2));
+        assert_eq!(h.span_start, 30);
+    }
+
+    #[test]
+    fn hook_use_no_dep_array() {
+        let h = HookUse {
+            kind: HookUseKind::UseCallback,
+            dep_array_arity: None,
+            span_start: 0,
+        };
+        assert!(h.dep_array_arity.is_none());
+    }
+
+    // --- MemberKind::StoreMember (missed in existing bitcode test) ---
+
+    #[test]
+    fn member_kind_store_member_bitcode_roundtrip() {
+        let kind = MemberKind::StoreMember;
+        let bytes = bitcode::encode(&kind);
+        let decoded: MemberKind = bitcode::decode(&bytes).unwrap();
+        assert_eq!(decoded, kind);
+    }
+
+    // --- RenderEdge / ForwardAttr ---
+
+    #[test]
+    fn render_edge_fields() {
+        let edge = RenderEdge {
+            parent_component: "Parent".to_string(),
+            child_component_name: "Child".to_string(),
+            attr_names: vec!["title".to_string(), "onClick".to_string()],
+            has_spread: false,
+            forward_attrs: vec![ForwardAttr {
+                attr: "title".to_string(),
+                root: "props".to_string(),
+            }],
+            has_complex_forward: false,
+        };
+        assert_eq!(edge.parent_component, "Parent");
+        assert_eq!(edge.child_component_name, "Child");
+        assert_eq!(edge.attr_names.len(), 2);
+        assert!(!edge.has_spread);
+        assert_eq!(edge.forward_attrs.len(), 1);
+        assert_eq!(edge.forward_attrs[0].attr, "title");
+        assert_eq!(edge.forward_attrs[0].root, "props");
+        assert!(!edge.has_complex_forward);
+    }
+
+    #[test]
+    fn render_edge_with_spread() {
+        let edge = RenderEdge {
+            parent_component: "Wrapper".to_string(),
+            child_component_name: "Inner".to_string(),
+            attr_names: Vec::new(),
+            has_spread: true,
+            forward_attrs: Vec::new(),
+            has_complex_forward: true,
+        };
+        assert!(edge.has_spread);
+        assert!(edge.has_complex_forward);
+    }
+
+    // --- ComponentFunction ---
+
+    #[test]
+    fn component_function_fields() {
+        let cf = ComponentFunction {
+            name: "MyButton".to_string(),
+            span_start: 0,
+            kind: ComponentFunctionKind::Arrow,
+            is_exported: true,
+            has_unharvestable_props: false,
+            uses_clone_element: false,
+            renders_provider: false,
+            has_children_as_function: false,
+            is_pure_passthrough: false,
+        };
+        assert_eq!(cf.name, "MyButton");
+        assert_eq!(cf.kind, ComponentFunctionKind::Arrow);
+        assert!(cf.is_exported);
+        assert!(!cf.has_unharvestable_props);
+        assert!(!cf.is_pure_passthrough);
+    }
+
+    #[test]
+    fn component_function_passthrough_flag() {
+        let cf = ComponentFunction {
+            name: "Passthrough".to_string(),
+            span_start: 5,
+            kind: ComponentFunctionKind::FnDecl,
+            is_exported: false,
+            has_unharvestable_props: false,
+            uses_clone_element: false,
+            renders_provider: false,
+            has_children_as_function: false,
+            is_pure_passthrough: true,
+        };
+        assert!(cf.is_pure_passthrough);
+        assert!(!cf.is_exported);
+    }
+
+    // --- DiKeySite ---
+
+    #[test]
+    fn di_key_site_fields() {
+        let site = DiKeySite {
+            key_local: "MY_KEY".to_string(),
+            role: DiRole::Provide,
+            framework: DiFramework::Vue,
+            span_start: 77,
+        };
+        assert_eq!(site.key_local, "MY_KEY");
+        assert_eq!(site.role, DiRole::Provide);
+        assert_eq!(site.framework, DiFramework::Vue);
+        assert_eq!(site.span_start, 77);
+    }
+
+    #[test]
+    fn di_key_site_inject_svelte() {
+        let site = DiKeySite {
+            key_local: "ctx_key".to_string(),
+            role: DiRole::Inject,
+            framework: DiFramework::Svelte,
+            span_start: 0,
+        };
+        assert_eq!(site.role, DiRole::Inject);
+        assert_eq!(site.framework, DiFramework::Svelte);
+    }
+
+    // --- release_resolution_payload: page data store whole-use derivation ---
+
+    #[test]
+    fn release_payload_derives_page_data_store_whole_use_from_page_data() {
+        let mut m = minimal_module_info();
+        m.whole_object_uses = vec!["page.data".to_string()];
+        m.release_resolution_payload();
+        assert!(m.has_page_data_store_whole_use);
+    }
+
+    #[test]
+    fn release_payload_derives_page_data_store_whole_use_from_dollar_page_data() {
+        let mut m = minimal_module_info();
+        m.whole_object_uses = vec!["$page.data".to_string()];
+        m.release_resolution_payload();
+        assert!(m.has_page_data_store_whole_use);
+    }
+
+    #[test]
+    fn release_payload_does_not_set_page_data_store_whole_use_for_other_names() {
+        let mut m = minimal_module_info();
+        m.whole_object_uses = vec!["data".to_string(), "page".to_string()];
+        m.release_resolution_payload();
+        assert!(!m.has_page_data_store_whole_use);
+    }
+
+    // --- release_resolution_payload: referenced_import_bindings derivation ---
+
+    #[test]
+    fn release_payload_referenced_bindings_excludes_empty_local_names() {
+        let mut m = minimal_module_info();
+        m.imports = vec![
+            ImportInfo {
+                source: "./styles.css".to_string(),
+                imported_name: ImportedName::SideEffect,
+                local_name: String::new(), // empty = side-effect import
+                is_type_only: false,
+                from_style: true,
+                span: span(),
+                source_span: span(),
+            },
+            ImportInfo {
+                source: "react".to_string(),
+                imported_name: ImportedName::Default,
+                local_name: "React".to_string(),
+                is_type_only: false,
+                from_style: false,
+                span: span(),
+                source_span: span(),
+            },
+        ];
+        m.unused_import_bindings = vec!["React".to_string()];
+        m.release_resolution_payload();
+        // "React" was unused, empty local is filtered; result should be empty
+        assert!(m.referenced_import_bindings.is_empty());
+    }
+
+    #[test]
+    fn release_payload_referenced_bindings_sorted_and_deduped() {
+        let mut m = minimal_module_info();
+        // Two imports with the same local name (unusual but possible via re-exports)
+        m.imports = vec![
+            ImportInfo {
+                source: "a".to_string(),
+                imported_name: ImportedName::Named("foo".to_string()),
+                local_name: "foo".to_string(),
+                is_type_only: false,
+                from_style: false,
+                span: span(),
+                source_span: span(),
+            },
+            ImportInfo {
+                source: "b".to_string(),
+                imported_name: ImportedName::Named("bar".to_string()),
+                local_name: "bar".to_string(),
+                is_type_only: false,
+                from_style: false,
+                span: span(),
+                source_span: span(),
+            },
+            ImportInfo {
+                source: "c".to_string(),
+                imported_name: ImportedName::Named("foo".to_string()),
+                local_name: "foo".to_string(),
+                is_type_only: false,
+                from_style: false,
+                span: span(),
+                source_span: span(),
+            },
+        ];
+        m.unused_import_bindings = Vec::new();
+        m.release_resolution_payload();
+        // sorted: ["bar", "foo"] with "foo" deduped
+        assert_eq!(
+            m.referenced_import_bindings,
+            vec!["bar".to_string(), "foo".to_string()]
+        );
+    }
+
+    // --- CalleeUse ---
+
+    #[test]
+    fn callee_use_fields() {
+        let cu = CalleeUse {
+            callee_path: "child_process.exec".to_string(),
+            span_start: 100,
+        };
+        assert_eq!(cu.callee_path, "child_process.exec");
+        assert_eq!(cu.span_start, 100);
+    }
+
+    // --- Helper to build a minimal ModuleInfo for targeted tests ---
+
+    fn minimal_module_info() -> ModuleInfo {
+        ModuleInfo {
+            file_id: FileId(0),
+            exports: Vec::new(),
+            imports: Vec::new(),
+            re_exports: Vec::new(),
+            dynamic_imports: Vec::new(),
+            dynamic_import_patterns: Vec::new(),
+            require_calls: Vec::new(),
+            package_path_references: Vec::new(),
+            member_accesses: Vec::new(),
+            whole_object_uses: Vec::new(),
+            has_cjs_exports: false,
+            has_angular_component_template_url: false,
+            content_hash: 0,
+            suppressions: Vec::new(),
+            unknown_suppression_kinds: Vec::new(),
+            unused_import_bindings: Vec::new(),
+            type_referenced_import_bindings: Vec::new(),
+            value_referenced_import_bindings: Vec::new(),
+            line_offsets: Vec::new(),
+            complexity: Vec::new(),
+            flag_uses: Vec::new(),
+            class_heritage: Vec::new(),
+            injection_tokens: Vec::new(),
+            local_type_declarations: Vec::new(),
+            public_signature_type_references: Vec::new(),
+            namespace_object_aliases: Vec::new(),
+            iconify_prefixes: Vec::new(),
+            iconify_icon_names: Vec::new(),
+            auto_import_candidates: Vec::new(),
+            directives: Vec::new(),
+            client_only_dynamic_import_spans: Vec::new(),
+            security_sinks: Vec::new(),
+            security_sinks_skipped: 0,
+            security_unresolved_callee_sites: Vec::new(),
+            tainted_bindings: Vec::new(),
+            sanitized_sink_args: Vec::new(),
+            security_control_sites: Vec::new(),
+            callee_uses: Vec::new(),
+            misplaced_directives: Vec::new(),
+            inline_server_action_exports: Vec::new(),
+            di_key_sites: Vec::new(),
+            has_dynamic_provide: false,
+            referenced_import_bindings: Vec::new(),
+            component_props: Vec::new(),
+            has_props_attrs_fallthrough: false,
+            has_define_expose: false,
+            has_define_model: false,
+            has_unharvestable_props: false,
+            component_emits: Vec::new(),
+            angular_inputs: Vec::new(),
+            angular_outputs: Vec::new(),
+            angular_component_selectors: Vec::new(),
+            angular_used_selectors: Vec::new(),
+            angular_entry_component_refs: Vec::new(),
+            has_dynamic_component_render: false,
+            has_unharvestable_emits: false,
+            has_dynamic_emit: false,
+            has_emit_whole_object_use: false,
+            load_return_keys: Vec::new(),
+            has_unharvestable_load: false,
+            has_load_data_whole_use: false,
+            has_page_data_store_whole_use: false,
+            component_functions: Vec::new(),
+            react_props: Vec::new(),
+            hook_uses: Vec::new(),
+            render_edges: Vec::new(),
+            svelte_dispatched_events: Vec::new(),
+            svelte_listened_events: Vec::new(),
+            has_dynamic_dispatch: false,
+        }
+    }
+
     #[test]
     fn function_complexity_bitcode_roundtrip() {
         let fc = FunctionComplexity {
