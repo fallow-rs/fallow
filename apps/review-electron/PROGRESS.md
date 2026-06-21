@@ -190,3 +190,9 @@ stacked on `fix/review-quality` (engine E1-E8+E11).
   10-focus QA capture that presses Tab (to enter keyboard modality so
   :focus-visible matches) then focuses a file row; ring confirmed rendering.
   format/lint/tsc/build/vitest/e2e 5/5.
+- Round 10 (review loading state, MED): during the multi-second review the sidebar
+  showed the "load a review to see what to look at first" empty prompt, which
+  contradicts the in-flight load (header already says "reviewing"). Split the
+  not-loaded branch into loading vs empty: loading now shows a centered spinner +
+  "running fallow review…" + a descriptive hint. Added an 11-loading capture
+  (screenshots the state before the real review resolves). format/lint/build/e2e 5/5.

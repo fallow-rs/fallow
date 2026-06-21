@@ -27,6 +27,11 @@ test("capture screens for design QA", async () => {
   const win = await app.firstWindow();
 
   await win.getByRole("button", { name: "Load review" }).click();
+  await safe(async () => {
+    // The real review takes a beat; capture the loading state before it resolves.
+    await win.getByText(/running fallow review/).waitFor({ timeout: 3000 });
+    await win.screenshot({ path: `${shots}/11-loading.png` });
+  });
   await win.getByTestId("review-loaded").waitFor({ timeout: 150_000 });
   await win.screenshot({ path: `${shots}/01-walkthrough.png` });
 

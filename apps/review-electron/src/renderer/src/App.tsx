@@ -105,6 +105,12 @@ export const App = () => {
                 onOpenDiff={onOpenDiff}
               />
             </>
+          ) : loading ? (
+            <div className="flex flex-col items-center gap-2 py-16 text-center text-muted-foreground">
+              <Loader2 className="size-6 animate-spin opacity-70" />
+              <p className="text-sm">running fallow review…</p>
+              <p className="text-[11px]">scoring blast radius and partitioning the diff</p>
+            </div>
           ) : (
             !error && (
               <div className="flex flex-col items-center gap-2 py-16 text-center text-muted-foreground">
