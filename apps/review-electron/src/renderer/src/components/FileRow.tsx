@@ -10,6 +10,8 @@ import { cn } from "@/lib/utils";
 type Props = {
   file: WalkthroughFile;
   viewed: boolean;
+  /** Stage directory, stripped from the displayed path (it titles the group). */
+  baseDir?: string;
   onToggleViewed: (path: string) => void;
   onAddNote: (path: string, note: string) => void;
   onOpenDiff: (path: string) => void;
@@ -21,7 +23,14 @@ const FAN_IN_TONE: Record<SignalTone, string> = {
   muted: "text-muted-foreground",
 };
 
-export const FileRow = ({ file, viewed, onToggleViewed, onAddNote, onOpenDiff }: Props) => {
+export const FileRow = ({
+  file,
+  viewed,
+  baseDir,
+  onToggleViewed,
+  onAddNote,
+  onOpenDiff,
+}: Props) => {
   const [adding, setAdding] = useState(false);
   const [note, setNote] = useState("");
 
@@ -31,9 +40,16 @@ export const FileRow = ({ file, viewed, onToggleViewed, onAddNote, onOpenDiff }:
     setAdding(false);
   };
 
-  const base = file.path.split("/").pop() ?? file.path;
-  const dir = file.path.slice(0, file.path.length - base.length);
+  // Drop the stage-dir prefix (the group header already shows it); always keep
+  // the filename visible by letting only the residual dir shrink.
+  const rel =
+    baseDir && file.path.startsWith(`${baseDir}/`)
+      ? file.path.slice(baseDir.length + 1)
+      : file.path;
+  const base = rel.split("/").pop() ?? rel;
+  const dir = rel.slice(0, rel.length - base.length);
   const signal = deriveFileSignal(file);
+  const title = file.reason ? `${file.path} · ${file.reason}` : file.path;
 
   return (
     <li
@@ -52,14 +68,14 @@ export const FileRow = ({ file, viewed, onToggleViewed, onAddNote, onOpenDiff }:
         <button
           type="button"
           data-testid="file-open"
-          title={file.reason || undefined}
+          title={title}
           onClick={() => onOpenDiff(file.path)}
           className="flex min-w-0 flex-1 items-center gap-2 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
         >
           <FileText className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 flex-1 truncate font-mono text-xs">
-            <span className="text-muted-foreground">{dir}</span>
-            <span className="text-foreground">{base}</span>
+          <span className="flex min-w-0 flex-1 items-baseline font-mono text-xs">
+            {dir && <span className="truncate text-muted-foreground">{dir}</span>}
+            <span className="shrink-0 text-foreground">{base}</span>
           </span>
         </button>
         <div className="flex shrink-0 items-center gap-1.5">

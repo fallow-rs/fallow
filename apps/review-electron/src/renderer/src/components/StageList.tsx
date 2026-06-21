@@ -33,6 +33,7 @@ export const StageList = ({ stages, isViewed, onToggleViewed, onAddNote, onOpenD
               key={f.path}
               file={f}
               viewed={isViewed(f.path)}
+              baseDir={stage.moduleDir}
               onToggleViewed={onToggleViewed}
               onAddNote={onAddNote}
               onOpenDiff={onOpenDiff}

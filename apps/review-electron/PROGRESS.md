@@ -202,3 +202,11 @@ stacked on `fix/review-quality` (engine E1-E8+E11).
   (indented under the header), count right in mono tabular-nums. Added a
   cleared-toggle testid + 12-cleared capture; verified the breakdown (dead-code 61,
   duplication 3, complexity 13) reads as a clean column. format/lint/tsc/build/vitest/e2e 5/5.
+- Round 12 (file-row path readability, HIGH): deeply-nested rows showed the full
+  path (apps/review-electron/src/renderer/src/components/...) which (a) truncated
+  the FILENAME, the most important part, and (b) duplicated the stage-group header
+  that already shows the module dir. FileRow now takes baseDir (the stage dir),
+  strips that prefix, and renders the residual dir as the only shrinkable span so
+  the filename never truncates; full path + reason move to the hover title.
+  Result: rows show clean filenames (App.tsx, walkthrough.ts ↓17) grouped under
+  their module header, hub metrics aligned right. format/lint/tsc/build/vitest/e2e 5/5.
