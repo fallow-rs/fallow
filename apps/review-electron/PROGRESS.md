@@ -155,3 +155,11 @@ stacked on `fix/review-quality` (engine E1-E8+E11).
   fallow-amber numbers, muted-italic comments) so no new palette is invented and
   the diff's green/red stays the add/del signal. Diff now reads like a real
   syntax-highlighted review surface. format/lint/tsc/build/vitest/e2e 5/5.
+- Round 5 (annotate drawing tools, was 5/10): the drawing surface was red-only
+  with no undo/clear, drawing directly onto the canvas (no stroke model). Rebuilt
+  DrawableImage around a stroke model (base image kept in a ref, strokes replayed
+  on redraw): a signal-palette pen picker (red/amber/green/blue swatches, selected
+  ring), undo (pop last stroke), and clear, all above the canvas; "save annotation"
+  -> "send to agent". Zero inline styles (Tailwind bg-fallow-* swatches + resolved
+  stroke colors). Added 07-inspector (bridge POST) + 08-annotate QA captures so the
+  inspector card and drawing toolbar are now screenshot-verified. e2e green 5/5.

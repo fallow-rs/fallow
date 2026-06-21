@@ -31,6 +31,29 @@ test("capture screens for design QA", async () => {
   await win.screenshot({ path: `${shots}/01-walkthrough.png` });
 
   await safe(async () => {
+    // Simulate the in-page picker posting a selection to the localhost bridge.
+    await fetch("http://127.0.0.1:7787/fallow-select", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        file: "apps/review-electron/src/main/index.ts",
+        line: 1,
+        component: "main",
+      }),
+    });
+    await win.getByText("inspected").waitFor({ timeout: 30_000 });
+    await win.screenshot({ path: `${shots}/07-inspector.png` });
+  });
+
+  await safe(async () => {
+    // Capture the screenshot + annotate surface (drawing toolbar over a capture).
+    await win.getByTestId("mode-shot").click({ timeout: 10_000 });
+    await win.getByTestId("shot-capture").click({ timeout: 10_000 });
+    await win.getByRole("button", { name: "send to agent" }).waitFor({ timeout: 20_000 });
+    await win.screenshot({ path: `${shots}/08-annotate.png` });
+  });
+
+  await safe(async () => {
     // Scroll a high fan-in hub (accented metric) into view to QA the grading.
     await win
       .getByTestId("file-open")
