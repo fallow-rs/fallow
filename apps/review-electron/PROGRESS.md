@@ -68,3 +68,9 @@ stacked on `fix/review-quality` (engine E1-E8+E11).
   theme (copied from fallow-cloud feat/dashboard-shadcn, fonts @import dropped for
   offline+CSP) + cn util + components.json + `@` alias + dark default. CSS bundle
   emitted; tsc + build + oxlint + e2e 3/3 green. P1 = port screens to shadcn.
+- P1 (in progress): copied shadcn ui (button/card/input/checkbox/badge/tabs/
+  separator/label). Ported the walkthrough SIDEBAR to shadcn + Tailwind
+  (App shell, ReviewFocus, StageList, FileRow, ClearedPanel, DecisionList,
+  InspectorCard) with conventions (lowercase, mono tabular-nums, Badge variants
+  for signal). tsc + oxlint + build + e2e 3/3 green. Next: right region
+  (AnnotateCanvas/LiveApp/DrawableImage) + delete theme.ts.

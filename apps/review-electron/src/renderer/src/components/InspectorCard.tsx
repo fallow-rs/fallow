@@ -1,24 +1,19 @@
 import type { InspectorCard as Card } from "../../../main/inspect";
-import { theme } from "../theme";
+import { Card as UiCard, CardContent } from "@/components/ui/card";
 
 export const InspectorCard = ({ card }: { card: Card }) => (
-  <section
-    style={{
-      border: `1px solid ${theme.accent}`,
-      borderRadius: 6,
-      padding: 10,
-      marginBottom: 12,
-    }}
-  >
-    <div style={{ fontSize: 11, color: theme.muted }}>inspected</div>
-    <div style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}>
-      {card.component ? `${card.component} · ` : ""}
-      {card.file}:{card.line}
-    </div>
-    <ul style={{ margin: "6px 0 0", paddingLeft: 16, fontSize: 11, color: theme.muted }}>
-      {card.facts.map((f, i) => (
-        <li key={`${card.file}-${i}`}>{f}</li>
-      ))}
-    </ul>
-  </section>
+  <UiCard className="mb-3 gap-0 border-primary/40 py-0">
+    <CardContent className="p-2.5">
+      <div className="text-[11px] text-muted-foreground lowercase">inspected</div>
+      <div className="font-mono text-xs">
+        {card.component ? `${card.component} · ` : ""}
+        {card.file}:<span className="tabular-nums">{card.line}</span>
+      </div>
+      <ul className="mt-1.5 list-disc pl-4 text-[11px] text-muted-foreground">
+        {card.facts.map((f, i) => (
+          <li key={`${card.file}-${i}`}>{f}</li>
+        ))}
+      </ul>
+    </CardContent>
+  </UiCard>
 );

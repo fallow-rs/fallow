@@ -1,6 +1,5 @@
 import type { WalkthroughStage } from "../../../model/walkthrough";
 import { FileRow } from "./FileRow";
-import { theme } from "../theme";
 
 type Props = {
   stages: WalkthroughStage[];
@@ -12,18 +11,11 @@ type Props = {
 export const StageList = ({ stages, isViewed, onToggleViewed, onAddNote }: Props) => (
   <div>
     {stages.map((stage) => (
-      <section key={stage.moduleDir} style={{ marginBottom: 16 }}>
-        <h3
-          style={{
-            fontSize: 12,
-            color: theme.accent,
-            margin: "0 0 4px",
-            fontFamily: "ui-monospace, monospace",
-          }}
-        >
-          {stage.order + 1}. {stage.moduleDir}
+      <section key={stage.moduleDir} className="mb-4">
+        <h3 className="mb-1 font-mono text-xs text-muted-foreground">
+          <span className="tabular-nums">{stage.order + 1}</span>. {stage.moduleDir}
         </h3>
-        <ul style={{ margin: 0, padding: 0 }}>
+        <ul className="m-0 p-0">
           {stage.files.map((f) => (
             <FileRow
               key={f.path}

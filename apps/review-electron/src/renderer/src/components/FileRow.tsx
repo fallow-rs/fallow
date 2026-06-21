@@ -1,7 +1,11 @@
 import { useState } from "react";
 import type { WalkthroughFile } from "../../../model/walkthrough";
 import { deriveFileBadges, type Tone } from "../lib/badges";
-import { theme } from "../theme";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 
 type Props = {
   file: WalkthroughFile;
@@ -10,8 +14,8 @@ type Props = {
   onAddNote: (path: string, note: string) => void;
 };
 
-const toneColor = (tone: Tone): string =>
-  tone === "high" ? theme.high : tone === "info" ? theme.info : theme.muted;
+const badgeVariant = (tone: Tone): "default" | "secondary" | "outline" =>
+  tone === "high" ? "default" : tone === "info" ? "secondary" : "outline";
 
 export const FileRow = ({ file, viewed, onToggleViewed, onAddNote }: Props) => {
   const [adding, setAdding] = useState(false);
@@ -24,72 +28,50 @@ export const FileRow = ({ file, viewed, onToggleViewed, onAddNote }: Props) => {
   };
 
   return (
-    <li
-      style={{
-        listStyle: "none",
-        padding: "6px 0",
-        borderBottom: `1px solid ${theme.border}`,
-        opacity: viewed ? 0.45 : 1,
-      }}
-    >
-      <label style={{ display: "flex", gap: 8, alignItems: "baseline", cursor: "pointer" }}>
-        <input type="checkbox" checked={viewed} onChange={() => onToggleViewed(file.path)} />
-        <span style={{ flex: 1 }}>
-          <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}>{file.path}</span>
-          <span style={{ display: "block", color: theme.muted, fontSize: 11 }}>
+    <li className={cn("border-b border-border py-1.5", viewed && "opacity-45")}>
+      <label className="flex cursor-pointer items-baseline gap-2">
+        <Checkbox
+          checked={viewed}
+          onCheckedChange={() => onToggleViewed(file.path)}
+          className="mt-0.5"
+        />
+        <span className="flex-1">
+          <span className="font-mono text-xs">{file.path}</span>
+          <span className="block text-[11px] text-muted-foreground">
             {file.reason || "no signal"}
           </span>
         </span>
       </label>
-      <div
-        style={{
-          display: "flex",
-          gap: 4,
-          marginTop: 2,
-          marginLeft: 24,
-          flexWrap: "wrap",
-          alignItems: "center",
-        }}
-      >
+      <div className="ml-6 mt-1 flex flex-wrap items-center gap-1">
         {deriveFileBadges(file).map((b) => (
-          <span
+          <Badge
             key={b.label}
-            style={{
-              fontSize: 9,
-              padding: "1px 5px",
-              borderRadius: 3,
-              color: theme.bg,
-              background: toneColor(b.tone),
-            }}
+            variant={badgeVariant(b.tone)}
+            className="px-1.5 py-0 font-mono text-[9px] lowercase"
           >
             {b.label}
-          </span>
+          </Badge>
         ))}
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-5 px-1.5 text-[9px] lowercase"
           onClick={() => setAdding((a) => !a)}
-          style={{
-            fontSize: 9,
-            background: "none",
-            border: `1px solid ${theme.border}`,
-            color: theme.muted,
-            borderRadius: 3,
-            cursor: "pointer",
-          }}
         >
           + note
-        </button>
+        </Button>
       </div>
       {adding && (
-        <div style={{ display: "flex", gap: 4, marginLeft: 24, marginTop: 4 }}>
-          <input
+        <div className="ml-6 mt-1 flex gap-1">
+          <Input
             value={note}
             onChange={(e) => setNote(e.target.value)}
             placeholder="note for the agent"
-            style={{ flex: 1, fontSize: 11 }}
+            className="h-7 text-xs"
           />
-          <button onClick={save} style={{ fontSize: 11 }}>
+          <Button size="sm" className="h-7 text-xs lowercase" onClick={save}>
             save
-          </button>
+          </Button>
         </div>
       )}
     </li>

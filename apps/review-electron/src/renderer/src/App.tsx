@@ -9,7 +9,7 @@ import { InspectorCard } from "./components/InspectorCard";
 import { AnnotateCanvas } from "./components/AnnotateCanvas";
 import { LiveApp } from "./components/LiveApp";
 import { isViewed as readViewed, setViewed as writeViewed } from "./lib/viewed";
-import { theme } from "./theme";
+import { Button } from "@/components/ui/button";
 
 export const App = () => {
   const [doc, setDoc] = useState<WalkthroughDocument | null>(null);
@@ -56,45 +56,21 @@ export const App = () => {
   }, []);
 
   return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "440px 1fr",
-        height: "100vh",
-        fontFamily: "system-ui, sans-serif",
-        background: theme.bg,
-        color: theme.text,
-      }}
-    >
-      <aside
-        style={{
-          borderRight: `1px solid ${theme.border}`,
-          padding: 16,
-          overflow: "auto",
-          background: theme.panel,
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: 12,
-          }}
-        >
-          <h1 style={{ fontSize: 14, margin: 0 }}>Fallow Review</h1>
-          <button onClick={() => void load()} disabled={loading} style={{ fontSize: 12 }}>
-            {loading ? "Reviewing…" : "Load review"}
-          </button>
+    <div className="grid h-screen grid-cols-[440px_1fr] bg-background font-sans text-foreground">
+      <aside className="flex flex-col overflow-auto border-r border-border bg-card p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <h1 className="text-sm font-semibold lowercase">fallow review</h1>
+          <Button size="sm" variant="secondary" disabled={loading} onClick={() => void load()}>
+            {loading ? "reviewing…" : "load review"}
+          </Button>
         </div>
         {noteCount > 0 && (
-          <p style={{ fontSize: 11, color: theme.muted }}>
-            {noteCount} note(s) sent to the agent feed
+          <p className="mb-2 text-xs text-muted-foreground">
+            <span className="font-mono tabular-nums">{noteCount}</span> note(s) sent to the agent
+            feed
           </p>
         )}
-        {error && (
-          <p style={{ color: theme.danger, whiteSpace: "pre-wrap", fontSize: 12 }}>{error}</p>
-        )}
+        {error && <p className="mb-2 whitespace-pre-wrap text-xs text-destructive">{error}</p>}
         {card && <InspectorCard card={card} />}
         {doc && (
           <>
@@ -110,24 +86,22 @@ export const App = () => {
           </>
         )}
       </aside>
-      <main style={{ overflow: "hidden", display: "grid", gridTemplateRows: "auto 1fr" }}>
-        <div
-          style={{ display: "flex", gap: 6, padding: 6, borderBottom: `1px solid ${theme.border}` }}
-        >
-          <button
+      <main className="grid grid-rows-[auto_1fr] overflow-hidden">
+        <div className="flex gap-1.5 border-b border-border p-1.5">
+          <Button
+            size="sm"
+            variant={rightMode === "live" ? "secondary" : "ghost"}
             onClick={() => setRightMode("live")}
-            disabled={rightMode === "live"}
-            style={{ fontSize: 12 }}
           >
-            Live app
-          </button>
-          <button
+            live app
+          </Button>
+          <Button
+            size="sm"
+            variant={rightMode === "shot" ? "secondary" : "ghost"}
             onClick={() => setRightMode("shot")}
-            disabled={rightMode === "shot"}
-            style={{ fontSize: 12 }}
           >
-            Screenshot URL
-          </button>
+            screenshot url
+          </Button>
         </div>
         {rightMode === "live" ? <LiveApp /> : <AnnotateCanvas />}
       </main>
