@@ -247,3 +247,26 @@ stacked on `fix/review-quality` (engine E1-E8+E11).
   only remaining nit (the live/screenshot "go" button's refresh icon) is LOW and
   defensible (it reloads the typed URL). No code changes this pass. One more clean
   pass confirms the stop condition.
+- CLEAN PASS 2/2: independent harsh re-evaluation (annotate drawing tools, focus
+  ring, live error, inspector, verdict header, file rows, diff). No HIGH/MED
+  issues. Two consecutive clean passes reached. No code changes this pass.
+
+## STATUS: polish loop complete (2026-06-21)
+Stop condition met: two consecutive full-screen passes with zero HIGH/MED visual
+issues. 18 polish chunks shipped this loop, each signed and gated
+(oxfmt + oxlint + tsc + electron-vite build + vitest + Playwright e2e green):
+- live + screenshot + diff + review surfaces now share ONE centered
+  empty/loading/error language (no more white webview void, no plain top-left text)
+- file rows: stage-dir prefix stripped (filenames never truncate), fan-in blast-
+  radius surfaced as a graded mono metric (amber hubs), single-line + de-noised
+- diff: GitHub/codiff layout (sign gutter, dual line numbers, readable code) plus
+  a pure zero-dep JS/TS syntax highlighter; duplicate path removed
+- sidebar leads with the verdict (KPI stat strip), agent backend picker unified as
+  a segmented control, cleared breakdown aligned as a count table, agent-run status
+  toned as a signal
+- annotation tools rebuilt (pen colors, undo, clear); keyboard-focus rings on every
+  custom button; purposeful Telescope brand mark; color reserved for signal only
+QA coverage grew from 4 to 13 screenshot states (added live-error, annotate,
+diff-mixed, focus, loading, cleared, review-error). e2e 3 -> 6.
+Only remaining nit is LOW (the live/screenshot "go" button reuses a refresh icon,
+which is defensible since it reloads the typed URL). Loop stopped; not rescheduled.
