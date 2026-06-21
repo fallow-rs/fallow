@@ -45,6 +45,14 @@ test("capture screens for design QA", async () => {
   });
 
   await safe(async () => {
+    // Expand the cleared panel to QA the aligned count list.
+    await win.getByTestId("cleared-toggle").click({ timeout: 10_000 });
+    await win.waitForTimeout(150);
+    await win.screenshot({ path: `${shots}/12-cleared.png` });
+    await win.getByTestId("cleared-toggle").click({ timeout: 10_000 });
+  });
+
+  await safe(async () => {
     // Simulate the in-page picker posting a selection to the localhost bridge.
     await fetch("http://127.0.0.1:7787/fallow-select", {
       method: "POST",

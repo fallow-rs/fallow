@@ -196,3 +196,9 @@ stacked on `fix/review-quality` (engine E1-E8+E11).
   not-loaded branch into loading vs empty: loading now shows a centered spinner +
   "running fallow review…" + a descriptive hint. Added an 11-loading capture
   (screenshots the state before the real review resolves). format/lint/build/e2e 5/5.
+- Round 11 (cleared-panel breakdown, MED): the expanded "fallow handled N" list
+  rendered each row as a left-aligned "count label" pair, against the design
+  language's right-aligned counts. Reflowed to an aligned mini-table: label left
+  (indented under the header), count right in mono tabular-nums. Added a
+  cleared-toggle testid + 12-cleared capture; verified the breakdown (dead-code 61,
+  duplication 3, complexity 13) reads as a clean column. format/lint/tsc/build/vitest/e2e 5/5.
