@@ -1665,9 +1665,17 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        glob_values_match, is_safe_static_dir_relative_path, is_tsconfig_error,
-        matches_nearest_tsconfig_path_alias, path_alias_capture, path_alias_pattern_matches,
-        resolve_tsconfig_extends_path,
+        SpecifierNormalization, extension_alias_matches, glob_values_match, has_glob_meta,
+        is_bare_style_package_reference, is_bare_style_subpath, is_js_ts_extension,
+        is_node_modules_path, is_plain_css_file, is_relative_tsconfig_extends,
+        is_safe_static_dir_relative_path, is_storybook_preview_html, is_style_file,
+        is_tsconfig_error, matches_nearest_tsconfig_path_alias, normalize_resolve_specifier,
+        package_usage_name_for_external_bare_specifier, package_usage_name_for_resolved_package,
+        path_alias_capture, path_alias_pattern_matches, path_alias_specificity,
+        resolve_tsconfig_extends_candidate, resolve_tsconfig_extends_path,
+        resolve_tsconfig_reference_path, should_preserve_node_modules_style_file,
+        specifier_matches_alias_prefix, static_dir_relative_path, storybook_static_url_path,
+        strip_url_suffix, tsconfig_extends_values, with_appended_extension, with_exact_extension,
     };
 
     #[test]
@@ -1842,5 +1850,795 @@ mod tests {
             &source_file,
             "@other/foo"
         ));
+    }
+
+    // ---- normalize_resolve_specifier (lines 1285-1308) ----
+
+    #[test]
+    fn jsr_scheme_is_external() {
+        let result = normalize_resolve_specifier("jsr:@std/path");
+        assert!(
+            matches!(result, SpecifierNormalization::External(_)),
+            "jsr: scheme must short-circuit to External"
+        );
+    }
+
+    #[test]
+    fn npm_scheme_with_version_strips_to_bare_package() {
+        let result = normalize_resolve_specifier("npm:preact@10/hooks");
+        let SpecifierNormalization::Resolvable(s) = result else {
+            panic!("npm: with version should be Resolvable");
+        };
+        assert_eq!(s, "preact/hooks");
+    }
+
+    #[test]
+    fn npm_scheme_scoped_package_with_version_strips_version() {
+        let result = normalize_resolve_specifier("npm:@supabase/supabase-js@2");
+        let SpecifierNormalization::Resolvable(s) = result else {
+            panic!("npm: scoped should be Resolvable");
+        };
+        assert_eq!(s, "@supabase/supabase-js");
+    }
+
+    #[test]
+    fn npm_scheme_empty_body_is_external() {
+        let result = normalize_resolve_specifier("npm:");
+        assert!(
+            matches!(result, SpecifierNormalization::External(_)),
+            "bare npm: with no body must be External"
+        );
+    }
+
+    #[test]
+    fn https_url_is_external() {
+        let result = normalize_resolve_specifier("https://deno.land/std/path.ts");
+        assert!(
+            matches!(result, SpecifierNormalization::External(_)),
+            "https:// URL must be External"
+        );
+    }
+
+    #[test]
+    fn data_uri_is_external() {
+        let result = normalize_resolve_specifier("data:text/javascript,export default 42;");
+        assert!(
+            matches!(result, SpecifierNormalization::External(_)),
+            "data: URI must be External"
+        );
+    }
+
+    #[test]
+    fn plain_bare_specifier_is_resolvable() {
+        let result = normalize_resolve_specifier("react");
+        let SpecifierNormalization::Resolvable(s) = result else {
+            panic!("plain bare specifier must be Resolvable");
+        };
+        assert_eq!(s, "react");
+    }
+
+    // ---- specifier_matches_alias_prefix (lines 412-417) ----
+
+    #[test]
+    fn alias_prefix_bare_at_sign_does_not_match_scoped_package() {
+        assert!(
+            !specifier_matches_alias_prefix("@radix-ui/react-checkbox", "@"),
+            "bare '@' must NOT match scoped packages"
+        );
+    }
+
+    #[test]
+    fn alias_prefix_bare_at_sign_matches_exact() {
+        assert!(
+            specifier_matches_alias_prefix("@", "@"),
+            "bare '@' must match exactly '@'"
+        );
+    }
+
+    #[test]
+    fn alias_prefix_with_trailing_slash_matches_any_continuation() {
+        assert!(
+            specifier_matches_alias_prefix("@/components/Button", "@/"),
+            "'@/' prefix matches any continuation"
+        );
+    }
+
+    #[test]
+    fn alias_prefix_tilde_matches_tilde_slash_continuation() {
+        assert!(
+            specifier_matches_alias_prefix("~/utils", "~"),
+            "'~' prefix matches '~/utils' (slash continuation)"
+        );
+    }
+
+    #[test]
+    fn alias_prefix_tilde_does_not_match_tilde_name() {
+        assert!(
+            !specifier_matches_alias_prefix("~utils", "~"),
+            "'~' prefix must NOT match '~utils' (no slash)"
+        );
+    }
+
+    // ---- strip_url_suffix (lines 419-423) ----
+
+    #[test]
+    fn strip_url_suffix_removes_query_string() {
+        assert_eq!(strip_url_suffix("./style.css?inline"), "./style.css");
+    }
+
+    #[test]
+    fn strip_url_suffix_removes_hash_fragment() {
+        assert_eq!(strip_url_suffix("./page.html#section"), "./page.html");
+    }
+
+    #[test]
+    fn strip_url_suffix_passes_through_plain_specifier() {
+        assert_eq!(strip_url_suffix("react"), "react");
+    }
+
+    // ---- storybook_static_url_path (lines 425-437) ----
+
+    #[test]
+    fn storybook_static_url_path_root_relative_returns_unchanged() {
+        assert_eq!(
+            storybook_static_url_path("/js/app.js"),
+            Some("/js/app.js".to_string())
+        );
+    }
+
+    #[test]
+    fn storybook_static_url_path_dot_slash_prepends_root() {
+        assert_eq!(
+            storybook_static_url_path("./icons/logo.svg"),
+            Some("/icons/logo.svg".to_string())
+        );
+    }
+
+    #[test]
+    fn storybook_static_url_path_bare_prepends_root() {
+        assert_eq!(
+            storybook_static_url_path("fonts/inter.woff2"),
+            Some("/fonts/inter.woff2".to_string())
+        );
+    }
+
+    #[test]
+    fn storybook_static_url_path_parent_relative_returns_none() {
+        assert_eq!(storybook_static_url_path("../escape.js"), None);
+    }
+
+    #[test]
+    fn storybook_static_url_path_strips_query_before_prefix() {
+        assert_eq!(
+            storybook_static_url_path("/js/app.js?v=1"),
+            Some("/js/app.js".to_string())
+        );
+    }
+
+    // ---- static_dir_relative_path (lines 439-449) ----
+
+    #[test]
+    fn static_dir_relative_path_root_mount_strips_leading_slash() {
+        assert_eq!(
+            static_dir_relative_path("/icons/logo.svg", "/"),
+            Some("icons/logo.svg")
+        );
+    }
+
+    #[test]
+    fn static_dir_relative_path_exact_mount_returns_empty() {
+        assert_eq!(static_dir_relative_path("/assets", "/assets"), Some(""));
+    }
+
+    #[test]
+    fn static_dir_relative_path_subdirectory_strips_mount_and_slash() {
+        assert_eq!(
+            static_dir_relative_path("/assets/logo.png", "/assets"),
+            Some("logo.png")
+        );
+    }
+
+    #[test]
+    fn static_dir_relative_path_non_matching_mount_returns_none() {
+        assert_eq!(static_dir_relative_path("/other/file.js", "/assets"), None);
+    }
+
+    // ---- is_node_modules_path (lines 1011-1016) ----
+
+    #[test]
+    fn is_node_modules_path_detects_node_modules_segment() {
+        let p = PathBuf::from("/project/node_modules/react/index.js");
+        assert!(is_node_modules_path(&p));
+    }
+
+    #[test]
+    fn is_node_modules_path_rejects_project_src() {
+        let p = PathBuf::from("/project/src/index.ts");
+        assert!(!is_node_modules_path(&p));
+    }
+
+    #[test]
+    fn is_node_modules_path_detects_nested_node_modules() {
+        let p = PathBuf::from("/project/packages/ui/node_modules/.pnpm/lodash/index.js");
+        assert!(is_node_modules_path(&p));
+    }
+
+    // ---- is_style_file / is_js_ts_extension / is_plain_css_file ----
+
+    #[test]
+    fn is_style_file_recognizes_css_scss_sass() {
+        assert!(is_style_file(Path::new("style.css")));
+        assert!(is_style_file(Path::new("theme.scss")));
+        assert!(is_style_file(Path::new("mixin.sass")));
+        assert!(!is_style_file(Path::new("index.ts")));
+    }
+
+    #[test]
+    fn is_js_ts_extension_recognizes_ts_family() {
+        assert!(is_js_ts_extension(Path::new("file.ts")));
+        assert!(is_js_ts_extension(Path::new("component.tsx")));
+        assert!(is_js_ts_extension(Path::new("module.mts")));
+        assert!(is_js_ts_extension(Path::new("module.cts")));
+        assert!(!is_js_ts_extension(Path::new("style.css")));
+        assert!(!is_js_ts_extension(Path::new("file.scss")));
+    }
+
+    #[test]
+    fn is_plain_css_file_matches_only_css_extension() {
+        assert!(is_plain_css_file(Path::new("main.css")));
+        assert!(!is_plain_css_file(Path::new("main.scss")));
+        assert!(!is_plain_css_file(Path::new("main.ts")));
+    }
+
+    // ---- is_bare_style_subpath / is_bare_style_package_reference ----
+
+    #[test]
+    fn is_bare_style_subpath_matches_package_with_css_subpath() {
+        assert!(is_bare_style_subpath(
+            "bootstrap/dist/css/bootstrap.min.css"
+        ));
+        assert!(is_bare_style_subpath("@fontsource/roboto/400.css"));
+    }
+
+    #[test]
+    fn is_bare_style_subpath_rejects_bare_package_root() {
+        assert!(!is_bare_style_subpath("bootstrap"));
+    }
+
+    #[test]
+    fn is_bare_style_subpath_rejects_relative_path() {
+        assert!(!is_bare_style_subpath("./local.css"));
+    }
+
+    #[test]
+    fn is_bare_style_package_reference_accepts_bare_root() {
+        assert!(is_bare_style_package_reference("bootstrap"));
+    }
+
+    #[test]
+    fn is_bare_style_package_reference_rejects_relative_specifier() {
+        assert!(!is_bare_style_package_reference("./styles.css"));
+    }
+
+    // ---- should_preserve_node_modules_style_file (lines 1018-1039) ----
+
+    #[test]
+    fn should_preserve_preserves_bare_subpath_css_from_node_modules() {
+        let specifier = "bootstrap/dist/css/bootstrap.min.css";
+        let from_file = Path::new("/project/src/main.css");
+        let resolved = Path::new("/project/node_modules/bootstrap/dist/css/bootstrap.min.css");
+        assert!(should_preserve_node_modules_style_file(
+            specifier, from_file, resolved, false
+        ));
+    }
+
+    #[test]
+    fn should_preserve_preserves_bare_root_css_from_style_importer() {
+        let specifier = "animate.css";
+        let from_file = Path::new("/project/src/main.scss");
+        let resolved = Path::new("/project/node_modules/animate.css/animate.min.css");
+        assert!(should_preserve_node_modules_style_file(
+            specifier, from_file, resolved, false
+        ));
+    }
+
+    #[test]
+    fn should_preserve_does_not_preserve_non_style_file() {
+        let specifier = "react";
+        let from_file = Path::new("/project/src/index.ts");
+        let resolved = Path::new("/project/node_modules/react/index.js");
+        assert!(!should_preserve_node_modules_style_file(
+            specifier, from_file, resolved, false
+        ));
+    }
+
+    // ---- package_usage_name_for_resolved_package (lines 1144-1153) ----
+
+    #[test]
+    fn package_usage_name_bare_specifier_uses_import_name() {
+        let specifier = "lodash";
+        let resolved = Path::new("/project/node_modules/lodash/index.js");
+        let name = package_usage_name_for_resolved_package(specifier, resolved);
+        assert_eq!(name, Some("lodash".to_string()));
+    }
+
+    #[test]
+    fn package_usage_name_scoped_bare_specifier_uses_import_name() {
+        let specifier = "@babel/core";
+        let resolved = Path::new("/project/node_modules/@babel/core/lib/index.js");
+        let name = package_usage_name_for_resolved_package(specifier, resolved);
+        assert_eq!(name, Some("@babel/core".to_string()));
+    }
+
+    #[test]
+    fn package_usage_name_non_node_modules_path_returns_none() {
+        let specifier = "./local";
+        let resolved = Path::new("/project/src/local.ts");
+        let name = package_usage_name_for_resolved_package(specifier, resolved);
+        assert_eq!(name, None);
+    }
+
+    // ---- package_usage_name_for_external_bare_specifier (lines 1160-1169) ----
+
+    #[test]
+    fn external_bare_specifier_valid_package_returns_name() {
+        let result = package_usage_name_for_external_bare_specifier("react");
+        assert_eq!(result, Some("react".to_string()));
+    }
+
+    #[test]
+    fn external_bare_specifier_scoped_package_returns_scoped_name() {
+        let result = package_usage_name_for_external_bare_specifier("@babel/core");
+        assert_eq!(result, Some("@babel/core".to_string()));
+    }
+
+    #[test]
+    fn external_bare_specifier_relative_path_returns_none() {
+        let result = package_usage_name_for_external_bare_specifier("./local");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn external_bare_specifier_path_alias_returns_none() {
+        let result = package_usage_name_for_external_bare_specifier("@/components");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn external_bare_specifier_bare_at_sign_only_returns_none() {
+        let result = package_usage_name_for_external_bare_specifier("@");
+        assert_eq!(result, None);
+    }
+
+    // ---- has_glob_meta (lines 370-374) ----
+
+    #[test]
+    fn has_glob_meta_detects_star_wildcard() {
+        assert!(has_glob_meta("src/**/*.ts"));
+    }
+
+    #[test]
+    fn has_glob_meta_detects_question_mark() {
+        assert!(has_glob_meta("src/?.ts"));
+    }
+
+    #[test]
+    fn has_glob_meta_detects_bracket_group() {
+        assert!(has_glob_meta("src/[abc].ts"));
+    }
+
+    #[test]
+    fn has_glob_meta_detects_brace_group() {
+        assert!(has_glob_meta("src/{a,b}.ts"));
+    }
+
+    #[test]
+    fn has_glob_meta_plain_path_returns_false() {
+        assert!(!has_glob_meta("src/components"));
+    }
+
+    // ---- path_alias_specificity (lines 734-738) ----
+
+    #[test]
+    fn path_alias_specificity_exact_pattern_is_max() {
+        assert_eq!(path_alias_specificity("$lib"), usize::MAX);
+    }
+
+    #[test]
+    fn path_alias_specificity_wildcard_pattern_counts_prefix_and_suffix_length() {
+        assert_eq!(path_alias_specificity("@app/*"), "@app/".len());
+    }
+
+    #[test]
+    fn path_alias_specificity_longer_prefix_is_more_specific_than_shorter() {
+        assert!(path_alias_specificity("@app/foo/*") > path_alias_specificity("@app/*"));
+    }
+
+    // ---- extension_alias_matches (lines 855-867) ----
+
+    #[test]
+    fn extension_alias_matches_js_to_ts() {
+        assert!(extension_alias_matches("js", ".ts"));
+        assert!(extension_alias_matches("js", ".tsx"));
+        assert!(extension_alias_matches("js", ".js"));
+    }
+
+    #[test]
+    fn extension_alias_matches_jsx_to_tsx() {
+        assert!(extension_alias_matches("jsx", ".tsx"));
+        assert!(extension_alias_matches("jsx", ".jsx"));
+        assert!(!extension_alias_matches("jsx", ".ts"));
+    }
+
+    #[test]
+    fn extension_alias_matches_mjs_to_mts() {
+        assert!(extension_alias_matches("mjs", ".mts"));
+        assert!(extension_alias_matches("mjs", ".mjs"));
+        assert!(!extension_alias_matches("mjs", ".ts"));
+    }
+
+    #[test]
+    fn extension_alias_matches_cjs_to_cts() {
+        assert!(extension_alias_matches("cjs", ".cts"));
+        assert!(extension_alias_matches("cjs", ".cjs"));
+        assert!(!extension_alias_matches("cjs", ".js"));
+    }
+
+    #[test]
+    fn extension_alias_matches_unknown_import_ext_returns_false() {
+        assert!(!extension_alias_matches("ts", ".js"));
+    }
+
+    // ---- with_appended_extension / with_exact_extension (lines 808-876) ----
+
+    #[test]
+    fn with_appended_extension_appends_to_extensionless_path() {
+        let path = Path::new("/project/src/Button");
+        let result = with_appended_extension(path, ".ts");
+        assert_eq!(
+            result.to_string_lossy().replace('\\', "/"),
+            "/project/src/Button.ts"
+        );
+    }
+
+    #[test]
+    fn with_exact_extension_replaces_existing_extension() {
+        let path = Path::new("/project/src/Button.js");
+        let result = with_exact_extension(path, ".ts");
+        assert_eq!(
+            result.to_string_lossy().replace('\\', "/"),
+            "/project/src/Button.ts"
+        );
+    }
+
+    // ---- resolve_tsconfig_reference_path (lines 293-313) ----
+
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    #[test]
+    fn resolve_tsconfig_reference_path_directory_appends_tsconfig_json() {
+        let temp = tempdir().unwrap();
+        let base = temp.path();
+        fs::create_dir_all(base.join("packages/ui")).unwrap();
+        let result = resolve_tsconfig_reference_path(base, "packages/ui");
+        assert_eq!(
+            result.to_string_lossy().replace('\\', "/"),
+            base.join("packages/ui/tsconfig.json")
+                .to_string_lossy()
+                .replace('\\', "/")
+        );
+    }
+
+    #[test]
+    fn resolve_tsconfig_reference_path_explicit_json_preserved() {
+        let base = Path::new("/project");
+        let result = resolve_tsconfig_reference_path(base, "tsconfig.lib.json");
+        assert_eq!(
+            result.to_string_lossy().replace('\\', "/"),
+            "/project/tsconfig.lib.json"
+        );
+    }
+
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    #[test]
+    fn resolve_tsconfig_reference_path_extensionless_existing_file_appends_json() {
+        let temp = tempdir().unwrap();
+        let base = temp.path();
+        fs::write(base.join("tsconfig.lib.json"), "{}").unwrap();
+        let result = resolve_tsconfig_reference_path(base, "tsconfig.lib");
+        assert_eq!(
+            result.to_string_lossy().replace('\\', "/"),
+            base.join("tsconfig.lib.json")
+                .to_string_lossy()
+                .replace('\\', "/")
+        );
+    }
+
+    #[test]
+    fn resolve_tsconfig_reference_path_extensionless_nonexistent_falls_back_to_tsconfig_json() {
+        let base = Path::new("/project");
+        let result = resolve_tsconfig_reference_path(base, "tsconfig.lib");
+        assert_eq!(
+            result.to_string_lossy().replace('\\', "/"),
+            "/project/tsconfig.lib/tsconfig.json"
+        );
+    }
+
+    // ---- tsconfig_extends_values (lines 315-320) ----
+
+    #[test]
+    fn tsconfig_extends_values_single_string() {
+        let json = serde_json::json!({ "extends": "../../tsconfig.base.json" });
+        let values = tsconfig_extends_values(&json);
+        assert_eq!(values, vec!["../../tsconfig.base.json"]);
+    }
+
+    #[test]
+    fn tsconfig_extends_values_array_form() {
+        let json = serde_json::json!({
+            "extends": ["../../tsconfig.base.json", "@tsconfig/node18/tsconfig.json"]
+        });
+        let values = tsconfig_extends_values(&json);
+        assert_eq!(
+            values,
+            vec!["../../tsconfig.base.json", "@tsconfig/node18/tsconfig.json"]
+        );
+    }
+
+    #[test]
+    fn tsconfig_extends_values_missing_extends_returns_empty() {
+        let json = serde_json::json!({ "compilerOptions": {} });
+        let values = tsconfig_extends_values(&json);
+        assert!(values.is_empty());
+    }
+
+    // ---- is_relative_tsconfig_extends (lines 539-541) ----
+
+    #[test]
+    fn is_relative_tsconfig_extends_dot_slash_is_relative() {
+        assert!(is_relative_tsconfig_extends("./tsconfig.base.json"));
+    }
+
+    #[test]
+    fn is_relative_tsconfig_extends_double_dot_slash_is_relative() {
+        assert!(is_relative_tsconfig_extends("../../tsconfig.base.json"));
+    }
+
+    #[test]
+    fn is_relative_tsconfig_extends_package_name_is_not_relative() {
+        assert!(!is_relative_tsconfig_extends(
+            "@tsconfig/node18/tsconfig.json"
+        ));
+    }
+
+    // ---- resolve_tsconfig_extends_candidate (lines 554-568) ----
+
+    #[test]
+    fn resolve_tsconfig_extends_candidate_with_json_ext_unchanged() {
+        let path = PathBuf::from("/project/tsconfig.base.json");
+        let result = resolve_tsconfig_extends_candidate(path.clone());
+        assert_eq!(
+            result.to_string_lossy().replace('\\', "/"),
+            path.to_string_lossy().replace('\\', "/")
+        );
+    }
+
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    #[test]
+    fn resolve_tsconfig_extends_candidate_extensionless_with_existing_json_file_appends_json() {
+        let temp = tempdir().unwrap();
+        let base = temp.path();
+        fs::write(base.join("tsconfig.base.json"), "{}").unwrap();
+        let path = base.join("tsconfig.base");
+        let result = resolve_tsconfig_extends_candidate(path);
+        assert_eq!(
+            result.to_string_lossy().replace('\\', "/"),
+            base.join("tsconfig.base.json")
+                .to_string_lossy()
+                .replace('\\', "/")
+        );
+    }
+
+    #[test]
+    fn resolve_tsconfig_extends_candidate_extensionless_nonexistent_returns_original_path() {
+        let path = PathBuf::from("/project/tsconfig.base");
+        let result = resolve_tsconfig_extends_candidate(path.clone());
+        assert_eq!(
+            result.to_string_lossy().replace('\\', "/"),
+            path.to_string_lossy().replace('\\', "/")
+        );
+    }
+
+    // ---- is_storybook_preview_html (lines 393-401) ----
+
+    #[test]
+    fn is_storybook_preview_html_matches_preview_head_html() {
+        let path = Path::new("/project/.storybook/preview-head.html");
+        assert!(is_storybook_preview_html(path));
+    }
+
+    #[test]
+    fn is_storybook_preview_html_matches_preview_body_html() {
+        let path = Path::new("/project/.storybook/preview-body.html");
+        assert!(is_storybook_preview_html(path));
+    }
+
+    #[test]
+    fn is_storybook_preview_html_rejects_non_storybook_dir() {
+        let path = Path::new("/project/src/preview-head.html");
+        assert!(!is_storybook_preview_html(path));
+    }
+
+    #[test]
+    fn is_storybook_preview_html_rejects_other_filenames() {
+        let path = Path::new("/project/.storybook/manager-head.html");
+        assert!(!is_storybook_preview_html(path));
+    }
+
+    // ---- tsconfig_extends_values array with non-string entries (line 318) ----
+
+    #[test]
+    fn tsconfig_extends_values_array_filters_out_non_string_entries() {
+        let json = serde_json::json!({ "extends": ["valid.json", 42, null] });
+        let values = tsconfig_extends_values(&json);
+        assert_eq!(values, vec!["valid.json"]);
+    }
+
+    // ---- path_alias_capture: exact match returns empty capture (line 615) ----
+
+    #[test]
+    fn path_alias_capture_exact_pattern_returns_empty_capture() {
+        assert_eq!(path_alias_capture("$lib", "$lib"), Some(""));
+        assert_eq!(path_alias_capture("$lib", "$lib/utils"), None);
+    }
+
+    // ---- path_alias_pattern_matches: bare wildcard (lines 596-599) ----
+
+    #[test]
+    fn wildcard_only_pattern_does_not_match_via_pattern_matches() {
+        assert!(!path_alias_pattern_matches("*", "anything"));
+    }
+
+    // ---- package_usage_name_for_resolved_package with path alias specifier ----
+
+    #[test]
+    fn package_usage_name_path_alias_specifier_uses_resolved_package() {
+        let specifier = "@/utils";
+        let resolved = Path::new("/project/node_modules/some-pkg/utils/index.js");
+        let name = package_usage_name_for_resolved_package(specifier, resolved);
+        assert_eq!(name, Some("some-pkg".to_string()));
+    }
+
+    // ---- static_dir_relative_path: mount without trailing slash subdir (line 447) ----
+
+    #[test]
+    fn static_dir_relative_path_prefix_collision_does_not_match() {
+        assert_eq!(
+            static_dir_relative_path("/assetsExtra/file.js", "/assets"),
+            None
+        );
+    }
+
+    // ---- glob_values_match: invalid glob is skipped (line 362) ----
+
+    #[test]
+    fn glob_values_match_invalid_glob_pattern_is_skipped() {
+        let base = Path::new("/project");
+        let source = Path::new("/project/src/index.ts");
+        let result = glob_values_match(base, &[serde_json::json!("[invalid")], source);
+        assert!(
+            !result,
+            "an invalid glob pattern must not accidentally match"
+        );
+    }
+
+    // ---- glob_values_match: no patterns at all returns false ----
+
+    #[test]
+    fn glob_values_match_empty_values_returns_false() {
+        let base = Path::new("/project");
+        let source = Path::new("/project/src/index.ts");
+        assert!(!glob_values_match(base, &[], source));
+    }
+
+    // ---- should_preserve: from_style flag enables preservation for bare package from scss importer ----
+
+    #[test]
+    fn should_preserve_from_style_flag_enables_preservation() {
+        let specifier = "normalize.css";
+        let from_file = Path::new("/project/src/App.vue");
+        let resolved = Path::new("/project/node_modules/normalize.css/normalize.css");
+        assert!(should_preserve_node_modules_style_file(
+            specifier, from_file, resolved, true
+        ));
+    }
+
+    // ---- normalize_resolve_specifier: http:// URL is external ----
+
+    #[test]
+    fn http_url_is_external() {
+        let result = normalize_resolve_specifier("http://cdn.example.com/lib.js");
+        assert!(
+            matches!(result, SpecifierNormalization::External(_)),
+            "http:// URL must be External"
+        );
+    }
+
+    // ---- normalize_resolve_specifier: npm: with subpath (lines 1291-1301) ----
+
+    #[test]
+    fn npm_scheme_plain_package_is_resolvable() {
+        let result = normalize_resolve_specifier("npm:react");
+        let SpecifierNormalization::Resolvable(s) = result else {
+            panic!("npm:react should be Resolvable");
+        };
+        assert_eq!(s, "react");
+    }
+
+    // ---- resolve_tsconfig_extends_path: relative path resolution (lines 519-536) ----
+
+    #[test]
+    fn resolve_tsconfig_extends_path_relative_dot_slash_preserves_dot_slash() {
+        let base = Path::new("/project");
+        let result = resolve_tsconfig_extends_path(base, "./tsconfig.base.json");
+        assert!(
+            result
+                .to_string_lossy()
+                .replace('\\', "/")
+                .contains("tsconfig.base.json"),
+            "relative dot-slash path must resolve to the base.json file"
+        );
+    }
+
+    #[test]
+    fn resolve_tsconfig_extends_path_adds_json_extension_for_extensionless_relative() {
+        let base = Path::new("/project");
+        let result = resolve_tsconfig_extends_path(base, "../shared/tsconfig.base");
+        assert!(
+            result.to_string_lossy().ends_with(".json"),
+            "extensionless extends must get .json appended"
+        );
+    }
+
+    // ---- is_bare_style_subpath edge cases: scss extension ----
+
+    #[test]
+    fn is_bare_style_subpath_scss_extension_matches() {
+        assert!(is_bare_style_subpath("bootstrap/scss/bootstrap.scss"));
+    }
+
+    #[test]
+    fn is_bare_style_subpath_sass_extension_matches() {
+        assert!(is_bare_style_subpath("bulma/sass/helpers/index.sass"));
+    }
+
+    #[test]
+    fn is_bare_style_subpath_less_extension_matches() {
+        assert!(is_bare_style_subpath("antd/lib/style/index.less"));
+    }
+
+    // ---- has_glob_meta: closing brace or bracket alone ----
+
+    #[test]
+    fn has_glob_meta_closing_bracket_detected() {
+        assert!(has_glob_meta("src/[a-z]"));
+    }
+
+    // ---- path_alias_specificity: wildcard-only pattern ----
+
+    #[test]
+    fn path_alias_specificity_pure_wildcard_has_zero_specificity() {
+        assert_eq!(path_alias_specificity("*"), 0);
+    }
+
+    // ---- with_exact_extension: path without extension ----
+
+    #[test]
+    fn with_exact_extension_path_without_extension_does_not_add_double_ext() {
+        let path = Path::new("/project/src/Button");
+        let result = with_exact_extension(path, ".ts");
+        assert_eq!(
+            result.to_string_lossy().replace('\\', "/"),
+            "/project/src/Button.ts"
+        );
     }
 }

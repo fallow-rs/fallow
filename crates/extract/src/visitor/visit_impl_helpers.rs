@@ -1063,3 +1063,294 @@ pub(super) fn fixture_type_reference_name(ty: &TSType<'_>) -> Option<(String, Sp
         _ => None,
     }
 }
+
+#[cfg(all(test, not(miri)))]
+mod tests {
+    use super::*;
+
+    // -------------------------------------------------------------------------
+    // record_pino_target
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn record_pino_target_pushes_new_source() {
+        let mut out = Vec::new();
+        record_pino_target("pino-pretty", &mut out);
+        assert_eq!(out, vec!["pino-pretty"]);
+    }
+
+    #[test]
+    fn record_pino_target_ignores_empty_source() {
+        let mut out = Vec::new();
+        record_pino_target("", &mut out);
+        assert!(out.is_empty(), "empty source must be ignored");
+    }
+
+    #[test]
+    fn record_pino_target_deduplicates_existing_source() {
+        let mut out = vec!["pino-pretty".to_string()];
+        record_pino_target("pino-pretty", &mut out);
+        assert_eq!(out.len(), 1, "duplicate source must not be added twice");
+    }
+
+    #[test]
+    fn record_pino_target_pushes_distinct_sources() {
+        let mut out = vec!["pino-pretty".to_string()];
+        record_pino_target("pino-elasticsearch", &mut out);
+        assert_eq!(out.len(), 2);
+    }
+
+    // -------------------------------------------------------------------------
+    // vitest_auto_mock_source
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn vitest_auto_mock_source_empty_returns_none() {
+        assert!(vitest_auto_mock_source("").is_none());
+    }
+
+    #[test]
+    fn vitest_auto_mock_source_url_scheme_returns_none() {
+        assert!(vitest_auto_mock_source("https://example.com/mod").is_none());
+        assert!(vitest_auto_mock_source("file://foo/bar").is_none());
+    }
+
+    #[test]
+    fn vitest_auto_mock_source_data_prefix_returns_none() {
+        assert!(vitest_auto_mock_source("data:text/plain,foo").is_none());
+    }
+
+    #[test]
+    fn vitest_auto_mock_source_already_under_mocks_returns_none() {
+        assert!(
+            vitest_auto_mock_source("./services/__mocks__/api").is_none(),
+            "source already containing __mocks__ segment must be skipped"
+        );
+    }
+
+    #[test]
+    fn vitest_auto_mock_source_no_slash_returns_none() {
+        // rsplit_once('/') on a bare package name fails the `?` and returns None
+        assert!(vitest_auto_mock_source("axios").is_none());
+    }
+
+    #[test]
+    fn vitest_auto_mock_source_trailing_slash_returns_none() {
+        // file_name would be empty after rsplit_once
+        assert!(vitest_auto_mock_source("./services/").is_none());
+    }
+
+    #[test]
+    fn vitest_auto_mock_source_normal_path_synthesizes_mocks_sibling() {
+        let result = vitest_auto_mock_source("./services/api");
+        assert_eq!(
+            result.as_deref(),
+            Some("./services/__mocks__/api"),
+            "expected mocks sibling path"
+        );
+    }
+
+    #[test]
+    fn vitest_auto_mock_source_nested_path_synthesizes_mocks_sibling() {
+        let result = vitest_auto_mock_source("../utils/format");
+        assert_eq!(result.as_deref(), Some("../utils/__mocks__/format"));
+    }
+
+    // -------------------------------------------------------------------------
+    // normalize_module_file_relative_path
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn normalize_empty_returns_none() {
+        assert!(normalize_module_file_relative_path("").is_none());
+    }
+
+    #[test]
+    fn normalize_absolute_returns_none() {
+        assert!(normalize_module_file_relative_path("/abs/path").is_none());
+    }
+
+    #[test]
+    fn normalize_trailing_slash_returns_none() {
+        assert!(normalize_module_file_relative_path("./foo/").is_none());
+    }
+
+    #[test]
+    fn normalize_current_dir_dot_returns_none() {
+        // "." leaves only __fallow_current_file__ in parts, which is filtered
+        assert!(normalize_module_file_relative_path(".").is_none());
+    }
+
+    #[test]
+    fn normalize_too_many_parent_dirs_returns_none() {
+        // Going above the sentinel anchor with excess ".." pops until empty
+        // then pop() returns None, so the whole function returns None.
+        assert!(normalize_module_file_relative_path("../../..").is_none());
+    }
+
+    #[test]
+    fn normalize_dot_slash_prefix_with_filename_returns_none() {
+        // "./foo" -> sentinel stays in parts -> None
+        // (The sentinel represents the current FILE, not directory; "./foo" from
+        // a file path produces a sub-path of the file itself, which is invalid.)
+        assert!(normalize_module_file_relative_path("./foo").is_none());
+    }
+
+    #[test]
+    fn normalize_parent_relative_produces_sibling_path() {
+        // "../sibling" pops the sentinel, leaving only "sibling" with no "../"
+        // prefix, so the result is "./sibling" (same-directory as the file's dir).
+        let result =
+            normalize_module_file_relative_path("../sibling").map(|s| s.replace('\\', "/"));
+        assert_eq!(result.as_deref(), Some("./sibling"));
+    }
+
+    #[test]
+    fn normalize_dot_slash_dotdot_inside_returns_none() {
+        // "./a/../b" resolves to sentinel+"b", sentinel stays -> None
+        assert!(normalize_module_file_relative_path("./a/../b").is_none());
+    }
+
+    #[test]
+    fn normalize_parent_relative_deep_path_produces_dot_slash() {
+        // "../a/b" pops the sentinel, leaves "a/b" which gets a "./" prefix.
+        let result = normalize_module_file_relative_path("../a/b").map(|s| s.replace('\\', "/"));
+        assert_eq!(result.as_deref(), Some("./a/b"));
+    }
+
+    // -------------------------------------------------------------------------
+    // loader_hook_exports_for_source
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn loader_hook_exports_for_relative_source_returns_all_hooks() {
+        let hooks = loader_hook_exports_for_source("./loader.mjs");
+        assert!(!hooks.is_empty());
+        assert!(hooks.contains(&"resolve".to_string()));
+        assert!(hooks.contains(&"load".to_string()));
+        assert!(hooks.contains(&"initialize".to_string()));
+    }
+
+    #[test]
+    fn loader_hook_exports_for_parent_relative_source_returns_hooks() {
+        let hooks = loader_hook_exports_for_source("../hooks/loader.mjs");
+        assert!(!hooks.is_empty());
+    }
+
+    #[test]
+    fn loader_hook_exports_for_absolute_source_returns_hooks() {
+        let hooks = loader_hook_exports_for_source("/absolute/loader.mjs");
+        assert!(!hooks.is_empty());
+    }
+
+    #[test]
+    fn loader_hook_exports_for_file_url_source_returns_hooks() {
+        let hooks = loader_hook_exports_for_source("file:///home/user/loader.mjs");
+        assert!(!hooks.is_empty());
+    }
+
+    #[test]
+    fn loader_hook_exports_for_bare_package_returns_empty() {
+        let hooks = loader_hook_exports_for_source("some-loader-package");
+        assert!(
+            hooks.is_empty(),
+            "bare package specifiers must return no hooks"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // local_fork_source
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn local_fork_source_relative_dot_slash_accepted() {
+        assert_eq!(
+            local_fork_source("./worker.js").as_deref(),
+            Some("./worker.js")
+        );
+    }
+
+    #[test]
+    fn local_fork_source_parent_relative_accepted() {
+        assert_eq!(
+            local_fork_source("../runner.js").as_deref(),
+            Some("../runner.js")
+        );
+    }
+
+    #[test]
+    fn local_fork_source_trailing_slash_rejected() {
+        assert!(local_fork_source("./workers/").is_none());
+    }
+
+    #[test]
+    fn local_fork_source_bare_package_rejected() {
+        assert!(local_fork_source("worker-threads").is_none());
+    }
+
+    // -------------------------------------------------------------------------
+    // is_dompurify_source
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn is_dompurify_source_exact_dompurify() {
+        assert!(is_dompurify_source("dompurify"));
+    }
+
+    #[test]
+    fn is_dompurify_source_isomorphic_variant() {
+        assert!(is_dompurify_source("isomorphic-dompurify"));
+    }
+
+    #[test]
+    fn is_dompurify_source_other_package_returns_false() {
+        assert!(!is_dompurify_source("sanitize-html"));
+    }
+
+    // -------------------------------------------------------------------------
+    // is_child_process_source / is_node_path_source / is_node_url_source
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn is_child_process_source_both_forms() {
+        assert!(is_child_process_source("child_process"));
+        assert!(is_child_process_source("node:child_process"));
+        assert!(!is_child_process_source("node:path"));
+    }
+
+    #[test]
+    fn is_node_path_source_both_forms() {
+        assert!(is_node_path_source("path"));
+        assert!(is_node_path_source("node:path"));
+        assert!(!is_node_path_source("child_process"));
+    }
+
+    #[test]
+    fn is_node_url_source_both_forms() {
+        assert!(is_node_url_source("url"));
+        assert!(is_node_url_source("node:url"));
+        assert!(!is_node_url_source("path"));
+    }
+
+    // -------------------------------------------------------------------------
+    // append_fixture_path (private, tested indirectly through its invariant)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn append_unique_paths_adds_only_new_entries() {
+        let mut target = vec!["a".to_string(), "b".to_string()];
+        append_unique_paths(&mut target, vec!["b".to_string(), "c".to_string()]);
+        assert_eq!(
+            target,
+            vec!["a", "b", "c"],
+            "duplicate 'b' must not be added"
+        );
+    }
+
+    #[test]
+    fn append_unique_paths_adds_all_when_none_duplicate() {
+        let mut target = vec!["x".to_string()];
+        append_unique_paths(&mut target, vec!["y".to_string(), "z".to_string()]);
+        assert_eq!(target, vec!["x", "y", "z"]);
+    }
+}

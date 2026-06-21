@@ -3977,4 +3977,989 @@ mod tests {
             ]
         );
     }
+
+    // --- extract_config_command ---
+
+    #[test]
+    fn extract_command_string_literal() {
+        let source = r#"export default { start: "node server.js" };"#;
+        let val = extract_config_command(source, &js_path(), &["start"]);
+        assert_eq!(val, Some("node server.js".to_string()));
+    }
+
+    #[test]
+    fn extract_command_nested_path() {
+        let source = r#"
+            export default {
+                scripts: {
+                    dev: "vite dev"
+                }
+            };
+        "#;
+        let val = extract_config_command(source, &js_path(), &["scripts", "dev"]);
+        assert_eq!(val, Some("vite dev".to_string()));
+    }
+
+    #[test]
+    fn extract_command_missing_key_returns_none() {
+        let source = r#"export default { other: "val" };"#;
+        let val = extract_config_command(source, &js_path(), &["start"]);
+        assert!(val.is_none());
+    }
+
+    #[test]
+    fn extract_command_ts_as_expression() {
+        let source = r#"export default { start: "node server.js" as string };"#;
+        let val = extract_config_command(source, &ts_path(), &["start"]);
+        assert_eq!(val, Some("node server.js".to_string()));
+    }
+
+    #[test]
+    fn extract_command_ts_satisfies_expression() {
+        let source = r#"export default { start: "node server.js" satisfies string };"#;
+        let val = extract_config_command(source, &ts_path(), &["start"]);
+        assert_eq!(val, Some("node server.js".to_string()));
+    }
+
+    #[test]
+    fn extract_command_parenthesized_expression() {
+        let source = r#"export default { start: ("node server.js") };"#;
+        let val = extract_config_command(source, &js_path(), &["start"]);
+        assert_eq!(val, Some("node server.js".to_string()));
+    }
+
+    #[test]
+    fn extract_command_empty_path_returns_none() {
+        let source = r#"export default { start: "node server.js" };"#;
+        let val = extract_config_command(source, &js_path(), &[]);
+        assert!(val.is_none());
+    }
+
+    // --- is_disabled_expression and extract_config_truthy_bool_or_object ---
+
+    #[test]
+    fn truthy_bool_or_object_with_true_value() {
+        let source = r"export default { typescript: true };";
+        let result = extract_config_truthy_bool_or_object(source, &ts_path(), &["typescript"]);
+        assert!(result);
+    }
+
+    #[test]
+    fn truthy_bool_or_object_with_false_value() {
+        let source = r"export default { typescript: false };";
+        let result = extract_config_truthy_bool_or_object(source, &ts_path(), &["typescript"]);
+        assert!(!result);
+    }
+
+    #[test]
+    fn truthy_bool_or_object_with_object_value() {
+        let source = r#"export default { typescript: { reactDocgen: "react-docgen" } };"#;
+        let result = extract_config_truthy_bool_or_object(source, &ts_path(), &["typescript"]);
+        assert!(result);
+    }
+
+    #[test]
+    fn truthy_bool_or_object_missing_key_returns_false() {
+        let source = r"export default { other: true };";
+        let result = extract_config_truthy_bool_or_object(source, &ts_path(), &["typescript"]);
+        assert!(!result);
+    }
+
+    #[test]
+    fn truthy_bool_or_object_with_string_value_returns_false() {
+        // A string is neither bool true nor object, so the else arm returns false.
+        let source = r#"export default { typescript: "yes" };"#;
+        let result = extract_config_truthy_bool_or_object(source, &ts_path(), &["typescript"]);
+        assert!(!result);
+    }
+
+    #[test]
+    fn truthy_bool_or_object_ts_satisfies_wrapper() {
+        let source = r"export default { typescript: (true satisfies boolean) };";
+        let result = extract_config_truthy_bool_or_object(source, &ts_path(), &["typescript"]);
+        assert!(result);
+    }
+
+    #[test]
+    fn truthy_bool_or_object_ts_as_wrapper() {
+        let source = r"export default { typescript: (true as boolean) };";
+        let result = extract_config_truthy_bool_or_object(source, &ts_path(), &["typescript"]);
+        assert!(result);
+    }
+
+    #[test]
+    fn truthy_bool_or_object_parenthesized_wrapper() {
+        let source = r"export default { typescript: (true) };";
+        let result = extract_config_truthy_bool_or_object(source, &ts_path(), &["typescript"]);
+        assert!(result);
+    }
+
+    // --- object_expression helper: exercises via static dir entries property_string ---
+    // property_object calls object_expression; it is also exercised through
+    // extract_object_from_expression, which handles TS wrappers at the top-export level.
+    // The ts_satisfies_direct_export / ts_as_direct_export tests already cover those arms.
+
+    #[test]
+    fn static_dir_entries_object_form_exercises_property_string() {
+        // property_string (which calls property_expr then expression_to_string) is used
+        // for the `from` and `to` keys in extract_config_static_dir_entries.
+        let source = r#"
+            export default {
+                staticDirs: [
+                    { from: "./media", to: "/assets" }
+                ]
+            };
+        "#;
+        let entries = extract_config_static_dir_entries(source, &ts_path(), &["staticDirs"]);
+        assert_eq!(
+            entries,
+            vec![("./media".to_string(), Some("/assets".to_string()))]
+        );
+    }
+
+    // --- expression_to_path_values (array form) ---
+
+    #[test]
+    fn expression_to_path_values_array_form_via_config_path() {
+        // The extract_config_path helper uses expression_to_path; path_values
+        // is exercised when the value is an array via extract_config_string_or_array.
+        let source = r#"export default { entries: ["./src/a.ts", "./src/b.ts"] };"#;
+        let result = extract_config_string_or_array(source, &js_path(), &["entries"]);
+        assert_eq!(result, vec!["./src/a.ts", "./src/b.ts"]);
+    }
+
+    // --- extract_config_array_nested_aliases ---
+
+    #[test]
+    fn array_nested_aliases_object_form() {
+        let source = r#"
+            export default {
+                test: {
+                    projects: [
+                        {
+                            resolve: {
+                                alias: { "@": "./src" }
+                            }
+                        }
+                    ]
+                }
+            };
+        "#;
+        let aliases = extract_config_array_nested_aliases(
+            source,
+            &ts_path(),
+            &["test", "projects"],
+            &["resolve", "alias"],
+        );
+        assert_eq!(aliases, vec![("@".to_string(), "./src".to_string())]);
+    }
+
+    #[test]
+    fn array_nested_aliases_array_form_find_replacement() {
+        let source = r#"
+            export default {
+                projects: [
+                    {
+                        resolve: {
+                            alias: [
+                                { find: "@", replacement: "./src" },
+                                { find: "~", replacement: "./lib" }
+                            ]
+                        }
+                    }
+                ]
+            };
+        "#;
+        let aliases = extract_config_array_nested_aliases(
+            source,
+            &ts_path(),
+            &["projects"],
+            &["resolve", "alias"],
+        );
+        assert_eq!(
+            aliases,
+            vec![
+                ("@".to_string(), "./src".to_string()),
+                ("~".to_string(), "./lib".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn array_nested_aliases_empty_when_path_is_not_array() {
+        let source = r#"export default { test: { projects: "not-an-array" } };"#;
+        let aliases = extract_config_array_nested_aliases(
+            source,
+            &ts_path(),
+            &["test", "projects"],
+            &["resolve", "alias"],
+        );
+        assert!(aliases.is_empty());
+    }
+
+    #[test]
+    fn array_nested_aliases_kinded_tracks_is_bare() {
+        let source = r#"
+            export default {
+                projects: [
+                    {
+                        resolve: {
+                            alias: [
+                                { find: "lodash-es", replacement: "lodash" },
+                                { find: "@", replacement: "./src" }
+                            ]
+                        }
+                    }
+                ]
+            };
+        "#;
+        let mut aliases = extract_config_array_nested_aliases_kinded(
+            source,
+            &ts_path(),
+            &["projects"],
+            &["resolve", "alias"],
+        );
+        aliases.sort();
+        assert_eq!(
+            aliases,
+            vec![
+                ("@".to_string(), "./src".to_string(), false),
+                ("lodash-es".to_string(), "lodash".to_string(), true),
+            ]
+        );
+    }
+
+    // --- extract_default_export_array_aliases_kinded ---
+
+    #[test]
+    fn default_export_array_aliases_kinded_extracts_from_workspace_config() {
+        let source = r#"
+            export default [
+                {
+                    resolve: {
+                        alias: { "@": "./src" }
+                    }
+                },
+                {
+                    resolve: {
+                        alias: [{ find: "~", replacement: "./lib" }]
+                    }
+                }
+            ];
+        "#;
+        let mut aliases =
+            extract_default_export_array_aliases_kinded(source, &ts_path(), &["resolve", "alias"]);
+        aliases.sort();
+        assert_eq!(
+            aliases,
+            vec![
+                ("@".to_string(), "./src".to_string(), false),
+                ("~".to_string(), "./lib".to_string(), false),
+            ]
+        );
+    }
+
+    #[test]
+    fn default_export_array_aliases_kinded_define_workspace_wrapper() {
+        let source = r#"
+            export default defineWorkspace([
+                {
+                    resolve: { alias: { "@": "./src" } }
+                }
+            ]);
+        "#;
+        let aliases =
+            extract_default_export_array_aliases_kinded(source, &ts_path(), &["resolve", "alias"]);
+        assert_eq!(aliases, vec![("@".to_string(), "./src".to_string(), false)]);
+    }
+
+    #[test]
+    fn default_export_array_aliases_kinded_empty_when_no_alias_path() {
+        let source = r#"
+            export default [
+                { test: { include: ["**/*.test.ts"] } }
+            ];
+        "#;
+        let aliases =
+            extract_default_export_array_aliases_kinded(source, &ts_path(), &["resolve", "alias"]);
+        assert!(aliases.is_empty());
+    }
+
+    // --- config_default_export_unreachable ---
+
+    #[test]
+    fn config_default_export_unreachable_when_no_export() {
+        let source = r"const x = 42;";
+        assert!(config_default_export_unreachable(source, &js_path()));
+    }
+
+    #[test]
+    fn config_default_export_unreachable_false_for_object_export() {
+        let source = r#"export default { key: "value" };"#;
+        assert!(!config_default_export_unreachable(source, &js_path()));
+    }
+
+    #[test]
+    fn config_default_export_unreachable_false_for_array_export() {
+        let source = r#"export default ["a", "b"];"#;
+        assert!(!config_default_export_unreachable(source, &js_path()));
+    }
+
+    #[test]
+    fn config_default_export_unreachable_true_for_function_without_return_object() {
+        // A function that returns a number is unreachable.
+        let source = r"export default function config() { return 42; }";
+        assert!(config_default_export_unreachable(source, &js_path()));
+    }
+
+    // --- extract_config_static_dir_entries ---
+
+    #[test]
+    fn static_dir_entries_string_and_object_form() {
+        let source = r#"
+            export default {
+                staticDirs: [
+                    "./public",
+                    { from: "../assets", to: "/static" }
+                ]
+            };
+        "#;
+        let entries = extract_config_static_dir_entries(source, &ts_path(), &["staticDirs"]);
+        assert_eq!(
+            entries,
+            vec![
+                ("./public".to_string(), None),
+                ("../assets".to_string(), Some("/static".to_string())),
+            ]
+        );
+    }
+
+    #[test]
+    fn static_dir_entries_object_without_to() {
+        let source = r#"
+            export default {
+                staticDirs: [
+                    { from: "./media" }
+                ]
+            };
+        "#;
+        let entries = extract_config_static_dir_entries(source, &ts_path(), &["staticDirs"]);
+        assert_eq!(entries, vec![("./media".to_string(), None)]);
+    }
+
+    #[test]
+    fn static_dir_entries_object_missing_from_skipped() {
+        // Objects without a `from` key are silently skipped.
+        let source = r#"
+            export default {
+                staticDirs: [
+                    { to: "/target" },
+                    "./public"
+                ]
+            };
+        "#;
+        let entries = extract_config_static_dir_entries(source, &ts_path(), &["staticDirs"]);
+        assert_eq!(entries, vec![("./public".to_string(), None)]);
+    }
+
+    #[test]
+    fn static_dir_entries_empty_when_not_array() {
+        let source = r#"export default { staticDirs: "./public" };"#;
+        let entries = extract_config_static_dir_entries(source, &ts_path(), &["staticDirs"]);
+        assert!(entries.is_empty());
+    }
+
+    // --- expression_to_alias_pairs and expression_to_alias_pairs_kinded (lines 1473-1541) ---
+
+    #[test]
+    fn aliases_array_form_missing_find_or_replacement_skipped() {
+        // An element missing "find" or "replacement" is silently skipped.
+        let source = r#"
+            export default {
+                resolve: {
+                    alias: [
+                        { replacement: "./src" },
+                        { find: "@" },
+                        { find: "~", replacement: "./lib" }
+                    ]
+                }
+            };
+        "#;
+        let aliases = extract_config_aliases(source, &ts_path(), &["resolve", "alias"]);
+        assert_eq!(aliases, vec![("~".to_string(), "./lib".to_string())]);
+    }
+
+    #[test]
+    fn aliases_object_form_computed_key_skipped() {
+        // Computed keys (expression keys) are not statically recoverable.
+        let source = r#"
+            const k = "@";
+            export default {
+                resolve: {
+                    alias: {
+                        [k]: "./src",
+                        "~": "./lib"
+                    }
+                }
+            };
+        "#;
+        let aliases = extract_config_aliases(source, &ts_path(), &["resolve", "alias"]);
+        // Only the literal key "~" survives; computed [k] is dropped.
+        assert_eq!(aliases, vec![("~".to_string(), "./lib".to_string())]);
+    }
+
+    #[test]
+    fn aliases_kinded_array_form_path_replacement_is_not_bare() {
+        let source = r#"
+            export default {
+                resolve: {
+                    alias: [{ find: "@", replacement: "./src" }]
+                }
+            };
+        "#;
+        let aliases = extract_config_aliases_kinded(source, &ts_path(), &["resolve", "alias"]);
+        assert_eq!(aliases, vec![("@".to_string(), "./src".to_string(), false)]);
+    }
+
+    #[test]
+    fn aliases_kinded_object_form_bare_and_path_discrimination() {
+        let source = r#"
+            export default {
+                resolve: {
+                    alias: {
+                        "lodash-es": "lodash",
+                        "@": "./src"
+                    }
+                }
+            };
+        "#;
+        let mut aliases = extract_config_aliases_kinded(source, &ts_path(), &["resolve", "alias"]);
+        aliases.sort();
+        assert_eq!(
+            aliases,
+            vec![
+                ("@".to_string(), "./src".to_string(), false),
+                ("lodash-es".to_string(), "lodash".to_string(), true),
+            ]
+        );
+    }
+
+    #[test]
+    fn aliases_kinded_parent_relative_replacement_is_not_bare() {
+        let source = r#"
+            export default {
+                resolve: { alias: { "@": "../shared/src" } }
+            };
+        "#;
+        let aliases = extract_config_aliases_kinded(source, &ts_path(), &["resolve", "alias"]);
+        assert_eq!(
+            aliases,
+            vec![("@".to_string(), "../shared/src".to_string(), false)]
+        );
+    }
+
+    #[test]
+    fn aliases_kinded_absolute_replacement_is_not_bare() {
+        let source = r#"
+            export default {
+                resolve: { alias: { "@": "/absolute/path" } }
+            };
+        "#;
+        let aliases = extract_config_aliases_kinded(source, &ts_path(), &["resolve", "alias"]);
+        assert_eq!(
+            aliases,
+            vec![("@".to_string(), "/absolute/path".to_string(), false)]
+        );
+    }
+
+    // --- find_default_export_array / array_from_expression wrappers ---
+
+    #[test]
+    fn default_export_array_ts_as_wrapper() {
+        // array_from_expression must unwrap TSAsExpression.
+        let source = r"export default [] as string[];";
+        assert!(!config_default_export_unreachable(source, &js_path()));
+    }
+
+    #[test]
+    fn default_export_array_ts_satisfies_wrapper() {
+        let source = r"export default [] satisfies string[];";
+        assert!(!config_default_export_unreachable(source, &ts_path()));
+    }
+
+    #[test]
+    fn default_export_array_define_config_call_wrapper() {
+        let source = r#"export default defineConfig(["**/*.test.ts"]);"#;
+        assert!(!config_default_export_unreachable(source, &ts_path()));
+    }
+
+    // --- collect_shallow_string_values: object-property branches ---
+
+    #[test]
+    fn shallow_strings_object_with_string_values() {
+        // The ObjectExpression arm of collect_shallow_string_values emits string values.
+        let source = r#"
+            export default {
+                plugins: {
+                    autoprefixer: "autoprefixer",
+                    tailwindcss: "tailwindcss"
+                }
+            };
+        "#;
+        let vals = extract_config_shallow_strings(source, &js_path(), "plugins");
+        assert!(vals.contains(&"autoprefixer".to_string()));
+        assert!(vals.contains(&"tailwindcss".to_string()));
+    }
+
+    #[test]
+    fn shallow_strings_object_with_sub_array_first_element() {
+        // An object property whose value is an array emits the first string element.
+        let source = r#"
+            export default {
+                reporters: {
+                    main: ["jest-junit", { outputFile: "report.xml" }],
+                    alt: ["html-reporter"]
+                }
+            };
+        "#;
+        let vals = extract_config_shallow_strings(source, &js_path(), "reporters");
+        assert!(vals.contains(&"jest-junit".to_string()));
+        assert!(vals.contains(&"html-reporter".to_string()));
+    }
+
+    // --- collect_shallow_string_or_object_property_values ---
+
+    #[test]
+    fn shallow_strings_or_object_property_non_array_single_string() {
+        // When the top-level value is a plain string (not an array), it is returned directly.
+        let source = r#"export default { jsPlugins: "eslint-plugin-foo" };"#;
+        let vals = extract_config_shallow_strings_or_object_property(
+            source,
+            &ts_path(),
+            "jsPlugins",
+            "specifier",
+        );
+        assert_eq!(vals, vec!["eslint-plugin-foo"]);
+    }
+
+    #[test]
+    fn shallow_strings_or_object_property_ts_satisfies_array_element() {
+        // shallow_string_or_object_property unwraps TSSatisfiesExpression.
+        let source = r#"
+            export default {
+                jsPlugins: [
+                    ("eslint-plugin-a" satisfies string)
+                ]
+            };
+        "#;
+        let vals = extract_config_shallow_strings_or_object_property(
+            source,
+            &ts_path(),
+            "jsPlugins",
+            "specifier",
+        );
+        assert_eq!(vals, vec!["eslint-plugin-a"]);
+    }
+
+    #[test]
+    fn shallow_strings_or_object_property_ts_as_array_element() {
+        let source = r#"
+            export default {
+                jsPlugins: [
+                    ("eslint-plugin-b" as string)
+                ]
+            };
+        "#;
+        let vals = extract_config_shallow_strings_or_object_property(
+            source,
+            &ts_path(),
+            "jsPlugins",
+            "specifier",
+        );
+        assert_eq!(vals, vec!["eslint-plugin-b"]);
+    }
+
+    #[test]
+    fn shallow_strings_or_object_property_sub_array_first_element_string() {
+        // A sub-array in jsPlugins returns the first string element.
+        let source = r#"
+            export default {
+                jsPlugins: [
+                    ["eslint-plugin-tuple-pkg", { options: true }]
+                ]
+            };
+        "#;
+        let vals = extract_config_shallow_strings_or_object_property(
+            source,
+            &ts_path(),
+            "jsPlugins",
+            "specifier",
+        );
+        assert_eq!(vals, vec!["eslint-plugin-tuple-pkg"]);
+    }
+
+    // --- extract_config_array_object_command_pairs ---
+
+    #[test]
+    fn array_object_command_pairs_basic() {
+        let source = r#"
+            export default {
+                webServer: [
+                    { command: "node server.js", cwd: "packages/api" },
+                    { command: "vite dev" }
+                ]
+            };
+        "#;
+        let pairs = extract_config_array_object_command_pairs(
+            source,
+            &ts_path(),
+            &["webServer"],
+            "command",
+            "cwd",
+        );
+        assert_eq!(
+            pairs,
+            vec![
+                (
+                    "node server.js".to_string(),
+                    Some("packages/api".to_string())
+                ),
+                ("vite dev".to_string(), None),
+            ]
+        );
+    }
+
+    #[test]
+    fn array_object_command_pairs_skips_missing_command() {
+        let source = r#"
+            export default {
+                webServer: [
+                    { cwd: "packages/api" },
+                    { command: "vite dev", cwd: "apps/web" }
+                ]
+            };
+        "#;
+        let pairs = extract_config_array_object_command_pairs(
+            source,
+            &ts_path(),
+            &["webServer"],
+            "command",
+            "cwd",
+        );
+        assert_eq!(
+            pairs,
+            vec![("vite dev".to_string(), Some("apps/web".to_string()))]
+        );
+    }
+
+    #[test]
+    fn array_object_command_pairs_empty_when_not_array() {
+        let source = r#"export default { webServer: { command: "vite dev" } };"#;
+        let pairs = extract_config_array_object_command_pairs(
+            source,
+            &ts_path(),
+            &["webServer"],
+            "command",
+            "cwd",
+        );
+        assert!(pairs.is_empty());
+    }
+
+    // --- normalize_config_path edge cases ---
+
+    #[test]
+    fn normalize_config_path_empty_string_returns_none() {
+        let config_path = PathBuf::from("/project/vite.config.ts");
+        let root = PathBuf::from("/project");
+        assert_eq!(normalize_config_path("", &config_path, &root), None);
+    }
+
+    #[test]
+    fn normalize_config_path_escapes_to_above_root_returns_none() {
+        let config_path = PathBuf::from("/project/vite.config.ts");
+        let root = PathBuf::from("/project");
+        // "../../etc" normalizes to the parent of root, which fails the strip_prefix.
+        assert_eq!(
+            normalize_config_path("../../etc", &config_path, &root),
+            None
+        );
+    }
+
+    #[test]
+    fn normalize_config_path_dot_slash_resolves_relative_to_config_dir() {
+        let config_path = PathBuf::from("/project/packages/app/vite.config.ts");
+        let root = PathBuf::from("/project");
+        assert_eq!(
+            normalize_config_path("./src", &config_path, &root),
+            Some("packages/app/src".to_string())
+        );
+    }
+
+    // --- JSON config parsing edge cases ---
+
+    #[test]
+    fn json_config_array_of_arrays_via_shallow_strings() {
+        // JSON with nested plugin tuples is parsed via the parenthesis-wrap path.
+        let source = r#"{"reporters": ["default", ["jest-junit", {}]]}"#;
+        let vals = extract_config_shallow_strings(source, &json_path(), "reporters");
+        assert_eq!(vals, vec!["default", "jest-junit"]);
+    }
+
+    // --- extract_config_path ---
+
+    #[test]
+    fn extract_config_path_string_literal() {
+        let source = r#"export default { outDir: "./dist" };"#;
+        let path = extract_config_path(source, &js_path(), &["outDir"]);
+        assert_eq!(
+            path.map(|p| p.to_string_lossy().replace('\\', "/")),
+            Some("./dist".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_config_path_with_resolve_call() {
+        let source = r#"
+            import { resolve } from "node:path";
+            export default { outDir: resolve(__dirname, "dist") };
+        "#;
+        let path = extract_config_path(source, &js_path(), &["outDir"]);
+        assert_eq!(
+            path.map(|p| p.to_string_lossy().replace('\\', "/")),
+            Some("dist".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_config_path_missing_key_returns_none() {
+        let source = r#"export default { other: "val" };"#;
+        let path = extract_config_path(source, &js_path(), &["outDir"]);
+        assert!(path.is_none());
+    }
+
+    // --- extract_imports_and_requires ---
+
+    #[test]
+    fn extract_imports_and_requires_both_forms() {
+        let source = r"
+            import foo from 'foo-pkg';
+            require('bar-pkg');
+            export default {};
+        ";
+        let sources = extract_imports_and_requires(source, &js_path());
+        assert!(sources.contains(&"foo-pkg".to_string()));
+        assert!(sources.contains(&"bar-pkg".to_string()));
+    }
+
+    #[test]
+    fn extract_imports_and_requires_skips_non_require_calls() {
+        let source = r"
+            import foo from 'foo-pkg';
+            someOtherCall('bar-pkg');
+            export default {};
+        ";
+        let sources = extract_imports_and_requires(source, &js_path());
+        assert_eq!(sources, vec!["foo-pkg"]);
+    }
+
+    // --- extract_config_nested_shallow_strings: non-object nested value ---
+
+    #[test]
+    fn nested_shallow_strings_non_object_nested_returns_empty() {
+        // When the outer path points to a non-object, it returns empty.
+        let source = r#"export default { test: "not-an-object" };"#;
+        let vals =
+            extract_config_nested_shallow_strings(source, &js_path(), &["test"], "reporters");
+        assert!(vals.is_empty());
+    }
+
+    // --- vite_react_babel_dependencies with namespace import ---
+
+    #[test]
+    fn vite_react_babel_dependencies_namespace_import() {
+        let source = r#"
+            import * as react from "@vitejs/plugin-react";
+
+            export default defineConfig({
+                plugins: [
+                    react.default({
+                        babel: {
+                            plugins: ["babel-plugin-ns"],
+                        },
+                    }),
+                ],
+            });
+        "#;
+        let deps = extract_vite_react_babel_dependencies(source, &ts_path());
+        assert_eq!(deps, vec!["babel-plugin-ns".to_string()]);
+    }
+
+    // --- collect_all_string_values nested object and array recursion ---
+
+    #[test]
+    fn property_strings_deeply_nested_object_values() {
+        // collect_all_string_values recurses into nested objects and arrays.
+        let source = r#"
+            export default {
+                settings: {
+                    a: "val-a",
+                    b: {
+                        c: "val-c",
+                        d: ["val-d1", "val-d2"]
+                    }
+                }
+            };
+        "#;
+        let values = extract_config_property_strings(source, &js_path(), "settings");
+        assert!(values.contains(&"val-a".to_string()));
+        assert!(values.contains(&"val-c".to_string()));
+        assert!(values.contains(&"val-d1".to_string()));
+        assert!(values.contains(&"val-d2".to_string()));
+    }
+
+    // --- find_variable_init_expression: export const form ---
+
+    #[test]
+    fn aliases_exported_const_form_resolves() {
+        // find_variable_init_expression must handle `export const NAME = ...`.
+        let source = r#"
+            export const sharedAliases = { "@": "./src" };
+            export default defineConfig({ resolve: { alias: sharedAliases } });
+        "#;
+        let aliases = extract_config_aliases(source, &ts_path(), &["resolve", "alias"]);
+        assert_eq!(aliases, vec![("@".to_string(), "./src".to_string())]);
+    }
+
+    // --- resolve_sibling_module: index file probe ---
+
+    #[test]
+    fn aliases_imported_from_sibling_directory_index_file() {
+        // resolve_sibling_module probes <specifier>/index.<ext> when direct
+        // path and extension-suffixed paths do not exist.
+        let dir = tempfile::tempdir().unwrap();
+        let aliases_dir = dir.path().join("aliases");
+        std::fs::create_dir_all(&aliases_dir).unwrap();
+        std::fs::write(
+            aliases_dir.join("index.js"),
+            r#"export const aliases = [{ find: "@", replacement: "./src" }];"#,
+        )
+        .unwrap();
+        let config = dir.path().join("vite.config.js");
+        let source = r#"
+            import { aliases } from "./aliases";
+            export default defineConfig({ resolve: { alias: aliases } });
+        "#;
+        let got = extract_config_aliases(source, &config, &["resolve", "alias"]);
+        assert_eq!(got, vec![("@".to_string(), "./src".to_string())]);
+    }
+
+    // --- aliases max depth guard ---
+
+    #[test]
+    fn aliases_depth_limit_terminates_deep_chain() {
+        // A chain of more than MAX_ALIAS_RESOLVE_DEPTH identifiers terminates
+        // without panic or infinite loop. We verify it does not crash.
+        let source = r#"
+            const a9 = [{ find: "@", replacement: "./src" }];
+            const a8 = a9;
+            const a7 = a8;
+            const a6 = a7;
+            const a5 = a6;
+            const a4 = a5;
+            const a3 = a4;
+            const a2 = a3;
+            const a1 = a2;
+            export default defineConfig({ resolve: { alias: a1 } });
+        "#;
+        // At MAX_ALIAS_RESOLVE_DEPTH (8), resolution stops before reaching the literal.
+        let got = extract_config_aliases(source, &js_path(), &["resolve", "alias"]);
+        let _ = got; // empty or non-empty; both are valid, no panic is the assertion.
+    }
+
+    // --- expression_to_path_string: new URL / fileURLToPath ---
+
+    #[test]
+    fn extract_aliases_file_url_to_path_new_url() {
+        // expression_to_path_string resolves new URL("./src", import.meta.url).
+        let source = r#"
+            import { fileURLToPath, URL } from 'node:url';
+            export default {
+                resolve: {
+                    alias: {
+                        "@": fileURLToPath(new URL("./src", import.meta.url))
+                    }
+                }
+            };
+        "#;
+        let aliases = extract_config_aliases(source, &ts_path(), &["resolve", "alias"]);
+        assert_eq!(aliases, vec![("@".to_string(), "./src".to_string())]);
+    }
+
+    #[test]
+    fn extract_path_via_new_url_pathname_member() {
+        // The .pathname member of new URL(...) is a path-string form.
+        let source = r#"
+            export default {
+                resolve: {
+                    alias: {
+                        "@": new URL("./src", import.meta.url).pathname
+                    }
+                }
+            };
+        "#;
+        let aliases = extract_config_aliases(source, &ts_path(), &["resolve", "alias"]);
+        assert_eq!(aliases, vec![("@".to_string(), "./src".to_string())]);
+    }
+
+    // --- is_disabled_expression: null literal ---
+
+    #[test]
+    fn truthy_bool_or_object_null_literal_returns_false() {
+        // null is a disabled expression and therefore not truthy.
+        let source = r"export default { typescript: null };";
+        let result = extract_config_truthy_bool_or_object(source, &js_path(), &["typescript"]);
+        assert!(!result);
+    }
+
+    // --- expression_to_string_array: non-array form returns empty ---
+
+    #[test]
+    fn string_array_non_array_value_returns_empty() {
+        let source = r#"export default { items: "not-an-array" };"#;
+        let result = extract_config_string_array(source, &js_path(), &["items"]);
+        assert!(result.is_empty());
+    }
+
+    // --- extract_config_object_nested edge cases ---
+
+    #[test]
+    fn object_nested_empty_when_inner_value_is_not_object() {
+        // extract_config_object_nested only processes properties whose value is an object.
+        let source = r#"export default { targets: { build: "not-an-object" } };"#;
+        let results =
+            extract_config_object_nested_strings(source, &json_path(), &["targets"], &["executor"]);
+        assert!(results.is_empty());
+    }
+
+    // --- extract_config_array_nested_string_or_array: missing inner path ---
+
+    #[test]
+    fn array_nested_string_or_array_missing_inner_path_returns_empty() {
+        let source = r#"
+            export default {
+                test: {
+                    projects: [
+                        { test: { include: ["**/*.test.ts"] } }
+                    ]
+                }
+            };
+        "#;
+        let results = extract_config_array_nested_string_or_array(
+            source,
+            &ts_path(),
+            &["test", "projects"],
+            &["test", "setupFiles"],
+        );
+        assert!(results.is_empty());
+    }
 }

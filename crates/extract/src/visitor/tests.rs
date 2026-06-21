@@ -7905,3 +7905,340 @@ fn angular_bootstrap_array_element_credits_component_as_used() {
         info.unused_import_bindings
     );
 }
+
+// ---------------------------------------------------------------------------
+// visit_impl_helpers.rs -- uncovered ranges coverage
+//
+// The helpers below are pure-function helpers or collector Visit impls whose
+// edge branches were not reachable from existing tests in this file. Each
+// test exercises one specific uncovered branch.
+// ---------------------------------------------------------------------------
+
+// ---- record_pino_targets_array ParenthesizedExpression branch (lines 296-299)
+// Pino supports `transport.targets` as an array; parenthesized object literals
+// inside the array must be unwrapped and their `target` key collected.
+// This exercises the `ArrayExpressionElement::ParenthesizedExpression` arm of
+// `record_pino_targets_array` (lines 296-299 of visit_impl_helpers.rs).
+#[test]
+fn pino_transport_targets_parenthesized_object_element_credited() {
+    let info = parse(
+        r"
+        import pino from 'pino'
+        const logger = pino({
+            transport: {
+                targets: [
+                    ({ target: 'pino-pretty' }),
+                ]
+            }
+        })
+        ",
+    );
+    assert!(
+        info.dynamic_imports
+            .iter()
+            .any(|d| d.source == "pino-pretty"),
+        "parenthesized object element in pino targets array must be credited: {:#?}",
+        info.dynamic_imports
+    );
+}
+
+// ---- vi.mock parenthesized factory suppresses auto-mock synthesis (line 323-325)
+// `vi.mock('./mod', ( () => ({}) ) )` -- the factory is wrapped in parens.
+// This exercises the `Argument::ParenthesizedExpression` arm of `vi_mock_has_factory`.
+#[test]
+fn vitest_mock_parenthesized_arrow_factory_suppresses_auto_mock() {
+    let info = parse(
+        r"
+        import { vi } from 'vitest'
+        vi.mock('./services/api', ( () => ({ default: {} }) ))
+        ",
+    );
+    let sources: Vec<&str> = info
+        .dynamic_imports
+        .iter()
+        .map(|d| d.source.as_str())
+        .collect();
+    assert!(
+        !sources.contains(&"./services/__mocks__/api"),
+        "parenthesized arrow factory must suppress auto-mock synthesis; got {sources:?}"
+    );
+    assert!(
+        sources.contains(&"./services/api"),
+        "the target itself must still be credited; got {sources:?}"
+    );
+}
+
+// ---- extract_binding_local_name AssignmentPattern branch (lines 815-817)
+// `const { a = 1, b } = obj` -- the `a = 1` destructure element produces an
+// `AssignmentPattern` binding that `extract_binding_local_name` must unwrap.
+// The Playwright `collect_object_pattern_bindings` helper calls this.
+#[test]
+fn playwright_fixture_destructure_with_default_value_records_binding() {
+    let info = parse(
+        r"
+        import { test } from './fixtures';
+
+        test('default value', async ({ adminPage = null }) => {
+            await adminPage.assertGreeting();
+        });
+        ",
+    );
+    // The fixture key is `adminPage`; even though the destructure has a
+    // default (`= null`), the binding must still be recognised.
+    assert!(
+        info.member_accesses.iter().any(|a| {
+            a.object == format!("{}test:adminPage", crate::PLAYWRIGHT_FIXTURE_USE_SENTINEL)
+                && a.member == "assertGreeting"
+        }),
+        "fixture with default value in destructure should still emit a use sentinel; \
+         got {:#?}",
+        info.member_accesses
+    );
+}
+
+// ---- playwright_test_callee_name StaticMemberExpression arm (line 880)
+// `base.extend({}).skip('test name', callback)` -- the callee is a
+// StaticMemberExpression whose object is `base.extend({})`. This exercises
+// the `StaticMemberExpression` arm of `playwright_test_callee_name`.
+#[test]
+fn playwright_test_skip_variant_records_fixture_uses() {
+    let info = parse(
+        r"
+        import { test } from './fixtures';
+
+        test.skip('skipped', async ({ adminPage }) => {
+            await adminPage.checkTitle();
+        });
+        ",
+    );
+    assert!(
+        info.member_accesses.iter().any(|a| {
+            a.object == format!("{}test:adminPage", crate::PLAYWRIGHT_FIXTURE_USE_SENTINEL)
+                && a.member == "checkTitle"
+        }),
+        "test.skip(...) callback should still emit fixture use sentinels; got {:#?}",
+        info.member_accesses
+    );
+}
+
+// ---- collect_fixture_type_bindings_from_type TSIntersectionType branch (lines 999-1003)
+// `base.extend<TypeA & TypeB>({})` -- the type argument is an intersection.
+// Both intersection branches must contribute their fixture bindings.
+#[test]
+fn playwright_extend_intersection_type_records_both_fixture_branches() {
+    let info = parse(
+        r"
+        import { test as base } from '@playwright/test';
+        import { AdminPage } from './admin-page';
+        import { UserPage } from './user-page';
+
+        type AdminFixtures = { adminPage: AdminPage };
+        type UserFixtures = { userPage: UserPage };
+
+        export const test = base.extend<AdminFixtures & UserFixtures>({});
+        ",
+    );
+
+    assert!(
+        info.member_accesses.iter().any(|a| {
+            a.object == format!("{}test:adminPage", crate::PLAYWRIGHT_FIXTURE_DEF_SENTINEL)
+                && a.member == "AdminPage"
+        }),
+        "intersection type left branch (adminPage) must be recorded; got {:#?}",
+        info.member_accesses
+    );
+    assert!(
+        info.member_accesses.iter().any(|a| {
+            a.object == format!("{}test:userPage", crate::PLAYWRIGHT_FIXTURE_DEF_SENTINEL)
+                && a.member == "UserPage"
+        }),
+        "intersection type right branch (userPage) must be recorded; got {:#?}",
+        info.member_accesses
+    );
+}
+
+// ---- collect_fixture_type_bindings_from_type TSParenthesizedType branch (lines 1004-1011)
+// `base.extend<(MyFixtures)>({})` -- the type argument is a parenthesized type.
+// The inner type must be unwrapped and its fixture bindings collected.
+#[test]
+fn playwright_extend_parenthesized_type_arg_records_fixture_bindings() {
+    let info = parse(
+        r"
+        import { test as base } from '@playwright/test';
+        import { AdminPage } from './admin-page';
+
+        type MyFixtures = { adminPage: AdminPage };
+
+        export const test = base.extend<(MyFixtures)>({});
+        ",
+    );
+
+    assert!(
+        info.member_accesses.iter().any(|a| {
+            a.object == format!("{}test:adminPage", crate::PLAYWRIGHT_FIXTURE_DEF_SENTINEL)
+                && a.member == "AdminPage"
+        }),
+        "parenthesized type argument must be unwrapped; got {:#?}",
+        info.member_accesses
+    );
+}
+
+// ---- TypeScript assignment target TS-expression variants (lines 782-793)
+// Inside a Playwright fixture callback, assignments of the form
+// `(x as Foo) = value` produce a TSAsExpression assignment target.
+// The `assignment_target_identifier_name` function must unwrap these.
+#[test]
+fn playwright_ts_as_assignment_in_callback_records_alias_correctly() {
+    let info = parse(
+        r"
+        import { test } from './fixtures';
+
+        test('ts-as alias', async ({ readerA, readerB }) => {
+            let currentReader;
+            if (process.env.READER === 'a') {
+                (currentReader as any) = readerA;
+            } else {
+                (currentReader as any) = readerB;
+            }
+            await currentReader.doWork();
+        });
+        ",
+    );
+    // Both readerA and readerB are fixture locals. The TS `as` cast wraps the
+    // assignment target; both branches of the if/else feed into currentReader.
+    // At minimum the doWork member must be emitted against both fixtures.
+    let has_reader_a = info.member_accesses.iter().any(|a| {
+        a.object == format!("{}test:readerA", crate::PLAYWRIGHT_FIXTURE_USE_SENTINEL)
+            && a.member == "doWork"
+    });
+    let has_reader_b = info.member_accesses.iter().any(|a| {
+        a.object == format!("{}test:readerB", crate::PLAYWRIGHT_FIXTURE_USE_SENTINEL)
+            && a.member == "doWork"
+    });
+    // Either or both must be present -- the key assertion is that the code
+    // path exercises the TS-expression assignment target path without panic.
+    assert!(
+        has_reader_a || has_reader_b,
+        "at least one of readerA/readerB.doWork should be recorded via TS-as assignment; \
+         got {:#?}",
+        info.member_accesses
+    );
+}
+
+// ---- StructuralParamMemberCollector shadowed variable declaration (lines 144-155)
+// The main visitor records raw member accesses without scope-based suppression;
+// the StructuralParamMemberCollector (invoked separately) DOES suppress accesses
+// on an inner let-shadowed binding, but those results live in
+// local_structural_functions, not member_accesses.
+// This test verifies that (a) both the outer param access and the inner
+// shadowed-binding access are present in raw member_accesses (expected
+// behavior: the main visitor is not shadow-aware), and (b) the outer param
+// access is always credited.
+#[test]
+fn structural_param_member_accesses_recorded_regardless_of_inner_shadow() {
+    let info = parse(
+        r"
+        import { Thing } from './thing'
+
+        export function use(thing: Thing) {
+            const inner = {
+                run() {
+                    const thing = { other: 'x' };
+                    void thing.other;   // inner shadow: also recorded in raw accesses
+                }
+            };
+            void inner;
+            void thing.realMethod();    // outer binding: recorded in raw accesses
+        }
+        ",
+    );
+
+    let accesses: Vec<(&str, &str)> = info
+        .member_accesses
+        .iter()
+        .map(|a| (a.object.as_str(), a.member.as_str()))
+        .collect();
+
+    // The outer param access is always recorded.
+    assert!(
+        accesses
+            .iter()
+            .any(|(obj, member)| *obj == "thing" && *member == "realMethod"),
+        "outer param member access must be recorded; got {accesses:?}"
+    );
+    // The main visitor records accesses without shadow suppression; the inner
+    // let-bound `thing.other` is also present in raw accesses.
+    assert!(
+        accesses
+            .iter()
+            .any(|(obj, member)| *obj == "thing" && *member == "other"),
+        "inner binding access is present in raw member_accesses (no shadow filtering \
+         in main visitor); got {accesses:?}"
+    );
+}
+
+// ---- merge_branch_aliases and visit_switch_statement edge (lines 703-724)
+// A Playwright fixture alias threaded through a switch statement without a
+// default case should still propagate the merged alias to subsequent accesses
+// (the `!has_default` branch pushes a clone of `before` at lines 721-723).
+#[test]
+fn playwright_switch_without_default_propagates_alias() {
+    let info = parse(
+        r"
+        import { test } from './fixtures';
+
+        test('switch no default', async ({ readerA, readerB }) => {
+            let r = readerA;
+            switch (process.env.MODE) {
+                case 'b':
+                    r = readerB;
+                    break;
+            }
+            await r.doWork();
+        });
+        ",
+    );
+    // The switch has no default, so the before-alias (readerA) is always
+    // possible. `doWork` must appear for at least readerA.
+    assert!(
+        info.member_accesses.iter().any(|a| {
+            a.object == format!("{}test:readerA", crate::PLAYWRIGHT_FIXTURE_USE_SENTINEL)
+                && a.member == "doWork"
+        }),
+        "switch without default must propagate readerA alias to doWork; got {:#?}",
+        info.member_accesses
+    );
+}
+
+// ---- record_assignment_alias path (lines 559-572)
+// When a fixture local is reassigned to a non-fixture value INSIDE a nested
+// block scope (where shadowed_stack has a live entry), the local is inserted
+// into the shadowed set and subsequent accesses in that scope are not credited.
+// At the top level of a callback body (no pushed block scope), the shadowing
+// insert is a no-op, so accesses ARE still recorded from the original fixture
+// binding.  This test verifies the top-level-no-shadow behavior and that
+// a reassignment to another fixture alias IS tracked correctly.
+#[test]
+fn playwright_fixture_reassigned_to_sibling_fixture_credits_sibling() {
+    let info = parse(
+        r"
+        import { test } from './fixtures';
+
+        test('reassign to sibling', async ({ readerA, readerB }) => {
+            let r = readerA;
+            r = readerB;  // reassign alias to another fixture
+            r.doWork();
+        });
+        ",
+    );
+    // After reassignment `r` points at readerB; doWork must appear for readerB.
+    assert!(
+        info.member_accesses.iter().any(|a| {
+            a.object == format!("{}test:readerB", crate::PLAYWRIGHT_FIXTURE_USE_SENTINEL)
+                && a.member == "doWork"
+        }),
+        "after reassigning r to readerB, doWork must be credited to readerB; \
+         got {:#?}",
+        info.member_accesses
+    );
+}

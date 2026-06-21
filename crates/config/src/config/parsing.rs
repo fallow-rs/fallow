@@ -3979,4 +3979,812 @@ thresholdOverrides = [
             .validate_resolved_boundaries(dir.path())
             .expect("Bulletproof with discoverable features should pass");
     }
+
+    // ------------------------------------------------------------------
+    // parse_config_to_value: BOM stripping, TOML parse error, JSON parse error
+    // ------------------------------------------------------------------
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn parse_config_to_value_strips_utf8_bom() {
+        let dir = test_dir("parse-bom");
+        let path = dir.path().join("fallow.toml");
+        // Write TOML with a UTF-8 BOM prefix
+        let content_with_bom = "\u{FEFF}entry = [\"src/main.ts\"]\n";
+        std::fs::write(&path, content_with_bom).unwrap();
+
+        let value = parse_config_to_value(&path).unwrap();
+        assert!(
+            value.get("entry").is_some(),
+            "BOM should be stripped before TOML parsing"
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn parse_config_to_value_toml_parse_error() {
+        let dir = test_dir("parse-toml-error");
+        let path = dir.path().join("fallow.toml");
+        std::fs::write(&path, "entry = [unquoted\n").unwrap();
+
+        let result = parse_config_to_value(&path);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("Failed to parse config file"),
+            "error should mention parse failure: {err}"
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn parse_config_to_value_json_parse_error() {
+        let dir = test_dir("parse-json-error");
+        let path = dir.path().join(".fallowrc.json");
+        std::fs::write(&path, "{ this is not json }").unwrap();
+
+        let result = parse_config_to_value(&path);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("Failed to parse config file"),
+            "error should mention parse failure: {err}"
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn parse_config_to_value_missing_file_error() {
+        let dir = test_dir("parse-missing");
+        let path = dir.path().join("nonexistent.toml");
+
+        let result = parse_config_to_value(&path);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("Failed to read config file"),
+            "error should mention read failure: {err}"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // is_repo_root: svn boundary
+    // ------------------------------------------------------------------
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn find_and_load_stops_at_svn_dir() {
+        let dir = test_dir("find-svn-stop");
+        let sub = dir.path().join("sub");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::create_dir(dir.path().join(".svn")).unwrap();
+
+        let result = FallowConfig::find_and_load(&sub).unwrap();
+        assert!(result.is_none(), "svn boundary should stop config walk");
+    }
+
+    // ------------------------------------------------------------------
+    // validate_npm_package_name: dot-segment in the package name
+    // (path traversal but using a single dot)
+    // ------------------------------------------------------------------
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn extends_npm_single_dot_package_name_rejected() {
+        let dir = test_dir("npm-dot-name");
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            r#"{"extends": "npm:./relative"}"#,
+        )
+        .unwrap();
+
+        let result = FallowConfig::load(&dir.path().join(".fallowrc.json"));
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("path traversal"),
+            "single-dot component should be rejected as path traversal: {err}"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // find_config_in_npm_package: main field points to nonexistent file,
+    // falls through to config-name scan
+    // ------------------------------------------------------------------
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn extends_npm_main_points_to_nonexistent_falls_through_to_config_name() {
+        let dir = test_dir("npm-main-missing");
+        let pkg_dir = dir.path().join("node_modules/my-config");
+        std::fs::create_dir_all(&pkg_dir).unwrap();
+        // package.json with main pointing at a file that does not exist
+        std::fs::write(
+            pkg_dir.join("package.json"),
+            r#"{"name": "my-config", "main": "./missing.json"}"#,
+        )
+        .unwrap();
+        // But a recognized config name is present for the fallback scan
+        std::fs::write(
+            pkg_dir.join(".fallowrc.json"),
+            r#"{"rules": {"unused-files": "warn"}}"#,
+        )
+        .unwrap();
+
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            r#"{"extends": "npm:my-config"}"#,
+        )
+        .unwrap();
+
+        let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
+        assert_eq!(config.rules.unused_files, Severity::Warn);
+    }
+
+    // ------------------------------------------------------------------
+    // find_config_in_npm_package: exports present but exports-pointed file
+    // does not exist, falls through to main then config name
+    // ------------------------------------------------------------------
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn extends_npm_exports_nonexistent_falls_through_to_main() {
+        let dir = test_dir("npm-exports-missing-file");
+        let pkg_dir = dir.path().join("node_modules/cfg-pkg");
+        std::fs::create_dir_all(&pkg_dir).unwrap();
+        // exports points to a file that does not exist; main is valid
+        std::fs::write(
+            pkg_dir.join("package.json"),
+            r#"{"name": "cfg-pkg", "exports": "./missing-exports.json", "main": "./real.json"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            pkg_dir.join("real.json"),
+            r#"{"rules": {"unused-types": "off"}}"#,
+        )
+        .unwrap();
+
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            r#"{"extends": "npm:cfg-pkg"}"#,
+        )
+        .unwrap();
+
+        let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
+        assert_eq!(config.rules.unused_types, Severity::Off);
+    }
+
+    // ------------------------------------------------------------------
+    // normalize_url_for_dedup: URL with no "://" scheme falls back to raw
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn normalize_url_no_scheme_returns_raw() {
+        // A string without "://" must come back unchanged
+        assert_eq!(normalize_url_for_dedup("not-a-url"), "not-a-url");
+        assert_eq!(normalize_url_for_dedup("/absolute/path"), "/absolute/path");
+    }
+
+    // ------------------------------------------------------------------
+    // normalize_url_for_dedup: query before fragment (fragment then query)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn normalize_url_fragment_only_stripped() {
+        // Fragment-only URL (no query)
+        assert_eq!(
+            normalize_url_for_dedup("https://example.com/file.json#anchor"),
+            "https://example.com/file.json"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // url_timeout: env var override
+    // ------------------------------------------------------------------
+
+    #[test]
+    #[allow(
+        unsafe_code,
+        reason = "set_var is unsafe in edition 2024; env mutation is safe within a single-threaded test"
+    )]
+    fn url_timeout_uses_env_var_when_set() {
+        let key = "FALLOW_EXTENDS_TIMEOUT_SECS";
+        let previous = std::env::var(key).ok();
+
+        // SAFETY: test-only; single-threaded; we restore previous value
+        unsafe { std::env::set_var(key, "15") };
+        let t = url_timeout();
+        if let Some(prev) = previous {
+            // SAFETY: test-only restore
+            unsafe { std::env::set_var(key, prev) };
+        } else {
+            // SAFETY: test-only restore
+            unsafe { std::env::remove_var(key) };
+        }
+
+        assert_eq!(t.as_secs(), 15);
+    }
+
+    #[test]
+    #[allow(
+        unsafe_code,
+        reason = "set_var is unsafe in edition 2024; env mutation is safe within a single-threaded test"
+    )]
+    fn url_timeout_zero_falls_back_to_default() {
+        let key = "FALLOW_EXTENDS_TIMEOUT_SECS";
+        let previous = std::env::var(key).ok();
+
+        // SAFETY: test-only; single-threaded; we restore previous value
+        unsafe { std::env::set_var(key, "0") };
+        let t = url_timeout();
+        if let Some(prev) = previous {
+            // SAFETY: test-only restore
+            unsafe { std::env::set_var(key, prev) };
+        } else {
+            // SAFETY: test-only restore
+            unsafe { std::env::remove_var(key) };
+        }
+
+        assert_eq!(
+            t,
+            Duration::from_secs(DEFAULT_URL_TIMEOUT_SECS),
+            "zero should fall back to the hardcoded default"
+        );
+    }
+
+    #[test]
+    #[allow(
+        unsafe_code,
+        reason = "set_var is unsafe in edition 2024; env mutation is safe within a single-threaded test"
+    )]
+    fn url_timeout_non_numeric_falls_back_to_default() {
+        let key = "FALLOW_EXTENDS_TIMEOUT_SECS";
+        let previous = std::env::var(key).ok();
+
+        // SAFETY: test-only; single-threaded; we restore previous value
+        unsafe { std::env::set_var(key, "not-a-number") };
+        let t = url_timeout();
+        if let Some(prev) = previous {
+            // SAFETY: test-only restore
+            unsafe { std::env::set_var(key, prev) };
+        } else {
+            // SAFETY: test-only restore
+            unsafe { std::env::remove_var(key) };
+        }
+
+        assert_eq!(
+            t,
+            Duration::from_secs(DEFAULT_URL_TIMEOUT_SECS),
+            "non-numeric value should fall back to the hardcoded default"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // resolve_url_extends: depth limit reached
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn resolve_url_extends_depth_limit_error() {
+        let mut visited = FxHashSet::default();
+        let result = resolve_url_extends(
+            "https://example.invalid/config.json",
+            &mut visited,
+            MAX_EXTENDS_DEPTH, // at the limit
+        );
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("too deep"),
+            "error should mention depth limit: {err}"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // resolve_extends_file: depth limit reached
+    // ------------------------------------------------------------------
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn resolve_extends_file_depth_limit_error() {
+        let dir = test_dir("extends-file-depth");
+        let path = dir.path().join(".fallowrc.json");
+        std::fs::write(&path, r#"{"entry": []}"#).unwrap();
+
+        let mut visited = FxHashSet::default();
+        let result = resolve_extends(&path, &mut visited, MAX_EXTENDS_DEPTH);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("too deep"),
+            "error should mention depth limit: {err}"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // resolve_extends_file_entry: http:// in file-sourced extends
+    // ------------------------------------------------------------------
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn extends_http_url_in_file_extends_rejected() {
+        let dir = test_dir("file-extends-http");
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            r#"{"extends": ["http://example.com/config.json"]}"#,
+        )
+        .unwrap();
+
+        let result = FallowConfig::load(&dir.path().join(".fallowrc.json"));
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("https://"),
+            "error should suggest https: {err}"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // sealed_config_dir: when sealed = true canonicalization runs
+    // ------------------------------------------------------------------
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn sealed_config_dir_returns_some_when_sealed() {
+        let dir = test_dir("sealed-dir");
+        let result = sealed_config_dir(dir.path(), true);
+        assert!(result.is_ok());
+        assert!(
+            result.unwrap().is_some(),
+            "sealed=true must return Some(canonicalized path)"
+        );
+    }
+
+    #[test]
+    fn sealed_config_dir_returns_none_when_not_sealed() {
+        let result = sealed_config_dir(Path::new("/nonexistent/path"), false);
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none(), "sealed=false must return None");
+    }
+
+    // ------------------------------------------------------------------
+    // collect_unknown_rule_keys: overrides entry without a rules key
+    // (the inner `if let Some(rules)` branch is not taken)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn collect_unknown_rule_keys_override_without_rules_key() {
+        let merged = serde_json::json!({
+            "overrides": [
+                {
+                    "files": ["src/**/*.ts"]
+                    // no "rules" key here
+                },
+                {
+                    "files": ["tests/**"],
+                    "rules": {
+                        "unsued-exports": "off"
+                    }
+                }
+            ]
+        });
+        let findings = collect_unknown_rule_keys(&merged);
+        assert_eq!(
+            findings.len(),
+            1,
+            "only the entry with rules should produce a finding"
+        );
+        assert_eq!(findings[0].context, "overrides[1].rules");
+    }
+
+    // ------------------------------------------------------------------
+    // FallowConfig::load: deserialization failure
+    // ------------------------------------------------------------------
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn load_fails_on_deserialization_error() {
+        let dir = test_dir("deser-error");
+        let path = dir.path().join(".fallowrc.json");
+        // Valid JSON but contains a field value with the wrong type for the schema
+        std::fs::write(&path, r#"{"entry": "not-an-array"}"#).unwrap();
+
+        let result = FallowConfig::load(&path);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("Failed to deserialize"),
+            "error should mention deserialization: {err}"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // FallowConfig::load: threshold override validation failure
+    // (covers lines 921-927)
+    // ------------------------------------------------------------------
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn load_rejects_threshold_override_with_empty_files() {
+        let dir = test_dir("threshold-empty-files");
+        let path = dir.path().join(".fallowrc.json");
+        std::fs::write(
+            &path,
+            r#"{
+                "health": {
+                    "thresholdOverrides": [
+                        {"files": [], "maxCyclomatic": 30}
+                    ]
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let result = FallowConfig::load(&path);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("thresholdOverrides"),
+            "error should mention thresholdOverrides: {err}"
+        );
+        assert!(
+            err.contains("files"),
+            "error should name the files field: {err}"
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn load_rejects_threshold_override_with_no_threshold_set() {
+        let dir = test_dir("threshold-no-threshold");
+        let path = dir.path().join(".fallowrc.json");
+        std::fs::write(
+            &path,
+            r#"{
+                "health": {
+                    "thresholdOverrides": [
+                        {"files": ["src/legacy.ts"]}
+                    ]
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let result = FallowConfig::load(&path);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("maxCyclomatic")
+                || err.contains("maxCognitive")
+                || err.contains("maxCrap"),
+            "error should name at least one threshold field: {err}"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // validate_ignore_rule_globs: ignoreCatalogReferences consumer glob
+    // validation (covers lines 1026-1032)
+    // ------------------------------------------------------------------
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn load_rejects_invalid_ignore_catalog_references_consumer_glob() {
+        let dir = test_dir("invalid-catalog-consumer-glob");
+        let path = dir.path().join(".fallowrc.json");
+        std::fs::write(
+            &path,
+            r#"{
+                "ignoreCatalogReferences": [
+                    {"package": "react", "consumer": "[invalid-glob"}
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        let result = FallowConfig::load(&path);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("ignoreCatalogReferences"),
+            "error should mention the field: {err}"
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn load_accepts_ignore_catalog_references_without_consumer() {
+        let dir = test_dir("catalog-ref-no-consumer");
+        let path = dir.path().join(".fallowrc.json");
+        std::fs::write(
+            &path,
+            r#"{"ignoreCatalogReferences": [{"package": "react"}]}"#,
+        )
+        .unwrap();
+
+        let config = FallowConfig::load(&path).unwrap();
+        assert_eq!(config.ignore_catalog_references.len(), 1);
+        assert!(config.ignore_catalog_references[0].consumer.is_none());
+    }
+
+    // ------------------------------------------------------------------
+    // validate_resolved_boundaries: tsconfig rootDir filtering
+    // (covers lines 1158-1160 - rootDir value is ".", starts with "..", or
+    // is absolute; all should fall back to "src")
+    // ------------------------------------------------------------------
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn validate_resolved_boundaries_with_preset_uses_src_fallback_when_no_tsconfig() {
+        // No tsconfig.json present; parse_tsconfig_root_dir returns None,
+        // unwrap_or_else supplies "src". This exercises the filter + fallback branch.
+        let dir = test_dir("boundaries-preset-no-tsconfig");
+        std::fs::create_dir_all(dir.path().join("src/features/auth")).unwrap();
+        let config = FallowConfig {
+            boundaries: crate::BoundaryConfig {
+                coverage: crate::BoundaryCoverageConfig::default(),
+                calls: crate::BoundaryCallsConfig::default(),
+                preset: Some(crate::BoundaryPreset::Bulletproof),
+                zones: vec![],
+                rules: vec![],
+            },
+            ..FallowConfig::default()
+        };
+        // Should not panic; no zone-ref errors expected since preset adds zones
+        let _ = config.validate_resolved_boundaries(dir.path());
+    }
+
+    // ------------------------------------------------------------------
+    // validate_user_globs: framework plugin invalid glob triggers error path
+    // (covers lines 970-974)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn validate_user_globs_framework_plugin_invalid_entry_glob() {
+        use crate::ExternalPluginDef;
+        use crate::external_plugin::EntryPointRole;
+        let config = FallowConfig {
+            framework: vec![ExternalPluginDef {
+                schema: None,
+                name: "test-plugin".to_owned(),
+                detection: None,
+                enablers: vec![],
+                entry_points: vec!["[invalid-glob".to_owned()],
+                entry_point_role: EntryPointRole::Support,
+                config_patterns: vec![],
+                always_used: vec![],
+                tooling_dependencies: vec![],
+                used_exports: vec![],
+                used_class_members: vec![],
+            }],
+            ..FallowConfig::default()
+        };
+
+        let result = config.validate_user_globs();
+        assert!(
+            result.is_err(),
+            "invalid entry_points glob should fail validation"
+        );
+        let errors = result.unwrap_err();
+        assert!(!errors.is_empty());
+    }
+
+    // ------------------------------------------------------------------
+    // shadowed_config_names: no lower-precedence names after the last index
+    // ------------------------------------------------------------------
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn shadowed_config_names_empty_when_last_config_wins() {
+        let dir = test_dir("shadow-last");
+        std::fs::write(dir.path().join(".fallow.toml"), "").unwrap();
+        // chosen_index = 3 (last), so skip+1 = 4, nothing to check
+        assert!(shadowed_config_names(dir.path(), 3).is_empty());
+    }
+
+    // ------------------------------------------------------------------
+    // warn_on_coexisting_configs: path without filename (edge branch)
+    // shadowed is empty -> early return without recording
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn warn_on_coexisting_configs_empty_shadowed_is_silent() {
+        let ((), captured) = capture_coexisting_config_warnings(|| {
+            warn_on_coexisting_configs(Path::new(".fallowrc.json"), &[]);
+        });
+        assert!(
+            captured.is_empty(),
+            "empty shadowed list must produce no warning"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // extract_extends: array with non-string entries are filtered out
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn extract_extends_array_filters_non_strings() {
+        let mut value = serde_json::json!({
+            "extends": ["a.json", 42, null, "b.json", true]
+        });
+        let extends = extract_extends(&mut value);
+        assert_eq!(extends, vec!["a.json", "b.json"]);
+    }
+
+    // ------------------------------------------------------------------
+    // record_extends_visit: circular file-extends detected
+    // (secondary path: same canonical path inserted twice)
+    // ------------------------------------------------------------------
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn record_extends_visit_circular_same_file() {
+        let dir = test_dir("visit-circular");
+        let path = dir.path().join("config.json");
+        std::fs::write(&path, "{}").unwrap();
+
+        let mut visited = FxHashSet::default();
+        record_extends_visit(&path, &mut visited).unwrap();
+        let result = record_extends_visit(&path, &mut visited);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("Circular extends"),
+            "second visit of same file must report circular: {err}"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // find_and_load: stops at .svn dir (is_repo_root branch)
+    // ------------------------------------------------------------------
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn find_config_path_stops_at_svn_dir() {
+        let dir = test_dir("find-path-svn");
+        let sub = dir.path().join("sub");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::create_dir(dir.path().join(".svn")).unwrap();
+
+        let path = FallowConfig::find_config_path(&sub);
+        assert!(path.is_none(), "svn root should stop config search");
+    }
+
+    // ------------------------------------------------------------------
+    // deep_merge: array over object replaces
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn deep_merge_array_over_object_replaces() {
+        let mut base = serde_json::json!({"key": "value"});
+        deep_merge_json(&mut base, serde_json::json!(["a", "b"]));
+        assert_eq!(base, serde_json::json!(["a", "b"]));
+    }
+
+    // ------------------------------------------------------------------
+    // find_and_load: returns an error when config parses but glob validation fails
+    // ------------------------------------------------------------------
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn find_and_load_returns_error_for_invalid_glob_in_config() {
+        let dir = test_dir("find-invalid-glob");
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            r#"{"entry": ["[invalid-glob"]}"#,
+        )
+        .unwrap();
+
+        let result = FallowConfig::find_and_load(dir.path());
+        assert!(
+            result.is_err(),
+            "invalid glob should surface as an error from find_and_load"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // resolve_package_exports: Object map with "." key that is not a
+    // string or object returns None (the `_ => None` arm)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn resolve_package_exports_dot_key_array_returns_none() {
+        // "." value is an array, which is neither String nor Object
+        let pkg = serde_json::json!({
+            "exports": {".": ["array-value"]}
+        });
+        let result = resolve_package_exports(&pkg, Path::new("/tmp"));
+        assert!(result.is_none(), "array dot-export should return None");
+    }
+
+    #[test]
+    fn resolve_package_exports_exports_is_array_returns_none() {
+        // top-level "exports" is an array (not String or Object)
+        let pkg = serde_json::json!({
+            "exports": ["./index.js"]
+        });
+        let result = resolve_package_exports(&pkg, Path::new("/tmp"));
+        assert!(result.is_none(), "array-form exports should return None");
+    }
+
+    #[test]
+    fn resolve_package_exports_object_no_dot_key_returns_none() {
+        // Object exports without "." key
+        let pkg = serde_json::json!({
+            "exports": {"./sub": "./sub.js"}
+        });
+        let result = resolve_package_exports(&pkg, Path::new("/tmp"));
+        assert!(result.is_none(), "no dot key should return None");
+    }
+
+    #[test]
+    fn resolve_package_exports_conditions_without_known_key_returns_none() {
+        // "." is an Object but none of the known condition keys are present
+        let pkg = serde_json::json!({
+            "exports": {".": {"browser": "./browser.js"}}
+        });
+        let result = resolve_package_exports(&pkg, Path::new("/tmp"));
+        assert!(result.is_none(), "unknown condition key should return None");
+    }
+
+    // ------------------------------------------------------------------
+    // npm package: exports condition "import" key (one of the priority keys)
+    // ------------------------------------------------------------------
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn extends_npm_exports_import_condition() {
+        let dir = test_dir("npm-import-cond");
+        let pkg_dir = dir.path().join("node_modules/import-config");
+        std::fs::create_dir_all(&pkg_dir).unwrap();
+        std::fs::write(
+            pkg_dir.join("package.json"),
+            r#"{"name": "import-config", "exports": {".": {"import": "./esm.json"}}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            pkg_dir.join("esm.json"),
+            r#"{"rules": {"unused-types": "warn"}}"#,
+        )
+        .unwrap();
+
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            r#"{"extends": "npm:import-config"}"#,
+        )
+        .unwrap();
+
+        let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
+        assert_eq!(config.rules.unused_types, Severity::Warn);
+    }
+
+    // ------------------------------------------------------------------
+    // npm package: exports condition "require" key
+    // ------------------------------------------------------------------
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn extends_npm_exports_require_condition() {
+        let dir = test_dir("npm-require-cond");
+        let pkg_dir = dir.path().join("node_modules/require-config");
+        std::fs::create_dir_all(&pkg_dir).unwrap();
+        std::fs::write(
+            pkg_dir.join("package.json"),
+            r#"{"name": "require-config", "exports": {".": {"require": "./cjs.json"}}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            pkg_dir.join("cjs.json"),
+            r#"{"rules": {"unused-class-members": "warn"}}"#,
+        )
+        .unwrap();
+
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            r#"{"extends": "npm:require-config"}"#,
+        )
+        .unwrap();
+
+        let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
+        assert_eq!(config.rules.unused_class_members, Severity::Warn);
+    }
 }
