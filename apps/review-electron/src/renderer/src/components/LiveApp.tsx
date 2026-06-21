@@ -55,8 +55,12 @@ export const LiveApp = () => {
   };
 
   return (
-    <div style={{ display: "grid", gridTemplateRows: "auto 1fr", height: "100%", color: theme.text }}>
-      <div style={{ display: "flex", gap: 6, padding: 8, borderBottom: `1px solid ${theme.border}` }}>
+    <div
+      style={{ display: "grid", gridTemplateRows: "auto 1fr", height: "100%", color: theme.text }}
+    >
+      <div
+        style={{ display: "flex", gap: 6, padding: 8, borderBottom: `1px solid ${theme.border}` }}
+      >
         <input
           value={url}
           onChange={(e) => setUrl(e.target.value)}

@@ -20,7 +20,9 @@ export const AnnotateCanvas = () => {
   };
 
   return (
-    <div style={{ padding: 12, width: "100%", height: "100%", overflow: "auto", color: theme.text }}>
+    <div
+      style={{ padding: 12, width: "100%", height: "100%", overflow: "auto", color: theme.text }}
+    >
       <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
         <input
           value={url}

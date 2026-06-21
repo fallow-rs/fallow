@@ -52,6 +52,20 @@ all of these):
   `optimizer.watchWindowShortcuts` (devtools in dev only).
 - Inspector bridge binds `127.0.0.1` only.
 
+## Tooling (aligned with codiff / nkzw-tech)
+
+Studied cpojer's codiff and adopted the patterns that fit + match the project's
+toolchain preference:
+
+- **oxlint** (Oxc linter) with `.oxlintrc.json` + `npm run lint` (clean).
+- **oxfmt** (Oxc formatter) + `npm run format` (codebase formatted).
+- **React Compiler** (`babel-plugin-react-compiler`) in the renderer for
+  auto-memoization, as codiff does.
+
+Deliberately NOT adopted (big migrations, no clear near-term win): Electron Forge
+(electron-builder works and produced a signed .app), Tailwind v4 (inline styles
+for now; a design pass can revisit), multi-window per-repo, JSONC config file.
+
 ## Phases (all built; per-phase detail in apps/review-electron/PROGRESS.md)
 
 0 baseline + sample app · 1 W1 render model · 2 Electron scaffold · 3 walkthrough

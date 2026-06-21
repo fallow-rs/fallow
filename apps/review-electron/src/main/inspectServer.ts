@@ -45,7 +45,9 @@ export const startInspectServer = (
             note: `inspected ${sel.component ?? sel.file}`,
             at: new Date().toISOString(),
           });
-          res.writeHead(200, { "content-type": "application/json", ...CORS }).end(JSON.stringify(card));
+          res
+            .writeHead(200, { "content-type": "application/json", ...CORS })
+            .end(JSON.stringify(card));
         } catch (err) {
           res.writeHead(400, CORS).end(String(err));
         }

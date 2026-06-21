@@ -58,3 +58,7 @@ stacked on `fix/review-quality` (engine E1-E8+E11).
   CSP on file://, setWindowOpenHandler deny, will-navigate block, will-attach-
   webview strip, permission deny-all, single-instance, ready-to-show,
   @electron-toolkit/utils). tsc + vitest + build + e2e 3/3 green under all of it.
+- codiff-aligned tooling: oxlint (+ .oxlintrc, npm run lint, clean) + oxfmt
+  (npm run format) + React Compiler (babel-plugin-react-compiler). 4 oxlint
+  warnings fixed (toSorted, hoisted helper, addEventListener). tsc lib -> ES2023.
+  oxlint + tsc + build + e2e 3/3 all green. Forge/Tailwind/multi-window skipped.

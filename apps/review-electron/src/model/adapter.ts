@@ -44,7 +44,10 @@ export type AuditBrief = {
   decisions?: { decisions?: Array<Record<string, unknown>>; emitted_signal_ids?: string[] };
   partition?: { units?: RawUnit[]; order?: string[] };
   focus?: { review_here?: RawFocusEntry[]; deprioritized?: RawFocusEntry[] };
-  impact_closure?: { affected_not_shown?: unknown[]; coordination_gap?: Array<Record<string, unknown>> };
+  impact_closure?: {
+    affected_not_shown?: unknown[];
+    coordination_gap?: Array<Record<string, unknown>>;
+  };
   weakening?: Array<Record<string, unknown>>;
   graph_snapshot_hash?: string;
 };
@@ -120,12 +123,14 @@ export const toWalkthroughDocument = (brief: AuditBrief): WalkthroughDocument =>
   };
   const stages: WalkthroughStage[] = (brief.partition?.units ?? [])
     .map((unit) => ({ unit, idx: orderIndex(unit.module_dir) }))
-    .sort((a, b) => a.idx - b.idx)
-    .map(({ unit }, i): WalkthroughStage => ({
-      moduleDir: unit.module_dir,
-      order: i,
-      files: (unit.files ?? []).map(fileFor),
-    }));
+    .toSorted((a, b) => a.idx - b.idx)
+    .map(
+      ({ unit }, i): WalkthroughStage => ({
+        moduleDir: unit.module_dir,
+        order: i,
+        files: (unit.files ?? []).map(fileFor),
+      }),
+    );
 
   const decisions: Decision[] = (brief.decisions?.decisions ?? [])
     .filter((d) => typeof d["signal_id"] === "string" && (d["signal_id"] as string).length > 0)

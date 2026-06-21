@@ -3,6 +3,14 @@ import { theme } from "../theme";
 
 type Props = { dataUrl: string; target: string; onDone?: () => void };
 
+const canvasPoint = (e: MouseEvent<HTMLCanvasElement>): [number, number] => {
+  const rect = e.currentTarget.getBoundingClientRect();
+  return [
+    (e.clientX - rect.left) * (e.currentTarget.width / rect.width),
+    (e.clientY - rect.top) * (e.currentTarget.height / rect.height),
+  ];
+};
+
 /** Draw freehand annotations on an image and send the result to the agent feed. */
 export const DrawableImage = ({ dataUrl, target, onDone }: Props) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -15,26 +23,19 @@ export const DrawableImage = ({ dataUrl, target, onDone }: Props) => {
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx) return;
     const image = new Image();
-    image.onload = () => {
+    image.addEventListener("load", () => {
       canvas.width = image.width;
       canvas.height = image.height;
       ctx.drawImage(image, 0, 0);
-    };
+    });
     image.src = dataUrl;
   }, [dataUrl]);
 
-  const at = (e: MouseEvent<HTMLCanvasElement>): [number, number] => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    return [
-      (e.clientX - rect.left) * (e.currentTarget.width / rect.width),
-      (e.clientY - rect.top) * (e.currentTarget.height / rect.height),
-    ];
-  };
   const startDraw = (e: MouseEvent<HTMLCanvasElement>): void => {
     const ctx = canvasRef.current?.getContext("2d");
     if (!ctx) return;
     drawing.current = true;
-    const [x, y] = at(e);
+    const [x, y] = canvasPoint(e);
     ctx.strokeStyle = theme.danger;
     ctx.lineWidth = 3;
     ctx.beginPath();
@@ -43,7 +44,7 @@ export const DrawableImage = ({ dataUrl, target, onDone }: Props) => {
   const moveDraw = (e: MouseEvent<HTMLCanvasElement>): void => {
     const ctx = canvasRef.current?.getContext("2d");
     if (!drawing.current || !ctx) return;
-    const [x, y] = at(e);
+    const [x, y] = canvasPoint(e);
     ctx.lineTo(x, y);
     ctx.stroke();
   };

@@ -50,9 +50,13 @@ export const validateWalkthrough = async (
 ): Promise<unknown> => {
   const file = join(tmpdir(), `fallow-agent-wt-${process.pid}-${Date.now()}.json`);
   await writeFile(file, JSON.stringify(payload), "utf8");
-  const { stdout } = await run(fallowBin(), ["review", "--walkthrough-file", file, "--format", "json"], {
-    cwd: at(root),
-    maxBuffer: MAX_BUFFER,
-  });
+  const { stdout } = await run(
+    fallowBin(),
+    ["review", "--walkthrough-file", file, "--format", "json"],
+    {
+      cwd: at(root),
+      maxBuffer: MAX_BUFFER,
+    },
+  );
   return JSON.parse(stdout);
 };

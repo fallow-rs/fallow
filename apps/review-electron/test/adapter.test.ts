@@ -22,7 +22,7 @@ describe("toWalkthroughDocument", () => {
   it("orders stages by partition.order", () => {
     const doc = toWalkthroughDocument(loadFixture());
     const orders = doc.stages.map((s) => s.order);
-    expect(orders).toEqual([...orders].sort((a, b) => a - b));
+    expect(orders).toEqual(orders.toSorted((a, b) => a - b));
   });
 
   it("drops decisions without a signal_id (anti-hallucination)", () => {

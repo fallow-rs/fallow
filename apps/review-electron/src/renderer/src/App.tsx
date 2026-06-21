@@ -111,11 +111,21 @@ export const App = () => {
         )}
       </aside>
       <main style={{ overflow: "hidden", display: "grid", gridTemplateRows: "auto 1fr" }}>
-        <div style={{ display: "flex", gap: 6, padding: 6, borderBottom: `1px solid ${theme.border}` }}>
-          <button onClick={() => setRightMode("live")} disabled={rightMode === "live"} style={{ fontSize: 12 }}>
+        <div
+          style={{ display: "flex", gap: 6, padding: 6, borderBottom: `1px solid ${theme.border}` }}
+        >
+          <button
+            onClick={() => setRightMode("live")}
+            disabled={rightMode === "live"}
+            style={{ fontSize: 12 }}
+          >
             Live app
           </button>
-          <button onClick={() => setRightMode("shot")} disabled={rightMode === "shot"} style={{ fontSize: 12 }}>
+          <button
+            onClick={() => setRightMode("shot")}
+            disabled={rightMode === "shot"}
+            style={{ fontSize: 12 }}
+          >
             Screenshot URL
           </button>
         </div>
