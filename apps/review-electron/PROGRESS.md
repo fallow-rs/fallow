@@ -174,3 +174,11 @@ stacked on `fix/review-quality` (engine E1-E8+E11).
   container, bg-background active) for the same pick-one interaction. Unified the
   backend picker to the segmented-control treatment so both read identically.
   format/lint/tsc/build/e2e 5/5.
+- Round 8 (review header hierarchy, MED): the agent-review CTA card sat ABOVE the
+  verdict, so the most important fact (pass/fail + risk) was visually subordinate
+  to a secondary action, and the stats were a run-on muted sentence. Reordered so
+  ReviewFocus leads the sidebar when a review is loaded (agent card drops to
+  secondary), and restyled the summary into a cloud-dashboard KPI-style stat strip:
+  verdict pill + commit hash on one row, then aligned files / risk / effort cells
+  (uppercase muted labels over mono values, risk color-toned). Verdict pill is now
+  semibold. The review state reads as the anchor. format/lint/tsc/build/vitest/e2e 5/5.

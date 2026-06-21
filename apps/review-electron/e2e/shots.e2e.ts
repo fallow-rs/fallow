@@ -70,6 +70,12 @@ test("capture screens for design QA", async () => {
     await win.screenshot({ path: `${shots}/02-diff.png` });
   });
   await safe(async () => {
+    // A heavily-rewritten file gives a mixed diff (deletions + context + adds).
+    await win.getByTestId("file-open").filter({ hasText: "DiffView.tsx" }).first().click();
+    await win.getByText(/@@/).first().waitFor({ timeout: 20_000 });
+    await win.screenshot({ path: `${shots}/09-diff-mixed.png` });
+  });
+  await safe(async () => {
     await win.getByTestId("mode-shot").click({ timeout: 10_000 });
     await win.screenshot({ path: `${shots}/03-screenshot-mode.png` });
   });

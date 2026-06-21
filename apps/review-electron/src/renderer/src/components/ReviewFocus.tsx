@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { GitCommitHorizontal, MessageSquarePlus } from "lucide-react";
 import type { ReviewFocus as Focus } from "../../../model/walkthrough";
 import { cn } from "@/lib/utils";
@@ -12,12 +13,29 @@ const verdictTone = (v: string): string =>
 const riskTone = (r: string): string =>
   r === "high" ? "text-fallow-red" : r === "medium" ? "text-fallow-amber" : "text-fallow-green";
 
+const Stat = ({
+  label,
+  children,
+  className,
+}: {
+  label: string;
+  children: ReactNode;
+  className?: string;
+}) => (
+  <div className="min-w-0">
+    <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</dt>
+    <dd className={cn("mt-0.5 truncate font-mono text-sm tabular-nums lowercase", className)}>
+      {children}
+    </dd>
+  </div>
+);
+
 export const ReviewFocus = ({ focus, noteCount }: { focus: Focus; noteCount: number }) => (
-  <section data-testid="review-loaded" className="space-y-2.5">
-    <div className="flex items-center gap-2">
+  <section data-testid="review-loaded" className="space-y-3">
+    <div className="flex items-center justify-between gap-2">
       <span
         className={cn(
-          "rounded-full border px-2 py-0.5 text-[11px] font-medium lowercase",
+          "rounded-full border px-2.5 py-0.5 text-xs font-semibold lowercase",
           verdictTone(focus.verdict),
         )}
       >
@@ -28,15 +46,17 @@ export const ReviewFocus = ({ focus, noteCount }: { focus: Focus; noteCount: num
         {focus.baseRef.slice(0, 9)}
       </span>
     </div>
-    <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm">
-      <span className="text-muted-foreground">
-        <span className="font-mono tabular-nums text-foreground">{focus.changedFiles}</span> files
-      </span>
-      <span className="text-muted-foreground">
-        risk <span className={cn("font-medium", riskTone(focus.riskClass))}>{focus.riskClass}</span>
-      </span>
-      <span className="text-muted-foreground">effort {focus.reviewEffort.replace(/_/g, " ")}</span>
-    </div>
+    <dl className="grid grid-cols-3 gap-3">
+      <Stat label="files" className="text-foreground">
+        {focus.changedFiles}
+      </Stat>
+      <Stat label="risk" className={cn("font-medium", riskTone(focus.riskClass))}>
+        {focus.riskClass}
+      </Stat>
+      <Stat label="effort" className="text-foreground">
+        {focus.reviewEffort.replace(/_/g, " ")}
+      </Stat>
+    </dl>
     {noteCount > 0 && (
       <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <MessageSquarePlus className="size-3.5" />

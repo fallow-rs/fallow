@@ -91,10 +91,10 @@ export const App = () => {
             </p>
           )}
           {card && <InspectorCard card={card} />}
+          {doc && <ReviewFocus focus={doc.focus} noteCount={noteCount} />}
           <AgentPanel />
           {doc ? (
             <>
-              <ReviewFocus focus={doc.focus} noteCount={noteCount} />
               <ClearedPanel cleared={doc.cleared} />
               <DecisionList decisions={doc.decisions} />
               <StageList
