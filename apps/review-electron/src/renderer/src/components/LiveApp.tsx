@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { DrawableImage } from "./DrawableImage";
-import { theme } from "../theme";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 /** Minimal slice of the Electron <webview> element we drive imperatively. */
 type WebviewEl = HTMLElement & {
@@ -11,7 +12,7 @@ type WebviewEl = HTMLElement & {
 
 /**
  * Live, interactive embed of the app-under-review (Electron <webview>). The
- * picker runs inside it (dev) and posts to the bridge; "Annotate view" captures
+ * picker runs inside it (dev) and posts to the bridge; "annotate view" captures
  * the CURRENT interacted state for drawing (Tier-2 live annotation).
  */
 export const LiveApp = () => {
@@ -26,14 +27,15 @@ export const LiveApp = () => {
     if (!host) return;
     const wv = document.createElement("webview") as WebviewEl;
     wv.src = url;
-    Object.assign(wv.style, { width: "100%", height: "100%", border: "none" });
-    host.appendChild(wv);
+    wv.style.width = "100%";
+    wv.style.height = "100%";
+    wv.style.border = "none";
+    host.append(wv);
     webviewRef.current = wv;
     return () => {
       wv.remove();
       webviewRef.current = null;
     };
-    // Create the webview once; subsequent navigation uses loadURL via "Go".
   }, []);
 
   const go = (): void => {
@@ -55,29 +57,21 @@ export const LiveApp = () => {
   };
 
   return (
-    <div
-      style={{ display: "grid", gridTemplateRows: "auto 1fr", height: "100%", color: theme.text }}
-    >
-      <div
-        style={{ display: "flex", gap: 6, padding: 8, borderBottom: `1px solid ${theme.border}` }}
-      >
-        <input
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          style={{ flex: 1, fontSize: 12 }}
-        />
-        <button onClick={go} style={{ fontSize: 12 }}>
-          Go
-        </button>
-        <button onClick={() => void annotate()} style={{ fontSize: 12 }}>
-          Annotate view
-        </button>
+    <div className="grid h-full grid-rows-[auto_1fr] text-foreground">
+      <div className="flex gap-1.5 border-b border-border p-2">
+        <Input value={url} onChange={(e) => setUrl(e.target.value)} className="h-8 text-xs" />
+        <Button size="sm" variant="secondary" className="lowercase" onClick={go}>
+          go
+        </Button>
+        <Button size="sm" className="lowercase" onClick={() => void annotate()}>
+          annotate view
+        </Button>
       </div>
-      {status && <p style={{ fontSize: 11, color: theme.muted, margin: 4 }}>{status}</p>}
+      {status && <p className="m-1 text-[11px] text-muted-foreground">{status}</p>}
       {shot ? (
         <DrawableImage dataUrl={shot} target={url} onDone={() => setShot(null)} />
       ) : (
-        <div ref={hostRef} style={{ height: "100%" }} />
+        <div ref={hostRef} className="h-full" />
       )}
     </div>
   );

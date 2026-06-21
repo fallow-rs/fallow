@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
-import { theme } from "../theme";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 type Props = { dataUrl: string; target: string; onDone?: () => void };
 
@@ -9,6 +10,11 @@ const canvasPoint = (e: MouseEvent<HTMLCanvasElement>): [number, number] => {
     (e.clientX - rect.left) * (e.currentTarget.width / rect.width),
     (e.clientY - rect.top) * (e.currentTarget.height / rect.height),
   ];
+};
+
+const strokeColor = (): string => {
+  const value = getComputedStyle(document.documentElement).getPropertyValue("--destructive").trim();
+  return value || "#f87171";
 };
 
 /** Draw freehand annotations on an image and send the result to the agent feed. */
@@ -36,7 +42,7 @@ export const DrawableImage = ({ dataUrl, target, onDone }: Props) => {
     if (!ctx) return;
     drawing.current = true;
     const [x, y] = canvasPoint(e);
-    ctx.strokeStyle = theme.danger;
+    ctx.strokeStyle = strokeColor();
     ctx.lineWidth = 3;
     ctx.beginPath();
     ctx.moveTo(x, y);
@@ -62,32 +68,32 @@ export const DrawableImage = ({ dataUrl, target, onDone }: Props) => {
   };
 
   return (
-    <div style={{ padding: 8, overflow: "auto" }}>
+    <div className="overflow-auto p-2">
       <canvas
         ref={canvasRef}
         onMouseDown={startDraw}
         onMouseMove={moveDraw}
         onMouseUp={endDraw}
         onMouseLeave={endDraw}
-        style={{ maxWidth: "100%", border: `1px solid ${theme.border}`, cursor: "crosshair" }}
+        className="max-w-full cursor-crosshair rounded-md border border-border"
       />
-      <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-        <input
+      <div className="mt-2 flex gap-1.5">
+        <Input
           value={note}
           onChange={(e) => setNote(e.target.value)}
           placeholder="note for the agent"
-          style={{ flex: 1, fontSize: 12 }}
+          className="h-7 text-xs"
         />
-        <button onClick={() => void save()} style={{ fontSize: 12 }}>
-          Save annotation
-        </button>
+        <Button size="sm" className="h-7 text-xs lowercase" onClick={() => void save()}>
+          save annotation
+        </Button>
         {onDone && (
-          <button onClick={onDone} style={{ fontSize: 12 }}>
-            Back
-          </button>
+          <Button size="sm" variant="outline" className="h-7 text-xs lowercase" onClick={onDone}>
+            back
+          </Button>
         )}
       </div>
-      {status && <p style={{ fontSize: 11, color: theme.muted }}>{status}</p>}
+      {status && <p className="mt-1.5 text-[11px] text-muted-foreground">{status}</p>}
     </div>
   );
 };

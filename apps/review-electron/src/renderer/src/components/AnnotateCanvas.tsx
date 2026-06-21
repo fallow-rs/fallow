@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { DrawableImage } from "./DrawableImage";
-import { theme } from "../theme";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 /** Screenshot a URL (fresh load) and annotate it. */
 export const AnnotateCanvas = () => {
@@ -20,20 +21,14 @@ export const AnnotateCanvas = () => {
   };
 
   return (
-    <div
-      style={{ padding: 12, width: "100%", height: "100%", overflow: "auto", color: theme.text }}
-    >
-      <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-        <input
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          style={{ flex: 1, fontSize: 12 }}
-        />
-        <button onClick={() => void capture()} style={{ fontSize: 12 }}>
-          Screenshot
-        </button>
+    <div className="h-full w-full overflow-auto p-3 text-foreground">
+      <div className="mb-2 flex gap-1.5">
+        <Input value={url} onChange={(e) => setUrl(e.target.value)} className="h-8 text-xs" />
+        <Button size="sm" className="lowercase" onClick={() => void capture()}>
+          screenshot
+        </Button>
       </div>
-      {status && <p style={{ fontSize: 11, color: theme.muted }}>{status}</p>}
+      {status && <p className="text-[11px] text-muted-foreground">{status}</p>}
       {img && <DrawableImage dataUrl={img} target={url} onDone={() => setImg(null)} />}
     </div>
   );
