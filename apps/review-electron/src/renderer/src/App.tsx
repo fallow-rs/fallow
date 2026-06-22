@@ -17,7 +17,7 @@ import {
 import type { WalkthroughDocument } from "../../model/walkthrough";
 import type { TradeOffEnvelope } from "../../model/tradeoff";
 import type { ReviewContext as ReviewContextData } from "../../model/reviewContext";
-import type { InlineFraming } from "../../model/agent";
+import type { FeedTarget, InlineFraming } from "../../model/agent";
 import type { InspectorCard as InspectorCardData } from "../../main/inspect";
 import { groupBySignalId } from "./lib/agentFraming";
 import { ReviewFocus } from "./components/ReviewFocus";
@@ -137,10 +137,7 @@ export const App = () => {
   // Group author-captured framing by signal_id for per-decision inline rendering.
   // Only the write-time captured framing feeds this now (the live reconstruct path
   // is gone); origin is tagged at the source, never inferred here.
-  const framingBySignal = useMemo(
-    () => groupBySignalId(capturedFraming),
-    [capturedFraming],
-  );
+  const framingBySignal = useMemo(() => groupBySignalId(capturedFraming), [capturedFraming]);
 
   useEffect(() => {
     window.localStorage.setItem(SIDEBAR_KEY, String(sidebarWidth));
@@ -193,14 +190,19 @@ export const App = () => {
     writeViewed(window.localStorage, path, !readViewed(window.localStorage, path));
     setViewedTick((t) => t + 1);
   }, []);
-  const onAddNote = useCallback((path: string, note: string) => {
-    void window.fallow.appendFeed({
-      target: { kind: "file_line", value: path },
-      note,
-      at: new Date().toISOString(),
-    });
+  // The general comment handler: route a note at ANY anchored target (a whole
+  // file, a signal/decision, a trade-off anchor, or a `file:line`/`file:start-end`
+  // diff range) back to the agent through the same feed channel.
+  const onComment = useCallback((target: FeedTarget, note: string) => {
+    void window.fallow.appendFeed({ target, note, at: new Date().toISOString() });
     setNoteCount((n) => n + 1);
   }, []);
+  // File-level note kept as-is so StageList/FileRow stay untouched; delegates to
+  // the general handler with the whole-file `file_line` target.
+  const onAddNote = useCallback(
+    (path: string, note: string) => onComment({ kind: "file_line", value: path }, note),
+    [onComment],
+  );
   const onOpenDiff = useCallback((path: string) => {
     setDiffFile(path);
     setRightMode("diff");
@@ -246,9 +248,10 @@ export const App = () => {
               <DecisionList
                 decisions={doc.decisions}
                 onOpenDiff={onOpenDiff}
+                onComment={onComment}
                 framingBySignal={framingBySignal}
               />
-              <TradeOffList tradeoffs={tradeoffs} onOpenDiff={onOpenDiff} />
+              <TradeOffList tradeoffs={tradeoffs} onOpenDiff={onOpenDiff} onComment={onComment} />
               <StageList
                 stages={doc.stages}
                 isViewed={isViewed}
@@ -320,7 +323,7 @@ export const App = () => {
         <div className="min-h-0 flex-1 overflow-hidden">
           {rightMode === "diff" ? (
             doc ? (
-              <DiffView file={diffFile} base={doc.focus.baseRef} />
+              <DiffView file={diffFile} base={doc.focus.baseRef} onComment={onComment} />
             ) : (
               <DiffPlaceholder loading={loading} error={error} />
             )

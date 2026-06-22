@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { FileX, Loader2, TriangleAlert } from "lucide-react";
+import { FileX, Loader2, MessageSquarePlus, TriangleAlert } from "lucide-react";
 import {
   parseUnifiedDiff,
   parseMultiFileDiff,
@@ -7,11 +7,17 @@ import {
   type DiffRow,
   type FileDiffSection,
 } from "../lib/diff";
+import type { FeedTarget } from "../../../model/agent";
 import { tokenize, type TokenType } from "../lib/highlight";
 import { errorMessage } from "../lib/errors";
 import { cn } from "@/lib/utils";
+import { NoteComposer } from "./NoteComposer";
 
-type Props = { file: string | null; base: string };
+type Props = {
+  file: string | null;
+  base: string;
+  onComment: (target: FeedTarget, note: string) => void;
+};
 
 const gutter =
   "w-12 shrink-0 select-none px-2 text-right text-[11px] tabular-nums text-muted-foreground/60";
@@ -34,40 +40,137 @@ const Code = ({ text }: { text: string }) => (
   </code>
 );
 
-const Row = ({ row, showOld }: { row: DiffRow; showOld: boolean }) => (
-  <div
-    className={cn(
-      "flex border-l-2 border-transparent hover:bg-muted/30",
-      row.kind === "add" && "border-fallow-green/70 bg-fallow-green/10",
-      row.kind === "del" && "border-fallow-red/70 bg-fallow-red/10",
-    )}
-  >
-    {showOld && <span className={gutter}>{row.oldNo ?? ""}</span>}
-    <span className={gutter}>{row.newNo ?? ""}</span>
-    <span
+const Row = ({
+  row,
+  showOld,
+  selected,
+  onSelectLine,
+  onCommentLine,
+}: {
+  row: DiffRow;
+  showOld: boolean;
+  /** This row falls inside the active range selection (highlighted). */
+  selected: boolean;
+  /** Click/shift-click the new-line gutter to set or extend the range anchor. */
+  onSelectLine: (newNo: number, shift: boolean) => void;
+  /** Open a single-line composer under this row (only for rows with a newNo). */
+  onCommentLine: (newNo: number) => void;
+}) => {
+  // Only context/added lines carry a new-file line number: those are the rows a
+  // reviewer can comment on or range-select. Deleted-only rows have no newNo.
+  const commentable = row.newNo !== null;
+  return (
+    <div
       className={cn(
-        "w-4 shrink-0 select-none text-center",
-        row.kind === "add" && "text-fallow-green",
-        row.kind === "del" && "text-fallow-red",
-        row.kind === "context" && "text-transparent",
+        "group/row flex border-l-2 border-transparent hover:bg-muted/30",
+        row.kind === "add" && "border-fallow-green/70 bg-fallow-green/10",
+        row.kind === "del" && "border-fallow-red/70 bg-fallow-red/10",
+        selected && "bg-primary/10",
       )}
     >
-      {row.kind === "add" ? "+" : row.kind === "del" ? "-" : " "}
-    </span>
-    <Code text={row.text} />
-  </div>
-);
+      {showOld && <span className={gutter}>{row.oldNo ?? ""}</span>}
+      {commentable ? (
+        <button
+          type="button"
+          title="click to set range start · shift-click to extend"
+          onClick={(e) => onSelectLine(row.newNo as number, e.shiftKey)}
+          className={cn(gutter, "cursor-pointer hover:text-foreground hover:underline")}
+        >
+          {row.newNo}
+        </button>
+      ) : (
+        <span className={gutter}>{row.newNo ?? ""}</span>
+      )}
+      <span
+        className={cn(
+          "w-4 shrink-0 select-none text-center",
+          row.kind === "add" && "text-fallow-green",
+          row.kind === "del" && "text-fallow-red",
+          row.kind === "context" && "text-transparent",
+        )}
+      >
+        {row.kind === "add" ? "+" : row.kind === "del" ? "-" : " "}
+      </span>
+      <Code text={row.text} />
+      {commentable && (
+        <button
+          type="button"
+          aria-label={`comment on line ${row.newNo}`}
+          title="comment on this line"
+          onClick={() => onCommentLine(row.newNo as number)}
+          className="mr-2 flex w-4 shrink-0 items-center justify-center self-stretch text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/row:opacity-100"
+        >
+          <MessageSquarePlus className="size-3" />
+        </button>
+      )}
+    </div>
+  );
+};
 
-/** One file's diff: a sticky path/stats header followed by its hunks. */
-const FileSection = ({ section }: { section: FileDiffSection }) => {
+/** First and last new-file line numbers in a hunk (for the per-hunk composer). */
+const hunkLineSpan = (hunk: { rows: DiffRow[] }): { start: number; end: number } | null => {
+  const lines = hunk.rows.map((r) => r.newNo).filter((n): n is number => n !== null);
+  if (lines.length === 0) return null;
+  return { start: Math.min(...lines), end: Math.max(...lines) };
+};
+
+/**
+ * One file's diff: a sticky path/stats header followed by its hunks. Owns the
+ * local line-comment state (which new-file line range is selected, and which line
+ * has an open inline composer) so the rest of the diff stays untouched. A reviewer
+ * routes a note at `file:line` (single) or `file:start-end` (range) back to the
+ * agent through {@link FeedTarget}.kind `file_line`, the same channel file notes use.
+ */
+const FileSection = ({
+  section,
+  onComment,
+}: {
+  section: FileDiffSection;
+  onComment: (target: FeedTarget, note: string) => void;
+}) => {
   const stats = diffStats(section.hunks);
   // New files are all-additions: drop the always-empty old-line gutter so the
   // line numbers sit at the left, like GitHub. Modified files keep both columns.
   const showOld = section.hunks.some((h) => h.rows.some((r) => r.oldNo !== null));
+  // The active new-file line range being selected for a comment (start/end are
+  // inclusive new-file line numbers); null = nothing selected.
+  const [range, setRange] = useState<{ start: number; end: number } | null>(null);
+  // The single new-file line whose inline composer is open (null = none). Distinct
+  // from `range`: the per-line "+" opens a composer directly; the range selection
+  // opens a separate "comment on lines X-Y" composer.
+  const [lineComposer, setLineComposer] = useState<number | null>(null);
+
+  const file = section.file;
+
+  // Click a line-number gutter: plain click sets a fresh single-line anchor;
+  // shift-click extends from the existing anchor to form start..end.
+  const onSelectLine = (newNo: number, shift: boolean): void => {
+    setLineComposer(null);
+    setRange((prev) =>
+      shift && prev
+        ? { start: Math.min(prev.start, newNo), end: Math.max(prev.end, newNo) }
+        : { start: newNo, end: newNo },
+    );
+  };
+
+  const onCommentLine = (newNo: number): void => {
+    setRange(null);
+    setLineComposer(newNo);
+  };
+
+  const clearRange = (): void => setRange(null);
+
+  // The range affordance only counts as a real range when it spans >1 line; a
+  // single-line selection is better served by the per-line composer.
+  const isRange = range !== null && range.end > range.start;
+
+  const isSelected = (newNo: number | null): boolean =>
+    range !== null && newNo !== null && newNo >= range.start && newNo <= range.end;
+
   return (
     <div>
       <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-border bg-muted px-3 py-1.5">
-        <span className="truncate text-foreground">{section.file}</span>
+        <span className="truncate text-foreground">{file}</span>
         <span className="ml-2 shrink-0 tabular-nums">
           <span className="text-fallow-green">+{stats.added}</span>{" "}
           <span className="text-fallow-red">-{stats.removed}</span>
@@ -78,19 +181,89 @@ const FileSection = ({ section }: { section: FileDiffSection }) => {
           {section.binary ? "binary file" : "no textual diff"}
         </p>
       ) : (
-        section.hunks.map((hunk, i) => (
-          <div key={i}>
-            <div className="flex items-center gap-2 bg-muted/40 px-3 py-1 font-mono text-[11px] text-muted-foreground">
-              <span className="shrink-0 text-fallow-blue/70 tabular-nums">@@ {hunk.range} @@</span>
-              {hunk.header && (
-                <span className="truncate text-muted-foreground/80">{hunk.header}</span>
-              )}
+        section.hunks.map((hunk, i) => {
+          const span = hunkLineSpan(hunk);
+          return (
+            <div key={i}>
+              <div className="flex items-center gap-2 bg-muted/40 px-3 py-1 font-mono text-[11px] text-muted-foreground">
+                <span className="shrink-0 text-fallow-blue/70 tabular-nums">
+                  @@ {hunk.range} @@
+                </span>
+                {hunk.header && (
+                  <span className="truncate text-muted-foreground/80">{hunk.header}</span>
+                )}
+                {span && (
+                  <span className="ml-auto shrink-0">
+                    <NoteComposer
+                      label="comment on this hunk"
+                      placeholder={`note on lines ${span.start}-${span.end}`}
+                      onSave={(note) =>
+                        onComment(
+                          { kind: "file_line", value: `${file}:${span.start}-${span.end}` },
+                          note,
+                        )
+                      }
+                    />
+                  </span>
+                )}
+              </div>
+              {hunk.rows.map((row, j) => (
+                <div key={j}>
+                  <Row
+                    row={row}
+                    showOld={showOld}
+                    selected={isSelected(row.newNo)}
+                    onSelectLine={onSelectLine}
+                    onCommentLine={onCommentLine}
+                  />
+                  {/* single-line composer, directly under the targeted row */}
+                  {lineComposer !== null && row.newNo === lineComposer && (
+                    <div className="flex bg-muted/20 py-1 pl-4 pr-2">
+                      <span className="mr-2 shrink-0 self-center text-[11px] text-muted-foreground">
+                        line {lineComposer}
+                      </span>
+                      <span className="flex-1">
+                        <NoteComposer
+                          onSave={(note) =>
+                            onComment({ kind: "file_line", value: `${file}:${lineComposer}` }, note)
+                          }
+                        />
+                      </span>
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
-            {hunk.rows.map((row, j) => (
-              <Row key={j} row={row} showOld={showOld} />
-            ))}
-          </div>
-        ))
+          );
+        })
+      )}
+      {/* range composer: surfaces once a multi-line gutter selection exists */}
+      {isRange && range && (
+        <div className="flex items-center gap-2 border-t border-border bg-muted/20 px-3 py-1.5">
+          <span className="shrink-0 text-[11px] text-muted-foreground">
+            lines {range.start}-{range.end}
+          </span>
+          <span className="flex-1">
+            <NoteComposer
+              label={`comment on lines ${range.start}-${range.end}`}
+              placeholder={`note on lines ${range.start}-${range.end}`}
+              onSave={(note) => {
+                onComment(
+                  { kind: "file_line", value: `${file}:${range.start}-${range.end}` },
+                  note,
+                );
+                clearRange();
+              }}
+            />
+          </span>
+          <button
+            type="button"
+            onClick={clearRange}
+            className="shrink-0 text-[11px] text-muted-foreground hover:text-foreground"
+          >
+            clear
+          </button>
+        </div>
       )}
     </div>
   );
@@ -100,7 +273,7 @@ const Centered = ({ children }: { children: React.ReactNode }) => (
   <div className="flex flex-col items-center gap-3 px-6 py-16 text-center">{children}</div>
 );
 
-export const DiffView = ({ file, base }: Props) => {
+export const DiffView = ({ file, base, onComment }: Props) => {
   const [sections, setSections] = useState<FileDiffSection[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -166,7 +339,7 @@ export const DiffView = ({ file, base }: Props) => {
   return (
     <div data-testid="diff-scroll" className="h-full overflow-auto font-mono text-xs">
       {sections.map((section) => (
-        <FileSection key={section.file} section={section} />
+        <FileSection key={section.file} section={section} onComment={onComment} />
       ))}
     </div>
   );

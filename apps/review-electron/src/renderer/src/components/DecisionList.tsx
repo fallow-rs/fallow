@@ -1,8 +1,9 @@
 import { GitBranchPlus, Users } from "lucide-react";
 import type { Decision } from "../../../model/walkthrough";
-import type { FramingOrigin, InlineFraming } from "../../../model/agent";
+import type { FeedTarget, FramingOrigin, InlineFraming } from "../../../model/agent";
 import type { FramingBySignal } from "@/lib/agentFraming";
 import { shortAnchor } from "@/lib/anchor";
+import { NoteComposer } from "./NoteComposer";
 
 /** Per-origin label + tone for a fenced inline-framing block (never a fact). */
 const ORIGIN_PRESENTATION: Record<FramingOrigin, { label: string; tone: string }> = {
@@ -35,10 +36,12 @@ const ORIGIN_PRESENTATION: Record<FramingOrigin, { label: string; tone: string }
 export const DecisionList = ({
   decisions,
   onOpenDiff,
+  onComment,
   framingBySignal,
 }: {
   decisions: Decision[];
   onOpenDiff: (path: string) => void;
+  onComment: (target: FeedTarget, note: string) => void;
   framingBySignal?: FramingBySignal;
 }) => {
   // A quiet empty state (NOT a silent null): the human must be able to tell
@@ -66,6 +69,7 @@ export const DecisionList = ({
             key={d.signalId}
             decision={d}
             onOpenDiff={onOpenDiff}
+            onComment={onComment}
             framing={framingBySignal?.get(d.signalId) ?? []}
           />
         ))}
@@ -77,10 +81,12 @@ export const DecisionList = ({
 const DecisionRow = ({
   decision: d,
   onOpenDiff,
+  onComment,
   framing,
 }: {
   decision: Decision;
   onOpenDiff: (path: string) => void;
+  onComment: (target: FeedTarget, note: string) => void;
   framing: ReadonlyArray<InlineFraming>;
 }) => {
   const linkable = d.anchorFile.length > 0;
@@ -121,15 +127,19 @@ const DecisionRow = ({
           {/* (1) the question , primary, always interrogative */}
           <p className="text-foreground">{d.question || d.signalId}</p>
           {/* (2) the honest blast number , a graph fact, only when emitted */}
-          {d.internalConsumerCount > 0 && (
-            <p className="text-muted-foreground">{consumerLabel}</p>
-          )}
+          {d.internalConsumerCount > 0 && <p className="text-muted-foreground">{consumerLabel}</p>}
           {/* (3) the trade-off clause , a named sacrifice stated as fact */}
           {d.tradeoff && <p className="text-muted-foreground">{d.tradeoff}</p>}
           {/* (4) framing , fenced, interrogative-leaning, never a graph fact */}
           {framing.map((f, i) => (
             <FramingBlock key={`${f.origin}:${i}`} framing={f} />
           ))}
+          {/* (5) a note back to the agent, anchored to THIS decision's signal */}
+          <div className="pt-0.5">
+            <NoteComposer
+              onSave={(note) => onComment({ kind: "signal_id", value: d.signalId }, note)}
+            />
+          </div>
         </div>
       </div>
     </li>

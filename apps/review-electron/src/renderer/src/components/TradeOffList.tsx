@@ -1,6 +1,8 @@
 import { Scale } from "lucide-react";
 import type { Severity, TradeOff, TradeOffEnvelope } from "../../../model/tradeoff";
+import type { FeedTarget } from "../../../model/agent";
 import { shortAnchor } from "@/lib/anchor";
+import { NoteComposer } from "./NoteComposer";
 
 /** Tone for a severity badge: only `high` gets the amber accent; the rest stay muted. */
 const severityTone = (s: Severity): string =>
@@ -23,9 +25,11 @@ const ANCHOR_CROSS_CUTTING = "cross-cutting";
 export const TradeOffList = ({
   tradeoffs,
   onOpenDiff,
+  onComment,
 }: {
   tradeoffs: TradeOffEnvelope | null;
   onOpenDiff: (path: string) => void;
+  onComment: (target: FeedTarget, note: string) => void;
 }) => {
   // Not run: neutral, no list, no abstain language (it never looked).
   if (tradeoffs === null) {
@@ -56,7 +60,7 @@ export const TradeOffList = ({
           treatment FramingBlock uses, so a trade-off is never read as a graph fact. */}
       <ul className="space-y-1.5 rounded-md border border-border/60 bg-muted/10 p-1.5">
         {tradeoffs.tradeoffs.map((t) => (
-          <TradeOffRow key={t.id} tradeoff={t} onOpenDiff={onOpenDiff} />
+          <TradeOffRow key={t.id} tradeoff={t} onOpenDiff={onOpenDiff} onComment={onComment} />
         ))}
       </ul>
     </section>
@@ -81,9 +85,11 @@ const Badge = ({ label, value }: { label: string; value: Severity }) => (
 const TradeOffRow = ({
   tradeoff: t,
   onOpenDiff,
+  onComment,
 }: {
   tradeoff: TradeOff;
   onOpenDiff: (path: string) => void;
+  onComment: (target: FeedTarget, note: string) => void;
 }) => {
   // The cross-cutting slot has no single changed line to deep-link to.
   const linkable = t.anchor !== ANCHOR_CROSS_CUTTING && t.anchor.length > 0;
@@ -120,6 +126,13 @@ const TradeOffRow = ({
           <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
             <Badge label="consequence" value={t.consequence} />
             <Badge label="confidence" value={t.confidence} />
+          </div>
+          {/* a note back to the agent, anchored to THIS trade-off's file:line
+              (or the literal "cross-cutting" anchor, sent as-is) */}
+          <div className="pt-0.5">
+            <NoteComposer
+              onSave={(note) => onComment({ kind: "file_line", value: t.anchor }, note)}
+            />
           </div>
         </div>
       </div>
