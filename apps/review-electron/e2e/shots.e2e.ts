@@ -36,6 +36,15 @@ test("capture screens for design QA", async () => {
   await win.screenshot({ path: `${shots}/01-walkthrough.png` });
 
   await safe(async () => {
+    // The default diff shows all files; scroll to expose a file-to-file boundary.
+    await win.getByTestId("diff-scroll").evaluate((el) => {
+      el.scrollTop = 2300;
+    });
+    await win.waitForTimeout(150);
+    await win.screenshot({ path: `${shots}/16-diff-all.png` });
+  });
+
+  await safe(async () => {
     // Keyboard-focus a file row to QA the focus-visible ring. Press Tab first so
     // the browser is in keyboard modality (otherwise :focus-visible won't match).
     await win.keyboard.press("Tab");

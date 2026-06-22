@@ -63,8 +63,8 @@ const FileSection = ({ section }: { section: FileDiffSection }) => {
   const stats = diffStats(section.hunks);
   return (
     <div>
-      <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-border bg-card px-3 py-1.5">
-        <span className="truncate text-muted-foreground">{section.file}</span>
+      <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-border bg-muted px-3 py-1.5">
+        <span className="truncate text-foreground">{section.file}</span>
         <span className="ml-2 shrink-0 tabular-nums">
           <span className="text-fallow-green">+{stats.added}</span>{" "}
           <span className="text-fallow-red">-{stats.removed}</span>
@@ -161,7 +161,7 @@ export const DiffView = ({ file, base }: Props) => {
   }
 
   return (
-    <div className="h-full overflow-auto font-mono text-xs">
+    <div data-testid="diff-scroll" className="h-full overflow-auto font-mono text-xs">
       {sections.map((section) => (
         <FileSection key={section.file} section={section} />
       ))}

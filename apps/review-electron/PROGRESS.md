@@ -378,3 +378,10 @@ layout; current build is the centered state with the clean message.)
   fragility the all-files diff exposed (its source rows contain UI strings like
   "inspected"): gave InspectorCard a data-testid and scoped the inspector e2e to
   it. New parseMultiFileDiff tests. vitest 54, format/lint/tsc/build/e2e (6) green.
+- Round 29 (all-files diff boundaries): scrolling the new default all-files diff
+  showed files blurring together: each file header used bg-card (barely distinct
+  from the diff bg-background) so file A's rows ran straight into file B's header.
+  Made the per-file sticky header a distinct bg-muted band with a foreground path,
+  so it reads as a section title and clearly separates files (and sits above the
+  bg-muted/40 hunk headers in hierarchy). Single-file header matches. Added a
+  diff-scroll testid + 16-diff-all boundary capture. format/lint/tsc/build/e2e (6) green.
