@@ -417,3 +417,22 @@ layout; current build is the centered state with the clean message.)
   error, inspector, focus, loading, cleared, collapsed, review-error). No HIGH/MED
   visual issues. Round 31 fixed a HIGH issue so the prior count reset; this is the
   first clean pass after it. One more clean pass confirms the stop condition.
+- CLEAN PASS 2/2: second consecutive harsh full-screen recapture of every surface
+  (walkthrough header + verdict/risk/effort metrics, agent-review card, cleared
+  panel, decisions + trade-offs, stage groups, file rows with fan-in badges +
+  active fill + focus ring; all-files + single-file diff with syntax highlighting,
+  banded per-file headers, +/- gutters; screenshot/annotate empty + capture-error;
+  live empty + unreachable-error; inspector card; loading, focus, collapsed,
+  cleared, review-error). No HIGH/MED visual issues; the only known nit (the
+  live/screenshot "go"/refresh glyph) remains LOW. Two consecutive clean passes met.
+
+## STATUS: polish loop complete
+
+The autonomous UX/UI polish loop has reached its stop condition: two consecutive
+full passes over every screen surface with no HIGH/MED visual issues. The interface
+holds the design language (shadcn new-york, zinc/neutral dark, Inter + JetBrains
+Mono, color only as signal, lowercase labels, tabular-nums, real hierarchy and
+spacing rhythm) across all states, including empty/loading/error/hover/focus/
+active/scroll. Remaining ideas are LOW-priority or larger features (e.g. a split
+diff view) that are out of scope for taste-polish and would be explicit follow-ups.
+Loop stopped (no reschedule).
