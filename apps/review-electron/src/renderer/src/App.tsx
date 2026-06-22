@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import type { WalkthroughDocument } from "../../model/walkthrough";
 import type { TradeOffEnvelope } from "../../model/tradeoff";
+import type { ReviewContext as ReviewContextData } from "../../model/reviewContext";
 import type { InlineFraming, ValidationEnvelope } from "../../model/agent";
 import type { InspectorCard as InspectorCardData } from "../../main/inspect";
 import { acceptedReconstructedFraming, groupBySignalId } from "./lib/agentFraming";
@@ -23,6 +24,7 @@ import { ReviewFocus } from "./components/ReviewFocus";
 import { ClearedPanel } from "./components/ClearedPanel";
 import { DecisionList } from "./components/DecisionList";
 import { TradeOffList } from "./components/TradeOffList";
+import { ReviewContext } from "./components/ReviewContext";
 import { StageList } from "./components/StageList";
 import { InspectorCard } from "./components/InspectorCard";
 import { AgentPanel } from "./components/AgentPanel";
@@ -102,6 +104,10 @@ export const App = () => {
   // elicitation was not run (the persisted file is absent); an envelope with
   // `abstained: true` is the distinct "looked, found nothing" state.
   const [tradeoffs, setTradeoffs] = useState<TradeOffEnvelope | null>(null);
+  // Author-agent review brief (the CAPTURE artifact): what the agent that did the
+  // work recorded at write-time about what to review. null = the author recorded no
+  // brief (the persisted file is absent), in which case the surface renders nothing.
+  const [reviewContext, setReviewContext] = useState<ReviewContextData | null>(null);
 
   useEffect(() => {
     window.fallow.onInspectSelection(setCard);
@@ -122,6 +128,15 @@ export const App = () => {
       .getTradeoffs()
       .then(setTradeoffs)
       .catch(() => setTradeoffs(null));
+  }, []);
+
+  // Fetch the author-agent review brief once on load; null stays null (render
+  // nothing) when the author recorded no brief or the read errors.
+  useEffect(() => {
+    void window.fallow
+      .getReviewContext()
+      .then(setReviewContext)
+      .catch(() => setReviewContext(null));
   }, []);
 
   // Group ALL inline framing by signal_id for per-decision rendering: captured
@@ -219,6 +234,7 @@ export const App = () => {
 
         <div className="min-h-0 flex-1 space-y-5 overflow-auto p-4">
           {card && <InspectorCard card={card} />}
+          <ReviewContext context={reviewContext} onOpenDiff={onOpenDiff} />
           {doc && <ReviewFocus focus={doc.focus} noteCount={noteCount} />}
           {doc && <AgentPanel onResult={setAgentValidation} />}
           {doc ? (

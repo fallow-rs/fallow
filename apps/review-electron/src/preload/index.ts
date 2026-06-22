@@ -8,6 +8,7 @@ import type { FileDiff } from "../main/diff";
 import type { AgentBackend } from "../main/backends";
 import type { AgentRunResult, TradeOffRunResult } from "../main/agentRun";
 import type { TradeOffEnvelope } from "../model/tradeoff";
+import type { ReviewContext } from "../model/reviewContext";
 import type { AppConfig } from "../main/config";
 
 const api = {
@@ -17,6 +18,8 @@ const api = {
   appendFeed: (item: FeedItem): Promise<void> => ipcRenderer.invoke("feed:append", item),
   getCapturedFraming: (): Promise<InlineFraming[]> => ipcRenderer.invoke("framing:captured"),
   getTradeoffs: (): Promise<TradeOffEnvelope | null> => ipcRenderer.invoke("tradeoffs:get"),
+  getReviewContext: (): Promise<ReviewContext | null> =>
+    ipcRenderer.invoke("reviewContext:get"),
   runTradeoffs: (id: string): Promise<TradeOffRunResult> => ipcRenderer.invoke("tradeoffs:run", id),
   validate: (hash: string, items: FeedItem[]): Promise<unknown> =>
     ipcRenderer.invoke("review:validate", hash, items),

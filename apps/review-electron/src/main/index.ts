@@ -13,6 +13,7 @@ import { getFileDiff, getAllDiffs } from "./diff";
 import { BACKENDS } from "./backends";
 import { runAgentReview, runTradeoffElicitation } from "./agentRun";
 import { readPersistedTradeoffs } from "./tradeoffs";
+import { readReviewContext } from "./reviewContext";
 import { startInspectServer } from "./inspectServer";
 import type { FeedItem } from "../model/agent";
 import type { WalkthroughDocument } from "../model/walkthrough";
@@ -76,6 +77,7 @@ ipcMain.handle("diff:all", (_event, base: string) => getAllDiffs(process.cwd(), 
 ipcMain.handle("agent:backends", () => BACKENDS);
 ipcMain.handle("agent:run", (_event, id: string) => runAgentReview(process.cwd(), id));
 ipcMain.handle("tradeoffs:get", () => readPersistedTradeoffs(process.cwd()));
+ipcMain.handle("reviewContext:get", () => readReviewContext(process.cwd()));
 ipcMain.handle("tradeoffs:run", (_event, id: string) => runTradeoffElicitation(process.cwd(), id));
 ipcMain.handle("config:get", () => appConfig);
 
