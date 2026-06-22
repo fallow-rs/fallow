@@ -102,6 +102,15 @@ test("capture screens for design QA", async () => {
     await win.screenshot({ path: `${shots}/03-screenshot-mode.png` });
   });
   await safe(async () => {
+    // Drive a capture against an unreachable URL to QA the cleaned error message.
+    await win.getByTestId("shot-url").fill("http://localhost:1");
+    await win.getByTestId("shot-capture").click({ timeout: 10_000 });
+    await win
+      .locator('[data-testid="shot-overlay"][data-phase="error"]')
+      .waitFor({ timeout: 20_000 });
+    await win.screenshot({ path: `${shots}/14-shot-error.png` });
+  });
+  await safe(async () => {
     await win.getByTestId("mode-live").click({ timeout: 10_000 });
     // Let the live webview settle into its loaded (or overlay) state.
     await win.waitForTimeout(1500);

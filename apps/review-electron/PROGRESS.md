@@ -288,3 +288,12 @@ Verified via 13-review-error: now "review failed" + "Couldn't find the
 \"fallow-bin\" binary. Make sure ... PATH." + retry. vitest 51, lint/tsc/build/e2e 6
 green. (The user's screenshot was a stale build with the pre-round-13 top-bar
 layout; current build is the centered state with the clean message.)
+
+## LOOP RESTART (user-requested)
+- Round 18 (verify error copy end-to-end): added a 14-shot-error capture that
+  drives a screenshot capture against an unreachable URL. Confirms describeLoadError
+  + errorMessage render cleanly in the UI: "couldn't capture" + "Couldn't load
+  http://localhost:1 (unsafe port)." + retry, no IPC/Chromium noise. Both error
+  surfaces (13-review-error, 14-shot-error) now screenshot-verified.
+  format/lint/tsc/build/vitest (51) /e2e (6) green. Walkthrough + screenshot empty
+  re-reviewed: no HIGH/MED.
