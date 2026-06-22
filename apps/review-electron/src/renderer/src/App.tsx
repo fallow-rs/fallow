@@ -50,7 +50,7 @@ export const App = () => {
   const [viewedTick, setViewedTick] = useState(0);
   const [noteCount, setNoteCount] = useState(0);
   const [card, setCard] = useState<InspectorCardData | null>(null);
-  const [rightMode, setRightMode] = useState<RightMode>("live");
+  const [rightMode, setRightMode] = useState<RightMode>("diff");
   const [diffFile, setDiffFile] = useState<string | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth);
 
@@ -199,32 +199,27 @@ export const App = () => {
       <main className="flex min-h-0 flex-col overflow-hidden">
         <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3">
           <div className="inline-flex items-center gap-0.5 rounded-lg bg-muted p-0.5">
-            {MODES.map(({ id, label, icon: Icon }) => {
-              const disabled = id === "diff" && !diffFile;
-              return (
-                <button
-                  key={id}
-                  type="button"
-                  data-testid={`mode-${id}`}
-                  disabled={disabled}
-                  onClick={() => setRightMode(id)}
-                  className={cn(
-                    "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs lowercase outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/60",
-                    rightMode === id
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground",
-                    disabled && "cursor-not-allowed opacity-40 hover:text-muted-foreground",
-                  )}
-                >
-                  <Icon className="size-3.5" />
-                  {label}
-                </button>
-              );
-            })}
+            {MODES.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                data-testid={`mode-${id}`}
+                onClick={() => setRightMode(id)}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs lowercase outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/60",
+                  rightMode === id
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <Icon className="size-3.5" />
+                {label}
+              </button>
+            ))}
           </div>
         </div>
         <div className="min-h-0 flex-1 overflow-hidden">
-          {rightMode === "diff" && diffFile ? (
+          {rightMode === "diff" ? (
             <DiffView file={diffFile} base={doc?.focus.baseRef ?? ""} />
           ) : rightMode === "live" ? (
             <LiveApp />

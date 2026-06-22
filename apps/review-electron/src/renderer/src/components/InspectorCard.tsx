@@ -3,7 +3,7 @@ import type { InspectorCard as Card } from "../../../main/inspect";
 import { Card as UiCard, CardContent } from "@/components/ui/card";
 
 export const InspectorCard = ({ card }: { card: Card }) => (
-  <UiCard className="gap-0 border-primary/40 bg-primary/5 py-0">
+  <UiCard data-testid="inspector-card" className="gap-0 border-primary/40 bg-primary/5 py-0">
     <CardContent className="space-y-1.5 p-3">
       <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
         <MousePointerClick className="size-3.5" />

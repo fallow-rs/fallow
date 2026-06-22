@@ -64,6 +64,7 @@ test("inspector bridge pushes a grounded card to the UI", async () => {
   });
   expect(res.ok).toBe(true);
 
-  await expect(win.getByText("inspected")).toBeVisible({ timeout: 30_000 });
-  await expect(win.getByText(/src\/main\/index\.ts:1/)).toBeVisible();
+  const inspector = win.getByTestId("inspector-card");
+  await expect(inspector).toBeVisible({ timeout: 30_000 });
+  await expect(inspector).toContainText("src/main/index.ts:1");
 });

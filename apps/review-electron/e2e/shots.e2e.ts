@@ -71,7 +71,7 @@ test("capture screens for design QA", async () => {
         component: "main",
       }),
     });
-    await win.getByText("inspected").waitFor({ timeout: 30_000 });
+    await win.getByTestId("inspector-card").waitFor({ timeout: 30_000 });
     await win.screenshot({ path: `${shots}/07-inspector.png` });
   });
 

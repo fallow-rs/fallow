@@ -20,6 +20,7 @@ const api = {
   saveShot: (payload: SaveAnnotation): Promise<string> => ipcRenderer.invoke("shot:save", payload),
   getDiff: (base: string, file: string): Promise<FileDiff> =>
     ipcRenderer.invoke("diff:get", base, file),
+  getAllDiffs: (base: string): Promise<{ patch: string }> => ipcRenderer.invoke("diff:all", base),
   listBackends: (): Promise<AgentBackend[]> => ipcRenderer.invoke("agent:backends"),
   runAgent: (id: string): Promise<AgentRunResult> => ipcRenderer.invoke("agent:run", id),
   getConfig: (): Promise<AppConfig> => ipcRenderer.invoke("config:get"),

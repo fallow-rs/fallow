@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseUnifiedDiff, diffStats } from "./diff";
+import { parseUnifiedDiff, parseMultiFileDiff, diffStats } from "./diff";
 
 const patch = `diff --git a/x.ts b/x.ts
 index 1111111..2222222 100644
@@ -33,5 +33,45 @@ describe("parseUnifiedDiff", () => {
 
   it("counts added/removed", () => {
     expect(diffStats(parseUnifiedDiff(patch))).toEqual({ added: 2, removed: 1 });
+  });
+});
+
+describe("parseMultiFileDiff", () => {
+  const multi = `diff --git a/x.ts b/x.ts
+index 1..2 100644
+--- a/x.ts
++++ b/x.ts
+@@ -1,1 +1,2 @@
+ const a = 1;
++const b = 2;
+diff --git a/logo.png b/logo.png
+index 3..4 100644
+Binary files a/logo.png and b/logo.png differ
+diff --git a/new.ts b/new.ts
+new file mode 100644
+--- /dev/null
++++ b/new.ts
+@@ -0,0 +1 @@
++export const z = 1;`;
+
+  it("splits a multi-file patch into per-file sections", () => {
+    const sections = parseMultiFileDiff(multi);
+    expect(sections.map((s) => s.file)).toEqual(["x.ts", "logo.png", "new.ts"]);
+    expect(sections[0]?.binary).toBe(false);
+    expect(sections[0]?.hunks[0]?.rows.at(-1)).toEqual({
+      kind: "add",
+      oldNo: null,
+      newNo: 2,
+      text: "const b = 2;",
+    });
+    // Binary files carry no hunks but are flagged.
+    expect(sections[1]).toMatchObject({ file: "logo.png", binary: true });
+    expect(sections[1]?.hunks).toEqual([]);
+    // A new file uses the +++ side for its path.
+    expect(sections[2]?.file).toBe("new.ts");
+  });
+
+  it("returns [] for an empty patch", () => {
+    expect(parseMultiFileDiff("")).toEqual([]);
   });
 });

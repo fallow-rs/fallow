@@ -368,3 +368,13 @@ layout; current build is the centered state with the clean message.)
   acted on a button click; typing a URL and pressing Enter did nothing, which a URL
   bar should never do. Added onKeyDown Enter -> go() (live) / capture() (screenshot).
   vitest 52, format/lint/tsc/build/e2e (6) green.
+- Round 28 (diff is default + all-files diff, user-reported): made diff the default
+  right-mode (was live) and the diff tab always enabled. When no file is selected
+  the diff pane now shows the FULL diff of every changed file: new getAllDiffs IPC
+  (git diff <base>, no path filter) + parseMultiFileDiff (splits on `diff --git`,
+  resolves each path from +++/---/header, flags binaries) rendered as per-file
+  sections with sticky path+stats headers; clicking a file still narrows to it.
+  DiffView refactored to a section list (single- or multi-file). Fixed test
+  fragility the all-files diff exposed (its source rows contain UI strings like
+  "inspected"): gave InspectorCard a data-testid and scoped the inspector e2e to
+  it. New parseMultiFileDiff tests. vitest 54, format/lint/tsc/build/e2e (6) green.

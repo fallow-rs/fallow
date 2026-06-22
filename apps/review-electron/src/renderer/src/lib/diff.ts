@@ -49,6 +49,36 @@ export const parseUnifiedDiff = (patch: string): DiffHunk[] => {
   return hunks;
 };
 
+/** One file's worth of diff within a multi-file `git diff` patch. */
+export type FileDiffSection = { file: string; hunks: DiffHunk[]; binary: boolean };
+
+/** Path a file section reports, preferring the new side, then the old. */
+const sectionPath = (block: string): string => {
+  const plus = /^\+\+\+ (?:b\/)?(.+)$/m.exec(block);
+  if (plus && plus[1] !== "/dev/null") return plus[1] ?? "file";
+  const minus = /^--- (?:a\/)?(.+)$/m.exec(block);
+  if (minus && minus[1] !== "/dev/null") return minus[1] ?? "file";
+  const git = /^diff --git a\/.+ b\/(.+)$/m.exec(block);
+  return git?.[1] ?? "file";
+};
+
+/** Split a full `git diff` patch into per-file sections, each with its hunks. */
+export const parseMultiFileDiff = (patch: string): FileDiffSection[] => {
+  const blocks: string[][] = [];
+  let current: string[] | null = null;
+  for (const line of patch.split("\n")) {
+    if (line.startsWith("diff --git ")) {
+      current = [line];
+      blocks.push(current);
+    } else current?.push(line);
+  }
+  return blocks.map((lines) => {
+    const block = lines.join("\n");
+    const binary = /^Binary files /m.test(block);
+    return { file: sectionPath(block), binary, hunks: binary ? [] : parseUnifiedDiff(block) };
+  });
+};
+
 export const diffStats = (hunks: ReadonlyArray<DiffHunk>): { added: number; removed: number } => {
   let added = 0;
   let removed = 0;

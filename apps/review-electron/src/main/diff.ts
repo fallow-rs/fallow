@@ -22,3 +22,21 @@ export const getFileDiff = async (root: string, base: string, file: string): Pro
     return { patch: "", binary: false };
   }
 };
+
+/**
+ * Full `git diff <base>` across every changed file (no path filter), for the
+ * "all files" diff shown when no single file is selected. The renderer splits
+ * the multi-file patch into per-file sections.
+ */
+export const getAllDiffs = async (root: string, base: string): Promise<{ patch: string }> => {
+  const ref = base || "HEAD";
+  try {
+    const { stdout } = await run("git", ["diff", ref], {
+      cwd: root,
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    return { patch: stdout };
+  } catch {
+    return { patch: "" };
+  }
+};
