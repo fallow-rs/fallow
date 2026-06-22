@@ -31,6 +31,9 @@ const api = {
   runAgent: (id: string): Promise<AgentRunResult> => ipcRenderer.invoke("agent:run", id),
   getConfig: (): Promise<AppConfig> => ipcRenderer.invoke("config:get"),
   onInspectSelection: (cb: (card: InspectorCard) => void): void => {
+    // Single consumer (the app shell). Drop any prior listener before adding, so a
+    // StrictMode double-mount or hot-reload re-registration cannot accumulate.
+    ipcRenderer.removeAllListeners("inspect:selection");
     ipcRenderer.on("inspect:selection", (_event, card: InspectorCard) => cb(card));
   },
 };

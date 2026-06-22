@@ -3,7 +3,10 @@
 export type FeedTarget =
   | { kind: "signal_id"; value: string }
   | { kind: "file_line"; value: string }
-  | { kind: "component"; value: string };
+  | { kind: "component"; value: string }
+  // A model-inferred trade-off, identified by its anchor (`file:line`) or the
+  // literal `cross-cutting` (which is NOT a `file_line`, so it gets its own kind).
+  | { kind: "tradeoff"; value: string };
 
 /** One human annotation/selection routed back toward the coding agent. */
 export type FeedItem = {

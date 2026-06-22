@@ -67,6 +67,9 @@ const Row = ({
   // new-file line, a deleted line anchors to its old-file line.
   const commentKey = rowCommentKey(row);
   const commentable = commentKey !== null;
+  // Range selection is new-side only (the gutter shows the new-file line number);
+  // a deleted line has no new number and must NOT be a range-select target.
+  const hasNew = row.newNo !== null;
   return (
     <div
       className={cn(
@@ -77,7 +80,7 @@ const Row = ({
       )}
     >
       {showOld && <span className={gutter}>{row.oldNo ?? ""}</span>}
-      {commentable ? (
+      {hasNew ? (
         <button
           type="button"
           title="click to set range start · shift-click to extend"
@@ -120,9 +123,14 @@ const Row = ({
 
 /** First and last new-file line numbers in a hunk (for the per-hunk composer). */
 const hunkLineSpan = (hunk: { rows: DiffRow[] }): { start: number; end: number } | null => {
-  const lines = hunk.rows.map((r) => r.newNo).filter((n): n is number => n !== null);
-  if (lines.length === 0) return null;
-  return { start: Math.min(...lines), end: Math.max(...lines) };
+  const newLines = hunk.rows.map((r) => r.newNo).filter((n): n is number => n !== null);
+  if (newLines.length > 0) {
+    return { start: Math.min(...newLines), end: Math.max(...newLines) };
+  }
+  // Deletion-only hunk: no new-side lines, anchor the hunk to its old-side span.
+  const oldLines = hunk.rows.map((r) => r.oldNo).filter((n): n is number => n !== null);
+  if (oldLines.length === 0) return null;
+  return { start: Math.min(...oldLines), end: Math.max(...oldLines) };
 };
 
 /**

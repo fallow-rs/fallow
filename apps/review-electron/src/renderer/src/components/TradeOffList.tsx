@@ -127,11 +127,11 @@ const TradeOffRow = ({
             <Badge label="consequence" value={t.consequence} />
             <Badge label="confidence" value={t.confidence} />
           </div>
-          {/* a note back to the agent, anchored to THIS trade-off's file:line
-              (or the literal "cross-cutting" anchor, sent as-is) */}
+          {/* a note back to the agent about THIS trade-off, identified by its
+              anchor (file:line) or the literal "cross-cutting" via its own kind */}
           <div className="pt-0.5">
             <NoteComposer
-              onSave={(note) => onComment({ kind: "file_line", value: t.anchor }, note)}
+              onSave={(note) => onComment({ kind: "tradeoff", value: t.anchor }, note)}
             />
           </div>
         </div>
