@@ -648,6 +648,7 @@ mod tests {
             routing: None,
             decision_surface: None,
             graph_snapshot_hash: None,
+            change_anchors: Vec::new(),
         }
     }
 

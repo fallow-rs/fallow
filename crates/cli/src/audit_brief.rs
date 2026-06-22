@@ -27,7 +27,12 @@ use crate::audit::AuditResult;
 ///
 /// v2: adds the stage-4 weighted `focus` map (composite attention score per
 /// unit + no-skip labels + confidence flags + the `deprioritized` escape hatch).
-pub const REVIEW_BRIEF_SCHEMA_VERSION: u32 = 4;
+/// v5: adds `change_anchors` to the walkthrough guide and `anchor_kind` /
+/// `change_anchor` to the walkthrough validation judgments. This version pins the
+/// brief, the walkthrough guide, and the validation envelope together; it is a
+/// SEMANTIC marker only (the integer is not pinned in the wire schema, so the
+/// bump alone produces no schema/`.d.ts` diff).
+pub const REVIEW_BRIEF_SCHEMA_VERSION: u32 = 5;
 
 /// A file count at or above which a changeset is classified [`RiskClass::High`].
 const RISK_HIGH_FILES: usize = 20;
@@ -1080,8 +1085,14 @@ pub fn print_walkthrough_file_result(result: &AuditResult, path: &std::path::Pat
     let agent = crate::audit_walkthrough::parse_agent_walkthrough(&contents);
     let surface = result.decision_surface.clone().unwrap_or_default();
     let current_hash = result.graph_snapshot_hash.clone().unwrap_or_default();
-    let validation =
-        crate::audit_walkthrough::validate_walkthrough(&agent, &surface, &current_hash);
+    let change_anchor_ids =
+        crate::audit_walkthrough::change_anchor_allowlist(&result.change_anchors);
+    let validation = crate::audit_walkthrough::validate_walkthrough(
+        &agent,
+        &surface,
+        &change_anchor_ids,
+        &current_hash,
+    );
     let envelope = crate::output_envelope::FallowOutput::WalkthroughValidation(validation);
     if let Ok(mut value) = serde_json::to_value(&envelope) {
         crate::output_envelope::apply_root_kind(&mut value, "review-walkthrough-validation");
@@ -1133,6 +1144,7 @@ mod tests {
             routing: None,
             decision_surface: None,
             graph_snapshot_hash: None,
+            change_anchors: Vec::new(),
         }
     }
 

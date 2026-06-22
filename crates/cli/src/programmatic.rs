@@ -488,6 +488,7 @@ fn load_explicit_diff_file(path: &Path, root: &Path) -> ProgrammaticResult<Loade
 
     Ok(LoadedDiff {
         index: DiffIndex::from_unified_diff(&text),
+        raw: text,
     })
 }
 

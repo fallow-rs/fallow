@@ -8912,6 +8912,13 @@ command: string
 graph_snapshot_hash: string
 digest: ReviewBriefOutput
 direction: ReviewDirection
+/**
+ * The per-hunk change anchors: one stable id per changed region. An agent
+ * may cite a `change_anchor` as a judgment anchor in addition to an emitted
+ * `signal_id`, so a trade-off about a changed region with no graph finding
+ * can still anchor (and be post-validated) rather than hallucinate.
+ */
+change_anchors: ChangeAnchor[]
 agent_schema: AgentSchema
 /**
  * The injection-resistance note (digest is graph-only; PR prose untrusted).
@@ -8966,6 +8973,41 @@ out_of_diff: string[]
  * The routed expert(s) to ask, from ownership routing.
  */
 expert: string[]
+}
+/**
+ * One stable per-hunk CHANGE ANCHOR: a changed region the agent may cite as a
+ * judgment anchor IN ADDITION to a `signal_id`. Where a `signal_id` anchors a
+ * graph FINDING ("fallow emitted this exact finding"), a change_anchor anchors
+ * only a changed REGION ("fallow confirms this region changed") , a strictly
+ * weaker guarantee, surfaced as `anchor_kind` on the accepted judgment so a
+ * consumer can tell the two apart. Graph/diff-derived; NEVER from prose.
+ */
+export interface ChangeAnchor {
+/**
+ * Stable, CONTENT-addressed id: `chg:<16-hex>` over the file path + the
+ * normalized added text (line numbers are NOT hashed, so an edit above the
+ * hunk or a whitespace-only change does not move the id).
+ */
+change_anchor: string
+/**
+ * Root-relative path of the changed file.
+ */
+file: string
+/**
+ * 1-based first line of the hunk in the head file (display/deep-link only;
+ * NOT part of the id).
+ */
+start_line: number
+/**
+ * Number of added lines in the hunk (display only; NOT part of the id).
+ */
+line_count: number
+/**
+ * Rename-durable anchor: the id this same hunk would have had under the
+ * pre-rename path. `None` unless the file was renamed in this change, so an
+ * agent that cited the anchor before a `git mv` still resolves.
+ */
+previous_change_anchor?: (string | null)
 }
 /**
  * The shape the agent must return, embedded in the guide so a thin skill needs
@@ -9039,9 +9081,22 @@ unanchored_count: number
  */
 export interface AcceptedJudgment {
 /**
- * The fallow-emitted `signal_id` (verified against the allowlist).
+ * The fallow-emitted `signal_id` (verified against the allowlist). Empty
+ * when this judgment was anchored by a `change_anchor` instead.
  */
 signal_id: string
+/**
+ * The fallow-emitted `change_anchor` (verified against the allowlist). Empty
+ * when this judgment was anchored by a `signal_id`.
+ */
+change_anchor: string
+/**
+ * Which anchor resolved: `"signal"` (a graph FINDING, the strong anchor) or
+ * `"change"` (a changed REGION only, the weaker anchor). Lets a consumer
+ * distinguish a finding-anchored judgment from a region-anchored one rather
+ * than collapsing both into one accepted bucket.
+ */
+anchor_kind: string
 /**
  * The agent's framing, FENCED: this is non-deterministic agent prose.
  */
@@ -9061,11 +9116,19 @@ deterministic: boolean
  */
 export interface RejectedJudgment {
 /**
- * The `signal_id` the agent cited (fallow never emitted it).
+ * The `signal_id` the agent cited (fallow never emitted it). Empty when the
+ * judgment cited a `change_anchor` instead.
  */
 signal_id: string
 /**
- * The rejection reason (e.g. `unanchored-signal-id`).
+ * The `change_anchor` the agent cited (fallow never emitted it). Empty when
+ * the judgment cited a `signal_id` instead.
+ */
+change_anchor: string
+/**
+ * The rejection reason: `unanchored-signal-id` (cited a signal fallow did
+ * not emit), `unknown-change-anchor` (cited a region fallow did not emit),
+ * or `stale-snapshot` (the tree moved).
  */
 reason: string
 }

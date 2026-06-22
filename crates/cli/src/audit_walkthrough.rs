@@ -32,13 +32,15 @@
 //! agent as untrusted: this loop is injection-resistant because the trusted
 //! surface is the graph, and the untrusted surface is fenced.
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
+use xxhash_rust::xxh3::xxh3_64;
 
 use crate::audit::routing::RoutingFacts;
 use crate::audit_brief::{ReviewBriefOutput, ReviewBriefSchemaVersion, build_brief_output};
 use crate::audit_decision_surface::DecisionSurface;
 use crate::audit_focus::FocusMap;
+use crate::report::ci::diff_filter::parse_new_hunk_start;
 
 /// The standing injection-resistance note stamped on every guide. States the
 /// trust boundary: the digest is graph-derived, PR prose is untrusted.
@@ -47,6 +49,197 @@ const INJECTION_NOTE: &str = "The digest is built from the deterministic module 
 /// The standing reason a judgment is rejected for citing a `signal_id` fallow
 /// never emitted (the anti-hallucination gate).
 const UNANCHORED_REASON: &str = "unanchored-signal-id";
+
+/// The reason a judgment is rejected for citing a `change_anchor` (a `chg:` id)
+/// that fallow did not emit for this changed set (the anti-hallucination gate
+/// for the weaker, region-level anchor).
+const UNKNOWN_CHANGE_ANCHOR_REASON: &str = "unknown-change-anchor";
+
+/// One stable per-hunk CHANGE ANCHOR: a changed region the agent may cite as a
+/// judgment anchor IN ADDITION to a `signal_id`. Where a `signal_id` anchors a
+/// graph FINDING ("fallow emitted this exact finding"), a change_anchor anchors
+/// only a changed REGION ("fallow confirms this region changed") , a strictly
+/// weaker guarantee, surfaced as `anchor_kind` on the accepted judgment so a
+/// consumer can tell the two apart. Graph/diff-derived; NEVER from prose.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[allow(
+    clippy::struct_field_names,
+    reason = "change_anchor / previous_change_anchor are the load-bearing wire keys an agent cites; renaming them off the struct name would break the contract"
+)]
+pub struct ChangeAnchor {
+    /// Stable, CONTENT-addressed id: `chg:<16-hex>` over the file path + the
+    /// normalized added text (line numbers are NOT hashed, so an edit above the
+    /// hunk or a whitespace-only change does not move the id).
+    pub change_anchor: String,
+    /// Root-relative path of the changed file.
+    pub file: String,
+    /// 1-based first line of the hunk in the head file (display/deep-link only;
+    /// NOT part of the id).
+    pub start_line: u32,
+    /// Number of added lines in the hunk (display only; NOT part of the id).
+    pub line_count: u32,
+    /// Rename-durable anchor: the id this same hunk would have had under the
+    /// pre-rename path. `None` unless the file was renamed in this change, so an
+    /// agent that cited the anchor before a `git mv` still resolves.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_change_anchor: Option<String>,
+}
+
+/// Strip per-line leading/trailing whitespace and join added lines with `\n`, so
+/// a reflow or a whitespace-only edit does not move the content-addressed id.
+fn normalize_added_text(lines: &[String]) -> String {
+    lines
+        .iter()
+        .map(|l| l.trim())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Derive a stable, CONTENT-addressed change-anchor id. Hashes ONLY the file
+/// path + the normalized added text + an occurrence ordinal (to disambiguate
+/// byte-identical hunks in one file). Line numbers are deliberately excluded so
+/// the id survives edits above the hunk and whitespace-only changes. Mirrors
+/// [`crate::audit_decision_surface::derive_signal_id`] with a `chg:` namespace.
+#[must_use]
+pub fn derive_change_anchor_id(path: &str, normalized_added_text: &str, ordinal: u32) -> String {
+    let mut bytes =
+        Vec::with_capacity(path.len() + 1 + normalized_added_text.len() + 1 + size_of::<u32>());
+    bytes.extend_from_slice(path.as_bytes());
+    bytes.push(0);
+    bytes.extend_from_slice(normalized_added_text.as_bytes());
+    bytes.push(0);
+    bytes.extend_from_slice(&ordinal.to_le_bytes());
+    format!("chg:{:016x}", xxh3_64(&bytes))
+}
+
+/// Mutable accumulator threaded through [`parse_change_anchors`] while walking a
+/// unified diff. Holds the current file, rename provenance, and the in-progress
+/// hunk; [`AnchorParser::flush`] turns the accumulated hunk into one anchor.
+#[derive(Default)]
+struct AnchorParser {
+    anchors: Vec<ChangeAnchor>,
+    /// `(file, normalized text) -> next ordinal` for byte-identical hunks.
+    seen: FxHashMap<(String, String), u32>,
+    current_file: Option<String>,
+    rename_from: Option<String>,
+    pending_rename_from: Option<String>,
+    start_line: u64,
+    hunk_lines: Vec<String>,
+    in_hunk: bool,
+}
+
+impl AnchorParser {
+    /// Flush the accumulated hunk into one anchor (computing its occurrence
+    /// ordinal for byte-identical normalized text within the same file), then
+    /// clear the hunk buffer. No-op when there is no current file or no added
+    /// lines.
+    fn flush(&mut self) {
+        if let Some(file) = self.current_file.clone()
+            && !self.hunk_lines.is_empty()
+        {
+            let normalized = normalize_added_text(&self.hunk_lines);
+            let counter = self
+                .seen
+                .entry((file.clone(), normalized.clone()))
+                .or_insert(0);
+            let ordinal = *counter;
+            *counter += 1;
+            let change_anchor = derive_change_anchor_id(&file, &normalized, ordinal);
+            let previous_change_anchor = self
+                .rename_from
+                .as_deref()
+                .map(|old| derive_change_anchor_id(old, &normalized, ordinal));
+            self.anchors.push(ChangeAnchor {
+                change_anchor,
+                file,
+                start_line: u32::try_from(self.start_line).unwrap_or(u32::MAX),
+                line_count: u32::try_from(self.hunk_lines.len()).unwrap_or(u32::MAX),
+                previous_change_anchor,
+            });
+        }
+        self.hunk_lines.clear();
+    }
+
+    /// Consume one diff line, flushing any pending hunk on a structural boundary
+    /// (`diff --git`, `+++ b/`, `+++ /dev/null`, `@@`) and accumulating `+` lines
+    /// inside a hunk.
+    fn consume(&mut self, line: &str) {
+        if line.starts_with("diff --git ") {
+            self.flush();
+            self.in_hunk = false;
+            self.current_file = None;
+            self.rename_from = None;
+            self.pending_rename_from = None;
+            return;
+        }
+        if let Some(rest) = line.strip_prefix("rename from ") {
+            self.pending_rename_from = Some(rest.to_owned());
+            return;
+        }
+        if let Some(rest) = line.strip_prefix("rename to ") {
+            if let Some(from) = self.pending_rename_from.take() {
+                self.current_file = Some(rest.to_owned());
+                self.rename_from = Some(from);
+            }
+            return;
+        }
+        if let Some(path) = line.strip_prefix("+++ b/") {
+            self.flush();
+            self.in_hunk = false;
+            self.current_file = Some(path.to_owned());
+            return;
+        }
+        if line.starts_with("+++ /dev/null") {
+            self.flush();
+            self.in_hunk = false;
+            self.current_file = None;
+            return;
+        }
+        if let Some(header) = line.strip_prefix("@@ ") {
+            self.flush();
+            self.start_line = parse_new_hunk_start(header).unwrap_or(0);
+            self.in_hunk = true;
+            return;
+        }
+        if self.in_hunk
+            && self.current_file.is_some()
+            && line.starts_with('+')
+            && !line.starts_with("+++")
+        {
+            self.hunk_lines.push(line[1..].to_owned());
+        }
+    }
+}
+
+/// Parse a zero-context unified diff (`git diff --unified=0`) into per-hunk
+/// [`ChangeAnchor`]s. Each hunk's added (`+`) lines form one anchor. Rename
+/// headers make the anchor rename-durable via `previous_change_anchor`. Pure:
+/// the same diff text always yields the same anchors.
+#[must_use]
+pub fn parse_change_anchors(diff: &str) -> Vec<ChangeAnchor> {
+    let mut parser = AnchorParser::default();
+    for line in diff.lines() {
+        parser.consume(line);
+    }
+    parser.flush();
+    parser.anchors
+}
+
+/// Build the change-anchor allowlist from the emitted anchors: every current id
+/// plus every `previous_change_anchor` (so a judgment that cited an anchor under
+/// a pre-rename path still resolves).
+#[must_use]
+pub fn change_anchor_allowlist(anchors: &[ChangeAnchor]) -> FxHashSet<String> {
+    let mut set = FxHashSet::default();
+    for anchor in anchors {
+        set.insert(anchor.change_anchor.clone());
+        if let Some(previous) = &anchor.previous_change_anchor {
+            set.insert(previous.clone());
+        }
+    }
+    set
+}
 
 /// One directed review unit projected from the graph: a file the change touches,
 /// the concern to check, the out-of-diff consumers it must account for, and the
@@ -103,9 +296,9 @@ pub struct AgentSchema {
 /// The default agent schema descriptor (constant; the shape is fixed).
 fn agent_schema() -> AgentSchema {
     AgentSchema {
-        judgment_shape: "Return { \"graph_snapshot_hash\": <echoed>, \"judgments\": [ { \"signal_id\": <one fallow emitted>, \"framing\": <free text>, \"concern\": <optional> } ] }.",
+        judgment_shape: "Return { \"graph_snapshot_hash\": <echoed>, \"judgments\": [ { \"signal_id\": <one fallow emitted, OR omit and use change_anchor>, \"change_anchor\": <one fallow emitted chg: id, for a changed region with no finding>, \"framing\": <free text>, \"concern\": <optional> } ] }.",
         echo_field: "graph_snapshot_hash",
-        anchoring_rule: "Every judgment must cite a signal_id fallow emitted; an unanchored id is rejected (anti-hallucination).",
+        anchoring_rule: "Every judgment must cite an emitted signal_id OR an emitted change_anchor; an unanchored id is rejected (anti-hallucination). A change_anchor proves only that the region changed (anchor_kind=change), a weaker guarantee than a signal_id finding (anchor_kind=signal).",
     }
 }
 
@@ -133,6 +326,11 @@ pub struct WalkthroughGuide {
     pub digest: ReviewBriefOutput,
     /// The review direction (order/units/concern-lens/out-of-diff/expert).
     pub direction: ReviewDirection,
+    /// The per-hunk change anchors: one stable id per changed region. An agent
+    /// may cite a `change_anchor` as a judgment anchor in addition to an emitted
+    /// `signal_id`, so a trade-off about a changed region with no graph finding
+    /// can still anchor (and be post-validated) rather than hallucinate.
+    pub change_anchors: Vec<ChangeAnchor>,
     /// The JSON shape the agent must return, embedded so the skill stays thin.
     pub agent_schema: AgentSchema,
     /// The injection-resistance note (digest is graph-only; PR prose untrusted).
@@ -152,13 +350,20 @@ pub struct AgentWalkthrough {
     pub judgments: Vec<AgentJudgment>,
 }
 
-/// One agent judgment: a cited `signal_id` plus fenced free-text framing.
+/// One agent judgment: a cited anchor (`signal_id` OR `change_anchor`) plus
+/// fenced free-text framing.
 #[derive(Debug, Clone, Deserialize)]
 pub struct AgentJudgment {
     /// The fallow-emitted `signal_id` this judgment frames. REJECTED if fallow
-    /// did not emit it (anti-hallucination).
+    /// did not emit it (anti-hallucination). Empty when the judgment anchors on a
+    /// `change_anchor` instead.
     #[serde(default)]
     pub signal_id: String,
+    /// The fallow-emitted `change_anchor` (a `chg:` id) this judgment frames, the
+    /// alternative anchor for a changed region with no graph finding. REJECTED if
+    /// fallow did not emit it. Empty when the judgment anchors on a `signal_id`.
+    #[serde(default)]
+    pub change_anchor: String,
     /// The agent's free-text framing. NON-DETERMINISTIC: fenced on the output,
     /// never gates, never auto-posts.
     #[serde(default)]
@@ -173,8 +378,17 @@ pub struct AgentJudgment {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AcceptedJudgment {
-    /// The fallow-emitted `signal_id` (verified against the allowlist).
+    /// The fallow-emitted `signal_id` (verified against the allowlist). Empty
+    /// when this judgment was anchored by a `change_anchor` instead.
     pub signal_id: String,
+    /// The fallow-emitted `change_anchor` (verified against the allowlist). Empty
+    /// when this judgment was anchored by a `signal_id`.
+    pub change_anchor: String,
+    /// Which anchor resolved: `"signal"` (a graph FINDING, the strong anchor) or
+    /// `"change"` (a changed REGION only, the weaker anchor). Lets a consumer
+    /// distinguish a finding-anchored judgment from a region-anchored one rather
+    /// than collapsing both into one accepted bucket.
+    pub anchor_kind: String,
     /// The agent's framing, FENCED: this is non-deterministic agent prose.
     pub agent_framing: String,
     /// The agent's optional concern category (advisory).
@@ -189,9 +403,15 @@ pub struct AcceptedJudgment {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RejectedJudgment {
-    /// The `signal_id` the agent cited (fallow never emitted it).
+    /// The `signal_id` the agent cited (fallow never emitted it). Empty when the
+    /// judgment cited a `change_anchor` instead.
     pub signal_id: String,
-    /// The rejection reason (e.g. `unanchored-signal-id`).
+    /// The `change_anchor` the agent cited (fallow never emitted it). Empty when
+    /// the judgment cited a `signal_id` instead.
+    pub change_anchor: String,
+    /// The rejection reason: `unanchored-signal-id` (cited a signal fallow did
+    /// not emit), `unknown-change-anchor` (cited a region fallow did not emit),
+    /// or `stale-snapshot` (the tree moved).
     pub reason: String,
 }
 
@@ -335,6 +555,7 @@ pub fn build_walkthrough_guide(
     digest: ReviewBriefOutput,
     graph_snapshot_hash: String,
     direction: ReviewDirection,
+    change_anchors: Vec<ChangeAnchor>,
 ) -> WalkthroughGuide {
     WalkthroughGuide {
         schema_version: ReviewBriefSchemaVersion::default(),
@@ -343,6 +564,7 @@ pub fn build_walkthrough_guide(
         graph_snapshot_hash,
         digest,
         direction,
+        change_anchors,
         agent_schema: agent_schema(),
         injection_note: INJECTION_NOTE,
     }
@@ -359,9 +581,14 @@ pub fn build_walkthrough_guide(
 ///    an unanchored id is REJECTED (`unanchored-signal-id`). Accepted judgments
 ///    carry the agent's framing FENCED as non-deterministic.
 #[must_use]
+#[allow(
+    clippy::implicit_hasher,
+    reason = "fallow standardizes on FxHashSet; the change-anchor allowlist is always built with the fallow hasher"
+)]
 pub fn validate_walkthrough(
     agent: &AgentWalkthrough,
     surface: &DecisionSurface,
+    change_anchor_ids: &FxHashSet<String>,
     current_hash: &str,
 ) -> WalkthroughValidation {
     let stale = agent.graph_snapshot_hash != current_hash;
@@ -375,22 +602,47 @@ pub fn validate_walkthrough(
         for judgment in &agent.judgments {
             rejected.push(RejectedJudgment {
                 signal_id: judgment.signal_id.clone(),
+                change_anchor: judgment.change_anchor.clone(),
                 reason: "stale-snapshot".to_string(),
             });
         }
     } else {
         for judgment in &agent.judgments {
-            if surface.accept_signal_id(&judgment.signal_id) {
+            // A signal_id (graph finding) is the strong anchor; a change_anchor
+            // (changed region) is the weaker fallback. Prefer the signal.
+            if !judgment.signal_id.is_empty() && surface.accept_signal_id(&judgment.signal_id) {
                 accepted.push(AcceptedJudgment {
                     signal_id: judgment.signal_id.clone(),
+                    change_anchor: String::new(),
+                    anchor_kind: "signal".to_string(),
+                    agent_framing: judgment.framing.clone(),
+                    concern: judgment.concern.clone(),
+                    deterministic: false,
+                });
+            } else if !judgment.change_anchor.is_empty()
+                && change_anchor_ids.contains(&judgment.change_anchor)
+            {
+                accepted.push(AcceptedJudgment {
+                    signal_id: String::new(),
+                    change_anchor: judgment.change_anchor.clone(),
+                    anchor_kind: "change".to_string(),
                     agent_framing: judgment.framing.clone(),
                     concern: judgment.concern.clone(),
                     deterministic: false,
                 });
             } else {
+                // Cited a change_anchor (but no valid signal_id) and it did not
+                // resolve -> the region-level miss; otherwise the signal-id miss.
+                let reason = if judgment.signal_id.is_empty() && !judgment.change_anchor.is_empty()
+                {
+                    UNKNOWN_CHANGE_ANCHOR_REASON
+                } else {
+                    UNANCHORED_REASON
+                };
                 rejected.push(RejectedJudgment {
                     signal_id: judgment.signal_id.clone(),
-                    reason: UNANCHORED_REASON.to_string(),
+                    change_anchor: judgment.change_anchor.clone(),
+                    reason: reason.to_string(),
                 });
             }
         }
@@ -462,7 +714,7 @@ pub fn build_guide_from_result(result: &crate::audit::AuditResult) -> Walkthroug
     // optional expert overlay, so the work-list is never empty on the author's own
     // PR. Borrow `digest.focus` before `digest` is moved into the guide.
     let direction = build_direction(&digest.focus, &out_of_diff_by_file, routing);
-    build_walkthrough_guide(digest, hash, direction)
+    build_walkthrough_guide(digest, hash, direction, result.change_anchors.clone())
 }
 
 #[cfg(test)]
@@ -520,11 +772,12 @@ mod tests {
             graph_snapshot_hash: hash.to_string(),
             judgments: vec![AgentJudgment {
                 signal_id: real_id.clone(),
+                change_anchor: String::new(),
                 framing: "Intended coupling, payments boundary widened on purpose.".to_string(),
                 concern: Some("coupling".to_string()),
             }],
         };
-        let validation = validate_walkthrough(&agent, &surface, hash);
+        let validation = validate_walkthrough(&agent, &surface, &FxHashSet::default(), hash);
         assert!(!validation.stale, "matching hash is not stale");
         assert_eq!(
             validation.accepted_count, 1,
@@ -547,18 +800,20 @@ mod tests {
             judgments: vec![
                 AgentJudgment {
                     signal_id: real_id.clone(),
+                    change_anchor: String::new(),
                     framing: "real".to_string(),
                     concern: None,
                 },
                 AgentJudgment {
                     // A fabricated id fallow never emitted.
                     signal_id: "sig:deadbeefdeadbeef".to_string(),
+                    change_anchor: String::new(),
                     framing: "hallucinated decision with no graph anchor".to_string(),
                     concern: None,
                 },
             ],
         };
-        let validation = validate_walkthrough(&agent, &surface, hash);
+        let validation = validate_walkthrough(&agent, &surface, &FxHashSet::default(), hash);
         assert_eq!(validation.accepted_count, 1, "only the real one accepts");
         assert_eq!(validation.rejected_count, 1, "the fabricated one rejects");
         assert_eq!(validation.rejected[0].signal_id, "sig:deadbeefdeadbeef");
@@ -581,11 +836,13 @@ mod tests {
             judgments: vec![AgentJudgment {
                 // Even a real signal id is refused under a stale snapshot.
                 signal_id: real_id,
+                change_anchor: String::new(),
                 framing: "would be valid, but the tree moved".to_string(),
                 concern: None,
             }],
         };
-        let validation = validate_walkthrough(&agent, &surface, current_hash);
+        let validation =
+            validate_walkthrough(&agent, &surface, &FxHashSet::default(), current_hash);
         assert!(validation.stale, "old hash is stale");
         assert_eq!(validation.accepted_count, 0, "nothing accepts when stale");
         assert_eq!(validation.rejected_count, 1, "the judgment is refused");
@@ -598,7 +855,8 @@ mod tests {
         assert!(agent.graph_snapshot_hash.is_empty());
         assert!(agent.judgments.is_empty());
         let (surface, _) = surface_with_one_signal();
-        let validation = validate_walkthrough(&agent, &surface, "graph:real");
+        let validation =
+            validate_walkthrough(&agent, &surface, &FxHashSet::default(), "graph:real");
         assert!(
             validation.stale,
             "empty echoed hash never matches a real hash"
@@ -703,10 +961,149 @@ mod tests {
             digest,
             "graph:pinned".to_string(),
             ReviewDirection::default(),
+            Vec::new(),
         );
         assert_eq!(guide.graph_snapshot_hash, "graph:pinned");
         assert!(guide.injection_note.contains("untrusted"));
         assert_eq!(guide.command, "review-walkthrough-guide");
         assert!(guide.agent_schema.anchoring_rule.contains("rejected"));
+    }
+
+    // change_anchor: a content-addressed id is stable across line-shifts and
+    // whitespace-only edits, and namespaced under `chg:`.
+    #[test]
+    fn derive_change_anchor_id_is_stable_and_namespaced() {
+        let added = vec!["const x = 1;".to_string(), "return x;".to_string()];
+        let normalized = normalize_added_text(&added);
+        let id = derive_change_anchor_id("src/a.ts", &normalized, 0);
+        assert!(id.starts_with("chg:"), "namespaced under chg:");
+        // Same content at a DIFFERENT line (the start line is not hashed) -> same id.
+        assert_eq!(id, derive_change_anchor_id("src/a.ts", &normalized, 0));
+        // A whitespace-only reflow normalizes to the same text -> same id.
+        let reflowed = vec!["  const x = 1;  ".to_string(), "\treturn x;".to_string()];
+        assert_eq!(
+            id,
+            derive_change_anchor_id("src/a.ts", &normalize_added_text(&reflowed), 0)
+        );
+        // Different added text -> different id.
+        assert_ne!(
+            id,
+            derive_change_anchor_id(
+                "src/a.ts",
+                &normalize_added_text(&["const y = 2;".to_string()]),
+                0
+            )
+        );
+        // Same text in a different file -> different id.
+        assert_ne!(id, derive_change_anchor_id("src/b.ts", &normalized, 0));
+    }
+
+    // change_anchor: parsing a unified diff yields one anchor per hunk; an edit
+    // ABOVE a hunk shifts its start_line but NOT its content-addressed id.
+    #[test]
+    fn parse_change_anchors_is_line_shift_stable() {
+        let diff_a = "diff --git a/src/x.ts b/src/x.ts\n--- a/src/x.ts\n+++ b/src/x.ts\n@@ -10,0 +11,1 @@\n+  const added = compute();\n";
+        let diff_b = "diff --git a/src/x.ts b/src/x.ts\n--- a/src/x.ts\n+++ b/src/x.ts\n@@ -40,0 +41,1 @@\n+  const added = compute();\n";
+        let a = parse_change_anchors(diff_a);
+        let b = parse_change_anchors(diff_b);
+        assert_eq!(a.len(), 1);
+        assert_eq!(b.len(), 1);
+        assert_eq!(
+            a[0].change_anchor, b[0].change_anchor,
+            "id is line-shift stable"
+        );
+        assert_eq!(a[0].start_line, 11);
+        assert_eq!(b[0].start_line, 41, "start_line tracks the new position");
+    }
+
+    // change_anchor: a judgment citing an emitted change_anchor is ACCEPTED with
+    // anchor_kind=change; an unknown change_anchor is REJECTED.
+    #[test]
+    fn change_anchor_judgment_accepts_and_unknown_rejects() {
+        let (surface, _) = surface_with_one_signal();
+        let hash = "graph:abc123";
+        let diff = "diff --git a/src/x.ts b/src/x.ts\n--- a/src/x.ts\n+++ b/src/x.ts\n@@ -1,0 +2,1 @@\n+  const added = compute();\n";
+        let anchors = parse_change_anchors(diff);
+        let allow = change_anchor_allowlist(&anchors);
+        let real = anchors[0].change_anchor.clone();
+        let agent = AgentWalkthrough {
+            graph_snapshot_hash: hash.to_string(),
+            judgments: vec![
+                AgentJudgment {
+                    signal_id: String::new(),
+                    change_anchor: real.clone(),
+                    framing: "this region trades simplicity for a cache".to_string(),
+                    concern: None,
+                },
+                AgentJudgment {
+                    signal_id: String::new(),
+                    change_anchor: "chg:deadbeefdeadbeef".to_string(),
+                    framing: "hallucinated region".to_string(),
+                    concern: None,
+                },
+            ],
+        };
+        let validation = validate_walkthrough(&agent, &surface, &allow, hash);
+        assert_eq!(
+            validation.accepted_count, 1,
+            "the real change_anchor accepts"
+        );
+        assert_eq!(validation.accepted[0].anchor_kind, "change");
+        assert_eq!(validation.accepted[0].change_anchor, real);
+        assert!(validation.accepted[0].signal_id.is_empty());
+        assert!(!validation.accepted[0].deterministic);
+        assert_eq!(
+            validation.rejected_count, 1,
+            "the fabricated region rejects"
+        );
+        assert_eq!(validation.rejected[0].reason, UNKNOWN_CHANGE_ANCHOR_REASON);
+        assert_eq!(validation.rejected[0].change_anchor, "chg:deadbeefdeadbeef");
+    }
+
+    // change_anchor: a stale snapshot refuses a change_anchor judgment too.
+    #[test]
+    fn stale_snapshot_refuses_change_anchor_judgment() {
+        let (surface, _) = surface_with_one_signal();
+        let diff = "diff --git a/src/x.ts b/src/x.ts\n--- a/src/x.ts\n+++ b/src/x.ts\n@@ -1,0 +2,1 @@\n+  const added = compute();\n";
+        let anchors = parse_change_anchors(diff);
+        let allow = change_anchor_allowlist(&anchors);
+        let agent = AgentWalkthrough {
+            graph_snapshot_hash: "graph:OLD".to_string(),
+            judgments: vec![AgentJudgment {
+                signal_id: String::new(),
+                change_anchor: anchors[0].change_anchor.clone(),
+                framing: "valid region, but the tree moved".to_string(),
+                concern: None,
+            }],
+        };
+        let validation = validate_walkthrough(&agent, &surface, &allow, "graph:NEW");
+        assert!(validation.stale);
+        assert_eq!(validation.accepted_count, 0, "nothing accepts when stale");
+        assert_eq!(validation.rejected[0].reason, "stale-snapshot");
+    }
+
+    // change_anchor: a renamed file's anchor resolves via previous_change_anchor,
+    // so an agent that cited the pre-rename id still anchors.
+    #[test]
+    fn change_anchor_survives_rename_via_previous_anchor() {
+        let renamed = "diff --git a/src/old.ts b/src/new.ts\nrename from src/old.ts\nrename to src/new.ts\n--- a/src/old.ts\n+++ b/src/new.ts\n@@ -1,0 +2,1 @@\n+  const added = compute();\n";
+        let anchors = parse_change_anchors(renamed);
+        assert_eq!(anchors.len(), 1);
+        assert_eq!(anchors[0].file, "src/new.ts");
+        let previous = anchors[0]
+            .previous_change_anchor
+            .clone()
+            .expect("rename yields a previous anchor");
+        // The previous id equals what the same hunk under the OLD path would emit.
+        let old_diff = "diff --git a/src/old.ts b/src/old.ts\n--- a/src/old.ts\n+++ b/src/old.ts\n@@ -1,0 +2,1 @@\n+  const added = compute();\n";
+        let old_anchors = parse_change_anchors(old_diff);
+        assert_eq!(previous, old_anchors[0].change_anchor);
+        // The allowlist contains BOTH the new id and the pre-rename id.
+        let allow = change_anchor_allowlist(&anchors);
+        assert!(
+            allow.contains(&previous),
+            "pre-rename id is in the allowlist"
+        );
+        assert!(allow.contains(&anchors[0].change_anchor));
     }
 }

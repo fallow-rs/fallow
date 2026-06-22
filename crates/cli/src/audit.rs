@@ -102,6 +102,12 @@ pub struct AuditResult {
     /// graph: a mutated tree changes a key set, changes this hash, refuses the
     /// stale payload. Populated only on the brief path; `None` otherwise.
     pub graph_snapshot_hash: Option<String>,
+    /// Per-hunk change anchors derived from the diff: one stable, content-
+    /// addressed id per changed region. Emitted in the walkthrough guide so an
+    /// agent can anchor a trade-off about a changed region with no graph finding
+    /// (and have it post-validated). Also folded into `graph_snapshot_hash` so a
+    /// moved region refuses a stale payload. Populated only on the brief path.
+    pub change_anchors: Vec<crate::audit_walkthrough::ChangeAnchor>,
 }
 
 pub struct AuditOptions<'a> {
@@ -1325,6 +1331,7 @@ struct AuditResultParts {
     routing: Option<routing::RoutingFacts>,
     decision_surface: Option<crate::audit_decision_surface::DecisionSurface>,
     graph_snapshot_hash: Option<String>,
+    change_anchors: Vec<crate::audit_walkthrough::ChangeAnchor>,
 }
 
 /// Run the three HEAD-side analyses with intra-pipeline sharing intact:
@@ -1694,10 +1701,21 @@ fn assemble_audit_result(input: AuditAssemblyInput<'_>) -> Result<AuditResult, E
         None
     };
 
+    // Per-hunk change anchors (the region-level anchor set): derived from the
+    // SAME diff source the run used (an opt-in `--diff-stdin`/`--diff-file` diff,
+    // else the committed `base...HEAD`), so emission and validation anchor to one
+    // changed set. Brief-path only.
+    let change_anchors = if opts.brief {
+        compute_change_anchors(opts.root, &input.base_ref)
+    } else {
+        Vec::new()
+    };
+
     // Graph-snapshot hash (the staleness pin): a deterministic hash of the
-    // HEAD-side key sets plus the resolved base ref + head sha. Brief-path only.
-    // The verifier is the graph: a mutated tree changes a key set, changes this
-    // hash, and refuses a stale agent walkthrough on reentry.
+    // HEAD-side key sets plus the resolved base ref + head sha + the change-anchor
+    // id set. Brief-path only. The verifier is the graph: a mutated tree changes a
+    // key set OR a changed region, changes this hash, and refuses a stale agent
+    // walkthrough on reentry (so a cited change_anchor that moved is refused too).
     let head_sha = get_head_sha(opts.root);
     let graph_snapshot_hash = if opts.brief {
         Some(compute_graph_snapshot_hash(
@@ -1706,6 +1724,7 @@ fn assemble_audit_result(input: AuditAssemblyInput<'_>) -> Result<AuditResult, E
             health_result.as_ref(),
             &input.base_ref,
             head_sha.as_deref(),
+            &change_anchors,
         ))
     } else {
         None
@@ -1733,6 +1752,7 @@ fn assemble_audit_result(input: AuditAssemblyInput<'_>) -> Result<AuditResult, E
         routing,
         decision_surface,
         graph_snapshot_hash,
+        change_anchors,
     }))
 }
 
@@ -1751,6 +1771,7 @@ fn compute_graph_snapshot_hash(
     health: Option<&HealthResult>,
     base_ref: &str,
     head_sha: Option<&str>,
+    change_anchors: &[crate::audit_walkthrough::ChangeAnchor],
 ) -> String {
     // The HEAD public-export set was computed on the brief path and retained on
     // the check result (`public_api_keys`); reuse it so the hash is exports-aware
@@ -1775,10 +1796,43 @@ fn compute_graph_snapshot_hash(
         }
         bytes.push(1);
     }
+    // Seventh key set: the SORTED change-anchor id set, so a moved/added/removed
+    // changed region shifts this hash and a cited change_anchor that moved is
+    // refused as stale (the finding key sets are line-independent and would not
+    // otherwise cover the region-level anchors).
+    let mut anchor_ids: Vec<&str> = change_anchors
+        .iter()
+        .map(|a| a.change_anchor.as_str())
+        .collect();
+    anchor_ids.sort_unstable();
+    for id in anchor_ids {
+        bytes.extend_from_slice(id.as_bytes());
+        bytes.push(0);
+    }
+    bytes.push(1);
     bytes.extend_from_slice(base_ref.as_bytes());
     bytes.push(0);
     bytes.extend_from_slice(head_sha.unwrap_or("").as_bytes());
     format!("graph:{:016x}", xxh3_64(&bytes))
+}
+
+/// Derive the per-hunk change anchors for this run from the SAME diff source the
+/// run used: the opt-in shared diff (`--diff-stdin` / `--diff-file`) when present,
+/// else the committed merge-base diff `base_ref...HEAD`. Using one source for both
+/// the guide emission and the `--walkthrough-file` validation keeps the emitted
+/// anchor set equal to the set validated on reentry (a committed-vs-staged
+/// mismatch would otherwise reject every staged region's anchor). A diff that
+/// cannot be computed yields an empty set (no anchors, never a panic).
+fn compute_change_anchors(
+    root: &std::path::Path,
+    base_ref: &str,
+) -> Vec<crate::audit_walkthrough::ChangeAnchor> {
+    if let Some(raw) = crate::report::ci::diff_filter::shared_diff_raw() {
+        return crate::audit_walkthrough::parse_change_anchors(raw);
+    }
+    fallow_core::changed_files::try_get_changed_diff(root, base_ref)
+        .map(|diff| crate::audit_walkthrough::parse_change_anchors(&diff))
+        .unwrap_or_default()
 }
 
 /// Compute the decision surface from the assembled brief inputs: gather the
@@ -2137,6 +2191,7 @@ fn build_audit_result(parts: AuditResultParts) -> AuditResult {
         routing: parts.routing,
         decision_surface: parts.decision_surface,
         graph_snapshot_hash: parts.graph_snapshot_hash,
+        change_anchors: parts.change_anchors,
     }
 }
 
@@ -2210,12 +2265,14 @@ fn empty_audit_result(
     // the walkthrough guide still carries a stable snapshot pin (no findings, so
     // the hash folds only the base ref + head sha).
     let graph_snapshot_hash = if opts.brief {
+        // An empty changeset has no changed regions, so no change anchors.
         Some(compute_graph_snapshot_hash(
             None,
             None,
             None,
             &base_ref,
             head_sha.as_deref(),
+            &[],
         ))
     } else {
         None
@@ -2252,6 +2309,7 @@ fn empty_audit_result(
         routing: None,
         decision_surface: None,
         graph_snapshot_hash,
+        change_anchors: Vec::new(),
     }
 }
 

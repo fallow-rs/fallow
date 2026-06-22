@@ -16499,7 +16499,15 @@
       "properties": {
         "signal_id": {
           "type": "string",
-          "description": "The fallow-emitted `signal_id` (verified against the allowlist)."
+          "description": "The fallow-emitted `signal_id` (verified against the allowlist). Empty\nwhen this judgment was anchored by a `change_anchor` instead."
+        },
+        "change_anchor": {
+          "type": "string",
+          "description": "The fallow-emitted `change_anchor` (verified against the allowlist). Empty\nwhen this judgment was anchored by a `signal_id`."
+        },
+        "anchor_kind": {
+          "type": "string",
+          "description": "Which anchor resolved: `\"signal\"` (a graph FINDING, the strong anchor) or\n`\"change\"` (a changed REGION only, the weaker anchor). Lets a consumer\ndistinguish a finding-anchored judgment from a region-anchored one rather\nthan collapsing both into one accepted bucket."
         },
         "agent_framing": {
           "type": "string",
@@ -16519,6 +16527,8 @@
       },
       "required": [
         "signal_id",
+        "change_anchor",
+        "anchor_kind",
         "agent_framing",
         "deterministic"
       ],
@@ -16591,15 +16601,20 @@
       "properties": {
         "signal_id": {
           "type": "string",
-          "description": "The `signal_id` the agent cited (fallow never emitted it)."
+          "description": "The `signal_id` the agent cited (fallow never emitted it). Empty when the\njudgment cited a `change_anchor` instead."
+        },
+        "change_anchor": {
+          "type": "string",
+          "description": "The `change_anchor` the agent cited (fallow never emitted it). Empty when\nthe judgment cited a `signal_id` instead."
         },
         "reason": {
           "type": "string",
-          "description": "The rejection reason (e.g. `unanchored-signal-id`)."
+          "description": "The rejection reason: `unanchored-signal-id` (cited a signal fallow did\nnot emit), `unknown-change-anchor` (cited a region fallow did not emit),\nor `stale-snapshot` (the tree moved)."
         }
       },
       "required": [
         "signal_id",
+        "change_anchor",
         "reason"
       ],
       "description": "One rejected judgment plus the reason it was rejected."
@@ -16655,6 +16670,13 @@
           "description": "The review direction (order/units/concern-lens/out-of-diff/expert).",
           "$ref": "#/definitions/ReviewDirection"
         },
+        "change_anchors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ChangeAnchor"
+          },
+          "description": "The per-hunk change anchors: one stable id per changed region. An agent\nmay cite a `change_anchor` as a judgment anchor in addition to an emitted\n`signal_id`, so a trade-off about a changed region with no graph finding\ncan still anchor (and be post-validated) rather than hallucinate."
+        },
         "agent_schema": {
           "description": "The JSON shape the agent must return, embedded so the skill stays thin.",
           "$ref": "#/definitions/AgentSchema"
@@ -16671,6 +16693,7 @@
         "graph_snapshot_hash",
         "digest",
         "direction",
+        "change_anchors",
         "agent_schema",
         "injection_note"
       ],
@@ -17042,6 +17065,41 @@
         }
       ],
       "description": "Best-effort classification of why a callee did not resolve to an edge."
+    },
+    "ChangeAnchor": {
+      "type": "object",
+      "properties": {
+        "change_anchor": {
+          "type": "string",
+          "description": "Stable, CONTENT-addressed id: `chg:<16-hex>` over the file path + the\nnormalized added text (line numbers are NOT hashed, so an edit above the\nhunk or a whitespace-only change does not move the id)."
+        },
+        "file": {
+          "type": "string",
+          "description": "Root-relative path of the changed file."
+        },
+        "start_line": {
+          "type": "integer",
+          "description": "1-based first line of the hunk in the head file (display/deep-link only;\nNOT part of the id)."
+        },
+        "line_count": {
+          "type": "integer",
+          "description": "Number of added lines in the hunk (display only; NOT part of the id)."
+        },
+        "previous_change_anchor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Rename-durable anchor: the id this same hunk would have had under the\npre-rename path. `None` unless the file was renamed in this change, so an\nagent that cited the anchor before a `git mv` still resolves."
+        }
+      },
+      "required": [
+        "change_anchor",
+        "file",
+        "start_line",
+        "line_count"
+      ],
+      "description": "One stable per-hunk CHANGE ANCHOR: a changed region the agent may cite as a\njudgment anchor IN ADDITION to a `signal_id`. Where a `signal_id` anchors a\ngraph FINDING (\"fallow emitted this exact finding\"), a change_anchor anchors\nonly a changed REGION (\"fallow confirms this region changed\") , a strictly\nweaker guarantee, surfaced as `anchor_kind` on the accepted judgment so a\nconsumer can tell the two apart. Graph/diff-derived; NEVER from prose."
     }
   }
 }

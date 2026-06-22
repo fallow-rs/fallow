@@ -308,11 +308,17 @@ impl DiffSource {
 }
 
 /// Result of [`load_diff_index_for_findings`]. Carries the parsed
-/// `DiffIndex`; the source breadcrumb is consumed by the function during
-/// load to compose warning messages and is not retained beyond that.
+/// `DiffIndex` plus the raw unified-diff text it was parsed from; the source
+/// breadcrumb is consumed by the function during load to compose warning
+/// messages and is not retained beyond that. The raw text is retained so the
+/// walkthrough guide can derive per-hunk `change_anchors` from the SAME diff
+/// source the finding filter used (a `--diff-stdin` staged diff, not the
+/// committed `base...HEAD`), keeping emission and validation anchored to one
+/// changed set.
 #[derive(Debug)]
 pub struct LoadedDiff {
     pub index: DiffIndex,
+    pub raw: String,
 }
 
 /// Resolve a diff source from CLI input.
@@ -413,7 +419,7 @@ fn load_diff_index_from_stdin(quiet: bool) -> Option<LoadedDiff> {
                      also produce empty indices.)"
                 );
             }
-            Some(LoadedDiff { index })
+            Some(LoadedDiff { index, raw: buf })
         }
         Err(err) => {
             if !quiet {
@@ -454,7 +460,7 @@ fn load_diff_index_from_file(path: &Path, label: &str, quiet: bool) -> Option<Lo
                      and deletion-only diffs also produce empty indices."
                 );
             }
-            Some(LoadedDiff { index })
+            Some(LoadedDiff { index, raw: text })
         }
         Err(err) => {
             if !quiet {
@@ -503,6 +509,19 @@ pub fn shared_diff_index() -> Option<&'static DiffIndex> {
     SHARED_DIFF.get().and_then(|v| v.as_ref()).map(|l| &l.index)
 }
 
+/// Read the RAW unified-diff text of the cached diff (the bytes
+/// [`init_shared_diff`] parsed). `None` when no diff was supplied. Used by the
+/// walkthrough guide to derive `change_anchors` from the same opt-in diff source
+/// (e.g. a `--diff-stdin` staged diff) the finding filter used, rather than
+/// recomputing a committed `base...HEAD` diff that would not match.
+#[must_use]
+pub fn shared_diff_raw() -> Option<&'static str> {
+    SHARED_DIFF
+        .get()
+        .and_then(|v| v.as_ref())
+        .map(|l| l.raw.as_str())
+}
+
 fn context_radius_from_env() -> u64 {
     std::env::var("FALLOW_DIFF_CONTEXT")
         .ok()
@@ -510,7 +529,7 @@ fn context_radius_from_env() -> u64 {
         .unwrap_or(3)
 }
 
-fn parse_new_hunk_start(header: &str) -> Option<u64> {
+pub fn parse_new_hunk_start(header: &str) -> Option<u64> {
     let plus = header.find('+')?;
     let rest = &header[plus + 1..];
     let end = rest

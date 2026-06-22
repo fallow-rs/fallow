@@ -2274,6 +2274,59 @@ fn e5_walkthrough_guide_pins_a_deterministic_snapshot_hash() {
     assert_eq!(again["graph_snapshot_hash"], guide["graph_snapshot_hash"]);
 }
 
+/// The guide emits per-hunk `change_anchors` from the committed diff, and a
+/// judgment citing one (with NO signal_id) is ACCEPTED with `anchor_kind: change`,
+/// the weaker region-level anchor. End-to-end through the real binary, so the
+/// emitted anchor set equals the set validated on reentry.
+#[test]
+fn e5_change_anchor_judgment_accepts_anchor_kind_change() {
+    let tmp = create_boundary_walkthrough_fixture();
+    let guide = run_walkthrough_guide(tmp.path());
+    let hash = guide["graph_snapshot_hash"].as_str().unwrap().to_string();
+    let anchors = guide["change_anchors"]
+        .as_array()
+        .expect("the guide carries change_anchors");
+    assert!(
+        !anchors.is_empty(),
+        "the page.ts edit must emit at least one change anchor. guide: {}",
+        serde_json::to_string_pretty(&guide).unwrap_or_default()
+    );
+    let anchor_id = anchors[0]["change_anchor"].as_str().unwrap().to_string();
+    assert!(anchor_id.starts_with("chg:"), "namespaced: {anchor_id}");
+
+    let agent = serde_json::json!({
+        "graph_snapshot_hash": hash,
+        "judgments": [
+            { "change_anchor": anchor_id, "framing": "This region trades a direct import for a seam." }
+        ]
+    });
+    let agent_path = tmp.path().join("agent_change.json");
+    fs::write(&agent_path, serde_json::to_string(&agent).unwrap()).unwrap();
+
+    let validation = run_walkthrough_file(tmp.path(), &agent_path);
+    assert_eq!(validation["stale"], false, "matching hash is not stale");
+    assert_eq!(
+        validation["accepted_count"],
+        1,
+        "the change-anchored judgment accepts. validation: {}",
+        serde_json::to_string_pretty(&validation).unwrap_or_default()
+    );
+    assert_eq!(validation["accepted"][0]["anchor_kind"], "change");
+    assert_eq!(validation["accepted"][0]["signal_id"], "");
+    assert_eq!(validation["accepted"][0]["deterministic"], false);
+
+    // A fabricated change anchor is rejected (anti-hallucination for the region anchor).
+    let bogus = serde_json::json!({
+        "graph_snapshot_hash": guide["graph_snapshot_hash"],
+        "judgments": [ { "change_anchor": "chg:deadbeefdeadbeef", "framing": "made up" } ]
+    });
+    let bogus_path = tmp.path().join("agent_bogus.json");
+    fs::write(&bogus_path, serde_json::to_string(&bogus).unwrap()).unwrap();
+    let rejected = run_walkthrough_file(tmp.path(), &bogus_path);
+    assert_eq!(rejected["rejected_count"], 1, "fabricated region rejects");
+    assert_eq!(rejected["rejected"][0]["reason"], "unknown-change-anchor");
+}
+
 /// Done-condition (a): a clean agent JSON citing only emitted signal_ids with
 /// the correct snapshot hash is ACCEPTED with zero unanchored findings.
 #[test]

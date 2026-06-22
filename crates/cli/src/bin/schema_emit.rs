@@ -34,7 +34,7 @@ use fallow_cli::audit_decision_surface::{
 };
 use fallow_cli::audit_focus::{ConfidenceFlag, FocusLabel, FocusMap, FocusScore, FocusUnit};
 use fallow_cli::audit_walkthrough::{
-    AcceptedJudgment, AgentSchema, DirectionUnit, RejectedJudgment, ReviewDirection,
+    AcceptedJudgment, AgentSchema, ChangeAnchor, DirectionUnit, RejectedJudgment, ReviewDirection,
     WalkthroughGuide, WalkthroughValidation,
 };
 use fallow_cli::health_types::{
@@ -333,6 +333,7 @@ const DERIVED_DEFINITION_NAMES: &[&str] = &[
     "TruncationNote",
     "AcceptedJudgment",
     "AgentSchema",
+    "ChangeAnchor",
     "DirectionUnit",
     "RejectedJudgment",
     "ReviewDirection",
@@ -681,6 +682,7 @@ fn register_audit_brief_definitions(generator: &mut schemars::SchemaGenerator) {
 fn register_walkthrough_definitions(generator: &mut schemars::SchemaGenerator) {
     let _ = generator.subschema_for::<DirectionUnit>();
     let _ = generator.subschema_for::<ReviewDirection>();
+    let _ = generator.subschema_for::<ChangeAnchor>();
     let _ = generator.subschema_for::<AgentSchema>();
     let _ = generator.subschema_for::<WalkthroughGuide>();
     let _ = generator.subschema_for::<AcceptedJudgment>();
