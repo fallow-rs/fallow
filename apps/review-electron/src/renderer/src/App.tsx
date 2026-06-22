@@ -17,9 +17,9 @@ import {
 import type { WalkthroughDocument } from "../../model/walkthrough";
 import type { TradeOffEnvelope } from "../../model/tradeoff";
 import type { ReviewContext as ReviewContextData } from "../../model/reviewContext";
-import type { InlineFraming, ValidationEnvelope } from "../../model/agent";
+import type { InlineFraming } from "../../model/agent";
 import type { InspectorCard as InspectorCardData } from "../../main/inspect";
-import { acceptedReconstructedFraming, groupBySignalId } from "./lib/agentFraming";
+import { groupBySignalId } from "./lib/agentFraming";
 import { ReviewFocus } from "./components/ReviewFocus";
 import { ClearedPanel } from "./components/ClearedPanel";
 import { DecisionList } from "./components/DecisionList";
@@ -27,7 +27,6 @@ import { TradeOffList } from "./components/TradeOffList";
 import { ReviewContext } from "./components/ReviewContext";
 import { StageList } from "./components/StageList";
 import { InspectorCard } from "./components/InspectorCard";
-import { AgentPanel } from "./components/AgentPanel";
 import { AnnotateCanvas } from "./components/AnnotateCanvas";
 import { LiveApp } from "./components/LiveApp";
 import { DiffView } from "./components/DiffView";
@@ -91,18 +90,14 @@ export const App = () => {
   const [rightMode, setRightMode] = useState<RightMode>("diff");
   const [diffFile, setDiffFile] = useState<string | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth);
-  // Validated reconstructed framing from the opt-in agent run, owned here so both
-  // AgentPanel (run controls + summary) and DecisionList (inline framing) read
-  // the same result. null = no run yet / cleared.
-  const [agentValidation, setAgentValidation] = useState<ValidationEnvelope | null>(null);
   // Author-captured framing (fact-ish, write-time), already origin-tagged + graph
   // validated in the main process. Empty when no captured source exists; we never
-  // fabricate it, so the UI then shows only reconstructed (or nothing).
+  // fabricate it, so a decision then shows no inline framing.
   const [capturedFraming, setCapturedFraming] = useState<InlineFraming[]>([]);
-  // Model-inferred trade-offs, fed from their OWN channel (NOT the AgentPanel
-  // result): the non-deterministic companion to `doc.decisions`. null = the
-  // elicitation was not run (the persisted file is absent); an envelope with
-  // `abstained: true` is the distinct "looked, found nothing" state.
+  // Model-inferred trade-offs, fed from their OWN persisted channel: the
+  // non-deterministic companion to `doc.decisions`. null = the elicitation was not
+  // run (the persisted file is absent); an envelope with `abstained: true` is the
+  // distinct "looked, found nothing" state.
   const [tradeoffs, setTradeoffs] = useState<TradeOffEnvelope | null>(null);
   // Author-agent review brief (the CAPTURE artifact): what the agent that did the
   // work recorded at write-time about what to review. null = the author recorded no
@@ -139,13 +134,12 @@ export const App = () => {
       .catch(() => setReviewContext(null));
   }, []);
 
-  // Group ALL inline framing by signal_id for per-decision rendering: captured
-  // (write-time, fact-ish) first, then reconstructed (agent-run, confirm with
-  // author). Origin is tagged at each source, never inferred here, so the two are
-  // never conflated. DecisionList fences both and labels them distinctly.
+  // Group author-captured framing by signal_id for per-decision inline rendering.
+  // Only the write-time captured framing feeds this now (the live reconstruct path
+  // is gone); origin is tagged at the source, never inferred here.
   const framingBySignal = useMemo(
-    () => groupBySignalId([...capturedFraming, ...acceptedReconstructedFraming(agentValidation)]),
-    [capturedFraming, agentValidation],
+    () => groupBySignalId(capturedFraming),
+    [capturedFraming],
   );
 
   useEffect(() => {
@@ -236,7 +230,6 @@ export const App = () => {
           {card && <InspectorCard card={card} />}
           <ReviewContext context={reviewContext} onOpenDiff={onOpenDiff} />
           {doc && <ReviewFocus focus={doc.focus} noteCount={noteCount} />}
-          {doc && <AgentPanel onResult={setAgentValidation} />}
           {doc ? (
             <>
               <ClearedPanel cleared={doc.cleared} />
