@@ -57,26 +57,30 @@ export const FileRow = ({
   return (
     <li
       className={cn(
-        "group rounded-md px-2 py-1 transition-colors",
+        "group rounded-md transition-colors",
         active ? "bg-accent" : "hover:bg-accent/40",
         !active && signal.deprioritized && "opacity-55",
         !active && viewed && "opacity-40",
       )}
     >
-      <div className="flex items-center gap-2">
-        <Checkbox
-          checked={viewed}
-          onCheckedChange={() => onToggleViewed(file.path)}
-          aria-label={`mark ${base} reviewed`}
-        />
-        {/* Filename and the signal metrics share one wide click target. */}
+      {/* A full-row click target sits under the content; only the checkbox and
+          note button re-enable pointer events to capture their own clicks. */}
+      <div className="relative px-2 py-1">
         <button
           type="button"
           data-testid="file-open"
+          aria-label={`open ${base}`}
           title={title}
           onClick={() => onOpenDiff(file.path)}
-          className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-        >
+          className="absolute inset-0 z-0 cursor-pointer rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+        />
+        <div className="pointer-events-none relative z-10 flex items-center gap-2">
+          <Checkbox
+            checked={viewed}
+            onCheckedChange={() => onToggleViewed(file.path)}
+            aria-label={`mark ${base} reviewed`}
+            className="pointer-events-auto"
+          />
           <FileText
             className={cn(
               "size-3.5 shrink-0",
@@ -107,19 +111,19 @@ export const FileRow = ({
               </span>
             )}
           </span>
-        </button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-6 shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100"
-          aria-label="add note"
-          onClick={() => setAdding((a) => !a)}
-        >
-          <Plus className="size-3.5" />
-        </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="pointer-events-auto size-6 shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100"
+            aria-label="add note"
+            onClick={() => setAdding((a) => !a)}
+          >
+            <Plus className="size-3.5" />
+          </Button>
+        </div>
       </div>
       {adding && (
-        <div className="ml-7 mt-1.5 flex gap-1">
+        <div className="flex gap-1 pb-1.5 pl-9 pr-2">
           <Input
             value={note}
             onChange={(e) => setNote(e.target.value)}

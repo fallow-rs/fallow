@@ -343,3 +343,12 @@ layout; current build is the centered state with the clean message.)
   bar entirely; the selected row is now just a clean filled rounded fill (bg-accent,
   the shadcn Command/Select convention) plus a subtly brightened file icon. No
   layout shift, no gimmick. format/lint/tsc/build/e2e (6) green.
+- Round 24 (full-row click target, user-reported): the row's vertical padding
+  (py-1 on the <li>) sat outside the file-open button, so the top/bottom strip of
+  each row showed no pointer cursor and didn't open the diff. Restructured to a
+  full-row click target: an absolute inset-0 button (z-0) under a pointer-events-
+  none content layer (z-10); the checkbox and note button re-enable pointer events
+  to capture their own clicks, while filename + metrics fall through to the button.
+  Whole row (incl. padding) now opens + shows the hand; the "opens a file diff" e2e
+  still passes (Playwright hits the button through the transparent overlay).
+  vitest 52, format/lint/tsc/build/e2e (6) green.
