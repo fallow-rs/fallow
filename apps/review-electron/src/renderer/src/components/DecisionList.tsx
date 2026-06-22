@@ -1,6 +1,25 @@
 import { ChevronDown, ChevronRight, GitBranchPlus, Users } from "lucide-react";
 import { useState } from "react";
 import type { Decision } from "../../../model/walkthrough";
+import type { FramingOrigin, InlineFraming } from "../../../model/agent";
+import type { FramingBySignal } from "@/lib/agentFraming";
+
+/** Per-origin label + tone for a fenced inline-framing block (never a fact). */
+const ORIGIN_PRESENTATION: Record<FramingOrigin, { label: string; tone: string }> = {
+  // Fact-ish: recorded by the author agent at write-time. Neutral/affirmative
+  // tone, but still fenced + deterministic:false: it is intent, not a graph fact.
+  captured: {
+    label: "captured at write-time (author agent):",
+    tone: "text-fallow-green",
+  },
+  // Review-time inference from the opt-in agent run. Amber/muted + the explicit
+  // "confirm with author" warning: a confident-wrong reconstruction is the worst
+  // failure mode, so this treatment is non-negotiable.
+  reconstructed: {
+    label: "agent framing (unverified, confirm with author):",
+    tone: "text-fallow-amber",
+  },
+};
 
 /**
  * The decision surface, rendered under taste ownership: every decision is a
@@ -9,13 +28,18 @@ import type { Decision } from "../../../model/walkthrough";
  * default fields (question, honest consumer count, trade-off) are always visible;
  * everything else (category, anchor, routed expert) is behind an expand so the
  * surface stays within the reviewer's working memory.
+ *
+ * Inline framing (captured or reconstructed), keyed by `signalId`, renders fenced
+ * under its own decision so the reviewer never re-joins it from a separate panel.
  */
 export const DecisionList = ({
   decisions,
   onOpenDiff,
+  framingBySignal,
 }: {
   decisions: Decision[];
   onOpenDiff: (path: string) => void;
+  framingBySignal?: FramingBySignal;
 }) => {
   // A quiet empty state (NOT a silent null): the human must be able to tell
   // "the surface ran and found nothing consequential" from "it is broken".
@@ -38,7 +62,12 @@ export const DecisionList = ({
       </h3>
       <ul className="space-y-1.5">
         {decisions.map((d) => (
-          <DecisionRow key={d.signalId} decision={d} onOpenDiff={onOpenDiff} />
+          <DecisionRow
+            key={d.signalId}
+            decision={d}
+            onOpenDiff={onOpenDiff}
+            framing={framingBySignal?.get(d.signalId) ?? []}
+          />
         ))}
       </ul>
     </section>
@@ -48,9 +77,11 @@ export const DecisionList = ({
 const DecisionRow = ({
   decision: d,
   onOpenDiff,
+  framing,
 }: {
   decision: Decision;
   onOpenDiff: (path: string) => void;
+  framing: ReadonlyArray<InlineFraming>;
 }) => {
   const [expanded, setExpanded] = useState(false);
   const consumerLabel =
@@ -68,6 +99,10 @@ const DecisionRow = ({
           <p className="text-muted-foreground">{consumerLabel}</p>
           {/* (3) the trade-off clause , a named sacrifice stated as fact */}
           {d.tradeoff && <p className="text-muted-foreground">{d.tradeoff}</p>}
+          {/* (4) framing , fenced, interrogative-leaning, never a graph fact */}
+          {framing.map((f, i) => (
+            <FramingBlock key={`${f.origin}:${i}`} framing={f} />
+          ))}
           {expanded && (
             <div className="space-y-1 border-t border-border/60 pt-1 text-[11px] text-muted-foreground">
               {d.category && <p>category: {d.category}</p>}
@@ -101,5 +136,23 @@ const DecisionRow = ({
         </button>
       </div>
     </li>
+  );
+};
+
+/**
+ * One fenced framing block under a decision. Typographically fenced (rounded
+ * border + muted ground), deterministic:false by construction, and labelled by
+ * origin so the reviewer can tell author intent (captured, fact-ish) from
+ * review-time inference (reconstructed, confirm-with-author). It never gates the
+ * reviewer's options, never carries a door/reversibility label, never ranks.
+ */
+const FramingBlock = ({ framing: f }: { framing: InlineFraming }) => {
+  const { label, tone } = ORIGIN_PRESENTATION[f.origin];
+  return (
+    <div className="space-y-0.5 rounded-md border border-border/60 bg-muted/10 p-1.5">
+      <p className={tone}>{label}</p>
+      <p className="text-foreground">{f.framing}</p>
+      {f.concern && <p className="text-muted-foreground">concern: {f.concern}</p>}
+    </div>
   );
 };

@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import {
   FileDiff,
   MonitorPlay,
@@ -9,7 +15,9 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import type { WalkthroughDocument } from "../../model/walkthrough";
+import type { ValidationEnvelope } from "../../model/agent";
 import type { InspectorCard as InspectorCardData } from "../../main/inspect";
+import { acceptedReconstructedFraming, groupBySignalId } from "./lib/agentFraming";
 import { ReviewFocus } from "./components/ReviewFocus";
 import { ClearedPanel } from "./components/ClearedPanel";
 import { DecisionList } from "./components/DecisionList";
@@ -53,10 +61,21 @@ export const App = () => {
   const [rightMode, setRightMode] = useState<RightMode>("diff");
   const [diffFile, setDiffFile] = useState<string | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth);
+  // Validated reconstructed framing from the opt-in agent run, owned here so both
+  // AgentPanel (run controls + summary) and DecisionList (inline framing) read
+  // the same result. null = no run yet / cleared.
+  const [agentValidation, setAgentValidation] = useState<ValidationEnvelope | null>(null);
 
   useEffect(() => {
     window.fallow.onInspectSelection(setCard);
   }, []);
+
+  // Group all inline framing by signal_id for per-decision rendering. Today this
+  // is reconstructed (agent-run) framing only; captured framing merges in later.
+  const framingBySignal = useMemo(
+    () => groupBySignalId(acceptedReconstructedFraming(agentValidation)),
+    [agentValidation],
+  );
 
   useEffect(() => {
     window.localStorage.setItem(SIDEBAR_KEY, String(sidebarWidth));
@@ -145,11 +164,15 @@ export const App = () => {
         <div className="min-h-0 flex-1 space-y-5 overflow-auto p-4">
           {card && <InspectorCard card={card} />}
           {doc && <ReviewFocus focus={doc.focus} noteCount={noteCount} />}
-          <AgentPanel />
+          <AgentPanel onResult={setAgentValidation} />
           {doc ? (
             <>
               <ClearedPanel cleared={doc.cleared} />
-              <DecisionList decisions={doc.decisions} onOpenDiff={onOpenDiff} />
+              <DecisionList
+                decisions={doc.decisions}
+                onOpenDiff={onOpenDiff}
+                framingBySignal={framingBySignal}
+              />
               <StageList
                 stages={doc.stages}
                 isViewed={isViewed}
