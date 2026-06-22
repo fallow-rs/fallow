@@ -43,22 +43,19 @@ export const ReviewContext = ({
         )}
       </div>
 
-      {/* The overview: what the change does + where taste is needed. */}
-      {context.summary && <p className="text-sm text-foreground">{context.summary}</p>}
-
-      {/* The specific anchored asks. */}
-      {context.items.length > 0 && (
-        <div className="space-y-1.5">
-          <h4 className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-            what to review here
-          </h4>
-          <ul className="space-y-1.5">
-            {context.items.map((item, i) => (
-              <ReviewContextRow key={`${item.anchor}:${i}`} item={item} onOpenDiff={onOpenDiff} />
-            ))}
-          </ul>
-        </div>
-      )}
+      {/* The brief reads as ONE short narrative, not a bulleted list: the overview
+          first, then a flowing paragraph per thing to review, each ending with its
+          anchor as a subtle inline clickable reference (no margin bullets). */}
+      <div className="space-y-2 text-sm leading-relaxed text-foreground">
+        {context.summary && <p>{context.summary}</p>}
+        {context.items.map((item, i) => (
+          <ReviewContextParagraph
+            key={`${item.anchor}:${i}`}
+            item={item}
+            onOpenDiff={onOpenDiff}
+          />
+        ))}
+      </div>
 
       {/* Provenance footer: anchored author prose, never graph-validated content. */}
       <p className="text-[11px] text-muted-foreground">
@@ -68,7 +65,7 @@ export const ReviewContext = ({
   );
 };
 
-const ReviewContextRow = ({
+const ReviewContextParagraph = ({
   item,
   onOpenDiff,
 }: {
@@ -79,17 +76,20 @@ const ReviewContextRow = ({
   const linkable = item.anchor.length > 0;
   const [anchorFile] = item.anchor.split(":");
   return (
-    <li className="text-xs text-foreground">
+    <p>
+      {item.note}
       {linkable && (
-        <button
-          type="button"
-          className="mr-2 font-mono text-[11px] text-muted-foreground hover:text-foreground hover:underline"
-          onClick={() => onOpenDiff(anchorFile ?? item.anchor)}
-        >
-          {item.anchor}
-        </button>
+        <>
+          {" "}
+          <button
+            type="button"
+            className="font-mono text-[12px] text-primary/80 hover:underline"
+            onClick={() => onOpenDiff(anchorFile ?? item.anchor)}
+          >
+            ({item.anchor})
+          </button>
+        </>
       )}
-      <span>{item.note}</span>
-    </li>
+    </p>
   );
 };

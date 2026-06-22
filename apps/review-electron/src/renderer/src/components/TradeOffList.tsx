@@ -1,5 +1,4 @@
-import { ChevronDown, ChevronRight, Scale } from "lucide-react";
-import { useState } from "react";
+import { Scale } from "lucide-react";
 import type { Severity, TradeOff, TradeOffEnvelope } from "../../../model/tradeoff";
 
 /** Tone for a severity badge: only `high` gets the amber accent; the rest stay muted. */
@@ -85,15 +84,31 @@ const TradeOffRow = ({
   tradeoff: TradeOff;
   onOpenDiff: (path: string) => void;
 }) => {
-  const [expanded, setExpanded] = useState(false);
   // The cross-cutting slot has no single changed line to deep-link to.
   const linkable = t.anchor !== ANCHOR_CROSS_CUTTING && t.anchor.length > 0;
   const [anchorFile, anchorLine] = t.anchor.split(":");
+  const anchorLabel = `${anchorFile ?? t.anchor}${anchorLine ? `:${anchorLine}` : ""}`;
   return (
     <li className="rounded-md border border-border bg-muted/20 p-2 text-xs">
       <div className="flex gap-2">
-        <Scale className="size-3.5 shrink-0 text-muted-foreground" />
+        <Scale className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1 space-y-1">
+          {/* anchor (clickable) + lens, subtle inline header , the deep-link is
+              always visible here, not hidden behind a full-height toggle button */}
+          <div className="flex flex-wrap items-center gap-x-2 text-[11px] text-muted-foreground">
+            {linkable ? (
+              <button
+                type="button"
+                className="font-mono hover:text-foreground hover:underline"
+                onClick={() => onOpenDiff(anchorFile ?? t.anchor)}
+              >
+                {anchorLabel}
+              </button>
+            ) : (
+              <span className="font-mono">{t.anchor}</span>
+            )}
+            {t.lens && <span className="opacity-70">· {t.lens}</span>}
+          </div>
           {/* (1) observed , a neutral fact read from the diff */}
           {t.observed && <p className="text-muted-foreground">{t.observed}</p>}
           {/* (2) trade-off , the model's inference (gain and cost) */}
@@ -104,32 +119,7 @@ const TradeOffRow = ({
             <Badge label="consequence" value={t.consequence} />
             <Badge label="confidence" value={t.confidence} />
           </div>
-          {expanded && (
-            <div className="space-y-1 border-t border-border/60 pt-1 text-[11px] text-muted-foreground">
-              {t.lens && <p>lens: {t.lens}</p>}
-              {linkable ? (
-                <button
-                  type="button"
-                  className="text-left text-fallow-amber hover:underline"
-                  onClick={() => onOpenDiff(anchorFile ?? t.anchor)}
-                >
-                  {anchorFile}
-                  {anchorLine ? `:${anchorLine}` : ""}
-                </button>
-              ) : (
-                <p>{t.anchor}</p>
-              )}
-            </div>
-          )}
         </div>
-        <button
-          type="button"
-          aria-label={expanded ? "collapse trade-off detail" : "expand trade-off detail"}
-          className="shrink-0 text-muted-foreground hover:text-foreground"
-          onClick={() => setExpanded((e) => !e)}
-        >
-          {expanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
-        </button>
       </div>
     </li>
   );
