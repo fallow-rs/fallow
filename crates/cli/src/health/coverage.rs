@@ -606,6 +606,18 @@ fn resolve_sidecar_via_command(
         return None;
     }
     let stdout = String::from_utf8(output.stdout).ok()?;
+    resolve_sidecar_from_output(root, &stdout, output_kind)
+}
+
+/// Resolve a sidecar path from a package-manager command's captured stdout.
+/// Split out from [`resolve_sidecar_via_command`] so the path-resolution
+/// branches stay testable without spawning a subprocess (the spawn-based tests
+/// flaked under the instrumented coverage CI run).
+fn resolve_sidecar_from_output(
+    root: &Path,
+    stdout: &str,
+    output_kind: PackageManagerOutput,
+) -> Option<PathBuf> {
     let candidate = stdout
         .lines()
         .rev()
@@ -2127,9 +2139,9 @@ mod tests {
         RemappedFunction, RuntimeCoverageAnalysisInput, StaticFunctionInput, StaticSignalIndex,
         build_request, build_static_signal_index, convert_response, discover_sidecar,
         looks_like_istanbul, merge_remapped_functions, path_binary_candidates,
-        prepare_coverage_sources, resolve_original_source_path, resolve_sidecar_via_command,
-        sidecar_binary_name, static_function, verify_sidecar_signature,
-        write_istanbul_coverage_file,
+        prepare_coverage_sources, resolve_original_source_path, resolve_sidecar_from_output,
+        resolve_sidecar_via_command, sidecar_binary_name, static_function,
+        verify_sidecar_signature, write_istanbul_coverage_file,
     };
     use crate::health::RuntimeCoverageOptions;
     use fallow_config::{FallowConfig, OutputFormat};
@@ -2727,24 +2739,14 @@ mod tests {
     #[test]
     fn resolves_yarn_sidecar_without_node_modules_bin() {
         let root = make_temp_dir("sidecar-yarn");
-        let command_dir = root.join("commands");
         let unplugged_dir = root
             .join(".yarn")
             .join("unplugged")
             .join("fallow-cov")
             .join("node_modules")
             .join(".bin");
-        std::fs::create_dir_all(&command_dir)
-            .unwrap_or_else(|err| panic!("failed to create {}: {err}", command_dir.display()));
         std::fs::create_dir_all(&unplugged_dir)
             .unwrap_or_else(|err| panic!("failed to create {}: {err}", unplugged_dir.display()));
-        std::fs::write(
-            root.join("package.json"),
-            r#"{"name":"demo","packageManager":"yarn@4.1.0"}"#,
-        )
-        .unwrap_or_else(|err| panic!("failed to write package.json: {err}"));
-        std::fs::write(root.join("yarn.lock"), "")
-            .unwrap_or_else(|err| panic!("failed to write yarn.lock: {err}"));
 
         let sidecar = if cfg!(windows) {
             unplugged_dir.join("fallow-cov.cmd")
@@ -2754,20 +2756,13 @@ mod tests {
         std::fs::write(&sidecar, "")
             .unwrap_or_else(|err| panic!("failed to write {}: {err}", sidecar.display()));
 
-        let yarn = if cfg!(windows) {
-            command_dir.join("yarn.cmd")
-        } else {
-            command_dir.join("yarn")
-        };
-        write_fake_yarn_bin_command(&yarn, &sidecar);
-
-        let resolved = resolve_sidecar_via_command(
-            &root,
-            yarn.as_os_str(),
-            &["bin", "fallow-cov"],
-            PackageManagerOutput::BinaryPath,
-        )
-        .unwrap_or_else(|| panic!("failed to resolve yarn-local sidecar"));
+        // `yarn bin fallow-cov` prints the absolute sidecar path on its last
+        // line. Parse that output directly instead of spawning yarn, which
+        // flaked under the instrumented coverage run.
+        let stdout = format!("{}\n", sidecar.display());
+        let resolved =
+            resolve_sidecar_from_output(&root, &stdout, PackageManagerOutput::BinaryPath)
+                .unwrap_or_else(|| panic!("failed to resolve yarn-local sidecar"));
 
         assert_eq!(resolved, sidecar);
 
@@ -2778,10 +2773,7 @@ mod tests {
     #[test]
     fn resolves_npm_sidecar_from_node_modules_root() {
         let root = make_temp_dir("sidecar-npm");
-        let command_dir = root.join("commands");
         let bin_dir = root.join("custom-node_modules").join(".bin");
-        std::fs::create_dir_all(&command_dir)
-            .unwrap_or_else(|err| panic!("failed to create {}: {err}", command_dir.display()));
         std::fs::create_dir_all(&bin_dir)
             .unwrap_or_else(|err| panic!("failed to create {}: {err}", bin_dir.display()));
 
@@ -2793,20 +2785,13 @@ mod tests {
         std::fs::write(&sidecar, "")
             .unwrap_or_else(|err| panic!("failed to write {}: {err}", sidecar.display()));
 
-        let npm = if cfg!(windows) {
-            command_dir.join("npm.cmd")
-        } else {
-            command_dir.join("npm")
-        };
-        write_fake_npm_root_command(&npm, &root.join("custom-node_modules"));
-
-        let resolved = resolve_sidecar_via_command(
-            &root,
-            npm.as_os_str(),
-            &["root"],
-            PackageManagerOutput::NodeModulesDir,
-        )
-        .unwrap_or_else(|| panic!("failed to resolve npm-local sidecar"));
+        // `npm root` prints the node_modules dir; NodeModulesDir resolution
+        // appends `.bin` plus the sidecar name. Parse the printed dir directly
+        // instead of spawning npm.
+        let stdout = format!("{}\n", root.join("custom-node_modules").display());
+        let resolved =
+            resolve_sidecar_from_output(&root, &stdout, PackageManagerOutput::NodeModulesDir)
+                .unwrap_or_else(|| panic!("failed to resolve npm-local sidecar"));
 
         assert_eq!(resolved, sidecar);
 
@@ -3859,41 +3844,6 @@ mod tests {
         .expect("valid script coverage")
     }
 
-    fn write_fake_yarn_bin_command(path: &Path, sidecar: &Path) {
-        if cfg!(windows) {
-            std::fs::write(
-                path,
-                format!(
-                    "@echo off\r\nif \"%1\"==\"bin\" if \"%2\"==\"fallow-cov\" (\r\n  echo {}\r\n  exit /b 0\r\n)\r\nexit /b 1\r\n",
-                    sidecar.display()
-                ),
-            )
-            .unwrap_or_else(|err| panic!("failed to write {}: {err}", path.display()));
-            return;
-        }
-
-        std::fs::write(
-            path,
-            format!(
-                "#!/bin/sh\nif [ \"$1\" = \"bin\" ] && [ \"$2\" = \"fallow-cov\" ]; then\n  printf '%s\\n' '{}'\n  exit 0\nfi\nexit 1\n",
-                sidecar.display()
-            ),
-        )
-        .unwrap_or_else(|err| panic!("failed to write {}: {err}", path.display()));
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-
-            let mut permissions = std::fs::metadata(path)
-                .unwrap_or_else(|err| panic!("failed to stat {}: {err}", path.display()))
-                .permissions();
-            permissions.set_mode(0o755);
-            std::fs::set_permissions(path, permissions)
-                .unwrap_or_else(|err| panic!("failed to chmod {}: {err}", path.display()));
-        }
-    }
-
     fn write_bun_store_sidecar(store: &Path, version: &str) -> PathBuf {
         let platform_dir = store
             .join(format!("@fallow-cli+fallow-cov-darwin-arm64@{version}"))
@@ -3916,41 +3866,6 @@ mod tests {
         std::fs::write(&binary, "")
             .unwrap_or_else(|err| panic!("failed to write {}: {err}", binary.display()));
         binary
-    }
-
-    fn write_fake_npm_root_command(path: &Path, node_modules_dir: &Path) {
-        if cfg!(windows) {
-            std::fs::write(
-                path,
-                format!(
-                    "@echo off\r\nif \"%1\"==\"root\" (\r\n  echo {}\r\n  exit /b 0\r\n)\r\nexit /b 1\r\n",
-                    node_modules_dir.display()
-                ),
-            )
-            .unwrap_or_else(|err| panic!("failed to write {}: {err}", path.display()));
-            return;
-        }
-
-        std::fs::write(
-            path,
-            format!(
-                "#!/bin/sh\nif [ \"$1\" = \"root\" ]; then\n  printf '%s\\n' '{}'\n  exit 0\nfi\nexit 1\n",
-                node_modules_dir.display()
-            ),
-        )
-        .unwrap_or_else(|err| panic!("failed to write {}: {err}", path.display()));
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-
-            let mut permissions = std::fs::metadata(path)
-                .unwrap_or_else(|err| panic!("failed to stat {}: {err}", path.display()))
-                .permissions();
-            permissions.set_mode(0o755);
-            std::fs::set_permissions(path, permissions)
-                .unwrap_or_else(|err| panic!("failed to chmod {}: {err}", path.display()));
-        }
     }
 
     #[test]

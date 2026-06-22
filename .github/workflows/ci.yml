@@ -614,7 +614,10 @@ jobs:
           enable-cache: false
       # Scope to repo's own workflows + composite action. tests/fixtures/ contains
       # intentionally lax CI YAML used as fallow analysis fixtures, not real workflows.
-      - run: uvx zizmor --config .github/zizmor.yml --min-confidence medium --format plain .github/ action.yml
+      # Pin zizmor so a new release adding/strengthening an audit cannot redden
+      # CI on main with no fallow change (v1.26.1 added the adhoc-packages audit,
+      # suppressed for ci.yml/release.yml in .github/zizmor.yml). Bump deliberately.
+      - run: uvx zizmor@1.26.1 --config .github/zizmor.yml --min-confidence medium --format plain .github/ action.yml
 
   msrv:
     name: MSRV (1.92)
