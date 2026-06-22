@@ -313,9 +313,14 @@ fn normalize_url_for_dedup(url: &str) -> String {
 
 /// Read the `FALLOW_EXTENDS_TIMEOUT_SECS` env var, falling back to [`DEFAULT_URL_TIMEOUT_SECS`].
 fn url_timeout() -> Duration {
-    std::env::var("FALLOW_EXTENDS_TIMEOUT_SECS")
-        .ok()
-        .and_then(|v| v.parse::<u64>().ok().filter(|&n| n > 0))
+    url_timeout_from(std::env::var("FALLOW_EXTENDS_TIMEOUT_SECS").ok().as_deref())
+}
+
+/// Parse a raw `FALLOW_EXTENDS_TIMEOUT_SECS` value into a timeout, falling back
+/// to [`DEFAULT_URL_TIMEOUT_SECS`] for absent, zero, or non-numeric input. Pure
+/// so the parsing branches stay testable without mutating the process env.
+fn url_timeout_from(raw: Option<&str>) -> Duration {
+    raw.and_then(|v| v.parse::<u64>().ok().filter(|&n| n > 0))
         .map_or(
             Duration::from_secs(DEFAULT_URL_TIMEOUT_SECS),
             Duration::from_secs,
@@ -4182,80 +4187,37 @@ thresholdOverrides = [
     // url_timeout: env var override
     // ------------------------------------------------------------------
 
+    // These exercise the pure `url_timeout_from` parser rather than mutating the
+    // process-global env var, so they stay deterministic under parallel test
+    // execution (an env-mutating version raced and failed on Windows CI).
     #[test]
-    #[allow(
-        unsafe_code,
-        reason = "set_var is unsafe in edition 2024; env mutation is safe within a single-threaded test"
-    )]
     fn url_timeout_uses_env_var_when_set() {
-        let key = "FALLOW_EXTENDS_TIMEOUT_SECS";
-        let previous = std::env::var(key).ok();
-
-        // SAFETY: test-only; single-threaded; we restore previous value
-        unsafe { std::env::set_var(key, "15") };
-        let t = url_timeout();
-        if let Some(prev) = previous {
-            // SAFETY: test-only restore
-            unsafe { std::env::set_var(key, prev) };
-        } else {
-            // SAFETY: test-only restore
-            unsafe { std::env::remove_var(key) };
-        }
-
-        assert_eq!(t.as_secs(), 15);
+        assert_eq!(url_timeout_from(Some("15")).as_secs(), 15);
     }
 
     #[test]
-    #[allow(
-        unsafe_code,
-        reason = "set_var is unsafe in edition 2024; env mutation is safe within a single-threaded test"
-    )]
     fn url_timeout_zero_falls_back_to_default() {
-        let key = "FALLOW_EXTENDS_TIMEOUT_SECS";
-        let previous = std::env::var(key).ok();
-
-        // SAFETY: test-only; single-threaded; we restore previous value
-        unsafe { std::env::set_var(key, "0") };
-        let t = url_timeout();
-        if let Some(prev) = previous {
-            // SAFETY: test-only restore
-            unsafe { std::env::set_var(key, prev) };
-        } else {
-            // SAFETY: test-only restore
-            unsafe { std::env::remove_var(key) };
-        }
-
         assert_eq!(
-            t,
+            url_timeout_from(Some("0")),
             Duration::from_secs(DEFAULT_URL_TIMEOUT_SECS),
             "zero should fall back to the hardcoded default"
         );
     }
 
     #[test]
-    #[allow(
-        unsafe_code,
-        reason = "set_var is unsafe in edition 2024; env mutation is safe within a single-threaded test"
-    )]
     fn url_timeout_non_numeric_falls_back_to_default() {
-        let key = "FALLOW_EXTENDS_TIMEOUT_SECS";
-        let previous = std::env::var(key).ok();
-
-        // SAFETY: test-only; single-threaded; we restore previous value
-        unsafe { std::env::set_var(key, "not-a-number") };
-        let t = url_timeout();
-        if let Some(prev) = previous {
-            // SAFETY: test-only restore
-            unsafe { std::env::set_var(key, prev) };
-        } else {
-            // SAFETY: test-only restore
-            unsafe { std::env::remove_var(key) };
-        }
-
         assert_eq!(
-            t,
+            url_timeout_from(Some("not-a-number")),
             Duration::from_secs(DEFAULT_URL_TIMEOUT_SECS),
             "non-numeric value should fall back to the hardcoded default"
+        );
+    }
+
+    #[test]
+    fn url_timeout_absent_uses_default() {
+        assert_eq!(
+            url_timeout_from(None),
+            Duration::from_secs(DEFAULT_URL_TIMEOUT_SECS)
         );
     }
 

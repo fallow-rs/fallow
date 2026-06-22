@@ -1622,14 +1622,24 @@ mod tests {
         assert!(!is_github_bot_comment(&comment));
     }
 
+    // Serializes the FALLOW_BOT_LOGIN env-mutating tests so the GitHub and
+    // GitLab override cases cannot overwrite each other's value when run in
+    // parallel (which raced and failed on Windows CI).
+    static BOT_LOGIN_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
-    #[allow(unsafe_code, reason = "test-only env mutation, single-threaded run")]
+    #[allow(
+        unsafe_code,
+        reason = "test-only env mutation, serialized via BOT_LOGIN_ENV_LOCK"
+    )]
     fn github_bot_check_accepts_explicit_login_override() {
+        let _env = BOT_LOGIN_ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let comment = serde_json::json!({
             "user": { "type": "User", "login": "fallow-bot-account" },
         });
-        // SAFETY: This test owns the FALLOW_BOT_LOGIN override and clears it
-        // before returning.
+        // SAFETY: serialized by BOT_LOGIN_ENV_LOCK; cleared before returning.
         unsafe {
             std::env::set_var("FALLOW_BOT_LOGIN", "fallow-bot-account");
         }
@@ -2370,14 +2380,19 @@ mod tests {
     // --- is_gitlab_bot_note: FALLOW_BOT_LOGIN path (lines 1356-1364) ---
 
     #[test]
-    #[allow(unsafe_code, reason = "test-only env mutation, single-threaded run")]
+    #[allow(
+        unsafe_code,
+        reason = "test-only env mutation, serialized via BOT_LOGIN_ENV_LOCK"
+    )]
     fn gitlab_bot_check_accepts_explicit_login_override() {
+        let _env = BOT_LOGIN_ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let note = serde_json::json!({
             "system": false,
             "author": { "bot": false, "username": "fallow-gl-bot" },
         });
-        // SAFETY: This test owns the FALLOW_BOT_LOGIN override and clears it
-        // before returning.
+        // SAFETY: serialized by BOT_LOGIN_ENV_LOCK; cleared before returning.
         unsafe {
             std::env::set_var("FALLOW_BOT_LOGIN", "fallow-gl-bot");
         }
