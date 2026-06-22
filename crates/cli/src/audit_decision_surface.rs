@@ -365,12 +365,23 @@ fn modules_word(n: u64) -> &'static str {
     if n == 1 { "module" } else { "modules" }
 }
 
+/// Subject-verb agreement for the per-clause count: a singular subject takes the
+/// "-s" verb form ("1 module depends"), plural drops it ("2 modules depend").
+fn agrees(verb_plural: &str, n: u64) -> String {
+    if n == 1 {
+        format!("{verb_plural}s")
+    } else {
+        verb_plural.to_string()
+    }
+}
+
 /// The named structural sacrifice for a coupling/boundary decision, as a FACT.
 /// `consumers` is the honest in-repo out-of-diff count for the anchor.
 fn boundary_tradeoff(from_zone: &str, to_zone: &str, consumers: u64) -> String {
     format!(
-        "Couples `{from_zone}` to `{to_zone}`; {consumers} in-repo {} already depend on this anchor.",
-        modules_word(consumers)
+        "Couples `{from_zone}` to `{to_zone}`; {consumers} in-repo {} already {} on this anchor.",
+        modules_word(consumers),
+        agrees("depend", consumers)
     )
 }
 
@@ -379,17 +390,19 @@ fn boundary_tradeoff(from_zone: &str, to_zone: &str, consumers: u64) -> String {
 /// contract risk in prose (it cannot count a published library's downstream).
 fn public_api_tradeoff(count: usize, consumers: u64) -> String {
     format!(
-        "Adds {count} maintained contract{}; {consumers} in-repo {} already consume this surface, and any external consumers become a contract you cannot remove without a breaking change.",
+        "Adds {count} maintained contract{}; {consumers} in-repo {} already {} this surface, and any external consumers become a contract you cannot remove without a breaking change.",
         if count == 1 { "" } else { "s" },
-        modules_word(consumers)
+        modules_word(consumers),
+        agrees("consume", consumers)
     )
 }
 
 /// The named structural sacrifice for a coordination-gap decision, as a FACT.
 fn coordination_tradeoff(consumers: u64) -> String {
     format!(
-        "{consumers} {} outside the diff consume this contract; changing its shape requires coordinating them.",
-        modules_word(consumers)
+        "{consumers} {} outside the diff {} this contract; changing its shape requires coordinating them.",
+        modules_word(consumers),
+        agrees("consume", consumers)
     )
 }
 
