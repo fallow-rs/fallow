@@ -370,16 +370,43 @@ pub(super) fn lit_custom_element_decorator(class: &Class<'_>) -> Option<LitCusto
     })
 }
 
+/// Extract the tag-name string literal from a `@customElement('x-foo')`
+/// decorator on a class (the Named `customElement(...)` or namespace
+/// `ns.customElement(...)` form). Returns `None` when the tag argument is not a
+/// static string literal (a computed tag the Lit `unrendered-component` arm
+/// cannot key on).
+pub(super) fn lit_custom_element_tag(class: &Class<'_>) -> Option<String> {
+    class.decorators.iter().find_map(|d| {
+        let Expression::CallExpression(call) = &d.expression else {
+            return None;
+        };
+        let is_custom_element = match &call.callee {
+            Expression::Identifier(id) => id.name == "customElement",
+            Expression::StaticMemberExpression(member) => member.property.name == "customElement",
+            _ => false,
+        };
+        if !is_custom_element {
+            return None;
+        }
+        match call.arguments.first()? {
+            Argument::StringLiteral(lit) => Some(lit.value.to_string()),
+            _ => None,
+        }
+    })
+}
+
 pub fn extract_custom_elements_define(
     call: &oxc_ast::ast::CallExpression<'_>,
 ) -> Option<(String, String)> {
     let Expression::StaticMemberExpression(member) = &call.callee else {
         return None;
     };
-    let Expression::Identifier(obj) = &member.object else {
-        return None;
-    };
-    if obj.name != "customElements" || member.property.name != "define" {
+    // The registry call: bare `customElements.define` or `window.customElements`
+    // / `globalThis.customElements.define`. Symmetric with the receiver handling
+    // in `extract_custom_element_tag_reference` so a `window.`-qualified define
+    // still registers the element (otherwise it would be a silent missed
+    // registration and a false `unrendered-component`).
+    if member.property.name != "define" || !is_custom_elements_receiver(&member.object) {
         return None;
     }
     let tag = match call.arguments.first()? {
@@ -391,6 +418,52 @@ pub fn extract_custom_elements_define(
         _ => return None,
     };
     Some((tag, class_name))
+}
+
+/// Extract the custom-element tag from an IMPERATIVE render / lookup call:
+/// `document.createElement('x-foo')`, `customElements.get('x-foo')`, or
+/// `customElements.whenDefined('x-foo')`. These reference an element by tag
+/// without an `html` template, so the Lit `unrendered-component` arm must treat
+/// the tag as rendered (the string-ref abstain). Only hyphenated custom-element
+/// tags are returned; `document.createElement('div')` is a native element.
+pub(super) fn extract_custom_element_tag_reference(
+    call: &oxc_ast::ast::CallExpression<'_>,
+) -> Option<String> {
+    let Expression::StaticMemberExpression(member) = &call.callee else {
+        return None;
+    };
+    let recognized = match member.property.name.as_str() {
+        // `createElement` is Document-specific; a hyphenated tag argument is a
+        // custom-element instantiation regardless of how the document is reached
+        // (`document.createElement`, `opts.document.createElement`,
+        // `el.ownerDocument.createElement`). Receiver-agnostic on purpose:
+        // over-crediting only suppresses a finding, never creates one.
+        "createElement" => true,
+        // The Custom Elements registry API. Gated on a `customElements` receiver
+        // (bare or `window.customElements` / `globalThis.customElements`) so a
+        // generic `map.get('a-b')` does not credit an arbitrary hyphenated key.
+        "get" | "whenDefined" => is_custom_elements_receiver(&member.object),
+        _ => return None,
+    };
+    if !recognized {
+        return None;
+    }
+    let Argument::StringLiteral(lit) = call.arguments.first()? else {
+        return None;
+    };
+    let tag = lit.value.as_str();
+    tag.contains('-').then(|| tag.to_string())
+}
+
+/// Whether an expression is the Custom Elements registry: the bare identifier
+/// `customElements`, or a `*.customElements` member access (`window.customElements`,
+/// `globalThis.customElements`).
+fn is_custom_elements_receiver(expr: &Expression<'_>) -> bool {
+    match expr {
+        Expression::Identifier(id) => id.name == "customElements",
+        Expression::StaticMemberExpression(member) => member.property.name == "customElements",
+        _ => false,
+    }
 }
 
 fn is_angular_signal_initializer(value: &Expression<'_>) -> bool {

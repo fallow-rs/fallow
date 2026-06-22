@@ -556,6 +556,17 @@ fn format_markdown_unrendered_component(
     c: &fallow_core::results::UnrenderedComponentFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
+    // Lit: `component_name` is the registered TAG, so render it as a custom
+    // element `<x-foo>` (mirrors the human formatter's `framework == "lit"`
+    // branch so the two human-facing surfaces stay consistent).
+    if c.component.framework == "lit" {
+        return vec![format!(
+            "- `{}`:{} `<{}>` is a registered custom element but rendered in no template (render it or remove it)",
+            rel(&c.component.path),
+            c.component.line,
+            escape_backticks(&c.component.component_name),
+        )];
+    }
     vec![format!(
         "- `{}`:{} `{}` is reachable but rendered nowhere in this project (render it somewhere or remove it)",
         rel(&c.component.path),

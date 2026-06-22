@@ -35,6 +35,248 @@ const title = "Hello";
 }
 
 #[test]
+fn astro_template_only_rendered_component_is_not_unused() {
+    // `Header` is imported in frontmatter and used ONLY as a `<Header/>` tag in
+    // the markup; the frontmatter semantic pass alone would call it unused, but
+    // the template-used credit must keep it out of `unused_import_bindings` so
+    // `referenced_import_bindings` (imports minus unused) includes it.
+    let info = parse_source_to_module(
+        FileId(0),
+        Path::new("Page.astro"),
+        r"---
+import Header from '../components/Header.astro';
+import { fmt } from '../lib/util.ts';
+const title = fmt('hi');
+---
+<html><body><h1>{title}</h1><Header /></body></html>
+",
+        0,
+        false,
+    );
+    assert!(
+        !info.unused_import_bindings.contains(&"Header".to_string()),
+        "template-rendered component must not be unused: {:?}",
+        info.unused_import_bindings
+    );
+    // `fmt` is used in the frontmatter script, so it is a real value reference.
+    assert!(
+        info.value_referenced_import_bindings
+            .contains(&"fmt".to_string()),
+        "frontmatter-used import must be value-referenced: {:?}",
+        info.value_referenced_import_bindings
+    );
+}
+
+#[test]
+fn astro_template_expression_binding_is_credited() {
+    // `tmplOnly` is consumed only inside a `{tmplOnly()}` markup expression.
+    let info = parse_source_to_module(
+        FileId(0),
+        Path::new("Page.astro"),
+        r"---
+import { tmplOnly } from '../lib/util.ts';
+---
+<p>{tmplOnly()}</p>
+",
+        0,
+        false,
+    );
+    assert!(
+        !info
+            .unused_import_bindings
+            .contains(&"tmplOnly".to_string()),
+        "expression-binding import must not be unused: {:?}",
+        info.unused_import_bindings
+    );
+}
+
+#[test]
+fn astro_frontmatter_import_used_nowhere_is_unused() {
+    // `Dead` is imported but referenced in neither the frontmatter script nor the
+    // markup, so it is a genuinely-unused binding (the precision the semantic pass
+    // restores; previously Astro left every import referenced).
+    let info = parse_source_to_module(
+        FileId(0),
+        Path::new("Page.astro"),
+        r"---
+import Dead from '../components/Dead.astro';
+---
+<div>nothing here references Dead</div>
+",
+        0,
+        false,
+    );
+    assert!(
+        info.unused_import_bindings.contains(&"Dead".to_string()),
+        "import used nowhere must be unused: {:?}",
+        info.unused_import_bindings
+    );
+}
+
+#[test]
+fn astro_identifier_inside_script_block_does_not_credit_frontmatter_import() {
+    // A frontmatter import whose name appears ONLY inside a `<script>` block (a
+    // client-script local) is not a markup use and stays unused.
+    let info = parse_source_to_module(
+        FileId(0),
+        Path::new("Page.astro"),
+        r"---
+import Widget from '../components/Widget.astro';
+---
+<div>no markup use</div>
+<script>const Widget = 1; console.log(Widget);</script>
+",
+        0,
+        false,
+    );
+    assert!(
+        info.unused_import_bindings.contains(&"Widget".to_string()),
+        "script-block identifier must not credit a frontmatter import: {:?}",
+        info.unused_import_bindings
+    );
+}
+
+#[test]
+fn astro_unused_prop_harvested_dead_used_prop_credited() {
+    let info = parse_source_to_module(
+        FileId(0),
+        Path::new("Card.astro"),
+        r"---
+interface Props { title: string; unused: string }
+const { title } = Astro.props;
+---
+<h1>{title}</h1>
+",
+        0,
+        false,
+    );
+    let title = info
+        .component_props
+        .iter()
+        .find(|p| p.name == "title")
+        .expect("title harvested");
+    let unused = info
+        .component_props
+        .iter()
+        .find(|p| p.name == "unused")
+        .expect("unused harvested");
+    assert!(title.used_in_template, "title used in {{title}}: {title:?}");
+    assert!(
+        !unused.used_in_script && !unused.used_in_template,
+        "unused prop must be dead: {unused:?}"
+    );
+    assert!(!info.has_unharvestable_props);
+    assert!(!info.has_props_attrs_fallthrough);
+}
+
+#[test]
+fn astro_props_member_access_credits_prop() {
+    let info = parse_source_to_module(
+        FileId(0),
+        Path::new("Card.astro"),
+        r"---
+interface Props { title: string }
+const heading = Astro.props.title;
+---
+<h1>{heading}</h1>
+",
+        0,
+        false,
+    );
+    let title = info
+        .component_props
+        .iter()
+        .find(|p| p.name == "title")
+        .expect("title harvested");
+    assert!(
+        title.used_in_script,
+        "Astro.props.title must credit title: {title:?}"
+    );
+}
+
+#[test]
+fn astro_props_rest_spread_abstains() {
+    let info = parse_source_to_module(
+        FileId(0),
+        Path::new("Card.astro"),
+        r"---
+interface Props { a: string; b: string }
+const { a, ...rest } = Astro.props;
+---
+<div>{a}{rest.b}</div>
+",
+        0,
+        false,
+    );
+    assert!(
+        info.has_props_attrs_fallthrough,
+        "a rest element in the Astro.props destructure must abstain"
+    );
+}
+
+#[test]
+fn astro_props_interface_extends_abstains() {
+    let info = parse_source_to_module(
+        FileId(0),
+        Path::new("Card.astro"),
+        r"---
+import type { Base } from './base';
+interface Props extends Base { title: string }
+const { title } = Astro.props;
+---
+<h1>{title}</h1>
+",
+        0,
+        false,
+    );
+    assert!(
+        info.has_unharvestable_props,
+        "interface Props extends Base must abstain (names unresolvable)"
+    );
+}
+
+#[test]
+fn astro_props_whole_object_use_abstains() {
+    let info = parse_source_to_module(
+        FileId(0),
+        Path::new("Card.astro"),
+        r"---
+interface Props { a: string }
+const all = Astro.props;
+doSomething(all);
+---
+<div>x</div>
+",
+        0,
+        false,
+    );
+    assert!(
+        info.has_props_attrs_fallthrough,
+        "a whole-object Astro.props binding use must abstain"
+    );
+}
+
+#[test]
+fn astro_props_template_spread_abstains() {
+    let info = parse_source_to_module(
+        FileId(0),
+        Path::new("Card.astro"),
+        r"---
+interface Props { a: string; b: string }
+const { a } = Astro.props;
+---
+<Child {...Astro.props}>{a}</Child>
+",
+        0,
+        false,
+    );
+    assert!(
+        info.has_props_attrs_fallthrough,
+        "a {{...Astro.props}} template spread must abstain"
+    );
+}
+
+#[test]
 fn astro_no_frontmatter_returns_empty() {
     let info = parse_source_to_module(
         FileId(0),

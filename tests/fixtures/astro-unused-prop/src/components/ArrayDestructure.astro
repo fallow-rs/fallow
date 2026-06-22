@@ -1,0 +1,9 @@
+---
+interface Props {
+  arrayProp: string;
+}
+// Array-destructuring an object is runtime-broken, but it must not silently
+// flag `arrayProp` as unused: the whole component abstains.
+const [first] = Astro.props;
+---
+<div>{first}</div>

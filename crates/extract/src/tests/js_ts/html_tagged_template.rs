@@ -233,3 +233,89 @@ export const Layout = () => html`
     );
     assert!(info.imports.iter().all(|i| !i.source.is_empty()));
 }
+
+#[test]
+fn lit_custom_element_decorator_records_registered_tag() {
+    let info = parse_ts(
+        r#"import { LitElement, html } from "lit";
+import { customElement } from "lit/decorators.js";
+@customElement("my-element")
+export class MyElement extends LitElement {
+  render() {
+    return html`<div></div>`;
+  }
+}"#,
+    );
+    let reg = info
+        .registered_custom_elements
+        .iter()
+        .find(|r| r.tag == "my-element")
+        .expect("my-element registered");
+    assert_eq!(reg.class_local_name, "MyElement");
+}
+
+#[test]
+fn custom_elements_define_records_registered_tag() {
+    let info = parse_ts(
+        r#"class XFoo extends HTMLElement {}
+customElements.define("x-foo", XFoo);"#,
+    );
+    let tags: Vec<&str> = info
+        .registered_custom_elements
+        .iter()
+        .map(|r| r.tag.as_str())
+        .collect();
+    assert!(tags.contains(&"x-foo"), "registered: {tags:?}");
+}
+
+#[test]
+fn html_template_records_used_custom_element_tags_excluding_native() {
+    let info = parse_ts(
+        r#"import { html } from "lit";
+export const tpl = () => html`<my-card><span>x</span><other-el></other-el></my-card>`;"#,
+    );
+    assert!(
+        info.used_custom_element_tags
+            .contains(&"my-card".to_string()),
+        "{:?}",
+        info.used_custom_element_tags
+    );
+    assert!(
+        info.used_custom_element_tags
+            .contains(&"other-el".to_string()),
+        "{:?}",
+        info.used_custom_element_tags
+    );
+    assert!(
+        !info.used_custom_element_tags.contains(&"span".to_string()),
+        "a native (non-hyphenated) tag must not be recorded: {:?}",
+        info.used_custom_element_tags
+    );
+}
+
+#[test]
+fn document_create_element_credits_custom_element_tag() {
+    let info = parse_ts(r#"document.body.appendChild(document.createElement("x-foo"));"#);
+    assert!(
+        info.used_custom_element_tags.contains(&"x-foo".to_string()),
+        "createElement should credit the tag as rendered: {:?}",
+        info.used_custom_element_tags
+    );
+    // A native (non-hyphenated) createElement is not a custom element.
+    let native = parse_ts(r#"document.createElement("div");"#);
+    assert!(native.used_custom_element_tags.is_empty());
+}
+
+#[test]
+fn dynamic_html_tag_records_dynamic_sentinel() {
+    let info = parse_ts(
+        r#"import { html } from "lit";
+export const render = (tag) => html`<${tag}></${tag}>`;"#,
+    );
+    assert!(
+        info.used_custom_element_tags
+            .contains(&"<dynamic>".to_string()),
+        "a `<${{tag}}>` dynamic render must record the dynamic sentinel: {:?}",
+        info.used_custom_element_tags
+    );
+}

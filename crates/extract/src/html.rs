@@ -117,6 +117,32 @@ pub(crate) fn collect_asset_refs(source: &str) -> Vec<String> {
     refs
 }
 
+/// Regex matching an opening or closing custom-element tag. The HTML spec
+/// requires a custom-element name to contain a hyphen, so `[a-z][a-z0-9]*-...`
+/// captures `<x-foo>` / `<my-element>` while native tags (`div`, `span`) never
+/// match. The capture stops before attributes / `>` / `/`.
+static CUSTOM_ELEMENT_TAG_RE: std::sync::LazyLock<regex::Regex> =
+    std::sync::LazyLock::new(|| crate::static_regex(r"</?\s*([a-z][a-z0-9]*-[a-z0-9-]*)"));
+
+/// Collect the custom-element tag names rendered in an `html` template snippet
+/// (`<x-foo>` / `</x-foo>` -> `x-foo`). HTML comments are stripped first so a
+/// commented-out `<!-- <x-foo> -->` does not credit the element. Deduped; native
+/// HTML tags are excluded by the hyphen requirement. Feeds the Lit
+/// `unrendered-component` arm's project-wide rendered-tag union.
+pub(crate) fn collect_custom_element_tags(source: &str) -> Vec<String> {
+    let stripped = HTML_COMMENT_RE.replace_all(source, "");
+    let mut tags: Vec<String> = Vec::new();
+    for cap in CUSTOM_ELEMENT_TAG_RE.captures_iter(&stripped) {
+        if let Some(m) = cap.get(1) {
+            let tag = m.as_str();
+            if !tags.iter().any(|t| t == tag) {
+                tags.push(tag.to_string());
+            }
+        }
+    }
+    tags
+}
+
 /// Parse an HTML file, extracting script and stylesheet references as imports.
 #[cfg(test)]
 pub(crate) fn parse_html_to_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleInfo {
@@ -277,6 +303,12 @@ fn html_module_info(
         angular_inputs: Vec::new(),
         angular_outputs: Vec::new(),
         angular_component_selectors: Vec::new(),
+        registered_custom_elements: Vec::new(),
+        // Custom-element tags rendered in a standalone `.html` document (an app
+        // shell, demo, or dev page) feed the Lit `unrendered-component` arm's
+        // project-wide rendered-tag union, so an element rendered only from HTML
+        // (e.g. a root `<my-app>` in `index.html`) is not falsely flagged.
+        used_custom_element_tags: collect_custom_element_tags(source),
         angular_used_selectors,
         angular_entry_component_refs: Vec::new(),
         has_dynamic_component_render,

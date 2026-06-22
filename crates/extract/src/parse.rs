@@ -397,7 +397,12 @@ fn parse_non_js_source_to_module(
         ));
     }
     if is_astro_file(path) {
-        return Some(parse_astro_to_module(file_id, source, content_hash));
+        return Some(parse_astro_to_module(
+            file_id,
+            source,
+            content_hash,
+            need_complexity,
+        ));
     }
     if is_mdx_file(path) {
         return Some(parse_mdx_to_module(file_id, source, content_hash));

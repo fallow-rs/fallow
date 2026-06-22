@@ -206,6 +206,19 @@ pub struct ModuleInfo {
     /// arm of the `unrendered-component` detector. Empty for every non-Angular
     /// class and for `@Directive`. See `AngularComponentSelector`.
     pub angular_component_selectors: Vec<AngularComponentSelector>,
+    /// Lit / web-component custom elements REGISTERED in this file via
+    /// `@customElement('x-foo')` or `customElements.define('x-foo', C)`. Consumed
+    /// by the Lit arm of the `unrendered-component` detector, which flags a
+    /// registered element whose tag is rendered in NO `html` template
+    /// project-wide. Empty for non-Lit / non-web-component files. See
+    /// `RegisteredCustomElement`.
+    pub registered_custom_elements: Vec<RegisteredCustomElement>,
+    /// Custom-element tag names USED (rendered) in this file's `html` tagged
+    /// templates, e.g. `` html`<x-foo></x-foo>` `` -> `x-foo`. Only hyphenated
+    /// (custom-element) tags are recorded; native HTML tags are excluded by the
+    /// hyphen requirement. The detector unions these project-wide into the
+    /// rendered-tag set. Empty for files with no `html` templates.
+    pub used_custom_element_tags: Vec<String>,
     /// Custom element selector tag names referenced in this file's Angular
     /// templates (inline `@Component({ template })` and the linked external
     /// `templateUrl` `.html` module), e.g. `<app-foo>` -> `app-foo`. Native HTML
@@ -1518,6 +1531,34 @@ pub struct AngularComponentSelector {
     pub class_name: String,
 }
 
+/// Sentinel pushed into `ModuleInfo.used_custom_element_tags` when an `html`
+/// template renders a DYNAMIC tag (`` html`<${tag}>` ``, the lit `static-html`
+/// form). It contains `<`/`>` so it can never collide with a real (hyphenated,
+/// no-angle-bracket) custom-element tag. When present project-wide, the Lit
+/// `unrendered-component` arm abstains on EVERY element (a dynamic render could
+/// instantiate any of them), mirroring `unprovided-inject`'s `has_dynamic_provide`.
+pub const DYNAMIC_CUSTOM_ELEMENT_TAG: &str = "<dynamic>";
+
+/// A Lit / web-component custom element registered in a module via
+/// `@customElement('x-foo')` or `customElements.define('x-foo', C)`. Consumed by
+/// the Lit arm of the `unrendered-component` detector. The span is stored as a
+/// byte offset (not an `oxc_span::Span`) so the type round-trips through the
+/// bitcode cache directly, mirroring `AngularComponentSelector::span_start`.
+#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode, PartialEq, Eq)]
+pub struct RegisteredCustomElement {
+    /// The registered custom-element tag name (`x-foo`).
+    pub tag: String,
+    /// The registering class's local name, used for the public-API / export
+    /// abstain (an exported / published element is rendered by a downstream
+    /// consumer the scan cannot see). Empty for an anonymous
+    /// `export default @customElement('x-foo') class extends LitElement {}`.
+    pub class_local_name: String,
+    /// Start byte offset of the registering class declaration (anchors the
+    /// finding at the element, NOT line 1, since a `.ts` file can register
+    /// several custom elements).
+    pub span_start: u32,
+}
+
 /// A key returned from a SvelteKit route `load()` function's terminal return
 /// object literal. Harvested from `+page.{ts,server.ts,js,server.js}` files
 /// exporting a `load` function. Consumed by the `unused-load-data-key` detector,
@@ -1765,7 +1806,7 @@ const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 216);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1256);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1304);
 
 /// A re-export declaration.
 #[derive(Debug, Clone)]
@@ -2007,6 +2048,8 @@ mod tests {
             angular_inputs: Vec::new(),
             angular_outputs: Vec::new(),
             angular_component_selectors: Vec::new(),
+            registered_custom_elements: Vec::new(),
+            used_custom_element_tags: Vec::new(),
             angular_used_selectors: Vec::new(),
             angular_entry_component_refs: Vec::new(),
             has_dynamic_component_render: false,
@@ -3219,6 +3262,8 @@ mod tests {
             angular_inputs: Vec::new(),
             angular_outputs: Vec::new(),
             angular_component_selectors: Vec::new(),
+            registered_custom_elements: Vec::new(),
+            used_custom_element_tags: Vec::new(),
             angular_used_selectors: Vec::new(),
             angular_entry_component_refs: Vec::new(),
             has_dynamic_component_render: false,

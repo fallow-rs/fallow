@@ -477,10 +477,19 @@ fn check_unrendered_component(
             continue;
         }
 
-        let value = format!(
-            "**fallow**: Component {} is reachable but rendered nowhere in this project.",
-            format_inline_code(&c.component_name),
-        );
+        // Lit: `component_name` is the registered TAG; render it as a custom
+        // element to match the CLI human / markdown formatters.
+        let value = if c.framework == "lit" {
+            format!(
+                "**fallow**: Custom element {} is registered but rendered in no template.",
+                format_inline_code(&format!("<{}>", c.component_name)),
+            )
+        } else {
+            format!(
+                "**fallow**: Component {} is reachable but rendered nowhere in this project.",
+                format_inline_code(&c.component_name),
+            )
+        };
 
         return Some(Hover {
             contents: HoverContents::Markup(MarkupContent {

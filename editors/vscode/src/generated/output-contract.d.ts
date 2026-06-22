@@ -2882,11 +2882,15 @@ export interface UnrenderedComponentFinding {
  */
 path: string
 /**
- * The component name (the `.vue`/`.svelte` file stem, PascalCase).
+ * The component name. For `"vue"` / `"svelte"` / `"astro"` this is the SFC
+ * file stem (PascalCase); for `"angular"` it is the component class name; for
+ * `"lit"` it is the registered custom-element TAG (e.g. `x-foo`), not a file
+ * stem. Use `path` to anchor the file across all frameworks.
  */
 component_name: string
 /**
- * Which framework this component belongs to: `"vue"` or `"svelte"`.
+ * Which framework this component belongs to: `"vue"`, `"svelte"`, `"astro"`,
+ * `"angular"`, or `"lit"`.
  */
 framework: string
 /**

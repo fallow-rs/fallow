@@ -6,6 +6,7 @@
 //! in [`engine`] and is shared by all three scanners. This module hosts the
 //! Angular outer scanner; [`vue`] and [`svelte`] host the SFC scanners.
 
+mod astro;
 mod engine;
 mod svelte;
 mod vue;
@@ -17,6 +18,7 @@ use engine::{
     is_identifier_before, read_attribute_value, read_identifier, skip_quoted, skip_whitespace,
 };
 
+pub use astro::compute_astro_template_complexity;
 pub use svelte::compute_svelte_template_complexity;
 pub use vue::compute_vue_template_complexity;
 

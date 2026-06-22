@@ -1766,6 +1766,18 @@ fn format_unrendered_component(
     entry: &fallow_types::output_dead_code::UnrenderedComponentFinding,
 ) -> String {
     let c = &entry.component;
+    // Lit: the `component_name` is the registered TAG, so render it as a custom
+    // element `<x-foo>` (the user's mental model + searchable artifact) with
+    // wording that names the registration.
+    if c.framework == "lit" {
+        return format!(
+            "{} {} {}",
+            format!(":{}", c.line).dimmed(),
+            format!("<{}>", c.component_name).bold(),
+            "is a registered custom element but rendered in no template (render it or remove it)"
+                .dimmed(),
+        );
+    }
     format!(
         "{} {} {}",
         format!(":{}", c.line).dimmed(),

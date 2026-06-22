@@ -13,6 +13,7 @@ use oxc_allocator::Allocator;
 use oxc_ast_visit::Visit;
 use oxc_parser::Parser;
 use oxc_span::{SourceType, Span};
+use rustc_hash::FxHashSet;
 
 use crate::asset_url::normalize_asset_url;
 use crate::html::is_remote_url;
@@ -54,6 +55,172 @@ static SRC_ATTR_RE: LazyLock<regex::Regex> =
 /// Regex matching HTML comments for stripping before template scanning.
 static HTML_COMMENT_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| crate::static_regex(r"(?s)<!--.*?-->"));
+
+/// Regex matching JavaScript identifier tokens for template-usage scanning.
+static TEMPLATE_IDENT_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r"[A-Za-z_$][A-Za-z0-9_$]*"));
+
+/// Regex matching the root identifier of an opening/closing markup tag
+/// (`<Header`, `</Header`, `<ui.Card` -> `ui`). The capture stops at the first
+/// non-identifier byte, so a dotted namespace tag yields its root binding.
+static TEMPLATE_TAG_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r"</?\s*([A-Za-z_$][A-Za-z0-9_$]*)"));
+
+/// Regex matching the `define:vars=` directive prefix. The expression object
+/// that follows (`define:vars={{ a, b: c }}`) passes frontmatter values into a
+/// scoped `<style>` / `<script>` / element, so the identifiers it references are
+/// real prop / import uses.
+static DEFINE_VARS_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r"define:vars\s*="));
+
+/// Collect the set of identifier names that appear USED in the Astro template
+/// markup, so the frontmatter semantic pass does not mark a template-only-used
+/// import (a rendered `<Header/>` component, or a `{fmt(x)}` expression binding)
+/// as unused. Only two genuine usage positions are credited: component tag roots
+/// (`<Header>`, `<ui.Card>`) and identifiers inside `{ ... }` expression regions
+/// (attribute values and text expressions). Raw text content is deliberately NOT
+/// scanned, so prose that happens to spell a component name (`references Header`)
+/// does not credit the import. `<script>` / `<style>` blocks and HTML comments
+/// are masked first so their identifiers (client-script locals, CSS) never
+/// credit a frontmatter import. The complement (a frontmatter import referenced
+/// in NEITHER the frontmatter script NOR a tag/expression position) is the
+/// genuinely-dead case the `unused-import` / `unrendered-component` arms surface.
+fn collect_astro_template_used_names(template: &str) -> FxHashSet<String> {
+    let mut used = FxHashSet::default();
+    if template.is_empty() {
+        return used;
+    }
+    // Byte ranges of `<script>` / `<style>` bodies and HTML comments. Positions
+    // inside any of these are skipped rather than mutating the source (mutation
+    // would corrupt multibyte UTF-8 inside a masked range).
+    let mut masked: Vec<(usize, usize)> = Vec::new();
+    masked.extend(
+        SCRIPT_BLOCK_RE
+            .find_iter(template)
+            .map(|m| (m.start(), m.end())),
+    );
+    masked.extend(
+        STYLE_BLOCK_RE
+            .find_iter(template)
+            .map(|m| (m.start(), m.end())),
+    );
+    masked.extend(
+        HTML_COMMENT_RE
+            .find_iter(template)
+            .map(|m| (m.start(), m.end())),
+    );
+    let is_masked = |pos: usize| masked.iter().any(|&(s, e)| pos >= s && pos < e);
+
+    // Component tag roots.
+    for cap in TEMPLATE_TAG_RE.captures_iter(template) {
+        if let Some(root) = cap.get(1)
+            && !is_masked(root.start())
+        {
+            used.insert(root.as_str().to_string());
+        }
+    }
+
+    // Identifiers inside `{ ... }` expression regions.
+    collect_brace_expression_idents(template, &is_masked, &mut used);
+
+    // Identifiers inside `define:vars={ ... }` directive values. These sit in the
+    // opening tag of a `<style>` / `<script>` block (masked above), so they are
+    // scanned separately over the unmasked template.
+    collect_define_vars_idents(template, &mut used);
+
+    used
+}
+
+/// Given `open` = the index of a `{` byte in `bytes`, return the index of the
+/// matching `}` (exclusive region end), or `bytes.len()` if unterminated. The
+/// scan is string-aware so braces inside quoted strings do not shift the depth.
+/// All boundary bytes (`{`, `}`, quotes, backslash) are ASCII, so the returned
+/// index always lands on a char boundary.
+fn brace_body_end(bytes: &[u8], open: usize) -> usize {
+    let len = bytes.len();
+    let mut depth = 1usize;
+    let mut j = open + 1;
+    let mut quote: Option<u8> = None;
+    while j < len && depth > 0 {
+        let c = bytes[j];
+        if let Some(q) = quote {
+            if c == b'\\' {
+                j += 1; // skip the escaped byte
+            } else if c == q {
+                quote = None;
+            }
+        } else {
+            match c {
+                b'"' | b'\'' | b'`' => quote = Some(c),
+                b'{' => depth += 1,
+                b'}' => depth -= 1,
+                _ => {}
+            }
+        }
+        j += 1;
+    }
+    // `j` is one past the matching `}` (or `len` if unterminated); the region body
+    // excludes the closing brace.
+    if depth == 0 { j - 1 } else { len }
+}
+
+/// Credit every identifier inside each `define:vars={ ... }` directive value.
+/// Astro's `define:vars` injects frontmatter values into a scoped `<style>` /
+/// `<script>` (or element) as the expression object, so a prop or import used
+/// only there is a genuine use. Because the directive sits inside the opening tag
+/// of a `<style>` / `<script>` block that the main scanner masks, this runs over
+/// the unmasked template and matches the directive directly. Over-crediting (e.g.
+/// an identifier-shaped fragment of a quoted CSS-variable key) only suppresses a
+/// finding, never creates one.
+fn collect_define_vars_idents(template: &str, used: &mut FxHashSet<String>) {
+    let bytes = template.as_bytes();
+    for m in DEFINE_VARS_RE.find_iter(template) {
+        // Skip whitespace after `define:vars=` to the JSX expression `{`.
+        let mut k = m.end();
+        while k < bytes.len() && bytes[k].is_ascii_whitespace() {
+            k += 1;
+        }
+        if k >= bytes.len() || bytes[k] != b'{' {
+            continue;
+        }
+        let end = brace_body_end(bytes, k);
+        if let Some(region) = template.get(k + 1..end) {
+            for token in TEMPLATE_IDENT_RE.find_iter(region) {
+                used.insert(token.as_str().to_string());
+            }
+        }
+    }
+}
+
+/// Collect every identifier inside each top-level `{ ... }` expression region of
+/// the Astro markup. The scan is depth-counted and string-aware so object
+/// literals (`{ class: x }`) and strings containing braces do not break region
+/// boundaries. Region boundaries (`{`, `}`, and quote bytes) are ASCII, so the
+/// `template.get(..)` slice always lands on char boundaries even when the region
+/// body contains multibyte text.
+fn collect_brace_expression_idents(
+    template: &str,
+    is_masked: &impl Fn(usize) -> bool,
+    used: &mut FxHashSet<String>,
+) {
+    let bytes = template.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+    while i < len {
+        if bytes[i] != b'{' || is_masked(i) {
+            i += 1;
+            continue;
+        }
+        let start = i + 1;
+        let region_end = brace_body_end(bytes, i);
+        if let Some(region) = template.get(start..region_end) {
+            for token in TEMPLATE_IDENT_RE.find_iter(region) {
+                used.insert(token.as_str().to_string());
+            }
+        }
+        i = region_end.max(start);
+    }
+}
 
 /// Extract frontmatter from an Astro component.
 pub fn extract_astro_frontmatter(source: &str) -> Option<SfcScript> {
@@ -175,6 +342,7 @@ pub(crate) fn parse_astro_to_module(
     file_id: FileId,
     source: &str,
     content_hash: u64,
+    need_complexity: bool,
 ) -> ModuleInfo {
     let parsed_suppressions = crate::suppress::parse_suppressions_from_source(source);
     let line_offsets = fallow_types::extract::compute_line_offsets(source);
@@ -185,24 +353,148 @@ pub(crate) fn parse_astro_to_module(
         .map_or(0, |script| script.byte_offset + script.body.len());
     let template = source.get(template_offset..).unwrap_or("");
 
-    let mut extractor = if let Some(script) = frontmatter.as_ref() {
-        let source_type = SourceType::ts();
-        let allocator = Allocator::default();
-        let parser_return = Parser::new(&allocator, &script.body, source_type).parse();
-        let mut extractor = ModuleInfoExtractor::new();
-        extractor.visit_program(&parser_return.program);
-        let extraction = ExtractionResult::contiguous(&script.body, script.byte_offset);
-        extractor.remap_spans_with(|span| extraction.remap_span(span));
-        extractor
-    } else {
-        ModuleInfoExtractor::new()
-    };
+    // Names used in the template markup (rendered components, expression
+    // bindings). Passed to the frontmatter semantic pass so a template-only-used
+    // import is not falsely classified as an unused binding.
+    let template_used = collect_astro_template_used_names(template);
+
+    let frontmatter_offset = frontmatter.as_ref().map_or(0, |script| script.byte_offset);
+
+    let (mut extractor, semantic_usage, props_harvest, frontmatter_complexity) =
+        if let Some(script) = frontmatter.as_ref() {
+            let source_type = SourceType::ts();
+            let allocator = Allocator::default();
+            let parser_return = Parser::new(&allocator, &script.body, source_type).parse();
+            let mut extractor = ModuleInfoExtractor::new();
+            extractor.visit_program(&parser_return.program);
+            let extraction = ExtractionResult::contiguous(&script.body, script.byte_offset);
+            extractor.remap_spans_with(|span| extraction.remap_span(span));
+            // Run the same `oxc_semantic` unused-binding pass the JS/TS path runs
+            // (`parse.rs::compute_semantic_usage`), crediting template-used names
+            // so a frontmatter import rendered only as `<Header/>` is referenced,
+            // not unused. Astro previously left `unused_import_bindings` empty
+            // (every import treated as referenced), which masked genuinely-dead
+            // frontmatter imports AND prevented `unrendered-component` from ever
+            // firing.
+            let semantic_usage = crate::parse::compute_semantic_usage(
+                &parser_return.program,
+                &extractor.imports,
+                &template_used,
+            );
+            // Harvest the `interface Props { ... }` declaration + `Astro.props`
+            // usage for the `unused-component-prop` Astro arm.
+            let props_harvest = crate::sfc_props::harvest_astro_props(&parser_return.program);
+            // Score the frontmatter's JS functions (the SFC-script analog), so a
+            // complex `.astro` frontmatter contributes to the health complexity
+            // aggregate like a Vue/Svelte `<script>`.
+            let frontmatter_complexity = if need_complexity {
+                compute_astro_frontmatter_complexity(
+                    &parser_return.program,
+                    &script.body,
+                    script.byte_offset,
+                    &line_offsets,
+                )
+            } else {
+                Vec::new()
+            };
+            (
+                extractor,
+                semantic_usage,
+                props_harvest,
+                frontmatter_complexity,
+            )
+        } else {
+            (
+                ModuleInfoExtractor::new(),
+                crate::parse::SemanticUsage::default(),
+                crate::sfc_props::DefinePropsHarvest::default(),
+                Vec::new(),
+            )
+        };
 
     extend_imports_from_template(&mut extractor.imports, template, template_offset);
 
     let mut info = extractor.into_module_info(file_id, content_hash, parsed_suppressions);
+    // Astro-only: thread the frontmatter binding usage onto the module so
+    // `referenced_import_bindings` (derived from `imports` minus
+    // `unused_import_bindings` in `release_resolution_payload`) reflects ACTUAL
+    // use. `auto_import_candidates` is intentionally left empty: Astro has no
+    // Nuxt-style convention auto-import, so seeding it would be inert at best.
+    info.unused_import_bindings = semantic_usage.import_binding_usage.unused;
+    info.type_referenced_import_bindings = semantic_usage.import_binding_usage.type_referenced;
+    info.value_referenced_import_bindings = semantic_usage.import_binding_usage.value_referenced;
+    apply_astro_props(
+        &mut info,
+        props_harvest,
+        &template_used,
+        template,
+        frontmatter_offset,
+    );
+    // Health complexity (only when requested): the frontmatter functions (scored
+    // above) plus a synthetic `<template>` entry for the markup `{ ... }`
+    // expression / iteration complexity, mirroring the Vue/Svelte synthetic
+    // template entry. Folds into the existing complexity aggregate; no new rule.
+    info.complexity.extend(frontmatter_complexity);
+    if need_complexity {
+        info.complexity
+            .extend(crate::template_complexity::compute_astro_template_complexity(source));
+    }
     info.line_offsets = line_offsets;
     info
+}
+
+/// Score the frontmatter's JS functions (cyclomatic/cognitive), remapping each
+/// function's line/col from the frontmatter-body coordinate space onto the
+/// `.astro` source. Mirrors the Vue/Svelte `sfc::translate_script_complexity`
+/// path so a complex `.astro` frontmatter contributes to the health complexity
+/// aggregate the same as an SFC `<script>`.
+fn compute_astro_frontmatter_complexity(
+    program: &oxc_ast::ast::Program<'_>,
+    body: &str,
+    body_byte_offset: usize,
+    source_line_offsets: &[u32],
+) -> Vec<fallow_types::extract::FunctionComplexity> {
+    let body_line_offsets = fallow_types::extract::compute_line_offsets(body);
+    let mut complexity = crate::complexity::compute_complexity(program, body, &body_line_offsets);
+    let (body_start_line, body_start_col) = fallow_types::extract::byte_offset_to_line_col(
+        source_line_offsets,
+        u32::try_from(body_byte_offset).unwrap_or(u32::MAX),
+    );
+    for function in &mut complexity {
+        function.line = body_start_line + function.line.saturating_sub(1);
+        if function.line == body_start_line {
+            function.col += body_start_col;
+        }
+    }
+    complexity
+}
+
+/// Thread the harvested Astro `Props` declaration + `Astro.props` usage onto the
+/// module: copy the abstain flags, remap each prop span onto the `.astro` source,
+/// and set `used_in_template` from the template-usage scan. A template spread
+/// `{...Astro.props}` forwards every prop opaquely, so it sets the whole-file
+/// fallthrough abstain (the markup analog of a script-side whole-object use).
+fn apply_astro_props(
+    info: &mut ModuleInfo,
+    harvest: crate::sfc_props::DefinePropsHarvest,
+    template_used: &FxHashSet<String>,
+    template: &str,
+    frontmatter_offset: usize,
+) {
+    if harvest.has_unharvestable_props {
+        info.has_unharvestable_props = true;
+    }
+    if harvest.has_props_attrs_fallthrough || template.contains("...Astro.props") {
+        info.has_props_attrs_fallthrough = true;
+    }
+    for mut prop in harvest.props {
+        prop.span_start = prop
+            .span_start
+            .saturating_add(u32::try_from(frontmatter_offset).unwrap_or(u32::MAX));
+        prop.used_in_template =
+            template_used.contains(&prop.local) || template_used.contains(&prop.name);
+        info.component_props.push(prop);
+    }
 }
 
 /// Append imports discovered in the Astro template body: `<script src="...">`
@@ -479,7 +771,7 @@ mod tests {
 
     #[test]
     fn parse_astro_to_module_no_frontmatter() {
-        let info = parse_astro_to_module(FileId(0), "<div>Hello</div>", 42);
+        let info = parse_astro_to_module(FileId(0), "<div>Hello</div>", 42, false);
         assert!(info.imports.is_empty());
         assert!(info.exports.is_empty());
         assert_eq!(info.content_hash, 42);
@@ -489,7 +781,7 @@ mod tests {
     #[test]
     fn parse_astro_to_module_with_imports() {
         let source = "---\nimport { ref } from 'vue';\nconst x = ref(0);\n---\n<div />";
-        let info = parse_astro_to_module(FileId(1), source, 99);
+        let info = parse_astro_to_module(FileId(1), source, 99, false);
         assert_eq!(info.imports.len(), 1);
         assert_eq!(info.imports[0].source, "vue");
         assert_eq!(info.file_id, FileId(1));
@@ -499,14 +791,14 @@ mod tests {
     #[test]
     fn parse_astro_to_module_has_line_offsets() {
         let source = "---\nconst x = 1;\n---\n<div />";
-        let info = parse_astro_to_module(FileId(0), source, 0);
+        let info = parse_astro_to_module(FileId(0), source, 0, false);
         assert!(!info.line_offsets.is_empty());
     }
 
     #[test]
     fn parse_astro_to_module_has_suppressions() {
         let source = "---\n// fallow-ignore-file\nconst x = 1;\n---\n<div />";
-        let info = parse_astro_to_module(FileId(0), source, 0);
+        let info = parse_astro_to_module(FileId(0), source, 0, false);
         assert!(!info.suppressions.is_empty());
         assert_eq!(info.suppressions[0].line, 0);
     }
@@ -524,7 +816,7 @@ mod tests {
     #[test]
     fn parse_astro_template_script_src_relative() {
         let source = "---\nconst x = 1;\n---\n<script src=\"./client.ts\"></script>";
-        let info = parse_astro_to_module(FileId(0), source, 0);
+        let info = parse_astro_to_module(FileId(0), source, 0, false);
         assert_eq!(info.imports.len(), 1);
         assert_eq!(info.imports[0].source, "./client.ts");
     }
@@ -532,7 +824,7 @@ mod tests {
     #[test]
     fn parse_astro_template_script_src_parent_relative() {
         let source = "---\n---\n<script src=\"../scripts/foo.ts\"></script>";
-        let info = parse_astro_to_module(FileId(0), source, 0);
+        let info = parse_astro_to_module(FileId(0), source, 0, false);
         assert_eq!(info.imports.len(), 1);
         assert_eq!(info.imports[0].source, "../scripts/foo.ts");
     }
@@ -540,7 +832,7 @@ mod tests {
     #[test]
     fn parse_astro_template_script_src_bare_normalized() {
         let source = "---\n---\n<script src=\"client.ts\"></script>";
-        let info = parse_astro_to_module(FileId(0), source, 0);
+        let info = parse_astro_to_module(FileId(0), source, 0, false);
         assert_eq!(info.imports.len(), 1);
         assert_eq!(info.imports[0].source, "./client.ts");
     }
@@ -548,14 +840,14 @@ mod tests {
     #[test]
     fn parse_astro_template_script_src_skips_remote() {
         let source = "---\n---\n<script src=\"https://cdn.example.com/lib.js\"></script>";
-        let info = parse_astro_to_module(FileId(0), source, 0);
+        let info = parse_astro_to_module(FileId(0), source, 0, false);
         assert!(info.imports.is_empty());
     }
 
     #[test]
     fn parse_astro_template_script_src_multiline_attrs() {
         let source = "---\n---\n<script\n  src=\"./client.ts\"\n></script>";
-        let info = parse_astro_to_module(FileId(0), source, 0);
+        let info = parse_astro_to_module(FileId(0), source, 0, false);
         assert_eq!(info.imports.len(), 1);
         assert_eq!(info.imports[0].source, "./client.ts");
     }
@@ -563,14 +855,14 @@ mod tests {
     #[test]
     fn parse_astro_template_script_src_with_extra_attrs_is_unprocessed() {
         let source = "---\n---\n<script type=\"module\" src=\"./client.ts\"></script>";
-        let info = parse_astro_to_module(FileId(0), source, 0);
+        let info = parse_astro_to_module(FileId(0), source, 0, false);
         assert!(info.imports.is_empty());
     }
 
     #[test]
     fn parse_astro_template_inline_script_import() {
         let source = "---\n---\n<script>\n  import '../scripts/bar';\n</script>";
-        let info = parse_astro_to_module(FileId(0), source, 0);
+        let info = parse_astro_to_module(FileId(0), source, 0, false);
         assert_eq!(info.imports.len(), 1);
         assert_eq!(info.imports[0].source, "../scripts/bar");
         assert!(matches!(
@@ -582,7 +874,7 @@ mod tests {
     #[test]
     fn parse_astro_template_inline_script_named_import() {
         let source = "---\n---\n<script>\n  import { foo } from '../utils';\n  foo();\n</script>";
-        let info = parse_astro_to_module(FileId(0), source, 0);
+        let info = parse_astro_to_module(FileId(0), source, 0, false);
         assert_eq!(info.imports.len(), 1);
         assert_eq!(info.imports[0].source, "../utils");
     }
@@ -590,7 +882,7 @@ mod tests {
     #[test]
     fn parse_astro_template_inline_script_typescript_syntax() {
         let source = "---\n---\n<script>\n  import { foo } from '../utils';\n  const x: number = foo();\n</script>";
-        let info = parse_astro_to_module(FileId(0), source, 0);
+        let info = parse_astro_to_module(FileId(0), source, 0, false);
         assert_eq!(info.imports.len(), 1);
         assert_eq!(info.imports[0].source, "../utils");
     }
@@ -598,21 +890,21 @@ mod tests {
     #[test]
     fn parse_astro_template_inline_script_with_attributes_is_unprocessed() {
         let source = "---\n---\n<script is:inline>\n  import '../scripts/bar';\n</script>";
-        let info = parse_astro_to_module(FileId(0), source, 0);
+        let info = parse_astro_to_module(FileId(0), source, 0, false);
         assert!(info.imports.is_empty());
     }
 
     #[test]
     fn parse_astro_template_type_module_inline_script_is_unprocessed() {
         let source = "---\n---\n<script type=\"module\">\n  import '../scripts/bar';\n</script>";
-        let info = parse_astro_to_module(FileId(0), source, 0);
+        let info = parse_astro_to_module(FileId(0), source, 0, false);
         assert!(info.imports.is_empty());
     }
 
     #[test]
     fn parse_astro_template_skips_inline_body_when_src_present() {
         let source = "---\n---\n<script src=\"./client.ts\">import 'should-be-ignored';</script>";
-        let info = parse_astro_to_module(FileId(0), source, 0);
+        let info = parse_astro_to_module(FileId(0), source, 0, false);
         assert_eq!(info.imports.len(), 1);
         assert_eq!(info.imports[0].source, "./client.ts");
     }
@@ -625,7 +917,7 @@ mod tests {
                       <script src=\"../scripts/foo.ts\"></script>\n\
                       <script>\n  import '../scripts/bar';\n</script>\n\
                       </body></html>";
-        let info = parse_astro_to_module(FileId(0), source, 0);
+        let info = parse_astro_to_module(FileId(0), source, 0, false);
         let sources: Vec<&str> = info.imports.iter().map(|i| i.source.as_str()).collect();
         assert!(sources.contains(&"../scripts/foo.ts"));
         assert!(sources.contains(&"../scripts/bar"));
@@ -636,7 +928,7 @@ mod tests {
         let source = "---\n---\n\
                       <script>\n  import '../a';\n</script>\n\
                       <script>\n  import '../b';\n</script>";
-        let info = parse_astro_to_module(FileId(0), source, 0);
+        let info = parse_astro_to_module(FileId(0), source, 0, false);
         let sources: Vec<&str> = info.imports.iter().map(|i| i.source.as_str()).collect();
         assert!(sources.contains(&"../a"));
         assert!(sources.contains(&"../b"));
@@ -645,7 +937,7 @@ mod tests {
     #[test]
     fn parse_astro_template_skips_commented_out_script_src() {
         let source = "---\n---\n<!-- <script src=\"./old.ts\"></script> -->\n<script src=\"./new.ts\"></script>";
-        let info = parse_astro_to_module(FileId(0), source, 0);
+        let info = parse_astro_to_module(FileId(0), source, 0, false);
         assert_eq!(info.imports.len(), 1);
         assert_eq!(info.imports[0].source, "./new.ts");
     }
@@ -653,7 +945,7 @@ mod tests {
     #[test]
     fn parse_astro_template_skips_commented_out_inline_script() {
         let source = "---\n---\n<!-- <script>\n  import '../old';\n</script> -->\n<script>\n  import '../new';\n</script>";
-        let info = parse_astro_to_module(FileId(0), source, 0);
+        let info = parse_astro_to_module(FileId(0), source, 0, false);
         let sources: Vec<&str> = info.imports.iter().map(|i| i.source.as_str()).collect();
         assert!(sources.contains(&"../new"));
         assert!(!sources.contains(&"../old"));
@@ -662,7 +954,7 @@ mod tests {
     #[test]
     fn parse_astro_template_no_frontmatter_with_script() {
         let source = "<html><body><script src=\"./client.ts\"></script></body></html>";
-        let info = parse_astro_to_module(FileId(0), source, 0);
+        let info = parse_astro_to_module(FileId(0), source, 0, false);
         assert_eq!(info.imports.len(), 1);
         assert_eq!(info.imports[0].source, "./client.ts");
     }
@@ -670,14 +962,14 @@ mod tests {
     #[test]
     fn parse_astro_template_empty_inline_script_is_skipped() {
         let source = "---\n---\n<script></script>";
-        let info = parse_astro_to_module(FileId(0), source, 0);
+        let info = parse_astro_to_module(FileId(0), source, 0, false);
         assert!(info.imports.is_empty());
     }
 
     #[test]
     fn parse_astro_template_does_not_double_count_frontmatter_imports() {
         let source = "---\nimport Layout from '../Layout.astro';\n---\n<Layout />";
-        let info = parse_astro_to_module(FileId(0), source, 0);
+        let info = parse_astro_to_module(FileId(0), source, 0, false);
         assert_eq!(info.imports.len(), 1);
         assert_eq!(info.imports[0].source, "../Layout.astro");
     }

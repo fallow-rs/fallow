@@ -28,10 +28,11 @@ use crate::html::is_remote_url;
 use super::helpers::{
     extract_angular_component_metadata, extract_angular_inputs_outputs,
     extract_angular_signal_query, extract_class_members, extract_concat_parts,
-    extract_custom_elements_define, extract_implemented_interface_names,
-    extract_nested_type_bindings, extract_query_list_element_type, extract_super_class_name,
-    extract_type_annotation_name, has_angular_class_decorator, has_angular_plural_query_decorator,
-    is_meta_url_arg, lit_custom_element_decorator, regex_pattern_to_suffix,
+    extract_custom_element_tag_reference, extract_custom_elements_define,
+    extract_implemented_interface_names, extract_nested_type_bindings,
+    extract_query_list_element_type, extract_super_class_name, extract_type_annotation_name,
+    has_angular_class_decorator, has_angular_plural_query_decorator, is_meta_url_arg,
+    lit_custom_element_decorator, lit_custom_element_tag, regex_pattern_to_suffix,
     ts_import_type_qualifier_root,
 };
 use super::{
@@ -3590,10 +3591,16 @@ impl<'a> ModuleInfoExtractor {
         let Some(decorator) = lit_custom_element_decorator(class) else {
             return;
         };
+        // The registered tag (`@customElement('x-foo')`) and the class span anchor
+        // the Lit `unrendered-component` finding at the element, not line 1.
+        let tag = lit_custom_element_tag(class);
+        let span_start = class.span.start;
         if let Some(id) = class.id.as_ref() {
             self.record_lit_custom_element_candidate(
                 decorator,
                 SideEffectRegistrationTarget::LocalClass(id.name.to_string()),
+                tag,
+                span_start,
             );
         } else if let Some(export) = self.exports.last()
             && matches!(export.name, crate::ExportName::Default)
@@ -3603,6 +3610,8 @@ impl<'a> ModuleInfoExtractor {
             self.record_lit_custom_element_candidate(
                 decorator,
                 SideEffectRegistrationTarget::AnonymousDefaultExport(export_index),
+                tag,
+                span_start,
             );
         }
     }
@@ -4129,8 +4138,25 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 ));
         }
 
-        if let Some((_tag, class_name)) = extract_custom_elements_define(expr) {
+        if let Some((tag, class_name)) = extract_custom_elements_define(expr) {
+            // Record the registration for the Lit `unrendered-component` arm
+            // (anchored at the `customElements.define(...)` call), then keep the
+            // class credited as side-effect-used.
+            self.registered_custom_elements
+                .push(fallow_types::extract::RegisteredCustomElement {
+                    tag,
+                    class_local_name: class_name.clone(),
+                    span_start: expr.span.start,
+                });
             self.side_effect_registered_class_names.insert(class_name);
+        }
+
+        // Imperative element render / lookup (`document.createElement('x-foo')`,
+        // `customElements.get('x-foo')`): credit the tag as rendered so the Lit
+        // `unrendered-component` arm does not flag an element created without an
+        // `html` template.
+        if let Some(tag) = extract_custom_element_tag_reference(expr) {
+            self.used_custom_element_tags.insert(tag);
         }
 
         self.bind_iterable_callback_parameter(expr);
@@ -4437,6 +4463,39 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     .map_or_else(|| quasi.value.raw.as_str(), |c| c.as_str());
                 for raw in crate::html::collect_asset_refs(text) {
                     self.push_html_template_asset_import(&raw);
+                }
+                // Record custom-element tags rendered in the template
+                // (`<x-foo>`), feeding the Lit `unrendered-component` arm's
+                // project-wide rendered-tag union.
+                for tag in crate::html::collect_custom_element_tags(text) {
+                    self.used_custom_element_tags.insert(tag);
+                }
+            }
+            // Detect a dynamic tag interpolation (`` html`<${tag}>` ``): a quasi
+            // that ends at a tag-open boundary (`<` / `</`) right before an
+            // expression renders an unknowable element, so mark the project
+            // dynamic (the Lit arm then abstains on every element).
+            //
+            // The bare `<` / `</` test is intentionally broad: in Lit's own
+            // template grammar a quasi ending in `<` immediately before an
+            // interpolation is a tag-open position, so a false trigger only
+            // over-abstains (suppresses Lit findings) while a missed trigger
+            // would risk a false `unrendered-component`. Over-abstain is the
+            // zero-FP-safe direction, so do not narrow this to require a
+            // preceding space.
+            let quasis = &expr.quasi.quasis;
+            for (i, quasi) in quasis.iter().enumerate() {
+                if i + 1 >= quasis.len() {
+                    break;
+                }
+                let text = quasi
+                    .value
+                    .cooked
+                    .as_ref()
+                    .map_or_else(|| quasi.value.raw.as_str(), |c| c.as_str());
+                if text.ends_with('<') || text.ends_with("</") {
+                    self.used_custom_element_tags
+                        .insert(fallow_types::extract::DYNAMIC_CUSTOM_ELEMENT_TAG.to_string());
                 }
             }
         }

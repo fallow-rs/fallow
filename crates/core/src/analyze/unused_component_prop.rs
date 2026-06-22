@@ -1,6 +1,9 @@
-//! Detection of unused Vue `<script setup>` `defineProps` props and Svelte 5
-//! `$props()` props: a declared prop referenced NOWHERE inside its own
-//! single-file component (neither `<script>` nor `<template>`).
+//! Detection of unused Vue `<script setup>` `defineProps` props, Svelte 5
+//! `$props()` props, and Astro `interface Props` fields: a declared prop
+//! referenced NOWHERE inside its own single-file component (neither `<script>` /
+//! frontmatter nor `<template>` / markup). Astro props are harvested from the
+//! frontmatter `interface Props { ... }` and credited via `Astro.props`
+//! destructure / member access / template `{prop}` usage.
 //!
 //! Single-file finding, zero-FP doctrine. The harvest + usage flags live on
 //! `ModuleInfo.component_props` (set during extraction); this detector only reads
@@ -40,7 +43,8 @@ pub fn find_unused_component_props(
         || declared_deps.contains("@vue/runtime-core")
         || declared_deps.contains("nuxt");
     let svelte_gated = declared_deps.contains("svelte") || declared_deps.contains("@sveltejs/kit");
-    if !vue_gated && !svelte_gated {
+    let astro_gated = declared_deps.contains("astro");
+    if !vue_gated && !svelte_gated && !astro_gated {
         return Vec::new();
     }
 
@@ -58,6 +62,7 @@ pub fn find_unused_component_props(
         match framework {
             ComponentPropFramework::Vue if !vue_gated => continue,
             ComponentPropFramework::Svelte if !svelte_gated => continue,
+            ComponentPropFramework::Astro if !astro_gated => continue,
             _ => {}
         }
         let Some(module) = modules_by_id.get(&node.file_id) else {
@@ -115,13 +120,18 @@ fn collect_module_unused_sfc_props(
 enum ComponentPropFramework {
     Vue,
     Svelte,
+    Astro,
 }
 
-/// Whether the path is an SFC whose props feed `unused-component-prop`.
+/// Whether the path is an SFC whose props feed `unused-component-prop`. `.astro`
+/// joins `.vue` / `.svelte`: its `interface Props` declaration + `Astro.props`
+/// usage are harvested into the same `ComponentProp` IR + abstain flags during
+/// extraction.
 fn component_prop_framework(path: &Path) -> Option<ComponentPropFramework> {
     match path.extension().and_then(|e| e.to_str()) {
         Some("vue") => Some(ComponentPropFramework::Vue),
         Some("svelte") => Some(ComponentPropFramework::Svelte),
+        Some("astro") => Some(ComponentPropFramework::Astro),
         _ => None,
     }
 }

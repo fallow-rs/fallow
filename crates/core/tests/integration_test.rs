@@ -15,6 +15,10 @@ mod common;
 mod angular_ng_package;
 #[path = "integration_test/angular_unrendered_component.rs"]
 mod angular_unrendered_component;
+#[path = "integration_test/astro_unrendered_component.rs"]
+mod astro_unrendered_component;
+#[path = "integration_test/astro_unused_component_prop.rs"]
+mod astro_unused_component_prop;
 #[path = "integration_test/barrel_exports.rs"]
 mod barrel_exports;
 #[path = "integration_test/basic_analysis.rs"]
@@ -79,6 +83,10 @@ mod issue_952_package_path_resolution;
 mod issue_954_pino_transport_target;
 #[path = "integration_test/jsx_assets_and_jsdoc.rs"]
 mod jsx_assets_and_jsdoc;
+#[path = "integration_test/lit_unrendered_element.rs"]
+mod lit_unrendered_element;
+#[path = "integration_test/lit_unused_state.rs"]
+mod lit_unused_state;
 #[path = "integration_test/member_detection.rs"]
 mod member_detection;
 #[path = "integration_test/nx_project_json.rs"]

@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Astro framework-health detection.** `.astro` components now participate in the same
+  health suite as Vue/Svelte/Angular/React. The frontmatter is semantic-analyzed (imports
+  used only as `<Header/>` tags or `{expr}` markup are credited; a genuinely-dead
+  frontmatter import now refines `unused-export`). A reachable `.astro` component kept alive
+  only by a barrel re-export but rendered in no template surfaces as `unrendered-component`
+  (framework `astro`). An `interface Props` field read nowhere via `Astro.props`
+  (destructure / member access) or the template surfaces as `unused-component-prop`, with a
+  zero-false-positive abstain ladder (`interface Props extends X` / `type Props = Imported`,
+  rest destructure, whole-object `Astro.props` use, and `{...Astro.props}` template spread
+  all abstain the component). No new rules or severities: `.astro` reuses the existing
+  `unrendered-component` and `unused-component-prop` rules.
+
+- **Lit / web-component framework-health detection.** A custom element registered via
+  `@customElement('x-foo')` or `customElements.define('x-foo', C)` but rendered as a tag in no
+  `html` template anywhere in the project surfaces as `unrendered-component` (framework `lit`,
+  the finding names the tag). The zero-false-positive ladder wholesale-abstains published
+  elements (re-exported from a package entry, the dominant design-system shape), credits
+  imperative renders (`document.createElement` / `customElements.get` / `whenDefined`), and
+  abstains the whole project when any `html` template renders a dynamic tag. A Lit `@state()`
+  reactive property read nowhere in its element (neither a method nor the `html` template) now
+  surfaces as `unused-class-member`; `@property` (the public attribute API, settable via HTML
+  attribute / parent binding / `setAttribute` / CSS) is never flagged. Gated on a `lit` /
+  `lit-element` / `@lit/reactive-element` dependency; reuses the existing `unrendered-component`
+  and `unused-class-member` rules (no new rules).
+
+### Changed
+
+- **`fallow health` now scores `.astro` complexity.** Astro frontmatter functions are scored
+  like a Vue/Svelte `<script>`, and a synthetic `<template>` entry scores the markup
+  `{ ... }` expression and iteration (`.map` / `.flatMap` / `.forEach`) complexity, mirroring
+  the existing Vue/Svelte synthetic `<template>` entries. This is a health SIGNAL only (it
+  never appears under bare `fallow`, `audit`, or `dead-code`), but it is a one-time
+  discontinuity in baselined health trends for projects with `.astro` files: a previously
+  unscored `.astro` frontmatter/template now contributes to the complexity aggregate.
+
 ## [2.101.0] - 2026-06-21
 
 ### Changed

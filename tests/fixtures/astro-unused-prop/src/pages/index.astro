@@ -1,0 +1,14 @@
+---
+import Card from '../components/Card.astro';
+import Forwarded from '../components/Forwarded.astro';
+import DefineVars from '../components/DefineVars.astro';
+import ArrayDestructure from '../components/ArrayDestructure.astro';
+---
+<html>
+  <body>
+    <Card title="hi" unused="x" />
+    <Forwarded gone="y" />
+    <DefineVars cssVar="red" nested={{ label: 'hi' }} reallyUnused="z" />
+    <ArrayDestructure arrayProp="a" />
+  </body>
+</html>

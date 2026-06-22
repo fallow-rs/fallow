@@ -1,0 +1,17 @@
+---
+interface Props {
+  cssVar: string;
+  nested: { label: string };
+  reallyUnused: string;
+}
+const {
+  cssVar,
+  nested: { label },
+} = Astro.props;
+---
+<span>{label}</span>
+<style define:vars={{ cssVar }}>
+  .x {
+    color: var(--cssVar);
+  }
+</style>

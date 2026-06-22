@@ -1,0 +1,9 @@
+{
+  "name": "lit-unrendered-element-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "dependencies": {
+    "lit": "^3.0.0"
+  }
+}

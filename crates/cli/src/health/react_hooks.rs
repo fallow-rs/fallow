@@ -262,6 +262,8 @@ mod tests {
             svelte_dispatched_events: Vec::new(),
             svelte_listened_events: Vec::new(),
             angular_component_selectors: Vec::new(),
+            registered_custom_elements: Vec::new(),
+            used_custom_element_tags: Vec::new(),
             angular_used_selectors: Vec::new(),
             angular_entry_component_refs: Vec::new(),
             has_dynamic_component_render: false,

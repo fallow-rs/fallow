@@ -111,6 +111,12 @@ enum SideEffectRegistrationTarget {
 struct LitCustomElementCandidate {
     decorator: LitCustomElementDecorator,
     target: SideEffectRegistrationTarget,
+    /// The `@customElement('x-foo')` tag literal, if statically recoverable.
+    /// `None` for a computed / non-literal tag argument (which the Lit
+    /// `unrendered-component` arm cannot key on, so no registration is recorded).
+    tag: Option<String>,
+    /// Start byte offset of the decorated class (anchors the finding).
+    span_start: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -161,6 +167,8 @@ pub(crate) struct ModuleInfoExtractor {
     pub(crate) inline_template_findings: Vec<InlineTemplateFinding>,
     pub(crate) side_effect_registered_class_names: FxHashSet<String>,
     lit_custom_element_candidates: Vec<LitCustomElementCandidate>,
+    pub(crate) registered_custom_elements: Vec<fallow_types::extract::RegisteredCustomElement>,
+    pub(crate) used_custom_element_tags: FxHashSet<String>,
     pub(crate) factory_call_candidates: Vec<FactoryCallCandidate>,
     pub(crate) node_module_register_url_bindings: FxHashMap<String, Vec<String>>,
     pub(crate) child_process_fork_bindings: FxHashSet<String>,
@@ -628,9 +636,24 @@ impl ModuleInfoExtractor {
 
         let mut class_names = Vec::new();
         let mut anonymous_default_indices = Vec::new();
+        let mut registrations = Vec::new();
         for candidate in &self.lit_custom_element_candidates {
             if !self.is_lit_custom_element_decorator(&candidate.decorator) {
                 continue;
+            }
+            // Record the registration for the Lit `unrendered-component` arm, but
+            // only when a static tag literal was recoverable (a computed tag is
+            // not flaggable). The class-local name drives the public-API abstain.
+            if let Some(tag) = &candidate.tag {
+                let class_local_name = match &candidate.target {
+                    SideEffectRegistrationTarget::LocalClass(name) => name.clone(),
+                    SideEffectRegistrationTarget::AnonymousDefaultExport(_) => String::new(),
+                };
+                registrations.push(fallow_types::extract::RegisteredCustomElement {
+                    tag: tag.clone(),
+                    class_local_name,
+                    span_start: candidate.span_start,
+                });
             }
             match &candidate.target {
                 SideEffectRegistrationTarget::LocalClass(class_name) => {
@@ -642,6 +665,7 @@ impl ModuleInfoExtractor {
             }
         }
 
+        self.registered_custom_elements.extend(registrations);
         self.side_effect_registered_class_names.extend(class_names);
         for index in anonymous_default_indices {
             if let Some(export) = self.exports.get_mut(index) {
@@ -654,9 +678,16 @@ impl ModuleInfoExtractor {
         &mut self,
         decorator: LitCustomElementDecorator,
         target: SideEffectRegistrationTarget,
+        tag: Option<String>,
+        span_start: u32,
     ) {
         self.lit_custom_element_candidates
-            .push(LitCustomElementCandidate { decorator, target });
+            .push(LitCustomElementCandidate {
+                decorator,
+                target,
+                tag,
+                span_start,
+            });
     }
 
     fn apply_side_effect_registrations(&mut self) {
@@ -1121,6 +1152,12 @@ impl ModuleInfoExtractor {
             angular_inputs: self.angular_inputs,
             angular_outputs: self.angular_outputs,
             angular_component_selectors: self.angular_component_selectors,
+            registered_custom_elements: self.registered_custom_elements,
+            used_custom_element_tags: {
+                let mut tags: Vec<String> = self.used_custom_element_tags.into_iter().collect();
+                tags.sort_unstable();
+                tags
+            },
             angular_used_selectors: self.angular_used_selectors,
             angular_entry_component_refs: self.angular_entry_component_refs,
             has_dynamic_component_render: self.has_dynamic_component_render,

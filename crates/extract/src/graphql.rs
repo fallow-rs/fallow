@@ -126,6 +126,8 @@ pub(crate) fn parse_graphql_to_module(
         angular_inputs: Vec::new(),
         angular_outputs: Vec::new(),
         angular_component_selectors: Vec::new(),
+        registered_custom_elements: Vec::new(),
+        used_custom_element_tags: Vec::new(),
         angular_used_selectors: Vec::new(),
         angular_entry_component_refs: Vec::new(),
         has_dynamic_component_render: false,

@@ -106,6 +106,7 @@ struct MemberSkipContext<'a> {
     super_class: Option<&'a str>,
     implemented_interfaces: &'a [String],
     is_public_api_class_export: bool,
+    lit_active: bool,
 }
 
 impl<'a> ClassMemberAllowlist<'a> {
@@ -1946,6 +1947,7 @@ pub fn find_unused_members(
         user_class_member_allowlist,
         ignore_decorators,
         public_api_entry_points: &FxHashSet::default(),
+        lit_active: false,
     });
     (results.enum_members, results.class_members)
 }
@@ -1977,6 +1979,12 @@ pub(super) struct UnusedMemberScanInput<'a> {
     pub(super) user_class_member_allowlist: &'a [UsedClassMemberRule],
     pub(super) ignore_decorators: &'a [String],
     pub(super) public_api_entry_points: &'a FxHashSet<FileId>,
+    /// Whether a Lit dependency is declared. When true, a `@state()`-decorated
+    /// member on a direct `LitElement` / `ReactiveElement` subclass is made
+    /// CHECKABLE (a never-read `@state` is dead internal reactive state). Other
+    /// decorated members, and `@property` (the public attribute API), stay
+    /// skipped.
+    pub(super) lit_active: bool,
 }
 
 struct PreparedMemberScan<'a> {
@@ -2147,6 +2155,7 @@ impl MemberReportContext<'_, '_> {
                     super_class,
                     implemented_interfaces,
                     is_public_api_class_export,
+                    lit_active: self.input.lit_active,
                 },
                 buckets,
             );
@@ -2367,21 +2376,33 @@ fn should_skip_member_for_unused_report(member: &MemberInfo, ctx: &MemberSkipCon
         return true;
     }
 
-    if member_decorator_requires_skip(member, ctx.ignore_decorators) {
+    if member_decorator_requires_skip(member, ctx) {
         return true;
     }
 
     class_member_runtime_credit_applies(member, ctx)
 }
 
-fn is_class_member_kind(kind: MemberKind) -> bool {
-    matches!(kind, MemberKind::ClassMethod | MemberKind::ClassProperty)
+/// Whether a member is a Lit `@state()` reactive property that should be CHECKED
+/// for deadness (overriding the generic decorated-member skip). Lit `@state` is
+/// INTERNAL reactive state, not a framework-reflected public API like
+/// `@property` (which is settable via HTML attribute / parent property binding /
+/// `setAttribute` / CSS, all invisible here). Gated on a Lit dependency + a
+/// direct `LitElement` / `ReactiveElement` base, and requires `@state` to be the
+/// member's ONLY decorator (a `@state` combined with another framework decorator
+/// stays skipped).
+fn is_lit_checkable_state_member(member: &MemberInfo, ctx: &MemberSkipContext<'_>) -> bool {
+    ctx.lit_active
+        && matches!(ctx.super_class, Some("LitElement" | "ReactiveElement"))
+        && !member.decorator_names.is_empty()
+        && member.decorator_names.iter().all(|name| name == "state")
 }
 
-fn member_decorator_requires_skip(
-    member: &MemberInfo,
-    ignore_decorators: &IgnoreDecoratorSet,
-) -> bool {
+fn member_decorator_requires_skip(member: &MemberInfo, ctx: &MemberSkipContext<'_>) -> bool {
+    if is_lit_checkable_state_member(member, ctx) {
+        return false;
+    }
+    let ignore_decorators = ctx.ignore_decorators;
     member.has_decorator
         && (member.decorator_names.is_empty()
             || ignore_decorators.is_empty()
@@ -2389,6 +2410,10 @@ fn member_decorator_requires_skip(
                 .decorator_names
                 .iter()
                 .any(|name| !ignore_decorators.matches(name)))
+}
+
+fn is_class_member_kind(kind: MemberKind) -> bool {
+    matches!(kind, MemberKind::ClassMethod | MemberKind::ClassProperty)
 }
 
 fn class_member_runtime_credit_applies(member: &MemberInfo, ctx: &MemberSkipContext<'_>) -> bool {
@@ -2686,6 +2711,8 @@ mod tests {
             svelte_dispatched_events: Vec::new(),
             svelte_listened_events: Vec::new(),
             angular_component_selectors: Vec::new(),
+            registered_custom_elements: Vec::new(),
+            used_custom_element_tags: Vec::new(),
             angular_used_selectors: Vec::new(),
             angular_entry_component_refs: Vec::new(),
             has_dynamic_component_render: false,

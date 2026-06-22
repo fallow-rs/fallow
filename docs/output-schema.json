@@ -13497,11 +13497,11 @@
         },
         "component_name": {
           "type": "string",
-          "description": "The component name (the `.vue`/`.svelte` file stem, PascalCase)."
+          "description": "The component name. For `\"vue\"` / `\"svelte\"` / `\"astro\"` this is the SFC\nfile stem (PascalCase); for `\"angular\"` it is the component class name; for\n`\"lit\"` it is the registered custom-element TAG (e.g. `x-foo`), not a file\nstem. Use `path` to anchor the file across all frameworks."
         },
         "framework": {
           "type": "string",
-          "description": "Which framework this component belongs to: `\"vue\"` or `\"svelte\"`."
+          "description": "Which framework this component belongs to: `\"vue\"`, `\"svelte\"`, `\"astro\"`,\n`\"angular\"`, or `\"lit\"`."
         },
         "reachable_via": {
           "type": [

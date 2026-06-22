@@ -91,7 +91,10 @@ use render_fan_in::compute_render_fan_in;
 use route_collision::find_route_collisions;
 use thin_wrapper::find_thin_wrappers;
 use unprovided_inject::{UnprovidedInjectInput, find_unprovided_injects};
-use unrendered_component::{find_unrendered_angular_components, find_unrendered_components};
+use unrendered_component::{
+    LitUnrenderedInput, find_unrendered_angular_components, find_unrendered_components,
+    find_unrendered_lit_elements,
+};
 #[expect(
     deprecated,
     reason = "ADR-008 deprecates detector helpers for external callers; core orchestration still calls them internally"
@@ -1224,6 +1227,23 @@ fn populate_unrendered_component_findings(input: &mut FrameworkSpecificFindingsI
             input.line_offsets_by_file,
             input.suppressions,
         )
+        .into_iter()
+        .map(UnrenderedComponentFinding::with_actions),
+    );
+    // Lit arm: a registered custom element (`@customElement` /
+    // `customElements.define`) rendered as a tag in no `html` template. SAME
+    // finding kind / result type with `framework: "lit"`, gated on a Lit
+    // dependency inside the detector. No new IssueKind.
+    input.results.unrendered_components.extend(
+        find_unrendered_lit_elements(&LitUnrenderedInput {
+            graph: input.graph,
+            modules: input.modules,
+            declared_deps: input.declared_deps,
+            public_api_entry_points: input.public_api_entry_points,
+            line_offsets_by_file: input.line_offsets_by_file,
+            suppressions: input.suppressions,
+            root: &input.config.root,
+        })
         .into_iter()
         .map(UnrenderedComponentFinding::with_actions),
     );
@@ -2364,6 +2384,9 @@ fn run_member_detectors(input: MemberDetectorInput<'_>) -> AnalysisResults {
         user_class_member_allowlist: input.user_class_members,
         ignore_decorators: &input.config.ignore_decorators,
         public_api_entry_points: input.public_api_entry_points,
+        lit_active: input.declared_deps.contains("lit")
+            || input.declared_deps.contains("lit-element")
+            || input.declared_deps.contains("@lit/reactive-element"),
     });
     populate_unused_enum_member_findings(&mut results, input.config, member_results.enum_members);
     populate_unused_class_member_findings(&mut results, input.config, member_results.class_members);
@@ -3084,6 +3107,8 @@ mod tests {
                 svelte_dispatched_events: Vec::new(),
                 svelte_listened_events: Vec::new(),
                 angular_component_selectors: Vec::new(),
+                registered_custom_elements: Vec::new(),
+                used_custom_element_tags: Vec::new(),
                 angular_used_selectors: Vec::new(),
                 angular_entry_component_refs: Vec::new(),
                 has_dynamic_component_render: false,

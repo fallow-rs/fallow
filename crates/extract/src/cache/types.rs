@@ -542,7 +542,21 @@ use crate::MemberKind;
 /// `toRefs(useStore())` destructures now record store member accesses. Warm
 /// caches from 180 can miss those synthetic `member_accesses` and surface false
 /// `unused-store-member` findings.
-pub(super) const CACHE_VERSION: u32 = 182;
+///
+/// Bumped to 183 for the Astro/Lit framework-health parity wave: Astro
+/// frontmatter now runs the `oxc_semantic` unused-binding pass (template-used
+/// names credited), so `.astro` modules carry populated `unused_import_bindings`
+/// / `value_referenced_import_bindings` instead of an empty (all-referenced) set;
+/// plus the Lit registered-tag / used-tag and Astro `<template>` complexity
+/// extraction fields. Warm caches from 182 lack these and would mask the new
+/// `unused-export` / `unrendered-component` arms.
+///
+/// Bumped to 184 for the post-smoke-test FP fixes: standalone `.html` modules now
+/// populate `used_custom_element_tags` (a root `<my-app>` rendered only in
+/// `index.html` no longer false-flags), and imperative `createElement` capture
+/// widened to any receiver (`opts.document.createElement(...)`). Warm 183 caches
+/// carry the narrower tag sets.
+pub(super) const CACHE_VERSION: u32 = 184;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -596,7 +610,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 1256);
+assert_cached_type_size!(CachedModule, 1304);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 56);
@@ -770,6 +784,12 @@ pub struct CachedModule {
     /// Round-trips so the Angular `unrendered-component` arm sees them on
     /// warm-cache loads.
     pub angular_component_selectors: Vec<fallow_types::extract::AngularComponentSelector>,
+    /// Lit / web-component custom elements registered in this file. Round-trips so
+    /// the Lit `unrendered-component` arm sees them on warm-cache loads.
+    pub registered_custom_elements: Vec<fallow_types::extract::RegisteredCustomElement>,
+    /// Custom-element tag names used (rendered) in this file's `html` templates.
+    /// Round-trips for the Lit `unrendered-component` rendered-tag union.
+    pub used_custom_element_tags: Vec<String>,
     /// Custom element selector tags referenced in this file's Angular templates.
     /// Round-trips for the Angular `unrendered-component` used-selector union.
     pub angular_used_selectors: Vec<String>,

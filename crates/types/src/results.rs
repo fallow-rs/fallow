@@ -1546,9 +1546,13 @@ pub struct UnrenderedComponent {
     /// The component file that is reachable but rendered nowhere.
     #[serde(serialize_with = "serde_path::serialize")]
     pub path: PathBuf,
-    /// The component name (the `.vue`/`.svelte` file stem, PascalCase).
+    /// The component name. For `"vue"` / `"svelte"` / `"astro"` this is the SFC
+    /// file stem (PascalCase); for `"angular"` it is the component class name; for
+    /// `"lit"` it is the registered custom-element TAG (e.g. `x-foo`), not a file
+    /// stem. Use `path` to anchor the file across all frameworks.
     pub component_name: String,
-    /// Which framework this component belongs to: `"vue"` or `"svelte"`.
+    /// Which framework this component belongs to: `"vue"`, `"svelte"`, `"astro"`,
+    /// `"angular"`, or `"lit"`.
     pub framework: String,
     /// A barrel/file that re-exports this component, kept for the remediation
     /// trace ("reachable via X, rendered nowhere"). Absolute in memory,
